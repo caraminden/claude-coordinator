@@ -249,7 +249,7 @@ export class WorkerJoin {
   }
 
   /** The scratch repo of this machine's running test, as a git bundle: a nonce to answer and the host tools check. */
-  async sendScratch(machineId: number): Promise<{ bundle: string; nonce: string } | null> {
+  async sendScratch(machineId: number): Promise<{ bundle: string } | null> {
     const test = this.tests.get(machineId);
     if (!test) return null;
     const dir = await mkdtemp(join(tmpdir(), 'citadel-worker-scratch-'));
@@ -268,7 +268,7 @@ export class WorkerJoin {
       await git('bundle', 'create', '.git/out.bundle', 'scratch');
       if (!sha) throw new Error('git could not make the scratch repo');
       this.scratch.set(machineId, { id: test.id, sha, nonce });
-      return { bundle: (await readFile(join(dir, '.git', 'out.bundle'))).toString('base64'), nonce };
+      return { bundle: (await readFile(join(dir, '.git', 'out.bundle'))).toString('base64') };
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

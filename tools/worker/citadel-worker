@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# What a worker machine's owner runs on it (Citadel, Build 7; install-worker.sh puts it here). As root:
+#   citadel-worker signin            sign in to Claude, through Claude Code's own sign-in
+#   citadel-worker signin-github     sign in to GitHub, through gh's own sign-in
+#   citadel-worker caps [--workers N] [--threads N] [--memory GB] [--disk GB]
+#   citadel-worker status            how it stands, and its last lines
+#   citadel-worker remove            take it off this PC (on Windows: wsl --unregister citadel-workers)
+set -euo pipefail
+
+die() { echo "citadel-worker: $*" >&2; exit 1; }
+r=${CITADEL_TEST_ROOT:-}
+etc=$r/etc/citadel-worker
+user=citadel-worker
+home=$r/home/$user
+[[ $(id -u) == 0 ]] || die 'Run this as root (with sudo).'
+uid=$(id -u "$user" 2>/dev/null) || die 'No worker is installed here: run the command from the Machines page.'
+as() { (cd / && runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"); }
+
+# A program in the worker's image, on this terminal, with the home its minions use: what it signs in to stays there.
+inside() {
+  local tag
+  tag=$(cat "$home/worker/image-tag" 2>/dev/null) || die 'Its image is not built yet: the Machines page says when it is.'
+  as podman run --rm -it --init --userns=keep-id --network=host -e HOME=/home/worker -w /home/worker -v citadel-worker-home:/home/worker:U "$tag" "$@"
+}
+
+case ${1:-} in
+  signin)
+    echo 'Follow the sign-in below. When it says you are signed in, type /exit.'
+    inside claude /login ;;
+  signin-github) inside gh auth login --hostname github.com --git-protocol https --web ;;
+  caps)
+    shift
+    restart=true
+    given=''
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --no-restart) restart=false; shift; continue ;;
+        --workers) key=workers ;;
+        --threads) key=threads ;;
+        --memory) key=memory_gb ;;
+        --disk) key=disk_gb ;;
+        *) die "No setting $1: --workers, --threads, --memory (GB) or --disk (GB)." ;;
+      esac
+      [[ ${2:-} =~ ^[1-9][0-9]{0,4}$ ]] || die "$1 takes a whole number."
+      given+="$key=$2 "
+      shift 2
+    done
+    # The file as it is (an image of the owner's own, say) with these over it; the first time, the starting values.
+    cfg=$(cat "$etc/config.json" 2>/dev/null || echo '{}')
+    cfg=$(ROOT="$home/worker" GIVEN="$given" CFG="$cfg" node -e '
+      const c = { workers: 6, threads: 8, memory_gb: 24, disk_gb: 60, root: process.env.ROOT, ...JSON.parse(process.env.CFG) };
+      for (const p of process.env.GIVEN.split(" ").filter(Boolean)) c[p.split("=")[0]] = Number(p.split("=")[1]);
+      console.log(JSON.stringify(c, null, 2));')
+    num() { CFG="$cfg" node -p "JSON.parse(process.env.CFG).$1"; }
+    threads=$(num threads)
+    memory=$(num memory_gb)
+    ( umask 077; printf '%s\n' "$cfg" > "$etc/config.json" )
+    chown "root:$user" "$etc/config.json"
+    chmod 640 "$etc/config.json"
+    # Everything that user runs, its containers included, is held to these.
+    systemctl set-property "user-$uid.slice" "CPUQuota=$((threads * 100))%" "MemoryMax=${memory}G" "MemoryHigh=$((memory * 1024 * 9 / 10))M"
+    if $restart; then as systemctl --user restart citadel-worker; fi
+    echo "Caps: $(num workers) minions at once, $threads threads, $memory GB of memory, $(num disk_gb) GB of disk." ;;
+  status)
+    as systemctl --user --no-pager status citadel-worker || true
+    tail -n 20 "$home/worker.log" ;;
+  remove)
+    read -rp "This deletes the worker, its sign-ins and everything in $home. Type yes to go on: " sure
+    [[ $sure == yes ]] || die 'Nothing was removed.'
+    as systemctl --user disable --now citadel-worker || true
+    loginctl disable-linger "$user"
+    loginctl terminate-user "$user" 2>/dev/null || true
+    systemctl disable --now citadel-worker-mounts || true
+    sleep 2
+    userdel -r "$user"
+    rm -rf "${etc:?}" "$r/etc/systemd/system/citadel-worker-mounts.service" "$r/usr/local/bin/citadel-worker" "$r/etc/systemd/system.control/user-$uid.slice.d"
+    systemctl daemon-reload
+    echo 'Removed. Switch Minion turns off on its row of the Machines page too.' ;;
+  *)
+    sed -n '2,7s/^# \{0,1\}//p' "$0"
+    exit 2 ;;
+esac

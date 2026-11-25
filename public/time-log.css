@@ -32,7 +32,7 @@
 .time-log .tl-clear { margin-left: auto; padding: 0 0.5rem; border: 0; background: none; color: var(--muted); font-size: 1.1em; cursor: pointer; }
 .tl-clear:hover { color: var(--ink); }
 
-.tl-rows { display: grid; gap: 0.35rem; }
+.tl-rows { display: grid; gap: 0.35rem; padding-top: 2px; }
 .tl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 0.95em; }
 .tl-row.tl-wait { border-style: dashed; background: color-mix(in srgb, var(--tl-wait) 9%, var(--panel)); }
 .tl-row.tl-wait.lost { background: color-mix(in srgb, var(--tl-lost) 8%, var(--panel)); }
@@ -41,7 +41,7 @@
 .tl-row.on { box-shadow: 0 0 0 2px var(--ink); }
 .time-log .tl-head { display: flex; align-items: baseline; gap: 0.5rem; width: 100%; padding: 0.4rem 0.6rem; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
 button.tl-head { cursor: pointer; }
-.time-log button.tl-head:hover { background: color-mix(in srgb, var(--tl-work) 8%, transparent); }
+@media (hover: hover) { .time-log button.tl-head:hover { background: color-mix(in srgb, var(--tl-work) 8%, transparent); } }
 .tl-head .icon { flex: none; width: 1em; text-align: center; color: var(--muted); }
 .tl-row.completed .icon { color: var(--done); }
 .tl-row.in_progress .icon { color: var(--running); }

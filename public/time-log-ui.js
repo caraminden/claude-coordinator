@@ -1,7 +1,7 @@
 // What a minion's progress line opens to (#1991, Josh's pick of 2026-11-25): where its time went, as a ribbon of working,
 // waiting and lost time over its steps. src/time-log.ts cuts it; time-log.js fits it. The panel's element outlives a
 // redraw of the progress line, so a click, a scroll or focus in it isn't lost to the next event.
-import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, view } from './base.js';
+import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, pacificDate, pacificIso, pacificStamp, view } from './base.js';
 import { firstSentence, shortDuration } from './chattext.js';
 import { grow, rowKey, tiles } from './time-log.js';
 import { heldStep } from './progress.js';
@@ -103,14 +103,14 @@ function rowEl(r, isLast, log) {
   const ms = r.work + r.wait + r.lost;
   const icon = r.type === 'step' ? (ICON[r.status] ?? '○') : r.type === 'line' ? '·' : '‖';
   const line = r.type === 'step' && stepLine(r);
-  const when = r.start && `${pacificClock(r.start)} to ${going || (r.status === 'in_progress' && isRunning()) ? 'now' : pacificClock(r.end)}`;
+  const when = r.start && `${at(r.start, log)} to ${going || (r.status === 'in_progress' && isRunning()) ? 'now' : at(r.end, log)}`;
   const head = [
     h('span', { class: 'icon', 'aria-hidden': 'true' }, icon),
     h('span', { class: 'subject' }, r.type === 'line' ? firstSentence(r.title, 200) : r.title, ' ', probably(r) || ''),
     h(
       'span',
       { class: 'tl-meta' },
-      r.start ? h('span', { class: 'tl-at' }, pacificClockBare(r.start)) : '',
+      r.start ? h('span', { class: 'tl-at' }, at(r.start, log)) : '',
       ms ? h('span', { class: 'tl-ms' }, shortDuration(ms)) : r.status === 'pending' ? h('span', { class: 'tl-ms' }, 'up next') : '',
       r.type !== 'wait' && r.wait > 5000 ? bit('wait', r.wait, ' waiting') : '',
       r.type !== 'wait' && r.lost > 0 ? bit('lost', r.lost, ' lost') : '',
@@ -124,6 +124,9 @@ function rowEl(r, isLast, log) {
     line ? h('p', { class: 'tl-note' }, line) : '',
   );
 }
+
+/** A time in the log: its day too when that isn't the day the log starts on. */
+const at = (ms, log) => `${pacificIso(ms) === pacificIso(log.start) ? '' : `${pacificDate(ms)}, `}${pacificClockBare(ms)}`;
 
 /** Pick a row (or none): its stretches light up. From a tile, `seg` is the stretch, and the row scrolls into sight. */
 function pick(key, seg = null) {
@@ -150,7 +153,7 @@ function ribbon(log) {
     'div',
     { class: `tl-ribbon${fit.length > width / 12 ? ' tight' : ''}${log.running ? ' live' : ''}`, role: 'group', 'aria-label': 'Where the time went, oldest first; each row below says the same' },
     fit.map((t) => {
-      const words = `${pacificClockBare(t.start)} to ${pacificClockBare(t.end)} · ${partsOf(t)}${said(t, log) ? ` · ${firstSentence(said(t, log), 90)}` : ''}${t.guess && t.main.sub !== 'unknown' ? ' (probably)' : ''}`;
+      const words = `${at(t.start, log)} to ${at(t.end, log)} · ${partsOf(t)}${said(t, log) ? ` · ${firstSentence(said(t, log), 90)}` : ''}${t.guess && t.main.sub !== 'unknown' ? ' (probably)' : ''}`;
       const el = h(
         'button',
         {
@@ -178,7 +181,7 @@ function picked(log) {
     'p',
     { class: 'tl-picked' },
     swatch(s.kind, s.guess),
-    h('b', {}, `${pacificClockBare(s.start)} to ${s === log.segs.at(-1) && !log.closed ? 'now' : pacificClockBare(s.end)}`),
+    h('b', {}, `${at(s.start, log)} to ${s === log.segs.at(-1) && !log.closed ? 'now' : at(s.end, log)}`),
     ` ${KIND[s.kind]} ${shortDuration(s.end - s.start)}${title ? ` · ${firstSentence(title, 120)}` : ''} `,
     s.event && s.row === undefined ? h('a', { class: 'tl-jump', href: jumpHref(view.ticket, s.event) }, 'Chat ↗') : '',
     h('button', { class: 'tl-clear', 'aria-label': 'Show the whole ribbon', onclick: () => pick(null) }, '×'),
@@ -202,7 +205,7 @@ function topOf(e, log) {
       guess >= 60_000 ? h('span', { class: 'tl-bit tl-guess', tabindex: 0, 'data-tip': 'No record says what these stretches were: they are worked out from what is around them, and drawn paler' }, swatch('wait', true), `${shortDuration(guess)} of it guessed`) : '',
     ),
     ribbon(log),
-    h('div', { class: 'tl-axis' }, h('span', {}, pacificClock(log.start)), h('span', {}, last.kind === 'gone' ? (log.closed ? 'dismissed' : 'finished') : log.closed ? `${pacificClock(log.end)}, dismissed` : 'now')),
+    h('div', { class: 'tl-axis' }, h('span', {}, (pacificIso(log.start) === pacificIso(Date.now()) ? pacificClock : pacificStamp)(log.start)), h('span', {}, last.kind === 'gone' ? (log.closed ? 'dismissed' : 'finished') : log.closed ? `${at(log.end, log)}, dismissed` : 'now')),
     picked(log),
     // Explain's slot: the minion after this fills it.
     retry || '',

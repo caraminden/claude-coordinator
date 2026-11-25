@@ -596,4 +596,5 @@ test('pressing Prep twice for the same area preps it once (WP7, #1858)', async (
   assert.equal(second.status, 'rejected');
   assert.match(String((second as PromiseRejectedResult).reason), /already being prepped/);
   assert.equal(ur.rows(7, 1).length, 1);
+  await until('the first prep finishes writing', () => ur.rows(7, 1).every((x) => x.state === 'ready') || undefined); // the test's cleanup removes root under it
 });

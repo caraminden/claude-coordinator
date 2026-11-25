@@ -24,6 +24,15 @@ export type SlowMoment = {
 };
 
 export const slowMomentQueries = {
+  /** How many host samples since `since` had CPU pressure, memory pressure at or over each line, and free memory under each (#1892). */
+  hostCrossings(this: Store, since: number, cpu: number[], mem: number[], freeGb: number[]): { total: number; cpu: number[]; mem: number[]; free: number[] } {
+    const GB = 1024 ** 3;
+    const sums = [...cpu.map(() => 'cpu_psi >= ?'), ...mem.map(() => 'mem_psi >= ?'), ...freeGb.map(() => 'mem_avail < ?')].map((c, i) => `COALESCE(SUM(${c}), 0) AS c${i}`);
+    const row = this.db.prepare(`SELECT COUNT(*) AS total, ${sums.join(', ')} FROM host_samples WHERE at >= ?`).all(...cpu, ...mem, ...freeGb.map((g) => g * GB), since)[0] as Record<string, number>;
+    const v = [row.total, ...sums.map((_, i) => row[`c${i}`])];
+    return { total: v[0], cpu: v.slice(1, 1 + cpu.length), mem: v.slice(1 + cpu.length, 1 + cpu.length + mem.length), free: v.slice(1 + cpu.length + mem.length) };
+  },
+
   /** One page's report, then everything older than the newest SLOW_KEEP dropped. */
   addSlowMoments(this: Store, rows: Omit<SlowMoment, 'id'>[]) {
     const add = this.db.prepare('INSERT INTO slow_moments (at, person, device, tab, kind, what, page, project_id, total_ms, server_ms, network_ms, tab_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');

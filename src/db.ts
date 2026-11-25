@@ -2608,15 +2608,6 @@ export class Store {
     this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
   }
 
-  /** How many host samples since `since` had CPU pressure, memory pressure at or over each line, and free memory under each (#1892). */
-  hostCrossings(since: number, cpu: number[], mem: number[], freeGb: number[]): { total: number; cpu: number[]; mem: number[]; free: number[] } {
-    const GB = 1024 ** 3;
-    const sums = [...cpu.map(() => 'cpu_psi >= ?'), ...mem.map(() => 'mem_psi >= ?'), ...freeGb.map(() => 'mem_avail < ?')].map((c, i) => `COALESCE(SUM(${c}), 0) AS c${i}`);
-    const row = this.db.prepare(`SELECT COUNT(*) AS total, ${sums.join(', ')} FROM host_samples WHERE at >= ?`).all(...cpu, ...mem, ...freeGb.map((g) => g * GB), since)[0] as Record<string, number>;
-    const v = [row.total, ...sums.map((_, i) => row[`c${i}`])];
-    return { total: v[0], cpu: v.slice(1, 1 + cpu.length), mem: v.slice(1 + cpu.length, 1 + cpu.length + mem.length), free: v.slice(1 + cpu.length + mem.length) };
-  }
-
   hostSamples(since: number): HostSample[] {
     return this.db.prepare('SELECT * FROM host_samples WHERE at >= ? ORDER BY at').all(since) as unknown as HostSample[];
   }

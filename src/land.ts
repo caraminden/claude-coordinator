@@ -462,6 +462,9 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   const testsRed = /tests failed on the rebased branch/.test(output) || failedFiles.length > 0;
   if (!testsRed && /failed in its setup step|runner clock:|the runner needs fixing/.test(output)) return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
   if (/boot check/i.test(output) && /SQLITE_|database is locked|sqlite.*(crash|abort|segfault)/i.test(output)) return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
+  // A run that skipped a test (#1914) is refused whatever else failed, its flakes included: before the passed-alone line.
+  if (/^land: (a test was|\d+ tests were) skipped in CI /m.test(output))
+    return k('skipped-test', "Kind: CI skipped a test, so a check didn't run. Never a flake, so handing off the same commit again is refused too. Make the test run in CI (or not register there); if your change has nothing to do with it, the runner lacks something: tell the Taskmaster which test.");
   // What land.sh's flake_only would call passed-alone (#1013, G1 of #1283): some file passed alone and none has another label
   // from tools/run-tests.sh: "failed again alone", "hung when rerun alone", "rerun alone stopped … counts as a real failure",
   // "not rerun: …". Not a "flake" for people: that word is for a known one (#1419), which ships and is never refused.

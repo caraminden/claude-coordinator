@@ -26,10 +26,10 @@ const tmp = tempRoot('land-verdicts-');
 after(() => tmp.teardown());
 
 // The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
-const BENCHED = ['cut_off', 'flake_only', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on', 'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone'];
+const BENCHED = ['cut_off', 'flake_only', 'skipped_tests', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on', 'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone'];
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
-  ci_failed: 'fetches the log and writes its flake lines',
+  ci_failed: 'fetches the log and writes its flake and skipped-test lines',
   ci_gate: 'waits for the run and fetches its log',
   gate: 'calls cut_off, flake_only and known_flakes, benched here',
   smoke: 'the smoke check before the line: one ship alone, its own red',
@@ -178,6 +178,13 @@ for (const [ci, through] of [
       assert.match(r.log, /drop: the riders go back in line/);
       assert.match(r.log, /retro: red on main too: not this train's .* also red: test\/wake-when-live\.test\.ts/);
     }
+    if (through) {
+      // A test skipped too (#1914): not main's red alone, so no ship through it, and still nobody is refused.
+      const skip = `failed+=$'\\ntest\\tthe full suite\\t2026-11-21T08:25:00.1Z ℹ skipped 1'`;
+      const s = run({ script: `${t} >/dev/null\n${skip}\ntrain_main_red && echo "also: $main_red_other"`, red: 'test/status-page.test.ts', failsAt: '3147c858' });
+      assert.equal(s.out, 'also: a skipped test\n');
+      assert.doesNotMatch(s.log, /SHIPPING THROUGH/);
+    }
     // Green on main: not main's red, so the suspects judge it.
     const g = run({ script: `${t} >/dev/null\ntrain_main_red || echo 'not main'`, red: 'test/status-page.test.ts' });
     assert.equal(g.out, 'not main\n');
@@ -250,6 +257,18 @@ for (const [ci, file] of [
     assert.equal(run({ script: `${t}\nknown_flakes "$(flake_only)" || echo 'fresh run'`, shared }).out, 'fresh run\n');
   });
 }
+
+// F: run 45549200030 (Nov 24 20:51 PST, #1873): one file passed alone and one test was skipped, and it was read as flakes
+// only. tests.yml asked about skips only on a green run. Verdict: red (#1914). Without the skip, the flake it was.
+test('F: a red of flakes only that skipped a test is no flake (run 45549200030)', () => {
+  const t = log('45549200030');
+  assert.equal(run({ script: `${t}\nskipped_tests` }).out, '1\nevery .ts, .js and .mjs file this branch changed is formatted\n');
+  assert.equal(run({ script: `${t}\nflake_only || echo red` }).out, 'red\n');
+  const none = `${t}\nfailed=$(sed 's/ℹ skipped 1$/ℹ skipped 0/' <<<"$failed")`;
+  assert.equal(run({ script: `${none}\nskipped_tests || flake_only` }).out, 'test/machine-lend-cards.test.ts\n');
+  // Perigee's own log has no CI prefix: its suite always skips the Biome tests, and that is not CI's skip.
+  assert.equal(run({ script: `failed='ℹ skipped 2'\nskipped_tests || echo none` }).out, 'none\n');
+});
 
 // The guard: a function that reads CI's log decides something about the red, so it is benched or says why not.
 test('every function that reads $failed is benched here or says why it decides nobody', () => {

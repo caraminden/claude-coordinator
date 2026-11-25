@@ -235,7 +235,13 @@ jobs:
           kill "$poster" 2>/dev/null || true # it ends by itself with no run token: bash -e would fail the step on that kill
           wait "$poster" || true # its last send, the final counts (#1667): 5 s at most
           sleep 1; kill "$tailer" # tail prints what it has read: a second for the last lines
-          [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
+          # A skipped test fails the run, a red one too (#1914: it looked only at green ones, so a red of flakes hid the skip). land.sh
+          # reads node's own line from this log (skipped_tests). No summary is a red run cut short: nothing to say about skips.
+          skips=$(sed -n 's/^ℹ skipped //p' "$RUNNER_TEMP/tests.log" | tail -n 1)
+          if [ "$skips" != 0 ] && { [ -n "$skips" ] || [ "$rc" = 0 ]; }; then
+            echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"
+            [ "$rc" != 0 ] || rc=1
+          fi
           exit "$rc"
       # Numbers per run for the CI page's Numbers tab (higher is worse; a step up wakes the Taskmaster). Never fails the job.
       # A ship's own check or an early run keeps none: its suite ran niced (and a check's narrower), so its time isn't main's line's.

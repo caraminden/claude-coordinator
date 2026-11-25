@@ -128,7 +128,7 @@ test('a skipped test beside known flakes refuses the run: no ship past flakes an
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
 
-test("a skipped test beside a flake nobody has seen refuses the run too, and so does one on the fresh run", () => {
+test('a skipped test beside a flake nobody has seen refuses the run too, and so does one on the fresh run', () => {
   for (const fresh of [false, true]) {
     const r = setup();
     const c = ci(r);

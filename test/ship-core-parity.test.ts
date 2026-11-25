@@ -150,3 +150,53 @@ test("the burn-in line parser is the same sed in land.sh's burn_lines and land.l
   assert.equal(parser('land.local.sh', 'citadel_burn_lines'), land);
   assert.equal(parser('land.local.sh', 'citadel_ci_burn_lines'), land);
 });
+
+test('land.local.sh refuses a CI red that skipped a test as land.sh does, whatever flakes it has beside it (#1914)', () => {
+  const local = join(repo, 'tools', 'land.local.sh'),
+    land = join(repo, 'tools', 'land.sh');
+  const raw = join(import.meta.dirname, 'fixtures', 'land-verdicts', '45549200030.log');
+  const pre = `set -euo pipefail\n${fn(local, 'citadel_flake_only')}${fn(local, 'citadel_skipped')}${fn(local, 'land_flaky')}citadel_retro_log() { :; }\n`;
+  const dir = mkdtempSync(join(root, 'skips-'));
+  const strip = readFileSync(join(repo, 'tools', 'land.local.sh'), 'utf8').match(/sed -E (\$'s\/\^\[\^\\t\]\*.*?\/\/')/);
+  assert.ok(strip, "citadel_ci_log's sed");
+  bash(`${pre}sed -E ${strip[1]} "$1" >"$2/run-7.log"`, raw, dir);
+  const theirs = bash(`failed=$(cat "$1")\n${fn(land, 'skipped_tests')}skipped_tests`, raw);
+  assert.deepEqual(theirs, ['1', 'every .ts, .js and .mjs file this branch changed is formatted']);
+  assert.deepEqual(bash(`${pre}citadel_skipped <"$1/run-7.log"`, dir), theirs);
+  const digest = `${fn(local, 'citadel_ci_digest')}citadel_ci_digest "$1/run-7.log" 7 https://ci/7 suite`;
+  assert.deepEqual(bash(`${pre}${digest} | citadel_skipped >/dev/null && echo seen`, dir), ['seen'], "land_main_red's log is the digest");
+  const flaky = `${pre}citadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ntip=abc\nland_flaky <<<'citadel-ci: run 7 https://ci/7 suite' || echo red`;
+  assert.deepEqual(bash(flaky), ['red']);
+  writeFileSync(join(dir, 'run-7.log'), readFileSync(join(dir, 'run-7.log'), 'utf8').replace(/^ℹ skipped 1$/m, 'ℹ skipped 0'));
+  assert.deepEqual(bash(flaky), ['test/machine-lend-cards.test.ts'], 'no skip: the one fresh run, as before');
+  // The status the core asks CI for, with every flake a known one: red on a skip, green without one.
+  const status = (skips: number) => {
+    writeFileSync(join(dir, 'run-7.log'), readFileSync(join(dir, 'run-7.log'), 'utf8').replace(/^ℹ skipped \d+$/m, `ℹ skipped ${skips}`));
+    const names = ['citadel_flake_only', 'citadel_skipped', 'citadel_skipped_said', 'citadel_cut_off', 'citadel_ci_digest', 'citadel_ci_status'];
+    const stubs = `citadel_retro_log() { echo "retro: $1"; }\ncitadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ncitadel_slug() { echo o/r; }\ncitadel_hub() { printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n'; }\ncitadel_ci_log() { echo ${JSON.stringify(dir)}/run-7.log; }\ncitadel_ci_known() { echo 'a known flake'; }\ncitadel_ci_rerun_said() { :; }\nCITADEL_CI_WORKFLOW=w CITADEL_CI_CLOCK_STEP=c CITADEL_CI_STEP="$(printf '7\\tcompleted\\tfailure\\thttps://ci/7')" CITADEL_CI_BURN_STEP=b`;
+    return bash(`set -euo pipefail\n${names.map((n) => fn(local, n)).join('')}${stubs}\nrc=0; citadel_ci_status 0123456789abcdef || rc=$?; echo "rc $rc"`).filter((l) => /^rc |^land: (a test|only known)/.test(l));
+  };
+  const [why, rc] = status(1);
+  assert.match(why, /^land: a test was skipped in CI \(https:\/\/ci\/7\): every \.ts, /);
+  assert.equal(rc, 'rc 1');
+  assert.deepEqual(status(0), ['land: only known flakes failed in CI (https://ci/7): a known flake, so this goes on as green, with no fresh run', 'rc 0']);
+});
+
+test('tests.yml fails a run that skipped a test, red runs included, and says nothing about skips when node gave no summary (#1914)', () => {
+  const yml = readFileSync(join(repo, '.github', 'workflows', 'tests.yml'), 'utf8');
+  const step = yml.match(/^ {10}skips=\$\(sed[\s\S]*?^ {10}exit "\$rc"\n/m);
+  assert.ok(step, 'the skip check at the end of the full suite step');
+  const dir = mkdtempSync(join(root, 'skip-step-'));
+  const end = (rc: number, log: string) => {
+    writeFileSync(join(dir, 'tests.log'), log);
+    const r = spawnSync('bash', ['-e', '-c', `rc=${rc}\n${step[0]}`], { encoding: 'utf8', env: { ...env, RUNNER_TEMP: dir } });
+    return [r.status, /tests were skipped on this runner/.test(r.stdout)];
+  };
+  assert.deepEqual(end(0, 'ℹ skipped 0\n'), [0, false]);
+  assert.deepEqual(end(0, 'ℹ skipped 1\n'), [1, true]);
+  assert.deepEqual(end(0, ''), [1, true], 'a green run with no summary is no proof nothing was skipped');
+  assert.deepEqual(end(1, 'ℹ skipped 0\n'), [1, false]);
+  assert.deepEqual(end(1, 'ℹ skipped 2\n'), [1, true], 'a red run says so too');
+  assert.deepEqual(end(3, 'ℹ skipped 2\n'), [3, true], "a red run keeps run-tests.sh's code");
+  assert.deepEqual(end(1, ''), [1, false], 'cut short: no summary');
+});

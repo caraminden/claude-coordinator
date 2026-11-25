@@ -468,6 +468,21 @@ citadel_flake_only() {
   [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
   sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
 }
+# Ports skipped_tests (#1914) on a CI log on stdin (citadel_ci_log's, no prefixes) or its digest: the count, then up to 5 names; fails when CI's suite skipped none. Never for perigee's suite, which always skips the Biome tests.
+citadel_skipped() {
+  local log n
+  log=$(cat)
+  n=$(sed -nE 's/^ℹ skipped ([0-9]+)$/\1/p' <<<"$log" | tail -n 1)
+  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
+  echo "$n"
+  sed -nE 's/^ *﹣ (.*) \([0-9.]+ms\).*/\1/p' <<<"$log" | sort -u | sed -n 1,5p
+}
+# Ports skipped_said: citadel_skipped's answer and the run's URL, in words.
+citadel_skipped_said() {
+  local n=${1%%$'\n'*} names=''
+  [ "$n" = "$1" ] || names=": $(sed '1d' <<<"$1" | paste -sd';' - | sed 's/;/; /g')"
+  if [ "$n" = 1 ]; then echo "a test was skipped in CI ($2)$names"; else echo "$n tests were skipped in CI ($2)$names"; fi
+}
 # Ports cut_off (#1377, #1393) on a log on stdin: 0 when the run was cut off or killed from outside before any test failed.
 citadel_cut_off() {
   local log
@@ -546,7 +561,7 @@ citadel_ci_digest() {
   local log=$1 id=$2 url=$3 kind=$4 f load
   echo "citadel-ci: run $id $url $kind"
   [ "$kind" != suite ] || while read -r f load; do echo "land: flake: $f · in CI"; done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' "$log" | sort -u)
-  { grep -E 'run-tests: |burn-in: |The tests left [0-9]+ process|Interrupted while running:|exit code 137\.|^✖ failing tests:' "$log" || true; } | head -n 200
+  { grep -E '^ℹ skipped [0-9]+$|run-tests: |burn-in: |The tests left [0-9]+ process|Interrupted while running:|exit code 137\.|^✖ failing tests:' "$log" || true; } | head -n 200
   { grep -A1 -E '^test at [^ ]+:[0-9]+:[0-9]+' "$log" || true; } | grep -v '^--$' | head -n 200
   echo "--- the failed log's last 40 lines:"
   tail -n 40 "$log"
@@ -555,7 +570,7 @@ citadel_ci_digest() {
 # --- CI_STATUS ------------------------------------------------------------------------------------------------------
 # Ports ci_run, ci_gate's verdict, ci_failed, cut_off's and known_flakes' parts of gate(): exit 0 green, 1 red, 2 running, 3 not started, 4 no verdict, 5 no answer (the core's codes).
 citadel_ci_status() {
-  local sha=$1 dir slug br run id status result url step log rc n files known why_f
+  local sha=$1 dir slug br run id status result url step log rc n files known why_f skips
   [ "${LAND_CI:-1}" != 0 ] || { echo "LAND_CI=0 was set"; return 5; }
   dir=$(citadel_ci_dir) || { echo "no git dir to keep CI's state in"; return 5; }
   why_f=$dir/why-$sha
@@ -623,6 +638,11 @@ citadel_ci_status() {
   fi
   rc=1
   files=$(citadel_flake_only <"$log") || files=''
+  if skips=$(citadel_skipped <"$log"); then # a skipped test is a real failure, never a flake (#1914)
+    files=''
+    echo "land: $(citadel_skipped_said "$skips" "$url"). A skipped test is a real failure, never a flake: its check didn't run, so no flake excuses this run and it gets no fresh one. Make the test run in CI, or give the runner what it needs"
+    ! mkdir "$dir/said-$id-skip" 2>/dev/null || citadel_retro_log "skipped test · $br · ${skips//$'\n'/; } · $url"
+  fi
   # A red of known flakes only (#1419) is a green, with no fresh run. Said once per run; the core shows CI_STATUS's lines only on red, so <dir>/known-<commit> keeps it for the shipped line.
   if [ -n "${files:-}" ] && known=$(citadel_ci_known "$files" "$sha" "$br" "$log" 2>"$dir/known-why.$$"); then
     rm -f "$dir/known-why.$$"
@@ -690,6 +710,7 @@ land_flaky() {
   log=$dir/run-$id.log
   [ -s "$log" ] || return 1
   files=$(citadel_flake_only <"$log") || return 1
+  ! citadel_skipped <"$log" >/dev/null || return 1 # a skipped test is a real failure, never a flake (#1914)
   if [ "${flaked:-0}" -ge 1 ]; then # the fresh run was red on flakes only too: keep its place only if nothing points at the change
     ! grep -qE 'The tests left [0-9]+ process\(es\) running' "$log" || return 1
     for f in ${files//, / }; do
@@ -1021,6 +1042,7 @@ land_main_red() {
   flakes=$(citadel_labels | sed -n 's/^failed in the full run, passed alone //p' | paste -sd, - | sed 's/,/, /g') || true
   if [ ${#other[@]} -gt 0 ] || [ ${#touched[@]} -gt 0 ] || [ ${#out[@]} = 0 ]; then ok=''
   elif grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed"; then ok='' other=('the leak guard (the tests left processes running)')
+  elif citadel_skipped <<<"$failed" >/dev/null; then ok='' other=('a skipped test')
   elif [ -n "$flakes" ] && ! citadel_known_flakes "$flakes"; then ok='' other=("$flakes (passed alone, but no known flake)")
   fi
   [ ${#out[@]} -gt 0 ] || return 0

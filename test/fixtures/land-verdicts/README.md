@@ -5,7 +5,7 @@ the GitHub Actions run it is named after (`gh run view <id> --log` on the citade
 the test cites the incident report in the shared folder's `reports/` that names the run.
 
 They are trimmed by `trim.sh` here to keep the repo small: a log with no `✖ failing tests:` stays whole (lines cut to
-400 characters); otherwise the lines before that block that land.sh reads (`run-tests:`, `burn-in:`, kill and
+400 characters); otherwise the lines before that block that land.sh reads (`run-tests:`, `burn-in:`, skips, kill and
 interrupt lines, `✖`), plus the first 3 lines naming a `src/…ts:N` path (the loop-lag noise a rule must ignore), then
 everything from `✖ failing tests:` on, lines cut to 1000 characters.
 

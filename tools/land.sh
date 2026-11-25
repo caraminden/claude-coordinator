@@ -1415,6 +1415,10 @@ ci_failed() {
   failed=$(hub gh run view "$ci_id" --repo "$ci_slug" --log-failed 2>/dev/null) || failed=''
   tail -n 40 <<<"$failed" >&2
   [ -z "$burn_red" ] || return 0 # a burn-in's log may quote run-tests.sh's lines (test/land.test.ts does): no flakes from it
+  if f=$(skipped_tests); then
+    say "$(skipped_said "$f"). A skipped test is a real failure, never a flake: its check didn't run, so no flake excuses this run and it gets no fresh one. Make the test run in CI, or give the runner what it needs"
+    retro_log "skipped test · $branch${train_br[*]:+ · with ${train_br[*]}} · ${f//$'\n'/; } · $ci_url"
+  fi
   while read -r f load; do
     retro_log "flake · $f · load $load · $branch · in CI${train_br[*]:+ · with ${train_br[*]}}" # riders: one run (#1419)
     say "flake: $f · in CI" # the server counts these (src/flakes.ts)
@@ -1422,12 +1426,32 @@ ci_failed() {
 }
 # The burn-in's verdict in $failed (#1443): "<file>: failed in <n> of <N> copies at once" for each red file; nothing otherwise.
 burn_lines() { sed -n 's/.*burn-in: \([^ ]*: failed in [0-9]* of [0-9]* copies at once\).*/\1/p' <<<"$failed" | sort -u; }
+# The tests CI's suite skipped (#1914; Cara: "Never skip, loosen or delete a test to get green"): the count, then up to 5
+# names, a line each; fails when it skipped none. On Nov 24 #1885 and #1873 went live on red runs with a test skipped, since
+# tests.yml looked for one only on a green run. Only CI's own lines count ("<job>\t<step>\t<time> ℹ skipped 1": node's
+# summary, the last one): a test's quoted output is indented, and perigee's suite always skips the Biome tests it has no
+# Biome for, so its log (no prefix) never matches.
+skipped_tests() {
+  local pre=$'^[^\t]+\t[^\t]+\t[^ \t]+' n
+  n=$(sed -nE "s/$pre ℹ skipped ([0-9]+)\$/\\1/p" <<<"$failed" | tail -n 1)
+  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
+  echo "$n"
+  sed -nE "s/$pre +﹣ (.*) \([0-9.]+ms\).*/\\1/p" <<<"$failed" | sort -u | sed -n 1,5p
+}
+# skipped_tests' answer in words: "a test was skipped in CI (<run>): <names>".
+skipped_said() {
+  local n=${1%%$'\n'*} names=''
+  [ "$n" = "$1" ] || names=": $(sed '1d' <<<"$1" | paste -sd';' - | sed 's/;/; /g')"
+  if [ "$n" = 1 ]; then echo "a test was skipped in CI ($ci_url)$names"; else echo "$n tests were skipped in CI ($ci_url)$names"; fi
+}
 # The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It
 # counts on run-tests.sh's own lines: "<n> test file(s) failed; rerunning each alone…" and then one label per file.
 # Without that line (more than its max_reruns files, a hang, a leak, a run that never got to the tests) it is no flake.
-# Only the labels after that line count: a test's own output can quote one (test/land.test.ts does).
+# Only the labels after that line count: a test's own output can quote one (test/land.test.ts does). Nor is a run that
+# skipped a test (#1914).
 flake_only() {
   local at n files
+  ! skipped_tests >/dev/null || return 1
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 1
   n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
@@ -1503,6 +1527,8 @@ train_main_red() {
     :
   elif grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed"; then
     main_red_other='the leak guard (the tests left processes running)'
+  elif skipped_tests >/dev/null; then
+    main_red_other='a skipped test'
   elif [ -n "$flakes" ] && ! known_flakes "$flakes"; then
     main_red_other="$flakes (passed alone, but no known flake)"
   fi

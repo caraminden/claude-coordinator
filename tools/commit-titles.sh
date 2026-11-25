@@ -4,7 +4,7 @@
 # drop it (core.commentChar, src/workspace.ts keepTitles, stops that for new work). Exit 0 when fine; exit 1 and one
 # line naming the first commit when a commit of <base>..HEAD has an empty subject, or has no "#N" while another
 # commit in that range has one. A branch whose commits have none of them (a plain scheme) is fine.
-base=${1:?usage: commit-titles.sh <base>, or <git log's range...>}
+base=${1:?usage: commit-titles.sh <base>, or <range...>}
 [ $# -gt 1 ] || set -- "$base..HEAD"
 subjects=$(git log --no-merges --format='%h %s' "$@") || exit 2
 numbered='^[0-9a-f]+ (WIP )?#[0-9]+'

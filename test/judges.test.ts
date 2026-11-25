@@ -47,7 +47,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile', calls: 2 },
   'src/minion-relay.ts': { why: 'leaveMail itself', calls: 1 },
   'src/closing.ts': { why: 'claimPassed: who a claim passed to, told to its keeper as held mail', calls: 1 },
-  'src/ship-lane.ts': { why: 'passes the lane to a minion that said it is ready, on the 10 min Josh picked (#1985), and tells the one it passed over; it compares file names and guesses at nothing', calls: 2 },
+  'src/ship-lane.ts': { why: 'passes the lane to a minion that said it is ready, on the 10 min Josh picked (#1985), and tells the one it passed over; acts from day one rather than log-only: Josh, 2026-11-25, "Act from day one"', calls: 2 },
   'src/keepalive-run.ts': { why: 'the weekly keepalive readout, and the note that keepalives switched themselves off, as held mail', calls: 1 },
   'src/rule-parks.ts': { why: "held mail (no wake) after a person's Settings save, listing parks for the Taskmaster to check; it refuses, wakes and stops nothing", calls: 1 },
   'src/exec.ts': { why: 'stops its own child on its own timeout', calls: 2 },

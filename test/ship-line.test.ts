@@ -8,8 +8,10 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { LandsInFlight } from '../src/release-readers.ts';
-import { Releases, type TargetView } from '../src/releases.ts';
+import { CITADEL_TARGET, Releases, type TargetView } from '../src/releases.ts';
+import { HISTORY_MAX, readState } from '../src/ship-line-state.ts';
 import { moveShip, seqsFor, shipFirst } from '../src/ship-line.ts';
+import { moveIn, writeOrder } from '../src/waits.ts';
 import { git, gitAt } from './git.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ship-line-'));
@@ -184,4 +186,52 @@ test("#1487: a broken test's fix goes to the front as a Taskmaster's move, once;
   assert.equal(shipFirst(app, p.id, ids[4], by, 'x'), 'refused', "it doesn't pass Cara's pin");
   assert.deepEqual(order(), [2, 4, 3, 5]);
   assert.equal(line().find((x) => x.name === '#5')?.placed, undefined);
+});
+
+test("what can't be ordered says why: an empty line, the ship that holds the lock, a place behind one that isn't waiting", () => {
+  const { app, p, line, q } = scheme('Peek Auras');
+  assert.match(
+    refused(() => moveShip(app, p.id, 1, [1, 2], CARA)),
+    /no longer waiting/,
+  );
+  assert.match(
+    refused(() => seqsFor(line(), 4, 1)),
+    /not waiting in line/,
+  );
+  for (const n of [1, 2, 3, 4, 5]) rmSync(join(q, String(n).padStart(10, '0')));
+  assert.match(
+    refused(() => moveShip(app, p.id, 3, [3, 2], CARA)),
+    /no ship line/,
+  );
+});
+
+test("a broken test's fix right behind a ship that holds the line is already first", () => {
+  const { app, p, q, ids } = scheme('Peek Auras');
+  writeFileSync(join(q, '0000000002'), readFileSync(join(q, '0000000002'), 'utf8') + 'hold\n');
+  assert.equal(shipFirst(app, p.id, ids[2], TM, 'x'), 'first');
+});
+
+test('the history keeps the newest moves', () => {
+  const { app, p } = scheme('Peek Auras');
+  for (let i = 0; i < HISTORY_MAX + 1; i++) moveShip(app, p.id, 4, i % 2 ? [2, 3, 4, 5] : [4, 2, 3, 5], CARA, `move ${i}`);
+  const h = readState(app.store, p.id).history.map((m) => /move \d+$/.exec(m.text)?.[0]);
+  assert.deepEqual([h.length, h[0], h.at(-1)], [HISTORY_MAX, 'move 1', `move ${HISTORY_MAX}`]);
+});
+
+test("Citadel's own line: the drag says which ship moved, so one dropped in a part of the line leaves the rest where they were", () => {
+  const { app, p, line } = scheme('Citadel');
+  const entries = line();
+  const releases = { poll() {}, view: () => [{ targets: [{ target: { id: CITADEL_TARGET }, line: entries }] }] };
+  const calls: unknown[][] = [];
+  const waits = { setOrder: (seqs: number[], _note: unknown, moved?: number) => (calls.push([seqs, moved]), moveIn([2, 3, 4, 5], seqs, moved!)) };
+  const own = { store: app.store, releases, waits } as unknown as Parameters<typeof moveShip>[0];
+  assert.deepEqual(moveShip(own, p.id, 5, [5, 3], CARA), [5, 2, 3, 4]);
+  assert.deepEqual(calls, [[[5, 3], 5]]);
+});
+
+test('writeOrder: a part of the line moves one ship, and a reason with a newline stays one line', () => {
+  const q = mkdtempSync(join(root, 'order-'));
+  const at = [1, 2, 3, 4].map((seq) => ({ seq, proc: '', got: 0, label: '', phase: '', mtime: 0, orders: true }));
+  assert.deepEqual(writeOrder(q, at, [2, 4, 3], 'Cara: one\n0000000009', 4), [1, 2, 4, 3]);
+  assert.equal(readFileSync(join(q, '.order'), 'utf8'), '# Cara: one 0000000009\n0000000001\n0000000002\n0000000004\n0000000003\n');
 });

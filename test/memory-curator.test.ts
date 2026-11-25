@@ -278,4 +278,8 @@ test('copies stored before the writes survive a kill, and the store keeps them o
   assert.deepEqual(s.get(p.id)!.backup, first);
   assert.equal(s.decide(p.id, { status: 'applied', changes: out, backup: merged, by: 'josh' }), true);
   assert.equal(s.kept(1).length, 1);
+  const q = s.create({ project_id: 1, ticket_id: 1, folder: 'f', changes }).proposal;
+  s.keepFirst(q.id, first);
+  s.create({ project_id: 1, ticket_id: 1, folder: 'f', changes });
+  assert.equal(s.kept(1).length, 1, 'a tidy a newer one superseded keeps its copy but offers no Put back');
 });

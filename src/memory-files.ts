@@ -200,7 +200,6 @@ export function indexNote(dir: string, file: string): boolean {
   return true;
 }
 
-/** Delete a note and its MEMORY.md line(s): the file first, then the index rewritten without the lines that link it (a stray index line is a smaller harm than a note the index forgot). */
 /** An index line without `file`'s link: null when that was its only link (the line goes), else the line with just that link's text left in place (ME3). */
 export function withoutLink(line: string, file: string): string | null {
   const others = [...line.matchAll(/\]\(([^)\s]+\.md)\)/g)].some((m) => m[1] !== file);
@@ -211,6 +210,7 @@ export function withoutLink(line: string, file: string): string | null {
     .join('');
 }
 
+/** Delete a note and its MEMORY.md line(s): the file first, then the index rewritten without the lines that link it (a stray index line is a smaller harm than a note the index forgot). */
 export function deleteNote(dir: string, file: string): number {
   const path = join(dir, file);
   if (!plain(path)) throw new Error('No such note');

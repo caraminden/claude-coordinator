@@ -311,9 +311,9 @@ export class MemoryProposals {
     return parse(this.db.prepare('SELECT * FROM memory_proposals WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticketId) as Row | undefined);
   }
 
-  /** Decided proposals whose old notes are still kept, newest first (an open one's copy, stored before its writes, isn't Put back yet). */
+  /** Decided proposals whose old notes are still kept, newest first (a copy stored before an undecided tidy's writes, open or since superseded, is not offered). */
   kept(projectId: number): Proposal[] {
-    return (this.db.prepare("SELECT * FROM memory_proposals WHERE project_id = ? AND backup IS NOT NULL AND status != 'open' ORDER BY decided_at DESC").all(projectId) as Row[]).map((r) => parse(r)!);
+    return (this.db.prepare("SELECT * FROM memory_proposals WHERE project_id = ? AND backup IS NOT NULL AND status IN ('applied', 'dismissed') ORDER BY decided_at DESC").all(projectId) as Row[]).map((r) => parse(r)!);
   }
 
   /** A new open proposal; the scheme's earlier open ones become superseded, and are returned so their cards can say so. */

@@ -41,7 +41,7 @@ import { thrown } from '../thrown.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
 import { timerBroken } from '../timer-alerts.ts';
 import { mailParksUnderOldRule } from '../rule-parks.ts';
-import { heldPlan, readVerdicts, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
+import { heldPlan, readVerdicts, refuseStale, refuseStaleFields, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
 import { runDescribe } from '../review-describe.ts';
 import { postPlan } from '../plan-cards.ts';
 import { cardHref } from '../card-links.ts';
@@ -393,22 +393,6 @@ function queuedState(app: App, t: Ticket | undefined, done: boolean): { state: s
   if (!t || t.status === 'closed') return { state: 'gone', after: null };
   if (t.status === 'new') return { state: 'new', after: null };
   return { state: app.runner.isRunning(t.id) || app.runner.turnLine.has(t.id) ? 'working' : 'waiting', after: null };
-}
-
-/**
- * Refuse a save of `next` whose draft began from `was` when someone has saved other text since (`now`): the page keeps what
- * was typed and the stored text stays (#1859). No `was` (an agent's call, an old tab) compares nothing, and neither does a
- * save that changes nothing. `byLine`: a list, so its order doesn't count.
- */
-function refuseStale(was: unknown, now: string, next: string, by?: string | null, byLine = false): void {
-  if (was === undefined) return;
-  if (typeof was !== 'string') throw new HttpError(400, 'was must be text');
-  const clean = (t: string) => {
-    const s = t.replace(/\r\n/g, '\n').trim();
-    return byLine ? [...new Set(s.split('\n').map((l) => l.trim()))].sort().join('\n') : s;
-  };
-  if (clean(was) === clean(now) || clean(next) === clean(now)) return;
-  throw new HttpError(409, `${by || 'Someone'} saved a different text since you opened it. Copy yours, Discard to load theirs, and make your change again`);
 }
 
 /**
@@ -1043,14 +1027,7 @@ export const projectRoutes: Route[] = [
           throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
         }
       }
-      // `was`: the text the page's draft started from, by field (#1859). Left out (an agent's call, an old tab), nothing is compared.
-      if (body.was !== undefined) {
-        if (!body.was || typeof body.was !== 'object') throw new HttpError(400, 'was must be an object of fields');
-        const now = store.getProject(project.id)!;
-        if (body.instructions !== undefined) refuseStale(body.was.instructions, now.instructions, instructions, now.instructions_updated_by);
-        if (settings.approval_rules !== undefined) refuseStale(body.was.approval_rules, now.approval_rules, settings.approval_rules, null, true);
-        if (settings.shot_note !== undefined) refuseStale(body.was.shot_note, now.shot_note, settings.shot_note);
-      }
+      if (body.was !== undefined) refuseStaleFields(body.was, store.getProject(project.id)!, { instructions, ...settings });
       // Worked out before anything is written, since it can still refuse (too many approval rules). The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
       const gate = shippingGate({ ...project, ...settings });
       if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;

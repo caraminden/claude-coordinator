@@ -8,7 +8,7 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { RULE_HOMES } from './rule-homes.ts';
 import { mailParksUnderOldRule } from './rule-parks.ts';
 import { added, homeText, inSettingsHome, overlapsFor, readIn, schemeRules, section, settingsSources, type Overlap } from './rule-overlap.ts';
-import { ownWrites, type App } from './http.ts';
+import { HttpError, ownWrites, type App } from './http.ts';
 import type { Project } from './db.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -28,6 +28,31 @@ export interface HeldEdit {
   edits: FindReplace[];
   by: string;
   count: number;
+}
+
+/**
+ * Refuse a save of `next` whose draft began from `was` when someone has saved other text since (`now`): the page keeps what
+ * was typed and the stored text stays (#1859). No `was` (an agent's call, an old tab) compares nothing, and neither does a
+ * save that changes nothing. `byLine`: a list, so its order doesn't count.
+ */
+export function refuseStale(was: unknown, now: string, next: string, by?: string | null, byLine = false): void {
+  if (was === undefined) return;
+  if (typeof was !== 'string') throw new HttpError(400, 'was must be text');
+  const clean = (t: string) => {
+    const s = t.replace(/\r\n/g, '\n').trim();
+    return byLine ? [...new Set(s.split('\n').map((l) => l.trim()))].sort().join('\n') : s;
+  };
+  if (clean(was) === clean(now) || clean(next) === clean(now)) return;
+  throw new HttpError(409, `${by || 'Someone'} saved a different text since you opened it. Copy yours, Discard to load theirs, and make your change again`);
+}
+
+/** A scheme's settings save: `was` holds, by field, the text the page's draft began from; `next` is what the save would store. */
+export function refuseStaleFields(was: unknown, now: Project, next: Partial<Pick<Project, 'instructions' | 'approval_rules' | 'shot_note'>>): void {
+  if (!was || typeof was !== 'object') throw new HttpError(400, 'was must be an object of fields');
+  const of = was as Record<string, unknown>;
+  if (next.instructions !== undefined) refuseStale(of.instructions, now.instructions, next.instructions, now.instructions_updated_by);
+  if (next.approval_rules !== undefined) refuseStale(of.approval_rules, now.approval_rules, next.approval_rules, null, true);
+  if (next.shot_note !== undefined) refuseStale(of.shot_note, now.shot_note, next.shot_note);
 }
 
 /** Save through Settings' own setters and history, then tell the chat, the Taskmasters and open pages. */

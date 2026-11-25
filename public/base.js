@@ -59,6 +59,12 @@ export function setShowLogin(fn) {
 
 // ---------- helpers ----------
 
+/**
+ * Whether the open chat could be seen: the tab is showing, with no app over the page (frames.js `framed`), and Citadel
+ * isn't put away in an app's installed window (rail.js `put-away`). Seen marks, leaving and presence all ask this (#1851).
+ */
+export const chatInSight = () => document.visibilityState === 'visible' && !document.documentElement.matches('.framed, .put-away');
+
 // GETs on their way, by path: two asks for the same thing in one burst (a scheme's open asks for its properties and
 // inbox twice) share one request (#1528). A GET asked after a write, or after any stream news (newsArrived), never
 // joins one sent before it, since what it was sent for may have changed meanwhile.

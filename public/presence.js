@@ -1,6 +1,6 @@
 // Presence (#695): "Josh is here" on a minion's row and in its chat header, when another person has it
 // open or wrote in it in the last 10 minutes (src/presence.ts). This tab reports the chat it has open.
-import { api, h, me, view } from './base.js';
+import { api, chatInSight, h, me, view } from './base.js';
 
 const HEARTBEAT_MS = 30_000; // src/presence.ts HEARTBEAT_MS
 let stream = null;
@@ -17,10 +17,10 @@ export function presenceHello(id) {
   reportPresence();
 }
 
-/** Tell the server which chat this tab has open: on a route change, a heartbeat, and hiding the tab. */
+/** Tell the server which chat this tab has open: on a route change, a heartbeat, and the chat going out of sight or coming back. */
 export function reportPresence(force = false) {
-  if (!stream) return;
-  const ticketId = document.visibilityState === 'visible' && view?.kind === 'project' && view.id ? view.id : null;
+  if (!stream || !me) return; // signed out, its 401 would draw the sign-in form again over what's typed (#1851)
+  const ticketId = chatInSight() && view?.kind === 'project' && view.id ? view.id : null;
   if (!force && ticketId === sent) return;
   sent = ticketId;
   // Fire and forget: a lost heartbeat is made up by the next one.

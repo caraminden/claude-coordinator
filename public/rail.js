@@ -33,7 +33,7 @@ let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
  * contraption: state { hasRail, narrow, own, apps, domain, title, desktop }, strip { vars }, deployed { auto } (a new version is
  * live: reload, or with `auto` answer held while unsent text would be lost; it answers reloading before it does, #1690). Its right-click menu (app-menu.js) to
  * Citadel: point { note, draw, crop | rect }, inspect { x, y } (pick.js). A contraption's installed window → Citadel's page in its
- * layer: layer { app }, go { app }; and back: layer-close. Nothing secret goes in one, so the target is '*'.
+ * layer: layer { app }, go { app }, away (it's put away); and back: layer-close. Nothing secret goes in one, so the target is '*'.
  */
 export const FRAME = 'citadel-frame-1';
 const isMessage = (e, from) => !!from && e.source === from && e.data?.protocol === FRAME && typeof e.data.type === 'string';
@@ -119,7 +119,9 @@ function openLayer(item) {
   // Citadel's entry goes back to Citadel's last own view, as its own rail's does: Citadel's page knows which (go).
   const go = (f) => {
     post(f.contentWindow, 'layer', { app: showing() });
-    post(f.contentWindow, 'go', { app: item.name });
+    // A page that reloaded while put away stays where it is, put away.
+    if (layer.hidden) post(f.contentWindow, 'away');
+    else post(f.contentWindow, 'go', { app: item.name });
   };
   const frame = layer?.firstChild;
   if (!frame) {
@@ -132,8 +134,8 @@ function openLayer(item) {
     layer.append(f);
     document.documentElement.append(layer); // beside <body>, which goes inert under it
   } else {
-    go(frame);
     layer.hidden = false;
+    go(frame);
   }
   if (!document.body.inert) layerOpener = document.activeElement;
   document.body.inert = true;
@@ -144,10 +146,17 @@ function openLayer(item) {
 function closeLayer() {
   if (!layer || layer.hidden) return;
   layer.hidden = true;
+  post(layer.firstChild.contentWindow, 'away'); // a hidden iframe still counts as visible to its page
   document.body.inert = false;
   if (layerOpener?.isConnected) layerOpener.focus({ preventScroll: true });
   else layer.firstChild.blur();
   layerOpener = null;
+}
+
+/** Citadel's page in a layer: put away or back, for base.js chatInSight; core.js is told unless it is about to route. */
+function putAway(on, tell = true) {
+  document.documentElement.classList.toggle('put-away', on);
+  if (tell) document.dispatchEvent(new Event('citadel-layer'));
 }
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
@@ -705,11 +714,16 @@ if (typeof document !== 'undefined') {
           if (link) location.hash = appHash(link); // core.js's route checks the path again
         }
       } else if (inLayer && isMessage(e, framedIn)) {
+        if (d.type === 'away') return putAway(true);
         // Citadel's page in a contraption's installed window: which contraption is under it, and where to go.
         const app = d.app === null || (typeof d.app === 'string' && /^[a-z0-9-]+$/.test(d.app)) ? d.app : undefined;
         if (app === undefined) return;
         if (d.type === 'layer') layerApp = app;
-        else if (d.type === 'go') location.hash = app ? `#/apps/${app}` : lastView;
+        else if (d.type === 'go') {
+          const was = location.hash;
+          location.hash = app ? `#/apps/${app}` : lastView;
+          putAway(false, location.hash === was); // elsewhere, the route says so once the new view is up
+        }
       }
     } else if (host && isMessage(e, framedIn) && d.type === 'state') {
       // A framed contraption: Citadel's rail and window, as Citadel says.

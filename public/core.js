@@ -3,7 +3,7 @@
 import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
-import { KEPT_EVENTS, reloadQuietly, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { KEPT_EVENTS, reloadQuietly, ago, api, baseName, chatInSight, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { mergeOpen, noteTicketChange } from './closedlist.js';
 import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
@@ -815,7 +815,10 @@ document.addEventListener('visibilitychange', () => {
     deploysMissed();
     if (view?.kind === 'project') resync();
     else countsIfOwed();
-  } else countsIfOwed();
+  } else {
+    if (view?.kind === 'project' && view.id) markSeen(view.id); // what it changed to while hidden is on screen now
+    countsIfOwed();
+  }
 });
 
 async function resync() {
@@ -1019,7 +1022,7 @@ export function onTicketUpdate(ticket) {
     view.ticket = ticket;
     renderTicketHead();
     // You're looking at it, so whatever it changed to is seen too.
-    if (document.visibilityState === 'visible') markSeen(ticket.id);
+    markSeen(ticket.id);
   }
 }
 
@@ -1043,11 +1046,37 @@ function onPersonNote({ projectId, ticketId, note }) {
 
 // ---------- seen ----------
 
+const listed = (id) => (view?.kind === 'project' ? (view.tickets?.get(id) ?? (view.coordinator?.id === id ? view.coordinator : null)) : null);
+
+/** The open chat is going out of sight (a hidden tab, an app over it, a put-away layer): what it was when last seen, until it's back. */
+function chatCovered() {
+  const t = listed(view?.id);
+  if (t) view.sawAt ??= t.updated_at;
+}
+
+/** Back in sight from under an app or a put-away layer. */
+const chatUncovered = () => view?.kind === 'project' && view.id && view.sawAt !== undefined && markSeen(view.id);
+
+document.addEventListener('citadel-layer', () => {
+  if (chatInSight()) chatUncovered();
+  else chatCovered();
+  reportPresence();
+});
+
+/** Open a contraption over the page. */
+function coverWith(name, src) {
+  chatCovered();
+  showFrame(name, src);
+  reportPresence();
+}
+
 const seenTimers = new Map();
-/** Record that you have looked at a thread as it is now (shortly, so a burst of updates sends one). */
+/** Record that you have looked at the open chat as it is now (shortly, so a burst of updates sends one), if it can be seen. */
 export function markSeen(ticketId) {
+  if (!chatInSight()) return void (view?.id === ticketId && (view.sawAt ??= 0));
+  if (view?.id === ticketId) delete view.sawAt;
   // The unread mark goes at once (Cara, 2026-11-08: "assume things will work instantly"); the server's time replaces ours when it answers.
-  const t = view?.kind === 'project' ? (view.tickets?.get(ticketId) ?? (view.coordinator?.id === ticketId ? view.coordinator : null)) : null;
+  const t = listed(ticketId);
   if (t && view.seen && (view.seen[ticketId] ?? 0) < t.updated_at) {
     view.seen[ticketId] = t.updated_at;
     renderSidebar();
@@ -1057,6 +1086,7 @@ export function markSeen(ticketId) {
     ticketId,
     setTimeout(async () => {
       seenTimers.delete(ticketId);
+      if (!me || (view?.id === ticketId && !chatInSight())) return; // it went out of sight first: marked when it's back
       try {
         const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
         if (view?.kind !== 'project') return;
@@ -1068,13 +1098,21 @@ export function markSeen(ticketId) {
   );
 }
 
-/** You've left a thread (another page, a hidden tab, a closed page): a finished minion you had open at its last update closes (#811). */
+/**
+ * You've left the open chat (another page, a hidden tab, a closed page): a finished minion you had open at its last
+ * update closes (#811). One that changed out of sight, under an app say, isn't left: nobody saw that.
+ */
 function leaveSeen(ticketId) {
-  if (!ticketId) return;
+  if (!ticketId || (view.sawAt !== undefined && (listed(ticketId)?.updated_at ?? 0) > view.sawAt)) return;
   fetch(`api/tickets/${ticketId}/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ left: true }), keepalive: true }).catch(() => {});
 }
-addEventListener('pagehide', () => view?.kind === 'project' && leaveSeen(view.id));
-document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && view?.kind === 'project' && leaveSeen(view.id));
+// A hidden tab has left already, and can't know what it missed since.
+addEventListener('pagehide', () => document.visibilityState === 'visible' && view?.kind === 'project' && leaveSeen(view.id));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden' || view?.kind !== 'project') return;
+  chatCovered();
+  leaveSeen(view.id);
+});
 
 function onEvent(event) {
   if (view?.kind !== 'project' || (view.id !== event.ticket_id && !inMerged(view.merged, event))) return;
@@ -1132,7 +1170,7 @@ async function route() {
         src = appSrc(m[1], decodeURIComponent(m[2]), location.origin);
       } catch {}
     }
-    showFrame(m[1], src ?? undefined);
+    coverWith(m[1], src ?? undefined);
     if (m[2] != null) replaceHash(`#/apps/${m[1]}`);
     return;
   }
@@ -1224,6 +1262,7 @@ async function route() {
       document.body.classList.remove('navigating');
       document.getElementById('app')?.classList.remove('nav-dim');
       routedHash = hash;
+      chatUncovered();
     }
     reportPresence();
   }
@@ -1245,7 +1284,7 @@ async function takeShare(search, seq) {
     toast('Nothing here takes shares');
     return replaceHash('#/');
   }
-  showFrame(to.name, to.src);
+  coverWith(to.name, to.src);
   replaceHash(`#/apps/${to.name}`);
 }
 

@@ -13,6 +13,7 @@ import { type GhGet, ghGet, ghPost, RateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import type { Store } from './db.ts';
 import { every, type Job } from './every.ts';
+import { ZONE } from './pacific.ts';
 
 export const HOLD_POLL_MS = 15_000;
 /** How long the line must stay empty before optional work starts: by day ships follow each other in minutes. */
@@ -108,7 +109,7 @@ export interface HoldDeps {
   log?: (line: string) => void;
 }
 
-const HOUR = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' });
+const HOUR = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', hourCycle: 'h23' });
 export function isNight(now: number): boolean {
   const h = Number(HOUR.format(now));
   return h >= NIGHT.from || h < NIGHT.until;

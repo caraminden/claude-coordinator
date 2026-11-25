@@ -57,9 +57,12 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
   const running = new Map<string, Data>();
   const failures: { file: string; own: boolean; where: string; name: string; error?: Err }[] = [];
   let passed = 0;
+  // node holds a file's pass and fail events back until the files before it end; only test:complete comes at once, so
+  // results are read from it, and test:fail adds what has no complete (a root hook).
   // The files whose process is done, and whether node passed it: what a stopped run doesn't rerun (#1925).
   const done = new Map<string, boolean>();
   const passes = new Map<string, number>();
+  const seen = new Set<string>();
 
   /** The summary; with `still` (the run was stopped from outside) the counts so far and what was still running. */
   function report(total?: Data, still?: Data[]): string {
@@ -116,7 +119,6 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
       yield report(undefined, data.tests ?? []);
     }
     if (!file) continue;
-    if (type === 'test:complete' && data.name && resolve(data.name) === file) done.set(file, data.details?.passed !== false);
     if (type === 'test:stderr') {
       const lines = stderr.get(file) ?? [];
       lines.push(...(data.message ?? '').replace(/\n$/, '').split('\n'));
@@ -127,19 +129,26 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
       names.push(data.name ?? '');
       path.set(file, names);
       if (data.details?.type !== 'suite') running.set(file, data);
-    } else if (type === 'test:pass' || type === 'test:fail') {
-      if (running.get(file)?.name === data.name) running.delete(file);
-      if (type === 'test:pass') {
-        if (data.details?.type !== 'suite' && !data.skip && !data.todo) {
-          passed++;
-          passes.set(file, (passes.get(file) ?? 0) + 1);
+    } else if (type === 'test:pass' || type === 'test:complete' || type === 'test:fail') {
+      if (type !== 'test:fail' && running.get(file)?.name === data.name) running.delete(file);
+      if (type === 'test:pass') continue;
+      const own = resolve(data.name ?? '') === resolve(file);
+      if (type === 'test:complete') {
+        if (own) done.set(file, data.details?.passed !== false);
+        if (data.details?.passed !== false) {
+          if (!own && data.details?.type !== 'suite' && !data.skip && !data.todo) {
+            passed++;
+            passes.set(file, (passes.get(file) ?? 0) + 1);
+          }
+          continue;
         }
-        continue;
       }
       const error = data.details?.error;
       // A suite that failed because a test inside it did: that test is listed already.
       if (error?.failureType === 'subtestsFailed') continue;
-      const own = resolve(data.name ?? '') === resolve(file);
+      const key = [file, data.nesting, data.line, data.name].join('\0');
+      if (type === 'test:fail' && seen.has(key)) continue;
+      if (type === 'test:complete') seen.add(key);
       const name = own ? '(the file itself)' : [...(path.get(file) ?? []).slice(0, data.nesting ?? 0), data.name].join(' › ');
       failures.push({ file, own, where: `${rel(file)}${data.line && !own ? `:${data.line}` : ''}`, name, error });
     }

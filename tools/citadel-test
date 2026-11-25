@@ -5,8 +5,9 @@
 # limit (300 s up to 10 files, then 30 s more a file, at most 1500 s; #1925), and prints a line of counts, then each failure's file, name and assertion diff, and the leak
 # guard's complaint if any. The full output goes to $TMPDIR/citadel-test.log; --full prints it too. --name keeps the
 # tests whose name matches (node's --test-name-pattern). Exits with the tests' status, 124 at the time limit.
-# A run that hits the limit says which files finished and reruns only the others, once, under one more limit; the
+# A run that hits that limit says which files finished and reruns only the others, once, under one more limit; the
 # failures of the finished files stay, and a file that stops twice is "not finished" and ends the run at 124.
+# --timeout <seconds> is the limit instead, one run and no rerun.
 # It also runs the repo-wide tests in tools/always-tests.txt (a change anywhere can break them), counted as "+N
 # repo-wide"; --name does not filter those (they run in a second pass).
 # With no files it runs --affected (#1621), so a bare `citadel-test` is the tests your change touched plus the repo-wide list.
@@ -25,7 +26,7 @@
 # The full suite is the land gate's job (tools/land.sh), so it refuses to run on a folder.
 set -uo pipefail
 say() { echo "citadel-test: $*" >&2; }
-usage() { say "usage: citadel-test [--affected [--wide] [--base <ref>]] [test/<name>.test.ts ...] [--name '<pattern>'] [--full] [--timeout <seconds>: the limit, instead of the one sized by the file count]"; exit 2; }
+usage() { say "usage: citadel-test [--affected [--wide] [--base <ref>]] [test/<name>.test.ts ...] [--name '<pattern>'] [--full] [--timeout <seconds>: the limit, instead of the one sized by the file count; no rerun]"; exit 2; }
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { say "run it inside a worktree of Citadel's repo"; exit 2; }
 reporter=$root/tools/citadel-test-reporter.ts
@@ -97,7 +98,7 @@ if [ "${CITADEL_TEST_FILES:-4}" != 0 ] && [ -z "${RUNNER_TEMP:-}${GITHUB_ACTIONS
   # Says the wait when it happens, not at the end; read -t on a pipe nobody writes is a sleep with no child to leave behind.
   ( exec {nap}<> <(:); until [ -s "$gate_note" ]; do kill -0 $$ 2>/dev/null || exit; read -rt 0.3 -u "$nap"; done; say "$(cat "$gate_note")" ) >/dev/null & watch=$!
 fi
-trap 'rm -f "$err" "$out" "$failed" ${gate_note:+"$gate_note" "$gate_note.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
+trap 'rm -f "$err" "$out" "$failed" ${gate_note:+"$gate_note" "$gate_note.n" "$gate_note.r" "$gate_note.r.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
 start=$SECONDS
 load0=$(cut -d' ' -f1 "${CITADEL_TEST_LOADAVG:-/proc/loadavg}" 2>/dev/null)
 # The spec output goes to the log, the short version to stdout, and node's own stderr (the leak guard says its
@@ -133,23 +134,28 @@ pass() {
   dn=$(mktemp)
   run_tests "$pass_limit" "$dn" "$lg" "${fl[@]}" >"$o" 2>>"$err"
   st=$?
-  if [ $st -ne 124 ] && [ $st -ne 137 ]; then rm -f "$dn"; return $st; fi
+  # --timeout is the whole limit, as before: land.sh sets one inside limits of its own.
+  if [ -n "$explicit" ] || { [ $st -ne 124 ] && [ $st -ne 137 ]; }; then rm -f "$dn"; return $st; fi
   for f in "${fl[@]}"; do rp=$(realpath "$f"); cut -f1 "$dn" | grep -qxF -- "$rp" || un+=("$f"); done
   if [ ${#un[@]} -eq 0 ]; then rm -f "$dn"; return $st; fi
   while IFS=$'\t' read -r f passed failed; do [ "${failed:-0}" -gt 0 ] && { red=1; echo "${f#"$root/"}" >>"$failed_file"; }; done <"$dn"
   { echo "✖ stopped at the time limit, ${pass_limit} s: $((n - ${#un[@]})) of $n files finished; rerunning only: ${un[*]}"; } >>"$o"
   lim2=$(limit_for ${#un[@]})
   o2=$(mktemp); d2=$(mktemp)
-  CITADEL_TEST_EXTRA=0 run_tests "$lim2" "$d2" "$lg.r" "${un[@]}" >"$o2" 2>>"$err"
-  st2=$?; cat "$lg.r" >>"$lg"; rm -f "$lg.r"; cat "$o2" >>"$o"; rm -f "$o2"
+  # A note of its own: the gate counts its wait cap from the note's first wait, which the first part may have used up.
+  CITADEL_TEST_GATE_NOTE=${gate_note:+"$gate_note.r"} CITADEL_TEST_EXTRA=0 run_tests "$lim2" "$d2" "$lg.r" "${un[@]}" >"$o2" 2>>"$err"
+  st2=$?; cat "$lg.r" >>"$lg" 2>/dev/null; rm -f "$lg.r"; cat "$o2" >>"$o"; rm -f "$o2"
   # Both parts' finished files, counted together.
   local tp=0 tf=0 nf=0
   while IFS=$'\t' read -r f passed failed; do tp=$((tp + passed)); tf=$((tf + failed)); nf=$((nf + 1)); done < <(cat "$dn" "$d2")
-  rm -f "$dn" "$d2"
   if [ $st2 -eq 124 ] || [ $st2 -eq 137 ]; then
-    unfinished_note="not finished after two limits: ${un[*]}"
+    local left=()
+    for f in "${un[@]}"; do cut -f1 "$d2" | grep -qxF -- "$(realpath "$f")" || left+=("$f"); done
+    rm -f "$dn" "$d2"
+    pass_limit=$lim2 unfinished_note="not finished after two limits: ${left[*]}"
     return 124
   fi
+  rm -f "$dn" "$d2"
   { echo; echo "both parts: $([ "$tf" -gt 0 ] || [ $st2 -ne 0 ] || [ -n "$red" ] && echo ✖ || echo ✔) $tp passed, $tf failed ($nf files)"; } >>"$o"
   [ $st2 -ne 0 ] && return $st2
   [ -n "$red" ] && return 1
@@ -167,7 +173,7 @@ pass "$out" "$log" "${files[@]}"
 status=$?
 limit1=$pass_limit
 if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
-  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2" "$failed" ${gate_note:+"$gate_note" "$gate_note.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
+  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2" "$failed" ${gate_note:+"$gate_note" "$gate_note.n" "$gate_note.r" "$gate_note.r.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
   popts=()
   pass "$out2" "$log.2" "${second[@]}"
   s2=$?; cat "$log.2" >>"$log"; rm -f "$log.2"

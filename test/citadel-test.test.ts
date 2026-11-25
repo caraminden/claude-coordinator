@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { procsUnder, tempRoot, until } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
@@ -86,9 +86,6 @@ test('a hung test ends at the limit, named, with a line saying so, and what it s
   await until('the hung test to start', () => existsSync(log) && readFileSync(log, 'utf8').includes('hung test running'));
   const [limit] = await until('the time limit', () => [...procsUnder([tmp])].find(([, cmd]) => cmd.startsWith('timeout --foreground')));
   process.kill(limit, 'SIGALRM');
-  // The file had not finished, so it runs once more under one more limit, and stops there too.
-  const [limit2] = await until('the second limit', () => [...procsUnder([tmp])].find(([pid, cmd]) => pid !== limit && cmd.startsWith('timeout --foreground')));
-  process.kill(limit2, 'SIGALRM');
   const { code, out } = await r;
   assert.equal(code, 124, `the runner stopped on the limit's SIGTERM, not the KILL 10 s later: ${out}`);
   assert.match(out, /stopped before the end \(1 passed, 0 failed by then\)\. Still running:\n {2}.*hang\.test\.ts:5 › waits forever\n/);
@@ -316,74 +313,85 @@ test('the time limit is the base up to the free files, then grows a step per fil
   assert.equal(nine.code, 0, nine.out);
 });
 
-test('--timeout wins, and the repo-wide files count toward the size', async () => {
+test('the repo-wide files count toward the size', async () => {
   const list = join(tmp, 'one.txt');
   writeFileSync(list, `${relative(repo, quick('w'))}\n`);
-  const fixed = await run([quick('a'), quick('b'), quick('c'), '--timeout', '77'], list, knobs);
-  assert.doesNotMatch(fixed.out, /time limit:/);
   const counted = await run([quick('a'), quick('b'), quick('c')], list, knobs);
   assert.match(counted.out, /time limit: 30 s for 4 files/);
 });
 
-test('the base limit is 300 s without knobs, and a stop names the one it used', async () => {
-  const quiet = await run([quick('a')]);
-  assert.doesNotMatch(quiet.out, /time limit:/);
-  const r = await run([hangs('stop-base', true)], noList, { CITADEL_TEST_LIMIT_BASE: '2' });
-  assert.equal(r.code, 124, r.out);
-  assert.match(r.out, /stopped at the time limit, 2 s/);
-});
+const marker = (name: string) => join(tmp, `${name}.marker`);
 
-/** A file that hangs on the first run (it leaves a marker) and passes on the next, or hangs every time. */
+/** A file that hangs on its first run and passes on the next (`always`: hangs every time), saying so in `.hung`. */
 function hangs(name: string, always = false): string {
-  const marker = join(tmp, `${name}.marker`);
-  rmSync(marker, { force: true });
-  return file(`${name}.test.ts`, `import { existsSync, writeFileSync } from 'node:fs';\ntest('maybe hangs', () => {\n  if (${always ? 'false' : `existsSync(${JSON.stringify(marker)})`}) return;\n  writeFileSync(${JSON.stringify(marker)}, '');\n  return new Promise(() => setInterval(() => {}, 1000));\n});`);
+  rmSync(marker(name), { force: true });
+  rmSync(`${marker(name)}.hung`, { force: true });
+  const skip = always ? 'false' : `existsSync(${JSON.stringify(marker(name))})`;
+  return file(
+    `${name}.test.ts`,
+    `import { existsSync, writeFileSync } from 'node:fs';\ntest('maybe hangs', () => {\n  if (${skip}) return;\n  writeFileSync(${JSON.stringify(marker(name))}, '');\n  writeFileSync(${JSON.stringify(`${marker(name)}.hung`)}, '');\n  return new Promise(() => setInterval(() => {}, 1000));\n});`,
+  );
 }
 
-test('a run stopped at the limit reruns only the files it had not finished, and passes when they do', async () => {
-  const done = quick('stop-done');
-  const slow = hangs('stop-slow');
-  const r = await run([done, slow, '--timeout', '3'], noList);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /stopped at the time limit, 3 s/);
-  assert.match(r.out, /1 of 2 files finished; rerunning only: .*stop-slow\.test\.ts/);
-  assert.doesNotMatch(r.out, /rerunning only: .*stop-done/);
-  assert.match(r.out, /✔ 1 passed, 0 failed/);
-});
+// Never reached: each stop is the test's own SIGALRM, what timeout's timer sends, once the files are where it wants them.
+const far = { CITADEL_TEST_LIMIT_BASE: '600', CITADEL_TEST_LOADAVG: join(tmp, 'none.txt') };
 
-test('a failure in a file that finished before the stop keeps the run red across both parts', async () => {
-  const bad = file('stop-bad.test.ts', `test('fails', () => { assert.equal(1, 2); });`);
-  const slow = hangs('stop-slow2');
-  const r = await run([bad, slow, '--timeout', '3'], noList, { CITADEL_TEST_LOADAVG: join(tmp, 'none.txt') });
-  assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /stop-bad\.test\.ts[^\n]*fails/);
-  assert.match(r.out, /rerunning only: .*stop-slow2/);
-  assert.match(r.out, /both parts: ✖ 1 passed, 1 failed/);
-});
+/** Runs citadel-test and fires its limit once per entry of `stops`, each when that hanging file has started. With two
+ *  workers a third file starts only once a second one is done and the runner knows it, however loaded the box is. */
+async function stopped(args: string[], stops: string[], always = noList, env: Record<string, string> = {}) {
+  const r = run(args, always, { ...far, CITADEL_TEST_CONCURRENCY: '2', ...env });
+  const fired = new Set<number>();
+  for (const name of stops) {
+    await until(`${name} to hang`, () => existsSync(`${marker(name)}.hung`));
+    const [pid] = await until('the time limit', () => [...procsUnder([repo])].find(([p, cmd]) => !fired.has(p) && cmd.startsWith('timeout --foreground') && cmd.includes(`${basename(tmp)}/${name}.test.ts`)));
+    fired.add(pid);
+    rmSync(`${marker(name)}.hung`);
+    process.kill(pid, 'SIGALRM');
+  }
+  return r;
+}
 
-test('a file that hits the limit twice is reported unfinished and the run exits 124', async () => {
-  const slow = hangs('stop-never', true);
-  const r = await run([quick('stop-ok'), slow, '--timeout', '3'], noList);
+test('--timeout is the whole limit: one run, no rerun', async () => {
+  const r = await run([quick('t'), hangs('stop-explicit', true), '--timeout', '3'], noList, knobs);
   assert.equal(r.code, 124, r.out);
-  assert.match(r.out, /not finished after two limits: .*stop-never\.test\.ts/);
+  assert.match(r.out, /stopped at the time limit, 3 s/);
+  assert.doesNotMatch(r.out, /rerunning|time limit: /);
+});
+
+test('a run stopped at the limit reruns only the files it had not finished, and passes when they do', async () => {
+  // The hanging file sorts first, so node holds the later files' results back: they still count as finished.
+  const slow = hangs('s1-a');
+  const r = await stopped([slow, quick('s1-b'), hangs('s1-c')], ['s1-c']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /stopped at the time limit, 600 s: 1 of 3 files finished; rerunning only: .*s1-a\.test\.ts .*s1-c\.test\.ts/);
+  assert.match(r.out, /stopped before the end \(1 passed, 0 failed by then\)/);
+  assert.match(r.out, /both parts: ✔ 3 passed, 0 failed \(3 files\)/);
+});
+
+test('failures in files that finished behind a hung one are shown and keep the run red', async () => {
+  const bad = file('s2-b.test.ts', `test('fails', () => { assert.equal(1, 2); });`);
+  const exit = file('s2-c.test.ts', `test('ok', () => {});\nprocess.exitCode = 1;`);
+  const hook = file('s2-d.test.ts', `import { after } from 'node:test';\ntest('ok', () => {});\nafter(() => { throw new Error('after hook'); });`);
+  const r = await stopped([hangs('s2-a'), bad, exit, hook, hangs('s2-e')], ['s2-e']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /s2-b\.test\.ts[^\n]*fails\n {2}.*(1 !== 2|equal)/);
+  assert.match(r.out, /3 of 5 files finished/);
+  assert.match(r.out, /both parts: ✖ 4 passed, 3 failed \(5 files\)/);
+});
+
+test('a file that hits the limit twice is the only one reported unfinished, and the run exits 124', async () => {
+  const never = hangs('s3-b', true);
+  // One worker, so s3-a is done before s3-b starts in the rerun.
+  const r = await stopped([hangs('s3-a'), never], ['s3-a', 's3-b'], noList, { CITADEL_TEST_CONCURRENCY: '1' });
+  assert.equal(r.code, 124, r.out);
+  assert.match(r.out, /not finished after two limits: [^ \n]*s3-b\.test\.ts\n/);
   assert.doesNotMatch(r.out, /Before chasing/);
 });
 
 test('the --name pass for the repo-wide files follows the same rule', async () => {
   const list = join(tmp, 'wide.txt');
-  const slow = hangs('stop-wide');
-  writeFileSync(list, `${relative(repo, slow)}\n`);
-  const r = await run([quick('stop-named'), '--name', 'ok', '--timeout', '3'], list);
+  writeFileSync(list, `${relative(repo, hangs('s4-wide'))}\n`);
+  const r = await stopped([quick('s4-named'), '--name', 'ok|hangs'], ['s4-wide'], list);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /rerunning only: .*stop-wide/);
-});
-
-test('a file that finished before the stop and failed outside its tests is not forgotten', async () => {
-  const exit = file('stop-exit.test.ts', `test('ok', () => {});\nprocess.exitCode = 1;`);
-  const hook = file('stop-hook.test.ts', `import { after } from 'node:test';\ntest('ok', () => {});\nafter(() => { throw new Error('after hook'); });`);
-  for (const bad of [exit, hook]) {
-    const r = await run([bad, hangs(`stop-slow-${relative(tmp, bad)}`), '--timeout', '3'], noList, { CITADEL_TEST_LOADAVG: join(tmp, 'none.txt') });
-    assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /1 of 2 files finished/);
-  }
+  assert.match(r.out, /rerunning only: .*s4-wide/);
 });

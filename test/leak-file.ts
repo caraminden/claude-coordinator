@@ -17,6 +17,7 @@ import { mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { isMainThread } from 'node:worker_threads';
 
 /** The runner's pid, set by globalSetup: only its direct children (the test files) count. */
@@ -260,7 +261,37 @@ export function cleanUp(o: { self: number; id: string; dir: string }) {
   rmSync(o.dir, { recursive: true, force: true, maxRetries: 3 }); // timing-ok: the guard's own last step, after the file's teardown
 }
 
+/** A root after() that throws also sets the exit code: node holds its failure event back behind an earlier file that is
+ *  still running, so a run stopped at its limit would count this file green (tools/citadel-test, #1925). */
+function afterFailsTheFile() {
+  const nodeTest = createRequire(import.meta.url)('node:test');
+  const after = nodeTest.after;
+  const mark = (e: unknown): never => {
+    process.exitCode ||= 1;
+    throw e;
+  };
+  nodeTest.after = (fn: (...a: unknown[]) => unknown, options?: unknown) => {
+    function withDone(this: unknown, t: unknown, done: (e?: unknown) => void) {
+      return fn.call(this, t, (e?: unknown) => {
+        if (e) process.exitCode ||= 1;
+        done(e);
+      });
+    }
+    function plain(this: unknown, t: unknown) {
+      try {
+        const r = fn.call(this, t);
+        return r instanceof Promise ? r.catch(mark) : r;
+      } catch (e) {
+        return mark(e);
+      }
+    }
+    return after(typeof fn !== 'function' ? fn : fn.length >= 2 ? withDone : plain, options);
+  };
+  syncBuiltinESMExports();
+}
+
 function install() {
+  afterFailsTheFile();
   const id = randomUUID();
   delete process.env[PARENT_ENV];
   process.env.NODE_OPTIONS = (process.env.NODE_OPTIONS ?? '').replace(IMPORT_FLAG, '').replace(/\s+/g, ' ').trim();

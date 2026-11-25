@@ -600,22 +600,32 @@ pipeline's own test files (#581, `tools/pipeline-files.txt`), so the whole suite
 13:30 UTC. That run and any started by hand are in a concurrency group of their own (a run waiting in the lands' group
 would cancel the land waiting there), niced.
 **Deploys first** (#1902; Josh, 2026-11-24: "while a ship is in line, nothing optional runs on the CI desktop"):
-`src/ci-hold.ts` stops flake proofs, heavy jobs and suites started by hand on a branch while a ship is in line or
+`src/ci-hold.ts` stops heavy jobs and suites started by hand on a branch while a ship is in line or
 testing, or main's full run waits or runs, and starts each again, from its beginning, once the line has been empty for
 5 minutes (1 at night, 23:00 to 06:00 Pacific; longer each time the same run is stopped again). Main's full run waits for
-ships 30 minutes at most. A ship's `land/**` run is never touched, and another scheme's heavy jobs are
+a gap in the ships, 4 hours at most, then goes beside them (Josh, 2026-11-25, picked "Wait for a gap, max 4 h": beside a ship it hit its 10-minute limit and gave no verdict); while it waits, ships' own checks and early runs still go. A ship's `land/**` run is never touched, and another scheme's heavy jobs are
 held 4 hours at most.
+**One flake proof beside ships** (Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card; it narrows both his earlier
+picks, for flake proofs only): one proof starts and runs on whatever the ship line does, and the next, the longest held first, starts when it ends.
+A ship, its own check and the early next train never wait for one; main's run stops one once it may start, as before; heavy jobs and suites never run beside one: each waits for the one that runs, and goes before the next if it may start.
+No proof starts while a ship's red tests run again alone (`rerun failed files alone`); one already running goes on.
 **One Citadel job at a time** (#1906; Josh, 2026-11-24: "Citadel never runs two heavy jobs at once"): the runs of Citadel's
 own repo go one by one, in the order ship, main's full run, a ship's own check (`check/**`, a light check) or the early next
-train (`early/**`), then flake proofs, heavy jobs and suites started by hand. A job is let in when it asks; one told to wait is
-stopped and started again by itself. A ship's run stops whatever runs, main's included, until main's has
-waited 30 minutes for ships: then it runs beside them (#1902's cap, the one time two of them run at once but for the caps below). An own check or early run starts only
+train (`early/**`), then heavy jobs and suites started by hand, then flake proofs. A job is let in when it asks; one told to wait is
+stopped and started again by itself. A ship's run stops whatever runs but a flake proof, main's included, until main's has
+waited 4 hours for ships: then it runs beside them (#1902's cap, the one time two of them run at once but for a proof and the caps below). An own check or early run starts only
 on an idle desktop (`ci_busy` in `deploy-queue.sh` before the push, the ask after): its ship goes on without it, and the stopped run
 comes back only while its branch is there. A job that has run 4 hours keeps no other
-waiting, and none waits behind lower ones past 24 hours (main's run waits for ships 30 minutes). Other
+waiting, and none waits behind lower ones past 24 hours (a proof waits its turn; main's run waits for ships 4 hours). Other
 schemes' jobs neither take nor wait for the place. Compare ships before and after with `node tools/ship-runs.ts --at <when>`. A job asks before it starts (`tools/ci-hold-ask.ts`, the run's OIDC token, `POST /api/ci-hold`) and
 goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("One job at a time"); one held a day is reported to
-its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets Citadel's jobs run side by side again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
+its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets Citadel's jobs run side by side again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop.
+**One Peek build while Citadel ships** (#1902; Josh, 2026-11-25, picked "Yes, use labels"): while a ship holds the desktop,
+`src/runner-cap.ts` takes `peek-auras-ci` off all but one of Peek's runners on that PC, with the Peek scheme owner's GitHub login, and puts
+it back when the line is clear, after 4 hours in one stretch, or at once with `hold-off`. Running jobs finish; queued ones wait at GitHub. It writes down
+what it takes off first, so a restart puts it back; with Citadel down, or rolled back to a version without this, the label stays off (`hold-off` first, or give it back in the repo's Settings → Actions → Runners). Peek's own ship can wait behind a
+Peek build already queued. Its screen jobs (`peek-auras-desktop`) and heavy runner are not part of it.
+The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
 skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
 own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the
 browser tests, and `libatomic1` and `sqlite3` unpacked from their `.deb`s. Those last two are tidier installed once

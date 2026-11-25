@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
+import type { Store } from '../src/db.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { supervisorHome } from '../src/reaper.ts';
 import { procsUnder } from './leak-file.ts';
@@ -25,6 +26,12 @@ export function testPins(dataDir?: string): TurnPins {
   const dir = dataDir ?? mkdtempSync(join(resolve(tmpdir()), 'test-pins-'));
   if (!dataDir) process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
   return pinTurnFiles(dir);
+}
+
+/** A reviewer Grunt's call and its answer in a minion's chat, which the review gate (src/review-gate.ts) wants before a ship. */
+export function addReview(store: Pick<Store, 'addEvent'>, ticketId: number, id = 'toolu_review') {
+  store.addEvent(ticketId, 'claude', { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Agent', input: { subagent_type: 'citadel:reviewer', prompt: 'review' } }] } });
+  store.addEvent(ticketId, 'claude', { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'No findings.' }] } });
 }
 
 /**

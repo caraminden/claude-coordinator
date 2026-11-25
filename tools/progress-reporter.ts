@@ -5,7 +5,7 @@
 import { renameSync, writeFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
-type Event = { type: string; data?: { name?: string; file?: string; todo?: unknown } };
+type Event = { type: string; data?: { name?: string; file?: string; todo?: unknown; details?: { passed?: boolean } } };
 
 export default async function* progress(source: AsyncIterable<Event>) {
   const to = process.env.CITADEL_TEST_PROGRESS_TO;
@@ -18,17 +18,16 @@ export default async function* progress(source: AsyncIterable<Event>) {
     try {
       const { name, file } = event.data ?? {};
       if (!to || !file) continue;
-      // Any failed test marks its file, a todo's failure aside (it fails no run).
-      if (event.type === 'test:fail') {
-        if (event.data?.todo) continue;
-        failed.add(file);
-      }
+      // Any failed test marks its file, a todo's failure aside (it fails no run). test:complete says it as it happens;
+      // test:fail waits its turn behind every file that started earlier, so a hang would hold it back (#1863).
+      const red = event.type === 'test:fail' || (event.type === 'test:complete' && event.data?.details?.passed === false);
+      if (red && !event.data?.todo) failed.add(file);
       // A file's own events carry its path as their name; the tests inside it carry their own names.
-      else if (!name || resolve(name) !== file) continue;
-      else if (event.type === 'test:enqueue') files.add(file);
-      else if (event.type === 'test:dequeue') running.push(file);
-      else if (event.type === 'test:complete') done.add(file);
-      else continue;
+      if (name && resolve(name) === file) {
+        if (event.type === 'test:enqueue') files.add(file);
+        else if (event.type === 'test:dequeue') running.push(file);
+        else if (event.type === 'test:complete') done.add(file);
+      }
       const current = running.findLast((f) => !done.has(f));
       const rel = (f: string) => relative(process.cwd(), f);
       const text = `${done.size}\n${files.size}\n${current ? rel(current) : ''}\n${[...failed].map(rel).join('\t')}\n`;

@@ -11,7 +11,7 @@ Citadel file; the other two are host settings, so they're commands for Cara to r
 `claude-coordinator.service.d/priority.conf` sets `MemorySwapMax=0`, `CPUWeight=1000` and
 `OOMScoreAdjust=100` on the server. Why each one, and what happens under real memory pressure, is in
 the file's comments. In short: `citadel.slice` caps the server, the host turns and every container at 22G together
-(each container also at 12G on its own unit, #1214), so a build that fills it makes the kernel swap
+(each person's container also at 14G on its own unit, #1214; their Taskmaster container at 4G, #1882), so a build that fills it makes the kernel swap
 out the idle server first. With this file,
 the turns' memory goes instead. If the slice really runs out, its OOM killer picks the biggest
 process, usually a rustc or a claude; if it picks the server, `Restart=always` brings it back in 3 s.

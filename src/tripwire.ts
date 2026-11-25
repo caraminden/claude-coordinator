@@ -1212,7 +1212,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     }
   }
   const words = seg.words;
-  const assigned = new Map<string, string | undefined>();
+  const assigned = new Map<string, string[] | undefined>();
   let i = 0;
   // `env $VARS PORT=1 cmd`: an unknown word after env is most likely more assignments.
   const takeAssignments = (orUnknown = false) => {
@@ -1622,7 +1622,7 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   type Step = Tok | { kind: 'bind'; name: string; args: Word[] | null } | { kind: 'unbind' };
   // A command that defines its own basename can't count on $(basename …) being one name.
   const own = /(^|[\s;&|({])(function\s+)?basename\s*\(|alias\s+basename=/.test(command);
-  const toks: Step[] = [...lex(command, cfg.home), { kind: 'op', text: ';' }].map((t) => (own && t.kind === 'word' && t.word.tmpl?.includes(`\0${ONE_NAME}\0`) ? { kind: 'word', word: { ...t.word, tmpl: t.word.tmpl.replaceAll(`\0${ONE_NAME}\0`, '\0\0') } } : t));
+  const toks: Step[] = [...lex(command, cfg.home), { kind: 'op' as const, text: ';' }].map((t): Step => (own && t.kind === 'word' && t.word.tmpl?.includes(`\0${ONE_NAME}\0`) ? { kind: 'word' as const, word: { ...t.word, tmpl: t.word.tmpl.replaceAll(`\0${ONE_NAME}\0`, '\0\0') } } : t));
   const traceable = traceableFunctions(toks as Tok[]);
   const funcs = new Map<string, Step[]>();
   const calls = new WeakSet<Step>();
@@ -1737,14 +1737,21 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   return asked;
 }
 
+/** What tripwire reads of Claude Code's PreToolUse hook input: JSON from outside, so each field is checked where it is read. */
+interface HookCall {
+  tool_name?: unknown;
+  cwd?: unknown;
+  tool_input?: object | null;
+}
+
 /**
  * Why this tool call is stopped, or null. `input` is Claude Code's PreToolUse hook input. Only a Bash
  * call in a turn that can show cards may ask, and only with a description that explains it: the
  * card shows the description as the minion's reason.
  */
-export function tripwire(input: any, cfg: TripwireConfig, saves?: Save[]): Verdict | null {
+export function tripwire(input: HookCall | null, cfg: TripwireConfig, saves?: Save[]): Verdict | null {
   const tool = String(input?.tool_name ?? '');
-  const ti = input?.tool_input ?? {};
+  const ti = (input?.tool_input ?? {}) as Record<string, unknown>;
   const cwd = typeof input?.cwd === 'string' ? input.cwd : null;
   if (tool === 'Bash') {
     const v = typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set(), values: new Map(), saves }, cfg) : null;
@@ -1779,10 +1786,13 @@ export function tripwire(input: any, cfg: TripwireConfig, saves?: Save[]): Verdi
 }
 
 /** The minion's explanation for a Bash call (its description), if it is long enough to count. */
-export function explanation(toolInput: any): string | null {
+export function explanation(toolInput: { description?: unknown } | null | undefined): string | null {
   const d = typeof toolInput?.description === 'string' ? toolInput.description.trim() : '';
   return d.length >= MIN_EXPLANATION ? d : null;
 }
+
+/** A caught error's message. Its own, as src/thrown.ts isn't among the files a Codex turn gets (CODEX_FILES). */
+const caught = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** The hook's answer to one raw call and its config argument: what its process prints and how it exits (hook-run.ts runs it in one process with the others). */
 export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string; stderr?: string; code?: number } {
@@ -1794,8 +1804,8 @@ export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string
   try {
     cfg = JSON.parse(cfgArg) as TripwireConfig;
     v = tripwire(JSON.parse(stdin), cfg, saves);
-  } catch (err: any) {
-    return { stderr: `[tripwire] skipped: ${err.message}\n` };
+  } catch (err) {
+    return { stderr: `[tripwire] skipped: ${caught(err)}\n` };
   }
   // Fails closed: a file checkout or restore over uncommitted edits passes only once its patches are written (#1716),
   // before an ask too, since approvals' card lets the same call through.
@@ -1803,8 +1813,8 @@ export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string
   if (!v?.reason || v.ask) {
     try {
       if (saves.length) note = writeSaves(saves, cfg);
-    } catch (err: any) {
-      return { stderr: `[tripwire] This call would throw away uncommitted edits, and ${err.message}. Commit first (a WIP commit is fine).\n`, code: 2 };
+    } catch (err) {
+      return { stderr: `[tripwire] This call would throw away uncommitted edits, and ${caught(err)}. Commit first (a WIP commit is fine).\n`, code: 2 };
     }
   }
   if (v?.ask) {
@@ -1819,8 +1829,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let stdin: string;
   try {
     stdin = readFileSync(0, 'utf8');
-  } catch (err: any) {
-    process.stderr.write(`[tripwire] skipped: ${err.message}\n`);
+  } catch (err) {
+    process.stderr.write(`[tripwire] skipped: ${caught(err)}\n`);
     process.exit(0);
   }
   const r = tripwireResult(stdin, process.argv[2]);

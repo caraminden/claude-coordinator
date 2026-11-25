@@ -7,7 +7,7 @@ import { keptCards } from '../src/card-wait.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { queueKey } from '../src/minion-queue.ts';
 import { git, makeRepo } from './git.ts';
-import { agentToken, bootServer, PASSWORD, releaseFake, SECRET, type Booted, stopProcs, tempRoot, until } from './helpers.ts';
+import { addReview, agentToken, bootServer, PASSWORD, releaseFake, SECRET, type Booted, stopProcs, tempRoot, until } from './helpers.ts';
 
 // #1930 (Josh, 2026-11-25, "Yes, server ships it"): Ship It on a card whose minion prepared its hand-off ships at once
 // from the server, with no turn and no worker; anything that rules that out sends the minion the answer, with why.
@@ -56,6 +56,7 @@ async function minion(opts: { file?: string; handOff?: object | null; kind?: str
   git(cwd, 'add', '.');
   git(cwd, 'commit', '-qm', 'change');
   store.setTicketDir(t.id, cwd, `ticket/${t.number}-m`);
+  addReview(store, t.id);
   const asMinion = srv.as({ token: agentToken(srv.data, t.id) });
   const post = (handOff: unknown, extra: object = {}) => asMinion(`/api/tickets/${t.id}/questions`, { kind: 'ship', questions: [{ question: 'Ship this high-risk change?', options: OPTIONS }], ...(handOff === null ? {} : { hand_off: handOff }), ...extra });
   const card = async (extra: object = {}) => {

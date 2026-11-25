@@ -244,6 +244,7 @@ export function jobView(j: MachineJob, extra: { machine?: string; waits?: string
     live_at: j.live_at,
     exit_code: j.exit_code,
     error: j.error,
+    pause_failed: j.pause_failed,
     outputs: parse(j.outputs, []),
     upload_bytes: j.upload_bytes,
     swept: j.swept_at !== null,
@@ -253,7 +254,6 @@ export type JobView = ReturnType<typeof jobView>;
 
 /** How long a job may sit in "starting" with no word from its machine: inputs and an image pull fit well inside. */
 export const STARTING_TIMEOUT_S = 2 * 3600;
-const PAUSE_FAILED = "Pause didn't take, still running: ";
 
 /** The results a job's machine kept because the server didn't take them, named with where they are there (MA3). */
 export function notTaken(job: MachineJob, machine: string): string {
@@ -810,8 +810,8 @@ export class MachineJobs {
       ...(state === 'paused' && !resumes && !job.paused_by ? { paused_by: 'owner' } : {}),
       ...(state !== 'paused' && !held ? { paused_by: null } : {}),
       ...(outputs ? { outputs: JSON.stringify(outputs) } : {}),
-      ...(pauseFailed && !ended ? { error: `${PAUSE_FAILED}${pauseFailed}` } : {}),
-      ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? (body.exit_code as number) : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error?.startsWith(PAUSE_FAILED) ? null : job.error } : {}),
+      ...(ended || (state === 'paused' && !resumes) ? { pause_failed: null } : pauseFailed ? { pause_failed: pauseFailed } : {}),
+      ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? (body.exit_code as number) : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error } : {}),
     });
     if (ended) {
       const m2 = this.machineOf(job);

@@ -12,5 +12,7 @@ Status: accepted, 2026-11-22. Minion #1657, from #1654's formal-verification rep
   are out of scope: tests on the real code only.
 - **What it costs:** a lockfile (`package-lock.json`), `npm ci` in a worktree (`src/worktree-deps.ts` does it for a new
   minion) and in `tests.yml`. A suite run on a tree without `node_modules` fails the two property tests on their import.
+  Since #1863 `tools/run-tests.sh` links a package store for the lockfile (`tools/test-deps.sh`) into a checkout without one for
+  the run, and the live checkout still keeps none. A test that could not import its package is no verdict, never red.
 - **The tests:** `test/lanes-property.test.ts`, `test/claims-property.test.ts`. A fixed seed (20261122) in every run,
   `FC_SEED=<n>` to try another; fast-check prints the seed and the shrunk counterexample on failure.

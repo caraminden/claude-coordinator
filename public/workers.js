@@ -156,6 +156,7 @@ export function workersPanel(page) {
     const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
+    page.dispatchEvent(new CustomEvent('pool', { detail: w.size })); // the mark on How many minions fit (box-capacity.js)
     const home = { id: 0, name: 'perigee', used: w.used, size: w.size, pool, limits: w.limits };
     const elsewhere = w.machines.reduce((n, m) => n + m.used, 0);
     const value = `${w.used} of ${w.size} working${elsewhere ? `, ${elsewhere} on other computers` : ''}${w.forced ? `, ${w.forced} forced` : ''}${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;

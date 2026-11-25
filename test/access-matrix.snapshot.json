@@ -129,6 +129,16 @@
   "m1": "403",
   "m2": "403"
  },
+ "GET /api/box-capacity": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/catalogue": {
   "anon": "401 Not logged in",
   "person": "200",

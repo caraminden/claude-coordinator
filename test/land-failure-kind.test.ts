@@ -129,3 +129,11 @@ test('the line for a red whose files all passed alone does not call it a flake (
   assert.doesNotMatch(c!.line, /flake/i);
   assert.match(c!.line, /passed alone/);
 });
+
+test("the fallback's no-answers on perigee are not the change, whatever ✖ their log shows (#1863)", () => {
+  const log = '✖ a flaky thing (12.4ms)\n✖ test/flaky.test.ts:3 › a flaky thing\nrun-tests: the tests ran past 1200s\n';
+  assert.equal(kind(`${log}land: the suite on perigee ran out of its time limit and no test is known to be ticket/9's own failure (full log: /x): that is no answer, so main is untouched. Run this again`), 'no-answer');
+  assert.equal(kind('land: no test ran: the packages the tests import could not be installed here (the run-tests line above says why), so main is untouched. Run this again'), 'no-answer');
+  // The limit hit and a file named as the ship's own: still its own red.
+  assert.equal(kind(`${log}land: tests failed on the rebased branch: the suite ran out of time, and test/flaky.test.ts fails alone here and passes on main (full log: /x), so main is untouched`), 'own-test');
+});

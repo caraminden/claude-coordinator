@@ -614,6 +614,43 @@ test('a long job busy under 75 % of its run runs at once; a long one from before
   assert.equal(await old.done, 0);
 });
 
+// HE4 (#1863): runs that failed at once pulled the median of a long job under the limit, so it ran without a slot.
+test('runs that failed at once do not make a long job light', async () => {
+  const { dir, env } = folder(1);
+  const failed = past('Fails #1 (cara)', 'npm test', 3, 2).replace('\t0\t5', '\t1\t5');
+  seed(dir, past('Fails #1 (cara)', 'npm test', 600, 2400).repeat(2) + failed.repeat(5));
+  const { go, holder } = await holdSlot(env);
+  const up = join(root, `fails-up-${n++}`);
+  const c = job({ ...judged(env), CITADEL_HEAVY_WHAT: 'npm test' }, 'Fails #2 (cara)', touch(up));
+  try {
+    await until('the long job to wait for the slot', () => /waiting for one/.test(c.err()));
+    assert.ok(!existsSync(up), 'it waits');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+  assert.equal(await c.done, 0);
+});
+
+// HE6 (#1863): Citadel reads the slot and wait files a line at a time.
+test('a command of several lines is one line in its waiter file', async () => {
+  const { dir, env } = folder(1);
+  const { go, holder } = await holdSlot(env);
+  const two = job({ ...env, CITADEL_HEAVY_WHAT: 'cd a\nnpm\ttest' }, 'Lines #1 (cara)', 'true');
+  try {
+    const waiters = () =>
+      readdirSync(dir)
+        .filter((f) => /^wait-\d+-\d+$/.test(f))
+        .map((f) => readFileSync(join(dir, f), 'utf8').split('\n'));
+    await until('its waiter file', () => waiters().some((l) => l[0] === 'Lines #1 (cara)'));
+    assert.equal(waiters().find((l) => l[0] === 'Lines #1 (cara)')![1], 'cd a npm test');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+  assert.equal(await two.done, 0);
+});
+
 test('a job with no past runs runs at once and never asks for CI, unless the caller guesses --heavy', async () => {
   const { dir, env } = folder(1);
   // A fake citadel-node: the CI path's first step (heavy-ci.ts --repo) leaves a mark, then says "no CI here".

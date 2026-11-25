@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
-import { agentToken, bootServer, until } from './helpers.ts';
+import { addReview, agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
 import { git } from './git.ts';
 import { spawnSync } from 'node:child_process';
@@ -811,6 +811,10 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.equal((await handOff({ ...body, stay_open: 'yes' })).status, 400, 'stay_open is true or false');
     assert.equal((await handOff({ ...body, waiting_on: 'x' })).status, 400, 'waiting_on goes with stay_open');
     writeFileSync(join(cwd, 'conflict'), '');
+    const unread = await handOff(body);
+    assert.equal(unread.status, 400, 'no reviewer has read it (#1938)');
+    assert.match(await unread.text(), /no reviewer has read this change/);
+    addReview(store, minion.id);
     const clash = await handOff(body);
     assert.equal(clash.status, 409, 'a branch that would conflict is sent back in the turn');
     assert.equal((await clash.json()).error, "Not handed off: ticket/1-x won't rebase onto main cleanly, so nothing landed; conflicted files: a.txt. On conflicts: run git rebase main");
@@ -847,6 +851,7 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
     git(cwd, 'add', '.');
     git(cwd, 'commit', '-qm', 'big');
     store.setTicketDir(minion.id, cwd, null);
+    addReview(store, minion.id);
     const token = agentToken(srv.data, minion.id);
     const handOff = async (body: object) => {
       const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -886,6 +891,7 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
     store.db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(other, scheme.id);
     const theirs = store.createTicket({ project_id: scheme.id, title: 'M2', permission_mode: 'default', created_by: 'Cara' });
     store.setTicketDir(theirs.id, other, null);
+    addReview(store, theirs.id);
     const theirToken = agentToken(srv.data, theirs.id);
     const theirHandOff = async (b: object) => {
       const res = await fetch(`${srv.base}/api/tickets/${theirs.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${theirToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
@@ -926,6 +932,7 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
     git(cwd, 'add', '.');
     git(cwd, 'commit', '-qm', 'fix');
     store.setTicketDir(minion.id, cwd, null);
+    addReview(store, minion.id);
     const token = agentToken(srv.data, minion.id);
     const handOff = async (body: object) => {
       const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -999,6 +1006,7 @@ test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, an
       git(cwd, 'add', '.');
       git(cwd, 'commit', '-qm', 'init');
       store.setTicketDir(minion.id, cwd, null);
+      addReview(store, minion.id);
       const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(srv.data, minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: name, risk_reason: 'r', ...body }) });
       assert.equal(res.status, 202, await res.text());
       await until(`${name} land.sh ran`, () => existsSync(dump), 20_000);

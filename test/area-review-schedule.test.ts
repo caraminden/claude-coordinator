@@ -31,6 +31,8 @@ test('the template picks by lines changed since each area’s last review, recor
   assert.equal(t.min_minions, 10);
   assert.match(t.body, /git diff --shortstat <baseline> main/);
   assert.match(t.body, /Reviewed commit:/);
+  assert.match(t.body, /newest other deep review/, 'an earlier review counts as the baseline');
+  assert.match(t.body, /never by single file/);
   assert.match(t.body, /citadel:reviewer/);
   assert.match(t.body, /citadel:finding-checker/);
   assert.match(t.body, /ask_question/);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, heldRows, isNight, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -22,6 +22,8 @@ function world(now = DAY, saved: unknown = null) {
     reports: [] as string[],
     closed: new Set<number>(),
     refs: new Set<string>(),
+    /** Ships' runs whose failed tests run again alone now. */
+    retries: new Set<number>(),
     resume: true,
     since: undefined as number | undefined,
     answer: null as (() => Promise<{ status: number }>) | null,
@@ -67,6 +69,22 @@ function world(now = DAY, saved: unknown = null) {
       if (w.down) throw new Error('GitHub is down');
       const ref = /git\/ref\/heads\/(.+)$/.exec(path);
       if (ref) return { status: w.refs.has(ref[1]) ? 200 : 404, etag: null, body: {} };
+      const jobs = /runs\/(\d+)\/jobs/.exec(path);
+      if (jobs)
+        return {
+          status: 200,
+          etag: null,
+          body: {
+            jobs: [
+              {
+                steps: [
+                  { name: 'full suite', status: 'completed' },
+                  { name: 'rerun failed files alone', status: w.retries.has(Number(jobs[1])) ? 'in_progress' : 'pending' },
+                ],
+              },
+            ],
+          },
+        };
       const one = /runs\/(\d+)$/.exec(path);
       if (one) {
         const r = w.runs.find((x) => x.id === Number(one[1]));
@@ -89,9 +107,9 @@ function world(now = DAY, saved: unknown = null) {
   return w;
 }
 
-test('a ship joining the line stops a running proof within a minute, and tells its minion once', async () => {
+test('a ship joining the line stops a running heavy job within a minute, and tells its minion once', async () => {
   const w = world();
-  w.proof();
+  w.heavy();
   await w.for(10 * MIN);
   assert.deepEqual(w.posts, [], 'an empty line stops nothing');
   w.line = 1;
@@ -101,12 +119,12 @@ test('a ship joining the line stops a running proof within a minute, and tells i
   await w.for(5 * MIN);
   assert.equal(w.told.length, 1);
   assert.equal(w.told[0].ticket, 7);
-  assert.match(w.told[0].text, /a ship is in line.*starts it again by itself.*from zero.*don't start it again/s);
+  assert.match(w.told[0].text, /a ship is in line.*starts it again by itself from the start.*don't start it again/s);
 });
 
-test('the proof comes back by itself once the line has been empty for the settle time, and is left alone after', async () => {
+test('a stopped job comes back by itself once the line has been empty for the settle time, and is left alone after', async () => {
   const w = world();
-  w.proof();
+  w.heavy();
   w.line = 2;
   await w.for(2 * MIN);
   w.line = 0;
@@ -125,7 +143,7 @@ test('the proof comes back by itself once the line has been empty for the settle
 
 test('a run stopped again after it came back waits for twice the quiet, so short gaps do not start and stop it all day', async () => {
   const w = world();
-  w.proof();
+  w.heavy();
   w.line = 1;
   await w.for(MIN);
   w.line = 0;
@@ -143,7 +161,7 @@ test('a run stopped again after it came back waits for twice the quiet, so short
 test('an optional job is not started through a line that outlasts the old 15 and 30 minute give-ups', async () => {
   const w = world();
   w.line = 1;
-  w.proof({ status: 'queued' });
+  w.heavy({ status: 'queued' });
   await w.for(3 * 3600_000);
   assert.deepEqual(w.posts, ['cancel 1']);
   assert.equal((await w.hold.ask(OWN, 1, w.now)).go, false);
@@ -152,7 +170,7 @@ test('an optional job is not started through a line that outlasts the old 15 and
 test('a ship whose tests run counts, whatever the line reads: its retry has the desktop to itself', async () => {
   const w = world();
   const land = w.land();
-  w.proof();
+  w.heavy();
   await w.tick();
   assert.deepEqual(w.posts, ['cancel 2']);
   await w.for(10 * MIN);
@@ -199,25 +217,42 @@ test("main's queued run starts before anything optional, and a running optional 
   assert.deepEqual(w.posts, ['cancel 1', 'rerun 1']);
 });
 
-test("main's run waits for ships off the runner, is back first when they end, and after 30 minutes goes anyway", async () => {
+test("main's run waits for ships off the runner, is back first when they end, and after 4 hours goes anyway", async () => {
   const w = world();
   w.line = 1;
-  w.proof();
+  w.heavy();
   w.main({ status: 'queued' });
   await w.tick();
   assert.deepEqual([...w.posts].sort(), ['cancel 1', 'cancel 2']);
   assert.equal(w.told.length, 1, 'main has no minion to tell');
   w.line = 0;
   await w.tick();
-  await w.tick();
-  assert.deepEqual(w.posts.slice(2), ['rerun 2'], 'no settle time for main');
+  assert.deepEqual(w.posts.slice(2), [], 'the gap is a moment old: the next ship may be a minute off');
+  await w.for(MAIN_SETTLE_MS);
+  assert.deepEqual(w.posts.slice(2), ['rerun 2'], 'two quiet minutes are enough for main');
+
+  const u = world();
+  u.line = 1;
+  u.main({ status: 'queued' });
+  await u.tick();
+  u.line = 0;
+  await u.tick();
+  u.down = true;
+  await u.for(5 * MIN);
+  u.down = false;
+  await u.tick();
+  assert.deepEqual(u.posts, ['cancel 1'], 'a ship may have come and gone while GitHub could not be read');
+  await u.for(MAIN_SETTLE_MS + MIN);
+  assert.deepEqual(u.posts, ['cancel 1', 'rerun 1']);
   await w.for(20 * MIN);
   assert.ok(!w.posts.includes('rerun 1'), 'the proof waits for it');
 
   const v = world();
   v.line = 1;
   v.main({ status: 'queued' });
-  await v.for(MAIN_WAIT_MS + MIN);
+  await v.for(4 * 60 * MIN - 2 * MIN);
+  assert.deepEqual(v.posts, ['cancel 1'], 'no 30 minutes: it waits for a gap');
+  await v.for(3 * MIN);
   assert.deepEqual(v.posts, ['cancel 1', 'rerun 1']);
   assert.equal((await v.hold.ask(OWN, 1, v.now)).go, true, 'and it is not stopped again');
   v.runs[0].status = 'in_progress';
@@ -228,14 +263,14 @@ test("main's run waits for ships off the runner, is back first when they end, an
 test('a job that asks while a ship waits is stopped and kept; asked with the line empty it goes', async () => {
   const w = world();
   await w.for(10 * MIN);
-  w.proof();
+  w.heavy();
   assert.deepEqual(await w.hold.ask(OWN, 1, w.now), { go: true, why: null });
   w.line = 1;
   assert.deepEqual(await w.hold.ask(OWN, 1, w.now), { go: false, why: 'a ship is in line' });
   assert.deepEqual(w.posts, ['cancel 1']);
 });
 
-test('night: a ship still stops a proof, and the settle time is shorter', async () => {
+test('night: a ship still stops optional work, and the settle time is shorter', async () => {
   assert.equal(isNight(NIGHT), true);
   assert.equal(isNight(DAY), false);
   for (const [at, night] of [
@@ -246,7 +281,7 @@ test('night: a ship still stops a proof, and the settle time is shorter', async 
   ] as const)
     assert.equal(isNight(Date.parse(at)), night, at);
   const w = world(NIGHT);
-  w.proof();
+  w.heavy();
   w.line = 1;
   await w.for(MIN);
   w.line = 0;
@@ -257,13 +292,13 @@ test('night: a ship still stops a proof, and the settle time is shorter', async 
 test('a job held over 24 hours is reported once, not while it is under', async () => {
   const w = world();
   w.line = 1;
-  w.proof();
+  w.heavy();
   await w.tick();
   await w.tick(REPORT_MS - MIN);
   assert.equal(w.reports.length, 0);
   await w.for(10 * MIN);
   assert.equal(w.reports.length, 1);
-  assert.match(w.reports[0], /flake-proof test\/x\.test\.ts.*a ship is in line/s);
+  assert.match(w.reports[0], /heavy h0-1-x.*a ship is in line.*once the line is empty/s);
   const again = world(w.now, w.settings.get('ci-hold'));
   again.runs = w.runs;
   again.line = 1;
@@ -274,12 +309,12 @@ test('a job held over 24 hours is reported once, not while it is under', async (
 test('the off switch: nothing is stopped or held, and what was held comes back at once', async () => {
   const w = world();
   w.line = 1;
-  w.proof();
+  w.heavy();
   await w.for(MIN);
   w.off = true;
   await w.tick();
   assert.deepEqual(w.posts, ['cancel 1', 'rerun 1']);
-  w.proof();
+  w.heavy();
   await w.for(10 * MIN);
   assert.equal(w.posts.length, 2);
   assert.equal((await w.hold.ask(OWN, 2, w.now)).go, true);
@@ -288,7 +323,7 @@ test('the off switch: nothing is stopped or held, and what was held comes back a
 
 test('GitHub down: no ship waits on the hold, a job that asks goes ahead, and the hold picks up after', async () => {
   const w = world();
-  w.proof();
+  w.heavy();
   await w.for(10 * MIN);
   w.down = true;
   w.line = 1;
@@ -303,7 +338,7 @@ test('GitHub down: no ship waits on the hold, a job that asks goes ahead, and th
 
 test('a stop survives a restart: the new server starts the run again', async () => {
   const w = world();
-  w.proof();
+  w.heavy();
   w.line = 1;
   await w.tick();
   const b = world(w.now, w.settings.get('ci-hold'));
@@ -314,7 +349,7 @@ test('a stop survives a restart: the new server starts the run again', async () 
 
 test('a run that ended by itself before its cancel keeps its result', async () => {
   const w = world();
-  const p = w.proof();
+  const p = w.heavy();
   await w.for(MIN);
   w.line = 1;
   w.answer = async () => {
@@ -332,7 +367,7 @@ test('a run that ended by itself before its cancel keeps its result', async () =
 test("a closed minion's job is not started again, and a long job only when it may", async () => {
   const w = world();
   w.line = 1;
-  w.proof();
+  w.heavy();
   await w.for(MIN);
   w.closed.add(7);
   w.line = 0;
@@ -355,7 +390,7 @@ test("a closed minion's job is not started again, and a long job only when it ma
 test('GitHub refusing the rerun for an hour hands it back to its minion, a blip of a few minutes does not', async () => {
   const w = world();
   w.line = 1;
-  const p = w.proof();
+  const p = w.heavy();
   await w.for(MIN);
   w.line = 0;
   w.answer = async () => ({ status: 503 });
@@ -366,7 +401,7 @@ test('GitHub refusing the rerun for an hour hands it back to its minion, a blip 
   assert.equal(p.status, 'queued', 'back once GitHub takes it');
   Object.assign(p, { status: 'completed', conclusion: 'success' });
   await w.for(5 * MIN);
-  const other = w.proof();
+  const other = w.heavy();
   w.line = 1;
   await w.for(MIN);
   w.line = 0;
@@ -391,7 +426,7 @@ test("main's run that can't come back is told to the Taskmaster", async () => {
 
 test('the hold is published before its cancel is sent, when a job asks between two looks too', async () => {
   const w = world();
-  const p = w.proof();
+  const p = w.heavy();
   await w.tick();
   w.line = 1;
   const seen: boolean[] = [];
@@ -441,8 +476,8 @@ test("main's run goes before a suite held beside it, and an hour-old queued main
 test('a held run deleted on GitHub keeps no other from coming back', async () => {
   const w = world();
   w.line = 1;
-  w.proof();
-  const other = w.add('flake-proof test/y.test.ts', { file: 'flake-proof.yml' });
+  w.heavy();
+  const other = w.heavy();
   await w.for(5_000);
   w.runs.shift();
   w.line = 0;
@@ -453,7 +488,7 @@ test('a held run deleted on GitHub keeps no other from coming back', async () =>
 test('switched off, a run being stopped gets no more cancels', async () => {
   const w = world();
   w.line = 1;
-  w.proof();
+  w.heavy();
   w.answer = async () => ({ status: 500 });
   await w.tick();
   w.off = true;
@@ -464,7 +499,7 @@ test('switched off, a run being stopped gets no more cancels', async () => {
 test('a ship run GitHub left queued for over an hour holds nothing', async () => {
   const w = world();
   w.land({ status: 'queued', run_started_at: new Date(DAY - 61 * MIN).toISOString() });
-  w.proof();
+  w.heavy();
   await w.for(10 * MIN);
   assert.deepEqual(w.posts, []);
 });
@@ -482,7 +517,7 @@ test("another scheme's job dispatched at its cap by the queue is not held for fo
 test("another scheme's heavy job goes ahead after four hours of a line that never empties, and Citadel's own does not", async () => {
   const w = world();
   const peek = w.add('heavy abc-1-x', { file: 'citadel-heavy.yml', repo: 'o/peek' });
-  const ours = w.proof();
+  const ours = w.heavy();
   w.line = 1;
   await w.for(3 * 60 * MIN);
   assert.equal(peek.conclusion, 'cancelled');
@@ -539,7 +574,7 @@ test('two heavy Citadel jobs queued together run one after the other, the second
 test('three jobs run one after another, each let in when it asks again', async () => {
   const w = world();
   await w.for(10 * MIN);
-  const [a, b, c] = [w.heavy(), w.proof(), w.heavy()];
+  const [a, b, c] = [w.heavy(), w.heavy(), w.heavy()];
   assert.deepEqual([await w.ask(a), await w.ask(b), await w.ask(c)], [true, false, false]);
   await w.for(2 * MIN);
   for (const [done, next] of [
@@ -633,16 +668,41 @@ test('a run GitHub leaves queued for over an hour holds up no check', async () =
   assert.equal(await w.ask(next), true);
 });
 
-test("main's full run that ships held for 30 minutes runs beside a ship's tests", async () => {
+test("main's full run held for hours still goes before optional work in the first gap", async () => {
+  const w = world();
+  w.line = 1;
+  const heavy = w.heavy();
+  const main = w.main({ status: 'queued' });
+  await w.for(3 * 60 * MIN);
+  const check = w.check({ head_branch: 'check/2' });
+  assert.equal(await w.ask(check), true, 'meanwhile a ship checks itself');
+  await w.tick();
+  end(check);
+  w.line = 0;
+  assert.match(w.hold.why(OWN, undefined, w.now)!, /main's full test run goes first/);
+  await w.tick();
+  await w.for(2 * MIN);
+  assert.ok(w.posts.includes(`rerun ${main.id}`));
+  assert.ok(!w.posts.includes(`rerun ${heavy.id}`));
+});
+
+test("main's full run that ships held for 4 hours runs beside a ship's tests", async () => {
   const w = world();
   await w.for(10 * MIN);
   w.land({ id: 50 });
   await w.tick();
   const main = w.main();
   assert.equal(await w.ask(main), false);
-  await w.for(MAIN_WAIT_MS - 2 * MIN);
+  // The ships that keep it waiting: each a run of its own, none of an hour.
+  const ships = async (ms: number) => {
+    for (let t = 0; t < ms; t += 10 * MIN) {
+      w.runs.find((r) => r.id === 50)!.run_started_at = new Date(w.now).toISOString();
+      await w.for(10 * MIN);
+    }
+  };
+  await ships(MAIN_WAIT_MS - 10 * MIN);
   assert.ok(!w.posts.includes(`rerun ${main.id}`));
-  await w.for(4 * MIN);
+  await ships(20 * MIN);
   assert.ok(w.posts.includes(`rerun ${main.id}`));
   main.status = 'in_progress';
   assert.equal(await w.ask(main), true);
@@ -747,7 +807,7 @@ test('a job behind another that never ends goes after four hours, and is not sto
 test('a job that waited a day behind others goes beside them', async () => {
   const w = world();
   await w.for(10 * MIN);
-  const [a, b] = [w.heavy(), w.proof()];
+  const [a, b] = [w.heavy(), w.heavy()];
   assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
   const saved = (w.settings.get('ci-hold') as Record<string, unknown>[]).map((h) => ({ ...h, behind: w.now - SLOT_WAIT_MS }));
   const v = world(w.now, saved);
@@ -779,7 +839,7 @@ test('the one-job wait fails open and turns off: GitHub unread, hold-off', async
 test('a job started again that no runner takes gives its place up, and one that ended frees it', async () => {
   const w = world();
   await w.for(10 * MIN);
-  const [a, b] = [w.heavy(), w.proof()];
+  const [a, b] = [w.heavy(), w.heavy()];
   assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
   end(a);
   await w.for(2 * MIN);
@@ -793,7 +853,7 @@ test('a job started again that no runner takes gives its place up, and one that 
 test('a restart keeps one job at a time, and jobs the old server held come back', async () => {
   const w = world();
   await w.for(10 * MIN);
-  const [a, b] = [w.heavy(), w.proof()];
+  const [a, b] = [w.heavy(), w.heavy()];
   assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
   // As #1902 saved it: no branch, no behind.
   const saved = (w.settings.get('ci-hold') as Record<string, unknown>[]).map(({ behind: _b, ...h }) => h);
@@ -823,4 +883,233 @@ test('the CI page has what runs and what it keeps waiting', async () => {
     rows().running.map((r) => r.kind),
     ['heavy', 'ship'],
   );
+});
+
+test('what else gives way to ships is told of one in line, and of none with the hold off', async () => {
+  const w = world();
+  w.line = 1;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), 'a ship is in line');
+  w.off = true;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), null);
+});
+
+// One flake proof beside ships (Josh, 2026-11-25, picked "Let them run, one at a time").
+const proofs = (w: ReturnType<typeof world>, n: number) => Array.from({ length: n }, (_, i) => w.add(`flake-proof test/${i}.test.ts`, { file: 'flake-proof.yml' }));
+const onNow = (runs: Run[]) => runs.filter((r) => r.status !== 'completed').length;
+
+test('a proof starts and runs on beside a ship, and one that joins does not stop it', async () => {
+  const w = world();
+  w.line = 1;
+  const land = w.land();
+  const p = w.proof();
+  assert.equal(await w.ask(p), true, 'asked with a ship testing');
+  await w.for(20 * MIN);
+  end(land);
+  w.line = 0;
+  await w.for(2 * MIN);
+  w.line = 3;
+  w.land();
+  await w.for(20 * MIN);
+  assert.deepEqual(w.posts, []);
+  assert.deepEqual(w.told, []);
+});
+
+test('a second proof is held, told why, and starts when the first ends, oldest first, ships in line or not', async () => {
+  const w = world();
+  w.line = 1;
+  w.land();
+  const all = proofs(w, 4);
+  await w.tick();
+  for (const [i, p] of all.entries()) assert.equal(await w.ask(p), i === 0);
+  assert.match(w.told[0].text, /another flake proof is running \(flake-proof test\/0\.test\.ts\), and they run one at a time.*counted from zero.*once that has ended/s);
+  assert.doesNotMatch(w.told[0].text, /ships go first/);
+  for (const [i, p] of all.entries()) {
+    for (let t = 0; t < 6 * MIN; t += 15_000) {
+      await w.tick();
+      assert.ok(onNow(all) <= 1, 'never two');
+      if (p.status === 'queued') {
+        p.status = 'in_progress';
+        assert.equal(await w.ask(p), true);
+      }
+    }
+    assert.equal(p.status, 'in_progress', `proof ${i}`);
+    const left = w.hold.state(w.now).held.filter((h) => h.phase === 'held');
+    assert.ok(
+      left.every((h) => h.why.includes(`test/${i}.test.ts`)),
+      'what is held says which one it waits for',
+    );
+    end(p);
+  }
+  assert.deepEqual(w.posts, ['cancel 3', 'cancel 4', 'cancel 5', 'rerun 3', 'rerun 4', 'rerun 5']);
+});
+
+test('a heavy job still waits for ships, and for a proof with none in line; it goes before the next proof', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  w.line = 1;
+  const [a, b] = proofs(w, 2);
+  const h = w.heavy();
+  assert.deepEqual([await w.ask(a), await w.ask(b), await w.ask(h)], [true, false, false]);
+  assert.match(w.hold.why(OWN, undefined, w.now) ?? '', /a ship is in line/);
+  w.line = 0;
+  await w.for(SETTLE_DAY_MS + 2 * MIN);
+  assert.equal(h.status, 'completed', 'not beside a proof');
+  assert.match(w.hold.why(OWN, undefined, w.now) ?? '', /a flake proof is running/);
+  end(a);
+  await w.for(2 * MIN);
+  assert.equal(h.status, 'queued');
+  assert.equal(b.status, 'completed', 'the proof waits for it');
+  h.status = 'in_progress';
+  assert.equal(await w.ask(h), true);
+  w.line = 1;
+  await w.for(2 * MIN);
+  assert.equal(h.status, 'completed', 'a ship stops the heavy job');
+  assert.equal(b.status, 'queued', 'and the proof has the time beside it');
+});
+
+test("a proof holds up no ship: not its run, its own check nor the early next train's run", async () => {
+  const w = world();
+  w.line = 2;
+  const [a, b] = proofs(w, 2);
+  assert.equal(await w.ask(a), true);
+  b.status = 'queued'; // waits for a runner
+  await w.tick();
+  const check = w.check();
+  assert.equal(await w.ask(check), true);
+  await w.for(5 * MIN);
+  end(check);
+  await w.for(2 * MIN);
+  const early = w.early();
+  assert.equal(await w.ask(early), true);
+  w.land();
+  await w.for(5 * MIN);
+  assert.deepEqual(w.posts, ['cancel 4'], "only the early run, for the ship's");
+});
+
+test("no proof starts while a ship's failed tests run again alone; one that runs goes on", async () => {
+  const w = world();
+  w.line = 1;
+  const land = w.land();
+  const a = w.proof();
+  await w.tick();
+  w.retries.add(land.id);
+  assert.equal(await w.ask(a), false);
+  assert.match(w.told[0].text, /a ship's failed tests are running again alone/);
+  await w.for(3 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2']);
+  w.retries.clear();
+  await w.for(2 * MIN);
+  assert.equal(a.status, 'queued');
+  a.status = 'in_progress';
+  assert.equal(await w.ask(a), true);
+  w.retries.add(land.id);
+  const n = w.posts.length;
+  await w.for(3 * MIN);
+  assert.equal(w.posts.length, n, 'left running');
+});
+
+test('a retry GitHub does not tell holds no proof', async () => {
+  const w = world();
+  w.land();
+  await w.tick();
+  w.down = true;
+  const p = w.proof();
+  assert.equal(await w.ask(p), true);
+});
+
+test('proofs held before the change come back one by one, ships in line all day', async () => {
+  const row = (run: number) => ({
+    repo: OWN,
+    run,
+    kind: 'proof',
+    what: `flake-proof test/${run - 1}.test.ts`,
+    url: `https://gh/${run}`,
+    ticket: 7,
+    since: DAY - 5 * 3600_000 + run,
+    why: run % 2 ? 'a ship is in line' : 'a flake proof is running (flake-proof test/z.test.ts), and Citadel runs one job at a time on the CI desktop',
+    phase: 'held',
+    at: DAY - 3600_000,
+    attempt: 2,
+    stops: 2,
+    misses: 0,
+    behind: DAY - 2 * SLOT_WAIT_MS,
+  });
+  const w = world(DAY, [1, 2, 3].map(row));
+  const all = proofs(w, 3);
+  for (const p of all) Object.assign(p, { status: 'completed', conclusion: 'cancelled', run_attempt: 2 });
+  w.line = 2;
+  w.land();
+  for (const p of all) {
+    await w.for(MIN);
+    assert.equal(p.status, 'queued');
+    p.status = 'in_progress';
+    assert.equal(await w.ask(p), true);
+    await w.for(5 * MIN);
+    assert.equal(onNow(all), 1);
+    end(p);
+    await w.tick();
+  }
+  assert.deepEqual(w.posts, ['rerun 1', 'rerun 2', 'rerun 3']);
+});
+
+test("main's run stops a proof once it may start, not while it waits for ships itself", async () => {
+  const w = world();
+  w.line = 1;
+  const p = w.proof();
+  await w.tick();
+  assert.equal(await w.ask(p), true);
+  const main = w.main();
+  assert.equal(await w.ask(main), false);
+  await w.for(5 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2']);
+  w.line = 0;
+  await w.tick();
+  w.line = 1;
+  await w.for(5 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2'], 'a momentary gap starts no main, so it stops no proof');
+  w.line = 0;
+  await w.for(MAIN_SETTLE_MS + 2 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2', 'cancel 1', 'rerun 2']);
+  assert.match(w.told[0].text, /main's full test run goes first.*counted from zero/s);
+  assert.doesNotMatch(w.told[0].text, /ships go first/);
+  main.status = 'in_progress';
+  assert.equal(await w.ask(main), true);
+  await w.for(5 * MIN);
+  end(main);
+  await w.for(2 * MIN);
+  assert.equal(w.posts.at(-1), 'rerun 1', 'back without the settle time');
+});
+
+test('a proof that waits for a runner keeps its turn, through a restart too', async () => {
+  const w = world();
+  w.line = 1;
+  const all = proofs(w, 3);
+  await w.tick();
+  for (const p of all) await w.ask(p);
+  end(all[0]);
+  await w.for(30 * MIN);
+  assert.equal(all[1].status, 'queued');
+  assert.equal(onNow(all), 1, 'no other is started behind a busy runner');
+  const v = world(w.now, w.settings.get('ci-hold'));
+  v.line = 1;
+  v.runs = w.runs;
+  await v.for(30 * MIN);
+  assert.deepEqual(v.posts, []);
+  all[1].status = 'in_progress';
+  assert.equal(await v.ask(all[1]), true);
+  assert.equal(await v.ask(v.proof()), false);
+});
+
+test('a proof held for a day is reported as waiting for its turn, not for ships', async () => {
+  const w = world();
+  w.line = 1;
+  const [a, b] = proofs(w, 2);
+  await w.tick();
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  Object.assign(w.hold.state(w.now).held[0], { since: w.now - REPORT_MS });
+  await w.tick();
+  assert.match(w.reports[0], /one at a time/);
+  assert.doesNotMatch(w.reports[0], /line is empty/);
 });

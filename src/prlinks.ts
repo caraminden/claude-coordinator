@@ -58,21 +58,43 @@ export interface RepoPrs {
 }
 
 type Listed = { prs: { number: number; headRefName: string }[] | null; issues: { number: number }[] | null };
-const cache = new Map<string, { at: number; lists: Promise<Listed> }>();
+// `value` is the last good lists, `fetching` the one ask in flight for the repo.
+const cache = new Map<string, { at: number; value?: Listed; fetching?: Promise<Listed> }>();
 
-/** Each GitHub-backed scheme's PRs and issues, and which PRs a minion owns. A failed gh call counts as none until the next look. */
-export async function prOwners(projects: Project[], ticketsOf: (projectId: number) => Ticket[]): Promise<RepoPrs[]> {
-  const out: RepoPrs[] = [];
-  for (const p of projects) {
+/** Asks GitHub for a repo; a failed call keeps the last good list. */
+function refresh(repo: string, now: number): Promise<Listed> {
+  const hit = cache.get(repo) ?? { at: now };
+  cache.set(repo, hit);
+  hit.fetching ??= Promise.all([list<{ number: number; headRefName: string }>('pr', repo, 'number,headRefName'), list<{ number: number }>('issue', repo, 'number')])
+    .then(([prs, issues]) => {
+      hit.value = { prs: prs ?? hit.value?.prs ?? null, issues: issues ?? hit.value?.issues ?? null };
+      hit.at = now;
+      return hit.value;
+    })
+    .finally(() => {
+      hit.fetching = undefined;
+    });
+  return hit.fetching;
+}
+
+/** A repo's lists: the saved copy at once (a stale one re-asked behind it), or the first ask's answer when there is none. */
+function lists(repo: string, now: number): Promise<Listed> {
+  const hit = cache.get(repo);
+  if (!hit?.value) return hit?.fetching ?? refresh(repo, now);
+  if (now - hit.at > TTL_MS) void refresh(repo, now);
+  return Promise.resolve(hit.value);
+}
+
+/** Each GitHub-backed scheme's PRs and issues, and which PRs a minion owns. Every repo is asked at once; a stale copy answers while GitHub is re-asked. */
+export async function prOwners(projects: Project[], ticketsOf: (projectId: number) => Ticket[], now: () => number = Date.now): Promise<RepoPrs[]> {
+  const asked = projects.flatMap((p) => {
     const repo = repoSlug(p.repo_url);
-    if (!repo) continue;
-    let hit = cache.get(repo);
-    if (!hit || Date.now() - hit.at > TTL_MS) {
-      const lists = Promise.all([list<{ number: number; headRefName: string }>('pr', repo, 'number,headRefName'), list<{ number: number }>('issue', repo, 'number')]).then(([prs, issues]) => ({ prs, issues }));
-      cache.set(repo, (hit = { at: Date.now(), lists }));
-    }
-    const { prs, issues } = await hit.lists;
-    out.push({ projectId: p.id, scheme: p.name, repo, prs: owners(prs ?? [], ticketsOf(p.id)), pulls: (prs ?? []).map((x) => x.number), issues: (issues ?? []).map((x) => x.number) });
-  }
-  return out;
+    return repo ? [{ p, repo, got: lists(repo, now()) }] : [];
+  });
+  return Promise.all(
+    asked.map(async ({ p, repo, got }) => {
+      const { prs, issues } = await got;
+      return { projectId: p.id, scheme: p.name, repo, prs: owners(prs ?? [], ticketsOf(p.id)), pulls: (prs ?? []).map((x) => x.number), issues: (issues ?? []).map((x) => x.number) };
+    }),
+  );
 }

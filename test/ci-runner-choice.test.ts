@@ -158,3 +158,19 @@ test("main's run and heavy jobs ask Citadel before they start, with their own ru
   assert.ok(ask.includes("if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}"), "only a ship's run in line starts unasked: a check and an early run ask (#1906)");
   assert.ok(yml.indexOf(ask) < yml.indexOf('- name: the full suite') && !yml.includes('wait for the lands'), 'nothing waits on the runner');
 });
+
+// HE1 (#1863): a heavy job's `npm test` and a flake proof of a property test could never be green: no packages there.
+test('every workflow that runs the tests installs their packages after its checkout', () => {
+  for (const f of ['tests', 'citadel-heavy', 'flake-proof']) {
+    const yml = read(`.github/workflows/${f}.yml`);
+    const at = yml.indexOf('run: npm ci --ignore-scripts --no-audit --no-fund');
+    assert.ok(at > yml.indexOf('actions/checkout@'), f);
+  }
+});
+
+// ci_busy keeps an own check and the early next train off a busy desktop (#1906); a flake proof runs beside ships (Josh, 2026-11-25), so it isn't busy.
+test('a flake proof does not make the desktop busy for an own check or the early next train', () => {
+  const [, re] = /ci_busy\(\) \{[^}]*?test\("([^"]+)"\)/s.exec(read('tools/deploy-queue.sh'))!;
+  const busy = (file: string) => new RegExp(re.replaceAll('\\\\', '\\')).test(`.github/workflows/${file}`);
+  assert.deepEqual(['tests.yml', 'citadel-heavy.yml', 'flake-proof.yml', 'desktop.yml'].map(busy), [true, true, false, false]);
+});

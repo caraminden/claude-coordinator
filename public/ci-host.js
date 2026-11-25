@@ -110,7 +110,7 @@ function minionsRow(l) {
 const RUNS = { ship: 'ship', main: 'main', check: 'own check', early: 'early tests', proof: 'flake proof', heavy: 'heavy job', suite: 'test run' };
 function holdRow(l) {
   if (!l.hold) return '';
-  const { off, why, busy, running = [] } = l.hold;
+  const { off, why, busy, running = [], cap } = l.hold;
   const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? busy ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
   const waits = runs.filter((r) => r.phase !== 'resumed').length;
@@ -118,7 +118,7 @@ function holdRow(l) {
   const note = off ? 'nothing is held: jobs run side by side' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? busy ?? 'optional jobs start at once');
   const [row] = settingsRow(
     { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'One job at a time', summary: [chip, note] },
-    runs.length || running.length
+    runs.length || running.length || cap
       ? h(
           'div',
           { class: 'hue-rows' },
@@ -133,12 +133,13 @@ function holdRow(l) {
               r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : h('span', { class: 'muted' }, ' · no CI run yet'),
             ),
           ),
+          cap ? hueRow({ hue: 'waiting', meta: 'ships first' }, cap) : '',
         )
-      : emptyCard('Nothing runs or waits', 'Citadel runs one heavy job at a time here: ships first, then the full run on main, then checks, then flake proofs, heavy jobs and test runs started by hand.'),
+      : emptyCard('Nothing runs or waits', 'Citadel runs one heavy job at a time here: ships first, then the full run on main, then checks, then heavy jobs and test runs started by hand. One flake proof at a time may run beside ships.'),
     h(
       'p',
       { class: 'look-prose' },
-      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs (the full run on main goes beside ships once they have held it 30 minutes); what it stops starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has run 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
+      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs except a flake proof. One flake proof at a time runs beside ships; the others wait, the longest held first. The full run on main waits for a gap between ships; after 4 hours of waiting it starts anyway. A stopped job starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has been running for 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
     ),
   );
   return row;

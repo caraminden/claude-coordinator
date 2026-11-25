@@ -367,7 +367,7 @@ esac
 // as the real server does).
 export async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>, args?: string[]) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: (hup: boolean) => Record<string, unknown> = () => ({})) {
   const r = setup();
-  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'test-deps.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');
@@ -418,4 +418,34 @@ export function seen(shared: string, files: string[], branch = 'ticket/7-other')
   const dir = join(shared, 'retro-log', now.slice(0, 10));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'land.md'), files.map((f) => `- ${now.slice(11, 19)}Z · flake · ${f} · load 20.5 · ${branch} · in CI\n`).join(''), { flag: 'a' });
+}
+
+// Packages from a lockfile (#1863, tools/test-deps.sh), without a registry: a repo whose package.json and lockfile name
+// one package, `citadel-fake-dep`, with node_modules ignored, and an npm on PATH whose `ci` writes what the lockfile names
+// (FAKE_NPM_FAIL: it fails), with a line per run in <dir>/npm.log. depsRepo() writes the files; the caller commits them.
+export const DEP = 'citadel-fake-dep';
+export function depsRepo(dir: string, where: string, version = '1.0.0') {
+  writeFileSync(join(where, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(where, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', devDependencies: { [DEP]: version } }));
+  writeFileSync(join(where, 'package-lock.json'), JSON.stringify({ name: 'x', lockfileVersion: 3, packages: { '': { name: 'x' }, [`node_modules/${DEP}`]: { version, dev: true } } }));
+  const npmBin = join(dir, 'npm-bin');
+  mkdirSync(npmBin, { recursive: true });
+  writeFileSync(
+    join(npmBin, 'npm'),
+    `#!/usr/bin/env bash
+echo "$PWD $*" >>${JSON.stringify(join(dir, 'npm.log'))}
+[ -z "\${FAKE_NPM_FAIL:-}" ] || { echo 'npm error no network' >&2; exit 1; }
+rm -rf ./node_modules
+exec node -e 'const fs = require("node:fs");
+for (const [p, v] of Object.entries(JSON.parse(fs.readFileSync("package-lock.json", "utf8")).packages)) {
+  if (!p) continue;
+  fs.mkdirSync(p, { recursive: true });
+  fs.writeFileSync(p + "/package.json", JSON.stringify({ name: p.slice(13), version: v.version, main: "i.js" }));
+  fs.writeFileSync(p + "/i.js", "module.exports = " + JSON.stringify(v.version));
+}'
+`,
+  );
+  chmodSync(join(npmBin, 'npm'), 0o755);
+  const npmRuns = () => (existsSync(join(dir, 'npm.log')) ? readFileSync(join(dir, 'npm.log'), 'utf8').trim().split('\n') : []);
+  return { npmBin, npmRuns };
 }

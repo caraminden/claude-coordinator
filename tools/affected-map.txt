@@ -110,6 +110,8 @@ tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/run
 .github/workflows/flake-proof.yml: test/ci-runner-choice.test.ts
 tools/own-check.sh: test/land-train-early.test.ts test/ci-runner-choice.test.ts
 tools/light-check.sh: test/land-train-early.test.ts
+tools/test-deps.sh: test/test-deps.test.ts test/land-train-early.test.ts test/land-deploy.test.ts test/run-tests.test.ts
+tools/test-alone.sh: test/land-train-early.test.ts test/land.test.ts test/land-verdicts.test.ts
 tools/light-check-run.sh: test/light-check-run.test.ts
 tools/land.sh: test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts test/land-size-list.test.ts
 kit/skills/scheme-setup/templates/land.sh: test/land-size-list.test.ts test/land-numbers.test.ts

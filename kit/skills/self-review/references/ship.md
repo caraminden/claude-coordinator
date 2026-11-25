@@ -2,33 +2,6 @@
 
 Part of `citadel:self-review`, opened by name from its SKILL.md; section numbers (1 to 5) are SKILL.md's.
 
-## Alongside the ship
-
-Which changes qualify (section 1):
-
-**Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
-the ship and the call returns at once), the Shipping line in your prompt lets a low change ship
-with no go and no try first, the sizing is Light, the branch is no feeder's (a feeder reviews
-before it merges in: `references/review-extras.md`, "A feeder"), and the file list alone says low.
-`git diff --name-only main...HEAD` shows only front-end files, `README.md`, docs outside
-`docs/rubrics/` and `docs/design-system/`, and test files that exercise no high-risk file, and it
-shows none of: a file on Project facts' high-risk-by-file or medium-at-least lists, a file under
-its "Agent instructions", `CLAUDE.md`, `.claude/`, the kit, or a file a Project facts rubric's
-`when:` matches. Decide this from the file list before any review; a doubt about one file means it
-doesn't qualify. A qualifying change hands off its ship as soon as its tests are green and the
-screenshots are checked, and the review in sections 2 to 4 runs in the same turn while the ship
-runs. Everything else reviews first.
-
-The steps (section 5):
-
-- **Alongside the ship:** the steps, in one turn:
-  1. Run any critic whose `when:` matches first (section 3's rubrics), then `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`. Code review runs alongside a ship, critics don't: the hand-off refuses a change a critic matches until its run is on record (Cara, 2026-11-21: "Code review can be simultaneous, but critics not").
-  2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check, Codex and any fresh eyes in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
-  3. Nothing real found: end the turn with the report line (SKILL.md section 5, "Below the threshold"). The server dismisses you once the ship is clean.
-  4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.
-  5. The first ship fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
-  A qualifying change that the review shows is medium or high is a defect in the file-list test: say so in the Risk line, and the follow-up takes that label's route.
-
 ## The fix route
 
 - **The fix route** (Cara, 2026-11-20, "Fixes ship; data still asks": "the thing we are trying to

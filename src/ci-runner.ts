@@ -92,6 +92,9 @@ export class RunnerTokens {
   /** Told after each token handed out and each runner taken off GitHub, for a note in the scheme Taskmaster's chat (or a runner job's, when one asked for it). */
   onFetched: (project: Project, words: string, machine: Machine) => void = () => {};
 
+  /** Whether Citadel itself took that label off the runner and owes it back (src/runner-cap.ts): it still counts as carrying it. */
+  owed: (id: number, label: string) => boolean = () => false;
+
   constructor(store: Store, link: GithubLink, live: boolean, fetch: Fetch = globalThis.fetch) {
     this.store = store;
     this.link = link;
@@ -144,7 +147,7 @@ export class RunnerTokens {
       found = runners.find((x) => x?.name === name);
       if (!found && (runners.length < RUNNERS_PAGE || page >= RUNNERS_PAGES)) return { ...answer, removed: false };
     }
-    if (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label || l?.name === roleLabels('check', label)[0])) {
+    if (!this.owed(Number(found.id), label) && (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label || l?.name === roleLabels('check', label)[0]))) {
       throw new HttpError(403, `The runner ${name} of ${slug} doesn't carry the label ${label}, so it isn't the kind of runner being removed and Citadel won't remove it; nothing changed.`);
     }
     if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);
@@ -161,6 +164,22 @@ export class RunnerTokens {
     const { slug, owner, ownerToken, hint } = this.repoOf(project);
     const r = await this.github(ownerToken, 'PUT', `/repos/${slug}/actions/runners/${id}/labels`, { labels });
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+  }
+
+  /** Take one custom label off a runner, as the repo's owner; one it doesn't have is already off (src/runner-cap.ts). */
+  async dropLabel(project: Project, id: number, label: string): Promise<void> {
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'DELETE', `/repos/${slug}/actions/runners/${id}/labels/${encodeURIComponent(label)}`);
+    if (r.status !== 200 && r.status !== 404) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+  }
+
+  /** Give a runner one more custom label, as the repo's owner; false when GitHub finds no such runner. */
+  async addLabel(project: Project, id: number, label: string): Promise<boolean> {
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'POST', `/repos/${slug}/actions/runners/${id}/labels`, { labels: [label] });
+    if (r.status === 404) return false;
+    if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+    return true;
   }
 
   /** The runners GitHub lists for a scheme's repo, asked with the owner's login (#328). */
@@ -261,7 +280,7 @@ export interface RunnerJobView {
 }
 
 /** A runner as GitHub lists it, checked. */
-interface Listed {
+export interface Listed {
   id: number;
   name: string;
   status: string;

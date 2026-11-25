@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ALIVE_KEY, ciEntries, DOWN_MS, group, Incidents, journalEntries, loadEntries, QUIET_MS, readCiRuns, readDeploys, RED_COUNT, redTrigger, render, stallTrigger, STATE_KEY, step, STILL_MS, stopsTrigger, type CiRun, type IncidentState, type InLine, type RedJob, type Sources } from '../src/incidents.ts';
+import { pacific } from '../src/pacific.ts';
 import { stopEvent } from '../src/sd-watchdog.ts';
 import { git, makeRepo } from './git.ts';
 
@@ -218,9 +219,9 @@ test('step: a trigger while one is open widens it; an old sign never reopens a c
     ],
     300,
   ).state;
-  assert.deepEqual(st.open, { from: 50, last: 300, why: ['a', 'b'] });
+  assert.deepEqual(st.open, { from: 50, last: 300, why: ['a', 'b'], at: [100, 50] });
   const r = step(st, [], 300 + QUIET_MS);
-  assert.deepEqual(r.close, { from: 50, last: 300, why: ['a', 'b'] });
+  assert.deepEqual(r.close, { from: 50, last: 300, why: ['a', 'b'], at: [100, 50] });
   assert.equal(r.state.after, 300);
   assert.equal(step(r.state, [{ from: 50, last: 300, why: 'a' }], 400 + QUIET_MS).state.open, null);
 });
@@ -488,4 +489,24 @@ test('a merged CI line names every runner its reds ran on, with counts', () => {
   // One runner stays as it was.
   const one = render({ from: at(0), last: at(1), why: ['x'] }, at(0), at(5), { entries: ciEntries([run(0, 'R'), run(1, 'R')]), read: {} }, '/db');
   assert.match(one, /clock on R \(b1\) \(×2/);
+});
+
+test('render: each trigger line is stamped when that trigger first passed; the header stays the incident span', () => {
+  let st: IncidentState = { open: null, after: 0, done: [] };
+  st = step(st, [{ from: T0, last: T0 + MIN, why: 'red burst' }], T0 + MIN).state;
+  st = step(st, [{ from: T0 + 90 * MIN, last: T0 + 91 * MIN, why: 'stalls' }], T0 + 91 * MIN).state;
+  const text = render(st.open!, T0 - MIN, T0 + 95 * MIN, { entries: [], read: {} }, '/db');
+  assert.match(text, new RegExp(`# Incident: ${pacific(T0)} to ${pacific(T0 + 91 * MIN)}`));
+  assert.match(text, new RegExp(`- \\*\\*${pacific(T0)}\\*\\* · Trigger · red burst`));
+  assert.match(text, new RegExp(`- \\*\\*${pacific(T0 + 90 * MIN)}\\*\\* · Trigger · stalls`));
+});
+
+test('an open incident saved with plain-string reasons and no times still steps and renders at its start', () => {
+  const old = { open: { from: T0, last: T0 + MIN, why: ['old one'] }, after: 0, done: [] } as IncidentState;
+  const text0 = render(old.open!, T0, T0 + 2 * MIN, { entries: [], read: {} }, '/db');
+  assert.match(text0, new RegExp(`\\*\\*${pacific(T0)}\\*\\* · Trigger · old one`));
+  const st = step(old, [{ from: T0 + 5 * MIN, last: T0 + 6 * MIN, why: 'new one' }], T0 + 6 * MIN).state;
+  assert.deepEqual(st.open!.at, [T0, T0 + 5 * MIN]);
+  const text = render(st.open!, T0, T0 + 8 * MIN, { entries: [], read: {} }, '/db');
+  assert.match(text, new RegExp(`\\*\\*${pacific(T0 + 5 * MIN)}\\*\\* · Trigger · new one`));
 });

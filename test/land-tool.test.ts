@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { landArgs } from '../src/land.ts';
-import { agentToken, bootServer, REPO, until } from './helpers.ts';
+import { addReview, agentToken, bootServer, REPO, until } from './helpers.ts';
 import { json } from './typed.ts';
 
 // The parts of the API's and the tool's answers these tests read.
@@ -31,6 +31,7 @@ test("landing keeps the calling turn's token: land.sh gets it, and the turn's to
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo "token:$COORDINATOR_TOKEN"\n');
   store.setTicketDir(minion.id, cwd, null);
+  addReview(store, minion.id);
   const token = agentToken(srv.data, minion.id);
   const call = (method: string) => fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
 
@@ -55,6 +56,7 @@ test("any scheme's minion lands through the tool when its worktree has tools/lan
   const cwd = join(srv.root, 'other-worktree');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   store.setTicketDir(minion.id, cwd, null);
+  addReview(store, minion.id);
   const token = agentToken(srv.data, minion.id);
   const call = (method: string) => fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
 
@@ -81,6 +83,7 @@ test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAN
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo "fix:${LAND_FIX:-none}${LAND_URGENT:+ urgent}"\n');
   store.setTicketDir(minion.id, cwd, null);
+  addReview(store, minion.id);
   const token = agentToken(srv.data, minion.id);
   const auth = { Authorization: `Bearer ${token}` };
   const land = async (body?: object) => {
@@ -182,6 +185,7 @@ curl -sS -o /dev/null -w 'report: %{http_code}\\n' -X POST "$COORDINATOR_API/api
 `,
     );
     store.setTicketDir(minion.id, cwd, null);
+    addReview(store, minion.id);
     const token = agentToken(first.data, minion.id);
     const call = (base: string, method: string) => fetch(`${base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
 
@@ -273,6 +277,7 @@ test('the land route hands land.sh those arguments, and refuses a bad call witho
   writeFileSync(join(cwd, 'test', 'b.test.ts'), '');
   writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo "n=$#"; for a in "$@"; do echo "[$a]"; done\n');
   store.setTicketDir(minion.id, cwd, null);
+  addReview(store, minion.id);
   const auth = { Authorization: `Bearer ${agentToken(srv.data, minion.id)}` };
   const post = (body?: object) => fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method: 'POST', headers: body ? { ...auth, 'Content-Type': 'application/json' } : auth, body: body ? JSON.stringify(body) : undefined });
   const land = async (body?: object) => {

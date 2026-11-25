@@ -1470,7 +1470,7 @@ export class JobRunner {
     if ((res.statusCode === 409 || res.statusCode === 404) && !job.final) this.stop(job, 'stopped', 'the app ended it');
     if (res.statusCode === 413) this.log(`Job ${job.id}: the app refused its ${job.state} report as too big`);
     const heard = res.statusCode < 500 && res.statusCode !== 413;
-    if (heard && body.pause_failed) job.pause_failed = null;
+    if (heard && body.pause_failed) this.save(Object.assign(job, { pause_failed: null }));
     return heard;
   }
 

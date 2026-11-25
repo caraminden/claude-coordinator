@@ -54,7 +54,7 @@ const shipped = /^: "\$\{LAND_RULES:=([^}]*)\}"$/m.exec(land)?.[1];
 
 const tools = tmp.path('tools');
 mkdirSync(tools);
-symlinkSync(join(root, 'tools/known-flakes.ts'), join(tools, 'known-flakes.ts'));
+for (const f of ['known-flakes.ts', 'test-alone.sh', 'test-deps.sh']) symlinkSync(join(root, 'tools', f), join(tools, f));
 // The fake citadel-node: a test file run alone fails at the commits in FAILS_AT (the scratch worktree's .at says which).
 writeFileSync(
   join(tools, 'citadel-node'),

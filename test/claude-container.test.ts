@@ -467,7 +467,7 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(log.some((c) => c[0] === 'systemd-run' && c.includes('OOMPolicy=continue')));
   // ...and past its cap only its own unit's processes are OOM-killed, on the unit before podman's own arguments (#1214).
   const unit = log.find((c) => c[0] === 'systemd-run')!;
-  for (const p of ['MemoryHigh=10G', 'MemoryMax=12G', 'MemorySwapMax=4G']) assert.ok(unit.indexOf(p) > 0 && unit.indexOf(p) < unit.indexOf('podman'), p);
+  for (const p of ['MemoryHigh=12G', 'MemoryMax=14G', 'MemorySwapMax=4G']) assert.ok(unit.indexOf(p) > 0 && unit.indexOf(p) < unit.indexOf('podman'), p);
   // The container runs an old spec: a starting turn that's its only one restarts it; with another turn there, it waits.
   link.busy = () => 2;
   await link.ensure(josh.id, true);
@@ -704,7 +704,7 @@ test("a Taskmaster's container is its person's other one: same volume and mounts
   const unit = starts().find((c) => c.includes(`--unit=${name}-tm`))!;
   for (const p of ['--slice=citadel-taskmasters.slice', 'ManagedOOMPreference=omit', 'OOMPolicy=continue', 'MemoryHigh=3G', 'MemoryMax=4G', 'MemorySwapMax=2G']) assert.ok(unit.indexOf(p) > 0 && unit.indexOf(p) < unit.indexOf('podman'), p);
   const main = starts().find((c) => c.includes(`--unit=${name}`))!;
-  assert.ok(main.includes('--slice=citadel.slice') && main.includes('MemoryHigh=10G'));
+  assert.ok(main.includes('--slice=citadel.slice') && main.includes('MemoryHigh=12G'));
   // Neither start chowns the volume (:U walks it, and fails on a file the other container deletes meanwhile); a sign-in's does.
   for (const c of [unit, main]) assert.ok(c.includes(`${name}:${process.env.HOME}`), 'the one volume, as it is');
   assert.equal(link.spec(uid).chown, false);

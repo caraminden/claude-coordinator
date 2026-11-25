@@ -1,5 +1,7 @@
 // Machines: people list and manage them; a machine's agent connects with its own token; a minion's
 // turn opens sessions to one and sends them messages.
+import { boxCapacity } from '../box-capacity.ts';
+import { HOST_SAMPLE_KEEP_MS } from '../db-rows.ts';
 import { appOwners, hostLoad } from '../host-load.ts';
 import { byMinion, REAPED, reapedRows } from '../reaper.ts';
 import { readEmulatorLease } from '../emulator-lease.ts';
@@ -421,6 +423,13 @@ export const machineRoutes: Route[] = [
       json(res, 200, await app.status.read({ canSee: (id) => app.store.canSee(session, id), admin: !!session.admin, key: String(session.uid) }));
     },
   },
+  // How many minions fit (#1987): load against the turns running, for whoever sees the Status page's box tiles.
+  {
+    method: 'GET',
+    path: '/api/box-capacity',
+    ...people,
+    handler: ({ res, app }) => json(res, 200, boxCapacity(app.store.boxReadings(Date.now() - HOST_SAMPLE_KEEP_MS))),
+  },
   // Investigate on a Status tile (#1273): the tile's numbers to the clicker's own Taskmaster in the tile's scheme (Cara picked
   // "Your own, in that scheme"), made for them as writing to it would. Only those who can see the scheme get a tile to press.
   {
@@ -474,7 +483,7 @@ export const machineRoutes: Route[] = [
         const t = app.store.getTicket(j.ticket);
         return t && canSee(t.project_id) ? { ...j, number: t.number, schemeId: t.project_id } : j;
       });
-      json(res, 200, { ...load, long, minions, reaped, hold: app.ciHold ? heldRows(app.ciHold.state(), app.store, canSee) : null });
+      json(res, 200, { ...load, long, minions, reaped, hold: app.ciHold ? { ...heldRows(app.ciHold.state(), app.store, canSee), cap: app.runnerCap?.text(canSee) ?? null } : null });
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.

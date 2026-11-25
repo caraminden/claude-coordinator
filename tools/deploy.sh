@@ -681,7 +681,7 @@ deploy() {
     say "skipping the tests and the boot check: nothing changed but docs and config no test or server code reads"
   elif [ -n "$TO" ]; then
     say "skipping the tests: $(short "$new") is last green, so CI passed the full suite on it"
-  elif [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
+  elif [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored -- . ':(exclude)node_modules')" ]; then
     say "skipping the tests: land.sh just ran them on $(short "$new")"
   else
     say "running the tests"
@@ -690,6 +690,9 @@ deploy() {
     (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log" 9>&- 7>&-) || trc=$? # without the locks' fds: a run that outlives a killed deploy must not hold it
     if [ "$trc" = 3 ]; then
       say "no test ran: the test run could not write its files (the run-tests line above says which); nothing deployed"
+      false
+    elif [ "$trc" = 4 ]; then
+      say "no test ran: the packages the tests import could not be installed (the run-tests line above says why); nothing deployed"
       false
     elif [ "$trc" != 0 ]; then
       tail -n 40 "$STATE/test.log" >&2

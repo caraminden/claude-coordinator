@@ -339,7 +339,7 @@ export class LongJobs {
     }
     // Loaded on use: a server copy with only server.ts, src/ and public/ still boots (test/boot-imports.test.ts).
     const { commandOutput } = await import('../tools/heavy-ci.ts');
-    const out = commandOutput(await this.d.gh(projectId, ['--allow-escape-sequences', `repos/${j.slug}/actions/jobs/${job.id}/logs`]));
+    const out = commandOutput(await this.d.gh(projectId, ['--allow-escape-sequences', `repos/${j.slug}/actions/jobs/${job.id}/logs`]), run.conclusion);
     await writeFile(this.logPath(j.id), out.lines.join('\n') + (out.lines.length ? '\n' : ''), { mode: 0o666 });
     if (out.code === null) await this.finish(j, 'lost', null, `the CI run ended ${run.conclusion} before the command finished`, projectId);
     else await this.finish(j, out.code === 0 ? 'done' : 'failed', out.code, undefined, projectId);

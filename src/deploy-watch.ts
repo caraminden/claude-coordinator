@@ -232,6 +232,9 @@ export class DeployWatch {
     const out: Reading[] = [];
     for (const sig of SIGNALS) {
       const b = store.healthCount(sig.key, at - len, at);
+      // Stalls just after a boot are stored as BOOT_STALL (#734), so a front-end deploy soon after a restart would see "0 before":
+      // the before side counts both kinds, so warm-up stalls that go on past the quiet window aren't the deploy's.
+      if (sig.key === 'loop-lag') b.count += store.healthCount(BOOT_STALL, at - len, at).count;
       const a = store.healthCount(sig.key, at, at + len);
       out.push({ name: sig.name, before: String(b.count), after: String(a.count), first: a.first, top: a.top, worse: worse(b.count, a.count, sig.floor) });
     }

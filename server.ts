@@ -106,7 +106,7 @@ import { OutsideSpend } from './src/outside-spend.ts';
 import { config, DEFAULT_DATA_DIR } from './src/config.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
-import { AppServices, folderHolds, manifestOn, serviceOptions, ServiceError } from './src/app-services.ts';
+import { AppServices, serviceOptions, ServiceError } from './src/app-services.ts';
 import { startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
@@ -115,10 +115,12 @@ import { sweepKept } from './src/replay-keep.ts';
 import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
+import { RunnerCap, runnersBeside } from './src/runner-cap.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { POOL } from './src/turn-line.ts';
 import { pressure } from './src/pressure.ts';
 import { MemoryEase } from './src/memory-ease.ts';
+import { publishRooms, ROOM_EVERY_MS } from './src/container-room.ts';
 import { GrowthStop } from './src/growth-stop.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
@@ -156,6 +158,7 @@ import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
+import { shipDeploys } from './src/ship-deploys.ts';
 import { StallWatch } from './src/stall-signals.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
@@ -1956,43 +1959,7 @@ const landHandoffs = new LandHandoffs({
     return waiters.add(id, full || null, text, true);
   },
   buildOwner: (id, n) => store.getSetting<number>(buildOwnerKey(store.getTicket(id)?.project_id ?? 0, n)) ?? null,
-  // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.
-  apps: (id) => {
-    const t = store.getTicket(id);
-    if (!t || services.opts.off) return [];
-    const dir = store.getProject(t.project_id)?.repo_dir;
-    // An app make_app registered (#1136) waits for the ship that puts its folder on main.
-    return store
-      .listContraptions()
-      .filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main' && (!c.subdir || (!!dir && manifestOn(dir, c.subdir))))
-      .map((c) => c.name);
-  },
-  deployOps: {
-    running: (name) => !!services.running(name),
-    start: async (name, id) => {
-      const t = store.getTicket(id);
-      if (!t) throw new Error(`minion ${id} is gone`);
-      const by = `#${t.number}`;
-      const uid = store.turnAsker(id);
-      try {
-        return await autoDeploy.deployNow(t.project_id, `app:${name}`, by, uid);
-      } catch (err) {
-        if (!(err instanceof HttpError && err.status === 404)) throw err;
-      }
-      // Not among the release targets yet (a contraption added since their last scan, or a clone git can't read): straight to its deploy.
-      const row = store.getContraption(name);
-      if (!row) throw new Error(`no contraption ${name}`);
-      return startDeploy(app, row, by, null, uid);
-    },
-    last: (name) => services.lastDeploy(name),
-    has: async (name, landed, deployed) => {
-      const row = store.getContraption(name);
-      // An app in a folder of its scheme's repo (#1136) is held when the ship didn't touch its folder: it isn't redeployed.
-      const dir = row?.subdir && row.home_scheme !== null ? store.getProject(row.home_scheme)?.repo_dir : null;
-      if (dir && (await folderHolds(dir, row!.subdir!, landed, deployed))) return true;
-      return new Promise((done) => (row ? execFile('git', ['merge-base', '--is-ancestor', landed, deployed], { cwd: services.folder(row), timeout: 30_000 }, (err) => done(!err)) : done(false)));
-    },
-  },
+  ...shipDeploys({ store, services, autoDeploy, startDeploy: (row, by, uid) => startDeploy(app, row, by, null, uid) }),
 });
 // The minions the server is landing for (#727): working, in the views. Synced again after the poll, since settling a
 // land sends its row before the hand-off is marked settled.
@@ -2132,6 +2099,19 @@ const ciHold = new CiHold({
 });
 // After the first read of the long jobs: before it, a held one would look free to start again in the day.
 if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());
+// One Peek build while Citadel ships (#1902; Josh, 2026-11-25, "Yes, use labels"). His pick is for Peek alone.
+const CAPPED_REPO = 'caraminden/peek-auras';
+const runnerCap = new RunnerCap({
+  project: () => schemeOf(CAPPED_REPO) ?? null,
+  label: (p) => runnerLabel(p.name),
+  why: () => ciHold.shipNow(),
+  here: () => runnersBeside(ciLoad.runnersByPc(), liveSlug, CAPPED_REPO),
+  tokens: runnerTokens,
+  store,
+  report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
+});
+runnerTokens.owed = (id, label) => runnerCap.owes(id, label);
+if (!BOOT_CHECK && !PREVIEW) runnerCap.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
@@ -2398,6 +2378,18 @@ if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, readStop(DATA_DIR));
   status.start();
   memoryStorms.start();
+  // Each container's memory room, for tools/mem-room inside it (#1982). A slow reading isn't run twice over.
+  let readingRooms = false;
+  every(
+    'container memory room',
+    ROOM_EVERY_MS,
+    async () => {
+      if (readingRooms) return;
+      readingRooms = true;
+      await publishRooms(await citadelSliceDir(), join(DATA_DIR, 'projects', '.heavy')).finally(() => (readingRooms = false));
+    },
+    0,
+  );
   void citadelSliceDir().then((dir) => {
     if (!dir || stoppingWork) return;
     containerRelief = startContainerRelief({
@@ -2444,6 +2436,7 @@ const app: App = {
   ciNumbers,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
+  runnerCap,
   chunked,
   claude: claudeLink,
   codex: codexLink,

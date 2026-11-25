@@ -2,7 +2,7 @@
 // live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
 import type { TurnPlace } from './claude-link.ts';
-import type { Machine, Project, Store, Ticket, User } from './db.ts';
+import type { Machine, Project, Store, Ticket, TicketFields, User } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { storedCheck } from './machines.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -56,7 +56,7 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
  * the payer only with nothing else waiting ("Deliver now"), when its author is disabled (so it is refused, above), and on
  * a person's own Taskmaster, where a held ask from someone else runs on theirs (below). A plain list is all what woke it.
  */
-export function turnPayer(store: Store, ticket: Ticket, project: Project, waiting: PayerMsg[] | { msgs: PayerMsg[]; held: PayerMsg[] }, personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
+export function turnPayer(store: Store, ticket: TicketFields, project: Project, waiting: PayerMsg[] | { msgs: PayerMsg[]; held: PayerMsg[] }, personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
   const { msgs, held } = Array.isArray(waiting) ? { msgs: waiting, held: [] } : waiting;
   const batch = [...msgs, ...held];
   const inScheme = (p: number | null) => payerInScheme(store, project, p);

@@ -48,6 +48,10 @@ jobs:
       # Deploys first (#1902): while a ship is in line this run is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
       - name: ask Citadel whether ships go first
         run: if [ -f tools/ci-hold-ask.ts ]; then node tools/ci-hold-ask.ts; fi # a snapshot from before #1902 has none
+      # As in tests.yml (#1863): without them the type check and the property tests can't run.
+      - name: devDependencies for the tests
+        if: hashFiles('package-lock.json') != ''
+        run: npm ci --ignore-scripts --no-audit --no-fund
       # As in tests.yml: Node 26's libatomic1 and the sqlite3 CLI from their .debs when the distro lacks them, and the
       # runner user's systemd for the tests that start units.
       - name: libatomic1, sqlite3 and the user's systemd

@@ -5,7 +5,7 @@
 import { AGENT_NAME } from './auth.ts';
 import { msgSettings } from './msg-settings.ts';
 import { type Relay, clip, loopKey, MINION_PAIRS, minionPairKey, pairKey, type LoopState } from './minion-relay.ts';
-import type { EventRow, Project, Store, Ticket, TicketFields } from './db.ts';
+import type { EventRow, Project, Store, TicketFields } from './db.ts';
 import type { Lanes } from './lanes.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 import { startHoldKey, START_HOLD_PREFIX, startNote } from './minion-budget.ts';
@@ -34,7 +34,7 @@ export interface HeldMailDeps {
   isRunning: (ticketId: number) => boolean;
   dropDisabled: (ticketId: number) => number;
   refused: (ticketId: number, person: number | null) => boolean;
-  turnPerson: (ticket: Ticket, project: Project, waiting: { msgs: QueuedMessage[]; held: QueuedMessage[] }) => number | null;
+  turnPerson: (ticket: TicketFields, project: Project, waiting: { msgs: QueuedMessage[]; held: QueuedMessage[] }) => number | null;
   next: (ticketId: number, now?: boolean) => void;
   send: (ticketId: number, author: string, text: string, images?: [], extra?: { from?: number; hold?: boolean; asker?: number | null }, steer?: boolean) => unknown;
 }
@@ -150,7 +150,7 @@ export class HeldMail {
    * Queue a ticket's held mail as a turn: the cold hold's cap ran out, or `by` (a person) asked from the Held list (#1059).
    * Never a dismissed minion's, nor while its Claude can't run a turn (#468 S03-6). Returns how many messages went.
    */
-  releaseMail(t: Ticket, p: Project, by = ''): number {
+  releaseMail(t: TicketFields, p: Project, by = ''): number {
     let mail = this.d.queue.heldMail(t.id);
     // A dismissed minion isn't reopened by the cap: its mail waits for a person's message, or its dismissal's cleanup notes it.
     if (!mail.length || t.status === 'closed') {

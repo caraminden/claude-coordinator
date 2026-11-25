@@ -1678,7 +1678,7 @@ train_main_red() {
   for f in "${real[@]}"; do
     r=0
     if [ $((n++)) -lt 6 ] && [ -e "$wt/$f" ]; then # shortcut: at most 6 files, so a badly red main costs minutes, not an hour
-      (cd "$wt" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$f") >"$state/main-red.one" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
+      "$tools/test-alone.sh" run "$wt" "$f" >"$state/main-red.one" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
       cat "$state/main-red.one" >>"$state/main-red.log"
       [ "$r" != 1 ] || ! grep -q 'test timed out after' "$state/main-red.one" || r=timeout
     fi
@@ -2361,11 +2361,10 @@ known_flakes() {
 }
 # <scratch worktree> <commit> <test file>: 0 when the file passes run alone at that commit here, or the commit hasn't
 # got it; 1 when it fails (a test past its own 60 s timeout too). Niced, one file, without the lock's fds; a run stopped
-# at LAND_PIN_LIMIT s or a checkout that fails is no answer (any other code), since a busy perigee can be that slow.
+# at LAND_PIN_LIMIT s, a checkout that fails or a missing package is no answer (any other code): test-alone.sh.
 train_alone() {
   git -C "$1" checkout -q --detach "$2" 2>/dev/null || return 2
-  [ -e "$1/$3" ] || return 0
-  (cd "$1" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$3") >>"$state/train-pin.log" 2>&1 9>&- 7>&- 6>&- </dev/null
+  "$tools/test-alone.sh" run "$1" "$3" >>"$state/train-pin.log" 2>&1 9>&- 7>&- 6>&- </dev/null
 }
 # <test file> <scratch worktree>: the train member (0: this one, 1 on: its riders) that turns it red run alone here: it
 # fails at the train's top and passes on main, so the train's prefixes are bisected with that one file, and the answer
@@ -2878,7 +2877,8 @@ else
   started=$(date +%H:%M)
   land_mark fallback fallback
   # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
-  [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
+  # node_modules is no stray: run-tests.sh runs on one that matches the commit's lockfile, or not at all (#1863).
+  [ -z "$(git status --porcelain --ignored -- . ':(exclude)node_modules')" ] && tested=$tip || tested=
   log="$state/land-test.log"
   trc=0
   # In citadel-heavy's slot on perigee (nice 19, idle IO) at half run-tests.sh's usual concurrency, so it yields (#1254).
@@ -2886,17 +2886,22 @@ else
   # quiet() looked holds it up no longer than the busy limit's rest: then citadel-heavy gives up (75), and this refuses.
   # --heavy: the suite is CPU work for minutes, so with no past runs to judge by it still takes the slot (#1629).
   half=$(( ( ($(nproc 2>/dev/null || echo 2) + 1) / 2 + 1) / 2 ))
+  fallback_limit=$((half < 10 ? 6000 / half : 600)) # run-tests.sh's 600 s is for half the cores; 6 of 9 fallbacks at a quarter of them hit it (#1863)
+  [ "$fallback_limit" -le 1800 ] || fallback_limit=1800
   left=$((QUIET_LIMIT - $(busy_waited)))
   # The wait for a slot (up to the busy limit's rest, plus citadel-heavy's load and memory waits) and then the suite can
   # take longer than the line waits; the reruns then set a phase of their own (waits.ts reads their counts from it).
   phase_ticker "running the tests since $started"
   CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
     CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
+    DEPLOY_TEST_TIMEOUT=${DEPLOY_TEST_TIMEOUT:-$fallback_limit} \
     "$tools/citadel-heavy" --here --heavy "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
   phase_ticker_end
   [ "$trc" != 75 ] || retry_in_place "perigee's heavy slot was taken"
   [ "$trc" != 75 ] || refuse "CI and perigee both busy, try again: CI: $why; perigee's heavy slot was taken just before the suite could start, and stayed taken (citadel-heavy's lines above), so no test ran. So $untouched"
   [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so $untouched"
+  [ "$trc" != 4 ] || retry_in_place "the test packages could not be installed on perigee"
+  [ "$trc" != 4 ] || refuse "no test ran: the packages the tests import could not be installed here (the run-tests line above says why), so $untouched. Run this again"
   if [ "$trc" != 0 ]; then
     tail -n 40 "$log" >&2
     # The shared log is the next landing's within a second (#553 M6): a red one is kept under the branch's name, for two weeks.
@@ -2910,6 +2915,14 @@ else
       if cut_off; then
         retry_in_place "the suite on perigee was killed from outside before any test failed"
         refuse "the suite on perigee was killed from outside before any test failed (full log: $kept): that says nothing about $branch, but it is no answer either, so $untouched. Run this again"
+      fi
+      # Stopped at its limit: only a file that fails alone here and passes on main is this ship's (#1863).
+      if grep -q '^run-tests: the tests ran past' "$kept"; then
+        queue_phase "running the stopped suite's suspects alone since $(date +%H:%M)"
+        mapfile -t own < <("$tools/test-alone.sh" stopped "$kept" "$tip" "$old" 2>"$state/train-pin.log" 9>&- 7>&- 6>&-)
+        [ ${#own[@]} -gt 0 ] || retry_in_place "the suite on perigee ran out of its time limit"
+        [ ${#own[@]} -gt 0 ] || refuse "the suite on perigee ran out of its time limit and no test is known to be $branch's own failure (full log: $kept): that is no answer, so $untouched. Run this again"
+        refuse "tests failed on the rebased branch: the suite ran out of time, and ${own[*]} fails alone here and passes on main (full log: $kept), so $untouched"
       fi
       refuse "tests failed on the rebased branch (full log: $kept), so $untouched"
     fi

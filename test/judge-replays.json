@@ -18,13 +18,13 @@
     "summary": "0 as before, 0 new, 0 gone"
   },
   "ci-hold": {
-    "hash": "abbe95b42ce7f241",
+    "hash": "1a50345814d6b4cc",
     "at": "2026-11-25",
     "days": 3,
-    "inputs": "576 CI runs of caraminden/claude-coordinator (gh, read-only); 216 runs held, waits median 267 min, longest 1231 min",
-    "hits": 287,
+    "inputs": "573 CI runs of caraminden/claude-coordinator (gh, read-only); 205 runs held, waits median 102 min, longest 1249 min",
+    "hits": 243,
     "real": 0,
-    "summary": "0 as before, 287 new, 0 gone"
+    "summary": "0 as before, 243 new, 0 gone"
   },
   "ci-red": {
     "hash": "0567173957833657",
@@ -54,13 +54,13 @@
     "summary": "0 as before, 9 new, 0 gone"
   },
   "deploy-watch": {
-    "hash": "bfeb5b90b4633551",
-    "at": "2026-11-21",
+    "hash": "f05597d3b0e10cb6",
+    "at": "2026-11-25",
     "days": 3,
-    "inputs": "338 deploys of the Citadel server, health_events and turns from the database",
-    "hits": 24,
-    "real": 27,
-    "summary": "23 as before, 1 new, 4 gone"
+    "inputs": "243 deploys of the Citadel server, health_events and turns from the database",
+    "hits": 6,
+    "real": 10,
+    "summary": "6 as before, 0 new, 4 gone"
   },
   "effort-retros": {
     "hash": "89116e3ad924b941",

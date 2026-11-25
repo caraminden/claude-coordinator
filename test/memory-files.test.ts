@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,13 +24,36 @@ test("memoryFolders maps a repo path to each login's projects/<slug>/memory, onc
   assert.deepEqual(memoryFolders(null, [{ label: 'x', configDir: '/c' }]), []);
 });
 
+test('two accounts whose projects folder is one symlinked folder list it once (2ME9)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'memfiles-'));
+  roots.push(root);
+  const repo = '/some/repo';
+  mkdirSync(join(root, 'one', 'projects'), { recursive: true });
+  mkdirSync(join(root, 'two'), { recursive: true });
+  symlinkSync(join(root, 'one', 'projects'), join(root, 'two', 'projects'));
+  mkdirSync(memoryDir(join(root, 'one'), repo), { recursive: true });
+  const got = memoryFolders(repo, [
+    { label: 'one', configDir: join(root, 'one') },
+    { label: 'two', configDir: join(root, 'two') },
+  ]);
+  assert.deepEqual(
+    got.map((f) => f.label),
+    ['one'],
+  );
+  assert.equal(got[0].dir, memoryDir(join(root, 'one'), repo), "the path and id stay the first login's");
+});
+
 test('noteFile refuses paths, the index and non-markdown', () => {
   for (const bad of ['../x.md', 'a/b.md', 'MEMORY.md', '.hidden.md', 'x.txt', 5, undefined]) assert.equal(noteFile(bad), null);
   assert.equal(noteFile('fable-burst.md'), 'fable-burst.md');
 });
 
+const roots: string[] = [];
+after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
 const setup = () => {
-  const dir = join(mkdtempSync(join(tmpdir(), 'memfiles-')), 'memory');
+  const root = mkdtempSync(join(tmpdir(), 'memfiles-'));
+  roots.push(root);
+  const dir = join(root, 'memory');
   mkdirSync(dir);
   writeFileSync(join(dir, 'a.md'), '---\nname: A note\ndescription: first\nmetadata:\n  type: project\n---\nSee #5 and recheck after 2020-01-01.\n');
   writeFileSync(join(dir, 'b.md'), '---\nname: B\ndescription: second\n---\nbody\n');
@@ -44,6 +67,13 @@ test('delete removes the file and only its index line, leaving the rest of the i
   assert.equal(existsSync(join(dir, 'a.md')), false);
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [B](b.md) — second\n');
   assert.throws(() => deleteNote(dir, 'a.md'), /No such note/);
+});
+
+test('delete takes only its own link from an index line that links two notes (ME3)', () => {
+  const dir = setup();
+  writeFileSync(join(dir, 'MEMORY.md'), '- [A note](a.md) and [B](b.md) — together\n- [B](b.md) — second\n');
+  assert.equal(deleteNote(dir, 'a.md'), 1);
+  assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- A note and [B](b.md) — together\n- [B](b.md) — second\n');
 });
 
 test('edit replaces a note whole and refuses one that is not there', () => {

@@ -2,7 +2,7 @@
 // Claude login's config dir at projects/<slugged repo path>/memory/. Every later session loads them, so a person can
 // read, edit and delete them here. Not src/memory.ts, which is search by meaning over chats.
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectSlug } from './sessions.ts';
 import { pacificDay } from './pacific.ts';
@@ -34,8 +34,16 @@ export function memoryFolders(repoDir: string | null, logins: MemoryLogin[]): Me
   const out: MemoryFolder[] = [];
   for (const l of logins) {
     const dir = memoryDir(l.configDir, repoDir);
-    if (seen.has(dir)) continue;
-    seen.add(dir);
+    // One folder on disk is one entry, whatever path reaches it (account 2's projects can be a symlink to account 1's, 2ME9).
+    // Only the dedupe key follows the link: the id and the path stay as they were.
+    let key = dir;
+    try {
+      key = realpathSync(dir);
+    } catch {
+      /* no folder yet: its path is its key */
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push({ label: l.label, dir, id: createHash('sha1').update(dir).digest('hex').slice(0, 12), rel: join('projects', projectSlug(repoDir), 'memory') });
   }
   return out;
@@ -191,6 +199,16 @@ export function indexNote(dir: string, file: string): boolean {
 }
 
 /** Delete a note and its MEMORY.md line(s): the file first, then the index rewritten without the lines that link it (a stray index line is a smaller harm than a note the index forgot). */
+/** An index line without `file`'s link: null when that was its only link (the line goes), else the line with just that link's text left in place (ME3). */
+export function withoutLink(line: string, file: string): string | null {
+  const others = [...line.matchAll(/\]\(([^)\s]+\.md)\)/g)].some((m) => m[1] !== file);
+  if (!others) return null;
+  return line
+    .split(`](${file})`)
+    .map((part, i, all) => (i < all.length - 1 ? part.replace(/\[([^\]]*)$/, '$1') : part))
+    .join('');
+}
+
 export function deleteNote(dir: string, file: string): number {
   const path = join(dir, file);
   if (!plain(path)) throw new Error('No such note');
@@ -200,10 +218,11 @@ export function deleteNote(dir: string, file: string): number {
   let removed = 0;
   const kept = readFileSync(indexPath, 'utf8')
     .split('\n')
-    .filter((l) => {
-      const gone = l.includes(`](${file})`);
-      if (gone) removed++;
-      return !gone;
+    .flatMap((l) => {
+      if (!l.includes(`](${file})`)) return [l];
+      removed++;
+      const left = withoutLink(l, file);
+      return left === null ? [] : [left];
     });
   writeAtomic(indexPath, kept.join('\n'));
   return removed;

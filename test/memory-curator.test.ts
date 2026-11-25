@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { readFolder } from '../src/memory-files.ts';
-import { applyChanges, checkChanges, countLine, KEEP_MS, MEMORY_PROPOSALS_SCHEMA, MemoryProposals, restoreSaved, withDrift, withLine } from '../src/memory-curator.ts';
+import { applyChanges, checkChanges, countLine, mergeBackup, saveFirst, KEEP_MS, MEMORY_PROPOSALS_SCHEMA, MemoryProposals, restoreSaved, withDrift, withLine } from '../src/memory-curator.ts';
 
 const A = '---\nname: A\ndescription: first\n---\nalpha\n';
 const B = '---\nname: B\ndescription: second\n---\nbeta\n';
@@ -219,4 +219,63 @@ test('the store supersedes an open proposal, decides once, and drops old notes a
   assert.equal(s.prune(3000 + KEEP_MS - 1), 0);
   assert.equal(s.prune(3000 + KEEP_MS + 1), 1);
   assert.deepEqual(s.kept(1), []);
+});
+
+test('a change that fails after its first write still keeps its old copy for Put back (ME6)', () => {
+  const dir = setup();
+  // A name so long that the temp file beside it can't be made: the line goes in, then the note's write fails.
+  const long = `${'n'.repeat(240)}.md`;
+  writeFileSync(join(dir, long), 'old long\n');
+  writeFileSync(join(dir, 'MEMORY.md'), `- [A](a.md) — first\n- [L](${long}) — long\n`);
+  const changes = checkChanges(view(dir), [{ action: 'edit', file: long, text: 'new long', line: `- [L](${long}) — short`, reason: 'r' }]);
+  const { changes: out, backup } = applyChanges(dir, changes, new Set([1]));
+  assert.match(out[0].outcome!, /^failed/);
+  assert.deepEqual(backup, [{ file: long, text: 'old long\n', line: `- [L](${long}) — long` }]);
+  restoreSaved(dir, backup);
+  assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), `- [A](a.md) — first\n- [L](${long}) — long\n`);
+});
+
+test('copies stored before the writes survive a kill, and the store keeps them off the kept list until the tidy is decided (2ME7)', () => {
+  const dir = setup();
+  const changes = checkChanges(view(dir), [
+    { action: 'edit', file: 'a.md', text: 'tidied a', reason: 'r' },
+    { action: 'edit', file: 'b.md', text: 'tidied b', reason: 'r' },
+  ]);
+  const first = saveFirst(dir, changes, new Set([1, 2]));
+  assert.deepEqual(
+    first.map((s) => s.text),
+    [A, B],
+  );
+  writeFileSync(join(dir, 'a.md'), 'tidied a\n'); // the killed run wrote a.md, then died
+  const { changes: out, backup } = applyChanges(dir, changes, new Set([1, 2]));
+  assert.deepEqual(
+    out.map((c) => c.outcome),
+    ['changed since', 'applied'],
+  );
+  assert.deepEqual(
+    backup.map((s) => s.file),
+    ['b.md'],
+  );
+  const merged = mergeBackup(dir, out, backup, first);
+  assert.deepEqual(merged.map((s) => [s.file, s.text]).sort(), [
+    ['a.md', A],
+    ['b.md', B],
+  ]);
+  // A note a person edited since is not put back over their edit.
+  writeFileSync(join(dir, 'a.md'), 'a person edited it\n');
+  assert.deepEqual(
+    mergeBackup(dir, applyChanges(dir, changes, new Set([1])).changes, [], first).map((s) => s.file),
+    ['b.md'],
+  );
+
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE projects (id INTEGER PRIMARY KEY);INSERT INTO projects VALUES (1);');
+  db.exec(MEMORY_PROPOSALS_SCHEMA);
+  const s = new MemoryProposals(db);
+  const p = s.create({ project_id: 1, ticket_id: 1, folder: 'f', changes }).proposal;
+  s.keepFirst(p.id, first);
+  assert.deepEqual(s.kept(1), [], 'an open tidy is not on the Put back list');
+  assert.deepEqual(s.get(p.id)!.backup, first);
+  assert.equal(s.decide(p.id, { status: 'applied', changes: out, backup: merged, by: 'josh' }), true);
+  assert.equal(s.kept(1).length, 1);
 });

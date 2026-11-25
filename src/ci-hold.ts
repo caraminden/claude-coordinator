@@ -33,9 +33,9 @@ export const MAX_BACKOFF = 8;
 export const MAIN_WAIT_MS = 30 * 60_000;
 /** The most another scheme's job waits (a starting value). */
 export const OTHERS_CAP_MS = 4 * 3600_000;
-/** A job that has run this long keeps no other waiting: a hung one can't hold the line. */
+/** A starting value: a job that has run this long keeps no other waiting, so a hung one can't hold the line. */
 export const SLOT_HOLD_MS = 4 * 3600_000;
-/** The most a job waits behind lower jobs of Citadel's, from the first time it did (ships still go first): a long queue can't hold it for ever. */
+/** A starting value: the most a job waits behind lower jobs of Citadel's, from the first time it did (ships still go first): a long queue can't hold it for ever. */
 export const SLOT_WAIT_MS = 24 * 3600_000;
 /** A run seen on a runner this long without having been let in (its workflow asks nothing) is stopped when another has the slot. */
 const UNASKED_MS = 2 * 60_000;
@@ -433,10 +433,16 @@ export class CiHold {
     const on = mine.filter((a) => a.run.status === 'in_progress' && !this.stopped(a.run.id));
     // On the first look after a restart GitHub says since when; later a run was first seen now (its start counts its queue).
     for (const a of on) if (!this.running0.has(a.run.id)) this.running0.set(a.run.id, this.looked ? now : Date.parse(a.run.run_started_at ?? '') || now);
+    // What runs at a restart was let in by the old server, or started before this rule: it ends by itself.
+    if (!this.looked) for (const a of on) this.letIn.set(a.run.id, now);
     this.looked = true;
     for (const [id, at] of this.letIn) if (now - at > 2 * SLOT_HOLD_MS) this.letIn.delete(id);
     for (const id of this.running0.keys()) if (!on.some((a) => a.run.id === id)) this.running0.delete(id);
-    this.queued = new Set(mine.filter((a) => a.run.status !== 'in_progress' && !sideRun(a.kind) && !this.stopped(a.run.id)).map((a) => a.run.id));
+    this.queued = new Set(
+      mine
+        .filter((a) => a.run.status !== 'in_progress' && !sideRun(a.kind) && !this.stopped(a.run.id) && now - Date.parse(a.run.run_started_at ?? '') < SHIP_RUN_MS) /* longer, GitHub left it there (ci_busy, land.sh) */
+        .map((a) => a.run.id),
+    );
     const s = this.slot;
     if (s) {
       const age = now - s.at;

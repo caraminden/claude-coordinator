@@ -613,10 +613,41 @@ test("another scheme's heavy job neither waits for Citadel's nor holds it up", a
 
 test('two jobs on runners whose workflows ask nothing: all but one are stopped', async () => {
   const w = world();
+  await w.tick(); // past a restart's first look, which takes what runs as let in
   w.check({ head_branch: 'check/1' });
   w.early();
   await w.for(5 * MIN);
   assert.deepEqual(w.posts, ['cancel 2']);
+});
+
+test('a run GitHub leaves queued for over an hour holds up no check', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const lost = w.heavy({ status: 'queued' });
+  await w.tick();
+  const early = w.early({ head_branch: 'early/1' });
+  assert.equal(await w.ask(early), false);
+  lost.run_started_at = new Date(w.now - 61 * MIN).toISOString();
+  await w.tick();
+  const next = w.check({ head_branch: 'check/2' });
+  assert.equal(await w.ask(next), true);
+});
+
+test("main's full run that ships held for 30 minutes runs beside a ship's tests", async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  w.land({ id: 50 });
+  await w.tick();
+  const main = w.main();
+  assert.equal(await w.ask(main), false);
+  await w.for(MAIN_WAIT_MS - 2 * MIN);
+  assert.ok(!w.posts.includes(`rerun ${main.id}`));
+  await w.for(4 * MIN);
+  assert.ok(w.posts.includes(`rerun ${main.id}`));
+  main.status = 'in_progress';
+  assert.equal(await w.ask(main), true);
+  await w.for(10 * MIN);
+  assert.equal(main.status, 'in_progress', 'and is not stopped again');
 });
 
 test("a ship's run stops whatever runs within a minute: a check, an early run, main's", async () => {

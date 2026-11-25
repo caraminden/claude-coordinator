@@ -138,7 +138,7 @@ function holdRow(l) {
     h(
       'p',
       { class: 'look-prose' },
-      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs; that starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has run 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
+      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs (the full run on main goes beside ships once they have held it 30 minutes); what it stops starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has run 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
     ),
   );
   return row;

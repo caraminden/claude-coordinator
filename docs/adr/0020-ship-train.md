@@ -258,7 +258,7 @@ first, the train came out different, or the early run went red (it runs again, a
 
 Josh, 2026-11-24, picked "One Citadel job, one Peek build". With the CI desktop's hold on (no `<state>/hold-off`) the early
 run goes only at the train's deploy, on an idle desktop, never beside its run; a ship's run stops it. The same holds for a
-ship's own check. Order, slot and caps: `src/ci-hold.ts`, `tools/ci-runner/README.md`. The sections below describe the hold off.
+ship's own check. Order, slot and caps: `src/ci-hold.ts`, `tools/ci-runner/README.md`. The sections below describe the hold off. With it on, a ship behind a running check gets no light check either (#1620, Cara, 2026-11-22: "Run it, niced"): `ci_busy` sends it into the line unchecked, since a light check is a second job.
 
 ### While the train ahead's CI runs (#1568)
 

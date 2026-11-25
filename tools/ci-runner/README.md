@@ -608,7 +608,8 @@ held 4 hours at most.
 **One Citadel job at a time** (#1906; Josh, 2026-11-24: "Citadel never runs two heavy jobs at once"): the runs of Citadel's
 own repo go one by one, in the order ship, main's full run, a ship's own check (`check/**`, a light check) or the early next
 train (`early/**`), then flake proofs, heavy jobs and suites started by hand. A job is let in when it asks; one told to wait is
-stopped and started again by itself. A ship's run stops whatever runs, main's included. An own check or early run starts only
+stopped and started again by itself. A ship's run stops whatever runs, main's included, until main's has
+waited 30 minutes for ships: then it runs beside them (#1902's cap, the one time two of them run at once but for the caps below). An own check or early run starts only
 on an idle desktop (`ci_busy` in `land.sh` before the push, the ask after): its ship goes on without it, and the stopped run
 comes back only while its branch is there. A job that has run 4 hours keeps no other
 waiting, and none waits behind lower ones past 24 hours (main's run waits for ships 30 minutes). Other

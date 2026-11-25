@@ -182,7 +182,9 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/gh-bodies.ts` | Types for the fields Citadel reads from GitHub's REST answers (runs, jobs, errors) |
 | `src/turn-launch.ts` | What a turn is launched with: pinned copies of the server files, hooks, settings, env and tool lists |
 | `src/prompts.ts` | The agent instructions: the minion and Taskmaster prompts, onboarding, and the messages a turn is sent |
-| `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
+| `src/mcp.ts` | The MCP server: each role's tool lists in order, who may call what, and the tools no family file holds yet; a tool's definition and handler live together in its `src/mcp-<family>.ts` |
+| `src/mcp-call.ts` | What every family of MCP tools shares: the turn's settings, the API call, minion number lookups, shared field text |
+| `src/mcp-apps.ts` | MCP tools for apps and contraptions: definitions and handlers (make_app, deploys, releases, app reads and turns) |
 | `src/mcp-types.ts` | Types only: the API answers and requests `src/mcp.ts`'s tools read (#1799) |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip at the top of the minions list |

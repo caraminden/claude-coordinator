@@ -2,7 +2,7 @@
 // inside their bounds, a chat's view says what is held and Continue / Deliver now send it, a never-hold kind wakes its
 // reader, and no number is typed into tool text.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -97,7 +97,11 @@ test('the settings reach the tool text through the turn env, and no number is ty
   assert.deepEqual(msgFromEnv(msgEnv(s)), s);
   assert.deepEqual(msgFromEnv(undefined), MSG_DEFAULTS);
   assert.match(heldToolText(s, 'x'), /\(4 messages in 20 minutes\)/);
-  const src = readFileSync(new URL('../src/mcp.ts', import.meta.url), 'utf8');
+  const dir = new URL('../src/', import.meta.url);
+  const src = readdirSync(dir)
+    .filter((f) => /^mcp(-(?!pool|types)\w+)?\.ts$/.test(f))
+    .map((f) => readFileSync(new URL(f, dir), 'utf8'))
+    .join('\n');
   assert.doesNotMatch(src, /idle over \d+ minutes|within \d+ hours|After \d+ messages|in \d+ minutes, the next|allows in \d+ minutes/);
   // Not mark_urgent (#1888), its route or its file, which are about workers: any other use of the word, a flag or an argument.
   assert.doesNotMatch(src, /(?<![\w/])urgent\b/, 'the message tools offer no urgent flag since #1603: an idle receiver wakes anyway');

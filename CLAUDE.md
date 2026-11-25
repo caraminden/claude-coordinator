@@ -57,7 +57,7 @@ skill step is skipped or uses its default.
 - **Medium risk at least (self-review):** a change to `test/ui-contract.json`, Citadel UI's contract
   with every app: it means an app-visible change to `public/ui/` or theme.css. Additive only.
 - **Agent instructions:** the prompt text in `src/prompts.ts` and the MCP tool descriptions in
-  `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`. A big change to a minion or Taskmaster prompt runs
+  `src/mcp.ts` and its `src/mcp-*.ts` families, besides the kit, `CLAUDE.md` and `.claude/`. A big change to a minion or Taskmaster prompt runs
   `tools/prompt-eval run --base main` (in the background, not through citadel-heavy) once before it ships; 2 or more cases fell makes it high risk
   (Josh, 2026-11-19, "Drop needs a go"; `tools/prompt-evals/README.md`). A change to the pre-ship reviewer (`kit/agents/reviewer.md`,
   self-review's section 2, the lenses) makes `test/reviewer-benchmark.test.ts` red until the benchmark is rerun and recorded;

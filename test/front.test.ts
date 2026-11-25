@@ -141,8 +141,14 @@ const get = async (srv: Booted, path: string, cookie?: string, once = false): Pr
     await new Promise((r) => setTimeout(r, 1000));
   }
 };
-/** Each caller's answer to each path. */
-async function answers(srv: Booted) {
+/**
+ * Each caller's answer to each path. With `reader`, every answer is a reader's: one the main thread gave is asked again
+ * until a reader gives it (#1903). A reader hands a read to the main thread when the main thread's write step stays open
+ * past READ_WAIT_MS (50 ms, src/reader.ts inWholeStep), which a starved machine stretches: with ten copies of this file
+ * at once that was one ask in 325, in 3 copies of 10. A route a reader can't answer is handed back every time, so it
+ * still fails, named with every other.
+ */
+async function answers(srv: Booted, reader = false) {
   const callers: Record<string, string | undefined> = {
     cara: srv.cookie,
     max: await signIn(srv, 'Max', 'a-long-password'),
@@ -151,7 +157,19 @@ async function answers(srv: Booted) {
     forged: 'cc_session=forged.cookie',
   };
   const out: Record<string, Got> = {};
-  for (const [who, cookie] of Object.entries(callers)) for (const p of PATHS) out[`${who} ${p}`] = await get(srv, p, cookie);
+  const ask = async (who: string, p: string) => (out[`${who} ${p}`] = await get(srv, p, callers[who]));
+  for (const who of Object.keys(callers)) for (const p of PATHS) await ask(who, p);
+  const byMain = () => Object.keys(out).filter((key) => !out[key].reader);
+  if (reader)
+    await until(
+      'a reader answers them all',
+      async () => {
+        for (const key of byMain()) await ask(key.slice(0, key.indexOf(' ')), key.slice(key.indexOf(' ') + 1));
+        return byMain().length === 0;
+      },
+      20_000,
+      () => `the main thread answered ${byMain().join(', ')}`,
+    );
   return out;
 }
 
@@ -195,7 +213,7 @@ test('through the front thread, readers give every caller the same answers and r
   srv = await bootServer({ root, env: KNOBS, log: LOG });
   // Readers start a moment after the port opens; until then the main thread answers.
   await readerAnswers(srv);
-  const viaReaders = await answers(srv);
+  const viaReaders = await answers(srv, true);
   for (const [key, got] of Object.entries(viaReaders)) {
     // A time log ends now, so its numbers differ; its stretches and rows don't.
     const same = (body: string) => (key.endsWith('/time-log') ? body.replace(/\d+/g, '0') : BOOT_BOUND.has(key.split(' ')[1]) ? '' : unclocked(body));
@@ -206,44 +224,61 @@ test('through the front thread, readers give every caller the same answers and r
     Object.values(viaReaders).some((g) => g.reader && g.timed),
     "a reader's answer carries Server-Timing",
   );
-  // All at once, so a route a reader hands back shows with every other.
-  assert.deepEqual(
-    Object.entries(viaReaders)
-      .filter(([, got]) => !got.reader)
-      .map(([key]) => key),
-    [],
-    'a reader answered them all',
-  );
   // Agents' calls stay on the main thread, where their nonces are.
   const bearer = await fetch(srv.base + PATHS[0], { headers: { Authorization: 'Bearer nope' } });
   assert.equal(bearer.headers.get('x-citadel-answered'), null);
   assert.equal(bearer.status, 401);
 });
 
-test('while the main thread is busy for 2 s, the slice still answers within 100 ms', { timeout: 60_000 }, async () => {
-  let unblocked = 0;
-  const blocked = fetch(`${srv.base}/api/test/block?ms=2000`).then((r) => ((unblocked = Date.now()), r));
-  // timing-ok: a busy main thread can't say it is busy; 200 ms puts these reads inside its 2 s loop
-  await new Promise((r) => setTimeout(r, 200));
-  for (const p of [PATHS[0], PATHS[6], PATHS[9], `/api/projects/${A.id}`, `/api/tickets/${M1.id}`, '/api/status']) {
-    // The fastest of up to three asks is the slice's own time (#1903). One ask's wall time also holds every moment the
-    // machine ran something else in place of the reader or of this process: with ten copies of this file at once, each
-    // spinning a main thread for 2 s, that alone was 112 and 115 ms. A read that waits on the main thread is slow every
-    // time, so the fastest ask still catches it; each ask must still be a reader's, with the right answer.
+/**
+ * How long each of `asks` takes while the main thread is busy for `ms`, checked against the slice's 100 ms (#1563, #1903).
+ * One ask's wall time also holds every moment the machine ran something else in place of the server's threads or of
+ * this process: with ten copies of this file at once, each spinning a main thread, that alone was 112 and 115 ms on
+ * CI. So each time is the fastest of up to three asks (an ask that waits on the main thread is slow every time), and
+ * the 100 ms is counted on top of what the same ask takes on this machine with the main thread idle, measured just
+ * before and just after: 1 to 4 ms on a quiet one, and over 100 ms for all three asks when ten copies share one
+ * core, where no number of asks finds a fast one. The claim is that a busy main thread adds nothing to these asks.
+ */
+async function withinWhileBusy(ms: number, asks: Record<string, () => Promise<unknown>>) {
+  const fastest = async (ask: () => Promise<unknown>, under: number) => {
     const took: number[] = [];
-    while (took.length < 3 && !(Math.min(...took) < 100)) {
+    while (took.length < 3 && !(Math.min(...took) < under)) {
       const s = Date.now();
-      const got = await get(srv, p, srv.cookie);
+      await ask();
       took.push(Date.now() - s);
+    }
+    return took;
+  };
+  const idle: Record<string, number> = {};
+  const idleNow = async () => {
+    for (const [name, ask] of Object.entries(asks)) idle[name] = Math.max(idle[name] ?? 0, Math.min(...(await fastest(ask, 5))));
+  };
+  await idleNow();
+  let unblocked = 0;
+  const blocked = fetch(`${srv.base}/api/test/block?ms=${ms}`).then((r) => ((unblocked = Date.now()), r));
+  // timing-ok: a busy main thread can't say it is busy; 200 ms puts these asks inside its loop
+  await new Promise((r) => setTimeout(r, 200));
+  const busy: Record<string, number[]> = {};
+  for (const [name, ask] of Object.entries(asks)) busy[name] = await fastest(ask, 100);
+  const asked = Date.now();
+  assert.equal((await blocked).status, 200);
+  assert.ok(unblocked > asked, 'the main thread was still busy when they were answered');
+  await idleNow();
+  // timing-ok: the slice's done line is "within 100 ms while the main thread is blocked 2 s" (#1563)
+  for (const [name, took] of Object.entries(busy)) assert.ok(Math.min(...took) < 100 + idle[name], `${name} took ${took.join(', ')} ms (${idle[name]} ms with the main thread idle)`);
+}
+
+test('while the main thread is busy for 2 s, the slice still answers within 100 ms', { timeout: 60_000 }, async () => {
+  await readerAnswers(srv);
+  const asks: Record<string, () => Promise<unknown>> = {};
+  for (const p of [PATHS[0], PATHS[6], PATHS[9], `/api/projects/${A.id}`, `/api/tickets/${M1.id}`, '/api/status'])
+    asks[p] = async () => {
+      // Every ask, the idle ones too, is a reader's, with the right answer.
+      const got = await get(srv, p, srv.cookie);
       assert.equal(got.status, viaMain[`cara ${p}`].status, p);
       assert.ok(got.reader, p);
-    }
-    // timing-ok: the slice's done line is "within 100 ms while the main thread is blocked 2 s" (#1563)
-    assert.ok(Math.min(...took) < 100, `${p} took ${took.join(', ')} ms`);
-  }
-  const read = Date.now();
-  assert.equal((await blocked).status, 200);
-  assert.ok(unblocked > read, 'the main thread was still busy when the reads were answered');
+    };
+  await withinWhileBusy(2000, asks);
 });
 
 test('a reader never sees half of one main step: two writes in one run of the main thread, a pause between them', { timeout: 60_000 }, async () => {
@@ -393,19 +428,15 @@ test('front-end files come from the front thread, the bytes and headers main sen
   } finally {
     rmSync(join(srv.data, SHELL_OFF_FILE));
   }
-  let unblocked = 0;
-  const blocked = fetch(`${srv.base}/api/test/block?ms=1500`).then((r) => ((unblocked = Date.now()), r));
-  // timing-ok: a busy main thread can't say it is busy; 200 ms puts these reads inside its 1.5 s loop
-  await new Promise((r) => setTimeout(r, 200));
-  for (const path of ['/c/', '/app.js', '/apps/_citadel/theme.css']) {
-    const s = Date.now();
-    assert.equal((await raw(path)).status, 200, path);
-    // timing-ok: a file the front holds never waits on the main thread
-    assert.ok(Date.now() - s < 100, `${path} took ${Date.now() - s} ms`);
-  }
-  const read = Date.now();
-  assert.equal((await blocked).status, 200);
-  assert.ok(unblocked > read, 'the main thread was still busy when the files were answered');
+  // A file the front holds never waits on the main thread.
+  const files: Record<string, () => Promise<unknown>> = {};
+  for (const path of ['/c/', '/app.js', '/apps/_citadel/theme.css'])
+    files[path] = async () => {
+      const got = await raw(path);
+      assert.equal(got.status, 200, path);
+      assert.ok(got.front, path);
+    };
+  await withinWhileBusy(1500, files);
 });
 
 test('everything else passes through: a POST, a live stream, the password check', { timeout: 60_000 }, async () => {

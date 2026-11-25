@@ -319,6 +319,35 @@ test("a memory note another login saved during this turn isn't pruned by this tu
   assert.ok(store.getClaudeState(join(memory, 'theirs.md')), "the other login's note is kept: this config dir never had it");
 });
 
+test("a Taskmaster's old memory notes are merged once: a restored copy never brings back one deleted since (#1952)", async () => {
+  reset();
+  const r = makeRunner();
+  const t = store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(root, 'taskmaster');
+  mkdirSync(cwd);
+  store.setTicketDir(t.id, cwd, null);
+  const path = join('projects', projectSlug(cwd), 'memory', 'old-note.md');
+  store.putClaudeState({ path, project_id: project.id, ticket_id: t.id, size: 3, mtime: Date.now(), data: gzipSync('old') });
+  const merged = join(config, 'projects', projectSlug(repo), 'memory', 'old-note.md');
+  for (const turn of [1, 2]) {
+    r.send(t.id, 'Cara', 'go');
+    if (turn === 1) {
+      await until('the note to be merged from its stored copy', () => existsSync(merged));
+      rmSync(merged);
+    }
+    // Its save prunes nothing, as after a restart.
+    let saved = false;
+    r.saveSession = async (store, ticket, project, dir) => {
+      await saveSession(store, ticket, project, dir, null);
+      saved = true;
+    };
+    writeFileSync(go, '');
+    await until('the turn to end', () => saved && !r.isRunning(t.id));
+    reset();
+  }
+  assert.equal(existsSync(merged), false);
+});
+
 for (const when of ['during the turn', 'during the save']) {
   test(`a restart during the end-of-turn save redoes the save at boot, and a message sent ${when} still runs`, async () => {
     reset();

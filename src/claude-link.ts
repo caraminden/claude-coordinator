@@ -674,8 +674,6 @@ export class ClaudeLink {
     const dir = this.configDir(uid, n)!;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const main = claudeConfigDir(process.env);
-    // Made here if it isn't there yet, so it is always linked: an account with one of its own keeps its own memory notes (#1952).
-    mkdirSync(join(main, 'projects'), { recursive: true, mode: 0o700 });
     for (const f of SHARED_CONFIG) if (existsSync(join(main, f)) && !existsSync(join(dir, f))) symlinkSync(join(main, f), join(dir, f));
     return dir;
   }

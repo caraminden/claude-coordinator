@@ -14,7 +14,7 @@
 // any other path needs a person signed in and enabled for the contraption, and carries X-Citadel-Identity
 // signed with the contraption's key (src/contraptions.ts), which the contraption checks. The proxy never
 // hands the contraption's server either login cookie, nor lets it set one, nor a cookie for another host.
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { connect } from 'node:net';
 import { request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -540,18 +540,25 @@ export class AppProxy {
     const target = { kind: 'app', app: row.name } as const;
     try {
       if (id === undefined) return answer(201, await chunked.start(who, target, (await readJson(req, 16 * 1024)) ?? {}));
-      if (req.method === 'GET') return answer(200, await chunked.status(who, target, id));
+      if (req.method === 'GET') return answer(200, await chunked.status(who, target, id, url.searchParams.has('finished')));
       if (req.method === 'DELETE') return answer(204, await chunked.cancel(who, target, id));
       const offset = Number(url.searchParams.get('offset') ?? NaN);
       if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'offset must be the byte the chunk starts at');
       answer(
         200,
-        await chunked.put(who, target, id, offset, req, async (meta, part) => {
-          const rel = ['uploads', safeFileName(user.login), ...meta.folder];
-          const saved = await place(part, join(home, '.local/share', row.name, ...rel), meta.name);
-          const file = { path: [...rel, saved.slice(saved.lastIndexOf('/') + 1)].join('/'), name: saved.slice(saved.lastIndexOf('/') + 1), size: meta.size };
-          return { ...file, app: await this.tellUploaded(row, user, file, meta) };
-        }),
+        await chunked.put(
+          who,
+          target,
+          id,
+          offset,
+          req,
+          async (meta, part) => {
+            const rel = ['uploads', safeFileName(user.login), ...meta.folder];
+            const saved = await place(part, join(home, '.local/share', row.name, ...rel), meta.name);
+            return { path: [...rel, basename(saved)].join('/'), name: basename(saved), size: meta.size };
+          },
+          async (meta, file) => ({ app: await this.tellUploaded(row, user, file, meta) }),
+        ),
       );
     } catch (err) {
       if (res.headersSent) return void res.destroy();
@@ -590,7 +597,7 @@ export class AppProxy {
   }
 
   /** Tell the app a file arrived; what it answers (64 KB at most) goes back to the page. Never fails the upload. */
-  private async tellUploaded(row: ContraptionRow, user: Parameters<Contraptions['signIdentity']>[1], file: { path: string; name: string; size: number }, meta: Meta) {
+  private async tellUploaded(row: ContraptionRow, user: Parameters<Contraptions['signIdentity']>[1], file: Record<string, unknown>, meta: Meta) {
     const identity = this.contraptions.signIdentity(row.name, user);
     if (!identity) return { status: 503, answer: null };
     try {

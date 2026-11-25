@@ -7,10 +7,12 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createServer, request, type IncomingMessage, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { after, before, test } from 'node:test';
-import { ChunkedUploads, CHUNK_SIZE } from '../src/chunked-uploads.ts';
+import { ChunkedUploads, CHUNK_SIZE, place } from '../src/chunked-uploads.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
+import type { HttpError } from '../src/http.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
@@ -27,6 +29,8 @@ mkdirSync(join(root, 'data'), { recursive: true });
 const seed = new Store(join(root, 'data', 'coordinator.db'));
 const project = seed.createProject('Uploads', null).id;
 const told: { login: string | null; body: unknown }[] = [];
+/** Set, the stub app's answer to "uploaded" waits for it. */
+let held: Promise<void> | null = null;
 
 const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
   let text = '';
@@ -35,7 +39,7 @@ const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
     if (req.url !== '/apps/stub/app-api/uploaded') return void res.writeHead(404).end();
     const identity = verifyIdentity(req.headers['x-citadel-identity'] as string | undefined, pub, 'stub');
     told.push({ login: identity?.login ?? null, body: JSON.parse(text) });
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ imported: 1 }));
+    void (held ?? Promise.resolve()).then(() => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ imported: 1 })));
   });
 });
 
@@ -135,8 +139,8 @@ test('a big file goes into the shared folder in chunks, resuming after a connect
   }
 });
 
-test("a contraption's page uploads into its DATA_DIR/uploads/<login>/, and Citadel tells the app as the uploader", async () => {
-  // Signed in on the app's host through the real handoff from Citadel's.
+/** A signed-in session on the app's host, through the real handoff from Citadel's. */
+async function appCookie() {
   const header = (host: string, path: string, headers: Record<string, string>, name: string) =>
     new Promise<string>((resolve, reject) => {
       request({ host: '127.0.0.1', port, path, headers: { Host: host, ...headers } }, (res) => (res.resume(), resolve(String(res.headers[name]))))
@@ -144,7 +148,11 @@ test("a contraption's page uploads into its DATA_DIR/uploads/<login>/, and Citad
         .end();
     });
   const to = new URL(await header(`127.0.0.1:${port}`, '/apps/stub/', { Accept: 'text/html', Cookie: srv.cookie }, 'location'));
-  const app = { Cookie: (await header(APP, to.pathname + to.search, {}, 'set-cookie')).split(';')[0] };
+  return { Cookie: (await header(APP, to.pathname + to.search, {}, 'set-cookie')).split(';')[0] };
+}
+
+test("a contraption's page uploads into its DATA_DIR/uploads/<login>/, and Citadel tells the app as the uploader", async () => {
+  const app = await appCookie();
   const base = '/apps/_citadel/uploads/stub';
   const data = randomBytes(CHUNK_SIZE + 99);
   const started = await ask(APP, 'POST', base, { ...app, 'Content-Type': 'application/json' }, JSON.stringify({ name: 'IMG 0001.MOV', size: data.length, folder: 'Japan 2026' }));
@@ -165,6 +173,80 @@ test("a contraption's page uploads into its DATA_DIR/uploads/<login>/, and Citad
   assert.equal((await ask(APP, 'POST', '/apps/_citadel/uploads/other', { ...app, 'Content-Type': 'application/json' }, '{"name":"x","size":1}')).status, 404);
   assert.equal((await ask(APP, 'POST', base, { ...app, Origin: 'http://evil.test', 'Content-Type': 'application/json' }, '{"name":"x","size":1}')).status, 403);
   assert.equal((await ask(APP, 'POST', base, { 'Content-Type': 'application/json' }, '{"name":"x","size":1}')).status, 401);
+});
+
+test('an upload whose last answer is lost while the app is being told finishes as the same file (#1945)', async () => {
+  const app = await appCookie();
+  const base = '/apps/_citadel/uploads/stub';
+  const { id } = (await ask(APP, 'POST', base, { ...app, 'Content-Type': 'application/json' }, JSON.stringify({ name: 'lost.mov', size: 3, folder: 'Lost' }))).body;
+  let release = () => {};
+  held = new Promise((r) => (release = r));
+  const before = told.length;
+  try {
+    const last = request({ host: '127.0.0.1', port, method: 'PUT', path: `${base}/${id}?offset=0`, headers: { Host: APP, ...app, 'Content-Length': '3' } });
+    last.on('error', () => {});
+    last.end('abc');
+    await until('the app to be told', async () => told.length > before);
+    last.destroy();
+    // Asked while the app is still thinking, by a retry that asks, one that sends, and a Cancel.
+    const asked = ask(APP, 'GET', `${base}/${id}`, app);
+    const sent = ask(APP, 'PUT', `${base}/${id}?offset=0`, app, 'abc');
+    const cancelled = await ask(APP, 'DELETE', `${base}/${id}`, app);
+    assert.equal(cancelled.status, 409, 'a cancel too late says the file is there');
+    release();
+    const login = told.at(-1)!.login;
+    const file = { id, offset: 3, size: 3, done: true, path: `uploads/${login}/Lost/lost.mov`, name: 'lost.mov', app: { status: 200, answer: { imported: 1 } } };
+    for (const got of [await asked, await sent]) assert.deepEqual(got, { status: 200, body: file });
+    // And later, however often: the page never heard, so it asks for a finished one too.
+    for (let i = 0; i < 2; i++) assert.deepEqual(await ask(APP, 'GET', `${base}/${id}?finished=1`, app), { status: 200, body: file });
+    assert.deepEqual((await ask(APP, 'PUT', `${base}/${id}?offset=3`, app)).body, file);
+    assert.equal((await ask(APP, 'DELETE', `${base}/${id}`, app)).status, 409);
+    assert.equal(told.length, before + 1, 'the app is told once');
+    assert.deepEqual(readdirSync(join(home, '.local/share/stub/uploads', login!, 'Lost')), ['lost.mov']);
+  } finally {
+    release();
+    held = null;
+  }
+});
+
+test('a restart after the file is placed: the next PUT tells the app, and the file is there once (#1945)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chunked-unit-'));
+  try {
+    const cara = { uid: 1, login: 'cara' };
+    const target = { kind: 'app', app: 'stub' } as const;
+    const started = () => Object.assign(new ChunkedUploads(dir, 100), { free: async () => 1000 });
+    const c = started();
+    const a = await c.start(cara, target, { name: 'a', size: 1 });
+    const put = async (meta: { name: string }, part: string) => ({ path: await place(part, join(dir, 'out'), meta.name) });
+    let calls = 0;
+    // The last byte is in and the file placed; the app never gets to answer before Citadel goes down.
+    await assert.rejects(
+      c.put(cara, target, a.id, 0, Readable.from([Buffer.from('x')]), put, async () => {
+        throw new Error('down');
+      }),
+    );
+    const d = started();
+    // Another start's sweep keeps it, and it owes the disk nothing.
+    d.free = async () => 110;
+    await d.start(cara, target, { name: 'b', size: 10 });
+    assert.deepEqual(await d.status(cara, target, a.id), { id: a.id, offset: 1, size: 1 });
+    await assert.rejects(d.status({ uid: 2, login: 'olive' }, target, a.id, true), (e: unknown) => (e as HttpError).status === 404);
+    const path = join(dir, 'out', 'a');
+    const done = { id: a.id, offset: 1, size: 1, done: true, path, app: calls + 1 };
+    const tell = async () => ({ app: ++calls });
+    assert.deepEqual(await d.put(cara, target, a.id, 1, Readable.from([]), put, tell), done);
+    assert.deepEqual(await d.status(cara, target, a.id, true), done);
+    assert.equal(calls, 1);
+    assert.deepEqual(readdirSync(join(dir, 'out')), ['a']);
+    // 3 days on, the next start after a restart forgets it.
+    const old = (Date.now() - 4 * 24 * 3600 * 1000) / 1000;
+    utimesSync(join(dir, 'chunked-done', `${a.id}.json`), old, old);
+    const e = started();
+    await e.start(cara, target, { name: 'c', size: 1 });
+    await assert.rejects(e.status(cara, target, a.id, true), (err: unknown) => (err as HttpError).status === 404);
+  } finally {
+    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });
 
 test('the free-disk floor counts what uploads under way still have to send; a stale upload is swept', async () => {
@@ -204,6 +286,7 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
   const plain = globalThis.fetch;
   const withCookie = (o: RequestInit = {}) => ({ ...o, headers: { ...(o.headers as object), Cookie: srv.cookie } });
   const stored = new Map<string, string>();
+  let lose = false; // the next finished answer breaks off on its way back
   class Xhr {
     upload: { onprogress: ((e: { loaded: number }) => void) | null } = { onprogress: null };
     onload: (() => void) | null = null;
@@ -224,6 +307,10 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
         async (r) => {
           this.status = r.status;
           this.responseText = await r.text();
+          if (lose && JSON.parse(this.responseText).done) {
+            lose = false;
+            return this.onerror?.();
+          }
           this.upload.onprogress?.({ loaded: body.size });
           this.onload?.();
         },
@@ -257,6 +344,19 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
     assert.ok(readFileSync(join(projectSharedDir(srv.data, project), 'inbox/Kit/photos.bin')).equals(data));
     assert.deepEqual(readdirSync(join(projectSharedDir(srv.data, project), 'inbox/Kit')), ['photos.bin']);
     assert.equal(stored.size, 0, 'a finished upload is forgotten');
+
+    // Its last answer lost (#1945): the retry learns it finished, and nothing is sent again.
+    lose = true;
+    const bytes: number[] = [];
+    const lost = startUpload(endpoint, new File([data], 'lost.bin'), { folder: 'inbox/Kit', onChange: (u: { sent: number }) => void bytes.push(u.sent) });
+    assert.equal(((await lost.done) as { path: string }).path, 'inbox/Kit/lost.bin');
+    assert.equal(lose, false, 'an answer was lost');
+    assert.deepEqual(
+      bytes,
+      bytes.toSorted((a, b) => a - b),
+      'never back to the start',
+    );
+    assert.deepEqual(readdirSync(join(projectSharedDir(srv.data, project), 'inbox/Kit')), ['lost.bin', 'photos.bin']);
 
     // Cancelled: done answers null and the server lets it go.
     const third = startUpload(endpoint, new File([data], 'gone.bin'), { onChange: (u) => u.sent > 0 && u.cancel() });

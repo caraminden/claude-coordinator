@@ -571,7 +571,7 @@ export const fileRoutes: Route[] = [
     async handler({ req, res, url, app, project, session, params }) {
       const who = uploader(session);
       const target = { kind: 'shared', project: project.id } as const;
-      if (req.method === 'GET') return json(res, 200, await app.chunked.status(who, target, params.upload));
+      if (req.method === 'GET') return json(res, 200, await app.chunked.status(who, target, params.upload, url.searchParams.has('finished')));
       if (req.method === 'DELETE') {
         await app.chunked.cancel(who, target, params.upload);
         return void res.writeHead(204).end();

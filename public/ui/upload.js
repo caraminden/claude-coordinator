@@ -95,7 +95,8 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
       run++;
       xhr?.abort();
       store.drop(key);
-      if (id) call('DELETE', `${base}/${id}`).catch(() => {});
+      // 409: it finished first, and the file stays there; the row says so.
+      if (id) call('DELETE', `${base}/${id}`).catch((err) => err.status === 409 && set('cancelled', err.message));
       set('cancelled');
       settle(null);
     },
@@ -134,32 +135,34 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
       try {
         let offset = 0;
         let chunk = CHUNK;
+        let r = {};
         id ??= store.get(key);
         if (id) {
           try {
-            offset = (await call('GET', `${base}/${id}`)).offset;
+            // ?finished: one whose last answer was lost gets it now.
+            r = await call('GET', `${base}/${id}?finished=1`);
+            offset = r.offset;
           } catch (err) {
             if (err.status !== 404) throw err;
-            // Gone from the server: it sat too long, or it finished and the answer never arrived. Start afresh.
+            // Gone from the server: it sat too long. Start afresh.
             store.drop(key);
             id = null;
           }
         }
         if (me !== run) return;
         if (!id) {
-          const r = await call('POST', base, { name: file.name || 'file', size: u.size, folder });
-          if (me !== run) return void call('DELETE', `${base}/${r.id}`).catch(() => {});
-          ({ id, chunk = CHUNK } = r);
+          const made = await call('POST', base, { name: file.name || 'file', size: u.size, folder });
+          if (me !== run) return void call('DELETE', `${base}/${made.id}`).catch(() => {});
+          ({ id, chunk = CHUNK } = made);
           store.set(key, id);
         }
-        let r;
-        do {
+        while (!r.done) {
           u.sent = offset;
           r = await put(offset, chunk);
           if (me !== run) return;
           offset = r.offset;
           tries = 0;
-        } while (!r.done);
+        }
         store.drop(key);
         u.result = r;
         u.sent = u.size;
@@ -396,9 +399,12 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   }
 
   function pauseAll() {
+    // Nothing waits before anything stops: a file that stops gives the next waiting one its turn.
     for (const r of rows) {
       if (!r.up && !r.cancelled) r.held = true;
       r.queued = false;
+    }
+    for (const r of rows) {
       if (r.up?.state === 'sending') r.up.pause();
       draw(r);
     }

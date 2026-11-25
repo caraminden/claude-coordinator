@@ -867,16 +867,18 @@ host only, under the same gate as your pages (signed in, your app enabled for th
   `folder` is a path under the person's uploads (`"Japan 2026/day 1"`, at most 8 deep, no part starting
   with a dot). 507 when the file would take the server's disk below its floor (50 GB free, counting
   the uploads already under way).
-- `GET …/<id>` → `{ id, offset, size }`: how many bytes Citadel has.
+- `GET …/<id>` → `{ id, offset, size }`: how many bytes Citadel has. With `?finished=1`, an upload that has finished
+  gets its finished file again (below), for 3 days; without it, a 404 once it's finished.
 - `PUT …/<id>?offset=<n>` with the next bytes (at most 16 MiB; the kit sends 8) → `{ id, offset, size }`.
   A wrong offset, or a chunk still landing, is a 409: GET and go on from its offset. A connection that
   breaks off keeps what arrived. The last chunk's answer is the finished file:
-  `{ done: true, path, name, size, app: { status, answer } }`.
+  `{ done: true, path, name, size, app: { status, answer } }`, and a PUT to it again, its answer lost, answers the same.
 - `DELETE …/<id>` → 204, what arrived deleted. An upload untouched for 3 days goes the same way.
+  Once the file is in place it's a 409, and the file stays.
 
 The finished file lands at `DATA_DIR/uploads/<login>/<folder>/<name>`: the name cleaned (no slashes,
 leading dots or brackets), and never over a file already there (`IMG_1 (2).jpg`). Then Citadel calls
-your server, signed as the person who sent it:
+your server, signed as the person who sent it (again, for the same `path`, if Citadel restarted before you answered):
 
 - `POST $BASE_PATH/app-api/uploaded` `{ "path", "name", "size", "folder" }`, `path` relative to
   `DATA_DIR` (`"uploads/cara/Japan 2026/IMG_1.jpg"`). Move it, import it or leave it there; it's yours.

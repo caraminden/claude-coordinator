@@ -38,7 +38,7 @@ function setup(opts: { off?: string; refuse?: Error; running?: boolean; noClone?
   const last = { state: 'deployed', to: first, said: [], log: '' };
   const d = shipDeploys({
     store,
-    services: { opts: { off: opts.off ?? null }, running: () => opts.running ?? null, lastDeploy: async () => last, folder: () => dir },
+    services: { opts: { off: opts.off ?? null }, running: () => opts.running ?? null, lastDeploy: async (name) => (name === 'a' ? last : null), folder: () => dir },
     autoDeploy: {
       deployNow: async (...a) => {
         asked.push(a);
@@ -87,6 +87,7 @@ test('running and last read the app services', async () => {
   assert.equal(s.deployOps.running('a'), false);
   assert.equal(setup({ running: true }).deployOps.running('a'), true);
   assert.equal(await s.deployOps.last('a'), s.last);
+  assert.equal(await s.deployOps.last('b'), null);
 });
 
 test("start goes through auto-deploy's start, as the minion and the person its turn runs for", async () => {

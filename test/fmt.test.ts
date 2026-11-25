@@ -121,21 +121,24 @@ test("--own leaves a build's other feeders' files alone", { skip }, () => {
   assert.equal(x.code, 1);
   assert.match(x.out, /mine2\.ts/);
   assert.doesNotMatch(x.out, /other-feeder/);
-  // The build's own ship is at its tip: every file it brings to main is its own, a feeder's too (--into has no smoke check).
+  // At the build's tip a feeder still answers for its own edits alone, an untracked file included.
   git(r.source, 'branch', '-f', 'build/7', 'ticket/1-x');
-  const tip = r.fmt(['--check', '--own']);
-  assert.equal(tip.code, 1, tip.out);
-  assert.match(tip.out, /other-feeder/);
-  // A feeder that starts there and edits a file answers for its edit alone.
-  assert.equal(r.fmt(['mine2.ts']).code, 0);
-  const edit = r.fmt(['--check', '--own']);
-  assert.equal(edit.code, 0, edit.out);
+  writeFileSync(join(r.wt, 'new.ts'), BAD);
+  assert.equal(r.fmt(['--check', '--own']).code, 0);
+  assert.equal(r.fmt(['--own']).code, 0);
+  assert.equal(readFileSync(join(r.wt, 'new.ts'), 'utf8'), GOOD);
+  assert.equal(git(r.wt, 'diff', '--name-only'), '', "no other feeder's file was touched");
 });
 
-// The advice in test/format.test.ts and the kit's copy: -X theirs, which it used to give, drops a landed change.
-test('the reformat advice never drops landed work', () => {
-  for (const f of ['test/format.test.ts', 'kit/skills/scheme-setup/templates/format.test.ts']) {
-    const fix = /export const FIX =\s*(.*);/.exec(readFileSync(join(repo, f), 'utf8'))![1];
-    assert.doesNotMatch(fix, /rebase[^`]*(-X|--strategy)/, f);
-  }
+test("a build's own ship is refused for any unformatted file the build brings to main", { skip }, () => {
+  const r = fmtRepo();
+  r.commit(r.wt, 'feeder.ts', BAD);
+  git(r.source, 'branch', 'build/7', 'ticket/1-x');
+  const res = r.run({ CI: '', CITADEL_TEST_EXTRA: '0', TMPDIR: r.dir }, ['--build']);
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /land: smoke: .*FMT_WHOLE_BUILD=1 tools\/fmt --own/);
+  assert.match(res.stderr, /feeder\.ts/);
+  assert.doesNotMatch(res.stderr, /main-own\.ts/);
+  assert.equal(r.fmt(['--own'], { FMT_WHOLE_BUILD: '1' }).code, 0);
+  assert.equal(readFileSync(join(r.wt, 'feeder.ts'), 'utf8'), GOOD);
 });

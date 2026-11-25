@@ -155,7 +155,7 @@ case ${1:-} in
       [ $# -eq 0 ] || refuse "--full runs the whole suite: name no test files with it"
     fi
     files=("$@") ;;
-  --build) [ $# -eq 1 ] || refuse "--build takes nothing more: run it from the build minion's branch at the build's tip" ; mode=build ;;
+  --build) [ $# -eq 1 ] || refuse "--build takes nothing more: run it from the build minion's branch at the build's tip" ; mode=build; export FMT_WHOLE_BUILD=1 ;; # the format check (tools/fmt --own): its feeders' files are this ship's
   *) refuse "takes no arguments besides --into build/<n> <test files>, --into build/<n> --full and --build (for --now, land first, then run tools/deploy.sh --now with a person's OK)" ;;
 esac
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below, which would break a relative path to it

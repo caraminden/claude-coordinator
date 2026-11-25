@@ -165,6 +165,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_REAL: "<test file>=<path> ...": a run is red when its commit has any of the paths, and its log names each such test file
 // a real failure (failed again alone), or with FAKE_LOG=burn a burn-in failure: a train with several bad ships (#1564);
 // FAKE_REAL_FIRST: only the first of them, so the next is seen once that one is gone (#1918);
+// FAKE_CASE=<name>: with FAKE_LOG=burn, the log also names that failing test case in each file (#2019);
+// FAKE_LOG_WHOLE=<path>: a run whose commit has that path names no failing test at all (#2019);
 // FAKE_REAL_SHORT=<file>: a log with that file counts one more failed file than it names (#1918);
 // FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
@@ -319,7 +321,9 @@ case "$*" in
       rl=''; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && [[ "$rl " != *" \${e%%=*} "* ]] && rl="$rl \${e%%=*}"; done
       [ -z "\${FAKE_REAL_FIRST:-}" ] || rl=" \$(cut -d' ' -f2 <<<"$rl")"
       echo "not ok 1 - the red test's output (run $3)"
+      [ -z "\${FAKE_LOG_WHOLE:-}" ] || ! git -C "${hub}" cat-file -e "$sha:$FAKE_LOG_WHOLE" 2>/dev/null || exit 0
       if [ "\${FAKE_LOG:-}" = burn ]; then
+        [ -z "\${FAKE_CASE:-}" ] || for f in $rl; do printf '%b test at %s:3:1\\n%b ✖ %s (12.5ms)\\n' "$p" "$f" "$p" "$FAKE_CASE"; done
         for f in $rl; do printf '%b burn-in: %s: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p" "$f"; done
       else
         printf '%b run-tests: %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\n' "$p" "$(($(wc -w <<<"$rl") + $(grep -cF "\${FAKE_REAL_SHORT:-no}" <<<"$rl")))"

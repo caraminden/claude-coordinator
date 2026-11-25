@@ -575,11 +575,16 @@ function rollbackBar(projectId, tv) {
   const busy = rb.running || (rollingBack.has(key) && rb.can);
   const pin = rb.pin;
   // A desktop app's feed names another build (2RE2): the roll back's is on its way, was refused, or a by-hand one went out over it.
-  const elsewhere = pin?.build && (tv.current?.commit ?? tv.current?.version) !== pin.build.sha;
+  const elsewhere =
+    pin?.build &&
+    (tv.current?.commit ?? tv.current?.version) !== pin.build.sha &&
+    (tv.next?.stage === 'publish' && !tv.next.waitingOn
+      ? h('span', { class: 'muted' }, `Rolling back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: PCs get the current release above until the desktop feed names its build.`)
+      : h('span', { class: 'waits' }, `Set back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}, but the desktop feed names another build: PCs get the current release above.`));
   const line = busy
     ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
     : elsewhere
-      ? h('span', { class: 'waits' }, `Set back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}, but the desktop feed names another build: PCs get the current release above.`)
+      ? elsewhere
       : pin
         ? h(
             'span',

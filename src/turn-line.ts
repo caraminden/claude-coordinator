@@ -47,9 +47,10 @@ export interface PoolSize {
   fixed?: { size: number; by: string };
 }
 
-/** No minion turn starts until it is lifted; those running finish. */
+/** No minion turn starts until it is lifted; those running finish, or with `stop` stop and carry on after it. */
 export interface Pause {
   by: string;
+  stop?: true;
   at: number;
 }
 
@@ -102,6 +103,10 @@ export interface LineHost {
   asks(ticketId: number, via?: RetryKind): { person: number; rank: number };
   /** Start its turn, now that a worker is free: it calls enter() again, which grants it. */
   start(entry: LineEntry): void;
+  /** Stop its running turn to carry on later; one already ending or not yet launched is left. */
+  pauseTurn(ticketId: number): void;
+  /** Who waits, or why they all do, changed. */
+  changed(ids: number[]): void;
   readonly gapMs: number;
   readonly detached: boolean;
 }
@@ -152,6 +157,8 @@ export class TurnLine {
 
   /** Auto's step, every POOL.everyMs. */
   tick(reading: PressureReading, now = Date.now()) {
+    // A turn still launching when the pause came, or re-attached since.
+    if (this.paused()?.stop) this.stopRunning();
     const p = this.pool();
     if (p.fixed) return;
     const size = nextSize({ ...p, used: this.used(), waiting: this.entries.length }, reading, now);
@@ -164,12 +171,16 @@ export class TurnLine {
     return this.host.store.getSetting<Pause>(PAUSE) ?? null;
   }
 
-  setPause(on: boolean, by: string) {
-    if (on) this.host.store.setSetting(PAUSE, { by, at: Date.now() });
-    else {
-      this.host.store.deleteSetting(PAUSE);
-      this.pump();
-    }
+  setPause(on: boolean | 'stop', by: string) {
+    if (on) this.host.store.setSetting(PAUSE, { by, at: Date.now(), ...(on === 'stop' ? { stop: true } : {}) } satisfies Pause);
+    else this.host.store.deleteSetting(PAUSE);
+    if (on === 'stop') this.stopRunning();
+    this.host.changed(this.waiting());
+    this.pump();
+  }
+
+  private stopRunning() {
+    for (const id of this.granted.keys()) this.host.pauseTurn(id);
   }
 
   /** Take a worker for a turn that starts now, or join the line (keeping a place it has) and return false: start() comes later. */

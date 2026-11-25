@@ -218,6 +218,8 @@ interface TurnState {
   /** A row saved before the retries record kept its counts in these four (read with retriesOf). */
   resumes?: number;
   stopped?: true;
+  /** A pause stopped it, to carry on after it (#1868). */
+  paused?: true;
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
   /** The turn's folder (see src/turn-wrapper.mjs); absent for turns from before they had one. */
@@ -505,6 +507,7 @@ export { KILL_HOLD_MAX_MS, nextLimitResume };
 export type { LimitedAccount };
 /** Usage-limit resumes in a row before a minion waits for a person. */
 export const MAX_LIMIT_RESUMES = RETRIES.limit.cap;
+const RESUME_PAUSE_PROMPT = `A person paused all minions while you were working, which stopped your last turn; the pause is over. A command may have half-run when it stopped, so check the state of your work (git first, then files and background jobs) and continue where you left off. Don't redo finished steps.`;
 const RESUME_ACCOUNT_PROMPT = `Your last turn stopped at a Claude account's usage limit (or its sign-in ran out), so this turn carries on with another of your person's Claude accounts. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
 const RESUME_LIMIT_PROMPT = `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
@@ -953,6 +956,8 @@ export class Runner {
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
       start: (entry) => this.startLined(entry),
+      pauseTurn: (id) => this.pauseTurn(id),
+      changed: (ids) => this.lineChanged(ids),
       get gapMs() {
         return self.resumeGapMs;
       },
@@ -2138,6 +2143,7 @@ export class Runner {
    */
   private resume(ticketId: number, via: RetryKind, retries: Retries, onCodex = false): Promise<void> | undefined {
     const killLine = via === 'kill';
+    const paused = !!this.queue.owed(ticketId)?.paused;
     // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
     const token = this.limitStarting.get(ticketId);
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
@@ -2175,13 +2181,13 @@ export class Runner {
               return;
             }
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
-            if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : 'Resumed after a server restart' });
+            if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
             // It carries on the interrupted turn, so it runs for that turn's person.
             return this.ranTurn(
               this.startTurn(
                 project,
                 ticket,
-                [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
+                [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : paused ? RESUME_PAUSE_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
                 person,
                 retries,
               ),
@@ -2887,6 +2893,21 @@ export class Runner {
     this.wakeNow.delete(ticketId);
     this.saveTurn(ticketId, { stopped: true });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
+    this.endLive(live, ticketId);
+    return true;
+  }
+
+  /** "Pause and stop running ones" (#1868): its queue stays, and its resume waits in the line. One about to end, or a fresh start's handoff, is left to. */
+  private pauseTurn(ticketId: number) {
+    const live = this.turns.get(ticketId);
+    const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!live || !turn || turn.paused || turn.stopped || turn.result || turn.fresh || turn.keepalive || turn.closing !== undefined) return;
+    this.saveTurn(ticketId, { paused: true });
+    this.emit(ticketId, 'note', { text: `${this.turnLine.paused()?.by ?? 'Someone'} paused all minions: this turn stops here and carries on after the pause.` });
+    this.endLive(live, ticketId);
+  }
+
+  private endLive(live: LiveTurn, ticketId: number) {
     live.stopPending = !existsSync(join(live.dir, 'pid.json'));
     // claude has a pid: SIGINT first, so it writes its result (cost, usage) before it exits. Not yet: nothing to
     // interrupt, so as before (this stops its unit); poll sends the SIGINT chain once claude starts.
@@ -2897,7 +2918,6 @@ export class Runner {
     if (live.stopPending && live.container) writeFileSync(join(live.dir, 'exit.json'), JSON.stringify({ code: null, signal: null, stopped: true }));
     // A turn that ignores the stop (or hadn't started claude yet) gets killed.
     if (live.stopPending) this.armKill(live, ticketId);
-    return true;
   }
 
   /** How long a stopped claude has after SIGINT to write its result before SIGTERM, and in all before SIGKILL (ms). */
@@ -3305,6 +3325,13 @@ export class Runner {
         }),
       );
     this.lanes.run(ticketId, 'turn', quiet ? step : () => this.turnLine.hold(ticketId, step));
+  }
+
+  /** A turn a pause stopped waits in the line to carry on; one stopped before claude had its prompt runs its batch again. */
+  private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }) {
+    const rerun = !turn.offset && this.queue.giveBack(ticketId).length > 0;
+    if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), paused: true });
+    this.turnLine.enter(ticketId, rerun ? undefined : retry.via);
   }
 
   /** Start a turn the line gave a worker: the resume it waited for as it stands now, else its queue's turn. */
@@ -4384,7 +4411,8 @@ export class Runner {
       else row(false);
     }
     const cleared = out.followUps.includes('cleared');
-    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' ? 'idle' : 'error';
+    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' ? 'idle' : 'error';
+    if (out.kind === 'paused') this.waitOutPause(ticketId, turn!, out.retry!);
     if (status === 'error') out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
     // Claude has the Codex turns now.
     else if (cleared && turn?.handBack) this.store.deleteSetting(codexThreadKey(ticketId));

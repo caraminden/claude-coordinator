@@ -99,7 +99,8 @@ test('the settings reach the tool text through the turn env, and no number is ty
   assert.match(heldToolText(s, 'x'), /\(4 messages in 20 minutes\)/);
   const src = readFileSync(new URL('../src/mcp.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /idle over \d+ minutes|within \d+ hours|After \d+ messages|in \d+ minutes, the next|allows in \d+ minutes/);
-  assert.doesNotMatch(src, /urgent/, 'the message tools offer no urgent flag since #1603: an idle receiver wakes anyway');
+  // Not mark_urgent (#1888), its route or its file, which are about workers: any other use of the word, a flag or an argument.
+  assert.doesNotMatch(src, /(?<![\w/])urgent\b/, 'the message tools offer no urgent flag since #1603: an idle receiver wakes anyway');
 });
 
 test("a scheme's own loop count and window hold the next message; the chat's row, card and Needs you show it until Continue", () => {

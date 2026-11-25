@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
-import { connect } from 'node:net';
+import { connect, type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { GhHelpers } from '../src/gh-api.ts';
@@ -20,7 +20,7 @@ const github = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'application/json', etag: '"v1"' }).end(JSON.stringify({ path: req.url, n: seen.length }));
 });
 await new Promise<void>((r) => github.listen(0, '127.0.0.1', r));
-const api = `http://127.0.0.1:${(github.address() as any).port}`;
+const api = `http://127.0.0.1:${(github.address() as AddressInfo).port}`;
 const helpers: GhHelpers[] = [];
 after(() => {
   for (const h of helpers) h.stop();

@@ -6,11 +6,13 @@ import { Agent, get, type IncomingMessage } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import type { Readable } from 'node:stream';
 import { after, test } from 'node:test';
 import { COLD, handOver, handoverState, standby } from '../src/handover.ts';
 import { SCHEMA_VERSION } from '../src/db.ts';
 import { STOP_MARK } from '../src/sd-watchdog.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot, TEST_ZONE, until } from './helpers.ts';
+import { json } from './typed.ts';
 
 const REPO = join(import.meta.dirname, '..');
 const tmp = tempRoot('handover-');
@@ -130,7 +132,7 @@ test('a standby copy of the real server does nothing before go, and goes when th
     stdio: ['ignore', 'inherit', 'inherit', 'ignore', 'pipe'],
   });
   const ctl = copy.stdio[4]!;
-  const ready = await new Promise<string>((r) => createInterface({ input: ctl as any }).once('line', r));
+  const ready = await new Promise<string>((r) => createInterface({ input: ctl as Readable }).once('line', r));
   assert.equal(ready, 'ready');
   assert.ok(!existsSync(data), 'it made its data folder before go');
   const exited = new Promise((r) => copy.once('exit', r));
@@ -179,7 +181,7 @@ test('the real server hands over under a request loop with no failed request and
       } catch {}
   });
   const { base, cookie, proc } = booted;
-  assert.equal((await (await fetch(`${base}/api/health`)).json()).handover, 'ready');
+  assert.equal((await json<{ handover: string }>(await fetch(`${base}/api/health`))).handover, 'ready');
 
   // An open page's live stream: it stays open until the new server listens, then ends, and the page reconnects.
   const stream = await new Promise<IncomingMessage>((r) => get({ host: '127.0.0.1', port: held.port, path: '/api/stream', agent: false, headers: { Cookie: cookie } }, r));

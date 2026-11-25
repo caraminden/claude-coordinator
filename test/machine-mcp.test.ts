@@ -16,7 +16,7 @@ after(async () => {
  * stream with a new session id); posts are recorded per session. `stream` is the open session's response.
  */
 async function fakeApp(answers: (number | 'open')[]) {
-  const posts: { session: string; message: any }[] = [];
+  const posts: { session: string; message: { method?: string; id?: number } }[] = [];
   const state = { stream: null as ServerResponse | null, session: '', gets: 0 };
   const srv = createServer((req, res) => {
     if (req.method === 'GET' && req.url!.startsWith('/api/machines/5/session?')) {
@@ -51,7 +51,7 @@ function startProxy(base: string) {
     env: { ...process.env, COORDINATOR_API: base, COORDINATOR_TOKEN: 'tok' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  const out: any[] = [];
+  const out: { id?: number | string; error?: { message: string } }[] = [];
   let err = '';
   createInterface({ input: proc.stdout! }).on('line', (l) => out.push(JSON.parse(l)));
   proc.stderr!.on('data', (c) => (err += c));
@@ -100,7 +100,7 @@ test('a call in flight when the app restarts is answered with an error, and one 
   // The agent stops its servers when the app goes, so this call's reply never comes.
   app.state.stream!.end();
   const answered = await until('the call answered', () => p.out.find((m) => m.id === 'call-7'));
-  assert.match(answered.error.message, /^box: /);
+  assert.match(answered.error!.message, /^box: /);
   await until('a new session', () => app.state.gets === 2 && app.posts.length === 4);
   assert.deepEqual(
     p.out.map((m) => m.id),

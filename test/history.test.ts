@@ -8,6 +8,9 @@ import { historyPage } from '../src/history.ts';
 import { applyEvent, createProgress, progressLine } from '../public/progress.js';
 import { bootServer, stopTurns } from './helpers.ts';
 
+/** The parts of a plan task these tests read. */
+type Task = { subject: string; status: string };
+
 const root = mkdtempSync(join(tmpdir(), 'history-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
@@ -172,7 +175,7 @@ test('each page carries the plan as it stood before it, so the readout matches a
   const page = historyPage(store, t.id, { limit: 12 });
   assert.equal(page.more, true);
   assert.deepEqual(
-    page.tasks.map((x: any) => [x.subject, x.status]),
+    (page.tasks as Task[]).map((x) => [x.subject, x.status]),
     [
       ['Map', 'completed'],
       ['Build', 'in_progress'],
@@ -224,7 +227,7 @@ test('planEvents leaves out ordinary tool results yet replays to the same plan a
   const kept = store.planEvents(t.id);
   assert.deepEqual(replay(kept), replay(store.listEvents(t.id)));
   assert.deepEqual(
-    replay(kept).tasks.map((x: any) => [x.subject, x.status]),
+    (replay(kept).tasks as Task[]).map((x) => [x.subject, x.status]),
     [
       ['Map', 'completed'],
       ['Build', 'in_progress'],
@@ -288,7 +291,7 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   assert.equal(page.more, true);
   assert.ok(page.events.length <= 200 && page.events.length > 100, `${page.events.length} events`);
   assert.deepEqual(
-    page.events.map((e: any) => e.id),
+    page.events.map((e: { id: number }) => e.id),
     all.slice(-page.events.length).map((e) => e.id),
   );
   assert.deepEqual(page.tasks, []);
@@ -296,13 +299,13 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   assert.equal(earlier.events.at(-1).id, all[all.length - page.events.length - 1].id);
   // after= stays a plain list of everything since.
   assert.deepEqual(
-    (await get(`/api/tickets/${t.id}/events?after=0`)).map((e: any) => e.id),
+    (await get(`/api/tickets/${t.id}/events?after=0`)).map((e: { id: number }) => e.id),
     all.map((e) => e.id),
   );
   // Search narrowed to one minion gives its oldest hit, and from= loads back to it.
   const hits = await get(`/api/projects/${p.id}/search?q=pelican&ticket=${t.id}`);
   assert.deepEqual(
-    hits.map((h: any) => [h.ticketId, h.oldestId, h.matches]),
+    hits.map((h: { ticketId: number; oldestId: number; matches: number }) => [h.ticketId, h.oldestId, h.matches]),
     [[t.id, firstHit, 2]],
   );
   const back = await get(`/api/tickets/${t.id}/events?before=${page.events[0].id}&from=${firstHit}`);
@@ -311,8 +314,8 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   assert.equal((await get(`/api/projects/${p.id}/search?q=pelican`)).length, 2);
 
   const sent = (await get(`/api/tickets/${other.id}/events`)).events;
-  const cutCall = JSON.parse(sent.find((e: any) => e.id === bigCall.id).data).message.content[0];
-  const cutResult = JSON.parse(sent.find((e: any) => e.id === bigResult.id).data).message.content[0];
+  const cutCall = JSON.parse(sent.find((e: { id: number }) => e.id === bigCall.id).data).message.content[0];
+  const cutResult = JSON.parse(sent.find((e: { id: number }) => e.id === bigResult.id).data).message.content[0];
   assert.deepEqual([cutCall.cut, cutResult.cut], [{ content: 30_000 }, 20_000]);
   for (const e of [bigCall, bigResult]) assert.equal((await get(`/api/tickets/${other.id}/events/${e.id}`)).data, store.getEvent(e.id)!.data, 'the event comes whole');
   assert.equal((await srv.call(`/api/tickets/${t.id}/events/${bigResult.id}`)).status, 404, "another minion's event isn't read through this one");
@@ -350,7 +353,7 @@ test('a newer page carries on from the last replay, with the task list a full re
   turn(store, t.id, 3);
   const first = historyPage(store, t.id, { limit: 12 });
   assert.deepEqual(
-    first.tasks.map((x: any) => x.subject),
+    (first.tasks as Task[]).map((x) => x.subject),
     ['One'],
   );
   turn(store, t.id, 3, [plan('c2', 'Two'), made('c2', 2)]);
@@ -368,7 +371,7 @@ test('a newer page carries on from the last replay, with the task list a full re
   for (const row of planEvents(t.id, later.events[0].id)) applyEvent(full, row.kind, JSON.parse(row.data), row.created_at);
   assert.deepEqual(later.tasks, full.tasks);
   assert.deepEqual(
-    later.tasks.map((x: any) => x.subject),
+    (later.tasks as Task[]).map((x) => x.subject),
     ['One', 'Two'],
   );
   // Paging back to before the last replay replays from the start, and leaves the furthest one in place.
@@ -387,7 +390,7 @@ test("after a restart, a chat's first open carries on from the saved replay, not
   turn(store, t.id, 3);
   const first = historyPage(store, t.id, { limit: 12 });
   assert.deepEqual(
-    first.tasks.map((x: any) => x.subject),
+    (first.tasks as Task[]).map((x) => x.subject),
     ['One'],
   );
   turn(store, t.id, 3, [plan('r2', 'Two'), made('r2', 2)]);
@@ -407,7 +410,7 @@ test("after a restart, a chat's first open carries on from the saved replay, not
   // As the client gets them: the saved state is JSON, which drops keys left undefined.
   assert.deepEqual(JSON.parse(JSON.stringify(later.tasks)), JSON.parse(JSON.stringify(full.tasks)));
   assert.deepEqual(
-    later.tasks.map((x: any) => x.subject),
+    (later.tasks as Task[]).map((x) => x.subject),
     ['One', 'Two'],
   );
   // Deleting the minion deletes its saved replay too.

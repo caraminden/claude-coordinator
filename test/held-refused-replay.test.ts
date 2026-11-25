@@ -38,8 +38,8 @@ test('Deliver now on cold mail whose Claude login is refused returns 0 and keeps
   store.setTicketDir(t.id, cwd, null);
   store.updateTicket(t.id, { session_id: `s${t.id}`, status: 'idle' });
   const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, cwd, `s${t.id}`);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, '{}\n');
+  mkdirSync(dirname(file!), { recursive: true });
+  writeFileSync(file!, '{}\n');
   store.recordTurn(t.id, { session_id: `s${t.id}`, ended_at: NOW - 20 * 60_000, session_cost_usd: 0 });
   // Mail held cold before #1603 dropped the cold hold, as relay() left it then.
   (runner as any).relays.mail(t.id, 'Taskmaster', 'hold this', undefined, true, 'ask');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -29,8 +30,8 @@ before(async () => {
   db.exec("CREATE TABLE tickets (id INTEGER, title TEXT); INSERT INTO tickets VALUES (1, 'secret plans'), (2, 'more');");
   db.close();
   // As server.ts signs a GET in: an app's path goes to the app's own host.
-  const headers = (path: string) => (path.startsWith('/apps/voice/') ? { 'x-forwarded-host': 'voice.apps.test', cookie: 'cc_app=abc' } : { cookie: 'cc_session=abc' });
-  env = { base: `http://127.0.0.1:${(srv.address() as any).port}`, headers, dbPath: join(root, 'c.db'), timeoutMs: 1000 };
+  const headers = (path: string): Record<string, string> => (path.startsWith('/apps/voice/') ? { 'x-forwarded-host': 'voice.apps.test', cookie: 'cc_app=abc' } : { cookie: 'cc_session=abc' });
+  env = { base: `http://127.0.0.1:${(srv.address() as AddressInfo).port}`, headers, dbPath: join(root, 'c.db'), timeoutMs: 1000 };
 });
 after(() => {
   srv.closeAllConnections();
@@ -116,7 +117,7 @@ function probes(outcome: Outcome['result'] | (() => Outcome), opts: { live?: boo
       updateTicket: (_id, f) => Object.assign(ticket, f),
     },
     runner: {
-      emit: (_id, _kind, data: any) => notes.push(data.text),
+      emit: (_id, _kind, data: { text: string }) => notes.push(data.text),
       send: (_id, _from, text) => sent.push(text),
       close: async (_id, text) => {
         ticket.status = 'closed';

@@ -58,8 +58,8 @@ function scheme(msg: Record<string, number>, idleMs = 0) {
     store.setTicketDir(t.id, cwd, null);
     store.updateTicket(t.id, { session_id: `s${t.id}`, status: 'idle' });
     const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, cwd, `s${t.id}`);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, '{}\n');
+    mkdirSync(dirname(file!), { recursive: true });
+    writeFileSync(file!, '{}\n');
     store.recordTurn(t.id, { session_id: `s${t.id}`, ended_at: NOW - idle, session_cost_usd: 0 });
     return store.getTicket(t.id)!;
   };

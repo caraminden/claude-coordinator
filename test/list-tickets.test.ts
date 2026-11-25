@@ -8,6 +8,10 @@ import { Contraptions } from '../src/contraptions.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, type Booted, stopProcs, tempRoot, zoneDay } from './helpers.ts';
 import { agentEnv, mcpOnce } from './mcp-agent.ts';
+import { json } from './typed.ts';
+
+/** A line of a scheme's minion list, as these tests read it. */
+type Line = { id: number; title: string; open_cards: { kind: string; what: string }[] };
 
 // A minion lists its own scheme's minions, read-only (#143): list_tickets through the real MCP server,
 // and the route behind it, which gives a minion only the line's fields and never another scheme.
@@ -93,8 +97,8 @@ test('a minion still cannot read another minion', async () => {
 test("the route gives a minion only the line's fields, and refuses another scheme", async () => {
   const res = await get(`/api/projects/${A.id}/tickets`, M2.id);
   assert.equal(res.status, 200);
-  const { tickets } = await res.json();
-  assert.deepEqual(tickets.map((t: any) => t.title).sort(), ['Asker', 'Sibling']);
+  const { tickets } = await json<{ tickets: Line[] }>(res);
+  assert.deepEqual(tickets.map((t) => t.title).sort(), ['Asker', 'Sibling']);
   assert.deepEqual(Object.keys(tickets[0]).sort(), ['branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'open_cards', 'parent', 'plugin_dirs', 'properties', 'queued', 'state', 'status', 'title', 'workflow']);
   const cross = await get(`/api/projects/${B.id}/tickets`, M1.id);
   assert.equal(cross.status, 403);
@@ -104,7 +108,7 @@ test("the route gives a minion only the line's fields, and refuses another schem
 test("the scheme's list counts an open minion's steps and leaves a dismissed one's history unread (#527)", async () => {
   const { status, data: scheme } = await srv.call(`/api/projects/${A.id}`);
   assert.equal(status, 200);
-  const by = (title: string) => scheme.tickets.find((t: any) => t.title === title);
+  const by = (title: string) => scheme.tickets.find((t: Line) => t.title === title);
   assert.deepEqual(by('Sibling').steps, { done: 0, total: 1 });
   assert.equal(by('Dismissed one').steps, null, 'its row shows no steps, so its events are not replayed for the list');
   assert.equal(by('Sibling').pending_card_at, CARD.created_at);
@@ -117,13 +121,13 @@ test('a question card asked with kind merge reads as a ship card on the list; an
   const asked = await tool('ask_question', { questions: q, kind: 'merge' });
   assert.equal(asked.error, false, asked.text);
   const { data: scheme } = await srv.call(`/api/projects/${A.id}`);
-  const cards = scheme.tickets.find((t: any) => t.title === 'Asker').open_cards;
+  const cards = scheme.tickets.find((t: Line) => t.title === 'Asker').open_cards;
   assert.deepEqual(
-    cards.map((c: any) => [c.kind, c.what]),
+    cards.map((c: { kind: string; what: string }) => [c.kind, c.what]),
     [['question', 'ship']],
   );
   assert.deepEqual(
-    scheme.tickets.find((t: any) => t.title === 'Sibling').open_cards.map((c: any) => c.what),
+    scheme.tickets.find((t: Line) => t.title === 'Sibling').open_cards.map((c: { kind: string; what: string }) => c.what),
     ['question'],
     'a plain question stays a question',
   );
@@ -137,7 +141,7 @@ test('a question card asked with kind merge reads as a ship card on the list; an
   }
   const { data: after } = await srv.call(`/api/projects/${A.id}`);
   assert.deepEqual(
-    after.tickets.find((t: any) => t.id === M1.id).open_cards.map((c: any) => c.what),
+    after.tickets.find((t: Line) => t.id === M1.id).open_cards.map((c: { kind: string; what: string }) => c.what),
     ['ship', 'ship', 'ship'],
   );
 });
@@ -155,6 +159,6 @@ test("a feeder's go card says merge, a build owner's and a plain minion's say sh
     assert.equal(r.status, 201, await r.text());
   }
   const { data: scheme } = await srv.call(`/api/projects/${C.id}`);
-  const what = (title: string) => scheme.tickets.find((t: any) => t.title === title).open_cards.map((c: any) => c.what);
+  const what = (title: string) => scheme.tickets.find((t: Line) => t.title === title).open_cards.map((c: { kind: string; what: string }) => c.what);
   assert.deepEqual([what('Feeder'), what('Owner'), what('Plain')], [['merge'], ['ship'], ['ship']]);
 });

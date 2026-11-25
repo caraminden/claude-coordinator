@@ -7,10 +7,13 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
+import type { MachineJob } from '../src/db-rows.ts';
 import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, notTaken, pacificClock, STARTING_TIMEOUT_S, type JobKind } from '../src/machine-jobs.ts';
 import { writeOffThread } from '../src/db-writer.ts';
+import { thrown } from '../src/thrown.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, zoneLabel, type Booted } from './helpers.ts';
+import { fake } from './typed.ts';
 
 // Jobs on a person's machine (#857, shared/project/specs/desktop-gpu-jobs.md): the real server, a stand-in `claude -p`
 // that records each turn, and a fake machine agent on the real SSE stream that records the job messages it is sent.
@@ -52,8 +55,8 @@ const KEY = (name: string) => readFileSync(join(data, 'contraptions', name, 'con
 
 let base = '';
 const cookies: Record<string, string> = {};
-let ticket: any;
-let box: any;
+let ticket: { id: number; number: number; status: string };
+let box: { id: number; owner_id: number };
 let boxToken = '';
 let agent: Agent;
 const shared = projectSharedDir(data, scheme.id);
@@ -76,13 +79,16 @@ const live = () =>
     .filter((t) => t.token.startsWith(`${ticket.id}.`))
     .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
-const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
+/** A chat event's data, as the tests read the go card and the job card. */
+type EventData = { id: string; job: number; stage: string; to: string; questions: { question: string; options: { label: string }[] }[]; recipe: { kind: { image: string }; inputs: unknown[]; limit_s: number } };
+const events = async (kind: string): Promise<EventData[]> => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: { kind: string }) => e.kind === kind).map((e: { data: string }) => JSON.parse(e.data) as EventData);
 const job = (id: number) => call('Josh', `/api/jobs/${id}`);
 
 /** A fake machine agent: its stream's messages, and its own calls with the machine's key. */
+type AgentJob = { type: string; id: number; kind: unknown; limit_s: number; inputs: { name: string }[]; input_token: string };
 interface Agent {
-  msgs: any[];
-  jobs(type?: string): any[];
+  msgs: { hello?: unknown; job?: AgentJob }[];
+  jobs(type?: string): AgentJob[];
   close(): void;
   post(path: string, body: unknown): Promise<Response>;
 }
@@ -90,11 +96,11 @@ async function connect(token: string, info: object): Promise<Agent> {
   const ctrl = new AbortController();
   const res = await fetch(`${base}/api/machines/connect?v=2&host=fake`, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
   assert.equal(res.status, 200);
-  const msgs: any[] = [];
+  const msgs: Agent['msgs'] = [];
   void (async () => {
     const dec = new TextDecoder();
     let buf = '';
-    for await (const chunk of res.body as any) {
+    for await (const chunk of res.body!) {
       buf += dec.decode(chunk, { stream: true });
       for (let i; (i = buf.indexOf('\n\n')) >= 0; buf = buf.slice(i + 2)) {
         const line = buf
@@ -107,7 +113,7 @@ async function connect(token: string, info: object): Promise<Agent> {
   })().catch(() => {});
   await until('the hello', () => msgs.some((m) => m.hello));
   const post = (path: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const a: Agent = { msgs, jobs: (type) => msgs.filter((m) => m.job && (!type || m.job.type === type)).map((m) => m.job), close: () => ctrl.abort(), post };
+  const a: Agent = { msgs, jobs: (type) => msgs.filter((m) => m.job && (!type || m.job.type === type)).map((m) => m.job!), close: () => ctrl.abort(), post };
   agents.push(a);
   assert.equal((await post('/api/machines/info', { v: 2, found: [], workspaces: [], ...info })).status, 202);
   return a;
@@ -191,16 +197,16 @@ test('only a minion whose scheme has a machine with a jobs block gets the job to
 test("no job.start without its owner's go: someone else's answer is refused, the owner's starts it", async () => {
   const j = await queue({ inputs: [join(shared, 'chapter.wav')] });
   assert.equal(j.state, 'needs-go');
-  const card = (await events('question')).find((q) => q.job === j.id);
+  const card = (await events('question')).find((q) => q.job === j.id)!;
   assert.equal(card.to, 'Josh', "the card is the owner's");
   assert.deepEqual(
-    card.questions[0].options.map((o: any) => o.label),
+    card.questions[0].options.map((o) => o.label),
     ['Run in job hours', 'Run now', 'Always allow this kind', 'No'],
   );
   assert.match(card.questions[0].question, /whisperx.*josh-gpu[\s\S]*Reads models; GPU yes; network no; limit 2 h[\s\S]*chapter\.wav/);
   // The live job card sits in the chat right after the go card, and the view says whose go it needs (#859).
   const chat = await call('Cara', `/api/tickets/${ticket.id}/events?after=0`);
-  const at = (kind: string) => chat.findIndex((e: any) => e.kind === kind && JSON.parse(e.data).job === j.id);
+  const at = (kind: string) => chat.findIndex((e: { kind: string; data: string }) => e.kind === kind && JSON.parse(e.data).job === j.id);
   assert.ok(at('job') > at('question') && at('question') >= 0, 'a job event follows the go card');
   assert.equal(j.decider_id, box.owner_id);
   assert.deepEqual([card.recipe.kind.image, card.recipe.inputs, card.recipe.limit_s], [IMAGE('a'), [{ name: 'chapter.wav', size: 15 }], 7200], 'the card carries the recipe whole');
@@ -220,7 +226,7 @@ test("no job.start without its owner's go: someone else's answer is refused, the
   );
   assert.deepEqual(agent.jobs('job.start'), [], 'nothing starts without a go');
   await answer('Josh', j.id, 'Run in job hours');
-  const [start] = await until('job.start', () => agent.jobs('job.start').length && agent.jobs('job.start'));
+  const [start] = (await until('job.start', () => agent.jobs('job.start').length && agent.jobs('job.start'))) as AgentJob[];
   assert.equal(start.id, j.id);
   assert.deepEqual(start.kind, { name: 'whisperx', image: IMAGE('a'), command: ['align', '/in'], reads: ['models'], gpu: true, network: false, resumable: true });
   assert.equal(start.limit_s, 7200);
@@ -240,7 +246,7 @@ test("no job.start without its owner's go: someone else's answer is refused, the
 });
 
 test('one job at a time: a second one with its go waits behind the first', async () => {
-  const [running] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: any) => x.state === 'running');
+  const [running] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: { state: string }) => x.state === 'running');
   const j = await queue({});
   await call('Josh', `/api/jobs/${j.id}/go`, { choice: 'hours' });
   const view = await job(j.id);
@@ -299,7 +305,7 @@ test('"Always allow" is a standing go for job hours; a changed digest asks again
 });
 
 test("only the owner (or an admin) pauses, resumes and stops; paused time is the owner's", async () => {
-  const [j] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: any) => x.state === 'starting');
+  const [j] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: { state: string }) => x.state === 'starting');
   await state(j.id, 'running');
   for (const action of ['pause', 'resume', 'stop']) await assert.rejects(call('Dana', `/api/jobs/${j.id}/${action}`, {}), /403/);
   await assert.rejects(
@@ -336,7 +342,7 @@ test("results upload under the job's and the scheme's caps", async () => {
         resolve(res.statusCode!);
         req.destroy();
       });
-      req.on('error', (err: any) => (err.code === 'ECONNRESET' ? undefined : reject(err)));
+      req.on('error', (err) => (thrown(err).code === 'ECONNRESET' ? undefined : reject(err)));
       if (body !== null) req.end(body);
       else req.flushHeaders();
     });
@@ -368,7 +374,7 @@ test('on reconnect the server reconciles: a lost job failed, one it ended is tol
   await until('job.start', () => agent.jobs('job.start').some((s) => s.id === j.id));
   await state(j.id, 'running');
   agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: { id: number }) => m.id === box.id).status !== 'ready');
   // It comes back knowing nothing of the running job, and still running an old ended one.
   agent = await wakes(() => connect(boxToken, { ...OFFER, known_jobs: [{ id: 1, state: 'running' }] }));
   assert.equal((await job(j.id)).state, 'failed');
@@ -379,16 +385,16 @@ test('on reconnect the server reconciles: a lost job failed, one it ended is tol
   await until('job.start', () => agent.jobs('job.start').some((s) => s.id === k.id));
   await state(k.id, 'running');
   agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: { id: number }) => m.id === box.id).status !== 'ready');
   // An agent from before MA1 lost its block and names no jobs at all: that says nothing about the job, which stays.
   agent = await connect(boxToken, {});
   assert.equal((await job(k.id)).state, 'running');
   agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: { id: number }) => m.id === box.id).status !== 'ready');
   agent = await wakes(() => connect(boxToken, { known_jobs: [] }));
   assert.equal((await job(k.id)).error, 'the machine restarted');
   agent.close();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: any) => m.id === box.id).status !== 'ready');
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((m: { id: number }) => m.id === box.id).status !== 'ready');
   agent = await connect(boxToken, OFFER);
 });
 
@@ -451,7 +457,7 @@ else if (cmd === 'wait') { const t = setInterval(() => { const s = read(); if (s
   // The agent restarts (an update, a reboot of WSL): it finds the job on disk and names it on connect, so the job
   // now started before this connection, the case the server's "lost" pass looks at.
   proc.kill();
-  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((x: any) => x.id === m.id).status !== 'ready');
+  await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((x: { id: number }) => x.id === m.id).status !== 'ready');
   store.updateMachine(m.id, { jobs: null });
   proc = startAgent();
   await until(
@@ -526,11 +532,11 @@ test("a contraption queues on its home scheme's machine, and can't read or stop 
 
 test('the owner removes an always-allowed kind: the next one asks again; nobody else may (#859)', async () => {
   const { kinds } = await call('Josh', `/api/machines/${box.id}/jobs`);
-  const hash = kinds.find((k: any) => k.name === 'whisperx').hash;
+  const hash = kinds.find((k: { name: string }) => k.name === 'whisperx').hash;
   await assert.rejects(call('Dana', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /403/);
   assert.deepEqual(await call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), { ok: true });
   assert.equal(
-    (await call('Josh', `/api/machines/${box.id}/jobs`)).kinds.some((k: any) => k.hash === hash),
+    (await call('Josh', `/api/machines/${box.id}/jobs`)).kinds.some((k: { hash: string }) => k.hash === hash),
     false,
   );
   await assert.rejects(call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /404/);
@@ -549,8 +555,8 @@ test('on the clock: hours pause and resume a job, a late "running" keeps the pau
   const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
   store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
   let t = Date.now();
-  const sent: any[] = [];
-  const cards: any[] = [];
+  const sent: { type: string; id?: number }[] = [];
+  const cards: { questions: { question: string }[] }[] = [];
   const jobs = new MachineJobs({
     store,
     send: (_m, msg) => (sent.push(msg), true),
@@ -568,7 +574,7 @@ test('on the clock: hours pause and resume a job, a late "running" keeps the pau
     const now = pacificClock(t).minutes;
     store.updateMachine(id0, { job_settings: JSON.stringify({ ...DEFAULT_SETTINGS, ...(open ? { start: hhmm(now - 60), end: hhmm(now + 120) } : { start: hhmm(now + 120), end: hhmm(now + 180) }) }) });
   };
-  const last = () => sent.at(-1);
+  const last = () => sent.at(-1)!;
   const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: true, max_limit_s: 3600 };
   setHours(true);
   const j = jobs.queue({ machine: m(), projectId: p.id, ticketId: null, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'hours', reason: '' });
@@ -617,7 +623,7 @@ test('on the clock: hours pause and resume a job, a late "running" keeps the pau
 
   // A card's 500 characters: a long reason and command give way, never what it reads, GPU, network or the image.
   jobs.queue({ machine: m(), projectId: p.id, ticketId: null, contraptionId: null, askedBy: 'test', kind: { ...kind, command: ['python', 'x'.repeat(900)] }, inputs: [], limitS: 600, when: 'now', reason: 'r'.repeat(200) });
-  const q: string = cards.at(-1).questions[0].question;
+  const q: string = cards.at(-1)!.questions[0].question;
   assert.ok(q.length <= 500, `${q.length} characters`);
   assert.match(q, /Reads none of your folders; GPU yes; network no; limit 10 min/);
   assert.match(q, new RegExp(`Image docker\\.io/x/y@sha256:a{64}`));
@@ -670,18 +676,18 @@ test("with the DB writes behind on their worker, a job's card still moves for ea
 });
 
 test('the wake names results the server did not take, with where they are on the machine (MA3)', () => {
-  const job = {
+  const job = fake<MachineJob>({
     id: 7,
     outputs: JSON.stringify([
       { path: 'a.json', size: 1, uploaded: true },
       { path: 'huge.bin', size: 9, uploaded: false, why: 'HTTP 413: over the cap' },
     ]),
-  } as any;
+  });
   const line = notTaken(job, 'gpu-box');
   assert.match(line, /huge\.bin \(HTTP 413: over the cap\)/);
   assert.match(line, /gpu-box, in job folder 7\/out\//);
   assert.doesNotMatch(line, /a\.json/);
-  assert.equal(notTaken({ id: 8, outputs: JSON.stringify([{ path: 'a', size: 1, uploaded: true }]) } as any, 'gpu-box'), '');
+  assert.equal(notTaken(fake<MachineJob>({ id: 8, outputs: JSON.stringify([{ path: 'a', size: 1, uploaded: true }]) }), 'gpu-box'), '');
 });
 
 test('a failed pause on the machine shows as running with why; a job silent in "starting" fails and frees the queue (MA2, MA8)', () => {
@@ -694,7 +700,7 @@ test('a failed pause on the machine shows as running with why; a job silent in "
   const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
   store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
   let t = Date.now();
-  const sent: any[] = [];
+  const sent: { type: string; id?: number }[] = [];
   const woke: string[] = [];
   const jobs = new MachineJobs({
     store,
@@ -710,7 +716,7 @@ test('a failed pause on the machine shows as running with why; a job silent in "
   });
   const m = () => store.getMachine(id0)!;
   const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: false, max_limit_s: 3600 };
-  const ticket = store.createTicket({ project_id: p.id, title: 'asker', permission_mode: 'default', created_by: 'owner' } as any).id;
+  const ticket = store.createTicket({ project_id: p.id, title: 'asker', permission_mode: 'default', created_by: 'owner' }).id;
   const queue = () => jobs.queue({ machine: m(), projectId: p.id, ticketId: ticket, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'now', reason: 'test' });
   const a = queue();
   jobs.decide(a.id, 'now', who);

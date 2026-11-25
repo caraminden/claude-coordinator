@@ -86,8 +86,8 @@ test('the indexer files the handoff when its minion closes, and search still fin
   minion('thing', `Your brief is ${shared}/handoffs/qp-thing.md`, 'closed');
   await idx.run();
   assert.ok(existsSync(join(shared, 'handoffs/shipped/qp-thing.md')));
-  const hit = (store.minionIndex.search(project, 'zebrafish') as any[]).find((h) => h.kind === 'handoff');
-  assert.equal(hit.name, 'shipped/qp-thing.md');
+  const hit = store.minionIndex.search(project, 'zebrafish').find((h) => h.kind === 'handoff');
+  assert.equal(hit!.name, 'shipped/qp-thing.md');
 });
 
 test('a name clash in shipped/ never overwrites, and only a top line marks not picked', async () => {
@@ -112,7 +112,7 @@ test('a start naming a moved handoff makes no second ideas row, and reconcile do
   await store.ideas.sync(project, shared);
   reconcileMoved(store, dir, project);
   await store.ideas.sync(project, shared);
-  const rows = store.db.prepare('SELECT card, handoff, ticket_id FROM ideas WHERE project_id = ?').all(project) as any[];
+  const rows = store.db.prepare('SELECT card, handoff, ticket_id FROM ideas WHERE project_id = ?').all(project) as { card: string; handoff: string; ticket_id: number }[];
   assert.equal(rows.length, 1, JSON.stringify(rows));
   assert.equal(rows[0].card, 'handoffs/shipped/x.md');
   assert.equal(rows[0].ticket_id, t.id);
@@ -131,7 +131,7 @@ test('relocate combines a loose row with its shipped twin, the twin gains what o
   rmSync(join(shared, 'handoffs/a.md'));
   rmSync(join(shared, 'handoffs/b.md'));
   reconcileMoved(store, dir, project);
-  const rows = store.db.prepare('SELECT card, pick, decided_by FROM ideas WHERE project_id = ? ORDER BY card').all(project) as any[];
+  const rows = store.db.prepare('SELECT card, pick, decided_by FROM ideas WHERE project_id = ? ORDER BY card').all(project) as { card: string; pick: string; decided_by: string }[];
   assert.deepEqual(
     rows.map((r) => [r.card, r.pick, r.decided_by]),
     [

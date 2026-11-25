@@ -101,7 +101,7 @@ async function observe(base: string, key: string, p: Probe) {
   try {
     body = JSON.parse(text);
   } catch {}
-  const keysOf = (v: any): unknown => (Array.isArray(v) ? v.slice(0, 1).map(keysOf) : v && typeof v === 'object' ? Object.keys(v).sort() : typeof v);
+  const keysOf = (v: unknown): unknown => (Array.isArray(v) ? v.slice(0, 1).map(keysOf) : v && typeof v === 'object' ? Object.keys(v).sort() : typeof v);
   return { status: res.status, keys: keysOf(body) };
 }
 

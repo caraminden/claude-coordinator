@@ -40,7 +40,7 @@ function fakeGithub(users: Record<string, { login: string; id: number; name: str
     calls.push({ url, init });
     if (url.endsWith('/login/oauth/access_token')) return Response.json({ access_token: token, scope });
     if (url.endsWith('/user')) {
-      const t = String((init?.headers as any)?.Authorization ?? '').replace('Bearer ', '');
+      const t = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '').replace('Bearer ', '');
       return users[t] ? Response.json(users[t]) : new Response('', { status: 401 });
     }
     return new Response(null, { status: 204 });
@@ -177,7 +177,7 @@ test('a limited link goes through the GitHub App with no scope, is kept as limit
   await link.unlink(rachel.id);
   const revoke = gh.calls.find((c) => c.url.includes('/applications/'))!;
   assert.ok(revoke.url.endsWith('/applications/appid/grant'));
-  assert.equal((revoke.init!.headers as any).Authorization, `Basic ${Buffer.from('appid:appsecret').toString('base64')}`);
+  assert.equal((revoke.init!.headers as Record<string, string>).Authorization, `Basic ${Buffer.from('appid:appsecret').toString('base64')}`);
   assert.equal(creds.get(rachel.id, 'github'), null);
 });
 

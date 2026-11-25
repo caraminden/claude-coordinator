@@ -57,10 +57,12 @@ export function frozenCached(pid: number): { cg: string } | null {
   return cg ? { cg } : null;
 }
 
-/** Process `pid`'s frozen cgroup, or null while it isn't in one; remembered for frozenCached. */
-export async function frozenCgroup(pid: number): Promise<{ cg: string } | null> {
+/** Process `pid`'s frozen cgroup, or null while it isn't in one (or doesn't run `runs`); remembered for frozenCached. */
+export async function frozenCgroup(pid: number, runs?: string): Promise<{ cg: string } | null> {
   let cg: string | null = null;
   try {
+    // A pid from another container's job means nothing here (tools/citadel-heavy): it must be running `runs`, or it isn't ours.
+    if (runs && !(await readFile(`${procDir()}/${pid}/cmdline`, 'utf8')).includes(runs)) throw new Error('not ours');
     cg = cgroupOf(await readFile(`${procDir()}/${pid}/cgroup`, 'utf8'));
     if (cg && !frozenIn(await readFile(`${cgroupDir()}${cg}/cgroup.events`, 'utf8'))) cg = null;
   } catch {

@@ -545,7 +545,7 @@ export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile:
   );
   await Promise.all(
     [...holders, ...waiters].map(async (j) => {
-      const f = j.pid ? await frozenCgroup(j.pid) : null;
+      const f = j.pid ? await frozenCgroup(j.pid, 'citadel-heavy') : null;
       if (f) j.frozen = noteFrozen(j.who, f.cg);
     }),
   );

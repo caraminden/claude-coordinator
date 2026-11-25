@@ -899,6 +899,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/line": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/login": {
   "anon": "400 Login is required",
   "person": "400 Login is required",
@@ -2492,6 +2502,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/projects/:p/urgent": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a scheme's Taskmaster marks its minions Urgent",
+  "member": "403 Only a scheme's Taskmaster marks its minions Urgent",
+  "outsider": "403 Only a scheme's Taskmaster marks its minions Urgent",
+  "tmA": "404 No such minion in this scheme",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/views": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -3582,6 +3602,16 @@
   "m1": "403",
   "m2": "403"
  },
+ "PUT /api/tickets/:minion1/urgent": {
+  "anon": "401 Not logged in",
+  "person": "400 on is true or false",
+  "member": "400 on is true or false",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people mark a minion Urgent here; a Taskmaster has mark_urgent",
+  "tmB": "403 Only people mark a minion Urgent here; a Taskmaster has mark_urgent",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/verdict": {
   "anon": "401 Not logged in",
   "person": "400 verdict must be approve, revise or reject",
@@ -4441,6 +4471,16 @@
   "tmB": "403",
   "m1": "403",
   "m2": "403"
+ },
+ "PUT /api/tickets/:taskmasterA/urgent": {
+  "anon": "401 Not logged in",
+  "person": "400 on is true or false",
+  "member": "400 on is true or false",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people mark a minion Urgent here; a Taskmaster has mark_urgent",
+  "tmB": "403 Only people mark a minion Urgent here; a Taskmaster has mark_urgent",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:taskmasterA/verdict": {
   "anon": "401 Not logged in",

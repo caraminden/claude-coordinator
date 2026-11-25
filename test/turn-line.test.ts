@@ -478,6 +478,31 @@ test("Auto moves the size and lets turns through as it grows; a person's number 
   runner.turnLine.setLimits({ min: null }, 'Cara');
 });
 
+// #1888. Josh, 2026-11-24: 'mark it as "urgent" which would just push it to the top of the queue when it wants a worker'.
+test('an Urgent minion gets the next worker, ahead of every share and of an own message, and its tag goes when it closes', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, own, mine, urgent] = [minion(), minion(), minion(false, 'Josh'), minion()];
+  say(a);
+  await started(a);
+  say(own);
+  say(mine, 'hello', 'Josh');
+  store.updateTicket(urgent, { person_id: cara.id });
+  runner.send(urgent, 'Citadel', 'CI passed');
+  assert.deepEqual(runner.turnLine.order(), [mine, own, urgent], 'automatic work, in the share with a worker already');
+  runner.urgent.set(urgent, { kind: 'person', by: 'Josh' });
+  assert.deepEqual(runner.turnLine.order(), [urgent, mine, own], 'the press shows at once');
+  assert.equal(runner.live(store.getTicket(urgent)!).urgent?.by, 'Josh');
+  end(a);
+  await started(urgent);
+  await settle();
+  assert.deepEqual([turnsOf(own).length, turnsOf(mine).length], [0, 0]);
+  end(urgent);
+  await idle(urgent);
+  assert.ok(runner.urgent.get(urgent), 'it stays Urgent between its turns');
+  await runner.close(urgent, 'Dismissed.');
+  assert.equal(runner.urgent.get(urgent), null);
+});
+
 /** A call to the Workers tile's route, as Josh. */
 async function workers(method: 'GET' | 'PUT', body?: unknown) {
   const route = workerRoutes.find((r) => r.method === method)!;

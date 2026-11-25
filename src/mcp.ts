@@ -1243,6 +1243,22 @@ const ORDER_SHIP_LINE = {
   },
 };
 
+/** A Taskmaster marks a minion of its scheme Urgent (#1888, src/urgent.ts), with a reason. */
+const MARK_URGENT = {
+  name: 'mark_urgent',
+  description:
+    "Mark one minion of this scheme Urgent: when it wants a worker it goes ahead of everyone's share, after the minions already Urgent, until it ships or closes or someone takes it off. on: false takes off your own or the server's mark. Your reason shows beside it. It never overrides a person: a minion a person marked, or took Urgent off, stays as they left it. It doesn't move the minion's ship (order_ship_line does).",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      minion: { type: 'integer', description: 'The minion number.' },
+      on: { type: 'boolean', description: 'false takes Urgent off; default true.' },
+      reason: { type: 'string', description: 'One line on why, at most 200 characters; needed to mark one.' },
+    },
+    required: ['minion'],
+  },
+};
+
 /** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
 const PUBLISH_DESKTOP = {
   name: 'publish_desktop',
@@ -2388,6 +2404,8 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
     case 'order_ship_line':
       return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/ship-line`, { ship: args.ship, before: args.before, reason: args.reason })).said;
+    case 'mark_urgent':
+      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/urgent`, { minion: args.minion, on: args.on, reason: args.reason })).said;
     case 'publish_release':
       return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
@@ -2815,8 +2833,8 @@ function toolListAll() {
   const audit = C().HOME_CONTRAPTIONS.length && (C().ROLE !== 'thread' || C().APP_TURNS_RUN) ? [CONTRAPTION_TURNS()] : [];
   if (C().ROLE !== 'thread')
     return C().APP_INSTRUCTIONS
-      ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host]
-      : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
+      ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, MARK_URGENT, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host]
+      : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, MARK_URGENT, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
   return [
     ...THREAD_TOOLS(),
     ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []),

@@ -388,7 +388,7 @@ export class GithubWatcher {
   private busy = false;
   private timer: Job | null = null;
   /** A ticket's PR was seen merged (or already merged at first look): its scheme's main can catch up (#208). */
-  onMerged: (repoDir: string) => void = () => {};
+  onMerged: (repoDir: string, ticket: Ticket, base: string | undefined) => void = () => {};
   /** Red CI on a minion's PR, once per head (new, not the first look's baseline): a failed ship in a PR scheme (#1139). */
   onCiFailed: (ticket: Ticket) => void = () => {};
   /** The GitHub login a scheme's PRs are read as (#321: its owner's, for a private repo); undefined is the box's. */
@@ -532,7 +532,7 @@ export class GithubWatcher {
       fyi = quiet = false;
     }
     if (messages.length) this.send(ticket.id, messages.join('\n\n'), fyi, quiet);
-    if (pr.state === 'MERGED' && handled.some((k) => k.startsWith('state:'))) this.onMerged(repoDir);
+    if (pr.state === 'MERGED' && handled.some((k) => k.startsWith('state:'))) this.onMerged(repoDir, ticket, pr.baseRef);
 
     const open = pr.state === 'OPEN';
     const last = JSON.stringify([pr.state, pr.draft, pr.headSha, pr.checks.map((c) => c.status), pr.remarks.length]);

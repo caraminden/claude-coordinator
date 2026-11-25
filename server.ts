@@ -129,6 +129,7 @@ import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { MinionIndexer } from './src/minion-index.ts';
 import { setLabels } from './src/routes/tickets.ts';
+import { redFixes, UrgentFixes } from './src/urgent-fixes.ts';
 import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
@@ -1205,6 +1206,19 @@ const apkBuilds = new ApkBuilds({
   },
   tell: (row, text) => row.home_scheme != null && tellHome(row.home_scheme, text),
 });
+// A red main's fix and a failed deploy's minion go Urgent by themselves (#1888).
+const urgentFixes = new UrgentFixes({
+  store,
+  urgent: runner.urgent,
+  from: APP_NAME,
+  chains: () => waiters.chains(),
+  reds: () =>
+    redFixes(
+      store,
+      (p, mark) => ciHealth.fixTicket(p, mark),
+      (id) => fastMode.view(id).reds,
+    ),
+});
 services.onDeploy = (view) => {
   if (view.finished_at === null) return releases.poll();
   // Its frames open in Citadel catch up to the new version (#1690, public/frames.js appDeployed).
@@ -1216,6 +1230,9 @@ services.onDeploy = (view) => {
     .catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err))
     .finally(() => void releases.refresh());
   const home = store.getContraption(view.name)?.home_scheme;
+  const deployer = /^#(\d+)$/.exec(view.by);
+  const minion = home != null && deployer ? store.getTicketByNumber(home, Number(deployer[1])) : undefined;
+  urgentFixes.deployEnded(view.name, minion?.id ?? null, view.state === 'deployed', `Its deploy of ${view.name} ${view.state === 'rolled back' ? 'was rolled back' : 'failed'}`);
   if (home != null) rollback.deployEnded(home, `app:${view.name}`, view.state === 'deployed', view.to, view.said.at(-1) ?? view.state);
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
@@ -1753,6 +1770,7 @@ const fastMode = new FastMode({
   },
 });
 if (!BOOT_CHECK && !PREVIEW) every('fast mode', 30_000, () => fastMode.tick());
+if (!BOOT_CHECK && !PREVIEW) every('urgent fixes', 60_000, () => urgentFixes.tick());
 // A flake fix has to prove it held (#1120, src/flake-fixes.ts): the retro log's flake lines counted, the third sighting in 7 days
 // starting one minion, and a fix held after 50 clean runs on the desktop. The minion runs for the scheme's owner, like a schedule's.
 const flakeFixes = new FlakeFixes({
@@ -2069,7 +2087,11 @@ if (!BOOT_CHECK && !PREVIEW) errorDigest.start();
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 // A merged PR catches its scheme's main up, and chains and commit waiters look again.
-github.onMerged = (repoDir) => catchUp(repoDir);
+github.onMerged = (repoDir, ticket, base) => {
+  // Into a build branch isn't shipped yet.
+  if (!base?.startsWith('build/')) runner.urgent.done(ticket.id);
+  catchUp(repoDir);
+};
 
 // Each CI runner token handed out (#320) is told in the scheme Taskmaster's chat, without waking it.
 // One fetched by a runner agent job's scripts goes under that job's note instead (#339).
@@ -2249,6 +2271,7 @@ const app: App = {
   autoDeploy,
   rollback,
   fastMode,
+  urgentFixes,
   waits,
   apkBuilds,
   desktop,

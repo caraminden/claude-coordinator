@@ -10,7 +10,7 @@ import { systemPrompt, turnContext } from '../src/prompts.ts';
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
 const BUDGET = {
   minion: 34_900 /* +250 on 2026-11-22 for the callers-and-twins and no-multi-file-dump lines (#1644);  -1,096 on 2026-11-22: the citadel-heavy line moved to the kit's heavy-nudge hook (#1577); +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5); -1,750 on 2026-11-22: seven lines moved to their homes (#1574) */,
-  taskmaster: 41_850 /* +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */,
+  taskmaster: 42_000 /* +150 on 2026-11-24 for the mark_urgent line (#1888); +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */,
 };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).

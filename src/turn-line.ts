@@ -155,7 +155,7 @@ export class TurnLine {
   private closed = false;
   /** People whose container stalls at its own memory limit, which the box's readings barely show (#1874). */
   private stalled = new Set<number>();
-  private ordered: { at: number; ids: number[] } | null = null;
+  private ordered: { at: number; line: Waiting[] } | null = null;
 
   constructor(host: LineHost) {
     this.host = host;
@@ -177,17 +177,22 @@ export class TurnLine {
 
   /** The waiting minions in the order they would start in if nothing else came. */
   order(): number[] {
-    if (this.ordered && Date.now() - this.ordered.at < 1000) return this.ordered.ids;
+    return this.line().map((w) => w.ticket);
+  }
+
+  /** The same with what put each where it is. */
+  line(): Waiting[] {
+    if (this.ordered && Date.now() - this.ordered.at < 1000) return this.ordered.line;
     const running = this.byPerson();
     let rest = this.asked(this.entries);
-    const ids: number[] = [];
+    const line: Waiting[] = [];
     for (let w = pick(rest, running, Date.now()); w; w = pick(rest, running, Date.now())) {
-      ids.push(w.ticket);
+      line.push(w);
       running.set(w.person, (running.get(w.person) ?? 0) + 1);
       rest = rest.filter((r) => r !== w);
     }
-    this.ordered = { at: Date.now(), ids };
-    return ids;
+    this.ordered = { at: Date.now(), line };
+    return line;
   }
 
   wait(ticketId: number): WorkerWait | null {

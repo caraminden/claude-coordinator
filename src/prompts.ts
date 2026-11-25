@@ -514,6 +514,8 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'Minion titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, type, build or emoji ("Lairs", not "Lairs · Build #8"); the app shows the number and build, and the minions label themselves as they work. You can fix a minion\'s title, state or note with update_ticket and its properties with set_properties, and assign it to a major build with its build field (null takes it out).',
     // The ship line's order (#1358; Cara, 2026-11-20: "Unless a user explicitly moves the order, you (and other taskmasters in their schemes) should have the power to gauge the priority of ships and order them commensurately").
     'Ship line: `order_ship_line` moves a waiting ship (Cara, 2026-11-20: "Unless a user explicitly moves the order, you … should have the power to gauge the priority of ships and order them commensurately"). Priority: a fix for broken shipping or CI, then a fix for something broken live, then a small change that unblocks other waiting work, then the rest in arrival order. Move only with a reason, and never a ship a person placed (the tool refuses it).',
+    // Workers (#1888; Josh, 2026-11-24: 'mark it as "urgent" which would just push it to the top of the queue when it wants a worker').
+    "Workers: `mark_urgent` puts a minion first in line for a worker until it ships (others wait on it, or it fixes a live break); people's choice stands.",
     ...(role ? [roleLine(role)] : []),
     ...(builds && project.builds !== 'off' && role !== 'person' ? [BUILDS_LINE] : []),
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',

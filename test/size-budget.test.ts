@@ -16,17 +16,17 @@ export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1604, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [
-    5556,
-    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868)',
+    5598,
+    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+42: facts for the order of the line and a keepalive in line, #1888)',
   ],
+  'src/mcp.ts': [2916, 'every MCP tool definition and handler; split by tool family is queued (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792) (+17: mark_urgent, #1888)'],
   'src/db.ts': [2903, 'schema, migrations and settings; its queries are moving to src/db/<area>.ts, a piece at a time (#1842)'],
-  'src/mcp.ts': [2899, 'every MCP tool definition and handler; split by tool family is queued (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792)'],
   'tools/land.sh': [2670, 'the ship script is one shell program; its steps share state and are pinned by tests'],
   'kit/skills/scheme-setup/templates/land.sh': [2879, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],
   'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],
   'src/routes/projects.ts': [2068, 'every /projects route; split by page is queued (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792)'],
   'src/tripwire.ts': [1830, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792)'],
-  'src/routes/tickets.ts': [1933, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792)'],
+  'src/routes/tickets.ts': [1936, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792) (+3: a hand-off and a deploy report move its place in line, #1888)'],
   'tools/dev-seeds.ts': [2104, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792)'],
 };
 

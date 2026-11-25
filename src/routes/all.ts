@@ -17,6 +17,7 @@ import { pushRoutes } from './push.ts';
 import { unitRoutes } from './units.ts';
 import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
+import { urgentRoutes } from './urgent.ts';
 import { workerRoutes } from './workers.ts';
 
 export const apiRoutes = [
@@ -38,4 +39,5 @@ export const apiRoutes = [
   ...contraptionRoutes,
   ...skillRoutes,
   ...workerRoutes,
+  ...urgentRoutes,
 ];

@@ -531,15 +531,20 @@ test("a PR seen merged catches its scheme's main up once, even at the first look
     async () => ({ pr: snapshot, self: 'cara' }),
   );
   const synced: string[] = [];
-  w.onMerged = (repoDir) => synced.push(repoDir);
+  let shipped: [number, string | undefined] | null = null;
+  w.onMerged = (repoDir, minion, base) => {
+    synced.push(repoDir);
+    shipped = [minion.id, base];
+  };
   await w.poll(t, root, 'o/r');
   snapshot = pr({ state: 'CLOSED', closedAt: T });
   await w.poll(t, root, 'o/r');
   assert.deepEqual(synced, []);
-  snapshot = pr({ number: 13, state: 'MERGED', closedAt: T, closedBy: 'josh' });
+  snapshot = pr({ number: 13, state: 'MERGED', closedAt: T, closedBy: 'josh', baseRef: 'main' });
   await w.poll(t, root, 'o/r');
   await w.poll(t, root, 'o/r');
   assert.deepEqual(synced, [root]);
+  assert.deepEqual(shipped, [t.id, 'main'], 'whose PR, and into what: its Urgent tag comes off (#1888)');
 });
 
 test("a scheme's PRs are read as the GitHub login it names (#321: its owner's, for a private repo)", async () => {

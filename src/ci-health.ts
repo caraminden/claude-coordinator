@@ -1071,7 +1071,7 @@ export class CiHealth {
     return c && c.project_id === p.id && c.number != null ? { number: c.number, closedAt: c.status === 'closed' ? c.updated_at : null, via: `shipped ${short(mark.fixer!.sha)} touching ${mark.fixer!.file}` } : null;
   }
   /** The red's named fix minion: only these are held open and re-run for (#1074); a credited fixer (mark.fixer) only touched the file. */
-  private fixTicket(p: Project, mark: RedMark): Ticket | null {
+  fixTicket(p: Project, mark: RedMark): Ticket | null {
     const held = mark.rerun ? this.store.getTicket(mark.rerun.ticket) : null;
     const heldOk = held && held.project_id === p.id && held.number != null ? held : null;
     // #1491: any red run of the streak, not only its first: a minion started later names the newest.

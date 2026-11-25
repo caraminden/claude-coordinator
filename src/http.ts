@@ -46,6 +46,7 @@ import type { Launchers } from './desktop-launcher.ts';
 import type { AutoDeploy } from './auto-deploy.ts';
 import type { Rollback } from './rollback.ts';
 import type { FastMode } from './fast-mode.ts';
+import type { UrgentFixes } from './urgent-fixes.ts';
 import type { Waits } from './waits.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
@@ -320,6 +321,8 @@ export interface App {
   rollback: Rollback;
   /** Fast mode's testing behind (src/fast-mode.ts, #1017). Absent in tests that build no server. */
   fastMode?: FastMode;
+  /** The server's own Urgent tags (#1888); absent in a test's app. */
+  urgentFixes?: UrgentFixes;
   /** What each minion waits on, the land line among them (src/waits.ts): the Releases page reorders the line through it (#1002). Absent in tests that build no server. */
   waits?: Waits;
   apkBuilds: ApkBuilds;

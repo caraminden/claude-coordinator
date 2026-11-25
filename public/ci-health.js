@@ -185,11 +185,11 @@ function lateBlock(s, late) {
   const listed = late.listed.map((f) => {
     const [lo, hi] = f.loads.map(Math.round);
     const why = `failed ${f.sightings} time${f.sightings === 1 ? '' : 's'} and passed alone, on ${f.branches.length} branches · load ${lo === hi ? lo : `${lo} to ${hi}`} · last ${ago(f.last)}`;
-    return hueRow({ hue: 'waiting', lead: String(f.branches.length) }, h('strong', { title: f.branches.join(', ') }, f.file), line(why), f.fixing ? line('being fixed by ', link(f.fixing)) : null);
+    return hueRow({ hue: 'waiting' }, h('strong', { title: f.branches.join(', ') }, f.file), line(why), f.fixing ? line('being fixed by ', link(f.fixing)) : null);
   });
   const alone = late.alone.map((f) => {
     const n = f.where.match(/^(?:ticket\/|#)(\d+)/)?.[1];
-    return hueRow({ hue: 'danger', lead: 'off' }, h('strong', {}, f.file), line('also failed alone, on ', n ? link(n) : f.where === 'main' ? 'main itself' : f.where, `, ${ago(f.failedAlone)}: it may be a real bug, so it runs with the rest`));
+    return hueRow({ hue: 'danger', meta: toneChip('danger', 'kept off') }, h('strong', {}, f.file), line('also failed alone, on ', n ? link(n) : f.where === 'main' ? 'main itself' : f.where, `, ${ago(f.failedAlone)}: it may be a real bug, so it runs with the rest`));
   });
   const [row] = settingsRow(
     {

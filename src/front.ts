@@ -431,6 +431,8 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const readers = new Set<Reader>();
   const asks = new Set<Ask>();
   let nextId = 1;
+  // A reader has been ready since this process started.
+  let up = false;
   let failures = 0;
   let stopping = false;
   let released = false; // a warm handover's: every request goes to the main thread, which passes it on
@@ -469,7 +471,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
       r.heard = Date.now();
       r.late = r.silent = false;
       if (m.ready) {
-        r.ready = true;
+        r.ready = up = true;
         started_up();
         failures = 0;
         if (again) console.log('Reader thread started again: ready.');
@@ -565,10 +567,17 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     r.open.set(id, { a, done });
     r.worker.postMessage({ id, method: a.req.method, url: a.req.url, headers: a.req.headers });
   };
+  // After a start on a busy box the first reader takes longer than that to load: a read waits for it (or, once none can be
+  // hoped for, goes to the main thread), since callers that aren't the page don't ask again.
+  const tooLong = (a: Ask) => {
+    if (up) return settle(a, () => busy(a.res));
+    a.timer = setTimeout(() => tooLong(a), answerMs);
+    give(a);
+  };
   const ask = (req: IncomingMessage, res: ServerResponse) => {
     // So every change main posted reaches the reader before the request does.
     if (!caughtUp()) return pass(req, res);
-    const a: Ask = { req, res, asked: new Set(), timer: setTimeout(() => settle(a, () => busy(res)), 4 * answerMs) };
+    const a: Ask = { req, res, asked: new Set(), timer: setTimeout(() => tooLong(a), 4 * answerMs) };
     asks.add(a);
     res.once('close', () => settle(a, () => {}));
     give(a);

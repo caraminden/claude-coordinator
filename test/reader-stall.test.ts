@@ -121,6 +121,26 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
   }
 });
 
+test('a page read before the first reader is up waits for it past its usual wait, the main thread free throughout', { timeout: 90_000 }, async () => {
+  const may = join(root, 'first-readers-may-start');
+  const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_READER_BOOT_WAIT: may }, log: join(root, 'four.log') });
+  try {
+    const first = get(srv, PAGE);
+    const sent = Date.now();
+    const worst = slowestHealth(srv, first);
+    // timing-ok: past the 4 s a read waits for readers that have been up, where it got a 503
+    await until('the usual wait to be over', () => Date.now() - sent > 5000);
+    writeFileSync(may, '');
+    const got = await first;
+    assert.deepEqual([got.status, got.by], [200, 'reader']);
+    // timing-ok: as above
+    assert.ok((await worst) < HELD, `the main thread was held for ${await worst} ms`);
+  } finally {
+    writeFileSync(may, '');
+    await srv.stop();
+  }
+});
+
 test('while writes are backed up, page reads wait for them in a reader, the main thread free throughout', { timeout: 90_000 }, async () => {
   const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_DB_WRITE_DELAY_MS: '300' }, log: join(root, 'three.log') });
   try {

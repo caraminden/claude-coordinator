@@ -2090,9 +2090,12 @@ const ciHold = new CiHold({
   heldSince: (heavyId) => longJobs.heldSince(heavyId),
   tell: (id, text) => runner.leaveMail(id, APP_NAME, text),
   report: tellHeld,
+  number: (id) => store.getTicket(id)?.number ?? undefined,
+  changed: (id) => runner.broadcastTicket(id),
   store,
   publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
 });
+runner.heldLine = (id) => ciHold.noteFor(id);
 // After the first read of the long jobs: before it, a held one would look free to start again in the day.
 if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());
 // One Peek build while Citadel ships (#1902; Josh, 2026-11-25, "Yes, use labels"). His pick is for Peek alone.

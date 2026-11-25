@@ -1192,6 +1192,8 @@ export class Runner {
       wait: closed ? null : this.wait(ticket.id),
       // The server working for it while its own turn has ended (#727): the list and chat show it as working.
       server_work: closed ? null : this.serverWork(ticket.id),
+      // Its own CI run is held off the desktop (#1984): the list shows this in place of its note.
+      held_line: closed ? null : (this.heldLine?.(ticket.id) ?? null),
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
       context_live: this.turns.has(ticket.id) ? (this.contextSizes.get(ticket.id) ?? null) : null,
       running_cost: this.turns.has(ticket.id) ? (this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend?.usd ?? 0) : 0, // #1913: the running turn's estimate, not yet in `cost`
@@ -1228,6 +1230,8 @@ export class Runner {
       held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []),
       queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []),
       ...shown,
+      // Its note ("50-run proof running") is stale while the run is held.
+      ...(shown.held_line && { note: shown.held_line }),
       // The status from the live turn and the row together, never the row alone: the row's write waits in the queue
       // (src/db-writer.ts), so under load this called a minion idle whose turn had already started -- and a turn's
       // token, minted at that start, is the only one that still works, so anything acting on "idle, nothing queued"
@@ -1409,6 +1413,8 @@ export class Runner {
    * again), or null. Set by the server; CI health's ciGreen lets it go.
    */
   ciHold?: (ticketId: number) => string | null;
+  /** The list's line for a minion whose own CI run is held off the desktop (CiHold.noteFor); set by server.ts. */
+  heldLine?: (ticketId: number) => string | null;
 
   /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
   probeHold?: (ticketId: number) => boolean;

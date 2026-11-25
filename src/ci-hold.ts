@@ -23,7 +23,7 @@ import { type GhGet, ghGet, ghPost, RateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import type { Store } from './db.ts';
 import { every, type Job } from './every.ts';
-import { ZONE } from './pacific.ts';
+import { pacificClock, pacificDay, pacificStamp, ZONE } from './pacific.ts';
 
 export const HOLD_POLL_MS = 15_000;
 /** How long the line must stay empty before optional work starts: by day ships follow each other in minutes. */
@@ -51,7 +51,11 @@ const CHECK_WAIT_MS = 30 * 60_000;
 const SLOT_GRACE_MS = 60_000;
 /** A run started again that no runner takes gives the slot up. */
 const QUEUED_MS = 10 * 60_000;
-export const REPORT_MS = 24 * 3600_000;
+/** A job held this long is told to its scheme's Taskmaster (#1984; Josh, 2026-11-25, picked "Tell someone when work is stuck"). */
+export const REPORT_MS = 2 * 3600_000;
+/** The least time between two such notes to one scheme: what falls due meanwhile goes in the next one together. */
+export const REPORT_GAP_MS = 3600_000;
+const NOTED_KEY = 'ci-hold-noted';
 const KEY = 'ci-hold';
 const RECANCEL_MS = 60_000;
 const RATE_LIMITED_MS = 5 * 60_000;
@@ -152,6 +156,10 @@ export interface HoldDeps {
   heldSince?: (heavyId: string) => number | undefined;
   tell: (ticket: number, text: string) => void;
   report: (repo: string, text: string) => void;
+  /** A minion's number, as people read it. */
+  number?: (ticket: number) => number | undefined;
+  /** A minion's held line (noteFor) changed, so its list row is sent again. */
+  changed?: (ticket: number) => void;
   store: { getSetting<T>(key: string): T | null; setSetting(key: string, value: unknown): void };
   /** Where citadel-heavy reads the hold, after every look. */
   publish?: (state: HoldState & { at: number }) => void | Promise<void>;
@@ -188,6 +196,13 @@ export function kindOf(run: GhRun, own: boolean): HoldKind | 'ship' | null {
 const groupOf = (repo: string, kind: HoldKind, what: string) => (kind === 'heavy' || kind === 'early' ? null : kind === 'check' ? `${repo} check` : kind === 'proof' ? `${repo} ${what}` : `${repo} suite`);
 const heavyId = (kind: HoldKind, title: string) => (kind === 'heavy' ? (/^heavy (\S+)$/.exec(title)?.[1] ?? null) : null);
 const NAMES: Record<HoldKind, string> = { proof: 'flake proof', heavy: 'heavy job', suite: 'test run', main: "main's full run", check: "ship's own check", early: "next ship's early tests" };
+
+/** A hold's reason in the few words a list row has room for. */
+function shortWhy(why: string): string {
+  if (/at a time|waited longer|is queued/.test(why)) return 'one at a time';
+  if (/main's full/.test(why)) return "main's run first";
+  return /long job/.test(why) ? 'waits for its hours' : 'ships first';
+}
 
 /** CI health's GitHub reads without the held runs: a run stopped for a ship starts again, so its cancel is nobody's red. */
 export function withoutHeld(get: GhGet, isHeld: (run: number) => boolean): GhGet {
@@ -228,6 +243,8 @@ export class CiHold {
   private job: Job | null = null;
   private said = '';
   private publishing: Promise<unknown> = Promise.resolve();
+  /** Each waiting minion's held line as last sent to the list. */
+  private lines = new Map<number, string>();
   /** Ship and main runs at the last good look, and when that was. */
   private seen = { at: 0, ship: 0, main: false };
   /** What was running at the last good look (the ships' runs by id), and the queued runs that aren't a check's or a proof's. */
@@ -258,6 +275,25 @@ export class CiHold {
   stop() {
     this.job?.stop();
     this.job = null;
+  }
+
+  /** What a minion's list row says in place of its note while a run of its own is held, or null. A ship's own check or early run is never waited for. */
+  noteFor(ticket: number, now = Date.now()): string | null {
+    let first: HeldRun | undefined;
+    for (const h of this.held.values()) if (h.ticket === ticket && h.phase !== 'resumed' && !sideRun(h.kind) && !(first && first.since <= h.since)) first = h;
+    if (!first) return null;
+    const when = pacificDay(first.since) === pacificDay(now) ? pacificClock(first.since) : pacificStamp(first.since);
+    return `held off CI since ${when}, ${shortWhy(first.why)}`;
+  }
+
+  private sendLines(now: number) {
+    const was = this.lines;
+    this.lines = new Map();
+    for (const { ticket } of this.held.values()) {
+      const line = ticket === null ? null : this.noteFor(ticket, now);
+      if (line) this.lines.set(ticket!, line);
+    }
+    for (const t of new Set([...was.keys(), ...this.lines.keys()])) if (was.get(t) !== this.lines.get(t)) this.d.changed?.(t);
   }
 
   /** A run this stopped and will start again: its cancelled end isn't news. */
@@ -420,6 +456,7 @@ export class CiHold {
 
   /** One write at a time, each of the state as it is then. */
   private publish(now: number) {
+    this.sendLines(now);
     this.publishing = this.publishing.then(() => this.d.publish?.({ at: now, ...this.state(now) })).catch((err) => this.say(`CI hold: ${err?.message ?? err}`));
     return this.publishing;
   }
@@ -590,12 +627,19 @@ export class CiHold {
           Object.assign(h, { why: taken, behind: h.behind ?? now });
           this.save();
         }
-        if (ship && h.kind === 'proof' && h.why !== ship) {
+        if (ship && h.why !== ship) {
           h.why = ship;
           this.save();
         }
         if (taken && !this.slotPast(h, now)) return;
         if (sideRun(h.kind) && this.queued.size) return;
+      }
+      // A long job outside its hours waits for them, not for what stopped it: its reason says so.
+      const later = !off && id !== null && this.d.mayResume?.(id) === false && !this.shipWhy(now);
+      const hours = 'it is a long job, which starts again only in its hours';
+      if (later && h.why !== hours) {
+        h.why = hours;
+        this.save();
       }
       const clear = sideRun(h.kind) || h.kind === 'proof' || h.kind === 'main' ? !this.shipsFirst(h.kind, h, true, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
       if ((!off && !clear) || (group && groups.has(group)) || (h.misses && now - h.at < RECANCEL_MS)) return;
@@ -718,16 +762,28 @@ export class CiHold {
     return sideRun(kind) && this.fresh(now) && [...this.queued].some((id) => id !== run) ? 'another Citadel job is queued, and a check starts only on an idle CI desktop' : null;
   }
 
-  /** A job held over a day is told to its scheme's Taskmaster, once. */
+  /** What has been held REPORT_MS is told to its scheme's Taskmaster, each job once, in one note a scheme. Main's run has its own limit (MAIN_WAIT_MS). */
   private report(now: number) {
+    const due = new Map<string, HeldRun[]>();
     for (const h of this.held.values()) {
-      if (h.reported || h.phase === 'resumed' || now - h.since < REPORT_MS) continue;
-      h.reported = true;
+      if (h.reported || h.kind === 'main' || h.phase === 'resumed' || now - h.since < REPORT_MS) continue;
+      due.set(h.repo, [...(due.get(h.repo) ?? []), h]);
+    }
+    if (!due.size) return;
+    const noted = this.d.store.getSetting<Record<string, number>>(NOTED_KEY) ?? {};
+    for (const [repo, jobs] of due) {
+      if (now - (noted[repo] ?? 0) < REPORT_GAP_MS) continue;
+      noted[repo] = now;
+      this.d.store.setSetting(NOTED_KEY, noted);
+      for (const h of jobs) h.reported = true;
       this.save();
-      this.d.report(
-        h.repo,
-        `A ${NAMES[h.kind]} has been held off the CI desktop for over 24 hours (${h.what}, ${h.url}): ${h.why}. ${h.kind === 'proof' ? 'Flake proofs run one at a time, the longest held first; it' : 'Ships go first, so it starts once the line is empty; it'} is never forced. The CI page lists what is held.`,
-      );
+      const lines = jobs
+        .sort((a, b) => a.since - b.since)
+        .map((h) => {
+          const n = h.ticket === null ? undefined : this.d.number?.(h.ticket);
+          return `- ${NAMES[h.kind]} (${h.what}, ${h.url}), held since ${pacificStamp(h.since)}, ${n === undefined ? 'no minion waits on it' : `#${n} waits on it`}: ${h.why}.`;
+        });
+      this.d.report(repo, `Held off the CI desktop for ${REPORT_MS / 3600_000} hours or more:\n${lines.join('\n')}\nCitadel starts each by itself when it may. If one should not be waiting this long, look into why; the CI page lists what is held.`);
     }
   }
 

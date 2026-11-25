@@ -12,6 +12,9 @@ export const pacific = (ms: number) => new Date(ms).toLocaleString('en-US', { ti
 const DAY = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }); // made once: inbox calls it per row
 export const pacificDay = (ms: number) => DAY.format(ms);
 
+/** `ms` as "6:30 AM PST": a time today. */
+export const pacificClock = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
 /** `ms` as "Nov 14, 6:30 AM PST" (12-hour): the stamp in text people read. */
 export const pacificStamp = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 

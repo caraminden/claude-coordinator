@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, REPORT_GAP_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -20,6 +20,7 @@ function world(now = DAY, saved: unknown = null) {
     posts: [] as string[],
     told: [] as { ticket: number; text: string }[],
     reports: [] as string[],
+    changed: [] as number[],
     closed: new Set<number>(),
     refs: new Set<string>(),
     /** Ships' runs whose failed tests run again alone now. */
@@ -62,6 +63,8 @@ function world(now = DAY, saved: unknown = null) {
     heldSince: () => w.since,
     tell: (ticket, text) => w.told.push({ ticket, text }),
     report: (_repo, text) => w.reports.push(text),
+    number: (t) => t + 100,
+    changed: (t) => void w.changed.push(t),
     store: { getSetting: <T>(k: string) => (w.settings.get(k) as T) ?? null, setSetting: (k, v) => w.settings.set(k, structuredClone(v)) },
     publish: (s) => void (w.published = s),
     log: () => {},
@@ -289,21 +292,95 @@ test('night: a ship still stops optional work, and the settle time is shorter', 
   assert.deepEqual(w.posts, ['cancel 1', 'rerun 1']);
 });
 
-test('a job held over 24 hours is reported once, not while it is under', async () => {
+test('a job held 2 hours is told once, with since when, why and who waits; at 1 hour nothing is', async () => {
   const w = world();
   w.line = 1;
   w.heavy();
   await w.tick();
-  await w.tick(REPORT_MS - MIN);
-  assert.equal(w.reports.length, 0);
+  await w.tick(REPORT_MS / 2);
+  assert.equal(w.reports.length, 0, 'held 1 hour');
+  await w.tick(REPORT_MS / 2);
   await w.for(10 * MIN);
   assert.equal(w.reports.length, 1);
-  assert.match(w.reports[0], /heavy h0-1-x.*a ship is in line.*once the line is empty/s);
+  assert.match(w.reports[0], /heavy job \(heavy h0-1-x, https:\/\/gh\/1\), held since Nov 24, 12:00 PM PST, #107 waits on it: a ship is in line\./);
   const again = world(w.now, w.settings.get('ci-hold'));
   again.runs = w.runs;
   again.line = 1;
   await again.for(5 * MIN);
   assert.equal(again.reports.length, 0, 'a restart does not say it again');
+});
+
+test('one note takes every job that fell due, and the next one waits an hour', async () => {
+  const w = world();
+  w.line = 1;
+  w.heavy();
+  w.heavy();
+  await w.tick();
+  await w.tick(10 * MIN);
+  w.heavy();
+  await w.tick();
+  await w.tick(REPORT_MS - 10 * MIN);
+  assert.equal(w.reports.length, 1);
+  assert.equal(w.reports[0].match(/^- /gm)?.length, 2);
+  await w.tick(15 * MIN);
+  assert.equal(w.reports.length, 1, 'the third is due, but a note just went');
+  await w.tick(REPORT_GAP_MS);
+  assert.equal(w.reports.length, 2);
+  assert.match(w.reports[1], /heavy h2-1-x/);
+  assert.doesNotMatch(w.reports[1], /heavy h0-1-x/);
+});
+
+test('a job started again and held again keeps its first start time', async () => {
+  const w = world();
+  w.line = 1;
+  const r = w.heavy();
+  await w.tick();
+  w.line = 0;
+  await w.for(SETTLE_DAY_MS + MIN);
+  assert.ok(w.posts.includes('rerun 1'));
+  r.status = 'in_progress';
+  w.line = 1;
+  await w.tick(REPORT_MS);
+  await w.tick();
+  assert.equal(w.reports.length, 1);
+  assert.match(w.reports[0], /held since Nov 24, 12:00 PM PST/);
+});
+
+test('the list line of a held minion: since when and why, only while it is held', async () => {
+  const w = world();
+  w.line = 1;
+  const r = w.heavy();
+  await w.tick();
+  assert.equal(w.hold.noteFor(7, w.now), 'held off CI since 12:00 PM PST, ships first');
+  assert.deepEqual(w.changed, [7]);
+  await w.for(MIN);
+  assert.deepEqual(w.changed, [7], 'sent again only when it changes');
+  assert.equal(w.hold.noteFor(7, w.now + 24 * 3600_000), 'held off CI since Nov 24, 12:00 PM PST, ships first');
+  w.line = 0;
+  await w.for(SETTLE_DAY_MS + MIN);
+  assert.equal(r.status, 'queued');
+  assert.equal(w.hold.noteFor(7, w.now), null);
+  assert.deepEqual(w.changed, [7, 7]);
+});
+
+test('a proof waiting behind another proof is told as that, not as ships first; main is not told', async () => {
+  const w = world();
+  const first = w.proof();
+  await w.tick();
+  assert.equal(await w.ask(first), true);
+  const second = w.add('flake-proof test/y.test.ts', { file: 'flake-proof.yml' });
+  assert.equal(await w.ask(second), false);
+  await w.tick();
+  assert.equal(w.hold.noteFor(7, w.now), 'held off CI since 12:00 PM PST, one at a time');
+  await w.tick(REPORT_MS);
+  assert.match(w.reports[0], /flake-proof test\/y\.test\.ts.*another flake proof is running/);
+  assert.doesNotMatch(w.reports[0], /ships? /);
+  const main = world();
+  main.line = 1;
+  main.main();
+  await main.tick();
+  await main.tick(REPORT_MS + MIN);
+  assert.deepEqual(main.reports, []);
 });
 
 test('the off switch: nothing is stopped or held, and what was held comes back at once', async () => {

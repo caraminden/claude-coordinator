@@ -618,8 +618,9 @@ on an idle desktop (`ci_busy` in `deploy-queue.sh` before the push, the ask afte
 comes back only while its branch is there. A job that has run 4 hours keeps no other
 waiting, and none waits behind lower ones past 24 hours (a proof waits its turn; main's run waits for ships 4 hours). Other
 schemes' jobs neither take nor wait for the place. Compare ships before and after with `node tools/ship-runs.ts --at <when>`. A job asks before it starts (`tools/ci-hold-ask.ts`, the run's OIDC token, `POST /api/ci-hold`) and
-goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("One job at a time"); one held a day is reported to
-its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets Citadel's jobs run side by side again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop.
+goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("One job at a time"); one held 2 hours is told to
+its scheme's Taskmaster (one note an hour at most; not main's run, which has its own 4-hour limit), and its minion's list row says
+since when and why (#1984). Off switch: `touch` the deploy state folder's `hold-off`, which also lets Citadel's jobs run side by side again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop.
 **One Peek build while Citadel ships** (#1902; Josh, 2026-11-25, picked "Yes, use labels"): while a ship holds the desktop,
 `src/runner-cap.ts` takes `peek-auras-ci` off all but one of Peek's runners on that PC, with the Peek scheme owner's GitHub login, and puts
 it back when the line is clear, after 4 hours in one stretch, or at once with `hold-off`. Running jobs finish; queued ones wait at GitHub. It writes down

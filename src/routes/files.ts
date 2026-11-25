@@ -361,7 +361,7 @@ const IMAGE_TYPES: { type: string; ext: string; magic: (b: Buffer) => boolean }[
 ];
 const IMAGE_NAME = /^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
 
-function uploadsDir(app: App, ticket: TicketLike): string {
+export function uploadsDir(app: App, ticket: TicketLike): string {
   return join(projectDir(app.dataDir, ticket.project_id), 'uploads', String(ticket.id));
 }
 

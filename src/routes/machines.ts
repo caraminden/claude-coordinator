@@ -15,12 +15,15 @@ import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
-import { HttpError, json, publicOrigin, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, publicOrigin, ownWrites, readJson, str, type App, type Ctx, type Route } from '../http.ts';
+import { uploadsDir } from './files.ts';
 import { ensureCoordinatorFor } from './projects.ts';
 import { pickFor } from '../../public/model-table.js';
 import { thrown } from '../thrown.ts';
 import { request } from 'node:http';
-import { placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
+import { projectSharedDir } from '../workspace.ts';
+import { readsDisk, stateCall, syncScript, type StateDeps } from '../machine-sync.ts';
+import { askCheckpoint, owned, placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -125,6 +128,15 @@ async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
   }
 }
 
+const stateDeps = (app: App): StateDeps => ({
+  store: app.store,
+  files: (t) => app.sharedDir(t),
+  uploads: (t) => uploadsDir(app, t),
+  shared: (p) => projectSharedDir(app.dataDir, p.id),
+  landing: (id) => app.landings.get(id)?.code === null,
+  note: (id, text) => app.runner.emit(id, 'note', { text }),
+});
+
 /** A route a machine's agent calls with its token, which reaches nothing else. */
 const agent = (method: string | readonly string[], path: string, handler: (ctx: Ctx, machine: Machine) => unknown): Route => ({
   method,
@@ -142,16 +154,19 @@ const agent = (method: string | readonly string[], path: string, handler: (ctx: 
  * with the machine's token, the turn's own in X-Turn-Authorization. Only for a turn placed on that machine and still
  * running; then it goes to this server's own address as the turn's request, where the turn's token is checked as ever.
  */
-function turnCall({ req, res, url, params, app }: Ctx, machine: Machine) {
+async function turnCall({ req, res, url, params, app }: Ctx, machine: Machine) {
   const bearer = String(req.headers['x-turn-authorization'] ?? '');
   const ticketId = Number(/^Bearer (\d+)\./.exec(bearer)?.[1]);
   const dir = ticketId ? app.runner.turnDir(ticketId) : null;
   if (!dir || placedAt(dir)?.id !== machine.id) throw new HttpError(403, 'Not a turn running on this machine');
   const headers: Record<string, string> = { authorization: bearer };
   for (const h of ['content-type', 'content-length', 'accept', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id']) if (typeof req.headers[h] === 'string') headers[h] = req.headers[h];
+  const reads = req.method !== 'GET' && readsDisk(params.rest);
+  const problem = reads ? await askCheckpoint(dir, reads === 'must' ? 60_000 : 15_000) : null;
+  if (problem && reads === 'must') throw new HttpError(503, `This turn's files could not come home first: ${problem}.`);
   return new Promise<void>((done) => {
     const out = request(new URL(`/${params.rest}${url.search}`, app.turnApi()), { method: req.method, headers }, (back) => {
-      res.writeHead(back.statusCode ?? 502, back.headers);
+      res.writeHead(back.statusCode ?? 502, reads ? { ...back.headers, 'x-citadel-sync': dir } : back.headers);
       back.pipe(res).on('close', done);
     });
     out.on('error', () => {
@@ -194,6 +209,14 @@ export const agentRoutes: Route[] = [
     if (!(await sendFolder(machine.id, url.searchParams.get('dir'), res))) throw new HttpError(404, 'Not a turn placed on this machine');
   }),
   agent(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/api/machines/turn-call/*rest', turnCall),
+  // A placed turn's worktree, session and folders, down before it and home at each checkpoint (Build 7 T3, src/machine-sync.ts).
+  agent(['GET', 'POST'], '/api/machines/state/*rest', async ({ req, res, url, params, app }, machine) => {
+    if (params.rest === 'script') return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end((await syncScript()).text);
+    const dir = url.searchParams.get('dir') ?? '';
+    const at = (await owned(machine.id, dir)) ? placedAt(dir) : null;
+    if (!at) throw new HttpError(410, 'Not a turn placed on this machine');
+    return stateCall(stateDeps(app), params.rest, dir, at, req, res);
+  }),
   // Jobs (#857, shared/project/specs/desktop-gpu-jobs.md "Wire contract"): one input file with the job's token, the
   // job's state every 10 s and on every change, and one result file, streamed to disk under the job's caps.
   agent('GET', '/api/machines/job-input', ({ req, res, url, app }, machine) => app.jobs.input(machine, req, res, url)),

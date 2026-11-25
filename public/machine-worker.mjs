@@ -17,12 +17,15 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, openSync, readSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { isAbsolute, join, normalize } from 'node:path';
+import { isAbsolute, join, normalize, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const SYNC_MS = 500;
 const LOAD_MS = 10_000;
 const SIGNED_IN_MS = 5 * 60_000;
+/** A turn's changes go home at least this often. */
+const CHECKPOINT_MS = 120_000;
 /** The most of one file's new bytes in one sync: a long stream catches up over several. */
 const CHUNK = 2_000_000;
 const APPENDED = ['stream.jsonl', 'stderr.log'];
@@ -63,6 +66,9 @@ export function containerArgs(cfg, launch, extraMounts = []) {
   return args;
 }
 
+/** A turn as this agent takes it up. @param {{ dir: string, local: string, launch: Launch } & Partial<Turn>} t @returns {Turn} */
+const newTurn = (t) => ({ applied: 0, acked: null, sentWhole: {}, starting: false, dropped: false, seeded: false, script: null, home: 0, homeFailed: null, asked: 0, steering: false, checking: false, checked: Date.now(), nextTry: 0, failures: 0, ref: -1, final: false, ...t });
+
 /** @param {string} cmd @param {string[]} args @param {number} [timeout] @returns {Promise<{ code: number, out: string, err: string }>} */
 const run = (cmd, args, timeout = 60_000) => new Promise((done) => execFile(cmd, args, { timeout, maxBuffer: 4 << 20 }, (err, out, stderr) => done({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(stderr || err?.message || '') })));
 
@@ -97,12 +103,13 @@ const read = (/** @type {string} */ file) => {
 };
 
 /**
- * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[] }} Launch
- * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean }} Turn
+ * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[], sync?: { at: string, key: string } }} Launch sync: its state comes from the server and goes back (public/machine-sync.mjs); `at` is that program's folder, `key` what one of it at a time runs for
+ * @typedef {{ start?: boolean, git?: boolean, roots?: string[], final?: boolean }} SyncAsk
+ * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean, seeded: boolean, script: string | null, home: number, homeFailed: string | null, asked: number, steering: boolean, checking: boolean, checked: number, nextTry: number, failures: number, ref: number, final: boolean }} Turn
  */
 
 export class Worker {
-  /** @param {{ config: unknown, appUrl: string, token: string, log?: (...a: unknown[]) => void, run?: typeof run }} o */
+  /** @param {{ config: unknown, appUrl: string, token: string, log?: (...a: unknown[]) => void, run?: typeof run, checkpointMs?: number }} o */
   constructor(o) {
     this.cfg = workerConfig(o.config);
     this.appUrl = o.appUrl;
@@ -118,10 +125,14 @@ export class Worker {
     this.busy = false;
     this.again = false;
     this.port = 0;
+    /** What each scheme's syncs wait in line behind: two at once would write the same repo. @type {Map<string, Promise<unknown>>} */
+    this.lines = new Map();
+    this.checkpointMs = o.checkpointMs ?? CHECKPOINT_MS;
     mkdirSync(join(this.cfg.root, 'fs'), { recursive: true, mode: 0o700 });
     // The turns an earlier run of this agent held: their wrappers ran on in the container without it.
     try {
-      for (const t of JSON.parse(readFileSync(this.index(), 'utf8'))) if (this.mine(t.dir) && existsSync(this.local(t.dir))) this.turns.set(t.dir, { dir: t.dir, local: this.local(t.dir), launch: t.launch, applied: Number(t.applied) || 0, acked: null, sentWhole: {}, starting: false, dropped: false });
+      for (const t of JSON.parse(readFileSync(this.index(), 'utf8')))
+        if (this.mine(t.dir) && existsSync(this.local(t.dir))) this.turns.set(t.dir, newTurn({ dir: t.dir, local: this.local(t.dir), launch: t.launch, applied: Number(t.applied) || 0, seeded: t.seeded === true, script: typeof t.script === 'string' ? t.script : null }));
     } catch {}
   }
 
@@ -140,7 +151,7 @@ export class Worker {
   }
 
   save() {
-    writeFileSync(`${this.index()}.tmp`, JSON.stringify([...this.turns.values()].map((t) => ({ dir: t.dir, launch: t.launch, applied: t.applied }))), { mode: 0o600 });
+    writeFileSync(`${this.index()}.tmp`, JSON.stringify([...this.turns.values()].map((t) => ({ dir: t.dir, launch: t.launch, applied: t.applied, seeded: t.seeded, script: t.script }))), { mode: 0o600 });
     renameSync(`${this.index()}.tmp`, this.index());
   }
 
@@ -189,6 +200,7 @@ export class Worker {
   }
 
   async sync() {
+    for (const t of this.turns.values()) this.checkpointIfDue(t);
     const turns = [...this.turns.values()].map((t) => this.report(t));
     const claude = this.claude;
     const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude, max: this.cfg.max, ...this.facts() }, turns: turns.map((r) => r.body) }), signal: AbortSignal.timeout(30_000) });
@@ -232,14 +244,10 @@ export class Worker {
     for (const name of WHOLE) {
       const text = read(join(t.local, name));
       // Its end goes last: only once the server holds the whole stream it ends.
-      if (text === null || text === t.sentWhole[name] || (name === 'exit.json' && !caughtUp)) continue;
+      if (text === null || text === t.sentWhole[name] || (name === 'exit.json' && (!caughtUp || !this.settled(t)))) continue;
       put[name] = text;
     }
-    let beat = Infinity;
-    try {
-      beat = Date.now() - statSync(join(t.local, 'beat')).mtimeMs;
-    } catch {}
-    const body = { dir: t.dir, append, put, steer: size(join(t.local, 'steer.jsonl')), signals: t.applied, alive: t.starting || beat < BEAT_STALE_MS };
+    const body = { dir: t.dir, append, put, steer: size(join(t.local, 'steer.jsonl')), signals: t.applied, alive: t.starting || this.beats(t) || !this.settled(t), ...(t.home ? { home: t.home } : {}), ...(t.homeFailed ? { homeFailed: t.homeFailed } : {}) };
     return { turn: t, body, put };
   }
 
@@ -249,8 +257,119 @@ export class Worker {
     if (r.gone) return this.drop(t);
     t.acked = r.sizes ?? {};
     Object.assign(t.sentWhole, sent.put);
-    if (typeof r.steer === 'string' && existsSync(t.local)) appendFileSync(join(t.local, 'steer.jsonl'), Buffer.from(r.steer, 'base64'));
+    if (typeof r.script === 'string') t.script = r.script;
+    if (Number(r.checkpoint) > t.asked) t.asked = Number(r.checkpoint);
+    if (typeof r.steer === 'string' && !t.steering) void this.steer(t, Buffer.from(r.steer, 'base64'));
     if (Array.isArray(r.signals) && r.signals.length) await this.signal(t, r.signals);
+  }
+
+  /** Steers for the turn, once the pictures they may name are here. @param {Turn} t @param {Buffer} lines */
+  async steer(t, lines) {
+    // Asked for again at every sync until it is written: the server sends from the size this file has.
+    t.steering = true;
+    if (t.seeded) await this.stateSync(t, { git: false, roots: ['uploads', 'files'] });
+    if (existsSync(t.local)) appendFileSync(join(t.local, 'steer.jsonl'), lines);
+    t.steering = false;
+    this.poke();
+  }
+
+  /** The turn's wrapper says it runs. @param {Turn} t */
+  beats(t) {
+    try {
+      return Date.now() - statSync(join(t.local, 'beat')).mtimeMs < BEAT_STALE_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Nothing of it is left to send home: its end may be told. @param {Turn} t */
+  settled(t) {
+    return !t.seeded || t.final;
+  }
+
+  /** The program a turn's state is synced by (public/machine-sync.mjs), in the version the app wants. Its path on both sides is under the turns' folder. @param {Turn} t */
+  async syncProgram(t) {
+    const { at } = /** @type {{ at: string }} */ (t.launch.sync);
+    // Before the first sync says which: the app's own, asked for anew.
+    const name = join(at, `machine-sync-${t.script ?? 'first'}.mjs`);
+    if (t.script && existsSync(this.local(name))) return name;
+    const res = await this.call('/api/machines/state/script', { signal: AbortSignal.timeout(60_000) });
+    if (!res.ok) throw Object.assign(new Error(`the app answered ${res.status} for the sync program`), { offline: res.status === 502 || res.status === 503 });
+    mkdirSync(this.local(at), { recursive: true, mode: 0o700 });
+    writeFileSync(`${this.local(name)}.tmp`, await res.text(), { mode: 0o600 });
+    renameSync(`${this.local(name)}.tmp`, this.local(name));
+    return name;
+  }
+
+  /**
+   * Run the sync program for a turn in the worker container, where the server's paths are and whatever a minion put in
+   * its git config stays. Never throws. @param {Turn} t @param {SyncAsk} ask
+   * @returns {Promise<{ ok?: true, gone?: true, error?: string, offline?: boolean, kept?: string | null }>}
+   */
+  stateSync(t, ask) {
+    const { at, key } = /** @type {{ at: string, key: string }} */ (t.launch.sync);
+    const now = async () => {
+      try {
+        const program = await this.syncProgram(t);
+        // Its container may have stopped with the machine since the turn began.
+        if (!ask.start) await this.ensureContainer(t.launch);
+        const arg = Buffer.from(JSON.stringify({ app: `http://127.0.0.1:${this.port}`, dir: t.dir, state: at, ...ask })).toString('base64');
+        const r = await this.exec(this.cfg.podman, ['exec', this.cfg.container, this.cfg.node ?? t.launch.wrapper[0], program, arg], ask.start ? 60 * 60_000 : 15 * 60_000);
+        const last = r.out.trim().split('\n').pop() ?? '';
+        return r.code || !last.startsWith('{') ? { error: (r.err.trim() || last || `exit ${r.code}`).slice(-300) } : JSON.parse(last);
+      } catch (err) {
+        // fetch says a TypeError when it can't reach the app.
+        return { error: err.message, offline: err.offline ?? (err instanceof TypeError || err.name === 'TimeoutError') };
+      }
+    };
+    const next = (this.lines.get(key) ?? Promise.resolve()).then(now);
+    this.lines.set(key, next);
+    void next.then(() => this.lines.get(key) === next && this.lines.delete(key));
+    return next;
+  }
+
+  /** The size of the worktree's HEAD log: it grows with each commit. @param {Turn} t */
+  headLog(t) {
+    const cwd = this.local(t.launch.cwd ?? '');
+    const to = /^gitdir: (.+)$/m.exec(read(join(cwd, '.git')) ?? '')?.[1];
+    return to ? size(join(resolve(cwd, to), 'logs', 'HEAD')) : 0;
+  }
+
+  /** Send home what a turn changed: at its end, when the server asks, on a commit, and every couple of minutes. @param {Turn} t */
+  checkpointIfDue(t) {
+    if (!t.seeded || t.starting || t.checking) return;
+    const over = existsSync(join(t.local, 'exit.json')) || !this.beats(t);
+    // A machine that slept looks over until its wrapper beats again.
+    if (!over) t.final = false;
+    const ref = this.headLog(t);
+    const due = over ? !t.final : t.asked > t.home || ref !== t.ref || Date.now() - t.checked > this.checkpointMs;
+    if (!due || (Date.now() < t.nextTry && t.asked <= t.home)) return;
+    void this.checkpoint(t, over, ref);
+  }
+
+  /** @param {Turn} t @param {boolean} over @param {number} ref */
+  async checkpoint(t, over, ref) {
+    t.checking = true;
+    const { asked } = t;
+    const r = await this.stateSync(t, { final: over || asked > t.home });
+    t.checked = Date.now();
+    t.homeFailed = r.ok ? (r.kept ?? null) : (r.error ?? 'the turn has ended here');
+    if (asked > t.home) t.home = asked;
+    if (r.ok || r.gone) {
+      t.ref = ref;
+      t.failures = 0;
+      if (over) t.final = true;
+    } else {
+      this.quiet(`Turn ${t.dir.split('/').pop()}: could not send its files home: ${r.error}`);
+      t.nextTry = Date.now() + (r.offline ? 2000 : 10_000);
+      // Out of reach is waited out, however long; a sync that fails by itself is not going to mend, and the turn's end must be told.
+      if (!r.offline && ++t.failures >= 3 && over) {
+        t.final = true;
+        await this.call(`/api/machines/state/failed?dir=${encodeURIComponent(t.dir)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: r.error }), signal: AbortSignal.timeout(30_000) }).catch(() => {});
+      }
+    }
+    t.checking = false;
+    this.poke();
   }
 
   /** The pid of the turn's claude in the container, once its wrapper has one. @param {Turn} t */
@@ -291,18 +410,18 @@ export class Worker {
 
   /** Fetch a turn's folder and start its wrapper in the worker container. @param {string} dir @param {Launch} launch */
   async begin(dir, launch) {
-    /** @type {Turn} */
-    const t = { dir, local: this.local(dir), launch, applied: 0, acked: null, sentWhole: {}, starting: true, dropped: false };
+    const t = newTurn({ dir, local: this.local(dir), launch, starting: true });
     this.turns.set(dir, t);
     this.save();
     try {
-      if (!launch || !Array.isArray(launch.wrapper) || !launch.wrapper.every((a) => typeof a === 'string') || !Array.isArray(launch.roots) || !launch.roots.every((r) => this.mine(r)) || !this.mine(launch.home)) throw new Error('the app sent a start this worker cannot read');
+      if (!launch || !Array.isArray(launch.wrapper) || !launch.wrapper.every((a) => typeof a === 'string') || !Array.isArray(launch.roots) || !launch.roots.every((r) => this.mine(r)) || !this.mine(launch.home) || (launch.sync && !this.mine(launch.sync.at)))
+        throw new Error('the app sent a start this worker cannot read');
       await this.fetchFolder(t);
       for (const r of launch.roots) mkdirSync(this.local(r), { recursive: true });
-      // shortcut: an empty folder where the minion's worktree goes, until state sync (T3) brings it.
       if (launch.cwd && this.mine(launch.cwd)) mkdirSync(this.local(launch.cwd), { recursive: true });
       this.fitSpec(t);
       await this.ensureContainer(launch);
+      if (launch.sync && !t.dropped) await this.bring(t);
       if (t.dropped || !existsSync(join(t.local, 'spec.json'))) return;
       const wrapper = [this.cfg.node ?? launch.wrapper[0], ...launch.wrapper.slice(1)];
       const r = await this.exec(this.cfg.podman, ['exec', '-d', this.cfg.container, ...wrapper]);
@@ -318,6 +437,21 @@ export class Worker {
       // From the top: the server's copy is empty, and this one starts as the folder it sent.
       t.acked = Object.fromEntries(APPENDED.map((n) => [n, 0]));
     }
+  }
+
+  /** Bring the minion's worktree, session and folders here, before its turn starts. @param {Turn} t */
+  async bring(t) {
+    for (let tries = 1; ; tries++) {
+      const r = await this.stateSync(t, { start: true });
+      if (r.gone) return void (t.dropped = true);
+      if (r.ok) break;
+      if (tries >= 3) throw new Error(`this minion's files could not be brought here: ${r.error}`);
+      await sleep(2000);
+    }
+    t.seeded = true;
+    t.checked = Date.now();
+    t.ref = this.headLog(t);
+    this.save();
   }
 
   /** The turn's folder from the server, unpacked here. @param {Turn} t */
@@ -406,7 +540,12 @@ export class Worker {
     this.server = createServer((req, res) => {
       const headers = { ...req.headers, host: up.host, authorization: `Bearer ${this.token}`, 'x-turn-authorization': String(req.headers.authorization ?? '') };
       delete headers.connection;
-      const out = (up.protocol === 'https:' ? httpsRequest : httpRequest)(new URL(`/api/machines/turn-call${req.url}`, up), { method: req.method, headers }, (back) => {
+      // A turn's sync program (stateSync) calls through here too, so it holds no token either.
+      const path = req.url?.startsWith('/_state/') ? `/api/machines/state/${req.url.slice(8)}` : `/api/machines/turn-call${req.url}`;
+      const out = (up.protocol === 'https:' ? httpsRequest : httpRequest)(new URL(path, up), { method: req.method, headers }, async (back) => {
+        // What the call wrote at home is here before the turn hears that it did.
+        const t = this.turns.get(String(back.headers['x-citadel-sync'] ?? ''));
+        if (t?.seeded) await this.stateSync(t, {});
         res.writeHead(back.statusCode ?? 502, back.headers);
         back.pipe(res);
       });

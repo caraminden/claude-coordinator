@@ -205,6 +205,8 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
 | `src/machine-turn.ts` | A minion turn placed on a connected machine (Build 7): its `machine` file, the RunningTurn for it, and the agent's sync that keeps the server's copy of the turn folder in step |
+| `src/machine-sync.ts` | The server's half of a machine turn's state (Build 7): its worktree, session, uploads and folders, sent before the turn and taken in at each checkpoint |
+| `public/machine-sync.mjs` | The same, the part both sides share and the program a machine runs: worktree snapshots as git commits, packs, and folders by file list |
 | `public/machine-worker.mjs` | The agent's worker: starts placed turns in a container on that computer, syncs their folders, forwards their tools' calls home; `--self-test` checks the container |
 | `public/refstate.js` | Paints minion links in chat (`a.thread-ref`) by their minion's state: waiting, working, deployed (`refBucket` in `public/threadstate.js`) |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |

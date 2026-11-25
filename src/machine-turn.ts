@@ -12,7 +12,8 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { appendFile, readFile, rename, stat, utimes, writeFile } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
-import { basename, isAbsolute, join, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
+import { syncDir, syncScript, type TurnState } from './machine-sync.ts';
 import type { ProcCheck } from './quiet.ts';
 import type { RunningTurn } from './running-turn.ts';
 
@@ -25,7 +26,12 @@ export interface MachineLaunch {
   home: string;
   /** The folders the turn's paths sit under, each a bind mount at the same path in the machine's container. */
   roots: string[];
+  /** What its syncs go by (src/machine-sync.ts): its worktree, session and folders come from here first. */
+  state?: TurnState;
 }
+
+/** The part of it the agent is sent. */
+type Offered = Omit<MachineLaunch, 'state'> & { sync?: { at: string; key: string } };
 
 /** A turn folder's `machine` file. */
 export interface Placed extends MachineLaunch {
@@ -187,12 +193,40 @@ interface SyncTurn {
   signals?: number;
   /** Its wrapper runs there, or it is still being started. */
   alive?: boolean;
+  /** The last checkpoint asked for here (askCheckpoint) that it finished, or why it couldn't. */
+  home?: number;
+  homeFailed?: string;
 }
 
-type SyncReply = { gone: true } | { sizes: Record<string, number>; steer?: string; signals: string[] };
+/** `script`: the sync program's id, of a turn whose state is synced; `checkpoint`: one asked for here. */
+type SyncReply = { gone: true } | { sizes: Record<string, number>; steer?: string; signals: string[]; script?: string; checkpoint?: number };
+
+/** Checkpoints waited for, by turn folder. In memory: what waits is a request, which ends with this process. */
+const asked = new Map<string, { id: number; done: (problem: string | null) => void }[]>();
+
+/** Bring home what the turn in `dir` has changed, for something here that is about to read it. Null once it is here, else why not. */
+export async function askCheckpoint(dir: string, timeout = 60_000): Promise<string | null> {
+  const at = placedAt(dir);
+  if (!at?.state) return null;
+  if (!machineLink.online(at.id)) return `${at.name}, where this turn runs, is not connected`;
+  const waiting = asked.get(dir) ?? [];
+  asked.set(dir, waiting);
+  const id = Math.max(Date.now(), (waiting.at(-1)?.id ?? 0) + 1);
+  let timer: NodeJS.Timeout | undefined;
+  const problem = await new Promise<string | null>((done) => {
+    waiting.push({ id, done });
+    timer = setTimeout(() => done(`${at.name} did not send this turn's files within ${Math.round(timeout / 1000)} seconds`), timeout);
+    machineLink.poke(at.id);
+  });
+  clearTimeout(timer);
+  const left = (asked.get(dir) ?? []).filter((w) => w.id !== id);
+  if (left.length) asked.set(dir, left);
+  else asked.delete(dir);
+  return problem;
+}
 
 /** The folder is a turn placed on `machineId` that is still followed: an agent may only name its own. */
-async function owned(machineId: number, dir: unknown): Promise<boolean> {
+export async function owned(machineId: number, dir: unknown): Promise<boolean> {
   return typeof dir === 'string' && isAbsolute(dir) && normalize(dir) === dir && (await placedNow(dir))?.id === machineId;
 }
 
@@ -200,7 +234,7 @@ async function owned(machineId: number, dir: unknown): Promise<boolean> {
  * An agent's sync: its worker facts, the turns it holds with what is new in each, answered with what each needs from
  * here and the turns it should start. A turn it names that is no longer the machine's (ended and tidied here) is `gone`.
  */
-type Sync = { turns: Record<string, SyncReply>; start: { dir: string; launch: MachineLaunch }[] };
+type Sync = { turns: Record<string, SyncReply>; start: { dir: string; launch: Offered }[] };
 type SyncBody = { worker?: { claude?: unknown; max?: unknown; load?: unknown; signedIn?: unknown }; turns?: unknown };
 /** An agent's load, checked: nothing for a kernel without pressure files, which Auto reads as not known. */
 function loadSaid(raw: unknown): WorkerInfo['load'] {
@@ -229,18 +263,19 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
     held.add(t.dir);
     turns[t.dir] = (await owned(machineId, t.dir)) ? await syncTurn(t) : { gone: true };
   }
-  const start: { dir: string; launch: MachineLaunch }[] = [];
+  const start: Sync['start'] = [];
   for (const dir of [...(placed.get(machineId) ?? [])]) {
     const at = await placedNow(dir);
     if (!at || at.id !== machineId) placed.get(machineId)?.delete(dir);
     // Not one that has ended here (a stop before it started): there is nothing to run.
-    else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots } });
+    else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
   }
   return { turns, start };
 }
 
 async function syncTurn(t: SyncTurn): Promise<SyncReply> {
   const { dir } = t;
+  for (const w of asked.get(dir) ?? []) if (typeof t.home === 'number' && t.home >= w.id) w.done(typeof t.homeFailed === 'string' ? t.homeFailed.slice(0, 300) : null);
   const over = await there(join(dir, 'exit.json'));
   const sizes: Record<string, number> = {};
   for (const name of APPENDED) {
@@ -269,7 +304,9 @@ async function syncTurn(t: SyncTurn): Promise<SyncReply> {
     .split('\n')
     .filter((s) => SIGNALS.test(s))
     .slice(Math.max(0, Number(t.signals) || 0));
-  return { sizes, ...(steer ? { steer } : {}), signals };
+  const at = await placedNow(dir);
+  const checkpoint = asked.get(dir)?.at(-1)?.id;
+  return { sizes, ...(steer ? { steer } : {}), signals, ...(at?.state ? { script: (await syncScript()).hash } : {}), ...(checkpoint ? { checkpoint } : {}) };
 }
 
 /** The turn's folder as a tar stream, for the agent that is to start it. shortcut: `pin/` (4 MB) goes every time; cache it by version on the machine if that shows on a slow link. */

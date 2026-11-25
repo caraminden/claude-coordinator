@@ -1189,6 +1189,26 @@
   "m1": "401 Unknown machine token; make a new one in the Machines panel",
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
+ "GET /api/machines/state/x": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/state/x": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
  "DELETE /api/machines/turn-call/x": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",

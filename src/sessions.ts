@@ -145,6 +145,12 @@ async function fileTimes(configDir: string, root: string): Promise<Map<string, n
   return out;
 }
 
+/** A ticket's own session files under a config dir (not the project's memory), as paths relative to it: what a turn elsewhere needs to resume (src/machine-sync.ts). */
+export async function sessionFiles(ticket: Ticket, project: Project, configDir: string): Promise<string[]> {
+  const listed = await Promise.all(scope(ticket, project).ticketRoots.map((r) => listFiles(configDir, r)));
+  return listed.flatMap((l) => l ?? []);
+}
+
 /**
  * What a memory folder held (path to mtime) when it was last matched up: a note it held then and lacks now was deleted
  * there. Negative: the note was gone on the other side by then, so this is an old copy until something writes it again.

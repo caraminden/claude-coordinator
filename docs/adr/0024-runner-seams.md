@@ -148,3 +148,27 @@ no `podman exec`, no `/proc`. Five places asking "which kind" would become five 
 - `ran` for `outcome()` says unit and container for a machine turn, so a kill there is never blamed on this server's restart.
 - The agent runs the turn's wrapper with `podman exec`, as a person's container at home does, not a supervisor of its own:
   the wrapper already outlives the agent, and a second supervisor would need its own adoption across agent restarts.
+
+## T3 (#1972): a machine turn's state
+
+- The server's copy is the record. A worktree travels as one commit that holds all of it (files, index, branch, a merge or
+  rebase under way), made the same way on both sides with a fixed author and date, so the same id means the same state
+  (`snapshot` in `public/machine-sync.mjs`). Folders travel by file list, each change going the way it was made.
+- The machine's half runs inside the worker container, not in the agent: a git config a minion wrote can then run nothing
+  outside it, and every path is the server's.
+- A worktree is written only under git's own index lock, only while it is still the snapshot it was read as, and by the
+  form of `read-tree` that leaves a file edited since alone (`restore` with `from`). Otherwise nothing is changed, and it is
+  looked at again. The files go first, then the branch and the index together, so a commit made after one cut off can't
+  hold an undo. The machine finishes a cut-off pull file by file before it sends anything (`resume`), keeping what the turn
+  did since. What git ignores and is in the way goes to `citadel-aside` in the worktree's git folder, and the chat says so.
+- Home keeps two marks per minion: the machine's last snapshot and its own as that left it, so a lost answer or a detached
+  copy is not taken for work done here. While a landing runs in the worktree, after its commit moved here, or when it can't
+  be written, the machine's is kept in `refs/citadel/kept/<ticket>/`, the chat says so, and a tool that waits for it is
+  refused. Files that changed here are kept there before the machine's go over them.
+- A file the machine only stopped sending (ignored now, a key) stays here. Stashes come home as kept refs, tags as tags.
+- Deletes travel too, only over a copy the other side left alone, and a side that lost a whole folder deletes nothing.
+- A turn's `exit.json` goes home after its last checkpoint, so the runner's end-of-turn work (session save, branch state,
+  links) reads the turn's files and needed no change.
+- A tool that reads the worktree here waits for a checkpoint in one place: `turnCall` in `src/routes/machines.ts`, by the
+  path list in `readsDisk`: 'must' is refused without one, 'may' goes on. A new tool that reads a minion's files by path goes in it.
+- Not moved: ignored files, untracked keys and `.env` files, git repos inside the worktree, LFS contents, empty folders.

@@ -7,7 +7,7 @@ import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
 import { appendFileSync, close, existsSync, fstatSync, open, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
@@ -3041,7 +3041,15 @@ export class Runner {
     await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
     if (plan.spawn.how === 'container') await containerFiles(dir, place as Extract<TurnPlace, { host: false }>);
     // Its `machine` file and first beat: the machine's agent fetches the folder and starts it (src/machine-turn.ts).
-    if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots: [dirname(dir), join(dirname(this.store.path), 'projects')] });
+    const projects = join(dirname(this.store.path), 'projects');
+    if (plan.spawn.how === 'machine')
+      await placeTurn(dir, worker!, {
+        wrapper: plan.spawn.wrapper,
+        cwd: ticket.cwd,
+        home: env.HOME ?? '',
+        roots: [dirname(dir), projects, ...(project.repo_dir && !project.repo_dir.startsWith(projects + sep) ? [project.repo_dir] : [])],
+        state: { ticket: ticket.id, config: { here: configDir, there: plan.env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? '', '.claude') }, mkdirs: plan.env.TMPDIR ? [plan.env.TMPDIR] : [] },
+      });
     // Nothing more to await: a stop or a dismissal meanwhile means no turn, and nothing of the minion's changed. A message
     // to a minion already dismissed does run its turn (it reopens it).
     const still = this.store.getTicket(ticket.id);

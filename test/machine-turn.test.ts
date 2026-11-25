@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import type { ChildProcess } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, lines, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
-import { MachineTurn, machineLink, placeTurn, placedAt, sameClaude, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
+import { askCheckpoint, MachineTurn, machineLink, placeTurn, placedAt, sameClaude, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
 import { runningTurn, wrapperAlive } from '../src/running-turn.ts';
 import { machineEnv } from '../src/turn-launch.ts';
 import { containerArgs, workerConfig, Worker } from '../public/machine-worker.mjs';
@@ -144,6 +144,161 @@ test("the worker container holds only the turn's folders, and the home volume", 
   assert.equal(sameClaude(null, null), false);
 });
 
+const state = { ticket: 1, config: { here: '/c', there: '/c' }, mkdirs: [] };
+async function stateful(id: number) {
+  const dir = await placed(id);
+  await placeTurn(dir, { id, name: `box-${id}` }, { ...launch, state });
+  return dir;
+}
+
+test('a checkpoint asked for here waits for the agent to finish it, and says why when it cannot', async (t) => {
+  const was = { ...machineLink };
+  t.after(() => Object.assign(machineLink, was));
+  machineLink.online = () => true;
+  assert.equal(await askCheckpoint(await placed(5)), null, 'a turn with no state to sync has nothing to wait for');
+  const dir = await stateful(5);
+  let done: string | null | undefined;
+  const asked = askCheckpoint(dir).then((p) => (done = p));
+  const r = await one(5, { dir });
+  assert.ok(r.checkpoint! > 0);
+  assert.match(r.script!, /^[0-9a-f]{16}$/);
+  await one(5, { dir, home: r.checkpoint! - 1 });
+  assert.equal(done, undefined, 'an earlier checkpoint does not answer it');
+  await one(5, { dir, home: r.checkpoint! });
+  await asked;
+  assert.equal(done, null);
+  assert.equal((await one(5, { dir })).checkpoint, undefined, 'asked once');
+
+  const second = askCheckpoint(dir);
+  await one(5, { dir, home: (await one(5, { dir })).checkpoint!, homeFailed: 'disk full' });
+  assert.equal(await second, 'disk full');
+  assert.match((await askCheckpoint(dir, 1))!, /did not send/);
+  machineLink.online = () => false;
+  assert.match((await askCheckpoint(dir))!, /box-5.* is not connected/);
+  // What the agent is sent of it: where its record goes, and what runs one at a time; not the server's paths.
+  const start = (await syncTurns(5, {})).start.find((s) => s.dir === dir)!;
+  assert.deepEqual(start.launch, { ...launch, sync: { at: join(root, 'unit', '.sync'), key: dir } });
+});
+
+/** A worker holding one seeded turn, whose sync program answers from `say`. */
+async function seededWorker(say: (arg: Record<string, unknown>) => unknown) {
+  const ran: Record<string, unknown>[] = [];
+  const run = async (_cmd: string, args: string[]) => {
+    const arg = JSON.parse(Buffer.from(args.at(-1)!, 'base64').toString());
+    ran.push(arg);
+    return { code: 0, out: `${JSON.stringify(await say(arg))}\n`, err: '' };
+  };
+  const dir = '/data/turns/t';
+  const home = join(root, `w-${++n}`);
+  const local = join(home, 'fs', dir);
+  mkdirSync(local, { recursive: true });
+  for (const f of ['beat', 'stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(local, f), '');
+  writeFileSync(join(home, 'turns.json'), JSON.stringify([{ dir, launch: { ...launch, sync: { at: '/data/turns/.sync', key: 'k' } }, applied: 0, seeded: true, script: 'x' }]));
+  mkdirSync(join(home, 'fs', 'data', 'turns', '.sync'));
+  writeFileSync(join(home, 'fs', 'data', 'turns', '.sync', 'machine-sync-x.mjs'), '');
+  const w = new Worker({ config: { root: home, image: 'img' }, appUrl: 'http://127.0.0.1:9', token: 't', run, checkpointMs: 60_000 });
+  w.poke = () => {};
+  const ensured: unknown[] = [];
+  w.ensureContainer = async (l: unknown) => void ensured.push(l);
+  const posts: string[] = [];
+  w.call = async (path: string) => (posts.push(path), new Response('{}'));
+  const t = w.turns.get(dir)!;
+  t.ref = 0;
+  t.acked = { 'stream.jsonl': 0, 'stderr.log': 0 };
+  return { w, t, local, ran, ensured, posts, idle: () => until('the checkpoint', () => !t.checking && !t.steering) };
+}
+
+test("a turn's end is told only once its last checkpoint is home; out of reach it waits, and broken it gives up and says so", async () => {
+  let answer: unknown = { error: 'no route', offline: true };
+  const s = await seededWorker(() => answer);
+  writeFileSync(join(s.local, 'exit.json'), '{"code":0}');
+  const tick = async () => {
+    s.t.nextTry = 0;
+    s.w.checkpointIfDue(s.t);
+    await s.idle();
+    return s.w.report(s.t).body;
+  };
+  for (let i = 0; i < 5; i++) {
+    const body = await tick();
+    assert.equal(body.put['exit.json'], undefined);
+    assert.equal(body.alive, true, 'and it still counts as running');
+  }
+  answer = { ok: true };
+  assert.equal((await tick()).put['exit.json'], '{"code":0}');
+  assert.equal(s.ran.length, 6);
+  await tick();
+  assert.equal(s.ran.length, 6, 'one last checkpoint, no more');
+  assert.deepEqual(s.posts, []);
+
+  const broken = await seededWorker(() => ({ error: 'bad object' }));
+  writeFileSync(join(broken.local, 'exit.json'), '{"code":0}');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(broken.w.report(broken.t).body.put['exit.json'], undefined);
+    broken.t.nextTry = 0;
+    broken.w.checkpointIfDue(broken.t);
+    await broken.idle();
+  }
+  assert.equal(broken.w.report(broken.t).body.put['exit.json'], '{"code":0}');
+  assert.match(broken.posts.join(), /state\/failed\?dir=/);
+
+  // Its program can't be had: the app out of reach is waited out, an answer that will not mend is not.
+  for (const [call, offline] of [
+    [async () => Promise.reject(new TypeError('fetch failed')), true],
+    [async () => new Response('', { status: 503 }), true],
+    [async () => new Response('', { status: 500 }), false],
+  ] as const) {
+    const s2 = await seededWorker(() => ({ ok: true }));
+    s2.t.script = 'other';
+    s2.w.call = call;
+    const r = await s2.w.stateSync(s2.t, {});
+    assert.ok(r.error);
+    assert.equal(r.offline ?? false, offline);
+  }
+});
+
+test('a checkpoint is made on a commit, when the server asks, and every couple of minutes, and not otherwise', async () => {
+  const s = await seededWorker(() => ({ ok: true }));
+  const tick = async () => {
+    s.w.checkpointIfDue(s.t);
+    await s.idle();
+    return s.ran.length;
+  };
+  assert.equal(await tick(), 0);
+  s.t.asked = 5;
+  assert.equal(await tick(), 1);
+  assert.equal(s.w.report(s.t).body.home, 5);
+  assert.equal(s.ran[0].final, true, 'a tool waits for it: nothing is left for the next');
+  assert.equal(s.ensured.length, 1, 'its container may have stopped with the machine');
+  s.w.headLog = () => 200;
+  assert.equal(await tick(), 2);
+  assert.equal(await tick(), 2);
+  s.t.checked = Date.now() - 61_000;
+  assert.equal(await tick(), 3);
+  assert.equal(s.ran[2].final, false);
+  assert.equal(s.w.lines.size, 0, 'its line is let go');
+
+  // Kept aside at home: whoever waits is told why, and the turn's end isn't held for it.
+  const kept = await seededWorker(() => ({ ok: true, kept: 'the worktree here moved' }));
+  kept.t.asked = 5;
+  kept.w.checkpointIfDue(kept.t);
+  await kept.idle();
+  assert.equal(kept.w.report(kept.t).body.homeFailed, 'the worktree here moved');
+});
+
+test('a steer reaches the turn after the pictures it may name', async () => {
+  let there = '';
+  const s: Awaited<ReturnType<typeof seededWorker>> = await seededWorker(() => {
+    there = text(s.local, 'steer.jsonl');
+    return { ok: true };
+  });
+  await s.w.heard(s.t, { put: {} }, { sizes: {}, signals: [], steer: b64('{"s":1}\n') });
+  await s.w.heard(s.t, { put: {} }, { sizes: {}, signals: [], steer: b64('{"s":1}\n') });
+  await s.idle();
+  assert.equal(there, '', 'not before the sync');
+  assert.equal(text(s.local, 'steer.jsonl'), '{"s":1}\n', 'once, though it was sent twice');
+  assert.deepEqual(s.ran[0].roots, ['uploads', 'files']);
+});
+
 // ---- the whole path ----
 
 const bin = join(root, 'bin');
@@ -152,6 +307,8 @@ const workerRoot = join(root, 'worker');
 const calls = join(root, 'podman-calls');
 const heard = join(root, 'heard.log');
 const release = join(root, 'release');
+/** With it, claude says it is this session. */
+const sessionFile = join(root, 'session');
 // podman: `exec [-d] <container> <command…>` runs the command here, the server's turns folder mapped to the worker's
 // copy as the container's mount does; `run` and `inspect` are only recorded (no container runs yet, each time).
 const podman = join(bin, 'podman');
@@ -168,7 +325,8 @@ const detached = a[1] === '-d';
 const cmd = a.slice(detached ? 3 : 2).map((s) => (s === ${JSON.stringify(turnsDir)} || s.startsWith(${JSON.stringify(turnsDir + '/')}) ? ${JSON.stringify(join(workerRoot, 'fs'))} + s : s));
 if (cmd.includes('--version')) { console.log('9.9.9 (fake)'); process.exit(0); }
 if (detached) { spawn(cmd[0], cmd.slice(1), { detached: true, stdio: 'ignore' }).unref(); process.exit(0); }
-process.exit(spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' }).status ?? 1);
+// The state sync program (T3) reads the server's paths from its call: where the container would mount them, it is told.
+process.exit(spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit', env: { ...process.env, CITADEL_SYNC_PREFIX: ${JSON.stringify(join(workerRoot, 'fs'))} } }).status ?? 1);
 `,
   );
 // claude: says what it hears on stdin (the prompt, then steers), asks the app who it is through COORDINATOR_API as its
@@ -182,13 +340,14 @@ const fs = require('node:fs');
 const out = (o) => console.log(JSON.stringify(o));
 const end = (result) => { out({ type: 'result', subtype: 'success', is_error: false, result }); process.exit(0); };
 let n = 0;
+if (fs.existsSync(${JSON.stringify(sessionFile)})) out({ type: 'system', subtype: 'init', session_id: fs.readFileSync(${JSON.stringify(sessionFile)}, 'utf8') });
 require('node:readline').createInterface({ input: process.stdin }).on('line', async () => {
   n++;
   let status = 0;
   try {
     status = (await fetch(process.env.COORDINATOR_API + '/api/tickets/' + process.env.COORDINATOR_TICKET, { headers: { Authorization: 'Bearer ' + process.env.COORDINATOR_TOKEN } })).status;
   } catch {}
-  fs.appendFileSync(${JSON.stringify(heard)}, JSON.stringify({ n, api: process.env.COORDINATOR_API, status, dir: process.argv[1], config: process.env.CLAUDE_CONFIG_DIR ?? null, key: process.env.ANTHROPIC_API_KEY ?? null }) + '\\n');
+  fs.appendFileSync(${JSON.stringify(heard)}, JSON.stringify({ n, api: process.env.COORDINATOR_API, status, dir: process.argv[1], config: process.env.CLAUDE_CONFIG_DIR ?? null, key: process.env.ANTHROPIC_API_KEY ?? null, token: process.env.COORDINATOR_TOKEN, resume: process.argv[process.argv.indexOf('--resume') + 1] }) + '\\n');
   out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'heard ' + n }] } });
 });
 process.on('SIGINT', () => end('interrupted'));
@@ -254,7 +413,7 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   assert.equal(first.status, 200, "and the call arrives as the turn's own");
   assert.equal(first.config, null, "the sign-in is the machine's own: the server's config folder is not named there");
   assert.equal(first.key, null, "and the server's own key never leaves it");
-  assert.match(text(local, 'stream.jsonl'), /heard 1/, "claude's stream is written on the machine");
+  await until("claude's stream to be written on the machine", () => /heard 1/.test(text(local, 'stream.jsonl')));
   await until('the stream to come home', () => /heard 1/.test(text(dir, 'stream.jsonl')));
   await until('its pid to come home', () => existsSync(join(dir, 'pid.json')) && JSON.parse(text(dir, 'pid.json')).claude > 0);
   assert.match(readFileSync(calls, 'utf8'), /^run -d .*--userns=keep-id.* citadel-worker sleep infinity$/m);
@@ -305,6 +464,89 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   await until('the stopped turn to end', async () => (await call(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
   assert.match(readFileSync(calls, 'utf8'), /kill -INT -\d+/, 'signalled inside the container');
   assert.doesNotMatch(agent.output(), /could not start/);
+});
+
+test("a minion's worktree, session and files go to the machine before its turn, come home at checkpoints, and go on from either side", async () => {
+  const s = srv!;
+  const call = async (path: string, body?: unknown, method?: string) => ok(await s.call(path, body, method));
+  const there = (p: string) => join(workerRoot, 'fs', p);
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=a', '-c', 'user.email=a@b', '-c', 'core.hooksPath=/dev/null', ...args], { cwd, encoding: 'utf8' }).trim();
+  const src = join(root, 'src');
+  mkdirSync(src);
+  git(src, 'init', '-q', '-b', 'main');
+  writeFileSync(join(src, 'a.txt'), 'one\n');
+  git(src, 'add', '-A');
+  git(src, 'commit', '-qm', 'first');
+  const turn = async (text: string, id?: number) => {
+    rmSync(release, { force: true });
+    writeFileSync(heard, '');
+    const t = id ? (await call(`/api/tickets/${id}/messages`, { text }), { id }) : await call(`/api/projects/${project.id}/tickets`, { message: text });
+    return { ...t, ...JSON.parse((await until('the turn to say what it heard', () => lines(heard).length === 1 && lines(heard)))[0]) };
+  };
+  const end = async (id: number) => {
+    writeFileSync(release, '');
+    await until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
+  };
+  const online = () => until('the machine to be online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'w1' && m.online));
+  const machine = await online();
+  const onMachine = (worker: boolean) => call(`/api/machines/${machine.id}`, { lend: { server: null, workspaces: [], worker } }, 'PATCH');
+  const project = await call('/api/projects', { name: 'Repo', source: 'folder', folder: src });
+  const session = '11111111-2222-3333-4444-555555555555';
+  writeFileSync(sessionFile, session);
+
+  // A turn there: the worktree is there before claude is.
+  const t = await turn('on the machine');
+  const { cwd, branch } = (await call(`/api/tickets/${t.id}`)).ticket;
+  assert.equal(text(there(cwd), 'a.txt'), 'one\n');
+  assert.equal(git(there(cwd), 'symbolic-ref', '--short', 'HEAD'), branch);
+
+  // A commit comes home by itself, with what is not committed yet; so do its conversation and its files.
+  const slug = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+  const jsonl = (at: string) => join(at, 'claude', 'projects', slug, `${session}.jsonl`);
+  mkdirSync(join(there(jsonl(root)), '..'), { recursive: true });
+  writeFileSync(there(jsonl(root)), '{"n":1}\n');
+  writeFileSync(there(join(cwd, 'a.txt')), 'two\n');
+  git(there(cwd), 'commit', '-qam', 'on the machine');
+  await until('the commit to come home', () => git(cwd, 'log', '-1', '--format=%s') === 'on the machine' && git(cwd, 'status', '--porcelain') === '');
+  assert.equal(text(cwd, 'a.txt'), 'two\n');
+  assert.equal(git(cwd, 'symbolic-ref', '--short', 'HEAD'), branch);
+
+  // A tool that reads its files here waits for them: the picture was only on the machine.
+  writeFileSync(there(join(cwd, 'shot.png')), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+  const mark = await fetch(`${t.api}/api/tickets/${t.id}/mark-image`, { method: 'POST', headers: { Authorization: `Bearer ${t.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ image: join(cwd, 'shot.png'), marks: [{ kind: 'box', at: [1, 1], to: [50, 50] }] }) });
+  assert.equal(mark.status, 200, await mark.text());
+  assert.ok(existsSync(join(cwd, 'shot.png')));
+
+  // What it left uncommitted at its end is here by the time the turn is over, and its session is in the database's keeping.
+  writeFileSync(there(join(cwd, 'left.txt')), 'uncommitted\n');
+  writeFileSync(there(jsonl(root)), '{"n":1}\n{"n":2}\n');
+  await end(t.id);
+  assert.equal(text(cwd, 'left.txt'), 'uncommitted\n');
+  assert.equal(readFileSync(jsonl(root), 'utf8'), '{"n":1}\n{"n":2}\n');
+  assert.match(git(cwd, 'status', '--porcelain'), /\?\? left\.txt/);
+
+  // It goes on here from that conversation, even with the machine's copy of it all that was left.
+  await onMachine(false);
+  await s.settled();
+  rmSync(jsonl(root));
+  const home = await turn('at home', t.id);
+  assert.equal(home.resume, session);
+  assert.equal(readFileSync(jsonl(root), 'utf8'), '{"n":1}\n{"n":2}\n', 'restored from the database');
+  writeFileSync(jsonl(root), '{"n":3}\n', { flag: 'a' });
+  writeFileSync(join(cwd, 'left.txt'), 'changed at home\n');
+  git(cwd, 'commit', '-q', '--allow-empty', '-m', 'at home');
+  await end(t.id);
+
+  // And there again from what happened here.
+  await onMachine(true);
+  const again = await turn('there again', t.id);
+  assert.notEqual(again.api, home.api);
+  assert.equal(again.resume, session);
+  assert.equal(readFileSync(there(jsonl(root)), 'utf8'), '{"n":1}\n{"n":2}\n{"n":3}\n');
+  assert.equal(text(there(cwd), 'left.txt'), 'changed at home\n');
+  assert.equal(git(there(cwd), 'log', '-1', '--format=%s'), 'at home');
+  await end(t.id);
+  assert.doesNotMatch(JSON.stringify(await call(`/api/tickets/${t.id}/events?after=0`)), /could not send|is kept in/);
 });
 
 function require_dirs(dir: string): string[] {

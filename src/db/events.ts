@@ -66,6 +66,14 @@ export const eventQueries = {
     return (this.db.prepare('SELECT event_id FROM turns WHERE ticket_id = ? AND event_id IS NOT NULL AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { event_id: number } | undefined)?.event_id ?? 0;
   },
 
+  /** Whether one of a chat's last 50 messages carries `sendId` (send-ids.ts): taken before a restart forgot it (#1862). */
+  tookSend(this: Store, ticketId: number, sendId: string): boolean {
+    return !!this.db
+      .prepare(`SELECT 1 FROM (SELECT data FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id DESC LIMIT 50)
+      WHERE json_extract(data, '$.sendId') = ?`)
+      .get(ticketId, sendId);
+  },
+
   /** A chat's newest plan card, or undefined: a real plan, not a machine's notes (#617), its lending (#1638) or a release key card (#837), which ride the same event kind. */
   latestPlan(this: Store, ticketId: number): EventRow | undefined {
     return this.db

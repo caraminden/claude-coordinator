@@ -192,10 +192,16 @@ test('a write the viewer refuses for good still fails at once, and the save stat
   assert.equal(p.ctx.citadel.saveState(), 'saved');
 });
 
-/** Say again and again that every request the page has out is being worked on, as a live viewer does, until stopped. */
+/** Say once that each request is here, and again only when the page asks (`alive`), as a live viewer does, until stopped. */
 function aliveViewer(p) {
+  const told = new Set();
   const timer = setInterval(() => {
-    for (const m of p.posted) if (!m.answered) p.deliver({ ack: m.id });
+    for (const m of p.posted) {
+      if (m.answered || told.has(m)) continue;
+      told.add(m);
+      if (m.op === 'alive') m.answered = true;
+      p.deliver({ ack: m.id });
+    }
   }, 5);
   return () => clearInterval(timer);
 }

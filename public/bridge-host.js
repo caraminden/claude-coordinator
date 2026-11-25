@@ -74,8 +74,8 @@ export function takeWrite(frame, now = Date.now()) {
 let typedAt = 0;
 export const bridgeTypedAt = () => typedAt;
 
-/** Whether a page open here holds writes Citadel couldn't take yet (it was restarting), or has one or a Send on its way: a reload would lose them. */
-export const bridgeUnsaved = () => [...frames].some((f) => alive(f) && (f.unsaved || [...f.working.values()].some((op) => op === 'write' || op === 'send')));
+/** Whether a page open here holds writes Citadel couldn't take yet (it was restarting), or has one, a Send or a hello (which picks may wait on) on its way: a reload would lose them. */
+export const bridgeUnsaved = () => [...frames].some((f) => alive(f) && (f.unsaved || [...f.working.values()].some((op) => op === 'write' || op === 'send' || op === 'hello')));
 
 /** A failure worth sending again: the network, or Caddy's answer while Citadel restarts. */
 const transient = (err) => err?.retry === true || err instanceof TypeError || [502, 503, 504].includes(err?.status);
@@ -149,6 +149,7 @@ async function onMessage(e) {
       send.out = frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items, sendId: send.id } });
       const r = await send.out.catch((e) => {
         send.out = null;
+        if (!transient(e)) frame.sends.delete(key); // refused: not taken
         unanswer();
         throw e;
       });

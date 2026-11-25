@@ -54,6 +54,7 @@ test('the viewer says it has a request, and that it still works on it, until it 
   assert.equal(p.posted.length, 3, 'nothing is being worked on any more');
   // A page that opens is told who looks at what before the server has answered.
   p.ask(2, { op: 'hello' });
+  assert.equal(bridgeUnsaved(), true, 'picks may wait on a hello');
   assert.deepEqual(p.posted.at(-1).known, { person: null, file: 'pw.html', owner: 'Cara', draw: false });
 });
 

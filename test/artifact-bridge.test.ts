@@ -513,6 +513,22 @@ test("a page's Send pressed again under the same id posts once (#1862)", async (
   assert.equal(count(), before + 1);
   assert.equal((await send('once', 'id-2')).status, 202);
   assert.equal(count(), before + 2, 'a new id is a new message');
+  // Taken before a restart, which forgot the ids it held: the message kept it.
+  store.addEvent(M.id, 'user_message', { author: 'Cara', text: 'once', sendId: 'id-3' });
+  assert.equal((await send('once', 'id-3')).status, 202);
+  assert.equal(count(), before + 3);
+});
+
+test("a shared page's Send pressed again goes to the one chat, though another minion linked the page meanwhile (#1862)", async () => {
+  writeFileSync(join(shared, 'relinked.html'), '<p>takes</p>');
+  const page = await sharedPage('relinked.html');
+  const send = () => sendPage({ open: { project: A.id, path: 'relinked.html' }, page, text: 'A', sendId: 'id-shared' });
+  assert.equal((await send()).status, 202);
+  assert.equal(lastMessage(TA.id).text, 'A');
+  const linker = thread(A.id, 'ticket', 'work-relinker');
+  store.syncArtifacts(linker, [{ path: join(shared, 'relinked.html'), size: 1, mtime: 1 }]);
+  assert.equal((await send()).status, 202);
+  assert.equal(store.listEvents(linker.id).filter((e) => e.kind === 'user_message').length, 0);
 });
 
 test("a page's Send is refused for another page, an empty text, and anyone but a person", async () => {

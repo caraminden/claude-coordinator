@@ -709,9 +709,12 @@ export const fileRoutes: Route[] = [
       const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.coordinatorFor(project.id, session.uid ?? null);
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
-      // Pressed again, its reply lost or slow: taken once (#1862, as the message box's).
-      await sendOnce(to.id, sendIdOf(body.sendId), async () => {
-        app.runner.send(to.id, session.name, text, await saveImages(app, to, body.images), { comment: { path: abs, about }, hold: true });
+      // Pressed again, its reply slow or lost: taken once (#1862, as the message box's), kept on the message for after a
+      // restart. Under no one chat, since another minion may have linked a shared page meanwhile.
+      const sendId = sendIdOf(body.sendId);
+      await sendOnce(0, sendId, async () => {
+        if (sendId && app.store.tookSend(to.id, sendId)) return;
+        app.runner.send(to.id, session.name, text, await saveImages(app, to, body.images), { comment: { path: abs, about }, hold: true, ...(sendId ? { sendId } : {}) });
         // The picks answer the chat's choices cards for this page (#804).
         let answered = false;
         for (const e of app.store.eventsOfKinds(to.id, ['question'])) {

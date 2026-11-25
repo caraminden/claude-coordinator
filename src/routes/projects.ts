@@ -180,8 +180,9 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
       }),
     );
     store.setTicketDir(t.id, cwd, null);
-  } catch {
-    // Lost a race with a concurrent request; the unique index kept a single coordinator.
+  } catch (e) {
+    // Lost a race with a concurrent request; the unique index kept a single coordinator. A queue still busy is a 503.
+    if (e instanceof HttpError) throw e;
   }
   return store.getCoordinator(project.id)!;
 }

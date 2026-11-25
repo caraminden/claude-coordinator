@@ -174,7 +174,8 @@ export class Memory {
       }
       const rows = part.flatMap((p, j): ChunkRow[] => (vecs[j] ? [[p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model]] : []));
       // On the server it goes to the write worker: waiting here for the queue held the server's thread 4.4 s (Nov 24).
-      if (rows.length) this.putChunks(rows);
+      // Awaited (off the loop): a failed insert stops the pass before its mark moves, as it did on the server's thread.
+      if (rows.length) await (this.putChunks(rows) as unknown);
       for (const p of part.filter((_, j) => vecs[j])) if (p.source_kind === 'ticket') this.ticketTexts?.set(p.source_id, p.text);
     }
     if (turns.mark !== null) this.store.setSetting(this.markKey(projectId), turns.mark);

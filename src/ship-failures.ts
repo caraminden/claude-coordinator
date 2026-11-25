@@ -57,6 +57,7 @@ export function failureDetail(output: string, code: number | null): FailureDetai
   ]);
   const files = uniq([...output.matchAll(/^(?:.*\t)?run-tests: (\S+\.test\.ts): /gm)].map((m) => m[1]));
   const broken = uniq([...output.matchAll(/^land: broken test, not a flake: (\S+) red in /gm)].map((m) => m[1]));
+  const skipped = uniq([...output.matchAll(/^land: (?:a test was|\d+ tests were) skipped in CI \([^)]*\): (.+)$/gm)].flatMap((m) => m[1].replace(/\. A skipped test is a real failure.*$/, '').split('; ')));
   const kind =
     cls === 'conflict' || conflicts.length
       ? 'merge conflict'
@@ -70,16 +71,18 @@ export function failureDetail(output: string, code: number | null): FailureDetai
               ? 'boot check'
               : /^land: smoke: .*, before the line/m.test(output)
                 ? 'smoke check'
-                : cls === 'passed-alone'
-                  ? broken.length
-                    ? 'broken test, not a flake'
-                    : 'failed together, passed alone' // #1487: red too often to be a flake
-                  : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output)
-                    ? 'tests failed'
-                    : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output)
-                      ? 'deploy or boot'
-                      : 'failed';
-  const all = kind === 'merge conflict' ? conflicts : kind === 'broken test, not a flake' ? broken : tests.length ? tests : files;
+                : cls === 'skipped-test'
+                  ? 'skipped test' // #1914
+                  : cls === 'passed-alone'
+                    ? broken.length
+                      ? 'broken test, not a flake'
+                      : 'failed together, passed alone' // #1487: red too often to be a flake
+                    : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output)
+                      ? 'tests failed'
+                      : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output)
+                        ? 'deploy or boot'
+                        : 'failed';
+  const all = kind === 'merge conflict' ? conflicts : kind === 'broken test, not a flake' ? broken : kind === 'skipped test' ? skipped : tests.length ? tests : files;
   const runs = output.split('\n').filter((l) => /\/actions\/runs\/\d+/.test(l));
   // The run named where it failed, else any run not named as a pass (a green CI before a failed deploy isn't the cause).
   const line = runs.filter((l) => /fail|\bred\b|refus|cancel|timed out|no verdict/i.test(l)).pop() ?? runs.filter((l) => !/pass|green/i.test(l)).pop();

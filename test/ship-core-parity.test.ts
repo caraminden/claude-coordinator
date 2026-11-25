@@ -170,16 +170,31 @@ test('land.local.sh refuses a CI red that skipped a test as land.sh does, whatev
   writeFileSync(join(dir, 'run-7.log'), readFileSync(join(dir, 'run-7.log'), 'utf8').replace(/^ℹ skipped 1$/m, 'ℹ skipped 0'));
   assert.deepEqual(bash(flaky), ['test/machine-lend-cards.test.ts'], 'no skip: the one fresh run, as before');
   // The status the core asks CI for, with every flake a known one: red on a skip, green without one.
-  const status = (skips: number) => {
-    writeFileSync(join(dir, 'run-7.log'), readFileSync(join(dir, 'run-7.log'), 'utf8').replace(/^ℹ skipped \d+$/m, `ℹ skipped ${skips}`));
+  const status = (skips: number, then = '', edit = (log: string) => log) => {
+    writeFileSync(join(dir, 'run-7.log'), edit(readFileSync(join(dir, 'run-7.log'), 'utf8')).replace(/^ℹ skipped \d+$/m, `ℹ skipped ${skips}`));
     const names = ['citadel_flake_only', 'citadel_skipped', 'citadel_skipped_said', 'citadel_cut_off', 'citadel_ci_digest', 'citadel_ci_status'];
     const stubs = `citadel_retro_log() { echo "retro: $1"; }\ncitadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ncitadel_slug() { echo o/r; }\ncitadel_hub() { printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n'; }\ncitadel_ci_log() { echo ${JSON.stringify(dir)}/run-7.log; }\ncitadel_ci_known() { echo 'a known flake'; }\ncitadel_ci_rerun_said() { :; }\nCITADEL_CI_WORKFLOW=w CITADEL_CI_CLOCK_STEP=c CITADEL_CI_STEP="$(printf '7\\tcompleted\\tfailure\\thttps://ci/7')" CITADEL_CI_BURN_STEP=b`;
-    return bash(`set -euo pipefail\n${names.map((n) => fn(local, n)).join('')}${stubs}\nrc=0; citadel_ci_status 0123456789abcdef || rc=$?; echo "rc $rc"`).filter((l) => /^rc |^land: (a test|only known)/.test(l));
+    return bash(`set -euo pipefail\n${names.map((n) => fn(local, n)).join('')}${stubs}\nrc=0; citadel_ci_status 0123456789abcdef >${JSON.stringify(dir)}/cilog || rc=$?; cat ${JSON.stringify(dir)}/cilog; echo "rc $rc"\n${then}`).filter((l) => /^rc |^waived|^refused|^land: (a test|only known|the CI run)/.test(l));
   };
   const [why, rc] = status(1);
   assert.match(why, /^land: a test was skipped in CI \(https:\/\/ci\/7\): every \.ts, /);
   assert.equal(rc, 'rc 1');
   assert.deepEqual(status(0), ['land: only known flakes failed in CI (https://ci/7): a known flake, so this goes on as green, with no fresh run', 'rc 0']);
+  // With a real failure that is main's own red beside it, the core's known_red waives the run, but not with a skip.
+  const core = join(repo, 'tools', 'land-core.sh');
+  const hooks = ['citadel_failed', 'citadel_url', 'citadel_burn_lines', 'citadel_id_in'].map((n) => readFileSync(local, 'utf8').match(new RegExp(`^${n}\\(\\) \\{.*\\}$`, 'm'))?.[0] ?? assert.fail(n));
+  const waiver = `${['citadel_labels', 'citadel_real', 'land_main_red'].map((n) => fn(local, n)).join('')}${hooks.join('\n')}\n${fn(core, 'land_failures')}${fn(core, 'known_red')}
+    here=/x branch=b BRANCH=main state=${JSON.stringify(dir)} cilog=${JSON.stringify(dir)}/cilog
+    git() { :; }; say() { :; }; citadel_main_alone() { return 1; }; citadel_chg() { :; }; citadel_suspects_of() { :; }
+    main_red() { land_main_red m "$1" <<<"$2"; }
+    if known_red CI abc <"$cilog"; then echo waived; else echo refused; fi`;
+  const real = (log: string) => log.replace(/failed in the full run, passed alone: .*$/gm, 'failed again alone: a real failure').concat('\ntest at test/machine-lend-cards.test.ts:3:1\n✖ lends (3ms)\n');
+  assert.equal(status(1, waiver, real).at(-1), 'refused');
+  assert.equal(status(0, waiver).at(-1), 'waived');
+  // A run cut off after a skip is a verdict too, not a run to ask for again.
+  const cut = (log: string) => `${log.replace(/✖ failing tests:/g, '')}\nInterrupted while running:\n`;
+  assert.deepEqual(status(1, '', cut).slice(-1), ['rc 1']);
+  assert.deepEqual(status(0).slice(-1), ['rc 4']);
 });
 
 test('tests.yml fails a run that skipped a test, red runs included, and says nothing about skips when node gave no summary (#1914)', () => {

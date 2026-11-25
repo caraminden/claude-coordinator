@@ -40,6 +40,14 @@ test('a failed ship sums up as its kind, the first three names and "+N more", an
     'deploy or boot',
     'a fresh run that passed and a deploy that failed: the deploy is the cause',
   );
+  // #1914: a run with a skipped test is refused for that, its flakes aside.
+  const skip = 'land: a test was skipped in CI (https://github.com/o/r/actions/runs/8): the format check. A skipped test is a real failure, never a flake: its check did not run';
+  assert.deepEqual(failureDetail(`run-tests: test/x.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 3)\n✖ x breaks (3ms)\n${skip}\nland: tests failed on the rebased branch in CI (${RUN}), so main is untouched`, 1), {
+    kind: 'skipped test',
+    names: ['the format check'],
+    more: 0,
+    ci: RUN,
+  });
   assert.deepEqual(failureDetail('something odd', 1), { kind: 'failed', names: [], more: 0, ci: null });
   // The smoke check names its test with no time; a green CI run before a failed deploy isn't the try's CI run.
   assert.deepEqual(failureDetail('land: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed', 1), { kind: 'smoke check', names: ['budget'], more: 0, ci: null });

@@ -29,6 +29,7 @@ after(() => tmp.teardown());
 const BENCHED = ['cut_off', 'flake_only', 'skipped_tests', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on', 'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone'];
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
+  train_tail: "cuts a red's log for the rider it refuses",
   ci_failed: 'fetches the log and writes its flake and skipped-test lines',
   ci_gate: 'waits for the run and fetches its log',
   gate: 'calls cut_off, flake_only and known_flakes, benched here',
@@ -153,6 +154,9 @@ test('the bench has every commit its cases name (CI checks out with fetch-depth 
 test('A: a run killed with no failing test is no verdict', () => {
   const r = run({ script: `${log('44859457680')}\ncut_off && echo cut-off\ntrain_real || echo 'no real failure'` });
   assert.equal(r.out, 'cut-off\nno real failure\n');
+  // Nor is one that skipped a test before it was killed (#1914): that is its verdict.
+  const skip = `failed+=$'\\ntest\\tthe full suite\\t2026-11-21T03:08:25.1Z ℹ skipped 1'`;
+  assert.equal(run({ script: `${log('44859457680')}\n${skip}\ncut_off || echo red` }).out, 'red\n');
   // And a real red is no cut-off: run 44869832060 (report 2106), db-writer failed again alone.
   assert.equal(run({ script: `${log('44869832060')}\ncut_off || echo red` }).out, 'red\n');
 });

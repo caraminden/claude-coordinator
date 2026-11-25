@@ -619,7 +619,7 @@ citadel_ci_status() {
     citadel_ci_rerun_said "$dir" "$sha" "$id" red
     return 1
   fi
-  if citadel_cut_off <"$log"; then # no verdict on the commit (#1377): the core runs it again once on 4; cut off twice is no answer
+  if ! citadel_skipped <"$log" >/dev/null && citadel_cut_off <"$log"; then # no verdict on the commit (#1377; a skipped test is one, #1914): the core runs it again once on 4; cut off twice is no answer
     if read -r n files 2>/dev/null <"$dir/cut-$sha" && [ "$n" != "$id" ]; then
       echo "CI was cut off twice before any test failed ($files, $url)" | tee "$why_f"
       citadel_ci_rerun_said "$dir" "$sha" "$id" "no answer"
@@ -641,6 +641,7 @@ citadel_ci_status() {
   if skips=$(citadel_skipped <"$log"); then # a skipped test is a real failure, never a flake (#1914)
     files=''
     echo "land: $(citadel_skipped_said "$skips" "$url"). A skipped test is a real failure, never a flake: its check didn't run, so no flake excuses this run and it gets no fresh one. Make the test run in CI, or give the runner what it needs"
+    echo "skipped tests: completed failure ($url)" # an id for the core's land_failures ("ci:skipped tests") that no land_main_red names, so known_red never waives the run
     ! mkdir "$dir/said-$id-skip" 2>/dev/null || citadel_retro_log "skipped test · $br · ${skips//$'\n'/; } · $url"
   fi
   # A red of known flakes only (#1419) is a green, with no fresh run. Said once per run; the core shows CI_STATUS's lines only on red, so <dir>/known-<commit> keeps it for the shipped line.

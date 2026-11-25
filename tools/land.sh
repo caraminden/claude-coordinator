@@ -1465,8 +1465,10 @@ flake_only() {
 # didn't stop it as a hang (its timeout sends the same signal, and a hang is a real red). It says nothing about the commit.
 # #1393: so is a run killed from outside (exit 137, the desktop's out-of-memory killer): run-tests.sh's "were killed" line,
 # or only GitHub's exit 137 line when the whole step went. A SIGKILL leaves Node no summary, so "no test failed" there
-# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red.
+# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red. So is a
+# skipped test (#1914).
 cut_off() {
+  ! skipped_tests >/dev/null || return 1
   ! grep -qF 'run-tests: the tests ran past' <<<"$failed" || return 1
   if grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed"; then return 0; fi
   grep -qE 'run-tests: the tests were killed \(exit [0-9]+\)|Process completed with exit code 137\.' <<<"$failed" && ! grep -qF '✖' <<<"$failed"
@@ -1578,6 +1580,13 @@ train_tell() {
   local f=$train_dir/$1
   shift
   printf '%s\n' "$@" >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
+}
+# <a red run's log>: what a refused rider hears of it, its last 40 lines, after the test it skipped, if any: those lines
+# don't say so, and the wake's kind is read from it (#1914).
+train_tail() {
+  local failed=$1 f
+  ! f=$(skipped_tests) || echo "land: $(skipped_said "$f")"
+  tail -n 40 <<<"$failed"
 }
 # [<index>]: the riders from there on (all by default) leave the train with no verdict: back in line as they were.
 train_drop() {
@@ -2301,10 +2310,10 @@ train_suspects() {
         keep+=("${train_n[$i]}")
       elif [ -n "${sure[$((i + 1))]:-}" ]; then
         kind="likely ${v//, /,} pinned"; [ -z "$burn_red" ] || kind="burn ${v//, /,}"
-        train_say "$i" "refused $branch $ci_url $kind" "$(tail -n 40 <<<"$failed")"
+        train_say "$i" "refused $branch $ci_url $kind" "$(train_tail "$failed")"
         train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
       else
-        held_n+=("${train_n[$i]}") held_br+=("${train_br[$i]}") held_was+=("${train_was[$i]}") held_files+=("${v//, /,}") held_run+=("$ci_url") held_log+=("$(tail -n 40 <<<"$failed")")
+        held_n+=("${train_n[$i]}") held_br+=("${train_br[$i]}") held_was+=("${train_was[$i]}") held_files+=("${v//, /,}") held_run+=("$ci_url") held_log+=("$(train_tail "$failed")")
         train_held+="${train_n[$i]} " train_held_tips+=" ${train_was[$i]}"
       fi
     done

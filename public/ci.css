@@ -197,7 +197,7 @@
 .flow-list { display: grid; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .flow-list h4 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .flow-list h4 .muted { font-weight: 400; font-size: var(--size-small); }
-.flow-cant { margin: 0; }
+.flow-cant { margin: 0; font-size: var(--size-small); }
 .flow-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .flow-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--space-3); padding: var(--space-2); border-radius: var(--radius-sm); color: inherit; text-decoration: none; transition: background var(--motion); }
 .flow-row:hover { background: color-mix(in srgb, var(--h) 7%, transparent); }
@@ -209,10 +209,18 @@
 .flow-row-bar i { display: block; height: 100%; width: var(--pct); border-radius: inherit; background: var(--h); }
 .flow-table-wrap { overflow-x: auto; }
 .flow-table :is(th, td):nth-child(-n+3) { text-align: left; }
+.flow-table td:first-child { overflow-wrap: normal; }
 .flow-table tfoot :is(th, td) { font-weight: 650; color: var(--ink); border-bottom: 0; }
 .flow-table tfoot td { text-align: right; }
-@container (max-width: 720px) {
-  .flow-names { grid-template-columns: minmax(0, 1fr); }
+@container (min-width: 440px) {
+  .flow-block:not(.table) .flow-names { display: none; } /* the river has the names itself */
+}
+.flow-tab .short { display: none; }
+@container (max-width: 520px) {
+  .flow-names { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow-names-col:last-child { grid-column: 1 / -1; }
+  :is(.flow-names-col:not(:last-child), .flow-table) .full { display: none; }
+  :is(.flow-names-col:not(:last-child), .flow-table) .short { display: inline; }
 }
 @media (max-width: 760px) {
   .flow-name { min-height: var(--control-h); }

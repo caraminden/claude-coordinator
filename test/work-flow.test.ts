@@ -110,7 +110,7 @@ test('the river: every column holds every minion, and a ribbon for each step tak
   const { cols, links, total } = layout(minions, 'n', 400);
   assert.equal(total, 15);
   assert.deepEqual(
-    cols.map((c) => c.map((n) => [n.key, n.v])),
+    cols.map((c: FlowNode[]) => c.map((n) => [n.key, n.v])),
     [
       [
         ['feature', 7],

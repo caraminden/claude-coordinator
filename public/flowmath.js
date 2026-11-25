@@ -1,27 +1,28 @@
 // The Flow tab's sums (#1989), apart from the page so a test can pin them.
 
+// [key, its name, the shorter one a narrow river has room for]
 export const KINDS = [
   ['feature', 'Feature'],
   ['bug', 'Bug fix'],
   ['chore', 'Chore'],
   ['research', 'Research'],
-  ['other', 'Design, ideas, other'],
+  ['other', 'Design, ideas, other', 'Other'],
 ];
 export const PATHS = [
-  ['shipped', 'Shipped, under two refusals'],
-  ['untold', 'Shipped, refusals not recorded'],
-  ['refused', 'Two or more refused ships'],
-  ['other', 'On main, no release of its own'],
+  ['shipped', 'Shipped, under two refusals', 'Shipped'],
+  ['untold', 'Shipped, refusals not recorded', 'Not recorded'],
+  ['refused', 'Two or more refused ships', '2+ refusals'],
+  ['other', 'On main, no release of its own', 'No release'],
   ['never', 'Never shipped'],
 ];
 export const ENDS = [
   ['live', 'Live'],
-  ['main', 'On main, no release recorded'],
-  ['late', 'There after two or more refusals'],
-  ['build', 'In a build that is not on main'],
-  ['nothing', 'Closed, nothing on main'],
-  ['answer', 'Answer, report or design'],
-  ['open', 'Still open'],
+  ['main', 'On main, no release recorded', 'On main'],
+  ['late', 'Got there after refusals', 'Late'],
+  ['build', 'In a build that is not on main', 'In a build'],
+  ['nothing', 'Closed, nothing on main', 'Not on main'],
+  ['answer', 'Answer, report or design', 'Answer'],
+  ['open', 'Still open', 'Open'],
 ];
 export const COLS = [
   ['kind', KINDS],
@@ -32,7 +33,7 @@ export const value = (ms, unit) => (unit === 'cost' ? ms.reduce((s, m) => s + m.
 
 /** Each column's nodes that hold anything, in their fixed order, with their minions. */
 export function nodesOf(minions) {
-  return COLS.map(([col, names]) => names.map(([key, name]) => ({ col, key, name, ms: minions.filter((m) => m[col] === key) })).filter((n) => n.ms.length));
+  return COLS.map(([col, names]) => names.map(([key, name, short = name]) => ({ col, key, name, short, ms: minions.filter((m) => m[col] === key) })).filter((n) => n.ms.length));
 }
 
 /**
@@ -95,8 +96,8 @@ export function rows(minions, unit) {
   return [...by.values()].map((r) => ({ ...r, n: r.ms.length, cost: value(r.ms, 'cost') })).sort((a, b) => value(b.ms, unit) - value(a.ms, unit) || b.n - a.n);
 }
 
-/** "$1,204", "$10.50", "$0.40": costs are estimates at API prices, said once on the page. */
-export const money = (usd) => `$${usd >= 100 ? Math.round(usd).toLocaleString('en-US') : usd.toFixed(2)}`;
+/** "$1,204", "$11", "$0.40": costs are estimates at API prices, said once on the page. */
+export const money = (usd) => `$${usd >= 10 ? Math.round(usd).toLocaleString('en-US') : usd.toFixed(2)}`;
 
 /** A Pacific day `back` days before `today` ('2026-11-25'). */
 export const dayBefore = (today, back) => new Date(Date.parse(`${today}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);

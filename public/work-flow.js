@@ -8,7 +8,8 @@ import { emptyCard, showFirst, toneChip } from './look.js';
 const num = (n) => n.toLocaleString('en-US');
 const plural = (n, one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
 const amount = (v, unit) => (unit === 'cost' ? money(v) : num(v));
-const NAME = Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names)]));
+const SHORT = Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names.map(([key, name, short = name]) => [key, short]))]));
+const NAME = Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names.map(([key, name]) => [key, name]))]));
 const PRESETS = [
   [7, '1 week'],
   [14, '2 weeks'],
@@ -16,6 +17,8 @@ const PRESETS = [
   [90, '90 days'],
 ];
 const NS = 'http://www.w3.org/2000/svg';
+/** A name and its shorter one: the page's width shows one (ci.css). */
+const both = (name, short) => [h('span', { class: 'full' }, name), h('span', { class: 'short' }, short)];
 const svgEl = (tag, attrs) => {
   const el = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
@@ -120,9 +123,9 @@ function river(minions, on) {
   function draw() {
     const W = width;
     if (!W) return;
-    const down = W < 560;
-    // Across a desktop the endings' names need room on the right; down a phone, the names are in the lists under it.
-    const pad = down ? 0 : 218;
+    const down = W < 440;
+    const tight = W < 640; // shorter names; a phone's are in the lists under it (ci.css)
+    const pad = down ? 0 : tight ? 128 : 226;
     const along = down ? W : Math.max(340, Math.min(500, W * 0.42));
     const across = down ? 430 : W - pad;
     const H = down ? across : along;
@@ -156,8 +159,8 @@ function river(minions, on) {
         attrs(g, { class: `flow-node${picked ? ' on' : ''}`, 'data-hue': `${n.col}-${n.key}`, 'aria-pressed': String(picked), 'aria-label': `${n.name}: ${plural(n.ms.length, 'minion')}, ${money(value(n.ms, 'cost'))}. List them` });
         const [hit, bar, lead, text] = g.children;
         attrs(bar, { ...(down ? { x: n.at, y: d, width: n.size, height: THICK } : { x: d, y: n.at, width: THICK, height: n.size }), rx: Math.min(3, n.size / 2) });
-        attrs(hit, down ? { x: n.at - 3, y: d - 14, width: n.size + 6, height: THICK + 28 } : { x: d - 8, y: n.at - 6, width: i === 2 ? pad : THICK + 150, height: n.size + 12 });
-        text.children[0].textContent = down ? '' : n.name;
+        attrs(hit, down ? { x: n.at - 3, y: d - 14, width: n.size + 6, height: THICK + 28 } : { x: d - 8, y: n.at - 6, width: i === 2 ? pad : THICK + 16, height: n.size + 12 });
+        text.children[0].textContent = down ? '' : tight ? n.short : n.name;
         text.children[1].textContent = down && n.size < 40 ? '' : amount(n.v, st.unit);
         if (down) {
           lead.setAttribute('d', '');
@@ -313,7 +316,7 @@ function build(id, name, data, retry, redraw) {
   ];
   if (!ms.length) return [head, controls, ...notes, shown.unread ? h('div', { class: 'code-skeleton flow-skeleton' }) : emptyCard('Nothing started in these days', 'Every minion started here shows as a thread from its kind to how it ended. Pick a longer range to see older ones.', { mark: '≈', hue: 'muted' })];
 
-  const body = h('section', { class: `ci-block code-block flow-block${stale ? ' stale' : ''}`, 'data-hue': 'accent', 'aria-busy': String(!!stale) });
+  const body = h('section', { class: `ci-block code-block flow-block${stale ? ' stale' : ''}${st.table ? ' table' : ''}`, 'data-hue': 'accent', 'aria-busy': String(!!stale) });
   const listBox = h('div', { class: 'flow-list' });
   const legend = h('div', { class: 'flow-names' });
   const has = (p) => ms.some((m) => m[p.col] === p.key);
@@ -353,7 +356,7 @@ function build(id, name, data, retry, redraw) {
               'button',
               { type: 'button', class: `flow-name${on ? ' on' : ''}`, 'aria-pressed': String(on), 'data-hue': `${n.col}-${n.key}`, onclick: () => pick({ col: n.col, key: n.key }) },
               h('i', { class: 'flow-key', 'aria-hidden': 'true' }),
-              h('span', {}, n.name),
+              ...both(n.name, n.short),
               h('b', {}, amount(value(n.ms, st.unit), st.unit)),
             );
           }),
@@ -365,7 +368,7 @@ function build(id, name, data, retry, redraw) {
     stage.append(
       showFirst({
         key: `flow-table-${id}`,
-        items: rows(ms, st.unit).map((x) => h('tr', {}, h('td', {}, NAME.kind[x.kind]), h('td', {}, NAME.path[x.path]), h('td', {}, NAME.end[x.end]), h('td', {}, num(x.n)), h('td', {}, money(x.cost)))),
+        items: rows(ms, st.unit).map((x) => h('tr', {}, ...COLS.map(([col]) => h('td', {}, ...both(NAME[col][x[col]], SHORT[col][x[col]]))), h('td', {}, num(x.n)), h('td', {}, money(x.cost)))),
         n: 18,
         noun: 'rows',
         wrap: (xs) =>

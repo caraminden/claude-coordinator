@@ -20,7 +20,7 @@ export interface PublishRunDeps {
   /** Where the apps' data folders are. */
   home: string;
   githubOf(repoDir: string): GithubEnv;
-  tellHome(projectId: number, text: string): void;
+  tellHome: (projectId: number, text: string) => void;
   publish?: typeof publish;
 }
 

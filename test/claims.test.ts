@@ -282,6 +282,8 @@ test('a database from before #1985 gains its columns, its claim as it was but co
   const claims = new Claims(db);
   assert.deepEqual({ ...claims.get(1, 'pipeline-lane') }, { project_id: 1, name: 'pipeline-lane', holder: 580, taken_by: 'Josh', note: 'part B', since: 1000, landed: '', keep: 0, handed: 1, beside: 0, beside_since: 0, beside_landed: '' });
   new Claims(db);
+  assert.equal(claims.take(1, 'another', 580, 'Josh').claim.handed, 0, 'a new claim there starts as not handed off');
+  claims.release(1, 'another');
   claims.shipped(580, 'one');
   assert.equal(claims.holderLive(claims.get(1, 'pipeline-lane')!, ['one'])?.from.holder, 580, 'held from before: its next live passes it on');
 });

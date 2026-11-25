@@ -110,8 +110,8 @@ export class Claims {
     const cols = (db.prepare('PRAGMA table_info(claims)').all() as { name: string }[]).map((c) => c.name);
     if (!cols.includes('landed')) db.exec("ALTER TABLE claims ADD COLUMN landed TEXT NOT NULL DEFAULT ''");
     if (!cols.includes('keep')) db.exec('ALTER TABLE claims ADD COLUMN keep INTEGER NOT NULL DEFAULT 0');
-    // A claim held when this arrives counts as handed off: what its holder did before wasn't recorded.
-    if (!cols.includes('handed')) db.exec('BEGIN; ALTER TABLE claims ADD COLUMN handed INTEGER NOT NULL DEFAULT 0; UPDATE claims SET handed = 1; COMMIT');
+    // 1 for a claim held when this arrives: whether its holder handed off before wasn't recorded. take() sets its own.
+    if (!cols.includes('handed')) db.exec('ALTER TABLE claims ADD COLUMN handed INTEGER NOT NULL DEFAULT 1');
     if (!cols.includes('beside')) db.exec("BEGIN; ALTER TABLE claims ADD COLUMN beside INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_since INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_landed TEXT NOT NULL DEFAULT ''; COMMIT");
     const queued = (db.prepare('PRAGMA table_info(claim_queue)').all() as { name: string }[]).map((c) => c.name);
     if (!queued.includes('ready')) db.exec('ALTER TABLE claim_queue ADD COLUMN ready INTEGER NOT NULL DEFAULT 0');
@@ -139,7 +139,7 @@ export class Claims {
     if (held && held.holder !== holder) return { claim: held, held };
     if (held) this.db.prepare('UPDATE claims SET note = ? WHERE project_id = ? AND name = ?').run(note, projectId, name);
     else {
-      this.db.prepare('INSERT INTO claims (project_id, name, holder, taken_by, note, since) VALUES (?, ?, ?, ?, ?, ?)').run(projectId, name, holder, takenBy, note, now);
+      this.db.prepare('INSERT INTO claims (project_id, name, holder, taken_by, note, since, handed) VALUES (?, ?, ?, ?, ?, ?, 0)').run(projectId, name, holder, takenBy, note, now);
       this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket = ? AND done_at IS NULL').run(projectId, name, holder);
     }
     if (keep !== undefined) this.db.prepare('UPDATE claims SET keep = ? WHERE project_id = ? AND name = ?').run(keep ? 1 : 0, projectId, name);

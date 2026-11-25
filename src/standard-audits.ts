@@ -153,6 +153,27 @@ export function addGlossaryDrifts(store: Store, dataDir: string): string[] {
     .filter((l): l is string => !!l);
 }
 
+/**
+ * The weekly area review (kit/schedules/area-review.md, #1784) for a scheme: added once, and PAUSED, so it is off until the scheme
+ * resumes it (it costs about $10 to $15 a run). A row someone deletes stays deleted.
+ */
+export function addAreaReview(store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()): string | null {
+  const line = addOnce(store, dataDir, projectId, 'area-review', `area_review:${projectId}`, templates, now);
+  if (!line) return null;
+  const row = store.schedules.list(projectId).find((s) => s.template === 'area-review');
+  if (row) store.schedules.update(row.id, { paused: true }, now);
+  return `${line}, paused`;
+}
+
+/** At boot: every scheme gets its (paused) area review (once each, as above). */
+export function addAreaReviews(store: Store, dataDir: string): string[] {
+  const templates = loadTemplates();
+  return store
+    .listProjects()
+    .map((p) => addAreaReview(store, dataDir, p.id, templates))
+    .filter((l): l is string => !!l);
+}
+
 /** The notes Citadel's hand-written monthly architecture check (schedule 12) carried beyond the template. */
 const CITADEL_ARCHITECTURE_NOTES = "Also read this scheme's retro-log/ in the shared folder for rebase conflicts and red ships. For the first run on the template, the baseline is the monolith findings in citadel-retro-2026-10.md at the shared folder's top level.";
 

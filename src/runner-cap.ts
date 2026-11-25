@@ -7,7 +7,7 @@
 //  - Off switch: the hold's own, <deploy state>/hold-off (src/ci-hold.ts).
 // It asks with the login of the scheme's owner, as Citadel's other runner work does (src/ci-runner.ts).
 import type { Listed, RunnerTokens } from './ci-runner.ts';
-import type { Pcs } from './ci-ships.ts';
+import { pcOf, type Pcs } from './ci-ships.ts';
 import type { Project, Store } from './db.ts';
 import { every, type Job } from './every.ts';
 import { thrown } from './thrown.ts';
@@ -54,7 +54,6 @@ const NONE: CapState = { since: null, off: [], late: null, told: false };
 
 export class RunnerCap {
   private d: CapDeps;
-  private s: CapState;
   private looked = 0;
   private was: boolean | null = null;
   private busy = false;
@@ -62,7 +61,6 @@ export class RunnerCap {
 
   constructor(d: CapDeps) {
     this.d = d;
-    this.s = { ...NONE, ...d.store.getSetting<CapState>(KEY) };
   }
 
   start() {
@@ -74,16 +72,27 @@ export class RunnerCap {
     this.job = null;
   }
 
-  /** For the CI page: what is capped now, or null. */
-  text(): string | null {
+  /** Whether this took `label` off that runner and owes it back. */
+  owes(id: number, label: string): boolean {
+    return this.s.off.some((o) => o.id === id && o.label === label);
+  }
+
+  /** For the CI page: what is capped now, or null; only to who sees the scheme. */
+  text(canSee: (project: number) => boolean): string | null {
     const p = this.d.project();
     const n = this.s.off.length;
-    return p && n ? `${p.name} builds one at a time (${n} runner${n === 1 ? '' : 's'} resting) while ships go first` : null;
+    if (!p || !n || !canSee(p.id)) return null;
+    const are = `${n} runner${n === 1 ? '' : 's'}`;
+    return this.s.late !== null ? `${p.name}'s build label is still off ${are}: putting it back failed, trying again` : `${p.name} builds one at a time (${are} resting) while ships go first`;
+  }
+
+  /** Read each time: across a handover two servers may each be in a tick. */
+  private get s(): CapState {
+    return { ...NONE, ...this.d.store.getSetting<CapState>(KEY) };
   }
 
   private save(change: Partial<CapState>) {
-    this.s = { ...this.s, ...change };
-    this.d.store.setSetting(KEY, this.s);
+    this.d.store.setSetting(KEY, { ...this.s, ...change });
   }
 
   async tick(now = Date.now()): Promise<void> {
@@ -93,7 +102,7 @@ export class RunnerCap {
       const p = this.d.project();
       if (!p) return;
       const ship = !!this.d.why();
-      if (!ship && this.s.since !== null) this.save({ since: null });
+      this.clear(ship);
       if (ship && this.s.since === null) this.save({ since: now });
       const cap = ship && now - this.s.since! < RUNNER_CAP_MS;
       const changed = cap !== this.was;
@@ -101,6 +110,7 @@ export class RunnerCap {
       if ((!cap && !this.s.off.length) || (!changed && now - this.looked < LOOK_MS)) return;
       this.looked = now;
       await (cap ? this.take(p) : this.putBack(p, now));
+      this.clear(ship);
     } catch (err) {
       (this.d.log ?? console.error)(`Runner cap: ${thrown(err).message}`);
     } finally {
@@ -108,11 +118,15 @@ export class RunnerCap {
     }
   }
 
+  /** A stretch ends once the line is clear and every label is back: one that can't go back yet keeps its 4 hours. */
+  private clear(ship: boolean) {
+    if (!ship && this.s.since !== null && !this.s.off.length) this.save({ since: null });
+  }
+
   private async take(p: Project) {
     const label = this.d.label(p);
     const on = this.d.here();
     if (!label || !on) return;
-    if (this.s.late !== null) this.save({ late: null, told: false });
     const here = (await this.d.tokens.listed(p)).filter((x) => on(x.name) && (x.labels.includes(label) || this.s.off.some((o) => o.id === x.id)));
     const online = here.filter((x) => x.status === 'online');
     const keep = online.find((x) => x.labels.includes(label) && x.busy) ?? online.find((x) => x.labels.includes(label)) ?? online[0];
@@ -122,9 +136,15 @@ export class RunnerCap {
     for (const x of here) {
       if (x.id === keep.id || !x.labels.includes(label)) continue;
       // Written down first: a label gone and not written down would never come back.
-      this.save({ off: [...this.s.off.filter((o) => o.id !== x.id), { id: x.id, name: x.name, label }] });
+      this.owe({ id: x.id, name: x.name, label });
       await this.d.tokens.dropLabel(p, x.id, label);
+      // Another server (a handover) may have seen it still there, and forgotten it.
+      this.owe({ id: x.id, name: x.name, label });
     }
+  }
+
+  private owe(o: Off) {
+    if (!this.owes(o.id, o.label)) this.save({ off: [...this.s.off, o] });
   }
 
   private async putBack(p: Project, now: number) {
@@ -160,9 +180,9 @@ export class RunnerCap {
   }
 }
 
-/** Tells the runners on the PCs that host `slug`'s own runners, by name (it starts with its PC's hostname); null while none is known. */
-export function runnersBeside(pcs: Pcs, slug: string | null): ((runner: string) => boolean) | null {
+/** Tells `repo`'s runners on the PCs that host `slug`'s own, by name; null while no such PC is known. */
+export function runnersBeside(pcs: Pcs, slug: string | null, repo: string): ((runner: string) => boolean) | null {
   const own = `${slug?.toLowerCase()}/`;
   const hosts = [...pcs].filter(([, runners]) => [...runners].some((r) => r.startsWith(own))).map(([host]) => host);
-  return hosts.length ? (name) => hosts.some((h) => name.toLowerCase() === h || name.toLowerCase().startsWith(`${h}-`)) : null;
+  return hosts.length ? (runner) => hosts.includes(pcOf({ repo, runner }, pcs) ?? '') : null;
 }

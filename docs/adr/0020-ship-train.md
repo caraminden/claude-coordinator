@@ -260,6 +260,11 @@ Josh, 2026-11-24, picked "One Citadel job, one Peek build". With the CI desktop'
 run goes only at the train's deploy, on an idle desktop, never beside its run; a ship's run stops it. The same holds for a
 ship's own check. Order, slot and caps: `src/ci-hold.ts`, `tools/ci-runner/README.md`. The sections below describe the hold off. With it on, a ship behind a running check gets no light check either (#1620, Cara, 2026-11-22: "Run it, niced"): `ci_busy` sends it into the line unchecked, since a light check is a second job.
 
+Josh, 2026-11-25, picked "Yes, use labels" on #1902's card ("may Citadel take the job label off Peek's spare build runners while
+a ship is in line, and put it back after?"): while a ship is in line or testing, one of Peek's runners on the desktop takes new builds
+(`src/runner-cap.ts`). Jobs already running finish, so builds can overlap at the start; screen and heavy jobs are apart. The costs he
+took: Peek's own ship can wait behind a Peek build already queued, the label stays off while Citadel is down, and 4 hours at most while it's up.
+
 ### While the train ahead's CI runs (#1568)
 
 Cara, 2026-11-21, "Go" on fix F of #1549's report (ship stalls), and 2026-11-22, picked "Low-priority run on a ship
@@ -339,5 +344,3 @@ runner was busy. Those 96 are the gap.
   change), and a red that is a skip, not a failure (#1561's realtime test; `citadel-test` passes a skip, CI fails one).
   Replayed against the 16 reds, the failing file was in the ship's own and affected set for 13.
 - Each logs `light check · <branch> · <verdict> · <s>`. Off: `LAND_LIGHT_CHECK=0` or `<state>/light-check-off`.
-
-Josh, 2026-11-25, picked "Yes, use labels" on #1902's card ("may Citadel take the job label off Peek's spare build runners while a ship is in line, and put it back after?"): Peek builds one at a time during Citadel ships, capped at 4 hours (`src/runner-cap.ts`).

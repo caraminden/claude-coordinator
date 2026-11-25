@@ -205,6 +205,15 @@ test('a runner GitHub no longer lists is already gone: success, nothing deleted,
   assert.equal(w.notes.length, 0);
 });
 
+test('a runner whose label Citadel took off and owes back can still be removed', async () => {
+  const w = world();
+  w.gh.runners.push(runner(7, 'DESK'), runner(8, 'BARE'));
+  w.tokens.owed = (id, label) => id === 7 && label === 'peek-auras-ci';
+  const pc = w.machine('cara-pc', w.cara.id);
+  assert.equal((await w.tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci')).removed, true);
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'BARE', 'peek-auras-ci'), { status: 403 });
+});
+
 test("a runner without one of the scheme's own labels is refused and stays", async () => {
   const w = world();
   // Delve's runner by hand on the same repo, another scheme's label, and a label that only starts like this scheme's.

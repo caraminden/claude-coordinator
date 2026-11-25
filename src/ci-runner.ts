@@ -92,6 +92,9 @@ export class RunnerTokens {
   /** Told after each token handed out and each runner taken off GitHub, for a note in the scheme Taskmaster's chat (or a runner job's, when one asked for it). */
   onFetched: (project: Project, words: string, machine: Machine) => void = () => {};
 
+  /** Whether Citadel itself took that label off the runner and owes it back (src/runner-cap.ts): it still counts as carrying it. */
+  owed: (id: number, label: string) => boolean = () => false;
+
   constructor(store: Store, link: GithubLink, live: boolean, fetch: Fetch = globalThis.fetch) {
     this.store = store;
     this.link = link;
@@ -144,7 +147,7 @@ export class RunnerTokens {
       found = runners.find((x) => x?.name === name);
       if (!found && (runners.length < RUNNERS_PAGE || page >= RUNNERS_PAGES)) return { ...answer, removed: false };
     }
-    if (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label || l?.name === roleLabels('check', label)[0])) {
+    if (!this.owed(Number(found.id), label) && (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label || l?.name === roleLabels('check', label)[0]))) {
       throw new HttpError(403, `The runner ${name} of ${slug} doesn't carry the label ${label}, so it isn't the kind of runner being removed and Citadel won't remove it; nothing changed.`);
     }
     if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);

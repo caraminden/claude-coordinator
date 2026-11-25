@@ -122,7 +122,6 @@ function holdRow(l) {
       ? h(
           'div',
           { class: 'hue-rows' },
-          cap ? hueRow({ hue: 'waiting', meta: 'ships first' }, cap) : '',
           ...running.map((r) => hueRow({ hue: 'running', meta: RUNS[r.kind] }, r.kind === 'ship' ? "A ship's tests" : r.what, h('span', { class: 'muted' }, ' · running now'), r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : '')),
           ...runs.map((r) =>
             hueRow(
@@ -134,6 +133,7 @@ function holdRow(l) {
               r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : h('span', { class: 'muted' }, ' · no CI run yet'),
             ),
           ),
+          cap ? hueRow({ hue: 'waiting', meta: 'ships first' }, cap) : '',
         )
       : emptyCard('Nothing runs or waits', 'Citadel runs one heavy job at a time here: ships first, then the full run on main, then checks, then flake proofs, heavy jobs and test runs started by hand.'),
     h(

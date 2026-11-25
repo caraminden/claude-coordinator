@@ -619,9 +619,8 @@ its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which 
 **One Peek build while Citadel ships** (#1902; Josh, 2026-11-25, picked "Yes, use labels"): while a ship holds the desktop,
 `src/runner-cap.ts` takes `peek-auras-ci` off all but one of Peek's runners on that PC, with the Peek scheme owner's GitHub login, and puts
 it back when the line is clear, after 4 hours in one stretch, or at once with `hold-off`. Running jobs finish; queued ones wait at GitHub. It writes down
-what it takes off first, so a restart puts it back; with Citadel down the label stays off. Peek's own ship can wait behind a
-Peek build already queued. Its screen jobs (`peek-auras-desktop`) and heavy runner are not part of it. Taking a runner off the PC meanwhile
-(`ci_runners` remove) is refused for one without its label: touch `hold-off` first.
+what it takes off first, so a restart puts it back; with Citadel down, or rolled back to a version without this, the label stays off (`hold-off` first, or give it back in the repo's Settings → Actions → Runners). Peek's own ship can wait behind a
+Peek build already queued. Its screen jobs (`peek-auras-desktop`) and heavy runner are not part of it.
 The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
 skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
 own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the

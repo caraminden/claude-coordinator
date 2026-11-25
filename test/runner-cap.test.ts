@@ -58,12 +58,21 @@ test('while a ship is in line one build runner on that PC keeps the label; the r
   await cap.tick(15_000);
   assert.deepEqual(w.can(), ['DESK', 'OTHER']);
   assert.deepEqual(w.runners[1].labels, ['extra']);
-  assert.match(cap.text()!, /Peek Auras builds one at a time \(3 runners resting\)/);
+  assert.match(cap.text(() => true)!, /Peek Auras builds one at a time \(3 runners resting\)/);
+  assert.equal(
+    cap.text(() => false),
+    null,
+    'who cannot see the scheme is not told of it',
+  );
+  assert.deepEqual([cap.owes(2, L), cap.owes(2, 'extra'), cap.owes(1, L)], [true, false, false]);
   w.why = null;
   await cap.tick(30_000);
   assert.deepEqual(w.can(), ALL);
   assert.deepEqual(w.runners[4].labels, ['peek-auras-heavy']);
-  assert.equal(cap.text(), null);
+  assert.equal(
+    cap.text(() => true),
+    null,
+  );
 });
 
 test('the runner with a build on it keeps the label', async () => {
@@ -72,6 +81,30 @@ test('the runner with a build on it keeps the label', async () => {
   w.why = 'a ship is in line';
   await w.boot().tick(0);
   assert.deepEqual(w.can(), ['DESK-3', 'OTHER']);
+});
+
+test('two builds running when a ship joins: neither runner is let take another but the one kept', async () => {
+  const w = world();
+  w.runners[1].busy = w.runners[2].busy = true;
+  w.why = 'a ship is in line';
+  await w.boot().tick(0);
+  assert.deepEqual(w.can(), ['DESK-2', 'OTHER']);
+});
+
+test('labels that could not go back keep the 4 hours of the ships that took them off', async () => {
+  const w = world();
+  const cap = w.boot();
+  w.why = 'a ship is in line';
+  await cap.tick(0);
+  w.why = null;
+  w.down = true;
+  for (let m = 180; m < 195; m++) await cap.tick(m * MIN);
+  assert.equal(w.reports.length, 1);
+  w.why = 'a ship is in line';
+  w.down = false;
+  await cap.tick(200 * MIN);
+  await cap.tick(RUNNER_CAP_MS + MIN);
+  assert.deepEqual(w.can(), ALL);
 });
 
 test('each label is written down before GitHub is asked to take it off', async () => {
@@ -99,6 +132,23 @@ test('a restarted server that does not know the PC yet leaves the runners alone'
   w.unknown = true;
   await w.boot().tick(MIN);
   assert.deepEqual(w.can(), ['DESK', 'OTHER']);
+});
+
+test('a label taken off by a server handing over while the next puts labels back is not forgotten', async () => {
+  const w = world(['DESK', 'DESK-2']);
+  const next = w.boot();
+  let between: Promise<void> | undefined;
+  w.beforeDrop = () => {
+    w.why = null;
+    between ??= next.tick(1);
+  };
+  w.why = 'a ship is in line';
+  const old = w.boot();
+  await old.tick(0);
+  await between;
+  await next.tick(2 * MIN);
+  await next.tick(4 * MIN);
+  assert.deepEqual(w.can(), ['DESK', 'DESK-2', 'OTHER']);
 });
 
 test('after 4 hours of ships without a break the labels go back until the line is clear', async () => {
@@ -142,6 +192,7 @@ test('a label that cannot be put back is tried every minute and told to the Task
   for (let m = 1; m < 30; m++) await cap.tick(m * MIN);
   assert.equal(w.reports.length, 1);
   assert.match(w.reports[0], /DESK-2, DESK-3, DESK-4.*GitHub is down/);
+  assert.match(cap.text(() => true)!, /still off 3 runners: putting it back failed/);
   w.down = false;
   await cap.tick(31 * MIN);
   assert.deepEqual(w.can(), ALL);
@@ -156,7 +207,10 @@ test('one runner that cannot be found again keeps no other from its label, and i
   w.why = null;
   await cap.tick(MIN);
   assert.deepEqual(w.can(), ['DESK', 'DESK-3', 'DESK-4', 'OTHER']);
-  assert.equal(cap.text(), null);
+  assert.equal(
+    cap.text(() => true),
+    null,
+  );
   assert.deepEqual(w.reports, []);
 });
 
@@ -172,11 +226,12 @@ test("only runners on a PC that hosts Citadel's own count, and none while that i
   const pcs = new Map([
     ['desk', new Set(['o/citadel/desk-linux', 'o/peek/desk-2'])],
     ['other', new Set(['o/peek/other'])],
+    ['desk-9', new Set(['o/peek/desk-9'])],
   ]);
-  const on = runnersBeside(pcs, 'O/Citadel')!;
-  assert.deepEqual(['DESK', 'DESK-2', 'OTHER', 'DESKTOP'].map(on), [true, true, false, false]);
-  assert.equal(runnersBeside(new Map(), 'o/citadel'), null);
-  assert.equal(runnersBeside(pcs, null), null);
+  const on = runnersBeside(pcs, 'O/Citadel', 'o/peek')!;
+  assert.deepEqual(['DESK', 'DESK-2', 'DESK-9', 'OTHER', 'DESKTOP'].map(on), [true, true, false, false, false]);
+  assert.equal(runnersBeside(new Map(), 'o/citadel', 'o/peek'), null);
+  assert.equal(runnersBeside(pcs, null, 'o/peek'), null);
 });
 
 test("GitHub's label calls go out as the scheme's owner, name only that label, and read a gone runner as false", async () => {

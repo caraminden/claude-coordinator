@@ -2124,11 +2124,12 @@ const runnerCap = new RunnerCap({
   project: () => schemeOf(CAPPED_REPO) ?? null,
   label: (p) => runnerLabel(p.name),
   why: () => ciHold.shipNow(),
-  here: () => runnersBeside(ciLoad.runnersByPc(), liveSlug),
+  here: () => runnersBeside(ciLoad.runnersByPc(), liveSlug, CAPPED_REPO),
   tokens: runnerTokens,
   store,
   report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
 });
+runnerTokens.owed = (id, label) => runnerCap.owes(id, label);
 if (!BOOT_CHECK && !PREVIEW) runnerCap.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).

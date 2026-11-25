@@ -824,3 +824,13 @@ test('the CI page has what runs and what it keeps waiting', async () => {
     ['heavy', 'ship'],
   );
 });
+
+test('what else gives way to ships is told of one in line, and of none with the hold off', async () => {
+  const w = world();
+  w.line = 1;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), 'a ship is in line');
+  w.off = true;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), null);
+});

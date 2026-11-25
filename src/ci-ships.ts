@@ -29,7 +29,7 @@ export interface Ship {
 /** Each CI PC by its hostname, with its runners as `owner/name/runner`, all lowercase. Windows' agent and WSL's share a hostname, so they are one PC. */
 export type Pcs = Map<string, Set<string>>;
 
-function pcOf(ship: Ship, pcs: Pcs): string | undefined {
+export function pcOf(ship: Pick<Ship, 'repo' | 'runner'>, pcs: Pcs): string | undefined {
   const name = ship.runner.toLowerCase();
   for (const [host, runners] of pcs) if (runners.has(`${ship.repo.toLowerCase()}/${name}`)) return host;
   // No sample lists it (a server just started, a runner just added): a runner's name starts with its PC's hostname, unless two do (DESK-2 is DESK's second runner, or a PC).

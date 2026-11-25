@@ -129,7 +129,7 @@ export const artifactQueries = {
   },
 
   /** Bring a ticket's artifact rows in line with what is on disk. Returns whether anything changed. */
-  syncArtifacts(this: Store, ticket: Ticket, found: { path: string; size: number; mtime: number }[]): boolean {
+  async syncArtifacts(this: Store, ticket: Ticket, found: { path: string; size: number; mtime: number }[]): Promise<boolean> {
     const existing = new Map((this.db.prepare('SELECT * FROM artifacts WHERE ticket_id = ?').all(ticket.id) as unknown as Artifact[]).map((a) => [a.path, a]));
     let changed = false;
     const insert = this.db.prepare('INSERT INTO artifacts (project_id, ticket_id, path, size, mtime, created_at) VALUES (?, ?, ?, ?, ?, ?)');

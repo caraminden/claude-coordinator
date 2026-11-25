@@ -104,6 +104,7 @@ import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillRes
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { sleepKey, stateWord, type Sleep } from './needs.ts';
@@ -715,6 +716,7 @@ export class Runner {
   /** The worker pool and the line of turns waiting for one (src/turn-line.ts, #1868). */
   readonly turnLine: TurnLine;
   readonly urgent: Urgent;
+  readonly startNow: StartNow;
   readonly places: LinePlaces;
   /** The waits' timers and probe delay, read by tests. */
   private get limitTimer() {
@@ -992,12 +994,14 @@ export class Runner {
       this.turnLine.reordered();
       this.lineChanged(ids);
     });
+    this.startNow = new StartNow({ store, over: (id) => this.holdOver(id), changed: (ids) => this.lineChanged(ids), now: () => this.now() });
     this.places = new LinePlaces({ store, urgent: this.urgent, chains: () => this.chains(), now: () => this.now() });
     this.turnLine = new TurnLine({
       store,
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
+      forced: (id) => !!this.startNow.get(id),
       start: (entry) => this.startLined(entry),
       pauseTurn: (id) => this.pauseTurn(id),
       changed: (ids) => this.lineChanged(ids),
@@ -1269,6 +1273,7 @@ export class Runner {
       worker_wait: closed ? null : this.turnLine.wait(ticket.id),
       // Who marked it Urgent, when and why (#1888).
       urgent: closed ? null : this.urgent.view(ticket.id),
+      start_now: closed ? null : this.startNow.view(ticket.id),
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -1506,6 +1511,7 @@ export class Runner {
   private dropQueue(ticketId: number, keepHeld = false) {
     this.turnLine.leave(ticketId);
     this.urgent.done(ticketId);
+    this.startNow.end(ticketId);
     this.places.refused(ticketId, false);
     // A no-action notice (its own PR merged, #619) was never meant to be read before a close: it isn't named.
     const left = this.queue.clear(ticketId, keepHeld).filter((m) => !m.fyi);
@@ -3579,6 +3585,12 @@ export class Runner {
     if (via === 'net' && this.netWait(ticket)) return this.resumes.netResume(ticket);
     if (via && owed) return void this.resume(ticket, via, owedRetries(owed));
     this.next(ticket, true);
+  }
+
+  /** A minion whose own worker (#1957) ends: closed, gone, or sealed with no turn under way. */
+  private holdOver(ticketId: number): boolean {
+    const t = this.store.getTicket(ticketId);
+    return !t || t.status === 'closed' || (this.parked(t) && !this.turnLine.has(ticketId) && !this.lanes.busy(ticketId));
   }
 
   /** Whose share a waiting turn counts in, and its place there (Waiting.rank). */

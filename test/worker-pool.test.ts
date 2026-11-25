@@ -206,6 +206,7 @@ function line(saved: Record<string, unknown> = {}) {
     exempt: () => false,
     busy: (id) => busy.has(id),
     asks: () => ({ person: 1, rank: 1 }),
+    forced: () => false,
     start: (e) => {
       started.push(e.ticket);
       turns.enter(e.ticket, e.via);
@@ -317,7 +318,7 @@ const dir = mkdtempSync(join(tmpdir(), 'pool-limits-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 test('saved limits steer at once, record who and when, a health event each, and reset puts the default back', () => {
   const store = new Store(join(dir, 'x.db'));
-  const turns = new TurnLine({ store, exempt: () => false, busy: () => false, asks: () => null, start: () => {}, pauseTurn: () => {}, changed: () => {}, carded: () => [], gapMs: 0, detached: false } as never);
+  const turns = new TurnLine({ store, exempt: () => false, busy: () => false, asks: () => null, forced: () => false, start: () => {}, pauseTurn: () => {}, changed: () => {}, carded: () => [], gapMs: 0, detached: false } as never);
   assert.deepEqual(turns.limits(), L);
   turns.setLimits({ shrinkCpu: 60 }, 'Josh', 5_000);
   assert.equal(turns.limits().shrinkCpu, 60);

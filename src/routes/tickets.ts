@@ -405,6 +405,8 @@ export function personWrote({ app: { store, runner, presence }, caller, session,
   presence.wroteIn(ticket.id, session.name);
   // Writing in a minion's chat (or answering its card) touches it: its updates reach their Taskmaster too (#919).
   if (ticket.kind !== 'coordinator' && session.uid != null) store.touch(ticket.id, session.uid);
+  // It keeps a worker they gave it (#1957).
+  runner.startNow.touch(ticket.id, session.uid);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
   runner.continueLoops(
     minions.map((t) => t.id),
@@ -1102,6 +1104,7 @@ export const ticketRoutes: Route[] = [
       }
       if (deciding.has(card.id)) throw new HttpError(409, 'Someone is answering that card right now');
       const { questions } = data;
+      runner.startNow.touch(id, session.uid);
       const answers = cleanAnswers(questions, body.answers, (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0));
       // A machine job's go card (#857): only the machine's owner or an admin answers it, and their pick is the job's go.
       // The minion that asked hears it held, with no turn: it is woken when the job ends or is refused.

@@ -424,6 +424,7 @@ setInterval(
       .then((r) => {
         const free = memoryEase.free();
         const { level } = memoryEase.get();
+        runner.startNow.sweep();
         runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level });
         runner.endCardWaits(boxShort(r));
       })
@@ -451,7 +452,10 @@ if (previews) {
   // Builds' previews are of this server's own code, so only its own scheme has them.
   previews.buildScheme = ownScheme;
 }
-if (BOOT_CHECK) runner.turnLine.clear();
+if (BOOT_CHECK) {
+  runner.turnLine.clear();
+  runner.startNow.clear();
+}
 if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
@@ -1897,6 +1901,7 @@ const landHandoffs = new LandHandoffs({
   },
   landed: (id, commit) => {
     runner.urgent.done(id);
+    runner.startNow.end(id);
     runner.holderShipped(id);
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
@@ -2203,7 +2208,10 @@ runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 // A merged PR catches its scheme's main up, and chains and commit waiters look again.
 github.onMerged = (repoDir, ticket, base) => {
   // Into a build branch isn't shipped yet.
-  if (!base?.startsWith('build/')) runner.urgent.done(ticket.id);
+  if (!base?.startsWith('build/')) {
+    runner.urgent.done(ticket.id);
+    runner.startNow.end(ticket.id);
+  }
   runner.places.refused(ticket.id, false);
   catchUp(repoDir);
 };

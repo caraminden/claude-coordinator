@@ -817,6 +817,49 @@ test('an Urgent minion gets the next worker, ahead of every share and of an own 
   assert.equal(runner.urgent.get(urgent), null);
 });
 
+test('a person starts a waiting minion now: past the full pool, nobody else with it, and its later turns too until it is sealed (#1957)', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, other, own] = [minion(), minion(), minion()];
+  say(a);
+  await started(a);
+  say(other);
+  say(own, 'hello', 'Josh');
+  runner.startNow.press(own, josh.id, 'Josh');
+  runner.turnLine.force(own);
+  assert.equal(runner.live(store.getTicket(own)!).start_now?.by, 'Josh');
+  await started(own);
+  await settle();
+  assert.deepEqual([turnsOf(other).length, runner.isRunning(a), runner.turnLine.used()], [0, true, 2]);
+  // Over a restart: the running turn re-attaches, and the hold with it.
+  runner.detachAll();
+  runner = makeRunner();
+  runner.recover();
+  await settle();
+  assert.deepEqual([runner.isRunning(own), runner.startNow.get(own)?.by, runner.turnLine.summary().forced], [true, 'Josh', 1]);
+  end(own);
+  await idle(own);
+  unend(own);
+  say(own, 'and then', 'Josh');
+  await until('its second turn', () => turnsOf(own).length === 2);
+  await settle();
+  assert.equal(turnsOf(other).length, 0);
+  // Sealed mid-turn: the turn goes on, and the hold ends with it.
+  store.updateTicket(own, { state: 'parked' });
+  assert.ok(runner.startNow.get(own));
+  end(own);
+  await idle(own);
+  await until('the hold to end', () => !runner.startNow.get(own));
+  runner.startNow.sweep();
+  store.updateTicket(own, { state: null });
+  unend(own);
+  say(own, 'once more', 'Josh');
+  assert.ok(runner.turnLine.has(own), 'in the ordinary line');
+  runner.startNow.press(own, josh.id, 'Josh');
+  await runner.close(own, 'Dismissed.');
+  assert.equal(runner.startNow.list().length, 0);
+  assert.equal(runner.isRunning(a), true);
+});
+
 // #1890. Josh, 2026-11-24: "End and wake".
 test("a minion woken by the end of what it waited for goes ahead of its person's new turns", async () => {
   runner.turnLine.setSize(1, 'Cara');

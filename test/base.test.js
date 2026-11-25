@@ -389,3 +389,54 @@ test('poller: one read at a time, a joiner during a read takes it, it waits whil
   release();
   await flush();
 });
+
+/** fetch replaced by `answer`, and a GET's time by a signal the test ends. */
+function faked(t, answer) {
+  const real = globalThis.fetch,
+    timeout = AbortSignal.timeout;
+  const late = new AbortController();
+  globalThis.fetch = answer;
+  AbortSignal.timeout = () => late.signal;
+  t.after(() => {
+    globalThis.fetch = real;
+    AbortSignal.timeout = timeout;
+  });
+  return late;
+}
+const busy503 = { ok: false, status: 503, json: async () => ({ error: 'waiting for its disk', retry: true }) };
+
+test('a page read the server had no reader for is asked again until it answers; a write is not (#2003)', async (t) => {
+  let asked = 0;
+  faked(t, async () => (++asked < 3 ? busy503 : { ok: true, status: 200, json: async () => ({ n: asked }) }));
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const got = api('api/busy');
+  for (let i = 0; i < 2; i++) {
+    for (let j = 0; j < 10; j++) await null;
+    t.mock.timers.tick(1000);
+  }
+  assert.deepEqual(await got, { n: 3 });
+  asked = 0;
+  await assert.rejects(api('api/busy', { method: 'POST', body: {} }), { status: 503 });
+  assert.equal(asked, 1);
+});
+
+test('a page read that is never answered fails once its time is up, whether or not its answer began (#2003)', async (t) => {
+  const cut = (signal) => new Promise((_, no) => signal.addEventListener('abort', () => no(signal.reason)));
+  let late = faked(t, (_path, { signal }) => cut(signal));
+  let got = assert.rejects(api('api/never'), /took too long to answer/);
+  late.abort();
+  await got;
+  late = faked(t, async (_path, { signal }) => ({ ok: true, status: 200, json: () => cut(signal) }));
+  got = assert.rejects(api('api/half'), /took too long to answer/);
+  await null;
+  late.abort();
+  await got;
+  // No reader for the whole time: the server's own words, for the page's retry.
+  late = faked(t, async () => busy503);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  got = assert.rejects(api('api/busy'), { status: 503, message: 'waiting for its disk' });
+  for (let j = 0; j < 10; j++) await null;
+  late.abort();
+  t.mock.timers.tick(1000);
+  await got;
+});

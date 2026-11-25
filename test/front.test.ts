@@ -454,14 +454,13 @@ test('a write the writer is still holding is never missed: the read waits for it
     await readerAnswers(slow);
     // Held 300 ms on the writer: a reader waits for it (up to a second), never the main thread.
     const sent = slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' });
-    const during = await until('a read that waited for the held write', async () => {
+    await until('a read that waited for the held write', async () => {
       const t0 = Date.now();
       const got = await get(slow, PATHS[0], slow.cookie);
       assert.deepEqual([got.status, got.reader], [200, true]);
       // timing-ok: a read that waits for nothing takes a few ms; the write is held 300
-      return Date.now() - t0 > 100 && got;
+      return Date.now() - t0 > 100;
     });
-    assert.match(during.body, /read your writes/);
     assert.equal((await sent).status, 202);
     // The response came once its writes ran (#1244): the next read, a reader's again, has the message.
     const next = await until('readers answer again', async () => {

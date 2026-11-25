@@ -144,25 +144,35 @@ export function poller(read, every) {
  */
 export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hiddenAt >= 60_000 || heardAt < hiddenAt;
 
+/** A read not answered in this long fails, so the page shows its retry instead of loading forever (#2003). */
+const GET_MS = 60_000;
 // Each request is timed for the slow-load recorder (public/slow-moments.js, #1752), its answer read whole first.
-const send = (path, opts) => {
+const send = async (path, opts) => {
   const start = performance.now(),
     timed = (res) => globalThis.citadelSlow?.request(opts.method, path, start, res);
-  return fetch(path, {
-    ...opts,
-    headers: opts.body ? { 'Content-Type': 'application/json' } : {},
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  }).then(
-    async (res) => {
+  const signal = opts.method && opts.method !== 'GET' ? undefined : AbortSignal.timeout(GET_MS);
+  try {
+    for (;;) {
+      const res = await fetch(path, {
+        signal,
+        ...opts,
+        headers: opts.body ? { 'Content-Type': 'application/json' } : {},
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      });
       const body = await res.json().catch(() => ({}));
+      signal?.throwIfAborted(); // cut off while its body came
+      // Every reader thread is waiting for the disk (src/front.ts): ask again until the time is up.
+      if (signal && res.status === 503 && body.retry) {
+        await new Promise((r) => setTimeout(r, 1000));
+        if (!signal.aborted) continue;
+      }
       timed(res);
       return { res, body };
-    },
-    (err) => {
-      timed(null);
-      throw err;
-    },
-  );
+    }
+  } catch (err) {
+    timed(null);
+    throw signal?.aborted ? new Error('%APP_NAME% took too long to answer: try again in a moment') : err;
+  }
 };
 
 export async function api(path, opts = {}) {

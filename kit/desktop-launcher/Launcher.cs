@@ -152,8 +152,9 @@ namespace Citadel.Desktop
                         if (state.Pending == null) throw new Exception("Couldn't download " + Title + " from " + config.Feed + ": see launcher.log.");
                     }
                     // Only a start with a build to try waits for the feed. The running copy is asked again after the wait.
-                    bool withdrawn = Trial.TryNow(state, () => ACopyRuns(state)) && DropWithdrawn(state, FeedBeforeTrial());
-                    bool tryNow = !withdrawn && Trial.TryNow(state, () => ACopyRuns(state));
+                    bool tryNow = Trial.TryNow(state, () => ACopyRuns(state));
+                    bool withdrawn = tryNow && DropWithdrawn(state, FeedBeforeTrial());
+                    tryNow = tryNow && !withdrawn && Trial.TryNow(state, () => ACopyRuns(state));
                     if (state.Pending != null && !withdrawn && !tryNow)
                         Log("build " + state.Pending.Id + " waits: a copy of " + Title + " is already running, and a new start would hand off to it, proving nothing about the new build");
                     var started = tryNow ? TryPending(state) : StartCurrent(state);

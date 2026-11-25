@@ -290,7 +290,8 @@ $d = New-Install 'crashdownload' '{"current":{"id":7,"exe":"App.exe","started":"
 $l = Start-Launcher $d
 Test-That 'crashdownload: 7 crashes and 6 starts' (Wait-Log $d 'build 7 crashed on probation.*rolling back to build 6' 45)
 [void](Wait-Notice $l)
-Start-Sleep -Seconds 25
+Test-That 'crashdownload: the download that ended after the crash is not put in place' (Wait-Log $d 'build 6 was downloaded, but it isn.t wanted any more' 45)
+Test-That 'crashdownload: 7 is dropped' (Wait-Log $d 'build 7 is not tried: the feed now names build 6' 15)
 Stop-Install $d
 $s = Get-State $d
 Test-That 'crashdownload: 6 is current and 7 no longer waits' ($s.current.id -eq 6 -and -not $s.pending)
@@ -302,10 +303,9 @@ Show-Install $d
 $d = New-Install 'slow' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'slow' 6 12)
 $at = Get-Date
 $l = Start-Launcher $d
-Test-That 'slow: 11 is tried' (Wait-Log $d 'trying build 11' 45)
-$took = ((Get-Date) - $at).TotalSeconds
-Test-That ('slow: within 10 s (took {0:n1})' -f $took) ($took -lt 10)
 Test-That 'slow: 11 starts' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
+$took = ((Get-Date) - $at).TotalSeconds
+Test-That ('slow: before the feed answers (took {0:n1} s)' -f $took) ($took -lt 11)
 Show-Install $d
 Stop-Install $d
 Stop-Process -Id $script:feed.Id -Force

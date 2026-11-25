@@ -95,6 +95,7 @@ import { Credentials, sealKey } from './src/credentials.ts';
 import { Secrets } from './src/secrets.ts';
 import { OpenRouter } from './src/openrouter.ts';
 import { OutsideSpend } from './src/outside-spend.ts';
+import { config, DEFAULT_DATA_DIR } from './src/config.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
 import { AppServices, folderHolds, manifestOn, serviceOptions, ServiceError } from './src/app-services.ts';
@@ -161,20 +162,19 @@ import { busySource, settled } from './src/settled.ts';
 import { moveToNoCow } from './src/db-nocow.ts';
 import { Presence } from './src/presence.ts';
 
-const HOST = process.env.HOST ?? '127.0.0.1';
-const PORT = Number(process.env.PORT ?? 8573);
+const HOST = config.host;
+const PORT = config.port;
 // The port actually bound: PORT=0 (tests, boot checks) lets the kernel pick one, reported on stdout.
 let boundPort = PORT;
 // Where machines' agents connect, if not the app's own address: a URL on a private network (the
 // tailnet), served by a second listener that takes nothing but agents. The main listener then
 // refuses agents, so a leaked token is no use from the public internet.
 /** Contraptions each on their own host, <name>.<APPS_DOMAIN> (src/apps.ts); unset serves them at /apps/<name>/ here. */
-const APPS_DOMAIN = process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
+const APPS_DOMAIN = config.appsDomain;
 // Before the front end's files load: their headers are built once, with the policy as it is then (#1628).
 if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
-const MACHINES_URL = process.env.MACHINES_URL ? new URL(process.env.MACHINES_URL) : null;
-const DEFAULT_DATA_DIR = join(homedir(), '.local/share/claude-coordinator');
-const DATA_DIR = process.env.DATA_DIR ?? DEFAULT_DATA_DIR;
+const MACHINES_URL = config.machinesUrl;
+const DATA_DIR = config.dataDir;
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
 // every thread gets full access.
@@ -261,8 +261,8 @@ const BOOT_COMMIT = checkoutHead();
 // A preview (src/previews.ts): a minion's branch served on a copy of the database for people to try.
 // Everything BOOT_CHECK skips, and more: no turns at all, no new minions or schemes (git in the real
 // repos), no pushes, no machines, no startup sweeps.
-const PREVIEW = process.env.PREVIEW === '1';
-const BOOT_CHECK = process.env.BOOT_CHECK === '1' || PREVIEW;
+const PREVIEW = config.preview;
+const BOOT_CHECK = config.bootCheck;
 // The tab title tells a preview from the live app.
 const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 // A preview goes with the server that started it, however that one goes (it is reparented then).
@@ -276,7 +276,7 @@ if (DATA_DIR !== DEFAULT_DATA_DIR) exitWithParent(DATA_DIR, every, PARENT);
 let deployWatch: DeployWatch | null = null;
 // Once, at the first start with it, before anything opens the database: the live file into a no-COW file (#761).
 // Not a dev copy's, a preview's or a boot check's: each would keep a second 1 GB file. NOCOW_DB=1 runs it anywhere, to try it.
-if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DIR)) {
+if (config.noCowDb || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DIR)) {
   // events.db too (#1169): before the move below fills it, it is the empty file the last release made.
   for (const file of ['coordinator.db', 'events.db']) {
     const { moved, note } = moveToNoCow(join(DATA_DIR, file));
@@ -300,7 +300,7 @@ if (!BOOT_CHECK) startRealtime({ enabled: () => store.getSetting<boolean>('realt
 // Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.
 // CITADEL_DB_WRITE_DELAY_MS is for tests (#1239): every write waits that long on the worker, as on a starved box, so a test
 // that reads the database itself right after a response, without waiting for the row, goes red every run. At most 1 s.
-const writer = writeOffThread(store, { delayMs: Math.min(Number(process.env.CITADEL_DB_WRITE_DELAY_MS) || 0, 1000) });
+const writer = writeOffThread(store, { delayMs: config.dbWriteDelayMs });
 // Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
 if (writer) writerQueued = writer.queued;
 checkpointOffThread(store);
@@ -308,8 +308,8 @@ checkpointOffThread(store);
 const dbWarmer = warmDatabase(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
 const auth = new Auth(
-  process.env.COORDINATOR_PASSWORD ?? '',
-  process.env.SESSION_SECRET ?? '',
+  config.password,
+  config.sessionSecret,
   {
     get: (id) => {
       const ticket = store.getTicket(id);
@@ -322,23 +322,23 @@ const auth = new Auth(
 // The first start with per-person logins (or any with no admin) makes the admin, whom COORDINATOR_PASSWORD
 // signs in until they set a password, and every scheme from before owners becomes theirs.
 if (!store.listUsers().some((u) => u.admin)) {
-  const name = process.env.COORDINATOR_ADMIN?.trim() || 'Cara';
+  const name = config.adminName;
   store.createUser({ name, login: name.toLowerCase().replace(/[^a-z0-9._-]/g, ''), admin: true, server_login: true });
 }
 store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
 // Before anything reads repo_url: a scheme whose repo moved on GitHub follows its checkout's origin (#456).
 await safely('follow repo moves', () => followOrigins(store));
-const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
+const credentials = new Credentials(store, config.sessionSecret);
 // Seals machine tokens for their owner's Show (#1355): read here, before SESSION_SECRET leaves the environment below.
-const machineTokenKey = sealKey(process.env.SESSION_SECRET ?? '', 'citadel machine tokens v1');
+const machineTokenKey = sealKey(config.sessionSecret, 'citadel machine tokens v1');
 // People's own OpenRouter keys (#717). OPENROUTER_BASE_URL points a dev copy or test at a fake.
 const openrouter = new OpenRouter(store, credentials);
 // Outside-API spend and its optional per-scheme cap (#839): crossing the cap tells the scheme's Taskmaster chat and pushes; nothing stops.
 const outsideSpend = new OutsideSpend(store);
 // Passwords and keys people save from a secret card or Settings (#838).
-const secrets = new Secrets(store, process.env.SESSION_SECRET ?? '');
+const secrets = new Secrets(store, config.sessionSecret);
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
-const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '', process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
+const contraptions = new Contraptions(store, config.sessionSecret, config.contraptionsDir ?? (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
 // Contraptions' systemd user services (#266): only the live server touches systemd, never a boot check or preview.
 const services = new AppServices(
   serviceOptions(process.env, DATA_DIR === DEFAULT_DATA_DIR, BOOT_CHECK, {
@@ -347,18 +347,18 @@ const services = new AppServices(
     logDir: join(DATA_DIR, 'contraption-deploys'),
   }),
 );
-const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '', undefined, {
-  clientId: process.env.GITHUB_APP_CLIENT_ID ?? '',
-  clientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '',
-  slug: process.env.GITHUB_APP_SLUG ?? '',
+const githubLink = new GithubLink(store, credentials, config.githubClientId, config.githubClientSecret, undefined, {
+  clientId: config.githubApp.clientId,
+  clientSecret: config.githubApp.clientSecret,
+  slug: config.githubApp.slug,
 });
 // A boot check or preview runs on a copy of the data: it leaves GitHub alone.
 const repoAccess = new RepoAccess(store, githubLink, !BOOT_CHECK);
 const runnerTokens = new RunnerTokens(store, githubLink, !BOOT_CHECK);
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
-const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
+const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, config.claudeBin, undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
 // Keep secrets out of the environment that claude and its tools inherit; the reader threads get the sign-in keys in their start data.
-const signInKeys = { password: process.env.COORDINATOR_PASSWORD ?? '', secret: process.env.SESSION_SECRET ?? '' };
+const signInKeys = { password: config.password, secret: config.sessionSecret };
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
 delete process.env.GITHUB_CLIENT_SECRET;
@@ -390,17 +390,17 @@ const runner = new Runner(
     COORDINATOR_TOKEN: token ?? auth.turnToken(ticket.id),
     COORDINATOR_PROJECT: String(ticket.project_id),
   }),
-  process.env.CLAUDE_BIN ?? 'claude',
+  config.claudeBin,
 );
 // Turns run in units of their own when this is the systemd service (systemd sets INVOCATION_ID), so a
 // restart doesn't stop them; TURN_UNITS=0 or 1 overrides that.
-runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
+runner.units = config.turnUnits;
 // Turns share their place's tool server (#1259) in the service too, not in tests or dev copies; TURN_POOL=0 or 1 overrides that
 // (0: every turn runs its own helpers again).
-runner.pool = process.env.TURN_POOL ? process.env.TURN_POOL === '1' : !!process.env.INVOCATION_ID;
+runner.pool = config.turnPool;
 // Host turns start in the shared turn supervisor (#1343) wherever they get units; TURN_SUPERVISOR=0 or 1 overrides that
 // (0: each turn gets its own wrapper unit again).
-runner.supervisor = process.env.TURN_SUPERVISOR ? process.env.TURN_SUPERVISOR === '1' : runner.units;
+runner.supervisor = config.turnSupervisor;
 runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
 // The line of kill resumes (#1364) holds while the box is starved; nothing else in the runner waits on it.
@@ -511,7 +511,7 @@ function ownScheme(): Project | null {
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
 // GitHub reads go through a helper per login that stays up, not a `gh` per read (#1542). A test server keeps `gh`.
-if (process.env.GH_HELPER !== '0') ghHelpers.dir = join(DATA_DIR, 'run', 'gh');
+if (config.ghHelper) ghHelpers.dir = join(DATA_DIR, 'run', 'gh');
 waiters.prs = githubPrs(githubOf, missingCommits(store));
 mainSync.as = githubOf;
 // A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).
@@ -559,10 +559,10 @@ if (watchdogAt) {
 }
 const clientErrors = new ClientErrors();
 // Semantic memory (#331): llama-server on this box embeds the chats (deploy/citadel-embed.service).
-const EMBED_MODEL = process.env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_0';
-const EMBED_URL = process.env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434';
+const EMBED_MODEL = config.embedModel;
+const EMBED_URL = config.embedUrl;
 const embed = llamaEmbed(EMBED_URL);
-const MEMORY_SCHEMES = process.env.CITADEL_MEMORY_SCHEMES?.split(',').map(Number);
+const MEMORY_SCHEMES = config.memorySchemes;
 // Every scheme is indexed (#488); CITADEL_MEMORY_SCHEMES narrows it to some, for tests or a box that can't keep up.
 const memoryScheme = (id: number) => !MEMORY_SCHEMES || MEMORY_SCHEMES.includes(id);
 runner.memoryScheme = memoryScheme;
@@ -663,7 +663,7 @@ runner.codexPlaceFor = (uid) => claudeLink.codexPlace(uid);
 // Its host turns' Codex reviews run in that container too (#398), so a host turn starts it if it isn't running.
 runner.wakeCodex = (uid) => void claudeLink.wakeCodex(uid).catch((err) => console.error(`Starting the Codex container for a review failed: ${err.message}`));
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
-const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
+const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: config.claudeBin });
 contraptionTurns.noTurns = PREVIEW;
 contraptionTurns.codexWhy = (uid) => runner.codexWhy(uid);
 contraptionTurns.onCodexUsage = (uid, limits) => runner.updateCodexUsage(limits, uid);
@@ -673,7 +673,7 @@ services.drain = (row) => contraptionTurns.drain(row.id);
 contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));
 contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`;
 const ultrareviews = new UltraReviews({
-  claudeBin: process.env.CLAUDE_BIN ?? 'claude',
+  claudeBin: config.claudeBin,
   place: (uid) => claudeLink.place(uid),
   scratch: (uid) => claudeLink.turnsDir(uid),
   emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data),
@@ -821,7 +821,7 @@ runner.secretsFor = (project, person) => secrets.forTurn(project, person);
 
 const pusher = new Pusher(store, loadVapidKeys(DATA_DIR));
 // Push services may contact the sender at this address; set from the first subscribe if not given.
-pusher.subject = process.env.PUSH_SUBJECT ?? store.getSetting<string>('push_subject') ?? pusher.subject;
+pusher.subject = config.pushSubject ?? store.getSetting<string>('push_subject') ?? pusher.subject;
 // A desktop app's ping (#1186) goes to its person's open pages; the page whose device it names shows it.
 pusher.local = (sub, msg) => {
   const data = `data: ${JSON.stringify({ type: 'notify', endpoint: sub.endpoint, msg })}\n\n`;
@@ -1065,7 +1065,7 @@ if (!BOOT_CHECK && !PREVIEW) {
       await runner.sweepBuildOutput();
       await runner.sweepWorktrees();
       // Scratch a killed ship, lint or heavy command left in perigee's RAM-backed /tmp (#1339).
-      const orphans = await sweepOrphanTmp(['/tmp', join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'citadel-heavy-tmp')]);
+      const orphans = await sweepOrphanTmp(['/tmp', join(config.cacheDir, 'citadel-heavy-tmp')]);
       if (orphans.length) console.log(`Removed ${orphans.length} orphaned scratch folder${orphans.length === 1 ? '' : 's'} (${orphans.map((d) => basename(d)).join(', ')}).`);
       // The shared Gradle build cache (#1153) under its cap.
       const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
@@ -1116,13 +1116,13 @@ if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runne
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
 if (!BOOT_CHECK)
-  every('memory', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => {
+  every('memory', config.memoryEveryMs, async () => {
     if (await pressure.gate('memory index')) await memoryIndexer.run();
   });
 // Closed minions and handoffs into the full-text index search_minions reads (src/minion-index.ts, #1156).
 const minionIndexer = new MinionIndexer(store, DATA_DIR);
 if (!BOOT_CHECK)
-  every('minion index', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => {
+  every('minion index', config.memoryEveryMs, async () => {
     if (await pressure.gate('minion index')) await minionIndexer.run();
   });
 
@@ -1233,9 +1233,9 @@ const tellHome = (projectId: number, text: string) => {
 const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.workflowRuns(p, w, b), runJobs: (p: Project, r: Run) => ciHealth.runJobs(p, r), runArtifacts: (p: Project, r: Run) => ciHealth.runArtifacts(p, r) };
 // A shipped run's GitHub artifact, copied into the CI store so its release links a file on perigee (#673).
 // Big uploads (#832); UPLOAD_FLOOR_GB moves the free-disk floor (tests, a dev copy on a small disk).
-const chunked = new ChunkedUploads(DATA_DIR, process.env.UPLOAD_FLOOR_GB ? Number(process.env.UPLOAD_FLOOR_GB) * 1024 ** 3 : DISK_FLOOR);
+const chunked = new ChunkedUploads(DATA_DIR, config.uploadFloor ?? DISK_FLOOR);
 // Push to contraptions' Android apps (#1138); CITADEL_FCM_API points a test at a stub Firebase.
-const fcm = new Fcm(fcmKeyPath(), { api: process.env.CITADEL_FCM_API || undefined });
+const fcm = new Fcm(fcmKeyPath(), { api: config.fcmApi });
 const ciMirror = new CiMirror(
   ciStore,
   ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)),
@@ -1405,7 +1405,7 @@ const rollback = new Rollback({
     [CITADEL_TARGET]: (tv, to) => {
       const p = store.getProject(tv.target.projectId);
       if (!p?.repo_dir || p.id !== ownScheme()?.id) throw new HttpError(404, 'Only the scheme this server runs can roll it back');
-      if ((services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) && !process.env.DEPLOY_LIVE) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
+      if ((services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) && !config.deployLive) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
       rollbackJobs.start({
         dir: ROLLBACK_DIR,
         cwd: p.repo_dir,
@@ -2352,8 +2352,8 @@ services.act = (row, action) => (action === 'start' && apps.restarts.running(row
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 // Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up,
 // then again every so often for one that was down or had nobody enabled at the first read (rows already read are skipped).
-const readStatics = () => void safely('static paths', () => apps.backfillStatics()).finally(() => setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_EVERY_MS ?? 15 * 60_000)).unref());
-setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref();
+const readStatics = () => void safely('static paths', () => apps.backfillStatics()).finally(() => setTimeout(readStatics, config.staticBackfillEveryMs).unref());
+setTimeout(readStatics, config.staticBackfillMs).unref();
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
 
 // Requests not yet answering, for settled() (src/settled.ts). Busy only until its headers go out: send() holds those until
@@ -2363,7 +2363,7 @@ const inFlight = new Map<ServerResponse, string>();
 const isEventStream = (res: ServerResponse) => res.headersSent && !res.writableEnded && /^content-type:\s*text\/event-stream/im.test(String((res as ServerResponse & { _header?: unknown })._header ?? ''));
 busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]) => `request ${what}`));
 // A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
-const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
+const SETTLED_ROUTE = config.testSettled;
 
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets), the same check as the front thread's; anything else asking is served as usual.
 const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS_DOMAIN) }, (req, res) =>
@@ -2463,7 +2463,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
 // Contraptions' websockets, which a restart ends (their pages reconnect): open ones never let server.close finish.
 const upgraded = new Set<Duplex>();
 // A dev copy (tools/dev-copy.ts sets IDLE_EXIT_MS) stops itself once nothing has asked it anything for that long, as an unused preview is stopped (#1365).
-const IDLE_EXIT_MS = PREVIEW ? Number(process.env.IDLE_EXIT_MS) || 0 : 0;
+const IDLE_EXIT_MS = config.idleExitMs;
 if (IDLE_EXIT_MS > 0) {
   let asked = Date.now();
   const touch = () => {
@@ -2498,7 +2498,7 @@ server.on('listening', keepServing);
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.
 // A warm handover's new server got the socket from the old one (src/handover.ts), and becomes systemd's main process once it listens.
-const onSocket = handover !== null || (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid));
+const onSocket = handover !== null || config.heldSocket;
 const listened = (port: number) => {
   boundPort = port;
   // It asks the port people use, so through the front thread too: /api/health stays on the main thread (#1563).
@@ -2509,7 +2509,7 @@ const listened = (port: number) => {
 };
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
-if (process.env.CITADEL_FRONT !== '0') {
+if (config.front) {
   front.on = true;
   throughFront = listenThroughFront(
     server,
@@ -2517,8 +2517,8 @@ if (process.env.CITADEL_FRONT !== '0') {
       ...(onSocket ? { fd: 3 } : { host: HOST, port: PORT }),
       readers: 2,
       appsDomain: APPS_DOMAIN,
-      ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
-      reader: { testHooks: SETTLED_ROUTE, bootWait: SETTLED_ROUTE ? process.env.CITADEL_READER_BOOT_WAIT : undefined, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
+      ...(SETTLED_ROUTE ? { answerMs: config.readerAnswerMs, stuckMs: config.readerStuckMs } : {}),
+      reader: { testHooks: SETTLED_ROUTE, bootWait: SETTLED_ROUTE ? config.readerBootWait : undefined, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
     },
     {
       listening: listened,
@@ -2540,7 +2540,7 @@ if (process.env.CITADEL_FRONT !== '0') {
     status,
     ships: () => ({ queue: waits.queue, releases: releases.view(() => true) }),
     statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), easing: () => memoryEase.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
-    ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
+    ...(SETTLED_ROUTE && config.readerSweepMs ? { sweepMs: config.readerSweepMs } : {}),
   });
 } else if (onSocket) {
   server.listen({ fd: 3 }, () => listened(PORT));

@@ -10,6 +10,8 @@ interface Family {
   /** What a new copy should use instead. */
   use: string;
   copy: RegExp;
+  /** The only files it is about; every file when left out. */
+  only?: string[];
   /** Copies the pattern must find (the old code's shapes), so a pattern that stops matching goes red. */
   planted: string[];
   /** Files that keep copies: how many, and why. */
@@ -52,6 +54,14 @@ const FAMILIES: Record<string, Family> = {
     planted: ['await pipeline(createReadStream(file), ctx.res).catch(() => {});'],
     kept: { 'src/http.ts': { copies: 1, why: 'the home' } },
   },
+  setting: {
+    use: 'a named setting in src/config.ts',
+    // Not `delete process.env.X`: server.ts takes its secrets out after reading them.
+    copy: /(?<!delete )\bprocess\.env(?:\.\w|\[|\?\.)|\} = process\.env\b/g,
+    only: ['server.ts'],
+    planted: ["const HOST = process.env.HOST ?? '127.0.0.1';", "process.env['HOST']", 'const { HOST } = process.env;'],
+    kept: {},
+  },
 };
 
 const root = join(import.meta.dirname, '..');
@@ -64,7 +74,7 @@ const linesOf = (text: string, copy: RegExp) => [...text.matchAll(copy)].map((m)
 for (const [name, family] of Object.entries(FAMILIES)) {
   test(`${name}: no copy outside its home`, () => {
     const extra: string[] = [];
-    for (const f of files) {
+    for (const f of family.only ?? files) {
       const lines = linesOf(readFileSync(join(root, f), 'utf8'), family.copy);
       const kept = family.kept[f]?.copies ?? 0;
       if (lines.length > kept) extra.push(`${f}:${lines.join(',')}${kept ? ` (${kept} kept: ${family.kept[f].why})` : ''}`);

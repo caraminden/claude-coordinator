@@ -197,6 +197,8 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/mcp-pool.ts`, `src/pool-client.mjs`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
+| `src/machine-turn.ts` | A minion turn placed on a connected machine (Build 7): its `machine` file, the RunningTurn for it, and the agent's sync that keeps the server's copy of the turn folder in step |
+| `public/machine-worker.mjs` | The agent's worker: starts placed turns in a container on that computer, syncs their folders, forwards their tools' calls home; `--self-test` checks the container |
 | `public/refstate.js` | Paints minion links in chat (`a.thread-ref`) by their minion's state: waiting, working, deployed (`refBucket` in `public/threadstate.js`) |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |
@@ -264,6 +266,7 @@ Configuration comes from the environment; `src/config.ts` reads it once for `ser
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |
 | `CLAUDE_BIN` | `claude` | Claude Code executable |
 | `APPS_DOMAIN` | (unset: contraptions at `/apps/<name>/` on Citadel's host) | Each contraption on its own host, `<name>.<APPS_DOMAIN>` (live: `citadel.zip`), so its page can't reach Citadel's API or login; people are shown `https://<name>.<APPS_DOMAIN>/` as its link while the app keeps serving under `/apps/<name>/`; needs `*.<APPS_DOMAIN>` to reach the app with `Host` intact ([ADR 0005](docs/adr/0005-contraptions-on-subdomains.md)) |
+| `CITADEL_WORKER_FORCE` | (unset: no turn leaves this box) | For trying Build 7 before placement exists: a machine's name; its owner's minion turns run there while its worker switch is on and its agent is connected |
 | `CITADEL_PUBLIC_URL` | `https://citadel.zip` (a dev copy or preview: the host it was reached at) | Citadel's address in links handed to someone else: invite and reset links, a machine's setup url, the desktop feed (`publicOrigin` in `src/http.ts`) |
 | `MACHINES_URL` | (unset: agents use the app's address) | Private address machines' agents connect to, e.g. `http://perigee.tail59477f.ts.net:8574`; the app listens there for agents only |
 | `PUSH_SUBJECT` | the app's address, from the first subscribe | VAPID contact (`https://…` or `mailto:…`) push services see |

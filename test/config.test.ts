@@ -37,6 +37,7 @@ test('an empty environment gives every default', () => {
     fcmApi: undefined,
     cacheDir: join(homedir(), '.cache'),
     uploadFloor: null,
+    workerForce: null,
     staticBackfillMs: 20_000,
     staticBackfillEveryMs: 900_000,
     deployLive: false,

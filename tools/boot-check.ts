@@ -13,7 +13,6 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { copyDb } from '../src/db-copy.ts';
 import { loadStretch } from '../src/load-stretch.ts';
@@ -186,7 +185,7 @@ try {
   begin('/api/health');
   let health: any = null;
   const healthy = loadStretch();
-  for (const end = Date.now() + healthy.ms(20_000); !health; await sleep(100)) {
+  for (const end = Date.now() + healthy.ms(20_000); !health; await new Promise((r) => setTimeout(r, 100))) {
     if (server.exitCode !== null) fail(`The server exited during boot (code ${server.exitCode})`);
     if (Date.now() > end) fail(`The server did not answer /api/health within ${healthy.ms(20_000) / 1000} s${healthy.why}`);
     health = await fetch(`${base}/api/health`).then(
@@ -230,7 +229,7 @@ try {
       if (!sent.ok) fail(`Messaging the ${what} answered ${sent.status}: ${await sent.text()}`);
       const report = join(dir, 'report.json');
       const slow = loadStretch();
-      for (const end = Date.now() + slow.ms(30_000); ; await sleep(100)) {
+      for (const end = Date.now() + slow.ms(30_000); ; await new Promise((r) => setTimeout(r, 100))) {
         const t = await ticket();
         if (t.status !== 'running' && t.status !== 'new') {
           if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
@@ -333,12 +332,12 @@ async function pageCheck(url: string, cookie: string) {
   // The first render waits on several rounds of API calls, each seconds long when the box is loaded, so
   // wait while the page is still loading and fail once it has gone quiet with #app still empty.
   const slow = loadStretch();
-  for (const end = Date.now() + slow.ms(60_000); !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await sleep(100)) {
+  for (const end = Date.now() + slow.ms(60_000); !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await new Promise((r) => setTimeout(r, 100))) {
     if (errors.length) break;
     if (!loading.size && Date.now() - lastLoad > slow.ms(10_000)) fail(`The app page finished loading but rendered nothing in #app (nothing loading for ${slow.ms(10_000) / 1000} s${slow.why})`);
     if (Date.now() > end) fail(`The app page rendered nothing in #app within ${slow.ms(60_000) / 1000} s${slow.why} (still loading: ${loading.size} requests)`);
   }
   // Room for errors that come just after the first render (a view's own imports, its first fetches).
-  await sleep(1000);
+  await new Promise((r) => setTimeout(r, 1000));
   if (errors.length) fail(`The app page logged errors in Chromium:\n${errors.join('\n').slice(0, 3000)}`);
 }

@@ -14,7 +14,6 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { access, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
 import type { Probe } from './live-probe.ts';
@@ -584,7 +583,7 @@ const DEPLOY_WAIT_MS = 60 * 60_000;
  * a newer land's deploy) isn't deployed again; a deploy that went to a commit without it (GitHub didn't have it yet) didn't ship it.
  */
 export async function deployApps(ticketId: number, names: string[], commit: string | undefined, ops: DeployOps): Promise<AppDeploy[]> {
-  const rest = ops.sleep ?? sleep;
+  const sleep = ops.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const now = ops.now ?? Date.now;
   const holds = async (name: string, to: string | null) => !!(commit && to && (to.startsWith(commit) || (await ops.has?.(name, commit, to).catch(() => false))));
   const healthy = (name: string, to: string | null) => `Deployed ${name}${to ? ` at ${to.slice(0, 9)}` : ''}, healthy.`;
@@ -592,7 +591,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
   apps: for (const name of names) {
     const until = now() + DEPLOY_WAIT_MS;
     for (let tries = 0; ; tries++) {
-      while (ops.running(name) && now() < until) await rest(3000);
+      while (ops.running(name) && now() < until) await sleep(3000);
       const before = await ops.last(name);
       if (before?.state === 'deployed' && (await holds(name, before.to))) {
         out.push({ name, ok: true, line: healthy(name, before.to) });
@@ -607,12 +606,12 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
           out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(err?.message ?? err).trim()}` });
           continue apps;
         }
-        await rest(3000);
+        await sleep(3000);
       }
     }
     let d = await ops.last(name);
     while (d?.state === 'running' && now() < until) {
-      await rest(3000);
+      await sleep(3000);
       d = await ops.last(name);
     }
     // The log's tail holds its said lines and the build's output between them.

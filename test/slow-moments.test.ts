@@ -91,5 +91,5 @@ test("a busy day's moments are all counted: the cap holds more than people's pag
   const row = (i: number) => ({ at: NOW - i * 1000, person: 'Cara', device: 'd', tab: 't', kind: 'request', what: 'GET /api/x', page: '#/', project_id: null, total_ms: 2500, server_ms: 10, network_ms: 10, tab_ms: 0 });
   // What the first 36 hours brought (2026-11-25), inside one day.
   store.addSlowMoments(Array.from({ length: 1924 }, (_, i) => row(i)));
-  assert.equal(slowView(store, { canSee: () => true } as unknown as Parameters<typeof slowView>[1], NOW).count, 1924);
+  assert.equal(slowView(store, fake<Viewer>({ canSee: () => true }), NOW).count, 1924);
 });

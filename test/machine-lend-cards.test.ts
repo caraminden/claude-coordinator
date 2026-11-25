@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { agentToken, bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 import { lendLines, lendPatch } from '../src/machine-lend.ts';
 import { Store } from '../src/db.ts';
 
@@ -186,25 +186,7 @@ test("taking the scheme off ends its minions' open sessions, as the page does", 
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as an agent of this scheme. */
 async function mcp(t: any, role: string, method: string, params: object) {
-  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: agentToken(srv.data, t.id),
-      COORDINATOR_PROJECT: String(project.id),
-      COORDINATOR_TICKET: String(t.id),
-      COORDINATOR_ROLE: role,
-      COORDINATOR_MACHINES: '',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
+  return mcpOnce(agentEnv(srv.base, agentToken(srv.data, t.id), { id: t.id, project_id: project.id }, role, { COORDINATOR_MACHINES: '' }), method, params, tmp.track);
 }
 
 test('end to end: the tool call posts the card, its reply links it and the Machines page, and Approve saves it', async () => {

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { bootServer, jsonLines, tempRoot, until, ok, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // An app's release key (#837; Cara, 2026-11-17, "Both"): make_release_key posts a card any member of the app's scheme
 // approves, and the Releases page's button does the same at once. Either makes the key on the server, where a stand-in
@@ -179,24 +179,6 @@ test('approving and rejecting one key card at the same moment gives the minion o
 });
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, whose scheme's apps are twi and later. */
-async function mcp(method: string, params: object) {
-  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: base,
-      COORDINATOR_TOKEN: live(),
-      COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: 'thread',
-      COORDINATOR_HOME_CONTRAPTIONS: 'later,twi',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
+async function mcp(method: string, params: object): Promise<any> {
+  return mcpOnce(agentEnv(base, live(), ticket, 'thread', { COORDINATOR_HOME_CONTRAPTIONS: 'later,twi' }), method, params, tmp.track);
 }

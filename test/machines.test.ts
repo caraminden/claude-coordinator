@@ -3,9 +3,9 @@ import type { ChildProcess } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { createInterface } from 'node:readline';
 import { SECRET, agentToken, bootServer, until, holds, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
+import { mcpAgent } from './mcp-agent.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { hashToken, newToken } from '../src/machines.ts';
 import { sealKey, unseal } from '../src/credentials.ts';
@@ -649,18 +649,12 @@ test("a Taskmaster lists the machines its scheme can see and checks one through 
   const tools = async (project: any, asker: number) => {
     const tm = (await call(`/api/projects/${project.id}`)).coordinator.id;
     store.setSetting(askerKey(tm), asker);
-    const child = tmp.spawn(process.execPath, [join(repo, 'src', 'mcp.ts')], {
-      env: { ...process.env, COORDINATOR_ROLE: 'coordinator', COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(project.id) },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
-    let n = 0;
+    const agent = mcpAgent({ COORDINATOR_ROLE: 'coordinator', COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(project.id) }, tmp.track);
     const use = async (name: string, args: object = {}) => {
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: ++n, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-      const r = JSON.parse((await lines.next()).value).result;
-      return ((r.isError ? 'ERROR ' : '') + r.content[0].text) as string;
+      const { isError, text } = await agent.tool(name, args);
+      return (isError ? 'ERROR ' : '') + text;
     };
-    return { use, tm, done: () => child.kill() };
+    return { use, tm, done: () => agent.close() };
   };
 
   // Josh's ask in a scheme he's in: his own machine and the shared ones, with their live state.

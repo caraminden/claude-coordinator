@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { agentToken, bootServer, mintedAgentToken, tempRoot } from './helpers.ts';
+import { agentEnv, mcpAgent } from './mcp-agent.ts';
 
 const tmp = tempRoot('turn-audit-');
 const root = tmp.dir;
@@ -132,17 +132,12 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
 
   // Its contraption_turns tool: the turns as text, with the verdict and the payload.
   const tool = async (args: object) => {
-    const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(srv.data, tmAlpha), COORDINATOR_PROJECT: String(alpha), COORDINATOR_TICKET: String(tmAlpha), COORDINATOR_ROLE: 'coordinator', COORDINATOR_HOME_CONTRAPTIONS: 'voice' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
+    const agent = mcpAgent(agentEnv(srv.base, agentToken(srv.data, tmAlpha), { id: tmAlpha, project_id: alpha }, 'coordinator', { COORDINATOR_HOME_CONTRAPTIONS: 'voice' }), tmp.track);
     try {
-      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'contraption_turns', arguments: args } }) + '\n');
-      const r = await reply;
+      const r = await agent.rpc('tools/call', { name: 'contraption_turns', arguments: args });
       return r.result?.content?.[0]?.text ?? JSON.stringify(r);
     } finally {
-      child.kill();
+      agent.close();
     }
   };
   const listed = await tool({});

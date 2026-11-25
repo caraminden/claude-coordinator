@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { agentToken, bootServer, tempRoot, type Booted } from './helpers.ts';
+import { agentEnv, mcpAgent } from './mcp-agent.ts';
 
-const repo = join(import.meta.dirname, '..');
 const scratch = tempRoot('schedules-api-');
 const root = scratch.dir;
 after(() => scratch.teardown()); // ends the server and its detached turns before the folder goes (#271)
@@ -88,30 +88,8 @@ test("the Taskmaster's schedule tools", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tools' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   for (const s of (await call(`/api/projects/${p.id}/schedules`)).data.schedules) await call(`/api/schedules/${s.id}`, { method: 'DELETE' });
-  const mcp = scratch.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
-    env: {
-      ...process.env,
-      MACHINES_URL: undefined,
-      COORDINATOR_API: base,
-      COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id),
-      COORDINATOR_PROJECT: String(p.id),
-      COORDINATOR_ROLE: 'coordinator',
-      COORDINATOR_TICKET: String(page.coordinator.id),
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  const { createInterface } = await import('node:readline');
-  const replies = new Map<number, (r: any) => void>();
-  createInterface({ input: mcp.stdout! }).on('line', (l) => {
-    const r = JSON.parse(l);
-    replies.get(r.id)?.(r);
-  });
-  let rid = 0;
-  const tool = (name: string, args: object) =>
-    new Promise<string>((r) => {
-      replies.set(++rid, (x) => r(x.result.content[0].text));
-      mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    });
+  const mcp = mcpAgent(agentEnv(base, agentToken(join(root, 'data'), page.coordinator.id), { id: page.coordinator.id, project_id: p.id }, 'coordinator'), scratch.track);
+  const tool = async (name: string, args: object) => (await mcp.tool(name, args)).text;
   assert.equal(await tool('list_schedules', {}), 'Nothing scheduled.');
   assert.match(await tool('schedule_minion', { name: 'Nightly', cron: '@daily', brief: 'Check main', model: 'claude-sonnet-5-5' }), /schedule_minion needs a model and an effort/);
   assert.match(await tool('schedule_minion', { name: 'Nightly', cron: '@daily', brief: 'Check main', model: 'claude-sonnet-5-5', effort: 'low' }), /^Scheduled\. \[\d+\] Nightly: Every day at 00:00 \(`@daily`\), type chore, model claude-sonnet-5-5, effort low; next /);
@@ -143,5 +121,5 @@ test("the Taskmaster's schedule tools", async () => {
   // Swapping a hand-written copy back keeps its pause.
   await tool('update_schedule', { schedule_id: aid, paused: true });
   assert.match(await tool('update_schedule', { schedule_id: aid, template: 'test-audit', notes: 'vitest.' }), /Test audit \(Tests\): .*standard audit test-audit with notes; paused;/);
-  mcp.kill();
+  mcp.close();
 });

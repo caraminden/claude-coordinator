@@ -3,7 +3,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { ClaudeLink } from '../src/claude-link.ts';
@@ -17,8 +16,8 @@ import { isTurnNote } from '../src/codex.ts';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { coordinatorAccess } from '../src/turn-launch.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
-const REPO = join(import.meta.dirname, '..');
 const tmp = tempRoot('every-scheme-');
 const root = tmp.dir;
 const data = join(root, 'data');
@@ -161,19 +160,9 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   after(() => srv.stop());
   const tokens = new Auth(PASSWORD, SECRET);
   const api = (as: { id: number }, method: string, path: string) => fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${tokens.agentToken(as.id)}`, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }).then((r) => r.status);
-  async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean) {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(as.id), COORDINATOR_PROJECT: String(as.project_id), COORDINATOR_TICKET: String(as.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_APP_INSTRUCTIONS: citadelTools ? '1' : undefined },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: name === 'tools/list' ? 'tools/list' : 'tools/call', params: { name, arguments: args } }) + '\n');
-      const r = (await reply).result;
-      return name === 'tools/list' ? r.tools : { isError: !!r.isError, text: r.content[0].text as string };
-    } finally {
-      child.kill();
-    }
+  async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean): Promise<any> {
+    const r = await mcpOnce(agentEnv(srv.base, tokens.agentToken(as.id), as, 'coordinator', { COORDINATOR_APP_INSTRUCTIONS: citadelTools ? '1' : undefined }), name === 'tools/list' ? 'tools/list' : 'tools/call', { name, arguments: args }, tmp.track);
+    return name === 'tools/list' ? r.tools : { isError: !!r.isError, text: r.content[0].text as string };
   }
   const schemeArg = (tools: any[], name: string) => !!tools.find((t) => t.name === name).inputSchema.properties.scheme;
   assert.ok(schemeArg(await tool(tmCitadel, 'tools/list', {}, true), 'list_tickets') && schemeArg(await tool(tmCitadel, 'tools/list', {}, true), 'read_ticket'));

@@ -4,11 +4,11 @@
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
-import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { bootServer, jsonLines, tempRoot, until, type Booted } from './helpers.ts';
+import { mcpOnce } from './mcp-agent.ts';
 
 const tmp = tempRoot('contraption-read-');
 const root = tmp.dir;
@@ -177,19 +177,8 @@ test('the contraption_read tool lists commands, quotes answers, says when an app
   });
   const tool = tempRoot('contraption-read-tool-');
   const port = await tool.serve(api);
-  const call = async (args: object) => {
-    const child = tool.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-      env: { ...process.env, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_ROLE: 'thread' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'contraption_read', arguments: args } }) + '\n');
-      return (await reply).result.content[0].text as string;
-    } finally {
-      child.kill();
-    }
-  };
+  const env = { COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_ROLE: 'thread' };
+  const call = async (args: object) => (await mcpOnce(env, 'tools/call', { name: 'contraption_read', arguments: args }, tool.track)).content[0].text as string;
   try {
     assert.equal(await call({ app: 'mandate' }), `- today: Today's items\n  input: ${JSON.stringify(LIST[0].input_schema)}`);
     assert.equal(await call({ app: 'mandate', command: 'today' }), 'mandate answered 200: {"items":[]}');

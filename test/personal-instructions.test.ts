@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { systemPrompt } from '../src/prompts.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // Personal instructions (#688): each person's own text for everywhere and per scheme, loaded last in the
 // minions assigned to them and never in the Taskmaster's prompt, which reads them with a tool instead.
@@ -95,24 +95,7 @@ test('My instructions: GET and PUT your own text per scope, capped at 4,000 char
 
 /** One tools/call through the real MCP server, as Delve's Taskmaster. */
 async function mcpCall(name: string, args: object): Promise<any> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(DelveTM.id),
-      COORDINATOR_PROJECT: String(Delve.id),
-      COORDINATOR_TICKET: String(DelveTM.id),
-      COORDINATOR_ROLE: 'coordinator',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
+  return mcpOnce(agentEnv(srv.base, tokens.agentToken(DelveTM.id), { id: DelveTM.id, project_id: Delve.id }, 'coordinator'), 'tools/call', { name, arguments: args }, tmp.track);
 }
 
 test("the Taskmaster reads a person's text with read_person_instructions; a minion can't", async () => {

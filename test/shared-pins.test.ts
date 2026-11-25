@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // Files in a scheme's shared folder can be pinned: by people in the Shared viewer.
 // A pin is keyed by path, so a rewrite keeps it and a deleted file shows as missing.
@@ -51,25 +51,8 @@ after(async () => {
 });
 
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = scratch.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: ticket.kind === 'coordinator' ? 'coordinator' : 'thread',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const { result } = await reply;
-    return { text: result.content[0].text, error: !!result.isError };
-  } finally {
-    child.kill();
-  }
+  const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), ticket, ticket.kind === 'coordinator' ? 'coordinator' : 'thread'), 'tools/call', { name, arguments: args }, scratch.track);
+  return { text: result.content[0].text, error: !!result.isError };
 }
 const shared = async (projectId = A.id) => (await srv.call(`/api/projects/${projectId}/shared`)).data as any[];
 const entry = async (path: string) => (await shared()).find((f) => f.path === path);

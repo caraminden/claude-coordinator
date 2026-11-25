@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // Minions message each other directly (#783): message_minion and read_minion through the real MCP server
 // and the routes behind them. Every message here is wake: false, so no turn starts (the server's claude is
@@ -46,25 +46,8 @@ before(async () => {
 });
 
 async function tool(from: number, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(from),
-      COORDINATOR_PROJECT: String(A.id),
-      COORDINATOR_TICKET: String(from),
-      COORDINATOR_ROLE: 'thread',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const { result } = await reply;
-    return { text: result.content[0].text, error: !!result.isError };
-  } finally {
-    child.kill();
-  }
+  const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(from), { id: from, project_id: A.id }, 'thread'), 'tools/call', { name, arguments: args }, tmp.track);
+  return { text: result.content[0].text, error: !!result.isError };
 }
 
 const events = (id: number, kind: string) =>

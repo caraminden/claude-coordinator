@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs, tempRoot, zoneDay } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, stopProcs, tempRoot, zoneDay } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // A minion lists its own scheme's minions, read-only (#143): list_tickets through the real MCP server,
 // and the route behind it, which gives a minion only the line's fields and never another scheme.
@@ -61,25 +61,8 @@ before(async () => {
 });
 
 async function tool(name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(M1.id),
-      COORDINATOR_PROJECT: String(A.id),
-      COORDINATOR_TICKET: String(M1.id),
-      COORDINATOR_ROLE: 'thread',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const { result } = await reply;
-    return { text: result.content[0].text, error: !!result.isError };
-  } finally {
-    child.kill();
-  }
+  const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(M1.id), M1, 'thread'), 'tools/call', { name, arguments: args }, tmp.track);
+  return { text: result.content[0].text, error: !!result.isError };
 }
 
 const get = (path: string, id: number) => fetch(srv.base + path, { headers: { Authorization: `Bearer ${tokens.agentToken(id)}` } });

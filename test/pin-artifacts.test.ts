@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // list_artifacts through the real MCP server talking to a real server; the pin tools are retired (#1356).
 const tmp = tempRoot('pin-artifacts-');
@@ -56,35 +56,14 @@ before(async () => {
 
 /** One tool call through a fresh mcp.ts acting as `ticket`. */
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: ticket.kind === 'coordinator' ? 'coordinator' : 'thread',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const { result } = await reply;
-    return { text: result.content[0].text, error: !!result.isError };
-  } finally {
-    child.kill();
-  }
+  const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), ticket, ticket.kind === 'coordinator' ? 'coordinator' : 'thread'), 'tools/call', { name, arguments: args }, tmp.track);
+  return { text: result.content[0].text, error: !!result.isError };
 }
 const pinnedBy = async (id: number) => (await srv.call(`/api/artifacts/${id}`)).data.artifact?.pinned_by ?? null;
 
 test('both servers offer the artifact tools', async () => {
   for (const role of ['coordinator', 'thread']) {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role }, stdio: ['pipe', 'pipe', 'inherit'] });
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
-    const names = (await reply).result.tools.map((t: any) => t.name);
-    child.kill();
+    const names = (await mcpOnce({ COORDINATOR_ROLE: role }, 'tools/list', undefined, tmp.track)).tools.map((t) => t.name);
     assert.ok(names.includes('list_artifacts'), `${role} lacks list_artifacts`);
     for (const n of ['pin_artifact', 'unpin_artifact']) assert.ok(!names.includes(n), `${role} still offers ${n}`);
   }

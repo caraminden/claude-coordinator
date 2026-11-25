@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { tempRoot } from './helpers.ts';
+import { agentEnv, mcpAgent } from './mcp-agent.ts';
 import { router, type Route } from '../src/http.ts';
 import { appRoutes } from '../src/routes/app.ts';
 import { fileRoutes } from '../src/routes/files.ts';
@@ -50,32 +49,11 @@ const api = createServer((req, res) => {
 const tmp = tempRoot('thread-identity-');
 const apiPort = await tmp.serve(api);
 
-const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
-  env: {
-    ...process.env,
-    MACHINES_URL: undefined,
-    COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
-    COORDINATOR_TOKEN: `${ID}.sig`,
-    COORDINATOR_PROJECT: '2',
-    COORDINATOR_ROLE: 'thread',
-    COORDINATOR_TICKET: String(ID),
-  },
-  stdio: ['pipe', 'pipe', 'inherit'],
-});
+const mcp = mcpAgent(agentEnv(`http://127.0.0.1:${apiPort}`, `${ID}.sig`, { id: ID, project_id: 2 }, 'thread'), tmp.track);
 // After the last top-level await: set before one, this hook left the MCP child and API up and the file never exited (#1535).
 after(() => tmp.teardown()); // stops the MCP server and the stand-in API
-const replies = new Map<number, (r: any) => void>();
-createInterface({ input: mcp.stdout! }).on('line', (l) => {
-  const r = JSON.parse(l);
-  replies.get(r.id)?.(r);
-});
-let rid = 0;
-function rpc(method: string, params: object): Promise<any> {
-  const id = ++rid;
-  mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
-  return new Promise((r) => replies.set(id, r));
-}
-const tool = (name: string, args: object) => rpc('tools/call', { name, arguments: args }).then((r) => r.result);
+const rpc = (method: string, params: object): Promise<any> => mcp.rpc(method, params);
+const tool = (name: string, args: object) => mcp.call('tools/call', { name, arguments: args });
 
 // Every test sits below the top-level await above: under the gate's force-exit, the file ran only the tests before it (#1732).
 test('a thread token may read, relabel, ask and close only its own internal id', async () => {

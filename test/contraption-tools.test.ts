@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, tempRoot, until, type Booted } from './helpers.ts';
+import { bootServer, fakeSystemd, PASSWORD, SECRET, tempRoot, until, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // Settings → Contraptions as coordinator tools (#246): only the Citadel scheme's Taskmaster, only on a
 // turn an admin asked for (#255), through the same routes the settings page calls, and never showing a key.
@@ -48,26 +48,7 @@ after(async () => {
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`; `citadel` is the env the runner sets for Citadel's Taskmaster. */
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator'): Promise<any> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: role,
-      COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined,
-      COORDINATOR_HOME_CONTRAPTIONS: home,
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
+  return mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), ticket, role, { COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined, COORDINATOR_HOME_CONTRAPTIONS: home }), method, params, tmp.track);
 }
 const tool = async (t: { id: number; project_id: number }, name: string, args: object = {}, citadel?: boolean) => {
   const r = await mcp(t, 'tools/call', { name, arguments: args }, citadel);

@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { freeAppPort, schemeRunner } from '../src/make-app.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { agentEnv, mcpAgent } from './mcp-agent.ts';
 
 // make_app (#1136): a scheme's Taskmaster, on a member's turn, makes an app in a folder of its own repo, with a
 // minion whose branch holds the generated app, registered and on for the scheme's members.
@@ -55,24 +55,17 @@ before(async () => {
   srv = await bootServer({ root });
 });
 after(async () => {
+  for (const a of agents.values()) a.close();
   await srv?.stop();
   rmSync(root, { recursive: true, force: true });
 });
 
-async function tool(t: { id: number; project_id: number }, name: string, args: object): Promise<{ isError: boolean; text: string }> {
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(t.id), COORDINATOR_PROJECT: String(t.project_id), COORDINATOR_TICKET: String(t.id), COORDINATOR_ROLE: 'coordinator' },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((ok) => createInterface({ input: child.stdout }).once('line', (l) => ok(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const r = (await reply).result;
-    return { isError: !!r.isError, text: r.content[0].text };
-  } finally {
-    child.kill();
-  }
-}
+// One MCP server per Taskmaster for the whole file: a node cold start per call made this file slow.
+const agents = new Map<number, ReturnType<typeof mcpAgent>>();
+const tool = (t: { id: number; project_id: number }, name: string, args: object) => {
+  if (!agents.has(t.id)) agents.set(t.id, mcpAgent(agentEnv(srv.base, tokens.agentToken(t.id), t, 'coordinator')));
+  return agents.get(t.id)!.tool(name, args);
+};
 const db = () => new Store(join(srv.data, 'coordinator.db'));
 /** Trips' Taskmaster on a turn for `person`. */
 async function turnFor<T>(person: number, work: () => Promise<T>): Promise<T> {

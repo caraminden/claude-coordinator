@@ -1,16 +1,15 @@
 // Search over past minions (#1156): what a closed minion leaves in the index, when it gets there, and that a
 // search never crosses schemes.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ftsQuery, heredocTargets, shortPath } from '../src/minion-index.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'minion-index-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -238,19 +237,7 @@ test('the route and search_minions: the server fills the index itself, and a min
     assert.equal((await get(A.id, 'seed', them.id)).status, 403, "not another scheme's");
     assert.equal((await fetch(`${srv.base}/api/projects/${A.id}/past-minions?since=yesterday`, { headers: { Cookie: srv.cookie } })).status, 400);
 
-    const mcp = async (method: string, params: object = {}) => {
-      const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-        env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, me.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(me.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEMORY: '' },
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
-      try {
-        const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-        return (await reply).result;
-      } finally {
-        child.kill();
-      }
-    };
+    const mcp = (method: string, params: object = {}) => mcpOnce(agentEnv(srv.base, agentToken(data, me.id), { id: me.id, project_id: A.id }, 'thread', { COORDINATOR_MEMORY: '' }), method, params);
     assert.ok(
       (await mcp('tools/list')).tools.some((t: any) => t.name === 'search_minions'),
       'listed with chat search off too',

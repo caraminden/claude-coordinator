@@ -3,12 +3,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, mintedAgentToken, tempRoot, testPins, until } from './helpers.ts';
+import { agentEnv, mcpAgent } from './mcp-agent.ts';
 testPins();
 
 const tmp = tempRoot('approvals-');
@@ -143,31 +143,10 @@ const listening = tmp.serve(api);
 
 async function mcpServer(approvals: boolean) {
   await listening;
-  const proc = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
-    env: {
-      ...process.env,
-      MACHINES_URL: undefined,
-      COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
-      COORDINATOR_TOKEN: `${TICKET}.sig`,
-      COORDINATOR_PROJECT: '1',
-      COORDINATOR_ROLE: 'thread',
-      COORDINATOR_TICKET: String(TICKET),
-      COORDINATOR_APPROVALS: approvals ? '1' : undefined, // a minion running the tests has it set
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  after(() => proc.kill());
-  const replies = new Map<number, (r: any) => void>();
-  createInterface({ input: proc.stdout! }).on('line', (l) => {
-    const r = JSON.parse(l);
-    replies.get(r.id)?.(r);
-  });
-  let rid = 0;
-  return (method: string, params: object): Promise<any> => {
-    const id = ++rid;
-    proc.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
-    return new Promise((r) => replies.set(id, (m) => r(m.result)));
-  };
+  const env = agentEnv(`http://127.0.0.1:${(api.address() as any).port}`, `${TICKET}.sig`, { id: TICKET, project_id: 1 }, 'thread', approvals ? { COORDINATOR_APPROVALS: '1' } : {});
+  const agent = mcpAgent(env, tmp.track);
+  after(() => agent.close());
+  return (method: string, params: object): Promise<any> => agent.call(method, params);
 }
 let server: ReturnType<typeof mcpServer> | null = null;
 const rpc = async (method: string, params: object) => (await (server ??= mcpServer(true)))(method, params);

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // People's note on a minion (#146): people read and write it; minions and the Taskmaster never see it,
 // not in any ticket JSON they can fetch nor in list_tickets or read_ticket.
@@ -42,26 +42,9 @@ async function asAgent(id: number, path: string, body?: object, method = body ? 
 }
 
 async function tool(name: string, args: object): Promise<string> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(TM.id),
-      COORDINATOR_PROJECT: String(P.id),
-      COORDINATOR_TICKET: String(TM.id),
-      COORDINATOR_ROLE: 'coordinator',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const { result } = await reply;
-    assert.equal(result.isError, undefined, result.content[0].text);
-    return result.content[0].text;
-  } finally {
-    child.kill();
-  }
+  const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(TM.id), { id: TM.id, project_id: P.id }, 'coordinator'), 'tools/call', { name, arguments: args }, tmp.track);
+  assert.equal(result.isError, undefined, result.content[0].text);
+  return result.content[0].text;
 }
 
 test('a person sets a note: folded to one line, capped, shown to people with who wrote it', async () => {

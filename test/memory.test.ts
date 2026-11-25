@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Embed } from '../src/memory.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { agentToken, bootServer, SECRET, tempRoot, until } from './helpers.ts';
+import { agentEnv, mcpAgent, mcpOnce } from './mcp-agent.ts';
 
 const tmp = tempRoot('memory-');
 const root = tmp.dir;
@@ -303,19 +303,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     assert.equal((await search(A.id, 'x')).status, 400, 'too short to search');
 
     // The minion's MCP tool: listed only where memory is on, and answered through the route.
-    const mcp = async (memory: boolean, method: string, params: object = {}) => {
-      const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-        env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, a1.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(a1.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEMORY: memory ? '1' : '' },
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
-      try {
-        const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-        return (await reply).result;
-      } finally {
-        child.kill();
-      }
-    };
+    const mcp = async (memory: boolean, method: string, params: object = {}) => mcpOnce(agentEnv(srv.base, agentToken(data, a1.id), a1, 'thread', { COORDINATOR_MEMORY: memory ? '1' : '' }), method, params, tmp.track);
     const names = async (memory: boolean) => (await mcp(memory, 'tools/list')).tools.map((t: any) => t.name);
     assert.ok((await names(true)).includes('search_memory'));
     assert.ok(!(await names(false)).includes('search_memory'));
@@ -337,17 +325,12 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
 
     // create_ticket, as the Taskmaster: refused when an open minion reads like the same work, until not_duplicate.
     const create = async (args: object) => {
-      const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-        env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, tmA.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(tmA.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_MEMORY: '1' },
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
+      const agent = mcpAgent(agentEnv(srv.base, agentToken(data, tmA.id), tmA, 'coordinator', { COORDINATOR_MEMORY: '1' }), tmp.track);
       try {
-        const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_ticket', arguments: { properties: { type: 'feature' }, model: 'claude-opus-5-5', effort: 'high', ...args } } }) + '\n');
-        const r = await reply;
+        const r = await agent.rpc('tools/call', { name: 'create_ticket', arguments: { properties: { type: 'feature' }, model: 'claude-opus-5-5', effort: 'high', ...args } });
         return r.result?.content?.[0]?.text ?? JSON.stringify(r);
       } finally {
-        child.kill();
+        agent.close();
       }
     };
     const twin = await create({ title: 'Dentist reminders', message: 'Remind people about the dentist' });

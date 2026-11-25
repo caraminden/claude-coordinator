@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { bootServer, jsonLines, tempRoot, until, ok, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // A minion proposes a machine's notes (#617, Josh: "Minion proposes, owner approves"): a plan card that only the
 // machine's owner or an admin can approve, which saves them through the Machines page's PATCH. Through the real
@@ -151,26 +151,8 @@ test('approving writes the notes through the PATCH path, unless they changed sin
 });
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, with the machines it got. */
-async function mcp(method: string, params: object, machines: string) {
-  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: base,
-      COORDINATOR_TOKEN: live(),
-      COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: 'thread',
-      COORDINATOR_MACHINES: machines,
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
+async function mcp(method: string, params: object, machines: string): Promise<any> {
+  return mcpOnce(agentEnv(base, live(), ticket, 'thread', { COORDINATOR_MACHINES: machines }), method, params, tmp.track);
 }
 
 test("the tool is listed for every minion with a free machine name (#878), refused for a machine the turn didn't get, and its call posts the card", async () => {

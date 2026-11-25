@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { PAGE_EVENTS } from '../src/history.ts';
-import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // read_ticket through the real MCP server: the events route pages a minion's history (#120), and the
 // tool still needs every entry to show the last few and count the rest (#142).
@@ -42,25 +42,8 @@ after(async () => {
 });
 
 async function readTicket(args: object): Promise<{ text: string; error: boolean }> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(TM.id),
-      COORDINATOR_PROJECT: String(P.id),
-      COORDINATOR_TICKET: String(TM.id),
-      COORDINATOR_ROLE: 'coordinator',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read_ticket', arguments: args } }) + '\n');
-    const { result } = await reply;
-    return { text: result.content[0].text, error: !!result.isError };
-  } finally {
-    child.kill();
-  }
+  const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(TM.id), { id: TM.id, project_id: P.id }, 'coordinator'), 'tools/call', { name: 'read_ticket', arguments: args }, tmp.track);
+  return { text: result.content[0].text, error: !!result.isError };
 }
 
 test('read_ticket shows the last entries of a paged history and counts every earlier one', async () => {

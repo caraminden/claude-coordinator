@@ -1189,7 +1189,7 @@ const apkBuilds = new ApkBuilds({
   cacheDir: join(services.opts.home, '.cache/citadel-apk'),
   keyDir: join(services.opts.home, '.config/citadel-android'),
   heavy: join(import.meta.dirname, 'tools/citadel-heavy'),
-  ciRelease: (row) => targetFinder.list('apk').some((t) => t.contraption === row.name && !!t.workflow),
+  ciRelease: (row) => targetFinder.ciRelease(row),
   published: (row, code, _commit, by) => {
     if (row.home_scheme != null) store.recordApkPublish({ projectId: row.home_scheme, contraption: row.name, versionCode: code, runId: 0, by, uid: null });
     void releases.refresh();

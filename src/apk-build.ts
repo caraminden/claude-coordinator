@@ -81,7 +81,7 @@ export interface ApkBuildDeps {
   /** tools/citadel-heavy: the Gradle build takes a host-wide slot, as a minion's does. */
   heavy: string;
   /** Whether a release workflow signs this app's APKs on CI (src/apk-release.ts): then this leaves it alone. */
-  ciRelease: (row: ContraptionRow) => boolean;
+  ciRelease: (row: ContraptionRow) => boolean | Promise<boolean>;
   /** Build `code` of `row` from `commit` went out, started by `by`. */
   published: (row: ContraptionRow, code: number, commit: string, by: string) => void;
   /** Tell the app's home Taskmaster something it has to act on. */
@@ -167,7 +167,7 @@ export class ApkBuilds {
 
   /** Whether `row`'s APK is behind its live commit, and if so build and publish it. */
   async check(row: ContraptionRow, by: string): Promise<Outcome> {
-    if (this.d.ciRelease(row)) return { skipped: 'a release workflow signs its APKs' };
+    if (await this.d.ciRelease(row)) return { skipped: 'a release workflow signs its APKs' };
     const live = await realpath(this.d.folder(row)).catch(() => null);
     if (!live) return { skipped: 'not deployed' };
     const cap = await capacitorApp(live);

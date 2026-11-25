@@ -18,12 +18,28 @@ import { promisify } from 'node:util';
 import { copyDb } from '../src/db-copy.ts';
 import { MAX_STRETCH, stepLimit, within } from '../src/load-stretch.ts';
 import { listeningPort } from '../src/ports.ts';
+import type { Ticket } from '../src/db-rows.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 
 const [checkout, db] = process.argv.slice(2);
 if (!checkout || !db) throw new Error('usage: boot-check.ts <checkout> <coordinator.db>');
-const { Store } = await import(join(checkout, 'src', 'db.ts'));
+
+interface LogEntry {
+  level: string;
+  text: string;
+  url?: string;
+}
+/** What Chromium's DevTools pipe sends: an answer to a numbered send, or one of the events read here. */
+type DevToolsMessage =
+  | { id: number; method?: undefined; error?: { message: string }; result?: unknown }
+  | { id?: undefined; method: 'Network.requestWillBeSent'; params: { requestId: string; type?: string } }
+  | { id?: undefined; method: 'Network.loadingFinished' | 'Network.loadingFailed'; params: { requestId: string } }
+  | { id?: undefined; method: 'Runtime.exceptionThrown'; params: { exceptionDetails: { text: string; exception?: { description?: string } } } }
+  | { id?: undefined; method: 'Runtime.consoleAPICalled'; params: { type: string; args: { value?: unknown; description?: string }[] } }
+  | { id?: undefined; method: 'Log.entryAdded'; params: { entry: LogEntry } };
+
+const { Store } = (await import(join(checkout, 'src', 'db.ts'))) as typeof import('../src/db.ts');
 
 const root = mkdtempSync(join(tmpdir(), 'citadel-boot-check-'));
 const procs: ChildProcess[] = [];
@@ -91,8 +107,10 @@ try {
   // otherwise select (or wake) the server login's Codex container, bypassing CLAUDE_BIN entirely.
   turnStore.db.prepare("DELETE FROM settings WHERE key GLOB 'container_home:*' OR key GLOB 'codex:on:user:*'").run();
   // A Taskmaster's git rules name each open minion's worktree (#92, #661): counted here from the copy, as the runner does.
-  const openIn = (projectId: number) => (turnStore.db.prepare(`select count(*) n from tickets where project_id = ? and kind != 'coordinator' and status != 'closed' and coalesce(cwd, '') != ''`).get(projectId) as any).n as number;
-  const busiest = (turnStore.db.prepare(`select id, project_id, permission_mode, branch from tickets where kind = 'coordinator'`).all() as any[]).map((c) => ({ ...c, open: openIn(c.project_id) })).sort((a, b) => Number(b.project_id === GLOBAL_OWNER) - Number(a.project_id === GLOBAL_OWNER) || b.open - a.open)[0];
+  const openIn = (projectId: number) => (turnStore.db.prepare(`select count(*) n from tickets where project_id = ? and kind != 'coordinator' and status != 'closed' and coalesce(cwd, '') != ''`).get(projectId) as { n: number }).n;
+  const busiest = (turnStore.db.prepare(`select id, project_id, permission_mode, branch from tickets where kind = 'coordinator'`).all() as Pick<Ticket, 'id' | 'project_id' | 'permission_mode' | 'branch'>[])
+    .map((c) => ({ ...c, open: openIn(c.project_id) }))
+    .sort((a, b) => Number(b.project_id === GLOBAL_OWNER) - Number(a.project_id === GLOBAL_OWNER) || b.open - a.open)[0];
   const turnChecks: { what: string; id: number; dir: string }[] = [];
   // A file in the new minion's folder and one in the scheme's shared folder, for the file viewer's details (#157).
   const fileChecks: { what: string; path: string }[] = [];
@@ -113,7 +131,7 @@ try {
             turnStore.db
               .prepare(`select count(*) n from tickets t join projects p on p.id = t.project_id
       where t.project_id != ? and coalesce(p.repo_dir, '') != '' and t.kind != 'coordinator' and t.status != 'closed' and coalesce(t.cwd, '') != ''`)
-              .get(busiest.project_id) as any
+              .get(busiest.project_id) as { n: number }
           ).n
         : null;
     console.error(`boot-check: the Taskmaster of scheme ${busiest.project_id}, with ${busiest.open} open minions${others === null ? '' : ` and every scheme's reads (${others} open minions in other schemes)`}`);
@@ -122,7 +140,7 @@ try {
     const longest = turnStore.db
       .prepare(`select t.number from events e join tickets t on t.id = e.ticket_id
       where t.project_id = ? and t.number is not null and t.status != 'closed' group by e.ticket_id order by count(*) desc limit 1`)
-      .get(busiest.project_id) as any;
+      .get(busiest.project_id) as { number: number } | undefined;
     const instructions =
       turnStore
         .getProject(busiest.project_id)
@@ -183,13 +201,13 @@ try {
   const base = `http://127.0.0.1:${await within(listeningPort(server, 2 * MAX_STRETCH * 20_000), 20_000, (limit) => `The server did not say which port it listens on within ${limit}`).catch((err) => fail(err.message))}`;
 
   begin('/api/health');
-  let health: any = null;
+  let health: { version: string } | null = null;
   const healthy = stepLimit();
   for (; !health; await sleep(100)) {
     if (server.exitCode !== null) fail(`The server exited during boot (code ${server.exitCode})`);
     if (healthy.over(20_000)) fail(`The server did not answer /api/health within ${healthy.text(20_000)}`);
     health = await fetch(`${base}/api/health`).then(
-      (r) => (r.ok ? r.json() : null),
+      (r) => (r.ok ? (r.json() as Promise<{ version: string }>) : null),
       () => null,
     );
   }
@@ -286,7 +304,7 @@ async function pageCheck(url: string, cookie: string) {
   chrome.stderr!.on('data', (d) => (chromeLog += d));
   const [input, output] = [chrome.stdio[3] as Writable, chrome.stdio[4] as Readable];
   let next = 0;
-  const pending = new Map<number, { ok: (v: any) => void; no: (e: Error) => void }>();
+  const pending = new Map<number, { ok: (v: unknown) => void; no: (e: Error) => void }>();
   const errors: string[] = [];
   const loading = new Set<string>();
   let lastLoad = Date.now();
@@ -295,7 +313,7 @@ async function pageCheck(url: string, cookie: string) {
     gone = new Error(`Chromium exited (code ${code}):\n${chromeLog.slice(-2000)}`);
     for (const p of pending.values()) p.no(gone);
   });
-  const handle = (m: any) => {
+  const handle = (m: DevToolsMessage) => {
     if (m.id) {
       const p = pending.get(m.id);
       pending.delete(m.id);
@@ -308,10 +326,10 @@ async function pageCheck(url: string, cookie: string) {
     }
     if ((m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') && loading.delete(m.params.requestId)) lastLoad = Date.now();
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
-    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description).join(' ')}`);
+    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console.error: ${m.params.args.map((a) => a.value ?? a.description).join(' ')}`);
     // The copy has the database but not the data folder's files (chat images): an API 404 (/api/ or the app's /c/api/) is that.
     // An API 503 is a slow reader's "ask again" on a busy box (#2003), which the page does.
-    const missingData = (e: any) => / (404|503) /.test(e.text) && /^(?:\/c)?\/api\//.test(new URL(e.url ?? url, url).pathname);
+    const missingData = (e: LogEntry) => / (404|503) /.test(e.text) && /^(?:\/c)?\/api\//.test(new URL(e.url ?? url, url).pathname);
     if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !missingData(m.params.entry)) errors.push(`${m.params.entry.text}${m.params.entry.url ? ` (${m.params.entry.url})` : ''}`);
   };
   let buf = '';
@@ -320,14 +338,14 @@ async function pageCheck(url: string, cookie: string) {
     buf += d;
     for (let i; (i = buf.indexOf('\0')) >= 0; buf = buf.slice(i + 1)) handle(JSON.parse(buf.slice(0, i)));
   });
-  const send = (method: string, params: object = {}, sessionId?: string) =>
-    new Promise<any>((ok, no) => {
+  const send = <T>(method: string, params: object = {}, sessionId?: string) =>
+    new Promise<T>((ok, no) => {
       if (gone) return no(gone);
-      pending.set(++next, { ok, no });
+      pending.set(++next, { ok: (v) => ok(v as T), no });
       input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
     });
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  const { targetId } = await send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+  const { sessionId } = await send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
   for (const domain of ['Runtime', 'Log', 'Network', 'Page']) await send(`${domain}.enable`, {}, sessionId);
   const [name, ...value] = cookie.split('=');
   await send('Network.setCookie', { name, value: value.join('='), url }, sessionId);
@@ -336,7 +354,7 @@ async function pageCheck(url: string, cookie: string) {
   // The first render waits on several rounds of API calls, each seconds long when the box is loaded, so
   // wait while the page is still loading and fail once it has gone quiet with #app still empty.
   const slow = stepLimit();
-  for (; !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await sleep(100)) {
+  for (; !(await send<{ result: { value?: unknown } }>('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await sleep(100)) {
     if (errors.length) break;
     if (!loading.size && slow.over(10_000, lastLoad)) fail(`The app page finished loading but rendered nothing in #app (nothing loading for ${slow.text(10_000)})`);
     if (slow.over(60_000)) fail(`The app page rendered nothing in #app within ${slow.text(60_000)} (still loading: ${loading.size} requests)`);

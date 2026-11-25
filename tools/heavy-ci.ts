@@ -19,6 +19,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { HoldFile } from '../src/ci-hold-file.ts';
+import type { GhJob, GhJobsBody, GhRun, GhRunsBody } from '../src/gh-bodies.ts';
 
 export const FALLBACK = 120;
 export const BEGIN = '=== citadel-heavy: the command starts ===';
@@ -62,6 +63,12 @@ export function commandOutput(log: string, conclusion: string | null): { lines: 
   return { lines: out, code };
 }
 
+/** One run as GitHub answers it by id: these two are always there. */
+type RunBody = GhRun & { html_url: string; conclusion: string | null };
+
+/** A caught git or gh failure. Not src/thrown.ts: this file also runs copied on its own, so it imports only types. */
+const failure = (e: unknown) => e as { stderr?: string | Buffer; message: string };
+
 class Fallback extends Error {}
 
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 }).trim();
@@ -73,10 +80,10 @@ function retried<T>(what: string, tries: number, call: () => T): T {
   for (let n = 1; ; n++) {
     try {
       return call();
-    } catch (e: any) {
+    } catch (e) {
       if (n >= tries)
         throw new Error(
-          `${what}: ${String(e.stderr || e.message)
+          `${what}: ${String(failure(e).stderr || failure(e).message)
             .trim()
             .split('\n')
             .pop()}`,
@@ -85,7 +92,7 @@ function retried<T>(what: string, tries: number, call: () => T): T {
     }
   }
 }
-function gh(args: string[], what: string, tries = 3): any {
+function gh<T = unknown>(args: string[], what: string, tries = 3): T {
   return retried(what, tries, () => {
     const out = execFileSync('gh', ['api', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
     return out.trim() ? JSON.parse(out) : null;
@@ -147,8 +154,8 @@ function shipRuns(slug: string): number {
   let n = 0;
   for (const status of ['queued', 'in_progress']) {
     try {
-      const runs = gh([`repos/${slug}/actions/runs?status=${status}&per_page=50`], 'reading the ship runs').workflow_runs ?? [];
-      n += runs.filter((r: any) => String(r.head_branch || '').startsWith('land/') && Date.parse(r.created_at) >= since).length;
+      const runs = gh<GhRunsBody>([`repos/${slug}/actions/runs?status=${status}&per_page=50`], 'reading the ship runs').workflow_runs ?? [];
+      n += runs.filter((r) => String(r.head_branch || '').startsWith('land/') && Date.parse(r.created_at) >= since).length;
     } catch {
       /* unread: the job goes ahead rather than wait on a blip */
     }
@@ -283,9 +290,9 @@ function queueLong(argv: string[]): number {
   try {
     sha = snapshot();
     git('push', '-q', '--no-verify', 'origin', `${sha}:refs/citadel-heavy/${id}`);
-  } catch (e: any) {
+  } catch (e) {
     say(
-      `pushing the snapshot to GitHub failed (${String(e.stderr || e.message)
+      `pushing the snapshot to GitHub failed (${String(failure(e).stderr || failure(e).message)
         .trim()
         .split('\n')
         .pop()}), so nothing is queued`,
@@ -315,9 +322,9 @@ async function main(argv: string[]): Promise<number> {
     sha = snapshot();
     // --no-verify: a repo's own pre-push hook (Peek's runs its whole check) is for its branches, not this scratch ref (#1254).
     git('push', '-q', '--no-verify', 'origin', `${sha}:${ref}`);
-  } catch (e: any) {
+  } catch (e) {
     throw new Fallback(
-      `pushing the snapshot to GitHub failed (${String(e.stderr || e.message)
+      `pushing the snapshot to GitHub failed (${String(failure(e).stderr || failure(e).message)
         .trim()
         .split('\n')
         .pop()})`,
@@ -339,8 +346,8 @@ async function main(argv: string[]): Promise<number> {
   let cancelled = false;
   /** The dispatch answers with no run id: the run is found by its name, which carries the id. */
   const findRun = (tries = 3): number | null => {
-    const runs = gh([`repos/${slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=30`], 'finding the run', tries).workflow_runs ?? [];
-    return runs.find((r: any) => r.display_title === `heavy ${id}`)?.id ?? null;
+    const runs = gh<GhRunsBody>([`repos/${slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=30`], 'finding the run', tries).workflow_runs ?? [];
+    return runs.find((r) => r.display_title === `heavy ${id}`)?.id ?? null;
   };
   /** False when a run exists, or may, and GitHub refused to cancel it: it may still run, so nothing runs here too. A run
    *  dispatched but not found yet is looked for a while first, so a stop or a fallback can't leave it to start later (CB4). */
@@ -360,7 +367,7 @@ async function main(argv: string[]): Promise<number> {
       return (cancelled = true);
     } catch {
       try {
-        return gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run').status === 'completed';
+        return gh<RunBody>([`repos/${slug}/actions/runs/${runId}`], 'reading the run').status === 'completed';
       } catch {
         return false;
       }
@@ -380,14 +387,14 @@ async function main(argv: string[]): Promise<number> {
       await waitForShips(slug, poll); // the repo's own ships, and what the hold says when it can't be read
     }
     try {
-      const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
+      const branch = gh<{ default_branch: string }>([`repos/${slug}`], 'reading the repo').default_branch;
       // From here a run may exist even if the call failed (it timed out after GitHub took it), so it is looked for.
       dispatched = true;
       gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow', 1);
-    } catch (e: any) {
+    } catch (e) {
       // GitHub answering 4xx refused it outright: no run to look for.
-      if (/HTTP 4\d\d/.test(e.message)) dispatched = false;
-      throw new Fallback(`${e.message} (is ${WORKFLOW} on the default branch yet?)`);
+      if (/HTTP 4\d\d/.test(failure(e).message)) dispatched = false;
+      throw new Fallback(`${failure(e).message} (is ${WORKFLOW} on the default branch yet?)`);
     }
     for (const from = Date.now(); !runId; ) {
       try {
@@ -401,7 +408,7 @@ async function main(argv: string[]): Promise<number> {
     let queued = Date.now();
     const asked = queued;
     // A blip in GitHub's answers is waited out: three misses in a row end it (gh tries three times).
-    const read = async () => gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run');
+    const read = async () => gh<RunBody>([`repos/${slug}/actions/runs/${runId}`], 'reading the run');
     let run = await read();
     say(`running on ${slug}'s CI, not here: ${run.html_url}`);
     let told = 0;
@@ -420,9 +427,9 @@ async function main(argv: string[]): Promise<number> {
       if (!started && run.status !== 'completed' && run.status !== 'queued' && run.status !== 'waiting' && run.status !== 'pending' && run.status !== 'requested') {
         started = true;
         // Only for the runner's name: an unread answer here must not cancel a run a runner just took.
-        let job: any;
+        let job: GhJob | undefined;
         try {
-          job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];
+          job = gh<GhJobsBody>([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];
         } catch {
           /* named nowhere, that's all */
         }
@@ -431,7 +438,7 @@ async function main(argv: string[]): Promise<number> {
       if (!started && run.status !== 'completed' && Date.now() - queued >= queueLimit * 1000) {
         // Busy runners mean wait (Josh: "things slow down, but perigee is fine"); only a CI running nothing at all,
         // the desktop off, sends the job back here. Reading the runners themselves needs admin, so other runs tell.
-        if (gh([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {
+        if (gh<{ total_count: number }>([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {
           queued = Date.now();
         } else {
           if (!cancel()) {
@@ -448,13 +455,13 @@ async function main(argv: string[]): Promise<number> {
       await sleep(poll * 1000);
       run = await read();
     }
-    const job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];
+    const job = gh<GhJobsBody>([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];
     if (!started && !job?.runner_name) {
       // Cancelled before any runner had it (by a person on GitHub): nothing ran, so it runs here.
       throw new Fallback(`the CI run ended ${run.conclusion} before a runner took it`);
     }
     started = true;
-    const took = Math.round((Date.parse(job?.completed_at) - Date.parse(job?.started_at)) / 1000);
+    const took = Math.round((Date.parse(job?.completed_at ?? '') - Date.parse(job?.started_at ?? '')) / 1000);
     if (took >= 0 && process.env.CITADEL_HEAVY_RAN_FILE) writeFileSync(process.env.CITADEL_HEAVY_RAN_FILE, `${took}\n`);
     const out = job ? commandOutput(ghText(`repos/${slug}/actions/jobs/${job.id}/logs`, 'reading the log'), run.conclusion) : { lines: [], code: null };
     if (out.lines.length) process.stdout.write(out.lines.join('\n') + '\n');

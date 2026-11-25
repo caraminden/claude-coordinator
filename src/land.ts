@@ -19,6 +19,7 @@ import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
 import type { Probe } from './live-probe.ts';
 import { pacificStamp } from './pacific.ts';
+import { thrown } from './thrown.ts';
 
 export interface Landing {
   /** The tail of what land.sh printed so far. */
@@ -130,7 +131,7 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
  */
 export function landConflict(cwd: string, env: Record<string, string>, args: string[], timeout = 30_000): Promise<string | null> {
   return new Promise((done) => {
-    execFile('bash', ['tools/land.sh', '--check', ...args], { cwd, env, timeout, maxBuffer: MAX_OUTPUT }, (err: any, _out, stderr) => {
+    execFile('bash', ['tools/land.sh', '--check', ...args], { cwd, env, timeout, maxBuffer: MAX_OUTPUT }, (err, _out, stderr) => {
       done(
         err?.code === 3
           ? String(stderr)
@@ -634,10 +635,10 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
       try {
         await ops.start(name, ticketId);
         break;
-      } catch (err: any) {
+      } catch (err) {
         // Another deploy started between the check and this start (auto-deploy's own, still starting): wait, then try once more.
         if (tries) {
-          out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(err?.message ?? err).trim()}` });
+          out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(thrown(err).message ?? err).trim()}` });
           continue apps;
         }
         await rest(3000);
@@ -733,8 +734,8 @@ export class LandHandoffs {
       try {
         // A re-queued one (#2030) is a new hand-off already: settling it now would drop that one.
         if (!(await this.settle(id, run, h))) this.d.landings.settled(id);
-      } catch (err: any) {
-        console.error(`Reporting minion ${id}'s land failed: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Reporting minion ${id}'s land failed: ${thrown(err).message ?? err}`);
       } finally {
         this.busy.delete(id);
       }
@@ -795,8 +796,8 @@ export class LandHandoffs {
     };
     try {
       await once('flakes', () => this.d.flakes?.(id, run.output));
-    } catch (err: any) {
-      console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Recording minion ${id}'s flakes failed: ${thrown(err).message ?? err}`);
     }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
     const stop = r.kind === 'failed' ? this.d.landings.stopped?.(id) : null;
@@ -819,8 +820,8 @@ export class LandHandoffs {
       const cls = classifyLandFailure(run.output);
       try {
         await once('failed', () => this.d.failed?.(id, cls?.kind ?? null));
-      } catch (err: any) {
-        console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Counting minion ${id}'s failed ship failed: ${thrown(err).message ?? err}`);
       }
       // Not in once(): the new hand-off starts in a fresh folder, and a step marked done would carry over into it.
       const notAgain = r.kind === 'failed' && loadOnly(run.output, cls, h) && this.d.requeue && !('told' in done) ? await this.d.requeue(id, h, run.output) : '';
@@ -836,11 +837,11 @@ export class LandHandoffs {
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).
-    if (r.kind !== 'failed' && r.kind !== 'no-ci') {
+    if (r.kind !== 'no-ci') {
       try {
         await once('learned', () => this.d.learned?.(id, h));
-      } catch (err: any) {
-        console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Queueing minion ${id}'s ship lines failed: ${thrown(err).message ?? err}`);
       }
     }
     if (r.kind === 'unpushed') {

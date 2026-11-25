@@ -138,7 +138,7 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     assert.equal(online.runners, true);
     // The cap and yield (#552): started from its folder with the cap and the agent's pid, its lines in the agent's log.
     const held = await until('keep-runners.ps1 to start', async () => existsSync(logFile) && /keep-runners: holding: .*/.exec(readFileSync(logFile, 'utf8'))?.[0]);
-    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid} -SqueezePercent 30`), held);
+    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid} -SqueezePercent 30 -CitadelSqueezePercent 10`), held);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
 
     const project = (await srv.call('/api/projects', { name: 'Vault' })).data;
@@ -396,8 +396,14 @@ test("Linux: a new agent clears every unit's quota at its first look, as one bef
 test('Windows: the ships go to ships.json beside keep-runners.ps1 with a 2-minute expiry, malformed entries dropped', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ships-'));
   try {
-    writeShips(dir, cleanShips([{ repo: 'CaraMinden/Peek-Auras', runner: 'DESKTOP-G248IJ8' }, { repo: 5 }, null, { repo: 'a/b', runner: 'x'.repeat(201) }]), 1000);
-    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'ships.json'), 'utf8')), { until: 1000 + SHIP_HOLD_MS, ships: [{ repo: 'caraminden/peek-auras', runner: 'desktop-g248ij8' }] });
+    writeShips(dir, cleanShips([{ repo: 'CaraMinden/Peek-Auras', runner: 'DESKTOP-G248IJ8' }, { repo: 5 }, null, { repo: 'a/b', runner: 'x'.repeat(201) }, { repo: 'c/d', runner: 'r', first: true }]), 1000);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'ships.json'), 'utf8')), {
+      until: 1000 + SHIP_HOLD_MS,
+      ships: [
+        { repo: 'caraminden/peek-auras', runner: 'desktop-g248ij8' },
+        { repo: 'c/d', runner: 'r', first: true },
+      ],
+    });
     assert.ok(!existsSync(join(dir, 'ships.json.new')));
   } finally {
     rmSync(dir, { recursive: true, force: true });

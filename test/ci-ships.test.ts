@@ -121,7 +121,7 @@ test("while Citadel's own ship runs, only its runners are ships, so another sche
   gh.pages[runs('caraminden/claude-coordinator')] = { workflow_runs: [] };
   await w.tick(15_000);
   // What the agents are sent, not just what tick returns.
-  assert.deepEqual(sent, [[{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux' }], [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]]);
+  assert.deepEqual(sent, [[{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux', first: true }], [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]]);
 });
 
 test("an early next train's run is squeezed while a ship runs; with none, the oldest early run is the ship, being a train's own counted CI (#1568)", async () => {

@@ -344,7 +344,7 @@ const KEEPER_AGAIN_MS = 60_000;
 export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.SystemRoot ?? 'C:\\Windows') {
   return {
     command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(CI_CPU_PERCENT), '-AgentPid', String(pid), '-SqueezePercent', String(SQUEEZE_PERCENT)],
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(CI_CPU_PERCENT), '-AgentPid', String(pid), '-SqueezePercent', String(SQUEEZE_PERCENT), '-CitadelSqueezePercent', String(WINDOWS_CITADEL_SQUEEZE_PERCENT)],
   };
 }
 
@@ -371,13 +371,15 @@ export function keepRunners(dir, log, again = KEEPER_AGAIN_MS) {
 // other runner on the PC is held to SQUEEZE_PERCENT of it together, shared among those running a job; a list that
 // stops coming lifts it after SHIP_HOLD_MS, so a Citadel that went away never leaves runners squeezed.
 export const SQUEEZE_PERCENT = 30;
+// Windows only (Josh, 2026-11-24, "Squeeze Peek's builds harder"): while a Citadel ship runs, the others share this much.
+export const WINDOWS_CITADEL_SQUEEZE_PERCENT = 10;
 export const SHIP_HOLD_MS = 2 * 60_000;
 
 /** Citadel's list, kept to well-formed entries, names and repos lowercase. */
 export function cleanShips(raw) {
   const text = (v) => (typeof v === 'string' && v.length <= 200 ? v.toLowerCase() : '');
   return (Array.isArray(raw) ? raw : [])
-    .map((s) => ({ repo: text(s?.repo), runner: text(s?.runner) }))
+    .map((s) => ({ repo: text(s?.repo), runner: text(s?.runner), ...(s?.first === true ? { first: true } : {}) }))
     .filter((s) => s.repo && s.runner)
     .slice(0, 200);
 }

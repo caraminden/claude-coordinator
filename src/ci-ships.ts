@@ -22,6 +22,8 @@ const EARLY_BRANCH = /^early\//;
 export interface Ship {
   repo: string;
   runner: string;
+  /** Set on Citadel's own ships (the repo whose ships go first). */
+  first?: true;
 }
 
 export interface ShipWatchDeps {
@@ -86,7 +88,8 @@ export class ShipWatch {
       const all = [...this.last.values()].flatMap((l) => l.ships);
       const first = this.deps.first?.()?.toLowerCase();
       const ships = first && all.some((s) => s.repo === first) ? all.filter((s) => s.repo === first) : all;
-      this.deps.send(ships);
+      // Citadel's own ships carry first: true, so a keeper that squeezes harder for them can tell them from another scheme's.
+      this.deps.send(ships.map((s) => (first && s.repo === first ? { ...s, first: true } : s)));
       if (!failed) this.said = '';
       return ships;
     } catch (err) {

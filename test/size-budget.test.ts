@@ -19,7 +19,10 @@ export const ALLOWED: Record<string, [number, string]> = {
     5753,
     'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920)',
   ],
-  'src/mcp.ts': [2924, 'every MCP tool definition and handler; split by tool family is queued (+2: a kind per plan step, #1923) (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792) (+17: mark_urgent, #1888) (+3: same-scheme person text, #1855) (+1: before and first, #1909)'],
+  'src/mcp.ts': [
+    2924,
+    'every MCP tool definition and handler; split by tool family is queued (+2: a kind per plan step, #1923) (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792) (+17: mark_urgent, #1888) (+3: same-scheme person text, #1855) (+1: before and first, #1909)',
+  ],
   'src/db.ts': [1703, 'schema, migrations and settings; its queries are moving to src/db/<area>.ts, a piece at a time (#1842; 1683 plus room for the ships waiting in line beside it, tightened next piece)'],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],
   'kit/skills/scheme-setup/templates/land.sh': [2879, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],

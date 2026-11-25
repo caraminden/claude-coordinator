@@ -604,7 +604,7 @@ const CI_RUNNERS = {
       op: { type: 'string', enum: ['add', 'list', 'remove'] },
       count: { type: 'number', description: 'add only: how many runners this scheme should have, 1 to 4 (default 1)' },
       host: { type: 'string', description: 'Which PC: its machine name or hostname. Left out: add takes the first free PC; list and remove reach every PC' },
-      os: { type: 'string', enum: ['windows', 'linux'], description: 'Which runners: windows (the default) or linux, which the runner agent inside WSL on that PC adds, lists and removes' },
+      os: { type: 'string', enum: ['windows', 'linux'], description: 'Which runners: windows (the default) or linux, which the Linux runner agent there (in WSL on a Windows PC, or on plain Linux) adds, lists and removes' },
     },
     required: ['op'],
   },

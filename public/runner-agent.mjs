@@ -339,22 +339,57 @@ export class Sampler {
 // services a reboot left stopped. It runs as long as the agent does, so the cap comes back with every boot and install.
 export const CI_CPU_PERCENT = 75;
 const KEEPER_AGAIN_MS = 60_000;
+/** The Linux runners' slice (systemd), which install-runner-agent.sh makes on plain Linux; in WSL, .wslconfig caps the VM. */
+export const SLICE = 'citadel-runners.slice';
+
+/**
+ * The PC's owner's caps (#1933), from caps.json beside this file, which only they (as admin or root) can write:
+ * { "cpu_percent": 75, "squeeze_percent": 30 }, each optional. Read once, at the agent's start. A wrong value is logged
+ * and keeps its default. The squeezes never exceed the cap they sit in.
+ */
+export function ownerCaps(dir, log = () => {}) {
+  const caps = { cpu_percent: CI_CPU_PERCENT, squeeze_percent: SQUEEZE_PERCENT };
+  let set = {};
+  try {
+    const text = readFileSync(join(dir, 'caps.json'), 'utf8').replace(/^\ufeff/, '');
+    set = JSON.parse(text);
+    if (!set || typeof set !== 'object' || Array.isArray(set)) throw new Error('it must be { "cpu_percent": …, "squeeze_percent": … }');
+  } catch (err) {
+    if (err.code !== 'ENOENT') log(`caps.json is ignored: ${err.message}`);
+    set = {};
+  }
+  for (const [k, v] of Object.entries(set)) {
+    if (!(k in caps)) log(`caps.json: ${k} is not a cap (cpu_percent, squeeze_percent)`);
+    else if (!Number.isInteger(v) || v < 1 || v > 100) log(`caps.json: ${k} must be a whole number from 1 to 100, so ${caps[k]} stays`);
+    else caps[k] = v;
+  }
+  const squeeze = Math.min(caps.squeeze_percent, caps.cpu_percent);
+  return { cpu: caps.cpu_percent, squeeze, citadel: Math.min(WINDOWS_CITADEL_SQUEEZE_PERCENT, squeeze) };
+}
+
+/** Plain Linux: caps every runner together at the owner's share of the cores, on the slice the installer made. Elsewhere does nothing. */
+export async function sliceCap(caps, { run = runCommand, units = '/etc/systemd/system', cores = cpus().length, log = () => {} } = {}) {
+  if (!existsSync(join(units, SLICE))) return;
+  const { code, output } = await run({ command: 'systemctl', args: ['set-property', '--runtime', SLICE, `CPUQuota=${Math.max(1, Math.round(cores * caps.cpu))}%`] }, process.env, 30_000);
+  if (code === 0) log(`CI is capped at ${caps.cpu}% of this PC (caps.json changes it).`);
+  else log(`Couldn't cap CI at ${caps.cpu}%: ${output.split('\n').at(-1)}`);
+}
 
 /** keep-runners.ps1 from the agent's folder, in Windows PowerShell, with the cap and this agent's pid (it ends with the agent). */
-export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.SystemRoot ?? 'C:\\Windows') {
+export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.SystemRoot ?? 'C:\\Windows', caps = ownerCaps(dir)) {
   return {
     command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(CI_CPU_PERCENT), '-AgentPid', String(pid), '-SqueezePercent', String(SQUEEZE_PERCENT), '-CitadelSqueezePercent', String(WINDOWS_CITADEL_SQUEEZE_PERCENT)],
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(caps.cpu), '-AgentPid', String(pid), '-SqueezePercent', String(caps.squeeze), '-CitadelSqueezePercent', String(caps.citadel)],
   };
 }
 
 /** Starts keep-runners.ps1, logs what it says, and starts it again a minute after it ever ends. */
-export function keepRunners(dir, log, again = KEEPER_AGAIN_MS) {
+export function keepRunners(dir, log, again = KEEPER_AGAIN_MS, caps = ownerCaps(dir, log)) {
   if (!existsSync(join(dir, 'keep-runners.ps1'))) {
     log("keep-runners.ps1 is not in the agent's folder, so CI is not capped (#552): install the agent again.");
     return;
   }
-  const { command, args } = keeperCommand(dir);
+  const { command, args } = keeperCommand(dir, process.pid, undefined, caps);
   const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   for (const stream of [child.stdout, child.stderr]) {
     createInterface({ input: stream }).on('line', (line) => line.trim() && log(`keep-runners: ${line.trim()}`));
@@ -362,7 +397,7 @@ export function keepRunners(dir, log, again = KEEPER_AGAIN_MS) {
   child.on('error', (err) => log(`Couldn't start keep-runners.ps1: ${err.message}`));
   child.on('close', (code) => {
     log(`keep-runners.ps1 ended (exit ${code}); starting it again in ${Math.round(again / 1000)}s.`);
-    setTimeout(() => keepRunners(dir, log, again), again).unref();
+    setTimeout(() => keepRunners(dir, log, again, caps), again).unref();
   });
 }
 
@@ -396,8 +431,8 @@ export function writeShips(dir, ships, now = Date.now()) {
  * the cores shared among the units off the ship running a job, while a ship runs; none otherwise.
  */
 export class LinuxSqueeze {
-  constructor({ run = runCommand, units = '/etc/systemd/system', cores = cpus().length, procs = linuxProcs, identity = runnerIdentity, now = Date.now, log = () => {} } = {}) {
-    Object.assign(this, { run, units, cores, procs, identity, now, log, ships: [], until: 0, set: new Map(), said: '', queue: Promise.resolve() });
+  constructor({ run = runCommand, units = '/etc/systemd/system', cores = cpus().length, procs = linuxProcs, identity = runnerIdentity, now = Date.now, log = () => {}, percent = SQUEEZE_PERCENT } = {}) {
+    Object.assign(this, { run, units, cores, procs, identity, now, log, percent, ships: [], until: 0, set: new Map(), said: '', queue: Promise.resolve() });
   }
 
   /** Each Citadel runner unit with its runner's repo and name, from the unit add-runner.sh wrote and its .runner. */
@@ -446,7 +481,7 @@ export class LinuxSqueeze {
         .filter(Boolean),
     );
     const busy = Math.max(1, others.filter((r) => working.has(r.dir)).length);
-    const quota = Math.max(10, Math.round((this.cores * SQUEEZE_PERCENT) / busy));
+    const quota = Math.max(10, Math.round((this.cores * this.percent) / busy));
     for (const r of runners) {
       const want = others.includes(r) ? `${quota}%` : '';
       // A unit not set yet is set even to no quota: an agent before this one (restarted mid-ship) may have left one.
@@ -544,8 +579,10 @@ async function main() {
     setTimeout(sample, sampleMs).unref();
   };
   sample();
-  if (os === 'windows') keepRunners(jobs.dir, log);
-  const squeeze = os === 'linux' ? new LinuxSqueeze({ log }) : null;
+  const caps = ownerCaps(jobs.dir, log);
+  if (os === 'windows') keepRunners(jobs.dir, log, undefined, caps);
+  else sliceCap(caps, { log }).catch((err) => log(`Couldn't cap CI: ${err.message}`));
+  const squeeze = os === 'linux' ? new LinuxSqueeze({ log, percent: caps.squeeze }) : null;
   squeeze?.next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
   if (squeeze) setInterval(() => squeeze.tick().catch((err) => log(`Couldn't lift the ship squeeze: ${err.message}`)), 10_000).unref();
   let shipError = '';

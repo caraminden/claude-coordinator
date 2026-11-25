@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { adminOwned } from './access.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { GithubLink } from './github-link.ts';
-import type { MachineRelay } from './machines.ts';
+import { storedCheck, type MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { thrown } from './thrown.ts';
@@ -70,7 +70,8 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 
 /**
  * Whether this machine's key may fetch a runner token for the scheme. A person's own machine: if its owner is
- * in the scheme (an admin is in all of them), whatever its own list of schemes says. An ownerless one: if the
+ * in the scheme (an admin is in all of them); a CI runner host of theirs (#1933) also needs the scheme on its list,
+ * since its owner lends it there; any other machine's list does not matter here. An ownerless one: if the
  * scheme is on its list, or, for a CI runner host from before #438 that was never given a list (machines.scoped 0,
  * which nothing else reads now), if an admin owns the scheme, so `ci_runners` keeps working for a new scheme.
  * The token lets a PC run the repo's CI jobs, which a member can already do by pushing a workflow.
@@ -78,7 +79,8 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 export function mayFetch(store: Store, machine: Machine, project: Project): boolean {
   if (machine.owner_id === null) return machine.scoped ? store.machineGranted(machine.id, project.id) : adminOwned(store, project);
   const owner = store.getUser(machine.owner_id);
-  return !!owner && !owner.disabled_at && store.canSee({ uid: owner.id, admin: !!owner.admin }, project.id);
+  if (!owner || owner.disabled_at || !store.canSee({ uid: owner.id, admin: !!owner.admin }, project.id)) return false;
+  return !storedCheck(machine)?.runners || store.machineGranted(machine.id, project.id);
 }
 
 export class RunnerTokens {
@@ -217,7 +219,7 @@ async function refused(r: Response, ownerName: string, slug: string, hint = ''):
 // messages?"): it changes nothing, and the caller already has its output.
 
 export type RunnerOp = 'add' | 'list' | 'remove';
-/** Which agent a job goes to (#510): the Windows one, or the Linux one in WSL on the same PC, whose runners take the label <scheme-slug>-ci-linux. */
+/** Which agent a job goes to (#510): the Windows one, or a Linux one (in WSL on a Windows PC, or plain Linux), whose runners take the label <scheme-slug>-ci-linux. */
 export type RunnerOs = 'windows' | 'linux';
 /** GitHub runs one job per runner, and Josh picked four of them for Peek Auras' builds. */
 export const MAX_RUNNERS = 4;
@@ -313,11 +315,11 @@ export class RunnerJobs {
       throw new HttpError(409, `No CI runner host named ${ask.host} may act for ${project.name} here; the ones online are ${online.map((m) => `${m.name} (${this.relay.runnerHost(m.id) ?? '?'})`).join(', ')}.`);
     }
     if (!machines.length) {
-      const where = ask.os === 'linux' ? 'Linux CI runner agent (the one in WSL)' : 'CI runner agent';
-      const install = ask.os === 'linux' ? '"Linux runners in WSL"' : '"Install the runner agent"';
+      const where = ask.os === 'linux' ? 'Linux CI runner agent' : 'CI runner agent';
+      const install = ask.os === 'linux' ? '"Linux runners in WSL" or "Linux runners on plain Linux"' : '"Install the runner agent"';
       throw new HttpError(
         409,
-        `No ${where} that may act for ${project.name} is online. It is installed once on each PC that hosts CI (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', WSL is stopped' : ''}, or an admin hasn't added ${project.name} to it under Settings → Machines.`,
+        `No ${where} that may act for ${project.name} is online. It is installed once on each PC that hosts CI (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', its WSL is stopped' : ''}, or its owner (an admin, for a shared one) hasn't added ${project.name} to it under Settings → Machines.`,
       );
     }
     // An add goes to one PC (the named one, else the first idle); list and remove reach every PC asked, which must all be free.

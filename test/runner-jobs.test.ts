@@ -73,6 +73,8 @@ function world(idleMs = 10_000) {
   };
   const pc = store.createMachine('cara-desktop-runners', 'x', 'Cara', cara.id);
   const agent = stream();
+  // An owned CI host acts for the schemes on its list (#1933).
+  store.setMachineProjects(pc.id, [scheme.id, other.id]);
   relay.connectAgent(pc, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true });
   /** Answer the last job the agent got. */
   const answer = (ok: boolean, output: string) => {
@@ -191,6 +193,7 @@ test('an agent only answers its own jobs, and a machine that may not act for the
 test('a scheme with no repo or no owner GitHub link fails before the PC is asked', async () => {
   const w = world();
   const bare = w.store.createProject('Bare', null, w.cara.id);
+  w.store.setMachineProjects(w.pc.id, [bare.id]);
   await assert.rejects(w.jobs.start(bare, w.cara.id, { op: 'add', count: 1, os: 'windows' }), { status: 409, message: /no GitHub repo/ });
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
 });
@@ -227,6 +230,7 @@ test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-
   // With only the Windows agent online, a Linux ask has nowhere to go.
   await assert.rejects(w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' }), (e: any) => e.status === 409 && /Linux CI runner agent/.test(e.message));
   const wsl = w.store.createMachine('cara-desktop-linux', 'y', 'Cara', w.cara.id);
+  w.store.setMachineProjects(wsl.id, [w.scheme.id]);
   const agent = stream();
   w.relay.connectAgent(wsl, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true, os: 'linux' });
   assert.deepEqual(
@@ -260,6 +264,7 @@ test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-
 /** A second PC with a runner agent, as a second host (C1 of the worker machines plan). */
 function secondPc(w: ReturnType<typeof world>, host = 'LAPTOP-JOSH') {
   const pc = w.store.createMachine('josh-laptop-runners', 'z', 'Cara', w.cara.id);
+  w.store.setMachineProjects(pc.id, [w.scheme.id]);
   const agent = stream();
   w.relay.connectAgent(pc, agent, { host, command: 'citadel runner agent', runners: true });
   const answer = (ok: boolean, output: string) => {
@@ -300,4 +305,25 @@ test('a host is named by its machine or its hostname; list and remove with none 
   await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null, os: 'windows', host: 'laptop-josh' });
   assert.equal(two.agent.sent.filter((m) => m.runners).length, 2);
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 1, 'the desktop got nothing');
+});
+
+test("a member's own CI host runs CI only for the schemes they lent it to and are in (#1933)", async () => {
+  const w = world();
+  // Josh, no admin, adds his own PC: it acts for no scheme until he lends it, and Peek Auras isn't Citadel.
+  const pc = w.store.createMachine('josh-pc', 'x', 'Josh', w.josh.id);
+  const agent = stream();
+  w.relay.connectAgent(pc, agent, { host: 'JOSH-PC', command: 'citadel runner agent', runners: true, os: 'linux' });
+  const add = () => w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'linux' });
+  await assert.rejects(add(), { status: 409 });
+  // Lent to a scheme he is not in: still nothing for it.
+  w.store.setMachineProjects(pc.id, [w.other.id]);
+  await assert.rejects(w.jobs.start(w.other, w.cara.id, { op: 'list', count: null, os: 'linux' }), { status: 409 });
+  w.store.setMachineProjects(pc.id, [w.scheme.id]);
+  assert.equal((await add()).machine, 'josh-pc');
+  const job = agent.sent.find((m) => m.runners).runners;
+  w.relay.runnerResult(pc, { id: job.id, ok: true, output: 'none' });
+  await tick();
+  // He leaves the scheme: the lend stays on the list and reaches nothing.
+  w.store.removeMember(w.scheme.id, w.josh.id);
+  await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null, os: 'linux' }), { status: 409 });
 });

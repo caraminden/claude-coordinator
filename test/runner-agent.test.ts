@@ -6,11 +6,13 @@ import { spawn } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
-import { linuxProcs, checkJob, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, writeShips } from '../public/runner-agent.mjs';
-import { bootServer, stopProcs, until } from './helpers.ts';
+import { after, test } from 'node:test';
+import { linuxProcs, checkJob, keeperCommand, ownerCaps, SLICE, sliceCap, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, writeShips } from '../public/runner-agent.mjs';
+import { bootServer, stopProcs, tempRoot, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
+const scratch = tempRoot('runner-agent-');
+after(() => scratch.teardown());
 
 test('it accepts add, list and remove with exactly their fields, and refuses everything else', () => {
   assert.deepEqual(checkJob({ id: ID, op: 'add', scheme: 3, count: 4 }), { id: ID, op: 'add', scheme: 3, count: 4 });
@@ -303,7 +305,7 @@ test('a line that arrives in pieces comes back whole: the sampler reads one long
 
 // Ships go first (#1268): the agent's half. The units and runners are faked; systemctl is a recorder.
 function linuxRunners() {
-  const units = mkdtempSync(join(tmpdir(), 'squeeze-'));
+  const units = mkdtempSync(join(scratch.dir, 'squeeze-'));
   const unit = (name: string, dir: string) => writeFileSync(join(units, name), `# citadel-repo=x\n[Service]\nExecStart=/bin/bash ${dir}/bin/runsvc.sh\n`);
   unit('citadel-runner-caraminden-claude-coordinator.service', '/opt/r/actions-runner-claude-coordinator');
   unit('citadel-runner-caraminden-claude-coordinator-2.service', '/opt/r/actions-runner-claude-coordinator-2');
@@ -408,4 +410,43 @@ test('Windows: the ships go to ships.json beside keep-runners.ps1 with a 2-minut
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the owner's caps.json sets the caps on that PC; today's numbers without one (#1933)", () => {
+  const dir = mkdtempSync(join(scratch.dir, 'caps-'));
+  const caps = (text?: string) => {
+    const said: string[] = [];
+    if (text !== undefined) writeFileSync(join(dir, 'caps.json'), text);
+    return { caps: ownerCaps(dir, (l: string) => said.push(l)), said };
+  };
+  assert.deepEqual(caps(), { caps: { cpu: 75, squeeze: 30, citadel: 10 }, said: [] });
+  assert.deepEqual(caps('{"cpu_percent": 50, "squeeze_percent": 20}').caps, { cpu: 50, squeeze: 20, citadel: 10 });
+  assert.deepEqual(caps('{"cpu_percent": 50}').caps, { cpu: 50, squeeze: 30, citadel: 10 });
+  // Notepad saves UTF-8 with a byte-order mark, which JSON.parse refuses.
+  assert.deepEqual(caps('\ufeff{"cpu_percent": 60}').caps, { cpu: 60, squeeze: 30, citadel: 10 });
+  // A squeeze is never more than the cap it sits in: keep-runners.ps1 divides one by the other.
+  assert.deepEqual(caps('{"cpu_percent": 20}').caps, { cpu: 20, squeeze: 20, citadel: 10 });
+  assert.deepEqual(caps('{"squeeze_percent": 5}').caps, { cpu: 75, squeeze: 5, citadel: 5 });
+  // Anything wrong is said, and that cap keeps its default: the agent never stops for it.
+  for (const bad of ['{not json', '[]', '{"cpu_percent": 0}', '{"cpu_percent": 101}', '{"cpu_percent": "50"}', '{"cpu_percent": 1.5}', '{"cpu": 50}']) {
+    const r = caps(bad);
+    assert.deepEqual(r.caps, { cpu: 75, squeeze: 30, citadel: 10 }, bad);
+    assert.equal(r.said.length, 1, bad);
+  }
+  assert.match(keeperCommand(dir, 7, 'C:\\Windows', { cpu: 50, squeeze: 20, citadel: 10 }).args.join(' '), /-CpuPercent 50 -AgentPid 7 -SqueezePercent 20 -CitadelSqueezePercent 10$/);
+});
+
+test("Linux: the owner's squeeze is used, and the all-CI cap goes on the runners' slice only where the installer made one", async () => {
+  const { squeeze, calls, units } = linuxRunners();
+  squeeze.percent = 10;
+  await squeeze.update(cleanShips([{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux-2' }]));
+  assert.ok(calls.includes('citadel-runner-caraminden-twireader.service CPUQuota=160%'), calls.join('; '));
+  const ran: string[] = [];
+  const run = async (c: { command: string; args: string[] }) => (ran.push([c.command, ...c.args].join(' ')), { code: 0, output: '' });
+  // Inside WSL no slice was made: .wslconfig caps that VM.
+  await sliceCap({ cpu: 50 }, { run, units, cores: 8 });
+  assert.deepEqual(ran, []);
+  writeFileSync(join(units, SLICE), '');
+  await sliceCap({ cpu: 50 }, { run, units, cores: 8 });
+  assert.deepEqual(ran, [`systemctl set-property --runtime ${SLICE} CPUQuota=400%`]);
 });

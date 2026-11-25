@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 test("the service worker answers Citadel's page loads but no /apps/ request", () => {
-  const listeners: Record<string, (e: any) => void> = {};
-  const self = { addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn) };
+  const listeners: Record<string, (e: unknown) => void> = {};
+  const self = { addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn) };
   new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
   const answered = (url: string, mode = 'navigate') => {
     let called = false;
@@ -22,7 +22,7 @@ test("the service worker answers Citadel's page loads but no /apps/ request", ()
 });
 
 test("a notification click opens the thread in Citadel's window, not a focused contraption's (#274)", async () => {
-  const listeners: Record<string, (e: any) => void> = {};
+  const listeners: Record<string, (e: unknown) => void> = {};
   const win = (url: string, focused: boolean) => ({
     url,
     focused,
@@ -36,7 +36,7 @@ test("a notification click opens the thread in Citadel's window, not a focused c
   const citadel = win('https://citadel.example/c/#/p/2', false);
   let opened = '';
   const self = {
-    addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+    addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
     location: { origin: 'https://citadel.example' },
     clients: {
       matchAll: async () => [mandate, citadel],
@@ -65,10 +65,10 @@ test("a notification click goes to a window on Citadel's own page, never a previ
     focus: async () => {},
   });
   const click = async (windows: ReturnType<typeof win>[]) => {
-    const listeners: Record<string, (e: any) => void> = {};
+    const listeners: Record<string, (e: unknown) => void> = {};
     let opened = '';
     const self = {
-      addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+      addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
       location: { origin: 'https://citadel.example' },
       clients: {
         matchAll: async () => windows,
@@ -95,8 +95,8 @@ test("a notification click goes to a window on Citadel's own page, never a previ
 
 test("a page load that meets Caddy's 502 gets a page that says Citadel is restarting and retries, but not a preview's own (#493)", async () => {
   const load = async (url: string, status: number) => {
-    const listeners: Record<string, (e: any) => void> = {};
-    const self = { addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn) };
+    const listeners: Record<string, (e: unknown) => void> = {};
+    const self = { addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn) };
     const upstream = new Response(`upstream ${status}`, { status });
     new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, async () => upstream);
     let answer: Promise<Response> | undefined;
@@ -115,12 +115,12 @@ test("a page load that meets Caddy's 502 gets a page that says Citadel is restar
 });
 
 test('a push shows its notification under its tag; a silent one (an all-clear) replaces it without ringing again (#532)', async () => {
-  const listeners: Record<string, (e: any) => void> = {};
-  const shown: [string, any][] = [];
+  const listeners: Record<string, (e: unknown) => void> = {};
+  const shown: [string, { tag?: string; renotify?: boolean; silent?: boolean }][] = [];
   const self = {
-    addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+    addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
     location: { origin: 'https://citadel.example' },
-    registration: { showNotification: async (title: string, opts: any) => void shown.push([title, opts]) },
+    registration: { showNotification: async (title: string, opts: { tag?: string; renotify?: boolean; silent?: boolean }) => void shown.push([title, opts]) },
   };
   new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
   for (const msg of [

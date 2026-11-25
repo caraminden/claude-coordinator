@@ -20,7 +20,7 @@ const edit = (file_path: string) => ({ type: 'assistant', message: { role: 'assi
 const RED = 'Exit code 1\n✖ 24 passed, 1 failed in 3 s\n\n✖ test/land.test.ts:91 › keeps the queue\n  expected 1';
 const GREEN = '✔ 25 passed in 3 s';
 
-function feed(s: StallState, events: any[]) {
+function feed(s: StallState, events: Parameters<typeof observe>[1][]) {
   return events.flatMap((e) => observe(s, e).signals);
 }
 
@@ -114,7 +114,7 @@ test('a green test run ends the stretch', () => {
 
 test("a Grunt's tool calls are its own, not the minion's", () => {
   const s = emptyState();
-  const grunt = (e: any) => ({ ...e, parent_tool_use_id: 'toolu_x' });
+  const grunt = <E extends object>(e: E) => ({ ...e, parent_tool_use_id: 'toolu_x' });
   assert.deepEqual(
     feed(
       s,
@@ -193,7 +193,7 @@ test('a stalled minion gets exactly one suggestion to its Taskmaster, with the e
   assert.match(w.told[0], /nothing was changed/);
   assert.equal(w.notes.length, 1);
   assert.match(w.notes[0], /Suggested Opus 5\.5 high/);
-  assert.equal(w.store.getSetting<any[]>(SUGGESTIONS_KEY)?.length, 1);
+  assert.equal(w.store.getSetting<unknown[]>(SUGGESTIONS_KEY)?.length, 1);
   // Stepped up, it can stall again: one more suggestion, from the new tier.
   w.store.updateTicket(w.t.id, { effort: 'high' });
   for (let i = 0; i < 3; i++) for (const e of [run('citadel-test test/other.test.ts'), result(RED.replace('land', 'other'), true)]) w.watch.observe(w.t.id, e);
@@ -258,7 +258,7 @@ test('no Taskmaster to tell: nothing is recorded and the tier is not spent; an u
   w.watch.shipFailed(w.t.id, null);
   w.watch.shipFailed(w.t.id, null);
   assert.deepEqual(w.notes, []);
-  assert.equal(w.store.getSetting<any[]>(SUGGESTIONS_KEY) ?? null, null);
+  assert.equal(w.store.getSetting<unknown[]>(SUGGESTIONS_KEY) ?? null, null);
   assert.deepEqual(w.store.getSetting<StallState>(stallKey(w.t.id))?.sent, []);
   const v = world();
   v.store.updateTicket(v.t.id, { model: 'gpt-6-astra' });

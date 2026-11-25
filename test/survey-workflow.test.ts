@@ -7,10 +7,11 @@ import { test } from 'node:test';
 // agent() as given, parallel() turning a throwing thunk into null, as Claude Code's does.
 const SCRIPT = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', 'skills-survey', 'survey.workflow.js'), 'utf8').replace(/^export const meta/m, 'const meta');
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
-const run = (args: unknown, agent: (prompt: string, opts: any) => Promise<any>) => {
-  const calls: { prompt: string; opts: any }[] = [];
-  const parallel = (thunks: (() => Promise<any>)[]) => Promise.all(thunks.map((t) => t().catch(() => null)));
-  const spy = (prompt: string, opts: any) => (calls.push({ prompt, opts }), agent(prompt, opts));
+type Opts = { phase?: string; label?: string; model?: string; effort?: string };
+const run = (args: unknown, agent: (prompt: string, opts: Opts) => Promise<unknown>) => {
+  const calls: { prompt: string; opts: Opts }[] = [];
+  const parallel = (thunks: (() => Promise<unknown>)[]) => Promise.all(thunks.map((t) => t().catch(() => null)));
+  const spy = (prompt: string, opts: Opts) => (calls.push({ prompt, opts }), agent(prompt, opts));
   const result = new AsyncFunction('args', 'agent', 'parallel', 'phase', 'log', SCRIPT)(
     args,
     spy,

@@ -8,6 +8,8 @@ import { coordinatorAccess } from '../src/turn-launch.ts';
 import { systemPrompt } from '../src/prompts.ts';
 import { mergeMemory, projectSlug } from '../src/sessions.ts';
 import { projectSharedDir } from '../src/workspace.ts';
+import { fake } from './typed.ts';
+import type { Project, Ticket } from '../src/db.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'shared-folder-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -16,16 +18,16 @@ const repo = join(root, 'projects', '2', 'repo');
 const tickets = join(root, 'projects', '2', 'tickets');
 const shared = projectSharedDir(root, 2);
 const memory = join(root, '.claude', 'projects', projectSlug(repo), 'memory');
-const project = { id: 2, name: 'Demo', repo_dir: repo, instructions: '' } as any;
-const ticket = { id: 9, kind: 'ticket', number: 3, title: 'Try it', branch: 'ticket/3-try-it' } as any;
-const coordinator = { ...ticket, kind: 'coordinator' };
+const project = fake<Project>({ id: 2, name: 'Demo', repo_dir: repo, instructions: '' });
+const ticket = fake<Ticket>({ id: 9, kind: 'ticket', number: 3, title: 'Try it', branch: 'ticket/3-try-it' });
+const coordinator = { ...ticket, kind: 'coordinator' as const };
 
 test('Claude Code names the memory folder by turning every non-alphanumeric character into a dash', () => {
   assert.equal(projectSlug('/home/cara/.local/share/claude-coordinator/projects/2/repo'), '-home-cara--local-share-claude-coordinator-projects-2-repo');
 });
 
 test('the coordinator adds the shared and memory folders without denying edits there', () => {
-  const { addDirs, settings } = coordinatorAccess(repo, tickets, shared, memory) as any;
+  const { addDirs, settings } = coordinatorAccess(repo, tickets, shared, memory);
   assert.deepEqual(addDirs, [repo, tickets, shared, memory]);
   const { deny, allow } = settings.permissions;
   assert.deepEqual(

@@ -12,6 +12,7 @@ import { Store } from '../src/db.ts';
 import { findChrome } from '../kit/skills/critique/scripts/ui-measure.mjs';
 import { projectSharedDir } from '../src/workspace.ts';
 import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { json, type Refused } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'sibling-files-'));
 const data = join(root, 'data');
@@ -175,14 +176,14 @@ test("the viewer's details of a linked or shared file load, and a file that's go
   const headers = { Cookie: srv.cookie };
   const linked = await get(`/api/tickets/${M.id}/file?path=clip.mp4&info`, headers);
   assert.equal(linked.status, 200);
-  assert.equal((await linked.json()).name, 'clip.mp4');
+  assert.equal((await json<{ name: string }>(linked)).name, 'clip.mp4');
   const inShared = await get('/api/projects/' + P.id + '/shared/file?path=pic.png&info', headers);
   assert.equal(inShared.status, 200);
-  assert.equal((await inShared.json()).kind, 'image');
+  assert.equal((await json<{ kind: string }>(inShared)).kind, 'image');
   for (const path of [`/api/tickets/${M.id}/file?path=gone.md&info`, `/api/projects/${P.id}/shared/file?path=gone.md&info`, `/api/artifacts/${GONE.id}/raw`]) {
     const res = await get(path, headers);
     assert.equal(res.status, 404, path);
-    assert.match((await res.json()).error, /no longer there/, path);
+    assert.match((await json<Refused>(res)).error, /no longer there/, path);
   }
 });
 
@@ -191,8 +192,8 @@ test('a link with the wrong folders opens the one file of its name, and says it 
   const wrong = encodeURIComponent(join(root, 'nowhere/clip.mp4'));
   const info = await get(`/api/tickets/${M.id}/file?path=${wrong}&info&fix`, headers);
   assert.equal(info.status, 200);
-  assert.deepEqual((({ abs, fixed }) => ({ abs, fixed }))(await info.json()), { abs: join(work, 'clip.mp4'), fixed: true });
-  assert.equal((await (await get(`/api/tickets/${M.id}/file?path=clip.mp4&info&fix`, headers)).json()).fixed, false);
+  assert.deepEqual((({ abs, fixed }) => ({ abs, fixed }))(await json<{ abs: string; fixed: boolean }>(info)), { abs: join(work, 'clip.mp4'), fixed: true });
+  assert.equal((await json<{ fixed: boolean }>(await get(`/api/tickets/${M.id}/file?path=clip.mp4&info&fix`, headers))).fixed, false);
   // Only the chat's link check guesses: the viewer and the file itself stay exact, so a deleted
   // artifact never opens some other file of its name.
   assert.equal((await get(`/api/tickets/${M.id}/file?path=${wrong}&info`, headers)).status, 404);
@@ -216,7 +217,7 @@ test('a linked script, stylesheet or data file opens as text in the viewer; othe
     assert.equal(res.headers.get('content-type'), type, url);
     // Served sandboxed with no scripts, like any text file: opening it never runs it.
     assert.match(res.headers.get('content-security-policy')!, /^sandbox; default-src 'none'/, url);
-    assert.equal((await (await get(`${url}&info`, headers)).json()).kind, 'text', url);
+    assert.equal((await json<{ kind: string }>(await get(`${url}&info`, headers))).kind, 'text', url);
   }
   assert.equal((await get(`/api/tickets/${M.id}/file?path=main.ts`, headers)).status, 404);
   // Outside the minion's folders stays out, whatever the type.
@@ -224,7 +225,7 @@ test('a linked script, stylesheet or data file opens as text in the viewer; othe
   assert.equal((await get(`/api/tickets/${M.id}/file?path=${encodeURIComponent(join(outside, 'x.js'))}`, headers)).status, 404);
   assert.equal((await get(`/api/tickets/${M.id}/file?path=escdir/x.js`, headers)).status, 404);
   // Still not listed as artifacts: only documents, pages and downloads are.
-  assert.ok(!(await (await get(`/api/projects/${P.id}/shared`, headers)).json()).some((f: any) => /\.(js|json)$/.test(f.path)));
+  assert.ok(!(await json<{ path: string }[]>(await get(`/api/projects/${P.id}/shared`, headers))).some((f) => /\.(js|json)$/.test(f.path)));
 });
 
 test("a choices card's preview (#821): a page's top as a JPEG, kept per version; 404 for what isn't a page", async () => {

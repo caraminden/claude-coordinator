@@ -11,6 +11,10 @@ import { BOOT_STALL } from '../src/deploy-watch.ts';
 import type { Storm } from '../src/memory-storms.ts';
 import type { EaseNow } from '../src/memory-ease.ts';
 import { pacificStamp } from '../src/pacific.ts';
+import type { CiView, ViewRun } from '../src/ci-view.ts';
+import type { CacheReading } from '../src/cache-health.ts';
+import type { AnswerProbe } from '../src/answer-time.ts';
+import { fake } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'status-page-'));
 // A database backup that is never stale for these tests' clocks, so the backups line stays out of their verdicts.
@@ -129,7 +133,7 @@ test('boots say why: a ship when the code changed, else a restart on the same co
   const page = new StatusPage({ store, dataDir: root, bootAt: now - HOUR, commit: 'bbbb2222', ownScheme: () => citadel.id, now: () => now });
   const c = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.match(c.uptime.reason ?? '', /^a restart on the same code/);
-  assert.equal(c.uptime.restarts.at(-1) + c.uptime.restarts.at(-2)!, 3);
+  assert.equal(c.uptime.restarts.at(-1)! + c.uptime.restarts.at(-2)!, 3);
   assert.equal(c.verdict.tone, 'warn');
   assert.deepEqual(c.verdict.reasons, ['1 restart without a ship in the last day']);
 });
@@ -208,7 +212,7 @@ test('memory-limit storms (#1280): per day with their stalled seconds, the last 
 test('memory easing (#1748): spells per day and their minutes, the last with its held turns named, and a warn with why while it is on', async () => {
   const { store, josh, citadel, peekScheme } = setup('easing');
   const now = sameDayNow();
-  const mk = (project: number) => store.createTicket({ project_id: project, title: 'A turn', permission_mode: 'bypass', created_by: 'josh' } as any);
+  const mk = (project: number) => store.createTicket({ project_id: project, title: 'A turn', permission_mode: 'bypass', created_by: 'josh' });
   const ours = mk(citadel.id),
     theirs = mk(peekScheme.id);
   const episode = (since: number, minutes: number, slowed: number[]) =>
@@ -281,7 +285,7 @@ test("a reader thread's Status page shows easing from main's snapshot (#1748): r
 test('a viewer outside Citadel sees its health but not its CI', async () => {
   const { store, mia, citadel } = setup('ci');
   const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [{ name: 'tests', file: 't.yml', verdict: { id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion: 'failure', at: '', url: 'u' }, skipped: [] }], runs: [] };
-  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any }] : []) });
+  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: fake<CiView>(view) }] : []) });
   store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v1'.padEnd(40, '0'), changes: '[{"number":12,"title":"A private fix"}]', started_at: Date.now() - 60_000, live_at: Date.now() - 30_000, outcome: 'live', stages: '{}' });
   const outside = (await page.build(viewer(store, mia.id))).citadel;
   assert.deepEqual(outside.ships.last?.changes, [], "what shipped is only for people who can see Citadel's scheme");
@@ -299,9 +303,9 @@ test("the CI share counts only main's runs of workflows that ring, not other bra
   const { store, citadel } = setup('cishare');
   const run = (id: number, branch: string, conclusion: string, name = 'tests') => ({ id, name, branch, status: 'completed', conclusion, at: '', url: 'u' });
   const verdict = (conclusion: string) => ({ id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion, at: '', url: 'u' });
-  const build = async (workflows: any[], runs: any[]) => {
+  const build = async (workflows: CiView['workflows'], runs: CiView['runs']) => {
     const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows, runs };
-    const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, ciSnapshot: () => [{ id: citadel.id, view: view as any }] });
+    const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, ciSnapshot: () => [{ id: citadel.id, view: fake<CiView>(view) }] });
     return (await page.build({ canSee: () => true, admin: true, key: 'a' })).citadel;
   };
   const tests = { name: 'tests', file: 't.yml', skipped: [] };
@@ -394,7 +398,7 @@ test('time to ship (#1132): per-day median and p90 per target, for Citadel and f
   const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => citadel.id, now: () => now });
   const all = await page.build(viewer(store, josh.id, true));
   const main = all.shipTimes.find((t) => t.key === `release:${citadel.id}:citadel-server`)!;
-  assert.equal(main.counts.at(-2) + main.counts.at(-1) >= 10, true);
+  assert.equal(main.counts.at(-2)! + main.counts.at(-1)! >= 10, true);
   assert.equal(main.p90.at(-1), 540, 'nearest-rank p90 of 10 ships: the 9th');
   assert.equal(
     main.ships.some((s) => s.took === 5000),
@@ -453,9 +457,9 @@ test('failure share sets the colour: one failure in many stays green, then yello
 
 test('CI with one failed run in twenty leaves the verdict green; six in twenty is red', async () => {
   const { store, citadel } = setup('cirate');
-  const mk = (bad: number) => ({ at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [], runs: Array.from({ length: 20 }, (_, i) => ({ name: 'tests', branch: 'main', status: 'completed', conclusion: i < bad ? 'failure' : 'success' })) });
+  const mk = (bad: number) => ({ at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [], runs: Array.from({ length: 20 }, (_, i) => fake<ViewRun>({ name: 'tests', branch: 'main', status: 'completed', conclusion: i < bad ? 'failure' : 'success' })) });
   let bad = 1;
-  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, now: () => Date.now() + bad * 60_000, ciSnapshot: () => [{ id: citadel.id, view: mk(bad) as any }] });
+  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, now: () => Date.now() + bad * 60_000, ciSnapshot: () => [{ id: citadel.id, view: fake<CiView>(mk(bad)) }] });
   const admin = { canSee: () => true, admin: true, key: 'a' };
   assert.equal((await page.build(admin)).citadel.verdict.tone, 'ok');
   bad = 6;
@@ -576,7 +580,7 @@ test("Investigate (#1273): a Citadel tile goes to Citadel, its reason carries it
     now: () => now,
     mem: async () => ({ total: 100, avail: 5 }),
     disk: async () => ({ total: 100, free: 50 }),
-    ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any, problems: [{ fixMinion: { number: fixer.number!, closed: false } }] }] : []),
+    ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: fake<CiView>(view), problems: [{ fixMinion: { number: fixer.number!, closed: false } }] }] : []),
   });
   await page.sample();
   const c = (await page.build(viewer(store, josh.id, true))).citadel;
@@ -661,7 +665,7 @@ test('answer time (#1559): each sample stores its window; three slow ones in a r
   const { store, citadel, josh } = setup('answer');
   let p95 = 900,
     now = Date.now() - 3_600_000;
-  const win = () => ({ v: 1, n: 300, fail: 0, p50: 5, p95, p99: p95 * 2, max: p95 * 3, over: 0.1, split: null, load: 20, turns: 4 });
+  const win = () => ({ v: 1 as const, n: 300, fail: 0, p50: 5, p95, p99: p95 * 2, max: p95 * 3, over: 0.1, split: null, load: 20, turns: 4 });
   const told: string[] = [];
   const page = new StatusPage({
     store,
@@ -672,10 +676,10 @@ test('answer time (#1559): each sample stores its window; three slow ones in a r
     now: () => now,
     tell: (_id, text) => told.push(text),
     cpuLedger: async () => null,
-    cache: async () => ({}) as any,
+    cache: async () => fake<CacheReading>({}),
     mem: async () => ({ total: 8e9, avail: 4e9 }),
     disk: async () => ({ total: 1e11, free: 5e10 }),
-    answer: { probe: { take: () => win() as any, lastMs: 12, readerMs: 3 }, turns: () => 4 },
+    answer: { probe: { take: () => fake<ReturnType<AnswerProbe['take']>>(win()), lastMs: 12, readerMs: 3 }, turns: () => 4 },
   });
   const next = async (v: number) => {
     p95 = v;

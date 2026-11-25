@@ -34,8 +34,8 @@ const live = () =>
     .at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
-let ticket: any;
-let turn: any;
+let ticket: { id: number; project_id: number };
+let turn: unknown;
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
@@ -50,7 +50,7 @@ before(async () => {
 
 const ask = (q: string) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: live(), body: { questions: [{ question: q, options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
 const settle = (questionId?: string) => call(`/api/tickets/${ticket.id}/settle`, { method: 'POST', token: live(), body: { questionId: questionId ?? null } });
-const inbox = async () => (await call(`/api/projects/${ticket.project_id}/inbox`)).items.filter((i: any) => i.kind === 'question');
+const inbox = async () => (await call(`/api/projects/${ticket.project_id}/inbox`)).items.filter((i: { kind: string }) => i.kind === 'question');
 
 test('a settled card leaves the inbox, records it on the card and refuses a late click', async () => {
   const { id } = await ask('Which one?');
@@ -59,9 +59,9 @@ test('a settled card leaves the inbox, records it on the card and refuses a late
   assert.deepEqual(await settle(id), { settled: [id] });
   assert.equal((await inbox()).length, 0);
   const events = await call(`/api/tickets/${ticket.id}/events?after=0`);
-  assert.equal(JSON.parse(events.find((e: any) => e.kind === 'question').data).settled.at > 0, true);
+  assert.equal(JSON.parse(events.find((e: { kind: string; data: string }) => e.kind === 'question').data).settled.at > 0, true);
   assert.deepEqual(
-    events.filter((e: any) => e.kind === 'question_result').map((e: any) => JSON.parse(e.data).id),
+    events.filter((e: { kind: string; data: string }) => e.kind === 'question_result').map((e: { kind: string; data: string }) => JSON.parse(e.data).id),
     [id],
   );
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: '' }] } }), /409 Claude took this as answered/);
@@ -106,14 +106,14 @@ test('a card addressed to one person (#687): to must be a member; a notice takes
 
   const notice = await post({ to: '@Cara', notice: 'Runner slots went to 3' });
   let events = await call(`/api/tickets/${ticket.id}/events?after=0`);
-  assert.deepEqual(JSON.parse(events.find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data), { id: notice.id, questions: [], to: 'Cara', notice: 'Runner slots went to 3' });
+  assert.deepEqual(JSON.parse(events.find((e: { kind: string; data: string }) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data), { id: notice.id, questions: [], to: 'Cara', notice: 'Runner slots went to 3' });
   assert.equal((await inbox()).length, 1);
   const turnsBefore = turns().length;
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: notice.id } });
   assert.equal((await inbox()).length, 0);
   events = await call(`/api/tickets/${ticket.id}/events?after=0`);
-  assert.equal(JSON.parse(events.find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data).settled.by, 'Cara');
-  assert.equal(events.filter((e: any) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === notice.id).length, 0, 'nothing sent back');
+  assert.equal(JSON.parse(events.find((e: { kind: string; data: string }) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data).settled.by, 'Cara');
+  assert.equal(events.filter((e: { kind: string; data: string }) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === notice.id).length, 0, 'nothing sent back');
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: notice.id } }), /409 Cara already marked this seen/);
 
   // #702: the answer wakes the asker even once it has gone cold (its last turn ended over 55 minutes ago).
@@ -140,7 +140,7 @@ test('a card answer carries pasted images to the minion in the same message, and
   assert.ok(prompt.includes('Picture too?\\n→ A\\n  Added: see this'), prompt);
   assert.ok(prompt.includes('"type":"image"') && prompt.includes(png.slice(0, 20)), prompt);
   const events = await call(`/api/tickets/${ticket.id}/events?after=0`);
-  const answer = events.map((e: any) => JSON.parse(e.data)).find((d: any) => d.answer?.questionId === id);
+  const answer = events.map((e: { kind: string; data: string }) => JSON.parse(e.data)).find((d: { answer?: { questionId: string }; images: string[] }) => d.answer?.questionId === id);
   assert.equal(answer.images.length, 1);
   assert.match(answer.images[0], /\.png$/);
 });

@@ -5,7 +5,7 @@
 // Citadel's real front end in headless Chromium (test/browser.ts), with fetch answered in the page.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
 import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
@@ -51,7 +51,7 @@ after(async () => {
 });
 
 // The list now draws a frame after a message (#1532).
-const frame = (page: any) => page.eval(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+const frame = (page: Page) => page.eval(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
 const closedRows = `document.querySelectorAll('#threads details.g-closed .thread-row').length`;
 
 test('a shut Dismissed list builds no rows, at first or when minion updates redraw the list', { skip }, async () => {

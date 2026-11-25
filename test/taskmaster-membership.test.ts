@@ -10,6 +10,7 @@ import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner } from '../src/runner.ts';
 import { systemPrompt } from '../src/prompts.ts';
 import { bootServer, PASSWORD, SECRET, type Booted, stopTurns, testPins } from './helpers.ts';
+import { json } from './typed.ts';
 testPins();
 
 // message_taskmaster by membership (#211): a Taskmaster turn reaches the schemes its person is in as
@@ -98,7 +99,7 @@ test('message_taskmaster: labels who asks Citadel, and refuses without naming hi
       headers: { Authorization: `Bearer ${tokens.agentToken(from.id)}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ scheme, saw: text, checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' }),
     });
-    const body = await res.json();
+    const body = await json<{ error: string; scheme: string }>(res);
     return { status: res.status, body };
   };
   const authors = () =>

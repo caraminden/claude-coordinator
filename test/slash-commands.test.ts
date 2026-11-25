@@ -100,22 +100,22 @@ test("the list: Citadel's own for the chat's kind lead, matched by name, by the 
     ['fresh', 'help', 'compact', 'citadel:grilling', 'focus'],
   );
   assert.deepEqual(
-    matchCommands(minion, 'f').map((c) => c.name),
+    matchCommands(minion, 'f').map((c: { name: string }) => c.name),
     ['fresh', 'focus'],
   );
   assert.deepEqual(
-    matchCommands(minion, 'gri').map((c) => c.name),
+    matchCommands(minion, 'gri').map((c: { name: string }) => c.name),
     ['citadel:grilling'],
   );
   assert.deepEqual(
-    matchCommands(minion, 'act').map((c) => c.name),
+    matchCommands(minion, 'act').map((c: { name: string }) => c.name),
     ['compact'],
   );
   assert.equal(matchCommands(minion, '').length, minion.length);
 });
 
 test('mentionQuery: the "@word" before the caret opens the member picker, but not inside an email address (#1149)', () => {
-  const q = (s) => mentionQuery(s, s.length);
+  const q = (s: string) => mentionQuery(s, s.length);
   assert.equal(q('@'), '');
   assert.equal(q('hey @Ca'), 'Ca');
   assert.equal(q('(@jo'), 'jo');

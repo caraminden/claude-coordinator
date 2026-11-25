@@ -7,6 +7,7 @@ import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
 import { agentEnv, mcpOnce } from './mcp-agent.ts';
+import { json } from './typed.ts';
 
 // Files in a scheme's shared folder can be pinned: by people in the Shared viewer.
 // A pin is keyed by path, so a rewrite keeps it and a deleted file shows as missing.
@@ -54,16 +55,17 @@ async function tool(ticket: { id: number; project_id: number; kind: string }, na
   const result = await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), ticket, ticket.kind === 'coordinator' ? 'coordinator' : 'thread'), 'tools/call', { name, arguments: args }, scratch.track);
   return { text: result.content[0].text, error: !!result.isError };
 }
-const shared = async (projectId = A.id) => (await srv.call(`/api/projects/${projectId}/shared`)).data as any[];
+type SharedFile = { path: string; kind: string; pinned_at: number | null; pinned_by: string | null; missing?: number };
+const shared = async (projectId = A.id) => (await srv.call(`/api/projects/${projectId}/shared`)).data as SharedFile[];
 const entry = async (path: string) => (await shared()).find((f) => f.path === path);
 const pin = (path: string, pinned: boolean) => srv.call(`/api/projects/${A.id}/shared/pin`, { path, pinned });
 
 test('a person pins a shared file; the Shared list carries the pin', async () => {
-  assert.equal((await entry('handoff.md')).pinned_at, null);
+  assert.equal((await entry('handoff.md'))!.pinned_at, null);
   const r = await pin('handoff.md', true);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.file.pinned_by, 'Cara');
-  const e = await entry('handoff.md');
+  const e = (await entry('handoff.md'))!;
   assert.equal(e.pinned_by, 'Cara');
   assert.equal(e.missing, 0);
   assert.equal((await pin('specs/town.md', true)).data.file.path, 'specs/town.md');
@@ -71,9 +73,9 @@ test('a person pins a shared file; the Shared list carries the pin', async () =>
 
 test('rewriting a pinned file keeps its pin; deleting it leaves it listed as missing until unpinned', async () => {
   writeFileSync(join(dirA, 'handoff.md'), '# Lairs handoff, take two');
-  assert.equal((await entry('handoff.md')).pinned_by, 'Cara');
+  assert.equal((await entry('handoff.md'))!.pinned_by, 'Cara');
   unlinkSync(join(dirA, 'specs', 'town.md'));
-  const gone = await entry('specs/town.md');
+  const gone = (await entry('specs/town.md'))!;
   assert.equal(gone.missing, 1);
   assert.equal(gone.pinned_by, 'Cara');
   const r = await pin('specs/town.md', false);
@@ -88,7 +90,7 @@ test('rewriting a pinned file keeps its pin; deleting it leaves it listed as mis
   mkdirSync(join(root, 'elsewhere'));
   writeFileSync(join(root, 'elsewhere', 'n.md'), '# Elsewhere');
   symlinkSync(join(root, 'elsewhere'), join(dirA, 'notes'));
-  assert.equal((await entry('notes/n.md')).missing, 1);
+  assert.equal((await entry('notes/n.md'))!.missing, 1);
   await pin('notes/n.md', false);
 });
 
@@ -118,16 +120,16 @@ test('people upload into the shared folder: the bytes as sent, a cleaned name, n
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00, 0x80]);
   const r = await put('name=snap.png', png);
   assert.equal(r.status, 201);
-  const got = await r.json();
+  const got = await json<{ path: string }>(r);
   assert.equal(got.path, 'inbox/snap.png'); // inbox/ unless a folder is named
   assert.deepEqual(readFileSync(join(dirA, 'inbox', 'snap.png')), png);
-  assert.equal((await entry('inbox/snap.png')).kind, 'image'); // pictures are listed now
+  assert.equal((await entry('inbox/snap.png'))!.kind, 'image'); // pictures are listed now
   // A folder of the person's choosing, made as needed; a second file of the same name keeps the first.
-  assert.equal((await (await put('folder=fixtures-inbox/poe2/&name=snap.png', png)).json()).path, 'fixtures-inbox/poe2/snap.png');
-  assert.equal((await (await put('folder=fixtures-inbox/poe2&name=snap.png', 'two')).json()).path, 'fixtures-inbox/poe2/snap (2).png');
+  assert.equal((await json<{ path: string }>(await put('folder=fixtures-inbox/poe2/&name=snap.png', png))).path, 'fixtures-inbox/poe2/snap.png');
+  assert.equal((await json<{ path: string }>(await put('folder=fixtures-inbox/poe2&name=snap.png', 'two'))).path, 'fixtures-inbox/poe2/snap (2).png');
   assert.deepEqual(readFileSync(join(dirA, 'fixtures-inbox', 'poe2', 'snap.png')), png);
   // A name can't climb out; a folder can't climb, hide, or go through a link that leads out.
-  assert.equal((await (await put(`name=${encodeURIComponent('../../evil.png')}`, 'x')).json()).path, 'inbox/evil.png');
+  assert.equal((await json<{ path: string }>(await put(`name=${encodeURIComponent('../../evil.png')}`, 'x'))).path, 'inbox/evil.png');
   for (const folder of ['..', 'specs/../..', '.git', 'a/b/c/d/e/f/g/h/i']) assert.equal((await put(`folder=${encodeURIComponent(folder)}&name=x.png`, 'x')).status, 400, folder);
   symlinkSync(join(root, 'elsewhere'), join(dirA, 'away'));
   assert.equal((await put('folder=away/deeper&name=x.png', 'x')).status, 400);
@@ -142,8 +144,8 @@ test('people upload into the shared folder: the bytes as sent, a cleaned name, n
 test('scheme scoping: another scheme cannot see these', async () => {
   const res = await fetch(`${srv.base}/api/projects/${A.id}/shared`, { headers: { Authorization: `Bearer ${tokens.agentToken(TB.id)}` } });
   assert.equal(res.status, 403);
-  assert.equal((await shared(B.id)).find((f) => f.path === 'theirs.md').pinned_at, null);
-  assert.equal((await entry('handoff.md')).pinned_by, 'Cara');
+  assert.equal((await shared(B.id)).find((f) => f.path === 'theirs.md')!.pinned_at, null);
+  assert.equal((await entry('handoff.md'))!.pinned_by, 'Cara');
 });
 
 test('deleting a scheme drops its shared pins', () => {

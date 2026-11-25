@@ -10,6 +10,7 @@ import { ScheduledRuns } from '../src/schedules.ts';
 import { parseLearned, queueLesson } from '../src/ship-lessons.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 import { git } from './git.ts';
+import { json } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ship-lessons-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -24,7 +25,7 @@ test('parseLearned keeps three tidy lines, reads "nothing" as an answer, and cut
   assert.equal(parseLearned('  none '), '');
   assert.equal(parseLearned('\n\n'), '');
   assert.equal(parseLearned('- land.sh needs main checked out\n\n* tests read $TMPDIR'), 'land.sh needs main checked out\ntests read $TMPDIR');
-  assert.equal(parseLearned('a\nb\nc\nd').split('\n').length, 3, 'a fourth line is dropped');
+  assert.equal(parseLearned('a\nb\nc\nd')!.split('\n').length, 3, 'a fourth line is dropped');
   const long = parseLearned('x'.repeat(400))!;
   assert.equal(long.length, 300);
   assert.ok(long.endsWith('…'));
@@ -170,14 +171,14 @@ test('a handed-off land queues its lines with the files the branch touched; a fa
     // A pull-request ship logs its lines with log_learned instead.
     const pr = mk('PR ship');
     store.setTicketDir(pr.id, cwd, null);
-    const logged = await (await call(pr.id, `/api/tickets/${pr.id}/learned`, { learned: 'Nothing' })).json();
+    const logged = await json<{ lines: string }>(await call(pr.id, `/api/tickets/${pr.id}/learned`, { learned: 'Nothing' }));
     assert.equal(logged.lines, '');
     assert.equal((await call(pr.id, `/api/tickets/${pr.id}/learned`, {})).status, 400);
 
-    const read = await (await call(pr.id, `/api/projects/${project.id}/ship-lessons`)).json();
+    const read = await json<{ week: object; lessons: { id: number }[] }>(await call(pr.id, `/api/projects/${project.id}/ship-lessons`));
     assert.deepEqual(read.week, { ships: 2, withLines: 1 });
     assert.equal(read.lessons.length, 1);
-    const took = await (await call(pr.id, `/api/projects/${project.id}/ship-lessons/take`, { ids: [read.lessons[0].id], note: 'proposed: docs/build.md' })).json();
+    const took = await json<{ taken: number[] }>(await call(pr.id, `/api/projects/${project.id}/ship-lessons/take`, { ids: [read.lessons[0].id], note: 'proposed: docs/build.md' }));
     assert.deepEqual(took.taken, [read.lessons[0].id]);
     assert.equal((await call(pr.id, `/api/projects/${project.id}/ship-lessons/take`, { ids: [], note: 'x' })).status, 400);
   } finally {

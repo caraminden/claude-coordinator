@@ -139,7 +139,11 @@
   .code-row-main > .code-start { grid-column: 2; grid-row: 1 / span 2; }
   .code-row-main > .code-by { grid-column: 1 / -1; }
 }
-@media (max-width: 760px) { .code-list { order: -1; } }
+.code-how summary { width: fit-content; color: var(--muted); cursor: pointer; padding: var(--space-1) 0; }
+@media (max-width: 760px) {
+  .code-stage:not(.table) + .code-list { order: -1; }
+  .code-how summary { min-height: var(--control-h); }
+}
 @media (prefers-reduced-motion: reduce) {
   .code-chart circle.enter, .code-skeleton { animation: none; }
 }

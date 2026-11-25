@@ -41,19 +41,15 @@ Commit first (the facts above already cover it when nothing says UNCOMMITTED), t
 Before your final test run, rebase onto your base once (the one "take a newer base at the end" step): then the tests you ran saw the files other ships added, which is what the ship's CI sees.
 A ship that is all a command's output (a reformat, a regenerated baseline or generated files, and nothing else) goes with the trailers `Regenerate: <command>` and `Regenerate-files: <patterns>` on one of its commits: tools/land.sh then makes those files again on the newest main instead of refusing on their conflicts, and the ship holds the line, first and alone (behind only ships a person placed), until it ships (#1827). A feature that also moves a baseline doesn't declare: it would jump the line. Ships by pull request ignore the trailers.
 
-- **Skip** when under about 20 changed lines and every change is docs (`docs/`, `README.md`) or
-  user-visible text in the front end with no logic touched. Label it `low: docs/copy only` and go
-  to 5. Never skip `CLAUDE.md`, `.claude/` or the Citadel kit: a few lines there change how every
-  minion works, and a kit change reaches every scheme.
+Every ship is reviewed, whatever its size or risk (Josh, 2026-11-25: "It's ok for no human to review, but we
+should ALWAYS have at least minion reviews"): the hand-off refuses one with no reviewer Grunt since your last ship.
+
 - **Deep** when the change is high in 4, takes the fix route in 5 whatever its size, or the diff is over about 300 lines.
 - **Light** for everything else.
 
-**Critics run before any `hand_off_land`, low-first path included.** A diff that matches a critic's `when:` (any `public/` file: `ui-screenshots`, even a timing-only change the shots can't show) is refused until that critic's run is on record: run `citadel:critique` with the rubric from your turn's review-set folder, then `review_set` with `run: {round, verdict}`.
+**Critics run before any `hand_off_land`.** A diff that matches a critic's `when:` (any `public/` file: `ui-screenshots`, even a timing-only change the shots can't show) is refused until that critic's run is on record: run `citadel:critique` with the rubric from your turn's review-set folder, then `review_set` with `run: {round, verdict}`.
 
-**Alongside the ship.** When how it ships is `hand_off_land` and the file list alone may say low,
-open `references/ship.md`, "Alongside the ship": it says which changes hand off their ship before
-the review and run sections 2 to 4 while it runs. Decide it from the file list before any review.
-Everything else reviews first.
+The review always comes before the hand-off; nothing ships first and is reviewed after.
 
 ## 2. Review in a Grunt
 
@@ -148,7 +144,6 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 ## 5. Report and ship
 
-- **Alongside the ship:** the steps are in `references/ship.md`, "Alongside the ship".
 - **A live probe** (`hand_off_land` to main, 600+ changed lines; #1741): pick the one check that would show
   this change broken once live, e.g. `{kind:"timing", path:"/api/x", ms:800}` for a speed fix, `{kind:"sql",
   query:"SELECT count(*) FROM ...", min:1}` for a new writer, `{kind:"http", path, text}` for a route or the data

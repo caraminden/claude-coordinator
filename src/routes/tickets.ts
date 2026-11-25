@@ -27,6 +27,7 @@ import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs } from '../land.ts';
 import { checkHandoff, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { reviewRefusal } from '../review-gate.ts';
 import { criticRefusal } from '../critic-gate.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
@@ -1589,6 +1590,8 @@ export const ticketRoutes: Route[] = [
       }
       const unjudged = await criticRefusal(app.store.reviews, ticket, args, body?.fix === true);
       if (unjudged) throw new HttpError(400, unjudged);
+      const unread = reviewRefusal(app.store, ticket, args);
+      if (unread) throw new HttpError(400, unread);
       return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env, args));
     },
   },

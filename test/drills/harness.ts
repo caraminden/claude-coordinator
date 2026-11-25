@@ -10,7 +10,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { Store } from '../../src/db.ts';
-import { agentToken, bootServer, releaseFake, stopTurns, until, type Booted } from '../helpers.ts';
+import { addReview, agentToken, bootServer, releaseFake, stopTurns, until, type Booted } from '../helpers.ts';
 
 /** test()'s option for a drill that shows finding `code`: it must fail with that finding's assertion, and only that. */
 export const gap = (code: string) => ({ expectFailure: new RegExp(`(^|: )${code}: `) });
@@ -158,6 +158,7 @@ echo 'land: main is now at abc1234 "#${id}: ${title}"'
     ])
       execFileSync('git', args, { cwd });
     store.setTicketDir(id, cwd, null);
+    addReview(store, id);
     store.db.close();
     const res = await fetch(`${this.srv!.base}/api/tickets/${id}/land/handoff`, {
       method: 'POST',

@@ -14,6 +14,7 @@ import { HANDOFF_FIX, HttpError, oneOf, str, type App } from './http.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from './land.ts';
 import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from './live-probe.ts';
 import { pacificStamp } from './pacific.ts';
+import { reviewRefusal } from './review-gate.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
@@ -126,6 +127,9 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   // As land.sh's own first check, but now, before the minion ends its turn on a land that would refuse at once.
   const dirty = await new Promise<string>((done) => execFile('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ticket.cwd! }, (err, out) => done(err ? `git status failed: ${err.message}` : out.trim())));
   if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
+  // The review gate (#1938): a minion's reviewer reads every ship before it goes.
+  const unread = reviewRefusal(app.store, ticket, args);
+  if (unread) throw new HttpError(400, unread);
   if (typeof caller === 'function') caller();
   const env = app.runner.hostEnv(ticket, typeof caller === 'string' ? caller : undefined);
   if (body.fix === true) env.LAND_FIX = '1';

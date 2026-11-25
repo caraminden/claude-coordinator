@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ScheduledRuns } from '../src/schedules.ts';
 import { parseLearned, queueLesson } from '../src/ship-lessons.ts';
-import { agentToken, bootServer, until } from './helpers.ts';
+import { addReview, agentToken, bootServer, until } from './helpers.ts';
 import { git } from './git.ts';
 import { json } from './typed.ts';
 
@@ -150,6 +150,7 @@ test('a handed-off land queues its lines with the files the branch touched; a fa
 
     const failed = mk('Fails');
     store.setTicketDir(failed.id, cwd, null);
+    addReview(store, failed.id);
     const call = (id: number, path: string, body?: object) => fetch(`${srv.base}${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${agentToken(srv.data, id)}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const body = { summary: 'Fx', risk: 'low', risk_reason: 'r', learned: 'fx builds only on Windows\nthe shader cache lives in target/fx' };
     assert.equal((await call(failed.id, `/api/tickets/${failed.id}/land/handoff`, body)).status, 202);
@@ -160,6 +161,7 @@ test('a handed-off land queues its lines with the files the branch touched; a fa
     git(cwd, 'commit', '-qam', 'land ok');
     const minion = mk('Ships');
     store.setTicketDir(minion.id, cwd, null);
+    addReview(store, minion.id);
     assert.equal((await call(minion.id, `/api/tickets/${minion.id}/land/handoff`, body)).status, 202);
     await until('the clean land is reported', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     const [row] = store.lessons.list(project.id);
@@ -171,6 +173,7 @@ test('a handed-off land queues its lines with the files the branch touched; a fa
     // A pull-request ship logs its lines with log_learned instead.
     const pr = mk('PR ship');
     store.setTicketDir(pr.id, cwd, null);
+    addReview(store, pr.id);
     const logged = await json<{ lines: string }>(await call(pr.id, `/api/tickets/${pr.id}/learned`, { learned: 'Nothing' }));
     assert.equal(logged.lines, '');
     assert.equal((await call(pr.id, `/api/tickets/${pr.id}/learned`, {})).status, 400);

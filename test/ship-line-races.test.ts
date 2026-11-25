@@ -16,7 +16,7 @@ import { Releases, type TargetView } from '../src/releases.ts';
 import { moveShip, seqsFor, shipFirst } from '../src/ship-line.ts';
 import { placedKey, readState } from '../src/ship-line-state.ts';
 import { git, gitAt } from './git.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { addReview, agentToken, bootServer } from './helpers.ts';
 import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ship-line-races-'));
@@ -54,6 +54,7 @@ function line(waiting: number, held = false) {
   const join1 = (seq: number) => {
     const t = store.createTicket({ project_id: p.id, title: `Change ${seq}`, permission_mode: 'default', created_by: 'cara' });
     store.setTicketDir(t.id, dir, `ticket/${seq}-c`);
+    addReview(store, t.id);
     ids.set(seq, t.id);
     const holds = seq === 1;
     writeFileSync(join(q, String(seq).padStart(10, '0')), [me, holds ? '1795067420' : '0', `ticket/${seq}-c`, holds ? 'waiting for CI' : 'waiting', '-', '-', '-', 'order', ''].join('\n'));
@@ -395,6 +396,7 @@ test('two hand-offs through the route at once: one is taken, one refused, and la
     git(cwd, 'add', '.');
     git(cwd, 'commit', '-qm', 'init');
     store.setTicketDir(minion.id, cwd, null);
+    addReview(store, minion.id);
     const token = agentToken(srv.data, minion.id);
     const call = async (summary: string) => {
       const r = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary, risk: 'low', risk_reason: 'front end only' }) });

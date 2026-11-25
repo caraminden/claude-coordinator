@@ -155,9 +155,11 @@ export function renderTicketHead() {
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: "Open this minion's preview in a new tab", onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
-  if (t.status !== 'running' && !t.limit_resume_at) stoppingIds.delete(t.id); // it has stopped
+  // An approval card outlives its turn (#1916): Stop expires it.
+  const stoppable = t.status === 'running' || t.limit_resume_at || t.approvals;
+  if (!stoppable) stoppingIds.delete(t.id); // it has stopped
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
-  if (t.status === 'running' || t.limit_resume_at) {
+  if (stoppable) {
     const stopping = stoppingIds.has(t.id);
     actions.push(h('button', { class: 'secondary act-stop', disabled: stopping, title: t.limit_resume_at ? "Don't resume after the usage limit resets" : undefined, onclick: () => stopChat(t, renderTicketHead) }, stopping ? 'Stopping…' : 'Stop'));
   } else if (coord) {

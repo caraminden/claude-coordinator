@@ -3,6 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { callOf, type CardCall, type ShownCard } from './card-wait.ts';
 import type { MergeCall, PrInfo } from './merge-card.ts';
 import { explanation, tripwire, type TripwireConfig } from './tripwire.ts';
 
@@ -288,8 +289,10 @@ interface Request {
   decision: Decision;
   wake: Set<() => void>;
   /** The card as the chat shows it, and when it was posted, for the Needs-you inbox. */
-  card: { id: string; tool: string; use?: string };
+  card: ShownCard;
   at: number;
+  /** Its turn's process ended while it waited (#1916): it outlives the turn, and its answer resumes the minion. */
+  kept?: true;
 }
 
 type Emit = (ticketId: number, kind: string, data: unknown) => void;
@@ -304,6 +307,10 @@ export class Approvals {
   /** Outcomes of cards forgotten when their turn ended, for an asker that was between two polls then. */
   private ended = new Map<string, { ticketId: number; decision: Decision }>();
   private emit: Emit;
+  /** Spend the turn's pass on this call: the approved card's id and who approved it, or null when it has none for exactly this call. */
+  usePass: (ticketId: number, call: CardCall) => { id: string; by: string } | null = () => null;
+  /** A kept card was answered. */
+  keptAnswered: (ticketId: number, id: string, allow: boolean, by: string) => void = () => {};
   /** Each scheme's standing gos to merge, from messages people typed into its chats (#201, #260). */
   private goes: GoStore;
 
@@ -335,6 +342,13 @@ export class Approvals {
     // A throwaway saves list: the hook already saved what a file checkout throws away (#1716), so it passes here too.
     const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true }, []);
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
+    const call = callOf({ id: '', tool, input, tripwire: verdict ?? undefined, merge }, cwd);
+    const pass = call && this.usePass(ticketId, call);
+    if (pass) {
+      // Its card was answered already: the asker reads that answer (get), and no second card is posted.
+      this.ended.set(pass.id, { ticketId, decision: { state: 'allowed', by: pass.by } });
+      return { id: pass.id };
+    }
     if (!verdict) {
       if (!rules) return { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
       const scheme = cfg.project;
@@ -452,7 +466,7 @@ export class Approvals {
     for (const e of events) {
       if (e.kind !== 'approval' || e.created_at < since) continue;
       const card = JSON.parse(e.data);
-      if (open.has(card.id)) this.requests.set(card.id, { ticketId, tripwire: !!card.tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: e.created_at });
+      if (open.has(card.id) && !this.requests.has(card.id)) this.requests.set(card.id, { ticketId, tripwire: !!card.tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: e.created_at });
     }
   }
 
@@ -469,8 +483,27 @@ export class Approvals {
   }
 
   /** A thread's waiting cards: the tool each is for and its call's id, which cards from before #1916 lack. */
-  cards(ticketId: number): { id: string; tool: string; use?: string }[] {
-    return [...this.requests.values()].filter((r) => r.ticketId === ticketId && r.decision.state === 'pending').map((r) => r.card);
+  cards(ticketId: number): (ShownCard & { at: number })[] {
+    return [...this.requests.values()].filter((r) => r.ticketId === ticketId && r.decision.state === 'pending').map((r) => ({ ...r.card, at: r.at }));
+  }
+
+  /** Keep a waiting card past its turn, whose process ends now: from here on that process never learns the answer. */
+  keep(id: string) {
+    const r = this.requests.get(id);
+    if (r) r.kept = true;
+  }
+
+  /** The turn that resumes after a kept card starts: the card is that turn's now, and ends with it. */
+  resumed(ticketId: number) {
+    for (const r of this.requests.values()) if (r.ticketId === ticketId) delete r.kept;
+  }
+
+  /** Nobody can answer a kept card any more. */
+  expire(id: string, reason: string) {
+    const r = this.requests.get(id);
+    if (r?.decision.state === 'pending') this.settle(id, r, { state: 'expired', reason });
+    if (r) this.ended.set(id, { ticketId: r.ticketId, decision: r.decision });
+    this.requests.delete(id);
   }
 
   /** Every card still waiting on a person, in any thread. */
@@ -494,18 +527,20 @@ export class Approvals {
     const r = this.requests.get(id);
     if (!r || r.ticketId !== ticketId || r.decision.state !== 'pending') return this.get(ticketId, id);
     this.settle(id, r, { state: allow ? 'allowed' : 'denied', by });
+    if (r.kept) this.keptAnswered(ticketId, id, allow, by);
     return r.decision;
   }
 
   /** Resolve once the card is settled or `ms` passes, with its outcome then. */
   wait(ticketId: number, id: string, ms: number): Promise<Decision> {
     const r = this.requests.get(id);
-    if (!r || r.ticketId !== ticketId || r.decision.state !== 'pending') return Promise.resolve(this.get(ticketId, id));
+    if (!r || r.ticketId !== ticketId || (r.decision.state !== 'pending' && !r.kept)) return Promise.resolve(this.get(ticketId, id));
     return new Promise((resolve) => {
       const done = () => {
         clearTimeout(timer);
         r.wake.delete(done);
-        resolve(r.decision);
+        // A kept card's only asker is the process that is ending: an answer to it would run the call there as well as in the resumed turn.
+        resolve(r.kept ? { state: 'pending' } : r.decision);
       };
       const timer = setTimeout(done, ms);
       r.wake.add(done);
@@ -517,10 +552,10 @@ export class Approvals {
     for (const r of this.requests.values()) for (const done of [...r.wake]) done();
   }
 
-  /** The thread's turn ended: expire its undecided cards and forget them all. */
+  /** The thread's turn ended: expire its undecided cards and forget them all, but for a kept one. */
   endTurn(ticketId: number, reason: string) {
     for (const [id, r] of this.requests) {
-      if (r.ticketId !== ticketId) continue;
+      if (r.ticketId !== ticketId || r.kept) continue;
       if (r.decision.state === 'pending') this.settle(id, r, { state: 'expired', reason });
       this.requests.delete(id);
       this.ended.set(id, { ticketId, decision: r.decision });

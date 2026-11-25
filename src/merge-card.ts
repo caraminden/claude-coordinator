@@ -6,7 +6,7 @@ import { check, verdict } from './github.ts';
 
 const run = promisify(execFile);
 const VIEW_MS = 5_000;
-const FIELDS = 'number,title,url,state,isDraft,headRefName,baseRefName,additions,deletions,changedFiles,commits,statusCheckRollup';
+const FIELDS = 'number,title,url,state,isDraft,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,commits,statusCheckRollup';
 
 export interface MergeCall {
   /** The PR as the command names it: a number, a URL or a branch; null for the current branch's PR. */
@@ -28,6 +28,8 @@ export interface PrInfo {
   state: string;
   draft: boolean;
   head: string;
+  /** The head commit; cards from before #1916 have none. */
+  oid?: string;
   base: string;
   additions: number;
   deletions: number;
@@ -255,6 +257,7 @@ export function toInfo(d: Record<string, unknown>): PrInfo | null {
     state: s(d.state),
     draft: d.isDraft === true,
     head: s(d.headRefName).slice(0, 200),
+    ...(s(d.headRefOid) ? { oid: s(d.headRefOid).slice(0, 64) } : {}),
     base: s(d.baseRefName).slice(0, 200),
     additions: n(d.additions),
     deletions: n(d.deletions),

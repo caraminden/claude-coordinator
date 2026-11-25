@@ -99,7 +99,7 @@ function minionMenu(row, t) {
     if (view?.id === t.id) renderTicketHead();
   };
   let state;
-  if (t.status === 'running' || t.limit_resume_at) state = needsServer({ label: 'Stop turn', icon: '■', run: () => stopChat(t, redraw) });
+  if (t.status === 'running' || t.limit_resume_at || t.approvals) state = needsServer({ label: 'Stop turn', icon: '■', run: () => stopChat(t, redraw) });
   else if (t.status === 'closed') state = { label: `Dismissed ${dismissedWhen(t.closed_at)?.short ?? ''}`.trim(), icon: '✕', disabled: true };
   else if (t.state === 'parked' || t.parked_for) state = needsServer({ label: 'Unseal', icon: '⏵', run: () => unpark(t) });
   // The head's Dismiss, behind a question here: a right-click is easier to slip on (the spec: "Asks first").

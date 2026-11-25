@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, beforeEach, test } from 'node:test';
@@ -29,6 +29,12 @@ writeFileSync(
   fake,
   `#!${process.execPath}
 const { appendFileSync, existsSync, readFileSync, unlinkSync } = require('node:fs');
+// As claude ends on an interrupt: its open call reads as rejected, and the turn as failed.
+process.on('SIGINT', () => {
+  console.log(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'use-' + process.env.TEST_MINION, is_error: true, content: 'rejected' }] } }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'interrupted' }));
+  process.exit(0);
+});
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   appendFileSync(${JSON.stringify(prompts)}, process.env.TEST_MINION + ' ' + input + '\\n');
   console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } }));
@@ -113,7 +119,10 @@ const say = (id: number, text = 'hello', by = 'Cara') => runner.send(id, by, tex
 beforeEach(async () => {
   runner.turnLine.setPause(false, 'Cara');
   runner.turnLine.setSize(50, 'Cara');
-  for (const id of made) end(id);
+  for (const id of made) {
+    end(id);
+    if (runner.approvals.waiting(id)) runner.stop(id);
+  }
   await until('the minions before to finish', () => made.every((id) => !runner.isRunning(id)) && runner.turnLine.waiting().length === 0);
   made.length = 0;
 });
@@ -261,6 +270,172 @@ test('after a restart, a turn still waiting on its card has no worker', async ()
   assert.deepEqual([runner.turnLine.used(), runner.turnLine.lent()], [0, 1]);
   say(b);
   await started(b);
+});
+
+const CALL = { command: 'gh pr merge 1' };
+const ask = (id: number, input: object = CALL) => {
+  const cfg = { home: homedir(), data: '/home/u/data', checkout: '/home/u/app', project: project.id, claudeConfig: '/home/u/.claude', deployScript: true };
+  return runner.approvals.ask(id, 'Bash', input, root, cfg, true) as { id: string };
+};
+const pass = (id: number) => store.getSetting<{ pass?: object }>(`turn:${id}`)?.pass;
+const texts = (id: number, kind: string) => store.eventsOfKinds(id, [kind]).map((e) => e.data);
+/** A minion on its card past the hold: its process has ended, and the card's id. */
+async function parked(id = minion()) {
+  say(id);
+  await started(id);
+  const card = await carded(id);
+  runner.endCardWaits(false, Date.now() + 3 * 60_000);
+  await idle(id);
+  return { id, card };
+}
+const resumed = (id: number) => until(`minion ${id} to carry on`, () => turnsOf(id).length > 1);
+
+// #1916. Josh, 2026-11-24: "why cant we fully free a minion waiting on a card and then just resume it when the card is answered?"
+test('past its hold a minion waiting on a card ends its process; approved, it goes ahead of the line and runs that call once', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const a = minion();
+  say(a);
+  await started(a);
+  const card = await carded(a);
+  runner.endCardWaits(false, Date.now() + 60_000);
+  assert.ok(runner.isRunning(a), 'not before its hold is over');
+  runner.endCardWaits(true);
+  await idle(a);
+  assert.equal(store.getTicket(a)!.status, 'idle');
+  assert.equal(runner.approvals.waiting(a), 1, 'the card waits on');
+  assert.deepEqual([texts(a, 'approval_result').length, texts(a, 'error').length], [0, 0]);
+  assert.ok(!texts(a, 'result').some((d) => d.includes('interrupted')), 'no failed turn in the chat');
+  const tile = await workers('GET');
+  assert.deepEqual([tile.used, tile.lent, tile.people.find((p: { lent?: number }) => p.lent)?.lent], [0, 1, 1]);
+  const [b, c] = [minion(), minion()];
+  say(b);
+  await started(b);
+  say(c);
+  runner.approvals.decide(a, card, true, 'Josh');
+  end(b);
+  await resumed(a);
+  assert.equal(turnsOf(c).length, 0, 'ahead of the minion that waited already');
+  assert.match(turnsOf(a)[1], /Josh approved your waiting Bash call/);
+  assert.deepEqual(ask(a), { id: card });
+  assert.equal((await runner.approvals.wait(a, card, 1)).state, 'allowed');
+  assert.notEqual(ask(a).id, card, 'once');
+});
+
+test('anything but the approved call asks again, and loses the pass', async () => {
+  for (const other of ['input', 'tool'] as const) {
+    const { id, card } = await parked();
+    runner.approvals.decide(id, card, true, 'Josh');
+    await resumed(id);
+    assert.ok(pass(id));
+    if (other === 'input') assert.notEqual(ask(id, { command: 'gh pr merge 2' }).id, card);
+    else await print(id, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'r', name: 'Read', input: {} }] } });
+    assert.equal(pass(id), undefined);
+    assert.notEqual(ask(id).id, card);
+  }
+});
+
+test('denied, it carries on with the answer and no pass', async () => {
+  const { id, card } = await parked();
+  runner.approvals.decide(id, card, false, 'Josh');
+  await resumed(id);
+  assert.match(turnsOf(id)[1], /Josh denied your waiting Bash call/);
+  assert.equal(pass(id), undefined);
+});
+
+test("a person's words stand in for the answer; automatic mail waits for it", async () => {
+  const { id, card } = await parked();
+  runner.send(id, 'Taskmaster', 'when you can', [], { from: taskmaster() });
+  await settle();
+  assert.equal(turnsOf(id).length, 1, 'mail starts nothing');
+  say(id, 'do it another way');
+  await resumed(id);
+  assert.match(turnsOf(id)[1], /Cara replied below instead of answering.*do it another way/s);
+  assert.equal(runner.approvals.get(id, card).state, 'expired');
+});
+
+test("a kept card outlives a restart, and an answer the last server didn't act on counts", async () => {
+  const [a, b] = [await parked(), await parked()];
+  runner.approvals.keptAnswered = () => {};
+  runner.approvals.decide(b.id, b.card, true, 'Josh');
+  runner.detachAll();
+  runner = makeRunner();
+  runner.recover();
+  await resumed(b.id);
+  assert.ok(pass(b.id));
+  assert.equal(runner.approvals.waiting(a.id), 1);
+  assert.equal(turnsOf(a.id).length, 1);
+  runner.approvals.decide(a.id, a.card, true, 'Josh');
+  await resumed(a.id);
+  assert.equal(ask(a.id).id, a.card);
+});
+
+test('a restart as its process ends keeps the card too', async () => {
+  const a = minion();
+  say(a);
+  await started(a);
+  const card = await carded(a);
+  runner.endCardWaits(true);
+  runner.detachAll();
+  runner = makeRunner();
+  runner.recover();
+  await idle(a);
+  await settle();
+  assert.deepEqual([runner.approvals.waiting(a), runner.turnLine.lent(), turnsOf(a).length], [1, 1, 1]);
+  runner.approvals.decide(a, card, false, 'Josh');
+  await resumed(a);
+});
+
+test('an answer as its process ends resumes it, and the ending process is not told', async () => {
+  const a = minion();
+  say(a);
+  await started(a);
+  const card = await carded(a);
+  const asker = runner.approvals.wait(a, card, 50);
+  runner.endCardWaits(true);
+  runner.approvals.decide(a, card, true, 'Josh');
+  assert.equal((await asker).state, 'pending');
+  await resumed(a);
+  assert.equal(ask(a).id, card);
+});
+
+test('a stop or a dismissal expires the card', async () => {
+  for (const how of ['stop', 'close'] as const) {
+    const { id, card } = await parked();
+    if (how === 'stop') assert.ok(runner.stop(id));
+    else await runner.close(id, 'Dismissed.');
+    assert.equal(runner.approvals.get(id, card).state, 'expired');
+    assert.deepEqual([runner.approvals.waiting(id), runner.turnLine.lent()], [0, 0]);
+  }
+});
+
+test('an answered card is dropped with the line when it is stopped there', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const { id, card } = await parked();
+  const b = minion();
+  say(b);
+  await started(b);
+  runner.approvals.decide(id, card, true, 'Josh');
+  assert.ok(runner.stop(id));
+  end(b);
+  await settle();
+  unend(id);
+  say(id, 'afresh');
+  await resumed(id);
+  assert.equal(pass(id), undefined);
+  assert.doesNotMatch(turnsOf(id)[1], /approved/);
+});
+
+test('a job it left running, or a message it has not read, keeps its process', async () => {
+  for (const why of ['job', 'steer'] as const) {
+    const a = minion();
+    say(a);
+    await started(a);
+    if (why === 'job') await print(a, { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_type: 'local_bash' }] });
+    await carded(a);
+    if (why === 'steer') say(a, 'one more thing');
+    runner.endCardWaits(true);
+    assert.ok(runner.isRunning(a) && !store.getSetting<{ card?: boolean }>(`turn:${a}`)!.card);
+  }
 });
 
 test('the line survives a restart: order kept, nothing lost, nothing started twice', async () => {

@@ -138,6 +138,8 @@ export interface LineHost {
   start(entry: LineEntry): void;
   /** Stop its running turn to carry on later; one already ending or not yet launched is left. */
   pauseTurn(ticketId: number): void;
+  /** Minions with no turn running that wait on an approval card, and whose share they come back to. */
+  carded(): { ticket: number; person: number }[];
   /** Who waits, or why they all do, changed. */
   changed(ids: number[]): void;
   readonly gapMs: number;
@@ -166,14 +168,12 @@ export class TurnLine {
   }
 
   used(): number {
-    return this.granted.size - this.lent();
+    return [...this.granted.values()].filter((g) => !g.lent).length;
   }
 
-  /** The turns that wait on an approval card without a worker. */
+  /** The minions that wait on an approval card without a worker. */
   lent(): number {
-    let n = 0;
-    for (const g of this.granted.values()) if (g.lent) n++;
-    return n;
+    return this.granted.size - this.used() + this.carded().length;
   }
 
   /**
@@ -224,6 +224,16 @@ export class TurnLine {
     return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null };
   }
 
+  /** Those whose process has ended too; one still ending counts as its turn. */
+  private carded() {
+    return this.host.carded().filter((c) => !this.granted.has(c.ticket));
+  }
+
+  /** Whether a person's container is at its memory limit. */
+  stalledFor(person: number): boolean {
+    return this.stalled.has(person);
+  }
+
   /** Each person's workers, turns waiting on a card (`lent`) and waiting turns, the most first. */
   people(): { person: number; used: number; waiting: number; lent: number; stalled?: true }[] {
     const out = new Map<number, { person: number; used: number; waiting: number; lent: number }>();
@@ -233,6 +243,7 @@ export class TurnLine {
       out.set(person, p);
     };
     for (const g of this.granted.values()) add(g.person, g.lent ? 'lent' : 'used');
+    for (const c of this.carded()) add(c.person, 'lent');
     for (const w of this.asked(this.entries)) add(w.person, 'waiting');
     const all = (p: { used: number; waiting: number; lent: number }) => p.used + p.waiting + p.lent;
     return [...out.values()].map((p) => (this.full(p.person) ? { ...p, stalled: true as const } : p)).sort((a, b) => all(b) - all(a) || a.person - b.person);

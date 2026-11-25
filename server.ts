@@ -414,7 +414,9 @@ setInterval(
       .read()
       .then((r) => {
         const free = memoryEase.free();
-        runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level: memoryEase.get().level });
+        const { level } = memoryEase.get();
+        runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level });
+        runner.endCardWaits(r.starved || level !== 'ok');
       })
       .catch((e) => console.error('worker pool:', e)),
   POOL.everyMs,

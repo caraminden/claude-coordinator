@@ -1,5 +1,7 @@
 // What a turn held open on approval cards is doing besides (#1916): whether it still needs its worker, and whether its process could end.
+import { isDeepStrictEqual } from 'node:util';
 import { blocks, type ClaudeEvent } from './claude-events.ts';
+import { WaitList, type WaitStore } from './resumes.ts';
 
 /** One turn's calls and background work, from its stream. */
 export interface TurnCalls {
@@ -53,4 +55,95 @@ export function cardWait(turn: TurnCalls, cards: { tool: string; use?: string }[
   if (![...turn.open.keys()].every(waits)) return 'working';
   const alone = turn.open.size === 1 && cards.length === 1 && !!cards[0].use;
   return alone && !turn.background.length && !turn.detached ? 'end' : 'lend';
+}
+
+/** How long a turn that only waits on a card keeps its process; none while the box or its person's container is short (Josh, 2026-11-24). */
+export const CARD_HOLD_MS = 2 * 60_000;
+
+/** An approval card as the chat shows it. */
+export interface ShownCard {
+  id: string;
+  tool: string;
+  use?: string;
+  input?: unknown;
+  tripwire?: { reason: string };
+  merge?: object;
+}
+
+/** All of a call that an approval stands for: its exact input, where it runs, why the tripwire asked, and the pull request it merges. */
+export interface CardCall {
+  tool: string;
+  input: unknown;
+  cwd: string;
+  tripwire: string | null;
+  pr: string | null;
+}
+
+/** A card whose turn's process ended while it waited: saved, so that its answer resumes the minion. */
+export interface KeptCard {
+  ticket: number;
+  id: string;
+  call: CardCall;
+  /** Whose turn it was: the resumed one runs as them too. */
+  person: number | null;
+  /** The relay the turn came from (TurnState.from). */
+  from?: number;
+  at: number;
+  answer?: { allow: boolean; by: string };
+}
+
+/** An approved card's one run, for the turn that resumes: spent by the call, or lost once that turn does anything else. */
+export interface CardPass {
+  id: string;
+  by: string;
+  call: CardCall;
+}
+
+export const keptCards = (store: WaitStore) => new WaitList<KeptCard>(store, 'card-waits');
+
+/** Whether a minion with no process waits for a person to answer its card: nothing else starts a turn of it. */
+export function cardHeld(store: WaitStore, ticketId: number): boolean {
+  const kept = keptCards(store).get(ticketId);
+  return !!kept && !kept.answer;
+}
+
+/** The pull request a merge card showed, its head commit included: a push since then needs a new answer. */
+export function prOf(merge: object | undefined): string | null {
+  if (!merge) return null;
+  const pr = ((merge as { pr?: unknown }).pr ?? {}) as Record<string, unknown>;
+  return JSON.stringify(['number', 'url', 'state', 'head', 'base', 'oid'].map((k) => pr[k] ?? null));
+}
+
+/** The call a card asks about, or null when the card holds only part of it. */
+export function callOf(card: ShownCard, cwd: string): CardCall | null {
+  const input = card.input as { truncated?: unknown } | undefined;
+  if (!input || 'truncated' in input) return null;
+  return { tool: card.tool, input, cwd, tripwire: card.tripwire?.reason ?? null, pr: prOf(card.merge) };
+}
+
+export const sameCall = (a: CardCall, b: CardCall) => isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
+
+/** Whether a line of the resumed turn's stream shows it doing something other than the approved call, read before noteCalls takes the line in. */
+export function losesPass(pass: CardPass, calls: TurnCalls, ev: ClaudeEvent): boolean {
+  return blocks(ev.message?.content).some((b) => {
+    // ToolSearch only loads the approved tool's schema.
+    if (b?.type === 'tool_use') return b.name !== pass.call.tool && b.name !== 'ToolSearch';
+    return b?.type === 'tool_result' && typeof b.tool_use_id === 'string' && calls.open.get(b.tool_use_id)?.name === pass.call.tool;
+  });
+}
+
+const SAYS_REJECTED = 'The call reads as rejected or interrupted in your session only because your process was ended to free its memory while the card waited.';
+
+/** What the resumed turn is told of its card's answer. */
+export function answerPrompt(kept: KeptCard): string {
+  const { call, answer } = kept;
+  const input = JSON.stringify(call.input);
+  if (answer?.allow)
+    return `${answer.by} approved your waiting ${call.tool} call. ${SAYS_REJECTED} It did not run. Make exactly that call again now, before anything else; it runs without another card, once. Any other call first, or a changed input, asks again. Its input, as JSON:\n${input}\nThen carry on with your work.`;
+  return `${answer?.by} denied your waiting ${call.tool} call in the chat. ${SAYS_REJECTED} It was not run. Do not retry it or work around it; say what you needed it for, carry on with anything that does not need it, and hand the commands it needed to a person in your reply. Its input, as JSON:\n${input}`;
+}
+
+/** What goes ahead of a person's message that came instead of an answer. */
+export function repliedPrompt(kept: KeptCard, by: string): string {
+  return `${by} replied below instead of answering the approval card for your waiting ${kept.call.tool} call, so the card expired and the call was not run. ${SAYS_REJECTED} Follow their reply; if the call is still needed, make it again and it asks again.`;
 }

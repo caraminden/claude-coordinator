@@ -840,4 +840,13 @@ CREATE TABLE IF NOT EXISTS taskmaster_digest (
   text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS taskmaster_digest_project ON taskmaster_digest(project_id, id);
+-- What a minion's time log can't work out from its events (#1992, src/db/wait-records.ts): state changes, its ship's places and stages, cut-off commands.
+CREATE TABLE IF NOT EXISTS wait_records (
+  id INTEGER PRIMARY KEY,
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS wait_records_ticket ON wait_records(ticket_id, id);
 `;

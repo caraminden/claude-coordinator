@@ -61,6 +61,8 @@ export interface JobDeps {
   wake(ticket: number, text: string): void;
   /** Its row changed. */
   changed(ticket: number): void;
+  /** A command's job ended at its own limit (#1992). */
+  cutOff?(job: MinionJob): void;
   lastTurnEnd(ticket: number): number | null;
   cacheMs: number;
   now?: () => number;
@@ -322,6 +324,7 @@ export class MinionJobs {
       Object.assign(job, { ended: now, code: f.code, ...(f.code === null ? { how: 'lost' } : f.how ? { how: f.how } : {}) });
       this.save();
       this.d.changed(job.ticket);
+      if (job.how === 'timeout' && job.kind === 'job') this.d.cutOff?.(job);
     }
     const seen = await exists(join(job.dir, 'seen'));
     // No await from here on: a Stop or close in between is heard.

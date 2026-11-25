@@ -6,6 +6,7 @@ import { AGENT_NAME } from './auth.ts';
 import { msgSettings } from './msg-settings.ts';
 import { type Relay, clip, loopKey, MINION_PAIRS, minionPairKey, pairKey, type LoopState } from './minion-relay.ts';
 import type { EventRow, Project, Store, TicketFields } from './db.ts';
+import { unsealedBy } from './db/wait-records.ts';
 import type { Lanes } from './lanes.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 import { startHoldKey, START_HOLD_PREFIX, startNote } from './minion-budget.ts';
@@ -122,7 +123,7 @@ export class HeldMail {
       // Queued before the state clears (#1378): a crash between the two leaves a turn to start, not held mail nothing releases.
       this.d.send(ticketId, author, `${author === by ? 'Unsealed' : `${by} unsealed`} you. ${held} Pick up where you left off.`, [], { quick: false });
     }
-    this.d.store.updateTicket(ticketId, { state: null });
+    this.d.store.updateTicket(ticketId, { state: null }, unsealedBy(by, author));
     this.d.broadcastTicket(ticketId);
     return true;
   }

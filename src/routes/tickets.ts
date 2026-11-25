@@ -19,6 +19,7 @@ import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { unsealedBy } from '../db/wait-records.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
@@ -99,7 +100,7 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
       fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? (fields.model ?? null) : stored.model, 'effort' in fields ? (fields.effort ?? null) : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
       store.addPick(id, 'model' in fields ? (fields.model ?? null) : stored.model, 'effort' in fields ? (fields.effort ?? null) : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because!);
     }
-    store.updateTicket(id, fields);
+    store.updateTicket(id, fields, caller === id ? { kind: 'minion' } : { kind: caller === null ? 'person' : 'agent', name });
     if (fields.state === 'pending-deploy') runner.deployPending(id);
     if (fields.state) closeCancelled = runner.closeCancelled(id, caller !== id);
     if ('build' in fields) store.props.setBuild(id, fields.build ?? null, name);
@@ -357,14 +358,15 @@ export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: st
       return;
     }
   }
+  const who = unsealedBy(by, author);
   // A scheduled run or flaky-test fixer waiting for the box (#1302): Unseal is its "Start now", with no pressure check.
-  if (app.held?.release(ticket.id, `${by} unsealed it`)) return;
+  if (app.held?.release(ticket.id, `${by} unsealed it`, who)) return;
   if (app.runner.heldFor(ticket.id)) {
     const chained = app.waiters.claim(ticket.id); // released by startChained as it sends the brief
     if (!chained) throw new HttpError(409, `#${ticket.number} is starting already`);
     await app.startChained(chained, `${by} unsealed it before its leader's work was in`);
     // Its brief is sent: what comes next goes to that turn, not held (the turn clears the state as it starts).
-    if (!app.runner.heldFor(ticket.id) && app.store.getTicket(ticket.id)?.state === 'parked') app.store.updateTicket(ticket.id, { state: null });
+    if (!app.runner.heldFor(ticket.id) && app.store.getTicket(ticket.id)?.state === 'parked') app.store.updateTicket(ticket.id, { state: null }, who);
     await ownWrites();
     return;
   }

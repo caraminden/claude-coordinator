@@ -22,6 +22,7 @@ import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from '.
 import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
+import { ShipTrail, type ShipLine } from './src/ship-trail.ts';
 import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
@@ -54,6 +55,7 @@ import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-job
 import { LongJobs } from './src/long-jobs.ts';
 import { gruntAtWork } from './src/live-state.ts';
 import { MinionJobs } from './src/minion-jobs.ts';
+import { CutOffs, jobCutOff } from './src/cut-offs.ts';
 import { CACHE_TTL_MS } from './src/keepalive.ts';
 import { tmpDirFor } from './src/turn-tmp.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
@@ -453,6 +455,14 @@ const stallWatch = new StallWatch({
   note: (id, text) => runner.emit(id, 'note', { text }),
 });
 if (!PREVIEW) runner.onStreamEvent = (id, ev) => stallWatch.observe(id, ev);
+const cutOffs = new CutOffs((id, cut) => store.addWaitRecord(id, 'cut', cut));
+runner.onRawEvent = (id, ev) => {
+  try {
+    cutOffs.observe(id, ev);
+  } catch (err) {
+    console.error(`[cut-offs] minion ${id}: ${thrown(err).message}`);
+  }
+};
 // Minions' branches served for people to try (src/previews.ts); a preview serves none of its own.
 const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
 if (previews) {
@@ -506,6 +516,7 @@ outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.p
 // Jobs that outlive a minion's turn (#1890): citadel-job starts them here, and their end wakes the minion.
 const minionJobs = new MinionJobs({
   store,
+  cutOff: (job) => store.addWaitRecord(job.ticket, 'cut', jobCutOff(job)),
   tmp: (id) => {
     const t = store.getTicket(id);
     return t && t.status !== 'closed' ? tmpDirFor(runner.tmpRoot(t.project_id), id) : null;
@@ -1914,7 +1925,31 @@ const serverWork = serverWorkWatch(
 );
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
 runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : (serverWork.of(id) ?? minionJobs.work(id)));
-if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
+// Every ship line, for the time log's record of each ship (#1992): Citadel's as last polled, every other scheme's read now.
+const shipTrail = new ShipTrail({
+  store,
+  landings,
+  lines: async () => {
+    const numbered = (id: number | null, label: string) => (id === null ? label : `#${store.getTicket(id)?.number ?? id}`);
+    const line = (tickets: ShipLine['line'], kit: boolean, minion: ShipLine['minion']): ShipLine => ({ line: tickets, kit, minion, name: (label) => numbered(minion(label), label) });
+    const own = ownScheme()?.id;
+    const others = store.listProjects().filter((p) => p.repo_dir && p.id !== own);
+    const reads = others.map(async (p) => {
+      const of = (label: string) =>
+        landings
+          .handoffs()
+          .map((id) => store.getTicket(id))
+          .find((t) => t?.project_id === p.id && t.branch === label) ?? store.ticketByBranch(label);
+      return line(await readQueueA(landQueue(p.repo_dir!), 7), true, (label) => {
+        const t = of(label);
+        return t?.project_id === p.id ? t.id : null;
+      });
+    });
+    return [line(waits.line, false, (label) => waits.ticketFor(label)), ...(await Promise.all(reads))];
+  },
+});
+const trailPoll = () => shipTrail.poll().catch((err) => console.error(`[ship trail] ${thrown(err).message}`));
+if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await trailPoll(), await landHandoffs.poll(), serverWork.sync()));
 // Was a blocking scan at each start, before the listen (#1463).
 if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);
 if (!BOOT_CHECK) {

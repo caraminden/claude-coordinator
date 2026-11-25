@@ -50,6 +50,7 @@ export const WRITES = [
   'deleteTicket',
   'updateTicketQuietly',
   'updateTicket',
+  'addWaitRecord',
   'setLastActivity',
   'setEventData',
   'setArtifactPinned',

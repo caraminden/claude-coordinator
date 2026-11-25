@@ -3,6 +3,7 @@
 import type { Store, Ticket, TicketKind, User } from '../db.ts';
 import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
+import type { ChangeBy } from './wait-records.ts';
 import { copyRow, inScope, scoped, warm } from '../read-scope.ts';
 
 export const minionQueries = {
@@ -311,6 +312,7 @@ export const minionQueries = {
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM wait_records WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
     this.minionIndex.deleteTicket(id);
     this.claims.releaseHeldBy(id);
@@ -324,18 +326,25 @@ export const minionQueries = {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   },
 
-  updateTicket(this: Store, id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>) {
+  updateTicket(
+    this: Store,
+    id: number,
+    fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>,
+    by: ChangeBy = { kind: 'server' },
+  ) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => fields[k] ?? null);
     const before = fields.status ? this.getTicket(id)?.status : undefined;
+    const was = 'state' in fields ? (this.db.prepare('SELECT state FROM tickets WHERE id = ?').get(id) as Pick<Ticket, 'state'> | undefined) : undefined;
     const now = Date.now();
     // Strictly after every earlier close, so a quick reopen and re-close never lands on the minion index's cursor mark.
     const closedAt = fields.status === 'closed' ? (this.lastClosedAt = Math.max(now, this.lastClosedAt + 1)) : now;
     // The dismissal's time (#1072): stamped when it goes closed, cleared when it opens again.
     const closing = fields.status === 'closed' ? (before === 'closed' ? '' : ', closed_at = ?') : fields.status ? ', closed_at = NULL' : '';
     this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [closedAt] : []), now, id);
+    if (was && was.state !== (fields.state ?? null)) this.addWaitRecord(id, 'state', { at: now, old: was.state, new: fields.state ?? null, by });
     // Dismissing moves the stage to done, reopening back to in-progress.
     if (before && fields.status) this.props.statusChanged(id, before, fields.status);
     if (fields.title?.includes('status:')) this.noteLooks(id, fields.title, now);

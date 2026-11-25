@@ -53,6 +53,9 @@ export type LoadError = string | { plugin?: string; name?: string; server?: stri
 export interface ClaudeEvent {
   type: string;
   subtype?: string;
+  /** system task_notification: the background command or Grunt that ended, and how */
+  tool_use_id?: string;
+  summary?: string;
   /** user: a steer echoed back as the turn takes it */
   isReplay?: boolean;
   /** stream_event (--include-partial-messages) */

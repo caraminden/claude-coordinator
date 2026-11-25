@@ -7,6 +7,7 @@
 // The list is in the settings table like the chains in src/wake.ts, so a restart keeps it; an entry is removed before its
 // brief is sent, so it goes once only.
 import type { Store } from './db.ts';
+import type { ChangeBy } from './db/wait-records.ts';
 import type { Runner } from './runner.ts';
 import type { PressureReading } from './pressure.ts';
 import { clockTime } from './pacific.ts';
@@ -95,14 +96,14 @@ export class HeldStarts {
   }
 
   /** Send a held brief now, with no pressure check. False when nothing was held for it. */
-  release(ticket: number, why: string): boolean {
+  release(ticket: number, why: string, who?: ChangeBy): boolean {
     const h = this.claim(ticket);
     if (!h) return false;
     const t = this.d.store.getTicket(ticket);
     // Dismissed meanwhile, or someone took it out of sealed another way: it is theirs now, so no second brief.
     if (!t || t.status === 'closed' || t.state !== 'parked') return true;
     const mins = Math.max(0, Math.round((this.now() - h.since) / 60_000));
-    this.d.store.updateTicket(ticket, { state: null, note: null });
+    this.d.store.updateTicket(ticket, { state: null, note: null }, who);
     if (h.schedule !== undefined) this.d.store.schedules.heldNote(h.schedule, `Held ${mins} min for the box, then started (${why})`);
     this.d.runner.emit(ticket, 'note', { text: `Held ${mins} min for the box; ${why}, so this minion started.` });
     this.d.runner.send(ticket, h.from, h.message, [], h.opts);

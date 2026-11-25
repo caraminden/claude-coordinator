@@ -573,6 +573,8 @@ export class Runner {
   jobs: Pick<MinionJobs, 'stop' | 'running' | 'turnLine'> | null = null;
   /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
   onStreamEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
+  /** Each stream event of a turn as it arrived, the ones not stored too (the cut-off commands, #1992); never throws. */
+  onRawEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion sealed on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -4096,6 +4098,7 @@ export class Runner {
     // A process ended for its card says the call was rejected and the turn failed; the chat shows it still waiting.
     if (live?.card && ev.type === 'user') return;
     if (live?.card && ev.type === 'result') ev = { ...ev, is_error: false, result: '' };
+    this.onRawEvent(ticketId, ev);
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);

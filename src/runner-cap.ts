@@ -83,7 +83,7 @@ export class RunnerCap {
     const n = this.s.off.length;
     if (!p || !n || !canSee(p.id)) return null;
     const are = `${n} runner${n === 1 ? '' : 's'}`;
-    return this.s.late !== null ? `${p.name}'s build label is still off ${are}: putting it back failed, trying again` : `${p.name} builds one at a time (${are} resting) while ships go first`;
+    return this.s.late !== null ? `${p.name}'s build label is still off ${are}: putting it back failed, trying again` : `${p.name} builds one at a time (${are} paused)`;
   }
 
   /** Read each time: across a handover two servers may each be in a tick. */

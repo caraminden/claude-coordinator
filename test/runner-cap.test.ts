@@ -58,7 +58,7 @@ test('while a ship is in line one build runner on that PC keeps the label; the r
   await cap.tick(15_000);
   assert.deepEqual(w.can(), ['DESK', 'OTHER']);
   assert.deepEqual(w.runners[1].labels, ['extra']);
-  assert.match(cap.text(() => true)!, /Peek Auras builds one at a time \(3 runners resting\)/);
+  assert.match(cap.text(() => true)!, /Peek Auras builds one at a time \(3 runners paused\)/);
   assert.equal(
     cap.text(() => false),
     null,

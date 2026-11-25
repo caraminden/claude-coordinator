@@ -451,6 +451,7 @@ html.frame-topbar .frame-nav { display: inline-flex; }
 .seg-track .wait-bar { grid-column: auto; display: block; margin: 0; height: 4px; border-radius: 2px; }
 .seg-track .wait-bar > i { width: 0; }
 .seg-track .done .wait-bar > i { width: 100%; background: var(--done); }
+.seg-track .held .wait-bar > i { width: 100%; }
 .seg-track .now .wait-bar > i { width: 8%; } /* waitBar's own width, when it has one, is inline and wins */
 .seg-track .now.waits .wait-bar { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--held) 55%, transparent) 0 3px, color-mix(in srgb, var(--held) 15%, transparent) 3px 6px); }
 .seg-track .now.waits .wait-bar > i { width: 0; }

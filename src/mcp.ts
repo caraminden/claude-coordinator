@@ -1741,7 +1741,7 @@ const SEAM_FRESH = {
 export const PLAN = {
   name: 'plan',
   description:
-    'Your task list, which people watch as the progress readout ("Running tests… 3/7"). Each call changes only the steps it names by number n (1, 2, 3…): a new n adds a step, a known one updates it. Once every step is done, naming step 1 with a title starts a new plan. Finish one step and start the next in one call.',
+    "Your task list, which people watch as the progress bar. The server moves the bar from what you do, by each step's kind. Each call changes only the steps it names by number n (1, 2, 3…): a new n adds a step, a known one updates it. Once every step is done, or in a later turn, naming step 1 with a title starts a new plan.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -1753,11 +1753,12 @@ export const PLAN = {
           properties: {
             n: { type: 'integer', minimum: 1 },
             step: { type: 'string', description: 'Short title' },
+            kind: { type: 'string', enum: ['read', 'build', 'test', 'review', 'ask', 'ship'], description: 'What it mostly is (two: the first); ask: a card or plan for people' },
             doing: { type: 'string', description: 'While underway, e.g. "Running tests"' },
             why: { type: 'string', description: 'One sentence: what it involves and why' },
             minutes: { type: 'number', description: 'Your estimate' },
-            status: { type: 'string', enum: ['todo', 'doing', 'done', 'dropped'] },
-            outcome: { type: 'string', description: 'When done: one sentence on what it found, decided or changed' },
+            status: { type: 'string', enum: ['todo', 'doing', 'done', 'dropped'], description: 'Only to correct the bar' },
+            outcome: { type: 'string', description: 'One sentence: what it found, decided or changed' },
           },
           required: ['n'],
         },
@@ -1778,6 +1779,7 @@ export function planResult(args: Record<string, unknown> | null): string {
     if (bad) throw new Error(`Step ${s.n}: ${bad} is text.`);
     if (s.minutes != null && !(Number.isFinite(s.minutes) && s.minutes >= 0)) throw new Error(`Step ${s.n}: minutes is a number.`);
     if (s.status != null && !['todo', 'doing', 'done', 'dropped'].includes(s.status)) throw new Error(`Step ${s.n}: status is todo, doing, done or dropped.`);
+    if (s.kind != null && !['read', 'build', 'test', 'review', 'ask', 'ship'].includes(s.kind)) throw new Error(`Step ${s.n}: kind is read, build, test, review, ask or ship.`);
   }
   return 'ok';
 }

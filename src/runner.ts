@@ -614,6 +614,7 @@ export function slimEvent(ev: ClaudeEvent, stored = false): ClaudeEvent | null {
     if (!content.length) return null;
     const slim: ClaudeEvent = { type: ev.type, message: { role: ev.message!.role, content } };
     if (ev.parent_tool_use_id) slim.parent_tool_use_id = ev.parent_tool_use_id;
+    if (ev.turn_state) slim.turn_state = ev.turn_state;
     return slim;
   }
   if (ev.type === 'result') {
@@ -5162,6 +5163,7 @@ export class Runner {
   /** A main-thread message without its status trailer, remembering the last good one for the turn's end; a bad one is noted once. */
   private stripStatus(ticketId: number, ev: ClaudeEvent): ClaudeEvent {
     let changed = false;
+    let state = '';
     const content = (ev.message!.content as ContentBlock[]).flatMap((b): ContentBlock[] => {
       if (b?.type !== 'text' || typeof b.text !== 'string') return [b];
       const { text, status, bad } = takeStatus(b.text);
@@ -5170,6 +5172,7 @@ export class Runner {
       if (status) {
         this.statuses.set(ticketId, status);
         this.saveTurn(ticketId, { status });
+        state = typeof status.state === 'string' ? status.state : '';
       }
       if (bad) {
         // A later reply's bad line (a sent-back reply's rewrite) doesn't let an earlier reply's line stand.
@@ -5179,7 +5182,9 @@ export class Runner {
       }
       return text ? [{ ...b, text }] : [];
     });
-    return changed ? { ...ev, message: { ...ev.message, content } } : ev;
+    if (!changed) return ev;
+    // The end it named stays on the stored event: the plan's last step is ticked by it, in every replay (progress.js, #1923).
+    return { ...ev, message: { ...ev.message, content }, ...(state ? { turn_state: state } : {}) };
   }
 
   /**

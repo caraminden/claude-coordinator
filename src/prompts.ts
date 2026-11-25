@@ -317,11 +317,11 @@ export function promptParts(
         'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with the `plan` tool (mcp__thread) before starting it:',
         '- Make 3 to 7 steps that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
         '- Give each a `why`, one sentence on what it involves and why, a short `doing` ("Finding where the sidebar text comes from"), and `minutes`: your guess of its minutes, which fills the readout\'s bar. Guess your own working minutes, not a person\'s, and guess short: half of all steps finish in under 3 minutes and three quarters in under 7; ship and self-review steps run longer (half by 5, nine in ten by 30); only about one step in eleven passes 20.',
-        '- Mark each step `doing` when you start it. When you finish it, mark it `done` with its `outcome`: one plain sentence on what it found, decided or changed.',
+        '- Give each a `kind`, then leave the bar alone: the server moves it from what you do, back too (an edit after a red test). Call `plan` again only when the steps change, or a step it has wrong needs your `status`, which wins.',
         '- If the plan changes, add, reword or drop steps so the list stays true.',
         'Tool calls show only in that readout, so put anything people need to see in your reply text.',
         ...CHAT_FACTS,
-        "Send `plan` and set_thread_status alongside a real tool call (a Read, Edit, Bash and so on) in the same message: a lone one costs a round trip. Finish a step and start the next in one `plan` call, in the same message as that step's first real call.",
+        'Send `plan` and set_thread_status alongside a real tool call (a Read, Edit, Bash and so on) in the same message: a lone one costs a round trip.',
         // The tools' own descriptions (always loaded, src/mcp.ts ALWAYS_LOAD) carry how ask_question, set_thread_status and close_self work (#760): these lines say only what those don't.
         // When to use a card has one home, the Citadel-wide card rule (src/rule-homes.ts, #1162): this line only points there.
         'Cards follow the Citadel-wide card rule (Asking and picking); a lone go may be a `set_thread_status` reply. If a typed answer or a newer card replaces one, call `settle_question`.',

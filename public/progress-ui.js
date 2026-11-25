@@ -9,7 +9,7 @@ import { stepMark } from './ui/chat.js';
 import { firstSentence, ticketActionRef } from './chattext.js';
 import { actionCut } from './eventcut.js';
 import { failedLine, loadingLine } from './ui/state.js';
-import { actionLabel, nowDoing, planEstimate, planTrack, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
+import { actionLabel, heldStep, nowDoing, planEstimate, planTrack, progressLine, runningFor, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 
 // ---------- work progress (thread-bar readout) ----------
 
@@ -145,19 +145,21 @@ export function phaseRows(acts, running, key = null) {
   ];
 }
 
-/** One step of Claude's plan: its title, one plain line about it, and on opening, how the work went. */
-function planStep(t, acts, running) {
+/** One step of Claude's plan: its title, one plain line about it, and on opening, how the work went. `held`: built, and being tested (#1923). */
+function planStep(t, acts, running, held) {
   const now = t.status === 'in_progress';
   const live = now && running;
   const phases = workPhases(acts, live);
   // The one line: what it achieved once done, where it's at while underway, what it's for before then.
   let line;
   if (t.status === 'completed') line = t.outcome || (t.note && firstSentence(t.note)) || t.description || phases.map((ph) => ph.text).join(', ');
+  else if (held) line = 'Done so far, kept open in case a test sends it back';
+  else if (now && t.kind && t.stage !== t.id) line = 'Under way together with the step above';
   else if (now) line = live ? (phases.length ? `Now: ${phases[phases.length - 1].text.toLowerCase()}` : 'Just started') : 'Paused here when the turn ended';
   else line = t.description || 'Not started yet';
   const el = h(
     'details',
-    { class: `step ${t.status}${now && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
+    { class: `step ${t.status}${now && !running ? ' paused' : ''}${held ? ' held' : ''}`, open: view.ui.openSteps.has(t.id) || null },
     h('summary', {}, h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'), h('span', { class: 'subject' }, t.subject), h('span', { class: 'recap' }, firstSentence(line, 220))),
     t.description && line !== t.description ? h('p', { class: 'step-desc' }, h('span', { class: 'muted' }, 'Plan: '), t.description) : '',
     t.note && !t.outcome ? stepNote(t.note) : '',
@@ -244,6 +246,8 @@ export function renderProgress() {
       (step || server) && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',
       now ? h('span', { class: 'doing', 'data-doing': doing }, now) : '',
     ),
+    // Beside the words, not in them, so a phone's cut-off line still shows it.
+    h('span', { class: 'ran' }, doing ? runningFor(view.turnActions, Date.now()) : ''),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',
     time,
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'),
@@ -273,8 +277,10 @@ export function renderProgress() {
     const stepEl = (t) =>
       planStep(
         t,
+        // A shared stage's calls are kept under its first step.
         all.filter((a) => a.taskId === t.id),
         running && !!current,
+        heldStep(p, t),
       );
     const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));

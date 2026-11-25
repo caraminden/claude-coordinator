@@ -19,7 +19,7 @@ import { payerLine } from './payer.js';
 import { sideEvent } from './sidethread.js';
 import { selectActions } from './selectact.js';
 import { chatWelcome, refreshWelcome } from './welcome.js';
-import { applyEvent, createProgress, nowDoing, planEstimate } from './progress.js';
+import { applyEvent, createProgress, nowDoing, planEstimate, runningFor } from './progress.js';
 import { clamp, markQueued, messageBody, previewNodes, showTakenBack, strikeNote, unclamp, userBubble } from './bubbles.js';
 import { initSeen, leftText, narrow, phaseRows, progressUi, renderProgress, scheduleProgress } from './progress-ui.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
@@ -567,7 +567,7 @@ function drawEvent(event, scroll) {
   }
   for (const { block, taskId } of applyEvent(view.progress, event.kind, data, event.created_at)) {
     // Which event it came from, so an opened row can fetch it whole when the page sent it cut (eventcut.js).
-    const action = { block, taskId, result: null, event: { id: event.id, ticket: event.ticket_id } };
+    const action = { block, taskId, result: null, startedAt: event.created_at, event: { id: event.id, ticket: event.ticket_id } };
     view.actions.set(block.id, action);
     view.turnActions.push(action);
   }
@@ -1141,7 +1141,8 @@ setInterval(() => {
 /** Turns the readout's running call to "Thinking…" once nothing has run for a while (its time ticks in wait.js). */
 setInterval(() => {
   const el = view?.progressEl?.querySelector('.progress-line .doing');
-  if (el && el.dataset.doing && el.dataset.doing !== nowDoing(view.turnActions, Date.now())) scheduleProgress();
+  const ran = view?.progressEl?.querySelector('.progress-line .ran');
+  if (el && el.dataset.doing && (el.dataset.doing !== nowDoing(view.turnActions, Date.now()) || ran.textContent !== runningFor(view.turnActions, Date.now()))) scheduleProgress();
   // What's left of the plan's guesses runs down while a long call runs, with no event to redraw it.
   const left = view?.progressEl?.querySelector('.progress-cap .left');
   const est = left && planEstimate(view.progress, view.ticket?.status === 'running', Date.now(), view.ticket?.step_ratio);

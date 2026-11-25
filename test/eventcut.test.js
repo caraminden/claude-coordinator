@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { actionCut, cutEvent, GRUNT_RESULT_HEAD, INPUT_HEAD, RESULT_HEAD, TEXT_HEAD } from '../public/eventcut.js';
+import { workKind } from '../public/progress.js';
 
 const row = (data, kind = 'claude') => ({ id: 7, ticket_id: 3, kind, data: JSON.stringify(data), created_at: 1 });
 const sent = (r) => JSON.parse(cutEvent(r).data);
@@ -49,4 +50,12 @@ test('an action is cut when its input or its result was', () => {
   assert.equal(actionCut({ block: { input: {} }, result: { content: 'x' } }), false);
   assert.equal(actionCut({ block: { input: {}, cut: { content: 9 } }, result: null }), true);
   assert.equal(actionCut({ block: { input: {} }, result: { content: 'x', cut: 9 } }), true);
+});
+
+test("a cut command keeps the kind of step its whole text shows, so the page's bar moves as the server's does (#1923)", () => {
+  const command = `rg -n ${big(2000)}\ncitadel-test test/a.test.ts`;
+  const cut = sent(row({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b', name: 'Bash', input: { command } }] } })).message.content[0];
+  assert.equal(cut.input.command.length, INPUT_HEAD);
+  assert.equal(workKind(cut), 'test');
+  assert.equal(workKind(cut, true), '', "a Grunt's test run isn't the minion's");
 });

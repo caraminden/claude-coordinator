@@ -87,9 +87,9 @@ function chat(c: SeedCtx, t: Ticket, steps: number) {
     asked: (text: string) => put('user_message', { author: c.who, text }),
     init: () => claude({ type: 'system', subtype: 'init', session_id: `seed-${t.id}`, model: 'claude-opus-5-5' }),
     done: (text: string) => claude({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: `seed-${t.id}`, total_cost_usd: 0.42, duration_ms: 95_000 }),
-    /** A plan of steps, each with a guess in minutes, the first `finished` done and the next in progress. */
-    plan: (steps: [string, number][], finished: number) => {
-      call('mcp__thread__plan', { steps: steps.map(([step, minutes], i) => ({ n: i + 1, step, why: `${step}.`, minutes })) });
+    /** A plan of steps, each with a guess in minutes, the first `finished` done and the next in progress; with kinds and -1, the calls after it move it (#1923). */
+    plan: (steps: [string, number, string?][], finished: number) => {
+      call('mcp__thread__plan', { steps: steps.map(([step, minutes, kind], i) => ({ n: i + 1, step, why: `${step}.`, minutes, ...(kind ? { kind } : {}) })) });
       for (let i = 0; i <= finished && i < steps.length; i++) {
         const next = i < steps.length - 1 && i < finished ? [{ n: i + 2, status: 'doing' }] : [];
         if (i === 0) call('mcp__thread__plan', { steps: [{ n: 1, status: 'doing' }] });
@@ -528,24 +528,24 @@ mock.boards('#takes', { boards: [
     },
   },
   'mid-turn': {
-    about: 'a minion mid-turn: a five-step plan with two done, one in progress and a Bash call still running',
+    about: 'a minion mid-turn: a five-step plan with kinds, one done, two built and held open under the test run still going (#1923)',
     seed(c) {
-      const t = minion(c, 'Faster minions list', { status: 'running', last_activity: 'Running tests… 2/5' }, 'bug');
+      const t = minion(c, 'Faster minions list', { status: 'running', last_activity: 'Run the tests… · 1 of 5 done' }, 'bug');
       const w = chat(c, t, 30);
       w.asked('The minions list takes two seconds to load on Citadel. Find out why and fix it.');
       w.init();
       w.plan(
         [
-          ['Measure the slow load', 3],
-          ['Find the slow query', 5],
-          ['Add the index', 4],
-          ['Run the tests', 8],
-          ['Self-review and land', 12],
+          ['Find the slow query', 3, 'read'],
+          ['Add the index', 4, 'build'],
+          ['Use it in the list', 5, 'build'],
+          ['Run the tests', 8, 'test'],
+          ['Self-review and ship', 12, 'review'],
         ],
-        2,
+        -1,
       );
       w.said('Cause: `listTickets` reads every event for the last-activity line, 56k rows for Citadel. An index on `(ticket_id, kind, id)` takes it to 40 ms.');
-      w.call('Edit', { file_path: `${t.cwd}/src/db.ts`, old_string: 'CREATE INDEX', new_string: 'CREATE INDEX IF NOT EXISTS' }, 'The file has been updated.');
+      w.call('Edit', { file_path: '/repo/src/db.ts', old_string: 'CREATE INDEX', new_string: 'CREATE INDEX IF NOT EXISTS' }, 'The file has been updated.');
       w.call('Bash', { command: 'tools/citadel-node --test test/list-tickets.test.ts', description: 'Run the minions list tests' }, null);
       return route(c, t);
     },

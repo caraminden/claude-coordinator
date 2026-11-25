@@ -2,7 +2,7 @@
 // opens that action's row, so a page sends a short beginning of each long one, with its full length in `cut`, and
 // the row fetches the whole event when opened (progress-ui.js fullAction). The chat page and the kept copy of a chat
 // (core.js keepOpenChat) both send events through here; stored events stay whole.
-import { TASK_TOOLS } from './progress.js';
+import { TASK_TOOLS, workKind } from './progress.js';
 
 /** A Grunt's tool result: nothing reads it unopened but a failure's first line (progress-ui.js actionEl). */
 export const GRUNT_RESULT_HEAD = 200;
@@ -43,6 +43,7 @@ export function cutEvent(row) {
     } else if (data.type === 'assistant' && block.type === 'tool_use' && block.input && typeof block.input === 'object' && !TASK_TOOLS.has(block.name)) {
       for (const [key, value] of Object.entries(block.input)) {
         if (typeof value !== 'string' || value.length <= INPUT_HEAD) continue;
+        block.work ??= workKind(block); // the whole call's kind, read before its words go (#1923)
         block.input[key] = value.slice(0, INPUT_HEAD);
         (block.cut ??= {})[key] = value.length;
         changed = true;

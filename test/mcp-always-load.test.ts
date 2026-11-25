@@ -23,6 +23,15 @@ test('the plan tool refuses exactly the calls the readout ignores, with the same
     { steps: [{ n: 1, minutes: 'soon' }] },
     { steps: [{ n: 1, minutes: -1 }] },
     { steps: [{ n: 1, status: 'started' }] },
+    {
+      steps: [
+        { n: 1, step: 'A', kind: 'build' },
+        { n: 2, kind: 'ship' },
+      ],
+    },
+    { steps: [{ n: 1, kind: 'coding' }] },
+    { steps: [{ n: 1, kind: 'toString' }] },
+    { steps: [{ n: 1, kind: 7 }] },
     { steps: [{ n: 1, status: 'toString' }] },
     { steps: [{ n: 1, status: 'dropped' }, { step: 'no number' }] },
   ];

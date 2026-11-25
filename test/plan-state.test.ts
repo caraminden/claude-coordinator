@@ -182,3 +182,37 @@ test("a running minion's row gets its step's start and guess for the list's bar 
   assert.equal(row.step_ratio, 0.5);
   assert.deepEqual(row.steps, { done: 0, total: 2, since: started, usual: 90 });
 });
+
+// The server moves a tagged plan (#1923), in any scheme: this project isn't Citadel's.
+test("a tagged plan moves from the minion's calls, the same after a restart at any point, and its reply's state ends it", () => {
+  const t = newTicket();
+  const steps = [
+    { n: 1, step: 'Read', kind: 'read', minutes: 2 },
+    { n: 2, step: 'Write A', kind: 'build', minutes: 4 },
+    { n: 3, step: 'Write B', kind: 'build', minutes: 4 },
+    { n: 4, step: 'Test', kind: 'test' },
+    { n: 5, step: 'Ship', kind: 'ship' },
+  ];
+  const lines = [
+    init,
+    call('mcp__thread__plan', { steps }),
+    call('Edit', { file_path: '/repo/a.ts' }),
+    call('Bash', { command: 'npm test' }),
+    call('Edit', { file_path: '/repo/a.ts' }),
+    call('Bash', { command: 'npm test' }),
+    call('mcp__thread__hand_off_land', { summary: 'x' }),
+    say('Handed off.\n<!-- status: {"state":"pending-deploy","note":"going live"} -->'),
+    result,
+  ];
+  const bars: string[] = [];
+  let live = restart();
+  for (const [i, line] of lines.entries()) {
+    feed(live, t.id, [line]);
+    live = restart();
+    const got = (live as any).progressFor(t.id);
+    assert.deepEqual(plain(got), plain(fullReplay(t.id)), `after event ${i + 1}`);
+    bars.push(got.tasks.map((s: any) => s.status[0]).join(''));
+  }
+  assert.deepEqual(bars, ['', 'ipppp', 'ciipp', 'ciiip', 'ciipp', 'ciiip', 'cccci', 'ccccc', 'ccccc']);
+  assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 5, total: 5 });
+});

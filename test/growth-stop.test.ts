@@ -187,8 +187,13 @@ test('a hold and its lift run only set-property MemoryHigh: no stop, kill or Mem
     await g.tick('tight');
     high = 4 * GB + STOP.headroom; // what the next reading finds, or the hold counts as already lifted
     await g.tick('ok');
+    high = null;
+    now += 60_000;
+    current = 5 * GB;
+    await g.tick('tight');
+    await g.stop(); // shutdown lifts too
     const set = `--user set-property --runtime ${unit(7)}`;
-    assert.deepEqual(systemd.calls(), [`${set} MemoryHigh=${4 * GB + STOP.headroom}`, `${set} MemoryHigh=infinity`]);
+    assert.deepEqual(systemd.calls(), [`${set} MemoryHigh=${4 * GB + STOP.headroom}`, `${set} MemoryHigh=infinity`, `${set} MemoryHigh=${5 * GB + STOP.headroom}`, `${set} MemoryHigh=infinity`]);
     assert.equal(kill.mock.callCount(), 0, 'no signal sent');
   } finally {
     process.env.PATH = path;

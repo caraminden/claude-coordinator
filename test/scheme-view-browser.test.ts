@@ -38,8 +38,11 @@ const counts = `document.querySelector('.build-counts')?.textContent ?? ''`;
 test('a chat click in a scheme with a build keeps its heading counts and Preview link', { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1/t/7`, { width: 1280, height: 800 });
   await waitFor(page, 'the counts', `(${counts}).includes('4 merged in')`);
-  await page.eval(`location.hash = '#/p/1/t/8'`);
-  await waitFor(page, 'the second chat', `document.title.length > 0 && location.hash === '#/p/1/t/8'`);
+  // A refresh after the click brings the fields back, so watch the view itself for a moment without them.
+  await page.eval(`import('/base.js').then((m) => { window.gap = false; setInterval(() => { if (m.view.id === 102 && !(m.view.builds?.length && m.view.buildPreviews)) window.gap = true; }, 1); }); location.hash = '#/p/1/t/8'`);
+  await waitFor(page, 'the second chat', `import('/base.js').then((m) => { window.shown = m.view.id; }) && window.shown === 102`);
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(await page.eval('window.gap'), false);
   await waitFor(page, 'the counts to stay', `(${counts}).includes('2 open') && !!document.querySelector('.build-counts a')`);
 });
 

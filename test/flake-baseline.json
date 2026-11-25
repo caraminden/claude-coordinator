@@ -913,12 +913,6 @@
    "ok": 0
   }
  },
- "usage-limit.test.ts": {
-  "shortUntil": {
-   "n": 3,
-   "ok": 0
-  }
- },
  "visible.test.ts": {
   "sleep": {
    "n": 8,

@@ -4,7 +4,7 @@ import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { thrown } from './src/thrown.ts';
 import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
@@ -107,7 +107,7 @@ import { OutsideSpend } from './src/outside-spend.ts';
 import { config, DEFAULT_DATA_DIR } from './src/config.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
-import { AppServices, serviceOptions, ServiceError } from './src/app-services.ts';
+import { AppServices, serviceOptions } from './src/app-services.ts';
 import { startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
@@ -148,12 +148,13 @@ import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
-import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
 import { earlyCi, earlyDroppedWhy, landNews, readTail } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
+import { rollbackStarters } from './src/rollback-starters.ts';
 import { HostJobs, jobLost } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
@@ -161,10 +162,9 @@ import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
 import { StallWatch } from './src/stall-signals.ts';
-import { rollBackApk } from './src/apk-release.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
@@ -1426,23 +1426,6 @@ const testCopyReader = new TestCopyReader({
 // Roll back to last green (#1016, src/rollback.ts): each scheme's last green from CI health's reads, and the button on
 // a Releases card that can deploy a given commit: an app's two-slot deploy, or Citadel's own tools/deploy.sh --to.
 const lastGreen = new LastGreen(store);
-const rollbackJobs = new HostJobs(() => runner.units);
-const ROLLBACK_DIR = join(DATA_DIR, 'run', 'rollback');
-// deploy.sh's paths, only where this server was given them (a dev copy rolling back a scratch checkout): the live
-// server's defaults otherwise. Any other copy (another DATA_DIR, or one that doesn't deploy) without them can't roll
-// back, so it never touches the live checkout.
-const deployEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^DEPLOY_(LIVE|SOURCE|URL|DB|SERVICE|UNIT)$/.test(k) && v)) as Record<string, string>;
-/** Whether Citadel's own roll back still runs; once its job ended, say why if it didn't go live, and clear it for the next one. */
-function citadelRollingBack(current: string | null): boolean {
-  const job = rollbackJobs.state(ROLLBACK_DIR, 2000);
-  if (!job) return false;
-  if (job.code === null) return true;
-  const p = ownScheme();
-  const pin = p && lastGreen.pinned(p.id, CITADEL_TARGET);
-  if (p && pin && job.code !== 0 && current !== pin.sha) rollback.failed(p.id, CITADEL_TARGET, pin.sha, `tools/deploy.sh --to said: ${job.output.trim().split('\n').slice(-3).join(' ') || `exit ${job.code}`}`);
-  rmSync(ROLLBACK_DIR, { recursive: true, force: true });
-  return false;
-}
 const rollback = new Rollback({
   lastGreen,
   repoDir: (id) => store.getProject(id)?.repo_dir ?? null,
@@ -1450,59 +1433,24 @@ const rollback = new Rollback({
   changed: () => showReleases(),
   get: (k) => store.getSetting(k) ?? undefined,
   set: (k, v) => store.setSetting(k, v),
-  // An APK Citadel builds after each deploy (#837: a feed, no release workflow) rolls back with its app (ADR 0012).
-  follows: (tv) => {
-    const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
-    return t?.contraption && !t.workflow ? `app:${t.contraption}` : null;
-  },
-  published: (tv) => (tv.target.kind === 'apk' ? apkReader.published(tv.target.projectId, tv.target.id) : null),
-  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : tv.target.kind === 'apk' ? apkReader.rollingBack(tv.target.projectId, tv.target.id) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
-  starters: {
-    contraption: (tv, to, by, uid) => {
-      const row = store.getContraption(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '');
-      if (!row || row.home_scheme !== tv.target.projectId) throw new HttpError(404, `${tv.target.name} isn't one of this scheme's apps`);
-      try {
-        startDeploy(app, row, by, null, uid, false, to);
-      } catch (err) {
-        if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
-        throw err;
-      }
-    },
-    // A CI package (ADR 0012, "Feed, no rebuild"): held at last green's existing build in the CI store, which its card
-    // shows as current and the CI store's pins hand to its app's updater. Nothing deploys.
-    ci: (tv) => {
-      const build = ciPackageReader.greenBuild(tv.target.projectId, tv.target.id);
-      if (!build) throw new HttpError(409, `${tv.target.name} has no build from last green or before it in Citadel's CI store, so there's nothing to hand out.`);
-      return { build };
-    },
-    // A CI-signed APK (ADR 0012, Q4 "Yes, now"): point citadel/rollback at last green and start its release workflow
-    // there numbered one past the published build; the APK reader publishes the run once it has signed.
-    apk: async (tv, to) => {
-      const t = targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id);
-      const p = store.getProject(tv.target.projectId);
-      if (!t?.contraption || !p?.repo_dir) throw new HttpError(409, `${tv.target.name} has no app or repo to roll back with`);
-      const code = await rollBackApk({ name: tv.target.name, workflow: t.workflow ?? null, slug: repoSlug(p.repo_url), current: tv.current?.number, copy: !!services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR, as: githubOf(p.repo_dir), branch: ROLLBACK_BRANCH }, to);
-      apkReader.started(t);
-      void releases.refresh();
-      return { code };
-    },
-    // Citadel's server (the every-scheme skill's §1: only the scheme whose repo this server runs has it): deploy.sh
-    // --to in a unit of its own, as a landing runs, since its restart ends this server. The next one reads how it went.
-    [CITADEL_TARGET]: (tv, to) => {
-      const p = store.getProject(tv.target.projectId);
-      if (!p?.repo_dir || p.id !== ownScheme()?.id) throw new HttpError(404, 'Only the scheme this server runs can roll it back');
-      if ((services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) && !config.deployLive) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
-      rollbackJobs.start({
-        dir: ROLLBACK_DIR,
-        cwd: p.repo_dir,
-        argv: ['bash', 'tools/deploy.sh', '--to', to],
-        env: { ...turnEnv(process.env), ...deployEnv() },
-        unit: `citadel-rollback-${Date.now()}`,
-        description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`,
-        ticketId: 0,
-      });
-    },
-  },
+  ...rollbackStarters({
+    store,
+    lastGreen,
+    finder: targetFinder,
+    ciPackages: ciPackageReader,
+    apk: apkReader,
+    services,
+    jobs: new HostJobs(() => runner.units),
+    dir: join(DATA_DIR, 'run', 'rollback'),
+    copy: !!services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR,
+    deployLive: config.deployLive,
+    env: process.env,
+    ownScheme,
+    githubOf,
+    startDeploy: (row, by, uid, to) => startDeploy(app, row, by, null, uid, false, to),
+    refresh: () => void releases.refresh(),
+    failed: (projectId, target, sha, why) => rollback.failed(projectId, target, sha, why),
+  }),
 });
 const releases = new Releases({
   store,

@@ -1,4 +1,5 @@
-// A red ship train keeps splitting (#1899, train_bisect in tools/land.sh; Josh, 2026-11-24: "keep splitting and any green
+// A red ship train with no likely ship to pull keeps splitting (train_bisect in tools/land.sh, #1899's rule, which #1918 keeps for
+// that case only; Josh, 2026-11-24: "keep splitting and any green
 // section gets shipped, until the bad change is found and then pulled out to be fixed and full train starts over"): each
 // green section ships at once, only the bad ship goes back, and the rest form a full train again.
 import assert from 'node:assert/strict';
@@ -118,55 +119,32 @@ test("a split's front red twice on flakes keeps its place: no verdict on it, and
   l.done();
 });
 
-const IMPORT = 'import'; // spelled out, test/pipeline-files.test.ts would follow the fixture's imports as this file's own
-
-// test/real.test.ts imports a.ts and b.ts and passes alone here: ship 6 adds b.ts and ship 7 changes a.ts, so the files name two ships.
-const guessed = (red: string) =>
-  [
-    ships(7, { [red === 'red.txt' ? 3 : 0]: redTxt(), 6: { also: ['b.ts', 'export const b = 1;\n'] }, 7: { also: ['a.ts', 'export const a = 2;\n'] } }),
-    { FAKE_RED_PATH: red, LAND_TRAIN_MAX: '5' },
-    (r: ReturnType<typeof setup>) => {
-      writeFileSync(join(r.source, 'a.ts'), 'export const a = 1;\n');
-      r.commit(r.source, 'test/real.test.ts', `import { existsSync } from 'node:fs';\n${IMPORT} '../a.ts';\nif (existsSync('b.ts')) await ${IMPORT}('../b.ts');\n`);
-    },
-  ] as const;
-
-test('a guess from the files cuts just before its first ship: the ones ahead ship on one run, fewer runs than the middle takes', async () => {
-  const l = await line(...guessed('b.ts'));
-  const done = await l.go();
-  assert.match(done[1].stderr, /suspects: the files name more than one ship \(#6, #7\)/);
-  assert.deepEqual(cuts(done), ['4/6'], 'the middle would be the first 3');
-  for (const n of [3, 4, 5]) shipped(l, done[n - 1], n, 2, 4);
-  assert.equal(done[5].status, 1, done[5].stderr);
-  for (const n of [1, 2, 3, 4, 5, 7]) assert.equal(done[n - 1].status, 0, `ship ${n}: ${done[n - 1].stderr}`);
-  assert.equal(l.runs(), 5, "ship 1's, the red train's, the four ahead, ship 6's own red, and ship 7's: the middle takes one more");
-  l.done();
+test('where a red train is cut: the middle', () => {
+  const body = /^split_cut\(\) \{.*\}$/m.exec(readFileSync(land, 'utf8'))?.[0] ?? assert.fail('no split_cut in land.sh');
+  const cut = (n: number) => Number(execFileSync('bash', ['-euc', `${body}\nsplit_cut "$@"`, '-', String(n)], { encoding: 'utf8' }));
+  assert.deepEqual([2, 3, 4, 5, 6, 7].map(cut), [0, 0, 1, 1, 2, 2]);
 });
 
-test('a wrong guess only costs its cut: the ships it named ship, and the bad one ahead of them is found and goes back', async () => {
-  const l = await line(...guessed('red.txt'));
-  const done = await l.go();
-  assert.deepEqual(cuts(done).slice(0, 2), ['4/6', '2/6']);
-  assert.equal(done[2].status, 1, done[2].stderr);
-  for (const n of [1, 2, 4, 5, 6, 7]) assert.equal(done[n - 1].status, 0, `ship ${n}: ${done[n - 1].stderr}`);
-  l.done();
-});
-
-// split_cut alone, over the trains the runs above don't reach.
-test('where a red train is cut: before the first guess, the front by itself when it is the guess, else the middle', () => {
-  const body = /^split_cut\(\) \{\n[\s\S]*?\n\}/m.exec(readFileSync(land, 'utf8'))?.[0] ?? assert.fail('no split_cut in land.sh');
-  const cut = (...a: number[]) => Number(execFileSync('bash', ['-euc', `${body}\nsplit_cut "$@"`, '-', ...a.map(String)], { encoding: 'utf8' }));
-  assert.deepEqual(
-    [2, 3, 4, 5, 6, 7].map((n) => cut(n)),
-    [0, 0, 1, 1, 2, 2],
-    'no guess: the middle',
-  );
-  assert.equal(cut(6, 5), 4);
-  assert.equal(cut(6, 5, 4), 3, 'in any order');
-  assert.equal(cut(6, 0, 4), 0, 'the front itself is a guess');
-  assert.equal(cut(6, 1, 2, 3, 4), 2, 'a guess naming over half of them says nothing');
-  assert.equal(cut(3, 4, 5), 0, 'only guesses past the part left: the middle');
-});
+// A split under way when #1918 went live ends as #1899 began it, cut at the middle: its file's third word is ignored. One
+// that names nobody in line, or is broken, holds nobody up.
+for (const [what, file, shipsAlone] of [
+  ['names two ships in line, one with the old guess word', 'ticket/0-x\n0000000003 ticket/3-x guess\n0000000004 ticket/4-x\n', true],
+  ['names only ships that are gone', 'ticket/0-x\n0000000098 ticket/98-x guess\n0000000099 ticket/99-x\n', false],
+  ['is cut off', 'ticket/0-x\n00000', false],
+  ['is empty', '', false],
+] as const) {
+  test(`an old split file that ${what} never wedges the line (#1918)`, async () => {
+    const l = await line(ships(5, {}));
+    writeFileSync(join(l.state, 'split'), file);
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    if (shipsAlone) {
+      assert.match(done[1].stderr, /takes the 1 ships waiting behind it \(ticket\/5-x\)/, "the split's two ride in no other train");
+      assert.match(done[2].stderr, /one of the 2 ships ticket\/0-x's red train is down to, so this tests it alone/);
+    } else shipped(l, done[4], 5, 2, 4);
+    l.done();
+  });
+}
 
 test("a ship sent back runs its failed test files in its next hand-off's smoke check, before it boards", () => {
   const r = setup();

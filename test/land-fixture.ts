@@ -141,6 +141,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_BURN: the burn-in step as land.sh asks at its CI limit (#1443), "<status><tab><started_at><tab><completed_at>";
 // FAKE_REAL: "<test file>=<path> ...": a run is red when its commit has any of the paths, and its log names each such test file
 // a real failure (failed again alone), or with FAKE_LOG=burn a burn-in failure: a train with several bad ships (#1564);
+// FAKE_REAL_FIRST: only the first of them, so the next is seen once that one is gone (#1918);
+// FAKE_REAL_SHORT=<file>: a log with that file counts one more failed file than it names (#1918);
 // FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
@@ -266,12 +268,13 @@ case "$*" in
     [ "$3" = 7 ] || [ -z "\${FAKE_LOG_RERUN:-}" ] || FAKE_LOG=\$FAKE_LOG_RERUN
     [ "$3" = 7 ] || [ -z "\${FAKE_SKIP_RERUN:-}" ] || FAKE_SKIP=\$FAKE_SKIP_RERUN
     if [ -n "\${FAKE_REAL:-}" ]; then # each test file whose path the run's commit has failed for real (#1564)
-      rl=''; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && rl="$rl \${e%%=*}"; done
+      rl=''; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && [[ "$rl " != *" \${e%%=*} "* ]] && rl="$rl \${e%%=*}"; done
+      [ -z "\${FAKE_REAL_FIRST:-}" ] || rl=" \$(cut -d' ' -f2 <<<"$rl")"
       echo "not ok 1 - the red test's output (run $3)"
       if [ "\${FAKE_LOG:-}" = burn ]; then
         for f in $rl; do printf '%b burn-in: %s: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p" "$f"; done
       else
-        printf '%b run-tests: %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\n' "$p" "$(wc -w <<<"$rl")"
+        printf '%b run-tests: %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\n' "$p" "$(($(wc -w <<<"$rl") + $(grep -cF "\${FAKE_REAL_SHORT:-no}" <<<"$rl")))"
         for f in $rl; do printf '%b run-tests: %s: failed again alone: a real failure\n' "$p" "$f"; done
       fi
       exit 0

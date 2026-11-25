@@ -421,6 +421,7 @@ test('landPhase names each phase land.sh writes: starting, boot check, rebase, C
     ['waiting for CI: a busy runner, 5 min so far', 'test', 'ci', 'CI'],
     ['waiting for CI or a quiet perigee, 31 min so far', 'test', 'ci', 'CI'],
     ['testing the train again without its likely causes', 'test', 'bisect', 'Bisect'],
+    ['running the red tests alone here: each likely ship by itself on main, 2 left at 14:02', 'test', 'bisect', 'Bisect'],
     ['finding the ship that turned the train red', 'test', 'bisect', 'Bisect'],
     ['running the tests since 14:20', 'test', 'tests', 'Tests on perigee'],
     ['rerunning 2 failed test files since 14:25', 'test', 'reruns', 'Reruns'],
@@ -460,6 +461,20 @@ test('a ship whose CI started early on the train ahead reads "CI · started earl
   early.clear();
   await waits.poll();
   assert.equal(waits.wait(f.id)!.label, 'CI');
+});
+
+test('a ship pulled off a red train on a guess says whose train, which test and what decides; it is in no train and not counted ahead (#1918)', async () => {
+  const { waits, ticket } = setup();
+  const [f, p, w] = [minion(), minion(), minion()];
+  ticket(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
+  ticket(2, p.branch, 0, `pulled off ${f.branch}'s ship train on a guess, red in test/a.test.ts, test/b.test.ts`, 20);
+  ticket(3, w.branch, 0, 'waiting', 19);
+  await waits.poll();
+  const off = waits.wait(p.id)!;
+  assert.deepEqual([off.stage, off.label, off.chip], ['line', 'Pulled', 'line · pulled']);
+  assert.match(off.text, new RegExp(`^pulled off #${f.number}'s train on a guess \\(test/a\\.test\\.ts, test/b\\.test\\.ts failed\\): the train runs again without it, and that decides`));
+  assert.equal(waits.wait(w.id)!.train?.label, 'Releasing next', 'the pulled ship fills no train');
+  assert.match(waits.wait(w.id)!.text, /2nd in line, behind #\d+ \(waiting for CI\)$/);
 });
 
 test("land-news's earlyCi reads the latest try's early_gate line only", async () => {

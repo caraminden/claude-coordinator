@@ -37,6 +37,7 @@ paths:
   - "test/land-train-riders.test.ts"
   - "test/land-train-early.test.ts"
   - "test/land-train-split.test.ts"
+  - "test/land-train-suspects.test.ts"
   - "test/land-burn-in.test.ts"
   - "test/burn-in.test.ts"
   - "test/land-deploy.test.ts"

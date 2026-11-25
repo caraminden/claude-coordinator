@@ -489,6 +489,7 @@ const PHASES: [RegExp, string][] = [
   [/^queue: /, 'in line'],
   // A rider waits outside the line for its train's verdict (#1166); "back in line" puts it in line again.
   [/^land: riding in \S+'s ship train/, 'riding'],
+  [/^land: pulled off \S+'s ship train/, 'pulled off its train'], // until the train without it has a verdict (#1918)
   [/^land: back in line on its own/, 'in line'],
 ];
 

@@ -352,6 +352,7 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   // The red train's bisect: its trial runs (#1366) and its search.
   if (/^(finding the ship that turned the train red|testing the train again without its likely causes)/.test(p))
     return { stage: 'test', word: 'bisect', key: 'bisect', text: p === 'finding the ship that turned the train red' ? 'the train went red in CI: finding the ship that turned it red' : 'the train went red in CI: testing it again without its likely causes', label: 'Bisect' };
+  if (/^running the red tests alone here/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: `the train went red in CI: ${p}`, label: 'Bisect' };
   // The kit core's own phases (Citadel on the core, #1323): its check, CI on a batch, and a member waiting on its head's deploy.
   if (/^(running the check|waiting to run the check|running the guards|running land_preflight)/.test(p)) return { stage: 'test', word: 'check', key: 'check', text: p, label: 'Check' };
   if (/^(CI is red|CI passed|checked \S+: CI runs on its batch's top)/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p, label: 'CI' };
@@ -402,6 +403,12 @@ export function earlyWait(w: Wait, e: EarlyTest): Wait {
   const word = e.state === 'running' ? `early${count}` : e.state === 'passed' ? 'passed early' : e.state === 'failed' ? 'early failed' : 'early dropped';
   return { ...w, early: e, chip: `${w.chip} · ${word}`, text: `${w.text}. ${e.text}`, brief: w.brief ? `${e.brief} · ${w.brief}` : e.brief };
 }
+
+/** A waiter's phase while it is off a red train on a guess (#1918, land.sh's train_verdict): whose train, and the failing tests. */
+export const pulledOf = (phase: string): { front: string; tests: string } | null => {
+  const m = /^pulled off (\S+)'s ship train on a guess, red in (.+?)(?: since \d\d:\d\d)?$/.exec(phase);
+  return m && { front: m[1], tests: m[2] };
+};
 
 /** The Releases page's words for a holder's CI after an early run counted for it (land.sh's early_gate). */
 export const EARLY_CI = { word: 'CI · early', label: 'CI · started early', text: "CI started early, during the train ahead's deploy: waiting for that run's result" };
@@ -473,7 +480,14 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
       out.set(t.label, { kind: 'land', stage: 'line', label: 'Held', chip: 'line · held', text: `${held}: it waits until main passes its boot check again, and rides no train`, brief: held, since: t.mtime, usual: null, train: { role: 'waiting', label: 'Held' } });
       return;
     }
-    const ahead = line.slice(0, i).filter((a) => !riders.includes(a) && !heldOf(a.phase));
+    // Pulled off a red train on a guess: it waits for the verdict on the train without it, and fills no train's count.
+    const off = pulledOf(t.phase);
+    if (off) {
+      const text = `pulled off ${name(off.front)}'s train on a guess (${off.tests} failed): the train runs again without it, and that decides whether it goes back to its minion`;
+      out.set(t.label, { kind: 'land', stage: 'line', label: 'Pulled', chip: 'line · pulled', text, brief: `pulled off ${name(off.front)}'s train on a guess`, since: t.mtime, usual: null, train: { role: 'waiting', label: 'Pulled' } });
+      return;
+    }
+    const ahead = line.slice(0, i).filter((a) => !riders.includes(a) && !heldOf(a.phase) && !pulledOf(a.phase));
     const place = ordinal(ahead.length + 1);
     const label = trainLabel(Math.floor(forming++ / TRAIN_SHIPS));
     let text: string,

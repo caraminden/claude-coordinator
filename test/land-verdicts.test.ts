@@ -35,7 +35,7 @@ const NOT_VERDICTS: Record<string, string> = {
   gate: 'calls cut_off, flake_only and known_flakes, benched here',
   smoke: 'the smoke check before the line: one ship alone, its own red',
   train_build: 'builds the train; keeps the last log for a rider it drops',
-  train_bisect: 'splits with CI runs: a guess only picks where to cut, each run decides',
+  train_bisect: 'splits with CI runs: each run decides',
   train_suspects: 'calls train_real, train_pin and train_suspects_of, benched here, then holds or refuses what they name',
   flake_keep: 'calls flake_only and train_suspects_of, benched here',
 };
@@ -222,16 +222,16 @@ test('D: a red reached through a hub file names no suspects: the bisect', () => 
   assert.equal(pin.out, '0\n');
 });
 // D2: run 44869305694 (Nov 20 21:06 PST, report 2106): front #1355, riders #1356, #1384, #1365, #1358, #1394; db-writer
-// real (#1356's), codex-lock a load flake. Today's guess names #1355 and #1365, both innocent: more than one ship, so
-// the bisect already. With hub: no suspects, the bisect too.
-test('D2: the same red with two wrong guesses goes to the bisect either way', () => {
+// real (#1356's), codex-lock a load flake. Today's guess names #1355 and #1365, both innocent: both are
+// pulled (#1918). With hub: no suspects, the bisect.
+test('D2: the same red with two wrong guesses: hub would spare both', () => {
   const t = `${log('44869305694')}\n${train('4730e151', '4730e151', 1355, 1356, 1384, 1365, 1358, 1394)}\ntrain_chg\nrules_say=1`;
   assert.equal(run({ script: `${t}\ntrain_real` }).out, 'test/db-writer.test.ts\n', 'codex-lock passed alone');
   // A held round red like this one puts back any held ship with either test (#1403): both count as red.
   assert.equal(run({ script: `${t}\ntrain_failing` }).out, 'test/codex-lock.test.ts\ntest/db-writer.test.ts\n');
   const r = run({ script: `${t}\nguess test/db-writer.test.ts` });
   assert.equal(r.out, '0 3\n');
-  assert.doesNotMatch(r.log, /would/, 'two guessed ships or none: the bisect either way, so the shadow line stays quiet');
+  assert.match(r.log, /would spare #1355, #1365 \(hub\): no suspects, so the bisect · test\/db-writer\.test\.ts/);
   assert.equal(run({ script: `${t}\nguess test/db-writer.test.ts`, rules: 'hub=live' }).out, '\n');
 });
 

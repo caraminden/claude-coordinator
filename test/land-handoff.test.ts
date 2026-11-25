@@ -1048,6 +1048,7 @@ test("a feeder's merge into a build wakes the build's parked owner with one mess
 test("landPhase reads the phase from land.sh's newest phase line", () => {
   assert.equal(landPhase(''), 'landing: starting');
   assert.equal(landPhase('queue: 2nd in line (ahead: #12 "x")\n'), 'landing: in line');
+  assert.equal(landPhase("queue: 2nd in line\nland: riding in ticket/3-a's ship train: waiting for CI on the train\nland: pulled off ticket/3-a's ship train on a guess, red in test/a.test.ts: waiting for CI on the train without it\n"), 'landing: pulled off its train');
   assert.equal(landPhase('land: CI passed\nland: master is now at d1a5c2f "x"\n'), 'landing: deploying', 'any default branch (KT2)');
   assert.equal(landPhase('land: waiting for CI on abc\nland: build/3 is now at d1a5c2f "x"; master is untouched\n'), 'landing: waiting on CI', 'a build merge is not a deploy');
   assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');

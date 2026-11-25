@@ -14,17 +14,43 @@ the last one in line waited for every run ahead of it.
 - **The shape** (Josh, 2026-11-20, "Plan approved: build it this way"): the ship at the front of the line takes up to
   `LAND_TRAIN_MAX` (6) ships waiting behind it, in line order. It replays each onto the one before it, runs CI once on
   the top, fast-forwards main to the top, and deploys once.
-- **A red train keeps splitting** (#1899; Josh, 2026-11-24: "keep splitting and any green section gets shipped, until
+- **A red train pulls every likely ship, and refills nothing** (#1918; Josh, 2026-11-24: "lets say we have a full train of
+  minions 1, 2, 3, 4, 5, 6, 7 and it goes red. Lets say we think it is 5 or 3 that is likely the issue based on the test
+  that failed. so we bisect out the likely failures and run 1, 2, 4, 6, 7 if they are green they get shipped and we send
+  5 and 3 back to debug their failures. If they are still red and we guess 1 is the issue based on the failure, then we
+  take it out and run 2, 4, 6, 7 then we finally get a green and ship those 4 while sending 1 back for debugging. this way
+  even on 3 failures we are only running 3 tests to ship 4 minions"; plan approved that day at 11:24 PM PST). It replaces
+  the refill, the guess that only picks where to cut, and the bisect after a wrong guess, in the four items below.
+  Every ship the failing tests point at leaves at once, the front included, and only what is left runs again, with nobody
+  from the line in the empty seats. Green: what is left ships together. Red: the new failure, the same test or another,
+  names the next pull, until green or one ship is left. Then the next ships in line form a fresh full train. A ship that
+  can't be rebuilt without the pulled ones goes back in line, blamed for nothing. No ship named: the split below.
+  - A ship pulled on a guess runs the failing test alone on main, here, before it is blamed. Red alone (twice, and green
+    on main): back to its minion with that. Green alone while another ship pulled for the same test was red alone: it
+    waits for the next train. None of them red alone: they wait off the train, and all go back once the train without
+    them passes the test. If that train is red on the test again, the guess was wrong: back in line, blamed for nothing
+    (a pick: "if none fails alone, all of them go back" read as once the train shows it was one of them).
+  - The test's runs on the train's prefixes (the pin) name a ship but don't prove it: the named ship runs alone on main too.
+    Red alone: it goes back, and the other ships its test named stay on the train. Not red alone: a guess like any other,
+    and the refusal says which runs it had (alone, on the train's prefixes, or none because it sits on another rider).
+  - A front pulled on a guess can't wait behind its own train: it hands what is left to the next ship in line
+    (`<state>/pull`, at most 3 times a hand-off, a pick, so a front never steps aside for ever) and takes its verdict like a rider's. A front proven alone is refused,
+    and the hand-over is the same. The next front resumes only if it is one of the kept ships; otherwise the file is dropped.
+  - Every ship named and some red alone: those go back, and the ones that passed alone stay on and ride.
+    Every ship named and none of them red alone leaves nothing to test: the split. A file no ship can be named for rides on
+    while others are pulled.
+  - "Failed alone" is said only of a ship that was run alone (a burn-in red used to say it without a run).
+  - A last red whose log doesn't name every failed file proves nothing of a pulled ship: it goes back in line, unblamed.
+  - Only Citadel's land.sh has this: the kit's land core and land.local.sh have no train that pulls or holds (ADR 0026).
+  - A split under way when this went live ends as it began, cut in the middle; its file's old third word is ignored.
+- **A red train with no likely ship keeps splitting** (#1899; Josh, 2026-11-24, kept by #1918 for this case only: "keep splitting and any green section gets shipped, until
   the bad change is found and then pulled out to be fixed and full train starts over"). It replaces "bisected, then the
   green part ships and the first red ship is refused"; "the bisect" below means this splitting. CI runs the front part of
   the train. Green: those ships go live at once, and the next ship in line fronts what is left, with those ships only
   (`<state>/split` lists them; ships waiting behind don't join). Red: a smaller part. A split refuses a ship only as a
   front tested alone on main, so a flake or a pair that fails only together blames nobody who passes alone: of such a
   pair the earlier one ships and the later one goes back. Once the bad ship is found, the next front builds a full train
-  again from everything waiting. No early run is stacked on a train being split. Suspects still come first: a confirmed
-  cause (below) leaves at once and the rest get one run, no halves. Names that nothing confirms only pick where to cut:
-  just before the first of them, or the middle when they name nobody or more than half the ships. One ship alone named
-  by a guess still waits off the train (#1403, below) and goes back only once the train without it passes its files.
+  again from everything waiting. No early run is stacked on a train being split.
   A refused front's branch keeps its rebase, as a ship tested alone always did. One bad ship of six takes 3 to 5 CI
   runs to find, the red one included, and 6 after a wrong guess.
   Picks, open to change: the part behind a red front part is not tested while the search runs (it boards the next full

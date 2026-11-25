@@ -147,14 +147,22 @@ test("readTail: the log's end, read again only once it grows; a cut first line i
   assert.equal(readTail(f), 'land: last\n');
 });
 
-test('suspects: the ships sent back replace the bisect line, naming each with its failing tests (G2)', () => {
-  const sus = 'land: suspects: #1331 (test/memory.test.ts, test/a.test.ts), #1351 (test/b.test.ts): CI is red on the ship train (' + url + '/1) in tests only their changes touched, so they are likely the cause: they go back to their minions with the failure, and the next ships in line take their places';
+test('suspects: the ships pulled off the train replace the bisect line, naming each with its failing tests (G2)', () => {
+  const sus =
+    'land: suspects: #1331 (test/memory.test.ts, test/a.test.ts; failed alone: sent back), #1351 (test/b.test.ts; a guess: waits for the verdict): CI is red on the ship train (' +
+    url +
+    '/1) in those tests, so they leave the train at once. The train runs again with the ships that are left, and none from the line takes their places';
   // land.sh guesses suspects before it bisects, so the log has no "CI is red on the ship train" line first
   const n = landNews([...front, ...red.slice(0, -1), sus].join('\n'), name);
   assert.deepEqual(n.slice(1), [
     { tone: 'bad', text: 'CI red on the train: the Overlord hears of every start, and gets a card when one… · checks run one at a time' },
-    { tone: 'bad', text: 'Sent back to their minions: #1331 (memory, a), #1351 (b)' },
+    { tone: 'bad', text: 'Pulled off the train: #1331 (memory, a; failed alone: sent back), #1351 (b; a guess: waits for the verdict). It runs again with the ships that are left' },
   ]);
+  // What became of a guess, and a pulled front (#1918).
+  const after = (line: string) => landNews([...front, ...red.slice(0, -1), sus, line].join('\n'), name).at(-1);
+  assert.deepEqual(after('land: #1351 goes back in line: the train was red again on test/b.test.ts without it, so the guess was wrong'), { tone: 'warn', text: '#1351 is back in line: the train was red again on b without it, so the guess was wrong' });
+  assert.deepEqual(after('land: #1351 is refused: it was pulled on a guess, no ship pulled for test/b.test.ts failed it alone, and the train without it passed it'), { tone: 'bad', text: '#1351 is sent back: the train without it passed b, and no pulled ship failed it alone' });
+  assert.match(after('land: ticket/1311-front steps aside: the next ship in line runs the train with what is left of it')!.text, /steps aside: the next ship in line runs the train with what is left$/);
   // a suspects line that gave up leaves the bisect line alone
   const none = [...front, ...red, 'land: suspects: no ship on the train touched test/x.test.ts or what it imports, so the bisect looks for the ship'];
   assert.equal(landNews(none.join('\n'), name).at(-1)!.text, 'Finding the ship that turned the train red');

@@ -121,12 +121,12 @@ test('a rider refused for a skipped test hears so, for its wake to say skipped, 
 test("a file CI didn't rerun because a real failure already made the run red names no suspect: only the confirmed failure's ship is refused", async () => {
   const l = await line([{}, {}, { change: ['test/busy.test.ts', 'x\n'] }, { change: ['test/real.test.ts', '// red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'after-real' });
   const done = await l.go();
-  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\): CI is red/);
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts; a guess: waits for the verdict\): CI is red/);
   assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /so it is likely the cause/);
+  assert.match(done[3].stderr, /in test\/real\.test\.ts, which ticket\/4-x changed.*pulled off the train on that guess/);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
-  assert.equal(l.runs(), 3, "ship 1's, the red train's and the refilled train's");
+  assert.equal(l.runs(), 3, "ship 1's, the red train's and the smaller train's");
   l.done();
 });
 
@@ -206,9 +206,9 @@ test('a bisect run killed from outside twice before any test failed refuses nobo
 test("a file whose rerun alone was killed from outside names no suspect: only the confirmed failure's ship is refused", async () => {
   const l = await line([{}, {}, { change: ['test/busy.test.ts', 'x\n'] }, { change: ['test/real.test.ts', '// red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'killed-rerun' });
   const done = await l.go();
-  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\): CI is red/);
+  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts; a guess: waits for the verdict\): CI is red/);
   assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /so it is likely the cause/);
+  assert.match(done[3].stderr, /in test\/real\.test\.ts, which ticket\/4-x changed.*pulled off the train on that guess/);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });

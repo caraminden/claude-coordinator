@@ -1106,7 +1106,8 @@ land_suspect() {
   fi
   for m in $(printf '%s\n' "${!sus[@]}" | sort -n); do
     line+="${line:+, }$(citadel_member_label "$m") (${sus[$m]})"
-    [ -z "${sure[$m]:-}" ] || sure_line+="${sure_line:+, }$(citadel_member_label "$m")"
+    # A burn-in red was run alone by nobody here, so its line never says it failed alone (#1918).
+    [ -n "$burn_red" ] || [ -z "${sure[$m]:-}" ] || sure_line+="${sure_line:+, }$(citadel_member_label "$m")"
   done
   say "suspects: $line, from CI's red on $(git rev-parse --short "$tip") ($ci_url).${sure_line:+ Run alone here, the tests failed with $sure_line and passed just before it.} The likeliest is $(citadel_member_label "$pick"): the bisect runs CI just below it, then on it"
   citadel_retro_log "ship train suspects · $branch · $line${sure_line:+ · failed alone here: $sure_line} · $ci_url"

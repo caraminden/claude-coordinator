@@ -103,7 +103,19 @@ export function landNews(output: string, name: (branch: string) => string): News
       slow = null;
       done();
       redNews(i); // land.sh guesses before it bisects, so no "CI is red" line came first
-      news.push({ tone: 'bad', text: `Sent back to their minions: ${m[1].replace(/\(([^)]*)\)/g, (_, fs: string) => `(${fs.split(', ').map(short).join(', ')})`)}` });
+      news.push({
+        tone: 'bad',
+        text: `Pulled off the train: ${m[1].replace(/\(([^)]*)\)/g, (_, s: string) => {
+          const [fs, ...said] = s.split('; ');
+          return `(${[fs.split(', ').map(short).join(', '), ...said].join('; ')})`;
+        })}. It runs again with the ships that are left`,
+      });
+    } else if ((m = s.match(/^(\S+) goes back in line: the train was red again on (.+?) without it, so the guess was wrong/))) {
+      news.push({ tone: 'warn', text: `${m[1]} is back in line: the train was red again on ${list(m[2].split(', ').map(short))} without it, so the guess was wrong` });
+    } else if ((m = s.match(/^(\S+) is refused: it was pulled on a guess, no ship pulled for (.+?) failed it alone, and the train without it passed it/))) {
+      news.push({ tone: 'bad', text: `${m[1]} is sent back: the train without it passed ${list(m[2].split(', ').map(short))}, and no pulled ship failed it alone` });
+    } else if ((m = s.match(/^(\S+) steps aside: /))) {
+      news.push({ tone: 'warn', text: `${name(m[1])} steps aside: the next ship in line runs the train with what is left` });
     } else if ((m = s.match(/^bisect: the first (\d+) of (\d+) ships tested green, so they ship now; back in line with nobody refused: ([^;]*)/))) {
       done();
       news.push({ tone: 'warn', text: `The first ${m[1]} of ${m[2]} ships tested green, so they ship now${backInLine(m[3].split(' ').filter(Boolean))}` });

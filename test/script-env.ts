@@ -8,7 +8,7 @@
 //   LAND_REBASED                  land.sh -> its rebased copy (unset again before any child, cleared in case).
 //   DEPLOY_TIMES                  land.sh -> deploy.sh: the file deploy.sh notes its "queued" and "live" times in (#565).
 //   LAND_REDO                     land.sh -> the copy that starts over after main went back (unset again before any child, like LAND_REBASED).
-//   LAND_RETRIED, LAND_RETRY_NOW, LAND_FLAKE_KEPT  land.sh -> the copy that goes again after a refusal by the pipeline (#1360; unset again before any child).
+//   LAND_RETRIED, LAND_RETRY_NOW, LAND_FLAKE_KEPT, LAND_ASIDE  land.sh -> the copy that goes again after a refusal by the pipeline (#1360; LAND_ASIDE: a pulled front stepping aside, #1918; unset again before any child).
 //   LAND_FIX                      a person -> land.sh: "this branch fixes the commit whose deploy was rolled back"; the suite a landing runs inherits it.
 //   LAND_URGENT                   a person -> land.sh -> deploy.sh: "this fixes shipping or an outage now": its restart skips the starved-box hold (#1417).
 //   CITADEL_TEST_PROGRESS(_TO)    citadel-heavy and run-tests.sh -> citadel-node -> its reporter: where a run's counts go.
@@ -32,6 +32,7 @@ export const SCRIPT_ENV = [
   'LAND_RETRIED',
   'LAND_RETRY_NOW',
   'LAND_FLAKE_KEPT',
+  'LAND_ASIDE',
   'LAND_FIX',
   'LAND_URGENT',
   'CITADEL_TEST_PROGRESS',

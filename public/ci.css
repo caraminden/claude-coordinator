@@ -212,6 +212,7 @@
 .flow-why .chip { cursor: pointer; min-height: 24px; transition: background var(--motion), border-color var(--motion); }
 .flow-why .chip:hover { border-color: var(--h); }
 .flow-why .chip.on { border-color: var(--h); background: color-mix(in srgb, var(--h) 12%, var(--panel)); }
+:root[data-theme="dark"] .flow-why .chip.on { background: color-mix(in srgb, var(--h) 28%, var(--panel)); color: var(--ink); }
 .flow-table-wrap { overflow-x: auto; }
 .flow-table tr > :is(th, td):nth-child(-n+3) { text-align: left; }
 .flow-table tfoot tr > td:nth-child(n) { text-align: right; }

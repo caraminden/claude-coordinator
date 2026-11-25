@@ -284,12 +284,12 @@ export function composer(chatId, ticket) {
           }),
           false
         );
-      return !!text || attachments.items.length > 0 || attachments.busy > 0;
+      return !!text || attachments.items.length > 0 || attachments.busy > 0 || attachments.adding > 0;
     },
     // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
     send: (text) => {
       // A file still uploading or an image still being prepared: the message shows at once as waiting on it, and goes when it's done.
-      if (attachments.busy || attachments.uploading) return holdForUploads(text, after, unparkWith);
+      if (attachments.working) return holdForUploads(text, after, unparkWith);
       const sent = attachments.items.slice();
       attachments.remove(sent);
       send(text, sent, after, unparkWith);
@@ -813,7 +813,7 @@ export async function pointAt(chatId, crop, note, { draw = false } = {}) {
 }
 
 /** Whether any chat has a file uploading or an image being prepared; a reload now would lose it. */
-export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.busy || a.uploading);
+export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.working);
 
 /**
  * What a message will carry: images as thumbnails, read as base64 so Claude sees them, and files,
@@ -828,6 +828,11 @@ function createAttachments(chatId, onChange) {
     el,
     items: [],
     busy: 0,
+    // Files an add() still has to go through: busy dips to 0 between images, so Send would go after the first (C3).
+    adding: 0,
+    get working() {
+      return state.busy > 0 || state.adding > 0 || state.uploading;
+    },
     get uploading() {
       return state.items.some((i) => i.upload && !i.upload.name);
     },
@@ -837,7 +842,7 @@ function createAttachments(chatId, onChange) {
   // Waiters run once nothing is being prepared or uploaded (a microtask later, so an image's original has started by then).
   const settle = () =>
     queueMicrotask(() => {
-      if (state.busy || state.uploading) return;
+      if (state.working) return;
       for (const f of idleWaiters.splice(0)) f();
     });
   state.whenIdle = (f) => {
@@ -913,9 +918,15 @@ function createAttachments(chatId, onChange) {
   };
   state.add = async (files, marked = false) => {
     // Copied first: the picker's FileList empties when the picker is reset, before the loop gets far.
-    for (const file of [...files]) {
-      if (file.type.startsWith('image/')) await addImage(file, marked);
-      else addFile(file);
+    state.adding++;
+    try {
+      for (const file of [...files]) {
+        if (file.type.startsWith('image/')) await addImage(file, marked);
+        else addFile(file);
+      }
+    } finally {
+      state.adding--;
+      settle();
     }
   };
   /** A chip naming what was pointed at (#1141); its text goes with the message. */

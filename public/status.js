@@ -441,8 +441,8 @@ const readAge = (at) => {
 };
 /** While the box is easing or tight, the headline tiles say so from the live reading: warn for easing, bad for tight. */
 const easeTone = (n) => (n ? (n.level === 'tight' ? 'bad' : 'warn') : null);
-/** "churning: reclaiming 98,233 pages a second, swapping out 40 MB/s" (tight: "tight: ..."), the numbers the 5 s reading has. */
-const churn = (n) => `${n.level === 'tight' ? '' : 'churning: '}${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages/s` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
+/** "reclaiming 98,233 pages/s, swapping out 40 MB/s", the numbers the 5 s reading has. */
+const churn = (n) => `${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages/s` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
 
 function citadelTiles(c, days, now, ships, redraw) {
   const n = c.easing?.now ?? null;
@@ -470,7 +470,7 @@ function citadelTiles(c, days, now, ships, redraw) {
       'CPU',
       n ? `load ${Math.round(n.load1)} on ${c.host.cores} cores` : host ? `load ${Math.round(host.load1)} on ${c.host.cores} cores` : 'No reading yet',
       n
-        ? `${n.level === 'tight' ? 'Tight' : 'Easing'} on memory · live load, warns over ${c.host.cpuWarn} at once`
+        ? `${n.level === 'tight' ? 'Tight' : 'Easing'} on memory · ${n.load1 > c.host.cpuWarn ? `over ${c.host.cpuWarn}, so slow` : `under ${c.host.cpuWarn}`}${n.at ? ` · ${readAge(n.at)}` : ''}`
         : c.host.peak
           ? `Load is tasks running or waiting, not a percent · Peak ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min`
           : 'Read every 5 minutes',

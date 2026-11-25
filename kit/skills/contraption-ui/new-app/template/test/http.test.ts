@@ -24,6 +24,10 @@ test('citadelUrl reads CITADEL_URL, and only a development run may go without it
     process.env.NODE_ENV = 'development';
     assert.match(citadelUrl(), /^http:\/\//);
   } finally {
-    for (const [k, v] of [['CITADEL_URL', saved.url], ['NODE_ENV', saved.node]] as const) v === undefined ? delete process.env[k] : (process.env[k] = v);
+    for (const [k, v] of [
+      ['CITADEL_URL', saved.url],
+      ['NODE_ENV', saved.node],
+    ] as const)
+      v === undefined ? delete process.env[k] : (process.env[k] = v);
   }
 });

@@ -607,8 +607,10 @@ test("a running turn, a queued message and an approval card: the readers' list, 
         if (who !== 'olive') assert.equal(reader.status, 200, `${who} ${p}`);
         // The Status page's clock is each answer's own. Values main moves on a timer with no broadcast, which only the
         // sweep (off here) carries: the turn's activity clock while a card waits on a person (Runner.checkQuiet), and the
-        // answer-time probes' last readings.
-        const timed = (k: string, v: unknown) => (k === 'activity' && v ? { ...v, at: 0 } : k === 'answer' && v && typeof v === 'object' && 'probing' in v ? { ...v, now: 0, reader: 0 } : v);
+        // answer-time probes' last readings. And the main thread's own stalls (#1903): it records one once its event loop
+        // is free again, so its answer, which waited the stall out, counts a stall the reader's answer, given during it,
+        // can't have (2.2 s on CI with ten copies of this file at once).
+        const timed = (k: string, v: unknown) => (k === 'activity' && v ? { ...v, at: 0 } : k === 'answer' && v && typeof v === 'object' && 'probing' in v ? { ...v, now: 0, reader: 0 } : k === 'stalls' ? null : v);
         const sansNow = (body: string) => ({ ...JSON.parse(body, timed), now: 0 });
         const [r, m] = [sansNow(reader.body), sansNow(main.body)];
         assert.deepEqual(r, m, `${who} ${p}: ${differs(r, m).slice(0, 5).join(', ')}`);

@@ -578,7 +578,9 @@ details.recap-group:not([open]) > summary { margin: 0; }
 /* The chat's context meter (#1193): fixed width, tabular numbers, so a changing number moves nothing. */
 .ctx-meter { display: inline-block; flex: none; min-width: 11ch; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85em; white-space: nowrap; }
 .ctx-compacts { flex: none; color: var(--muted); font-size: 0.85em; white-space: nowrap; }
-.ctx-compacts.hot { color: var(--danger, #c0392b); }
+.ctx-compacts.hot { color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); border-radius: 999px; padding: 0.1em 0.6em; }
+/* A phone's head has room for one of the two. */
+@media (max-width: 800px) { .ctx-meter:has(+ .ctx-compacts) { display: none; } }
 .ctx-meter.hot { color: var(--danger, #c0392b); }
 
 /* A waiting heavy run's newest output (#1681) */

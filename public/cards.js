@@ -847,6 +847,7 @@ export function questionCard(ticketId, card, opts = {}) {
     markAnswered(answers, author, pictureUrls = []) {
       answered = confirmed = true;
       cardPicks.delete(card.id);
+      cardPictures.delete(card.id);
       el.classList.add('answered');
       attach.hidden = true;
       if (pictureUrls.length && !atts.items.length) {
@@ -871,6 +872,7 @@ export function questionCard(ticketId, card, opts = {}) {
     markSettled(settled) {
       answered = confirmed = true;
       cardPicks.delete(card.id);
+      cardPictures.delete(card.id);
       el.classList.add('answered');
       for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = true;
       for (const other of el.querySelectorAll('.other')) other.hidden = true;

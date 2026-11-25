@@ -2,11 +2,11 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/judges.test.ts test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md
+shared: src/turn-launch.ts src/machines.ts src/routes/machines.ts src/runner.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/judges.test.ts test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: src/running-turn.ts
-#1972: public/machine-worker.mjs src/machine-turn.ts test/machine-turn.test.ts src/machine-sync.ts test/machine-sync.test.ts src/sessions.ts src/routes/files.ts public/machine-sync.mjs src/routes/machines.ts src/runner.ts
+#1972: public/machine-worker.mjs src/machine-turn.ts test/machine-turn.test.ts src/machine-sync.ts test/machine-sync.test.ts src/sessions.ts src/routes/files.ts public/machine-sync.mjs
 #1973: (merged in)
 #2006: public/settings-machines.js public/machine-setup.js public/machines.css src/machine-lend.ts public/worker-agent.mjs public/machine-worker-row.js src/worker-join.ts test/worker-join.test.ts test/worker-install.test.ts test/machine-worker-browser.test.ts tools/worker/ server.ts src/machine-pools.ts test/machine-pools.test.ts
 
@@ -22,4 +22,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - T4 (#1973) merged in on 2026-11-25; the eight files it borrowed are back, the first three with #1972, the rest shared. Its own files (src/turn-line.ts and the rest) are free: a later piece that needs one asks #1935.
 - #1962's three real-run fixes merged in on 2026-11-25 (8de6e66e7); the two files it borrowed are back on #1972's line.
 - Lent to #2006 for its merge (2026-11-25): server.ts (the `online` lines of T2 and T4; then shared again), src/machine-pools.ts and test/machine-pools.test.ts (T4's `away()`; then T6's).
-- Lent to #1972 for its merge (2026-11-25): src/routes/machines.ts and src/runner.ts (four of T2's lines change), then shared again.
+- T3 (#1972) merged in on 2026-11-25; src/routes/machines.ts and src/runner.ts, lent for it, are shared again. Its line's files pass to T6 when it starts.

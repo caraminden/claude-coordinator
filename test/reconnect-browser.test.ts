@@ -174,6 +174,26 @@ test('switching chat drops what was held: the next chat is live at once, and the
   await waitFor(page, 'the first chat, whole', `${texts} === 'first,missed,live'`);
 });
 
+test('a reconnect sends the pages open in the viewer what others changed meanwhile, whatever else is on screen (#1862)', { skip }, async () => {
+  const page = await openChat();
+  // A page frame with its bridge, as the viewer makes one, whose store another person changes while the stream is down.
+  await page.eval(`(async () => {
+    const { attachBridge, TAG } = await import(new URL('bridge-host.js', location.href));
+    window.saved = 'old';
+    window.got = [];
+    const iframe = document.body.appendChild(document.createElement('iframe'));
+    const api = async () => ({ store: 's', entries: [{ key: 'k', value: saved }] });
+    attachBridge(iframe, { open: { artifact: 1 }, name: 'p.html', owner: 'Josh', api });
+    iframe.contentWindow.addEventListener('message', (e) => e.data.op === 'changed' && got.push(e.data.entries[0].value));
+    dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, origin: 'null', data: { bridge: TAG, id: 1, op: 'hello', page: 'p' } }));
+  })()`);
+  await page.eval(`saved = 'theirs', dropStream(), reopenStream()`);
+  await waitFor(page, "the page has the other's change", `got.join() === 'theirs'`);
+  await page.eval(`import(new URL('base.js', location.href)).then((m) => m.setView({ kind: 'projects' }))`); // no scheme on screen
+  await page.eval(`saved = 'theirs too', dropStream(), reopenStream()`);
+  await waitFor(page, 'outside a scheme too', `got.at(-1) === 'theirs too'`);
+});
+
 test('a dismissal that arrives while a reconnect is fetching is not undone by the older answer', { skip }, async () => {
   const page = await openChat();
   const row = `import(new URL('base.js', location.href)).then((m) => m.view.tickets.get(102).status + ' ' + m.view.ticket.title)`;

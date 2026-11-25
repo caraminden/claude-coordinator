@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
+import { until } from './wait.ts';
 
 const SRC = readFileSync(join(import.meta.dirname, '..', 'public', 'artifact-bridge.js'), 'utf8');
 const FN = SRC.slice(SRC.indexOf('(function (cfg)')).trim().replace(/;$/, '');
@@ -191,13 +192,10 @@ test('a write the viewer refuses for good still fails at once, and the save stat
   assert.equal(p.ctx.citadel.saveState(), 'saved');
 });
 
-/** Answer the page's questions whether its request is still being worked on, as a live viewer does, until stopped. */
+/** Say again and again that every request the page has out is being worked on, as a live viewer does, until stopped. */
 function aliveViewer(p) {
   const timer = setInterval(() => {
-    for (const m of p.waiting('alive')) {
-      m.answered = true;
-      p.deliver({ ack: m.id });
-    }
+    for (const m of p.posted) if (!m.answered) p.deliver({ ack: m.id });
   }, 5);
   return () => clearInterval(timer);
 }
@@ -211,14 +209,14 @@ test('a write the viewer is still working on past the limit is waited for, then 
   const set = p.ctx.citadel.storage.set('k', 'b').catch((e) => {
     failed = e.message;
   });
-  await wait(10);
+  await until('the write', () => p.waiting('write').length);
   p.ack('write');
   await wait(500); // past the 150 ms limit three times over
   assert.equal(failed, null, 'the viewer is there and has it');
   assert.equal(p.bars.length, 0);
   assert.equal(p.waiting('write').length, 1, 'not sent beside the one on its way, which could land after a later write');
   p.restarting('write');
-  await wait(40);
+  await until('the write', () => p.waiting('write').length);
   assert.equal(JSON.stringify(p.waiting('write').map((m) => m.entries)), JSON.stringify([[{ key: 'k', value: 'b' }]]));
   p.answer('write', { entries: [{ key: 'k', value: 'b' }] });
   await set;
@@ -231,7 +229,7 @@ test('a viewer that took a write and then went away still puts the bar up (#1862
   p.answer('hello', { person: 'Cara', entries: [] });
   await p.ctx.citadel.ready;
   const set = p.ctx.citadel.storage.set('k', 'b');
-  await wait(10);
+  await until('the write', () => p.waiting('write').length);
   p.ack('write');
   await assert.rejects(set, /did not answer/);
   assert.equal(p.waiting('alive').length, 1, 'asked before giving up');
@@ -246,15 +244,16 @@ test('a send the viewer is still posting past the limit does not read as failed 
   p.answer('hello', { person: 'Cara', entries: [] });
   await p.ctx.citadel.ready;
   const sent = p.ctx.citadel.send('Picks: 3');
-  await wait(5);
+  await until('the send', () => p.waiting('send').length);
   p.ack('send');
   await wait(300);
   p.answer('send', { sent: true, to: '#4' });
   assert.equal((await sent).to, '#4');
 });
 
-test('a page opened while Citadel restarts joins once it is back, and what was picked meanwhile is saved (#1862)', async () => {
+test('a page opened while Citadel restarts joins once it is back, and what was picked meanwhile is saved (#1862)', async (t) => {
   const p = page([['k', 'a']]);
+  t.after(aliveViewer(p));
   const states = [];
   p.ctx.citadel.watchSaves((s) => states.push(s));
   p.ack('hello', { person: 'Cara', file: 'p.html', owner: 'Josh', draw: true });
@@ -263,9 +262,9 @@ test('a page opened while Citadel restarts joins once it is back, and what was p
   assert.equal(await p.ctx.citadel.ready, true);
   assert.equal(JSON.stringify(await p.ctx.citadel.info()), JSON.stringify({ person: 'Cara', file: 'p.html', owner: 'Josh', draw: true }));
   const set = p.ctx.citadel.storage.set('k', 'b');
-  await wait(20);
+  await until('the hello again', () => p.waiting('hello').length);
   p.restarting('hello');
-  await wait(30);
+  await until('and again', () => p.waiting('hello').length);
   assert.equal(p.waiting('write').length, 0, 'nothing is written before the hello lands');
   assert.equal(p.ctx.citadel.saveState(), 'retrying');
   p.answer('hello', {
@@ -277,7 +276,7 @@ test('a page opened while Citadel restarts joins once it is back, and what was p
       { key: 'n', value: 1 },
     ],
   });
-  await wait(10);
+  await until('the write', () => p.waiting('write').length);
   assert.equal(await p.ctx.citadel.storage.get('n'), 1, "others' changes came with the hello");
   assert.equal(await p.ctx.citadel.storage.get('k'), 'b', 'the pick stays on top');
   p.answer('write', { entries: [] });
@@ -291,11 +290,10 @@ test('a page whose hello hangs draws once the viewer is known to be there, and s
   const p = page();
   t.after(aliveViewer(p));
   p.ack('hello', { person: 'Cara', file: 'p.html', owner: 'Josh', draw: false });
-  await wait(200); // the hello's limit is 5 s, 50 ms here
-  assert.equal(await Promise.race([p.ctx.citadel.ready, wait(50)]), true);
+  assert.equal(await p.ctx.citadel.ready, true); // once the hello's limit is past, 5 s, 50 ms here
   const set = p.ctx.citadel.storage.set('k', 1);
   p.answer('hello', { person: 'Cara', entries: [] });
-  await wait(10);
+  await until('the write', () => p.waiting('write').length);
   p.answer('write', { entries: [] });
   await set;
 });
@@ -303,7 +301,7 @@ test('a page whose hello hangs draws once the viewer is known to be there, and s
 test('a page the viewer refuses says on the page that a change is not saved; one nobody answers stays quiet (#1862)', async () => {
   const refused = page();
   refused.answer('hello', 'That page is no longer there', false);
-  await wait(5);
+  await until('the second try', () => refused.waiting('hello').length);
   refused.answer('hello', 'That page is no longer there', false);
   assert.equal(await refused.ctx.citadel.ready, false);
   assert.equal(refused.bars.length, 0, 'nothing to lose yet');

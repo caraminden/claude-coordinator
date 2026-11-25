@@ -34,6 +34,7 @@ function line(t: TestContext, size = 1) {
     },
     pauseTurn: (id) => void stopped.push(id),
     changed: () => {},
+    carded: () => [],
     gapMs: 0,
     detached: false,
   };

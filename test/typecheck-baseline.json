@@ -19,7 +19,6 @@
   "src/routes/tickets.ts": [18, 0],
   "src/runner.ts": [6, 0],
   "src/side-ask.ts": [0, 2],
-  "src/stuck-list.ts": [1, 0],
   "src/tripwire.ts": [6, 5],
   "src/turn-launch.ts": [0, 1],
   "src/waits.ts": [1, 0],

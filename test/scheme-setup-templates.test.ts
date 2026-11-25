@@ -69,3 +69,17 @@ test("the format template passes in a repo with another style and includes, and 
     s.done();
   }
 });
+
+test("the biome.json template leaves a Python environment's JavaScript alone (#2007)", () => {
+  const theirs = 'var  a=1\n';
+  const dirs = ['.venv/lib/torch/x.js', 'ml/.venv/lib/torch/x.js'];
+  const s = scheme({ 'biome.json': readFileSync(join(templates, 'biome.config.json'), 'utf8'), 'src/b.js': 'const  b=2\n', ...Object.fromEntries(dirs.map((f) => [f, theirs])) });
+  try {
+    const r = spawnSync(join(repo, 'node_modules/.bin/biome'), ['format', '--write', '.'], { cwd: s.dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(readFileSync(join(s.dir, 'src/b.js'), 'utf8'), 'const b = 2;\n');
+    for (const f of dirs) assert.equal(readFileSync(join(s.dir, f), 'utf8'), theirs, f);
+  } finally {
+    s.done();
+  }
+});

@@ -2597,9 +2597,9 @@ smoke() {
   local t0=$SECONDS out rc=0 passed=1
   say "smoke: checking $branch before it queues"
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
-  # Commit titles, again on the rebased commit: here without what the rebase leaves out (#1983).
+  # Commit titles, again on the rebased commit: here without the same patches on main, and land_under's (#1983); one the rebase would empty is named.
   if [ "$mode" = land ] && ! out=$(titles "nothing landed" --cherry-pick --right-only "refs/heads/$BRANCH...$pre" ${under:+"^$under"} 2>&1); then
-    sed 's/^land: /land: smoke: /' <<<"$out" >&2
+    sed 's/^land: /land: smoke: /' <<<"$out. If $BRANCH already has that commit's change, git rebase $BRANCH drops it" >&2
     refuse "smoke: a commit title is wrong, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
   fi
   early_plan

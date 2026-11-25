@@ -509,9 +509,9 @@ smoke() {
     under=$(under_of)
     early_check main "before the line" || smoke_fail "it conflicts with main"
   fi
-  # What waited in line to hear it (#1983). A plain ship's without what its rebase leaves out: what main has, and under_of's.
+  # What waited in line to hear it (#1983). A plain ship's without the same patches on main, and under_of's, which its rebase leaves out; one it would empty is named.
   [ "$mode" != land ] || left=(--cherry-pick --right-only main...HEAD ${under:+"^$under"})
-  lost_title "${left[@]}" || { say "smoke: $lost"; smoke_fail "a commit title is wrong"; }
+  lost_title "${left[@]}" || { say "smoke: $lost. If main already has that commit's change, git rebase main drops it"; smoke_fail "a commit title is wrong"; }
   if [ -f tools/parse-check.ts ]; then
     out=$("$tools/citadel-node" --no-warnings tools/parse-check.ts 2>/dev/null) || true
     [ -z "$out" ] || { sed 's/^/land: smoke: /' <<<"$out" >&2; smoke_fail "a .ts file does not parse"; }

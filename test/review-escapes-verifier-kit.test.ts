@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -141,6 +141,22 @@ test('the stay hook blocks a run that stopped early, then gives way after its la
     const run = () => spawnSync(process.execPath, [join(HERE, 'verifier-stay.mjs'), dir], { input: JSON.stringify({ stop_hook_active: false }), encoding: 'utf8' }).stdout;
     for (let i = 0; i < MAX_BLOCKS; i++) assert.equal(JSON.parse(run()).decision, 'block', `block ${i + 1}`);
     assert.equal(run(), '');
+  } finally {
+    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
+test('a scratch folder set up before for another checkout boots this one, a dangling link included', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'verifier-copy-'));
+  try {
+    const repo = realpathSync(join(HERE, '../..'));
+    for (const old of [tmpdir(), join(dir, 'gone')]) {
+      rmSync(join(dir, 'repo'), { force: true });
+      symlinkSync(old, join(dir, 'repo'));
+      const r = spawnSync(process.execPath, [join(HERE, 'verifier-copy.ts'), dir], { encoding: 'utf8', timeout: 30_000 });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(realpathSync(join(dir, 'repo')), repo);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }

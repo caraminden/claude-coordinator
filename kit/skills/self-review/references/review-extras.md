@@ -126,4 +126,5 @@ made untried, send it back once (SendMessage, its agent id), naming that one sta
 
 Its findings are claims. Run the steps of each before you act on it: fix the ones that happen, with a test;
 the rest are `wrong`. Nothing it finds sets the label by itself. Record the run with `review_set` (slug
-`verifier`, `pass` when no finding held).
+`verifier`: `fail` when a finding held, `pass` when none did). One that never drove the change (it couldn't boot, or
+still shows fewer than 3 flows after going back) is no pass: record nothing and say `Verifier: incomplete: <why>`.

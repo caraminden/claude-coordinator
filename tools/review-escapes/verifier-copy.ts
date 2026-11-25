@@ -2,7 +2,7 @@
 // services. The escape-set harness (run.ts) sets one up per case; the opt-in verifier's Grunt sets one up on a
 // minion's worktree:
 //   node tools/review-escapes/verifier-copy.ts <scratch folder>
-import { chmodSync, copyFileSync, existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const HERE = import.meta.dirname;
@@ -30,7 +30,9 @@ if (import.meta.main) {
     process.exit(1);
   }
   setUpCopy(dir);
-  if (!existsSync(join(dir, 'repo'))) symlinkSync(repo, join(dir, 'repo'));
+  // Relinked each time: one left by another minion's worktree would boot that one instead.
+  rmSync(join(dir, 'repo'), { force: true });
+  symlinkSync(repo, join(dir, 'repo'));
   console.log(`Ready: ${dir} boots ${repo}.
 - node ${dir}/boot.mjs start [--fresh] --turns [--clock <iso>]: a real server on empty data (${dir}/data), signed in as the admin. Then: set -a; . ${dir}/dev.env; set +a; curl -s -H "Cookie: \$DEV_COOKIE" "\${DEV_URL}api/..."
 - Turns run a stand-in claude, scripted one line a turn in ${dir}/fake/turns.jsonl, all keys optional: {"ticket": 2, "outcome": "success|usage_limit|not_logged_in|error|crash", "text": "...", "delayMs": 15000, "tools": [{"name": "ask_question", "arguments": {}}]}. fake/calls.jsonl shows what each turn was sent.

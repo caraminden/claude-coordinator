@@ -30,7 +30,7 @@ const MAX_MASKED = 50;
  * Each person's container's memory (#1214, sizes in deploy/citadel.slice): everyday peaks were 1.6G and 3.4G, one ran to
  * 22.3G with 21.6G of it in swap. Throttled past 12G, OOM-killed (one process, OOMPolicy=continue) past 14G, 4G of zram swap.
  * Raised from 6G/8G (#1258; Josh, 2026-11-20, "Raise to 10 GB": his container hit 6G with ~10 minions and a Rust build).
- * Raised from 10G/12G (#1950; Josh, 2026-11-25, "Raise to 12 GB now": 30 storms at 10G in his container in 11 hours while the box had 10 GB free).
+ * Raised from 10G/12G (#1950; Josh, 2026-11-25, "Raise to 12 GB now": 30 storms at 10G in his container in 11 hours, the box at 6.7 GB available or more).
  */
 export const CONTAINER_MEMORY = { high: '12G', max: '14G', swap: '4G' };
 /**

@@ -526,10 +526,7 @@ export class ClaudeLink {
 
   private async start(uid: number, forTurn: boolean): Promise<void> {
     // The two slow reads of a spec (git's ignored list, the image folder walk) run off the main thread, fresh every start.
-    const [checkout, image] = await Promise.all([
-      LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT),
-      imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`),
-    ]);
+    const [checkout, image] = await Promise.all([LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT), imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`)]);
     const spec = this.spec(uid, { checkout, image });
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
     await this.containers.createVolume(spec.name);

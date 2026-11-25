@@ -358,6 +358,7 @@ export function planCard(ticketId, card, opts = {}) {
   let rank = 0;
   const editing = (on) => {
     notes.hidden = cancel.hidden = sendNotes.hidden = !on;
+    notes.toggleAttribute('data-draft', on && !!notes.value.trim()); // holds a reload while it has text
     approve.hidden = revise.hidden = on;
     drop.hidden = !ins || on;
     if (!on) return;
@@ -421,10 +422,17 @@ export function planCard(ticketId, card, opts = {}) {
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
-  cancel.addEventListener('click', () => editing(false));
+  cancel.addEventListener('click', () => {
+    notes.value = '';
+    planNotes.delete(card.id);
+    editing(false);
+  });
   sendNotes.addEventListener('click', () => decide('revise'));
   drop.addEventListener('click', () => decide('reject'));
   notes.addEventListener('input', () => {
+    notes.toggleAttribute('data-draft', !!notes.value.trim());
+    if (notes.value.trim()) planNotes.set(card.id, notes.value);
+    else planNotes.delete(card.id);
     sendNotes.disabled = !fixed && !ins && !notes.value.trim();
   });
   notes.addEventListener('keydown', (e) => {
@@ -441,6 +449,7 @@ export function planCard(ticketId, card, opts = {}) {
       if ((PLAN_RANK[r.status] ?? 0) <= rank) return;
       rank = PLAN_RANK[r.status];
       handle.status = r.status;
+      planNotes.delete(card.id);
       editing(false);
       el.classList.add('answered', `p-${r.status}`);
       why.hidden = true;
@@ -452,6 +461,10 @@ export function planCard(ticketId, card, opts = {}) {
   mine.handle = handle;
   view.cards.set(card.id, handle);
   if (card.status !== 'pending') handle.settle(card);
+  else if (planNotes.has(card.id)) {
+    notes.value = planNotes.get(card.id);
+    editing(true);
+  }
   return el;
 }
 
@@ -574,6 +587,11 @@ const cardPicks = new Map();
 // The pictures pasted into a card's box, by card id: switching chats rebuilds the card, and they stay with it. Only a card
 // holding a picture is kept: each strip's callback holds its whole card, so an empty one is let go (#1760).
 const cardPictures = new Map();
+// What a plan card's Revise box holds, by card id, so a redrawn card gets its notes back (#1852).
+const planNotes = new Map();
+
+/** Whether a question card still holds picks or pictures nobody has sent: a reload would lose them (#1852). */
+export const unsentCardWork = () => cardPictures.size > 0 || [...cardPicks.values()].some((ps) => ps.some((p) => p.selected.size || p.other.trim()));
 
 export function questionCard(ticketId, card, opts = {}) {
   if (card.notice) return noticeCard(ticketId, card, opts);
@@ -828,6 +846,7 @@ export function questionCard(ticketId, card, opts = {}) {
     // `pictures`: the urls of the images the answer carried; this viewer's own strip already shows theirs.
     markAnswered(answers, author, pictureUrls = []) {
       answered = confirmed = true;
+      cardPicks.delete(card.id);
       el.classList.add('answered');
       attach.hidden = true;
       if (pictureUrls.length && !atts.items.length) {
@@ -851,6 +870,7 @@ export function questionCard(ticketId, card, opts = {}) {
     // The minion took a typed reply as the answer (settle_question).
     markSettled(settled) {
       answered = confirmed = true;
+      cardPicks.delete(card.id);
       el.classList.add('answered');
       for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = true;
       for (const other of el.querySelectorAll('.other')) other.hidden = true;

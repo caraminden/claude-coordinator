@@ -30,6 +30,7 @@ import { ciChip, releasesChip, tabOf } from './ci.js';
 import { statusChip } from './status.js';
 import { inAppHash, jumpParts, showParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
+import { unsentCardWork } from './cards.js';
 import { filesUploading } from './files.js';
 import { onJobUpdate } from './jobs.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
@@ -559,6 +560,8 @@ function unsentWork() {
   if (tabBridgeOpen()) return 'once you close the page you opened with Open';
   if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return writing;
   if (filesUploading()) return 'once your files finish uploading';
+  // Picks and pictures on a card nobody has sent yet, drawn or not (#1852).
+  if (unsentCardWork()) return 'once you have sent your card answers';
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim()) ? writing : null;
 }
 

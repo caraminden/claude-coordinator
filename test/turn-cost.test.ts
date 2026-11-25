@@ -52,7 +52,6 @@ createInterface({ input: process.stdin }).once('line', () => {
   mkdirSync(join(root, 'data'), { recursive: true });
   const seed = new Store(join(root, 'data', 'coordinator.db'));
   seed.setSetting('turn-pool', { size: TURNS, at: 0, fixed: { size: TURNS, by: 'test' } } satisfies PoolSize);
-  seed.close();
   const srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   try {
     const project = ok(await srv.call('/api/projects', { name: 'Load' }));

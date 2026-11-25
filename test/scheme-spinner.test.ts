@@ -12,7 +12,8 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const fake = fakeClaude(root, { release: join(root, 'release') });
 
 test('api/projects: a turn waiting on an approval card is not working until someone answers it', async () => {
-  const srv = await bootServer({ env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
+  // HOME holds the server's data, as on a real box: the tripwire refuses the card's `echo hi` in a folder beside its home (a CI runner's temp).
+  const srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1', HOME: root } });
   try {
     const project = (await srv.call('/api/projects', { name: 'Delve' })).data;
     assert.equal((await srv.call(`/api/projects/${project.id}`, { approval_rules: 'Bash(echo:*)' }, 'PATCH')).status, 200);

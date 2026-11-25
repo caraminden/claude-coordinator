@@ -112,7 +112,7 @@ if (!args.includes('--no-build')) {
   for (const step of manifest.build ?? []) {
     console.log(`boot check: $ ${step}`);
     const r = spawnSync('bash', ['-c', step], { cwd: app, stdio: 'inherit', timeout: Math.max(1, deadline - Date.now()) });
-    if (r.status !== 0) fail(`the build step "${step}" ${r.error ? `didn't finish (the build has ${minutes} min): ${r.error.message}` : `exited ${r.status ?? r.signal}`}`);
+    if (r.error || r.status !== 0) fail(`the build step "${step}" ${r.error ? `didn't finish (the build has ${minutes} min): ${r.error.message}` : `exited ${r.status ?? r.signal}`}`);
   }
 }
 

@@ -40,6 +40,6 @@ CI has no real data to start on, and Citadel does restart, so fix the app. A rep
 - **A person comes back in** through that minion's chat.
 - **Two at once:** the `boot` concurrency group.
 
-No `CI_RUNNER` switch, unlike `references/push-guard.md`'s `runs-on`: as in Citadel's other Linux jobs, GitHub's runners cost Actions minutes and need
+No `CI_RUNNER` switch, unlike `references/push-guard.md`'s `runs-on`: GitHub's runners cost Actions minutes and need
 a person's yes (`citadel:ci-store`), and a nightly can wait.
 While Cara's PC is off or she is logged off, runs wait in GitHub's queue.

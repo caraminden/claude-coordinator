@@ -147,7 +147,7 @@ check or its failure is in your done note.
 
 Read `references/push-guard.md` and do it as written: copy `guard.sh`, `pre-push` and `settings.json` from `templates/`, prove the
 guard, then point every workflow job at the scheme's shared runner (`<scheme-slug>-ci`) and call `ci_runners` with `op: "add"`.
-A repo with no workflows gets `templates/starter-ci/` instead, on a Linux runner of its own (`os: "linux"`).
+A repo with no workflows, when the plan gives it CI, gets `templates/starter-ci/` instead, on a Linux runner of its own (`os: "linux"`).
 
 *Done when* `git config core.hooksPath` prints `.githooks`, `tools/guard.sh --self-test` ends `0 failed`, a push to main through
 `.githooks/pre-push` exits 1, no job's `runs-on` is a bare hosted runner and, if the repo has workflows, `ci_runners` came back

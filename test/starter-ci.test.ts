@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import { until } from './wait.ts';
 
 const DIR = join(import.meta.dirname, '..', 'kit/skills/scheme-setup/templates/starter-ci');
 
@@ -91,10 +92,10 @@ test('a failed build step is red and starts nothing; --no-build skips it', async
 });
 
 test('build_timeout is one clock for the whole build', async (t) => {
-  // 0.01 min is 600 ms: each step fits alone, the two together don't.
-  const r = await check(t, { build: ['sleep 0.4', 'sleep 0.4'], build_timeout: 0.01, start: ['node', 'server.mjs'] }, SERVER);
+  // 0.01 min is 600 ms: each step fits alone, the two together don't. The second exits 0 when stopped, and still fails.
+  const r = await check(t, { build: ['sleep 0.4', "trap 'exit 0' TERM; sleep 0.4 & wait"], build_timeout: 0.01, start: ['node', 'server.mjs'] }, SERVER);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /the build step "sleep 0\.4" didn't finish/);
+  assert.match(r.out, /the build step ".*sleep 0\.4.*" didn't finish/);
 });
 
 test('the start command reads as in its unit: ~/ and ${VAR}', async (t) => {
@@ -110,13 +111,15 @@ const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio
   const r = await check(t, { start: ['node', 'server.mjs'], health: '/apps/demo/health' }, wrapper);
   assert.equal(r.code, 1, r.out);
   const left = Number(readFileSync(join(r.app, 'left.txt'), 'utf8'));
-  let stat = '';
-  try {
-    stat = readFileSync(`/proc/${left}/stat`, 'utf8');
-  } catch {
-    // gone
-  }
-  assert.ok(stat === '' || / Z /.test(stat), `pid ${left} is still running: ${stat}`);
+  // Killed, then reaped a moment later: gone, or a zombie waiting to be.
+  const gone = () => {
+    try {
+      return / Z /.test(readFileSync(`/proc/${left}/stat`, 'utf8'));
+    } catch {
+      return true;
+    }
+  };
+  await until(`pid ${left} to stop`, gone);
 });
 
 test('with no health path an open port counts', async (t) => {

@@ -91,6 +91,7 @@ import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
+import { CodeCounts, countApart } from './src/code-counts.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
 import { Launchers } from './src/desktop-launcher.ts';
 import { CiStore } from './src/ci-store.ts';
@@ -701,6 +702,9 @@ if (!BOOT_CHECK)
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
+const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
+// One scheme's git a tick, each once a day, after the boot's rush (#1988).
+if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
 runner.placeFor = (person, warm, taskmaster) => turnPlace(store, claudeLink, person, warm, taskmaster);
@@ -2381,6 +2385,7 @@ const app: App = {
   ciHealth,
   ciStore,
   ciNumbers,
+  codeCounts,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
   runnerCap,

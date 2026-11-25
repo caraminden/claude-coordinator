@@ -48,6 +48,18 @@ export const minionQueries = {
     return [...scoped(this.db, `tickets:${projectId}`, () => this.db.prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as unknown as Ticket[])];
   },
 
+  /** A scheme's bug minions' numbers, open and closed: what the Code tab counts as bug fixes (#1988). */
+  bugNumbers(this: Store, projectId: number): number[] {
+    const sql = `SELECT k.number FROM tickets k JOIN properties p ON p.target_type = 'minion' AND p.target_id = k.id JOIN property_keys pk ON pk.id = p.key_id AND pk.key = 'type'
+      WHERE k.project_id = ? AND k.number IS NOT NULL AND p.value = 'bug'`;
+    return (this.db.prepare(sql).all(projectId) as { number: number }[]).map((r) => r.number);
+  },
+
+  /** A scheme's open minions, by number and title. */
+  openTitles(this: Store, projectId: number): { number: number; title: string }[] {
+    return this.db.prepare("SELECT number, title FROM tickets WHERE project_id = ? AND status != 'closed' AND kind != 'coordinator' AND number IS NOT NULL ORDER BY number").all(projectId) as { number: number; title: string }[];
+  },
+
   /** Open tickets whose last turn hit the usage limit, in every project. */
   limitedTickets(this: Store): Ticket[] {
     return this.db.prepare("SELECT * FROM tickets WHERE state = 'limited' AND status != 'closed'").all() as unknown as Ticket[];

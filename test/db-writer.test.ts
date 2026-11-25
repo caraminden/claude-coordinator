@@ -451,7 +451,6 @@ const STAYS_ON_THREAD: Record<string, string> = {
   // The usage ledger batches counts in memory and sends them as usage.addCounts on a timer (#1306, #1877).
   'usage.prune': "the ledger's own timer",
   dropAudit: 'inside sweepTurnAudit and deleteTurnAudit',
-  turnRow: 'inside recordTurn and backfillTurns',
   'props.insertValue': 'inside props.registerValues and props.review',
   'props.putStage': 'inside props.statusChanged',
   'props.statusChanged': 'inside updateTicket',

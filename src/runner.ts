@@ -27,7 +27,9 @@ import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
 import { track } from './settled.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
+import { Fresh, roleWord, type FreshState } from './fresh.ts';
 import { HeldMail } from './held-mail.ts';
+import { KeepaliveRun } from './keepalive-run.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
 import { buildBranch, landsBuilds, projectDir, surveyReports } from './workspace.ts';
@@ -47,10 +49,9 @@ import { gradleCacheDir } from './build-cache.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
-import { handoffSheet, minionSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
 import { stuckList } from './stuck-list.ts';
-import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, SEAM_WHY, type SeamTrial, trialLine } from './seam-trial.ts';
-import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
+import { armOf, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial, trialLine } from './seam-trial.ts';
+import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorAlive, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -61,31 +62,7 @@ import { takeStatus, type StatusFields } from './status-trailer.ts';
 import { appFolder, slotsOf } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
-import {
-  CACHE_TTL_MS,
-  KEEPALIVE_AFTER_MS,
-  KEEPALIVE_GATES_KEY,
-  KEEPALIVE_OFF_KEY,
-  KEEPALIVE_REPORT_KEY,
-  KEEPALIVE_TEXT,
-  SERIES_CAP_MS,
-  WEEK_MS,
-  changedParts,
-  claudeStamp,
-  contextText,
-  countGate,
-  fingerprint,
-  inWindow,
-  keepaliveKey,
-  missed,
-  prefixParts,
-  reportText,
-  tooManyMisses,
-  treeHash,
-  turnDate,
-  weekReport,
-  type KeepaliveSeries,
-} from './keepalive.ts';
+import { KEEPALIVE_TEXT, changedParts, claudeStamp, contextText, fingerprint, keepaliveKey, prefixParts, treeHash, turnDate, type KeepaliveSeries } from './keepalive.ts';
 import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, losesPass, newCalls, noteCalls, readsSteers, repliedPrompt, sameCall, STEER_LAG_MS, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
@@ -97,18 +74,19 @@ import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type Budge
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
-import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
+import { clockTime, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
 import type { MinionJobs } from './minion-jobs.ts';
-import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
+import { LinePlaces, type OnAccount } from './line-place.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
-import { sleepKey, stateWord, type Sleep } from './needs.ts';
+import { contextKey, windowKey, freshKey, handoffKey, shippedKey, failNoteKey, closeCancelledKey, turnKey, warmKey, talkedKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
+import { sleepKey, type Sleep } from './needs.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
@@ -221,7 +199,7 @@ export interface QueuedMessage {
  * from the turn's start until the server has handled its end. A restart re-attaches to the turn from
  * this, or resumes it if its process died too.
  */
-interface TurnState {
+export interface TurnState {
   /** Auto-resumes in a row that led to this turn, by kind (src/turn-outcome.ts); absent for a turn people or GitHub started. */
   retries?: Retries;
   /** A row saved before the retries record kept its counts in these four (read with retriesOf). */
@@ -308,7 +286,7 @@ interface TurnState {
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
-interface LiveTurn {
+export interface LiveTurn {
   dir: string;
   unit: string | null;
   offset: number;
@@ -357,56 +335,17 @@ interface LiveTurn {
 /** The stream reader's buffer: one for every followed turn, grown only for a line longer than it (readStream). */
 const STREAM_CHUNK = 1 << 20;
 
-/** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
-const contextKey = (ticketId: number) => `context:${ticketId}`;
-/** The model's context window (tokens) as its last result reported it, for the chat's size meter (#1193). */
-const windowKey = (ticketId: number) => `ctxwin:${ticketId}`;
 /** The window before a result has reported one: a `[1m]` model id has 1M, the rest 200k. */
 export const guessWindow = (model: string | null | undefined) => (/\[1m\]/i.test(model ?? '') ? 1_000_000 : 200_000);
 
-/**
- * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
- * fresh_session, and `compact` once the handoff failed and a /compact turn falls back on. `auto`: Citadel
- * asked for it by itself (turn end or idle), so a message queued meanwhile goes first.
- */
-export interface FreshState {
-  why: string;
-  summary?: string;
-  compact?: true;
-  auto?: true;
-  seam?: { carryOn: boolean };
-}
-const freshKey = (ticketId: number) => `fresh:${ticketId}`;
-/** The handoff a fresh session's first turn starts from, kept until that session exists. */
-const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
-/** A claim holder whose work shipped (#1334): its claims pass on as shipped when it is dismissed. */
-const shippedKey = (ticketId: number) => `claim-shipped:${ticketId}`;
-/** A fresh start's idle time for the chat's divider (#1059): "55 m", "1 h 12 m". */
-export const idleText = (ms: number) => {
-  const m = Math.round(ms / 60_000);
-  return m < 60 ? `${m} m` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} m` : ''}`;
-};
-/** What a fresh start's notes call the chat's agent. */
-const roleWord = (t: Ticket) => (t.kind === 'coordinator' ? 'Taskmaster' : 'minion');
 /** The slash commands a chat's last turn loaded (its init event, #937), and the scheme's newest, for a chat with no turn yet. */
 export interface LoadedCommands {
   names: string[];
   plugins: { name: string; path: string }[];
   cwd: string;
 }
-export const commandsKey = (ticketId: number) => `commands:${ticketId}`;
-export const schemeCommandsKey = (projectId: number) => `commands-scheme:${projectId}`;
-/** The note the server last wrote about a failed or stopped turn, which the next turn that ends well clears (#428). */
-const failNoteKey = (ticketId: number) => `failnote:${ticketId}`;
-/** Why a minion's close_self was cancelled at its turn's end, told to its next turn (#619). */
-const closeCancelledKey = (ticketId: number) => `close-cancelled:${ticketId}`;
-/** Idle this long, a Taskmaster's prompt cache (1 hour) is still warm, so its handoff turn reads it cheaply. */
-export const FRESH_IDLE_MS = 55 * 60_000;
-/** Past this much context (tokens), a Taskmaster whose turn just ended starts fresh by itself (#423), so a long working session isn't cut mid-flow. */
-export const FRESH_CONTEXT_TOKENS = 150_000;
-/** Past this much context (tokens), an idle Taskmaster starts fresh (#406): its next cold wake would re-read all of it at full price. Cara 2026-11-15: 60k, not 150k. */
-export const FRESH_IDLE_CONTEXT_TOKENS = 60_000;
-const HANDOFF_MAX = 20_000;
+export { commandsKey, schemeCommandsKey };
+export { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, idleText, type FreshState } from './fresh.ts';
 
 // Kept in src/account-pick.ts, which claude-link.ts reads them from too (#793).
 export { accountUsageKey, usageKey };
@@ -511,15 +450,8 @@ export function unsentSteers(turn: { steered?: Steer[]; dir?: string }): QueuedM
   return turn.steered.filter((s) => s.end > sent).map((s) => s.msg);
 }
 
-const turnKey = (ticketId: number) => `turn:${ticketId}`;
-/** A minion's session as the account pick knows it (#793): only one it resumes can be warm, so a fresh start goes where new work goes. */
-const warmKey = (ticket: Ticket) => (ticket.session_id ? `ticket:${ticket.id}` : undefined);
 // A scheme's standing gos to merge (#260), kept in settings so they outlive turns and restarts.
 const goesKey = (projectId: number) => `merge_goes:${projectId}`;
-/** Set when a person writes to a minion waiting in pending-deploy: its deploy then leaves it open. */
-const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
-/** A turn's end-of-turn session save that hasn't finished yet: the config dir it reads, so a restart redoes it (#259). */
-const savingKey = (ticketId: number) => `saving:${ticketId}`;
 /** The longest a message held for a cold session waits before it wakes the session anyway: only mail held before #1603 dropped the cold hold. */
 export const COLD_HOLD_MAX_MS = MSG_DEFAULTS.holdH * 3600_000;
 
@@ -803,6 +735,8 @@ export class Runner {
   private cardWaits: WaitList<KeptCard>;
   private relays: Relay;
   private held: HeldMail;
+  private keepaliveRun: KeepaliveRun;
+  private fresh: Fresh;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null, warm?: string, taskmaster?: boolean) => TurnPlace | { refused: string };
@@ -1056,6 +990,53 @@ export class Runner {
       turnPerson: (t, p, waiting) => this.turnPerson(t, p, waiting),
       next: (id, now) => this.next(id, now),
       send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer),
+    });
+    this.keepaliveRun = new KeepaliveRun({
+      store,
+      now: () => this.now(),
+      noTurns: () => this.noTurns,
+      queued: (id) => this.queued(id),
+      limitWait: (id) => this.limitWait(id),
+      netWait: (id) => this.netWait(id),
+      killWait: (id) => this.killWait(id),
+      parked: (t) => this.parked(t),
+      next: (id) => this.next(id),
+      queue: this.queue,
+      jobs: () => this.jobs,
+      turnLine: this.turnLine,
+      turns: this.turns,
+      keepalivePending: this.keepalivePending,
+      gateCounted: this.gateCounted,
+      statuses: this.statuses,
+      closing: this.closing,
+      deployedMidTurn: this.deployedMidTurn,
+      waiting: (id) => this.waiting(id),
+      turnPerson: (t, p, waiting) => this.turnPerson(t, p, waiting),
+      codexTurn: (t, p, person) => this.codexTurn(t, p, person),
+      accountOf: (t, person) => this.accountOf(t, person),
+      payerOf: (uid) => this.payerOf(uid),
+      leaveMail: (to, author, text) => this.leaveMail(to, author, text),
+      actOnDeferred: (id, closing, reason, deployed) => this.actOnDeferred(id, closing, reason, deployed),
+      saveAfterTurn: (id, dir, had) => this.saveAfterTurn(id, dir, had),
+    });
+    this.fresh = new Fresh({
+      store,
+      now: () => this.now(),
+      noTurns: () => this.noTurns,
+      queued: (id) => this.queued(id),
+      limitWait: (id) => this.limitWait(id),
+      netWait: (id) => this.netWait(id),
+      killWait: (id) => this.killWait(id),
+      parked: (t) => this.parked(t),
+      next: (id) => this.next(id),
+      lanes: this.lanes,
+      closing: this.closing,
+      emit: (id, kind, data) => this.emit(id, kind, data),
+      isRunning: (id) => this.isRunning(id),
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      send: (id, author, text, images, extra) => this.send(id, author, text, images, extra),
+      view: (...args) => this.view(...args),
+      tellCitadel: (text) => this.keepaliveRun.tellCitadel(text),
     });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
@@ -2496,7 +2477,7 @@ export class Runner {
   unqueue(ticketId: number, eventId: number, by: string): boolean {
     // A wait's held messages are in the queue too (#468 S03-9).
     if (!this.queue.remove(ticketId, eventId)) return false;
-    if (!this.queue.size(ticketId) && !this.freshStep(ticketId)) this.turnLine.leave(ticketId, true);
+    if (!this.queue.size(ticketId) && !this.fresh.freshStep(ticketId)) this.turnLine.leave(ticketId, true);
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
@@ -2812,37 +2793,18 @@ export class Runner {
     if (live.unit && (!pid || sig === 'SIGKILL')) execFile('systemctl', ['--user', 'stop', `${live.unit}.*`], () => {});
   }
 
-  /**
-   * Start a Taskmaster, or a minion (its composer's /fresh, #937), on a fresh Claude session (#406): a handoff
-   * turn on the old session first (once any running turn ends), then the next turn starts a new session from
-   * that handoff. A Taskmaster hands off with fresh_session; a minion's handoff is that turn's reply. Returns
-   * why it can't, or null.
-   */
+  // Fresh starts: src/fresh.ts.
+
   requestFresh(ticketId: number, why: string, auto = false): string | null {
-    const ticket = this.store.getTicket(ticketId);
-    if (!ticket) return 'No such minion';
-    if (ticket.status === 'closed') return 'A dismissed minion keeps its session: send it a message first';
-    if (!ticket.session_id) return 'Its session is already fresh';
-    if (this.store.getSetting<FreshState>(freshKey(ticketId))) return 'A fresh start is already under way';
-    this.store.setSetting(freshKey(ticketId), { why, ...(auto ? { auto: true as const } : {}) });
-    this.emit(ticketId, 'note', { text: `Starting a fresh session (${why}): the ${roleWord(ticket)} writes its handoff first${this.isRunning(ticketId) ? ', once this turn ends' : ''}.` });
-    if (!this.isRunning(ticketId)) this.next(ticketId);
-    this.broadcastTicket(ticketId);
-    return null;
+    return this.fresh.requestFresh(ticketId, why, auto);
   }
 
-  /**
-   * The handoff a Taskmaster's running turn wrote (fresh_session): its session resets as the turn ends. A minion in the
-   * seam trial's fresh group (#1129) hands off the same way, and its fresh session carries on at once unless `carryOn` is false.
-   */
   recordHandoff(ticketId: number, summary: string, carryOn = true): string | null {
-    const ticket = this.store.getTicket(ticketId);
-    const seam = ticket?.kind !== 'coordinator';
-    if (seam && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId) !== 'fresh') return "Only a Taskmaster, or a minion in the fresh-session trial's fresh group, starts its own fresh session: a person can type /fresh in your chat";
-    if (!this.isRunning(ticketId)) return 'Only a running turn can hand off';
-    const was = this.store.getSetting<FreshState>(freshKey(ticketId));
-    this.store.setSetting(freshKey(ticketId), { why: was?.why ?? (seam ? SEAM_WHY : 'the Taskmaster asked for it'), summary: summary.slice(0, HANDOFF_MAX), ...(seam ? { seam: { carryOn } } : {}) });
-    return null;
+    return this.fresh.recordHandoff(ticketId, summary, carryOn);
+  }
+
+  freshSweep(now = Date.now()) {
+    return this.fresh.freshSweep(now);
   }
 
   /**
@@ -2859,115 +2821,9 @@ export class Runner {
     if (ticket && JSON.stringify(this.store.getSetting(schemeCommandsKey(ticket.project_id))) !== JSON.stringify(loaded)) this.store.setSetting(schemeCommandsKey(ticket.project_id), loaded);
   }
 
-  /** A fresh start's next step, if it needs a turn of its own: the handoff ask, or the /compact fallback. */
-  private freshStep(ticketId: number): QueuedMessage | null {
-    const f = this.store.getSetting<FreshState>(freshKey(ticketId));
-    // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait.
-    if (!f || f.summary || this.netWait(ticketId) || this.killWait(ticketId)) return null;
-    // A message queued for a fresh start Citadel asked for by itself goes first, before its handoff or
-    // its /compact fallback; the step follows that turn (#423).
-    if (f.auto && this.queued(ticketId)) return null;
-    const minion = this.store.getTicket(ticketId)?.kind !== 'coordinator';
-    return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: (minion ? minionHandoffPrompt : handoffPrompt)(f.why), images: [], fresh: 'handoff' };
-  }
-
-  /**
-   * A fresh-start step's turn ended (wrapUp). A handoff resets the session; a Taskmaster's handoff turn without one
-   * resets it from a server-built facts sheet (G6), a minion's falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
-   */
-  private endFresh(ticketId: number, turn: TurnState | null, ok: boolean, stopped: boolean) {
-    let f = this.store.getSetting<FreshState>(freshKey(ticketId));
-    if (!f) return;
-    const ticket = this.store.getTicket(ticketId);
-    const who = ticket ? roleWord(ticket) : 'Taskmaster';
-    // A minion's /fresh has no fresh_session (only the seam trial's fresh group has the tool, which records the summary first): its handoff turn's reply is its handoff (#937), the status line left out.
-    const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
-    if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
-    // A Taskmaster's failed handoff starts the fresh session from a facts sheet the server builds from the database (G6), not a compaction.
-    const sheeted = ticket?.kind === 'coordinator' && !f.summary && turn?.fresh === 'handoff' && !stopped;
-    if (f.summary || sheeted) {
-      const sheet = ticket?.kind === 'coordinator' ? handoffSheet(this.store, this, ticket) : '';
-      // A seam handoff (#1129) gets the minion's own facts sheet, people's last words verbatim, against a thin handoff.
-      const own = f.seam && ticket ? minionSheet(this.store, this, ticket) : '';
-      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : own ? `${f.summary}\n\n${MINION_SHEET_CHECK}\n\n${own}` : f.summary!;
-      this.store.deleteSetting(freshKey(ticketId));
-      this.store.setSetting(handoffKey(ticketId), text);
-      this.store.deleteSetting(contextKey(ticketId));
-      this.store.updateTicket(ticketId, { session_id: null });
-      if (sheeted) this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the new session starts from a facts sheet the server built from the database.` });
-      this.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
-      // A seam handoff carries straight on (#1129), unless the turn failed or was stopped, closes, or waits on people.
-      const after = this.store.getTicket(ticketId);
-      if (f.seam?.carryOn && ok && !stopped && after && !this.closing.has(ticketId) && !this.parked(after) && !['ready', 'try', 'complete', 'parked', 'pending-deploy'].includes(after.state ?? '') && !this.store.openCardsOf(ticketId).length) {
-        this.send(ticketId, 'System', CARRY_ON);
-      }
-    } else if (turn?.fresh === 'handoff' && stopped) {
-      this.store.deleteSetting(freshKey(ticketId));
-      this.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });
-    } else if (turn?.fresh === 'handoff') {
-      this.store.setSetting(freshKey(ticketId), { ...f, compact: true });
-      this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the ${who} compacts its session instead.` });
-    } else if (turn?.fresh === 'compact') {
-      this.store.deleteSetting(freshKey(ticketId));
-      // Its size is unknown until its next turn, which keeps the idle check from asking again meanwhile.
-      this.store.deleteSetting(contextKey(ticketId));
-      this.emit(ticketId, 'note', { text: ok ? `Compacted the ${who}'s session instead of a fresh start.` : `Compacting failed too, so the ${who} keeps its session as it was.` });
-    }
-  }
-
-  /**
-   * Taskmasters idle FRESH_IDLE_MS with more than FRESH_IDLE_CONTEXT_TOKENS of context start fresh (#406),
-   * while their prompt cache is still warm. One that missed that window (a restart) still does: its
-   * next wake would re-read the whole context anyway. Run every minute.
-   */
-  freshSweep(now = Date.now()) {
-    if (this.noTurns) return;
-    for (const p of this.store.listProjects()) {
-      for (const t of this.store.listTickets(p.id)) {
-        if (t.kind !== 'coordinator' || !t.session_id || t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id) || this.lanes.busy(t.id) || this.limitWait(t.id) || this.netWait(t.id) || this.killWait(t.id)) continue;
-        const size = this.store.getSetting<number>(contextKey(t.id));
-        const ended = this.store.lastTurnEnd(t.id);
-        if (!size || size <= FRESH_IDLE_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
-        this.requestFresh(t.id, `idle ${idleText(now - ended)} with ${Math.round(size / 1000)}k context`, true);
-      }
-    }
-  }
-
-  /**
-   * Keep waiting minions' prompt caches warm (#862, src/keepalive.ts): a hidden one-line turn 55 minutes after the last
-   * one ended, in working hours, while the prefix it would re-read is still the one cached. Also sends the week's
-   * readout to the Citadel Taskmaster, and switches keepalives off when they cost more than they saved. Run every minute.
-   */
+  /** Start due keepalives, weekly readout included (src/keepalive-run.ts). Run every minute. */
   keepaliveSweep(now = this.now()) {
-    if (this.noTurns || this.store.getSetting(KEEPALIVE_OFF_KEY)) return;
-    const reported = this.store.getSetting<number>(KEEPALIVE_REPORT_KEY);
-    if (!reported) this.store.setSetting(KEEPALIVE_REPORT_KEY, now);
-    else if (now - reported >= WEEK_MS) {
-      this.store.setSetting(KEEPALIVE_REPORT_KEY, now);
-      // A wait's real turn ends up to a long turn after it starts: the rows reach back a little before the week.
-      const r = weekReport(this.store.minionTurnsSince(now - WEEK_MS - 9 * 3_600_000), now - WEEK_MS, now);
-      const off = r.pings > 0 && r.netUsd < 0;
-      if (off) this.store.setSetting(KEEPALIVE_OFF_KEY, { reason: 'they cost more than they saved last week', at: now });
-      this.tellCitadel(reportText(r, off));
-      if (off) return;
-    }
-    // Runs outside working hours too, only to count the minions the hours turned away (#1274).
-    for (const p of this.store.listProjects()) {
-      for (const t of this.store.listTickets(p.id)) {
-        // A busy lane (its last save, say) runs it once free, if it still qualifies then.
-        if (t.kind === 'coordinator' || t.status !== 'idle' || this.keepalivePending.has(t.id)) continue;
-        const gate = this.keepaliveGate(t, p, now);
-        this.countGate(t.id, gate, now);
-        if (gate) continue;
-        this.keepalivePending.set(t.id, now - this.now());
-        this.next(t.id);
-      }
-    }
-  }
-
-  /** Whether a minion waiting on a person or on its ship has a warm cache that a keepalive would keep (keepaliveSweep). */
-  private wantsKeepalive(t: Ticket, p: Project, now: number): boolean {
-    return !this.keepaliveGate(t, p, now);
+    this.keepaliveRun.keepaliveSweep(now);
   }
 
   /** Whether its turn would run on Codex, which keeps no Claude cache. */
@@ -2980,128 +2836,15 @@ export class Runner {
     return { payer: this.payerOf(person), account: person === null || !this.accountFor ? null : (this.accountFor(person, warmKey(t)) ?? 0) };
   }
 
-  /** Which of wantsKeepalive's gates turns a minion away, or null when a keepalive is due. */
-  private keepaliveGate(t: Ticket, p: Project, now: number): string | null {
-    if (t.kind === 'coordinator') return 'taskmaster';
-    if (!t.session_id || !t.cwd) return 'no session';
-    // A live turn, not isRunning: its own lane step re-checks here while it counts as launching (#1808), and a launch
-    // under way elsewhere holds the lane, so the sweep's next() waits for it.
-    // One waiting in line for a worker is idle too (#1888, Josh, 2026-11-24: "like any idle minion"), whatever its state: it carries on soon.
-    const lined = this.turnLine.has(t.id);
-    if (t.status !== 'idle' || this.turns.has(t.id) || (this.queued(t.id) && !lined)) return 'busy';
-    // A restart's resume still to start (2A2): a keepalive would take its place, or back out and hold its batch as mail.
-    if (this.queue.owed(t.id)) return 'resume owed';
-    if (this.limitWait(t.id)) return 'limit wait';
-    if (this.netWait(t.id)) return 'net wait';
-    if (this.killWait(t.id)) return 'kill wait';
-    if (cardHeld(this.store, t.id)) return 'card wait';
-    if (this.parked(t) && !lined) return 'parked';
-    if (this.store.getSetting(sleepKey(t.id)) && !lined) return 'asleep';
-    if (this.store.getSetting(freshKey(t.id))) return 'fresh';
-    // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
-    // and about 30 a day of them were woken cold by their ship's result an hour or more later.
-    // Waiting on a job the server runs (#1890) is idle too.
-    if (!(lined || this.jobs?.running(t.id).length || t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
-    if (!inWindow(now)) return 'hours';
-    const person = this.turnPerson(t, p, lined ? this.waiting(t.id) : []);
-    if (this.codexTurn(t, p, person)) return 'codex';
-    // In line it would run as the waiting turn: on another account that pays to write a cache the turn may not use (#1888).
-    const last = lined ? this.store.lastTurnOn(t.id) : null;
-    if (last && !sameAccount(last, this.accountOf(t, person))) return 'other account';
-    const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(t.id));
-    if (!s) return 'no series';
-    if (s.stopped) return `stopped ${s.stopped}`;
-    if (now - s.since >= SERIES_CAP_MS) return 'series cap';
-    const ended = this.store.lastTurnEnd(t.id);
-    if (!ended) return 'no turn end';
-    return now - ended >= KEEPALIVE_AFTER_MS && now - ended < CACHE_TTL_MS ? null : 'not due';
-  }
-
   /** Each minion's counted due window: its last turn end, the day and the gate it was counted under. */
   private gateCounted = new Map<number, { ended: number; day: string; gate: string }>();
-
-  /**
-   * Count which gate turned a due minion away, or "passed" (#1274): once per idle minion whose last turn ended 55 to
-   * 60 minutes ago, per Pacific day in KEEPALIVE_GATES_KEY. A later minute of the same window that finds another gate
-   * moves the count there, so a minion busy at minute 55 and pinged at 56 counts as passed. Minions not yet due aren't
-   * counted, or "not due" would drown the rest. "passed" is the sweep's ask: the launch can still stop a dirty series.
-   */
-  private countGate(ticketId: number, gate: string | null, now: number) {
-    const ended = this.store.lastTurnEnd(ticketId);
-    if (!ended || now - ended < KEEPALIVE_AFTER_MS || now - ended >= CACHE_TTL_MS) return;
-    const was = this.gateCounted.get(ticketId);
-    const g = gate ?? 'passed';
-    if (was?.ended === ended && was.gate === g) return;
-    let counts = this.store.getSetting<Record<string, Record<string, number>>>(KEEPALIVE_GATES_KEY);
-    if (was?.ended === ended) counts = countGate(counts, was.day, was.gate, -1);
-    const day = was?.ended === ended ? was.day : pacificDay(now);
-    this.gateCounted.set(ticketId, { ended, day, gate: g });
-    this.store.setSetting(KEEPALIVE_GATES_KEY, countGate(counts, day, g));
-  }
-
-  /** Mark a minion's keepalive series stopped, with why. */
-  private stopSeries(ticketId: number, why: NonNullable<KeepaliveSeries['stopped']>) {
-    const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticketId));
-    if (s && !s.stopped) this.store.setSetting(keepaliveKey(ticketId), { ...s, stopped: why });
-  }
-
-  /** Held mail to the Citadel scheme's Taskmaster about keepalives. */
-  private tellCitadel(text: string) {
-    const tm = this.store.getOverlord(GLOBAL_OWNER);
-    if (tm) this.leaveMail(tm.id, 'Citadel (keepalives)', text);
-  }
-
-  /** A keepalive's result: costed apart, and its miss stops its series; too many misses in a day switch keepalives off. */
-  private async keepaliveResult(ticketId: number, ev: ClaudeEvent) {
-    await this.store.recordTurn(ticketId, {
-      ...turnOf(ev),
-      ended_at: Date.now(),
-      payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person),
-      keepalive: true,
-      account: this.store.getSetting<TurnState>(turnKey(ticketId))?.account ?? null,
-    });
-    if (!missed(ev.usage)) return;
-    this.stopSeries(ticketId, 'missed');
-    console.log(`[keepalive] minion ${ticketId}: its keepalive wrote ${ev.usage?.cache_creation_input_tokens} tokens to the cache, so its series stops`);
-    const day = this.store.minionTurnsSince(Date.now() - 24 * 3_600_000).filter((r) => r.keepalive);
-    const misses = day.filter((r) => missed({ cache_creation_input_tokens: r.cache_write_tokens })).length;
-    if (!tooManyMisses(day.length, misses) || this.store.getSetting(KEEPALIVE_OFF_KEY)) return;
-    this.store.setSetting(KEEPALIVE_OFF_KEY, { reason: `${misses} of ${day.length} keepalives missed the cache in a day`, at: Date.now() });
-    this.tellCitadel(`Keepalives are off: ${misses} of the last day's ${day.length} keepalives missed the cache (more than 1 in 5), so something in minions' prompts keeps changing between turns. Find it, then delete the \`${KEEPALIVE_OFF_KEY}\` setting to switch them back on.`);
-  }
-
-  /**
-   * A Taskmaster whose turn ended past FRESH_CONTEXT_TOKENS starts fresh at once (#423), not only once idle.
-   * Not while messages wait (the last of their turns hands off) or on a usage-limit or network wait, and
-   * never after a fresh-start step's own turn: one that leaves it big waits for the next real turn.
-   */
-  private freshAtTurnEnd(ticketId: number, turn: TurnState) {
-    if (turn.fresh || this.queued(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId)) return;
-    const t = this.store.getTicket(ticketId);
-    const size = this.store.getSetting<number>(contextKey(ticketId));
-    if (t?.kind !== 'coordinator' || !t.session_id || !size || size <= FRESH_CONTEXT_TOKENS) return;
-    this.requestFresh(ticketId, `${Math.round(size / 1000)}k tokens of context at the end of a turn`, true);
-  }
-
-  /** Enrol a minion whose turn starts past the seam trial's mark (#1129), every scheme: at the start, so only minions that carry on are in it; the Citadel Taskmaster hears once both groups are full. */
-  private seamEnrol(ticketId: number) {
-    const t = this.store.getTicket(ticketId);
-    const p = t && this.store.getProject(t.project_id);
-    const size = this.store.getSetting<number>(contextKey(ticketId));
-    if (!t || !p || !size || !eligible(t, isCodexModel(turnSettings(t, p).model) || !!this.store.getSetting(codexThreadKey(t.id)))) return;
-    const r = enrol(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId, size, this.now());
-    if (!r) return;
-    this.store.setSetting(SEAM_TRIAL_KEY, r.trial);
-    console.log(`[seam-trial] minion ${ticketId}: enrolled in the ${r.arm} group at ${Math.round(size / 1000)}k context`);
-    if (r.filled) this.tellCitadel(fullText(r.trial));
-  }
 
   /**
    * Start a turn with what waits in the queue, once the minion's lane is free. During a network or kill wait the queue
    * holds the messages for its resume: only `now` (a message or a release arriving) starts a turn that takes them sooner.
    */
   private next(ticketId: number, now = false) {
-    if (!this.queue.size(ticketId) && !this.freshStep(ticketId) && !this.keepalivePending.has(ticketId)) return;
+    if (!this.queue.size(ticketId) && !this.fresh.freshStep(ticketId) && !this.keepalivePending.has(ticketId)) return;
     // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
     if (this.limitWait(ticketId)) return;
     // Nor while its card waits on a person: what came since goes into the turn that resumes it (#1916).
@@ -3116,18 +2859,18 @@ export class Runner {
     // turn's save above all: a turn on another login restores from that save (#250). The queue keeps the messages.
     if (this.lanes.busy(ticketId)) return;
     // A keepalive alone takes no worker; anything else waits in the line for one (#1868).
-    const quiet = !this.queue.size(ticketId) && !this.freshStep(ticketId);
+    const quiet = !this.queue.size(ticketId) && !this.fresh.freshStep(ticketId);
     // In line, only its keepalive runs (#1888): no worker, and its turn keeps its place.
     const keepalive = !quiet && !this.turnLine.enter(ticketId);
     if (keepalive && !this.keepalivePending.has(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
-    const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.waiting(ticketId));
+    const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.fresh.freshStep(ticketId) ? [] : this.waiting(ticketId));
     // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
     const step = () =>
       this.liveTurn(ticketId, () =>
         this.afterRestore(ticketId, person, () => {
           // A real message came in meanwhile: it needs a worker, so the keepalive is dropped and the free lane asks again.
-          if (quiet && (this.queue.size(ticketId) || this.freshStep(ticketId))) return void this.keepalivePending.delete(ticketId);
+          if (quiet && (this.queue.size(ticketId) || this.fresh.freshStep(ticketId))) return void this.keepalivePending.delete(ticketId);
           const ticket = this.store.getTicket(ticketId);
           const project = ticket && this.store.getProject(ticket.project_id);
           if (!ticket || !project) return;
@@ -3138,7 +2881,7 @@ export class Runner {
           const rest = () => {
             // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
             const skew = this.keepalivePending.get(ticketId);
-            if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
+            if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.keepaliveRun.wantsKeepalive(ticket, project, this.now() + skew!)) {
               return this.ranTurn(this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, [])));
             }
             // Everything queued while the last turn ran goes into one turn. Held mail alone wakes nothing, nor does a disabled person's message.
@@ -3156,7 +2899,7 @@ export class Runner {
             const carriesOn = !this.queue.wakes(ticketId);
             return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person, {}, carriesOn));
           };
-          const fresh = this.freshStep(ticketId);
+          const fresh = this.fresh.freshStep(ticketId);
           if (!fresh) return rest();
           // Its launch's stop mark (startTurn takes it on), so a stop before the turn is followed calls the fresh start off as a stop after does.
           const mark = { stopped: false };
@@ -3184,7 +2927,7 @@ export class Runner {
   /** The keepalive of a minion in line (#1888), as the turn it waits for would run; whatever else waits stays in line. */
   private linedKeepalive(project: Project, ticket: Ticket): unknown {
     const skew = this.keepalivePending.get(ticket.id);
-    if (!this.keepalivePending.delete(ticket.id) || !this.wantsKeepalive(ticket, project, this.now() + skew!)) return;
+    if (!this.keepalivePending.delete(ticket.id) || !this.keepaliveRun.wantsKeepalive(ticket, project, this.now() + skew!)) return;
     return this.ranTurn(this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, this.waiting(ticket.id))));
   }
 
@@ -3234,7 +2977,7 @@ export class Runner {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project) return { person: 0, rank: 2 };
-      const fresh = this.freshStep(ticketId);
+      const fresh = this.fresh.freshStep(ticketId);
       const waiting = this.waiting(ticketId);
       const payer = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via);
       const person = payer ?? 0;
@@ -3481,7 +3224,7 @@ export class Runner {
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    if (!step && !keepalive && !codex) this.seamEnrol(ticket.id);
+    if (!step && !keepalive && !codex) this.fresh.seamEnrol(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
       built = await this.buildLaunch(project, ticket, {
@@ -3536,7 +3279,7 @@ export class Runner {
       const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id));
       if (!fp || s?.fp !== fp) {
         console.log(`[keepalive] minion ${ticket.id}: its prompt changed since its last turn (${changedParts(s?.parts ?? {}, fpParts ?? {}).join(', ')}), so its keepalives stop`);
-        this.stopSeries(ticket.id, 'dirty');
+        this.keepaliveRun.stopSeries(ticket.id, 'dirty');
         await rm(dir, { recursive: true, force: true });
         this.turnSecrets.delete(ticket.id);
         return;
@@ -3568,7 +3311,7 @@ export class Runner {
       if (!codex) args.push('--resume', ticket.session_id);
     } else if (keepalive) {
       // No session to keep warm: its next real turn says so.
-      this.stopSeries(ticket.id, 'failed');
+      this.keepaliveRun.stopSeries(ticket.id, 'failed');
       await rm(dir, { recursive: true, force: true });
       this.turnSecrets.delete(ticket.id);
       return;
@@ -4284,7 +4027,7 @@ export class Runner {
     this.store.deleteSetting(turnKey(ticketId));
     // Its session's cache is warm on this account for the next hour (src/account-pick.ts): its next turn stays there.
     if (turn?.person && !turn.codex && turn.account) this.onRan?.(turn.person, `ticket:${ticketId}`, turn.account);
-    if (this.keepalives.delete(ticketId)) return this.wrapUpKeepalive(ticketId, live, turn, exit);
+    if (this.keepalives.delete(ticketId)) return this.keepaliveRun.wrapUpKeepalive(ticketId, live, turn, exit);
     this.keepKilled(ticketId, turn, exit);
     if (unsent.length) {
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
@@ -4331,7 +4074,7 @@ export class Runner {
     if (back?.thread) this.store.setSetting(codexThreadKey(ticketId), { ...back, thread: null });
     // A fresh session's handoff is in its transcript once the session exists (#406); then the fresh start's own step, if any.
     if (turn?.handoff && this.store.getTicket(ticketId)?.session_id) this.store.deleteSetting(handoffKey(ticketId));
-    this.endFresh(ticketId, turn ?? null, cleared, stopped);
+    this.fresh.endFresh(ticketId, turn ?? null, cleared, stopped);
     // Still sealed after answering: the row stays sealed, whatever state the turn set. A failed turn keeps its error note.
     const parkedAs = this.parkedAs.get(ticketId);
     this.parkedAs.delete(ticketId);
@@ -4356,7 +4099,7 @@ export class Runner {
       if (keep) this.store.setSetting(closeCancelledKey(ticketId), keep);
       this.setStatus(ticketId, status);
     }
-    if (turn && out.followUps.includes('fresh')) this.freshAtTurnEnd(ticketId, turn);
+    if (turn && out.followUps.includes('fresh')) this.fresh.freshAtTurnEnd(ticketId, turn);
     // A real turn that ended well starts a keepalive series from the prefix it cached (#862); anything else ends the series.
     if (turn?.fp && turn.fpParts && out.followUps.includes('keepalive')) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now(), ...(turn.light ? { light: true as const } : {}) } satisfies KeepaliveSeries);
     else this.store.deleteSetting(keepaliveKey(ticketId));
@@ -4386,29 +4129,6 @@ export class Runner {
       return live.end();
     }
     // Messages queued during the turn wait in the queue for the save.
-    this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
-  }
-
-  /** A keepalive's end (#862): nothing in the chat or the minion's row; a failure stops its series. Its session is saved as any turn's. */
-  private wrapUpKeepalive(ticketId: number, live: LiveTurn, turn: TurnState | null, exit: { code: number | null; signal: string | null; error?: string } | null) {
-    this.statuses.delete(ticketId);
-    // A dismissal (ciGreen, a land) or a live deploy that came while it ran waited for it, as for any turn (2A3): handed on below.
-    const closing = this.closing.has(ticketId);
-    const closeReason = this.closing.get(ticketId) ?? null;
-    this.closing.delete(ticketId);
-    const deployed = this.deployedMidTurn.delete(ticketId);
-    if (turn?.stopped || !exit || exit.signal || exit.code !== 0 || !turn?.result || turn.result.error) {
-      console.log(`[keepalive] minion ${ticketId}: its keepalive failed (${exit?.error ?? turn?.result?.text ?? `exit ${exit?.code ?? exit?.signal ?? 'unknown'}`}), so its series stops`);
-      this.stopSeries(ticketId, 'failed');
-    }
-    void dropTurnDir(live.dir); // renamed aside at once, deleted off the thread (#1459)
-    if (!this.store.getTicket(ticketId)) {
-      this.store.deleteSetting(savingKey(ticketId));
-      return live.end();
-    }
-    // Even after a failed keepalive: unlike a real turn's, its failure is hidden upkeep and says nothing about the dismissal.
-    this.actOnDeferred(ticketId, closing, closeReason, deployed);
-    // A message that came in meanwhile waits behind it in the queue, as behind any turn.
     this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
   }
 
@@ -4617,7 +4337,7 @@ export class Runner {
     if (this.keepalives.has(ticketId)) {
       if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) this.store.updateTicket(ticketId, { session_id: ev.session_id });
       if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
-      if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') void this.keepaliveResult(ticketId, ev).catch((e) => console.error(`[keepalive] minion ${ticketId}: ${(e as Error).message}`));
+      if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') void this.keepaliveRun.keepaliveResult(ticketId, ev).catch((e) => console.error(`[keepalive] minion ${ticketId}: ${(e as Error).message}`));
       return;
     }
     if (ev.type === 'codex_waiting') return this.emit(ticketId, 'note', { text: CODEX_WAITING });

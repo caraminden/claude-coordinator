@@ -45,6 +45,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/routes/files.ts': { why: "a person's comment on a file", calls: 1 },
   'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile', calls: 2 },
   'src/minion-relay.ts': { why: 'leaveMail itself', calls: 1 },
+  'src/keepalive-run.ts': { why: 'the weekly keepalive readout, and the note that keepalives switched themselves off, as held mail', calls: 1 },
   'src/rule-parks.ts': { why: "held mail (no wake) after a person's Settings save, listing parks for the Taskmaster to check; it refuses, wakes and stops nothing", calls: 1 },
   'src/exec.ts': { why: 'stops its own child on its own timeout', calls: 2 },
   'src/contraption-turns.ts': { why: "stops its own turn's process", calls: 1 },

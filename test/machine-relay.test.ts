@@ -81,6 +81,18 @@ test('a managed machine names the MCP server it lends, to a starting turn and on
   assert.deepEqual(opened(), ['godot-ai', 'godot-ai']);
 });
 
+test('with its jobs block broken, a machine still hears of a job it lists, and of no other (2MA10)', () => {
+  const { relay, store, box } = world();
+  const agent = stream();
+  relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+  relay.setInfo(store.getMachine(box.id)!, { v: 2, known_jobs: [{ id: 5, state: 'running' }] });
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 5 }), true);
+  assert.deepEqual(agent.sent.at(-1), { job: { type: 'job.stop', id: 5 } });
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 6 }), false);
+  relay.setInfo(store.getMachine(box.id)!, { v: 2 });
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 5 }), false, 'it named none: Citadel ends the job itself');
+});
+
 test('an agent that beats and then goes quiet (a laptop asleep) is dropped within a couple of minutes; one that never beats is kept', () => {
   mock.timers.enable({ apis: ['setInterval', 'Date'] });
   try {

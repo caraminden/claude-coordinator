@@ -198,6 +198,8 @@ interface Agent {
   found: FoundServer[];
   workspaces: { name: string }[];
   problems: string[];
+  /** The jobs (#857) it last said it holds; null when it named none at all, or hasn't said. */
+  jobs?: Set<number> | null;
   /** Its hourly check, and the connect check for an agent that never posts its info (#437). */
   timers: NodeJS.Timeout[];
   /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
@@ -482,7 +484,9 @@ export class MachineRelay {
   sendJob(machineId: number, msg: AgentJobMessage): boolean {
     const agent = this.agents.get(machineId);
     const machine = this.store.getMachine(machineId);
-    if (!agent || agent.runners || !machine || !storedOffer(machine)) return false;
+    if (!agent || agent.runners || !machine) return false;
+    // With no jobs block (a typo broke it) it hears only of a job it said it holds (2MA10), never of a new one.
+    if (!storedOffer(machine) && (msg.type === 'job.start' || !agent.jobs?.has(msg.id))) return false;
     agent.res.write(`data: ${JSON.stringify({ job: msg })}\n\n`);
     return true;
   }
@@ -587,6 +591,7 @@ export class MachineRelay {
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
     const known = Array.isArray(body.known_jobs) ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
+    agent.jobs = known && new Set(known.map((k) => k.id));
     if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.

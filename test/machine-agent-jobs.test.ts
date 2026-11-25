@@ -34,7 +34,9 @@ const set = (name, s) => (writeFileSync(box(name) + '.new', JSON.stringify(s)), 
 const name = args[args.length - 1];
 if (cmd === 'run') {
   if (args.some((a) => a.includes('fail-run'))) { console.error('Error: image not known'); process.exit(125); }
-  set(args[args.indexOf('--name') + 1], { status: 'running' });
+  // A pull that never ends: only a kill gets it out.
+  if (args.some((a) => a.includes('slow-run'))) setInterval(() => {}, 1000);
+  else set(args[args.indexOf('--name') + 1], { status: 'running' });
 } else if (cmd === 'wait') {
   const tick = () => {
     const s = read(name);
@@ -715,9 +717,59 @@ test("a resume during a pause's grace runs the job again once the pause ends (MA
   await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   await r.handle({ type: 'job.pause', id: msg.id });
   await r.handle({ type: 'job.resume', id: msg.id });
-  await until('paused, then running again', () => statesOf(msg.id).some((s) => s.state === 'paused') && lastState(msg.id)?.state === 'running', undefined, statesTail);
+  await until('started again', () => statesOf(msg.id).filter((s) => s.state === 'starting').length > 1 && lastState(msg.id)?.state === 'running', undefined, statesTail);
+  assert.ok(!statesOf(msg.id).some((s) => s.state === 'paused'), 'the app already shows it running, and is not told otherwise (2MA3)');
   assert.equal(container(msg.id).status, 'running');
   await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
+});
+
+test('a job started while another is being stopped waits for it, and is refused if it will not go (2MA2)', async () => {
+  const r = runner();
+  const first = start();
+  await r.handle(first);
+  await until('running', () => lastState(first.id)?.state === 'running', undefined, statesTail);
+  await r.handle({ type: 'job.stop', id: first.id });
+  const second = start();
+  const third = start();
+  const started = r.handle(second);
+  await r.handle(third);
+  assert.match(lastState(third.id)?.error ?? '', /holds this machine's GPU slot/, 'one waits at a time');
+  await started;
+  await until('the second runs', () => lastState(second.id)?.state === 'running', undefined, statesTail);
+  stickContainer(second.id, true);
+  await r.handle({ type: 'job.stop', id: second.id });
+  const fourth = start();
+  await r.handle(fourth);
+  await until('the fourth refused', () => lastState(fourth.id)?.state === 'failed', undefined, statesTail);
+  assert.match(lastState(fourth.id)?.error ?? '', /wouldn't stop/);
+  stickContainer(second.id, false);
+  await r.handle({ type: 'job.stop', id: second.id });
+  await until('stopped', () => lastState(second.id)?.state === 'stopped', undefined, statesTail);
+});
+
+test('a stop while its image is pulled ends the job at once, as stopped (2MA11)', async () => {
+  const r = runner();
+  const msg = start({}, { command: ['slow-run'] });
+  const started = r.handle(msg);
+  await until('pulling', () => podmanCalls().some((c) => c[0] === 'run' && c.includes(`citadel-job-${msg.id}`)), undefined, statesTail);
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await started;
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
+});
+
+test('an agent that starts with no jobs block cannot say what it holds, and names it once the block is back (2MA5)', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
+  r.close();
+  const back = runner(null);
+  await back.ready;
+  assert.equal(back.known(), undefined);
+  await back.setBlock(block());
+  assert.ok(back.known().some((k: { id: number; state: string }) => k.id === msg.id && k.state === 'running'));
+  await back.handle({ type: 'job.stop', id: msg.id });
   await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 

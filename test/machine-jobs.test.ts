@@ -480,6 +480,26 @@ else if (cmd === 'wait') { const t = setInterval(() => { const s = read(); if (s
   assert.equal((await job(j.id)).state, 'running', 'the job the agent still holds is not "lost"');
   assert.equal(readFileSync(join(pc, 'container'), 'utf8'), 'running');
   assert.ok(!jsonLines(join(pc, 'podman.log')).some((a) => a[0] === 'rm'), 'nothing removed its container');
+  // Restarted on the same typo it can't look for its jobs, so it names none and none is lost (2MA5).
+  proc.kill();
+  await until('the machine offline again', async () => (await call('Josh', '/api/machines')).find((x: { id: number }) => x.id === m.id).status !== 'ready');
+  const spoke = out.length;
+  proc = startAgent();
+  await until(
+    'the agent back',
+    () => /Connected/i.test(out.slice(spoke)),
+    undefined,
+    () => out.slice(spoke),
+  );
+  await holds('the job stays running', async () => (await job(j.id)).state === 'running', { ms: 1000 });
+  writeFileSync(config, JSON.stringify(good));
+  const quiet = store.getMachineJob(j.id)!.live_at!;
+  await until(
+    'its reports again',
+    () => store.getMachineJob(j.id)!.live_at! > quiet,
+    undefined,
+    () => out,
+  );
   // It runs to its end as it would have: the result reaches the app, the minion hears it.
   await wakes(async () => {
     writeFileSync(join(pc, 'container'), 'exited 0');

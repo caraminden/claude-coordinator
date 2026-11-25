@@ -557,7 +557,7 @@ export class MachineJobs {
     const m = this.machineOf(job);
     if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can pause its jobs`);
     if (job.state !== 'running' && job.state !== 'starting') throw new HttpError(409, `Job #${id} is ${job.state}, not running`);
-    if (!this.d.send(m.id, { type: 'job.pause', id })) throw new HttpError(409, `${m.name} is offline`);
+    if (!this.d.send(m.id, { type: 'job.pause', id })) throw new HttpError(409, this.unreachable(m));
     this.store.updateMachineJob(id, { state: 'paused', paused_by: 'owner' });
     this.changed(id);
     return this.store.getMachineJob(id)!;
@@ -569,7 +569,7 @@ export class MachineJobs {
     if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can resume its jobs`);
     if (job.state !== 'paused') throw new HttpError(409, `Job #${id} is ${job.state}, not paused`);
     if (storedSettings(m).paused) throw new HttpError(409, `${m.name}'s jobs are paused: switch the machine's Pause off first`);
-    if (!this.d.send(m.id, { type: 'job.resume', id })) throw new HttpError(409, `${m.name} is offline`);
+    if (!this.d.send(m.id, { type: 'job.resume', id })) throw new HttpError(409, this.unreachable(m));
     // Resumed outside job hours by a person: it runs now, or the next pump would pause it again.
     const now = !hoursOpen(storedSettings(m), this.now()) && job.go !== 'now' ? { go: 'now' as const, go_by: who.name } : {};
     this.store.updateMachineJob(id, { state: 'running', paused_by: null, live_at: this.now(), ...now });
@@ -598,15 +598,39 @@ export class MachineJobs {
     // On the machine: tell it, and end it here too if it is offline (it reconciles when it comes back and is told to stop then).
     const sent = this.d.send(m.id, { type: 'job.stop', id });
     this.store.updateMachineJob(id, { error: `${why} by ${by}`, ...(sent ? {} : { state: 'stopped', ended_at: this.now() }) });
-    if (!sent) this.ended(id, `Job #${id} (${job.kind_name}) on ${m.name} was stopped by ${by}; ${m.name} is offline and is told when it reconnects.`, 'asker' in who);
+    if (!sent) this.ended(id, `Job #${id} (${job.kind_name}) on ${m.name} was stopped by ${by}; ${this.unreachable(m)} and is told when it next lists its jobs.`, 'asker' in who);
     else this.changed(id);
     return this.store.getMachineJob(id)!;
   }
 
-  /** The owner (or an admin) takes back an "Always allow": the next job of that kind asks again. */
+  /** Why a message about a job can't reach its machine: offline, or (2MA10) there with jobs off and not listing it. */
+  private unreachable(m: Machine): string {
+    return this.d.online(m.id) ? `${m.name} has jobs switched off and doesn't list this one` : `${m.name} is offline`;
+  }
+
+  /** Its machine is being removed, or its scheme came off it (2MA9; only what hasn't started): the job ends, its card settles and its minion hears. */
+  drop(machineId: number, why: string, which: (j: MachineJob) => boolean) {
+    for (const j of this.store.machineJobs({ machine: machineId, states: ['needs-go', 'queued', ...ACTIVE] }, 1000).filter(which)) {
+      if ((ACTIVE as readonly string[]).includes(j.state)) this.d.send(machineId, { type: 'job.stop', id: j.id });
+      const card = j.card ? (JSON.parse(j.card) as { ticket: number; question: string }) : null;
+      if (card) this.d.settleCard(card, 'Citadel', `Job #${j.id} was stopped: ${why}`);
+      this.store.updateMachineJob(j.id, { state: 'stopped', ended_at: this.now(), input_token_hash: null, card: null, error: why });
+      this.ended(j.id, `Job #${j.id} (${j.kind_name}) was stopped: ${why}.`);
+    }
+  }
+
+  /** The owner (or an admin) takes back an "Always allow": the next job of that kind asks again, as does one queued on it. */
   forgetKind(m: Machine, hash: string, who: Actor) {
     if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${m.name}'s owner can change what it always allows`);
     if (!this.store.forgetJobKind(m.id, hash)) throw new HttpError(404, `${m.name} doesn't always allow that kind`);
+    // Left on their standing go they would never start, and hold up the line behind them (2MA4).
+    for (const j of this.store.machineJobs({ machine: m.id, states: ['queued'] }, 1000)) {
+      if (j.go !== 'standing' || j.kind_hash !== hash) continue;
+      this.store.updateMachineJob(j.id, { state: 'needs-go', go: null, go_by: null });
+      this.askOwner(j, m);
+      this.changed(j.id);
+    }
+    this.pump(m.id);
   }
 
   /** A machine's job hours, one-off window or Pause changed (its owner's): pause or resume what runs, start what may. */
@@ -642,7 +666,11 @@ export class MachineJobs {
     if (active) {
       if (active.state === 'running' && !s.paused && !open && active.go !== 'now') this.hold(active, 'hours');
       else if (active.state === 'running' && s.paused) this.hold(active, 'machine');
-      else if (active.state === 'paused' && ((active.paused_by === 'hours' && open) || (active.paused_by === 'machine' && !s.paused)) && !s.paused) {
+      else if (active.state === 'paused' && active.paused_by === 'machine' && !s.paused && !open && active.go !== 'now') {
+        // The machine's Pause is off, but job hours are closed: they hold it now (2MA8).
+        this.store.updateMachineJob(active.id, { paused_by: 'hours' });
+        this.changed(active.id);
+      } else if (active.state === 'paused' && ((active.paused_by === 'hours' && open) || (active.paused_by === 'machine' && !s.paused)) && !s.paused) {
         if (this.d.send(machineId, { type: 'job.resume', id: active.id })) {
           this.store.updateMachineJob(active.id, { state: 'running', paused_by: null, live_at: this.now() });
           this.changed(active.id);
@@ -713,6 +741,16 @@ export class MachineJobs {
     this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${this.machineOf(j).name} failed: ${error}.`);
   }
 
+  private resumeSent = new Map<number, number>();
+
+  /** Send job.resume again, at most once a minute for a job. False when it wasn't sent. */
+  private sendResume(machineId: number, id: number): boolean {
+    if (this.now() - (this.resumeSent.get(id) ?? -Infinity) < 60_000) return false;
+    if (!this.d.send(machineId, { type: 'job.resume', id })) return false;
+    this.resumeSent.set(id, this.now());
+    return true;
+  }
+
   /** The agent's job-state report (every 10 s while a job runs, and on every change). */
   report(m: Machine, body: Record<string, unknown>): void {
     const id = Number(body?.id);
@@ -746,19 +784,23 @@ export class MachineJobs {
       log_tail: typeof body.log_tail === 'string' ? body.log_tail.slice(-LOG_TAIL) : '',
     };
     const ended = (ENDED as readonly string[]).includes(state);
+    if (ended) this.resumeSent.delete(id);
     // A pause stays the server's: a "running" report sent before the agent got job.pause (a resumable kind's grace)
     // leaves it paused, and the agent saying "paused" keeps who paused it, so job hours can resume it.
     // ...unless the agent says its pause failed (MA2): then it runs, and the owner sees why.
     const pauseFailed = typeof body.pause_failed === 'string' ? body.pause_failed.slice(0, 500) : null;
     const held = job.state === 'paused' && (state === 'running' || state === 'starting') && !pauseFailed;
+    // A "paused" from before the agent acted on a job.resume, or one it never got (2MA3): told again, at most once a
+    // minute; a second one inside that minute is believed.
+    const resumes = job.state === 'running' && state === 'paused' && !job.error && this.sendResume(m.id, id);
     this.store.updateMachineJob(id, {
-      state: held ? 'paused' : state,
+      state: held ? 'paused' : resumes ? 'running' : state,
       live: JSON.stringify(live),
       live_at: now,
       run_s: Math.round(num(body.run_s) ?? job.run_s),
       server_run_s: Math.round(job.server_run_s + gap),
       gpu_busy_s: Math.round(num(body.gpu_busy_s) ?? job.gpu_busy_s),
-      ...(state === 'paused' && !job.paused_by ? { paused_by: 'owner' } : {}),
+      ...(state === 'paused' && !resumes && !job.paused_by ? { paused_by: 'owner' } : {}),
       ...(state !== 'paused' && !held ? { paused_by: null } : {}),
       ...(outputs ? { outputs: JSON.stringify(outputs) } : {}),
       ...(pauseFailed && !ended ? { error: `${PAUSE_FAILED}${pauseFailed}` } : {}),
@@ -800,7 +842,8 @@ export class MachineJobs {
       }
       // A stop asked while it was offline (stopJob and the limit set error), or a pause: tell it again.
       if (j.error && !(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
-      else if (j.state === 'paused' && state === 'running') this.d.send(m.id, { type: 'job.pause', id });
+      else if (j.state === 'paused' && (state === 'running' || state === 'starting')) this.d.send(m.id, { type: 'job.pause', id });
+      else if (j.state === 'running' && state === 'paused') this.sendResume(m.id, id);
     }
     this.pump(m.id);
     this.changedMachine(m.id);

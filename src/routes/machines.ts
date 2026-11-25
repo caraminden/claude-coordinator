@@ -79,6 +79,8 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
   // Switched on: its workspace tools get their first check now.
   if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
+  // A job already running there goes on to its end (its minion hears of it); one that hasn't started never will (2MA9).
+  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.machineGranted(machine.id, j.project_id));
   if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.machineGranted(machine.id, id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return app.machines.view(app.store.getMachine(machine.id)!);
@@ -520,6 +522,8 @@ export const machineRoutes: Route[] = [
     path: '/api/machines/:machine',
     ...people,
     handler: managed(async ({ res, app, machine }) => {
+      // Before its rows go: the agent is told to stop, and each job's minion hears (2MA9).
+      app.jobs.drop(machine.id, `${machine.name} was removed from Citadel`, () => true);
       app.store.deleteMachine(machine.id);
       app.ciLoad.forget(machine.id);
       app.machines.disconnect(machine.id);

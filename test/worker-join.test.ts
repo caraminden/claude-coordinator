@@ -268,8 +268,15 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     mkdirSync(work);
     const pod = fakePodman(work);
     let left: number | null = null;
+    const synced = new Set<string>();
+    class Watched extends Worker {
+      sync() {
+        synced.add(this.cfg.container);
+        return super.sync();
+      }
+    }
     const log: string[] = [];
-    agent = new WorkerAgent({ config: { root: work, ...CAPS }, appUrl: srv.base, token, Worker, run: pod.run, log: (...a) => log.push(a.join(' ')), exit: (code) => void (left = code) });
+    agent = new WorkerAgent({ config: { root: work, ...CAPS }, appUrl: srv.base, token, Worker: Watched, run: pod.run, log: (...a) => log.push(a.join(' ')), exit: (code) => void (left = code) });
     assert.equal(agent.worker.cfg.max, 0, 'it takes no turn before it has an image');
     const going = agent.start();
     await until('its image', async () => (await view()).worker.image?.state === 'ready');
@@ -307,6 +314,7 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     assert.match(test.lines.find((l: { key: string }) => l.key === 'link').text, /^\d+ Mbit\/s down, \d+ up, [\d.]+ ms$/);
     assert.ok((await view()).worker.passed);
     assert.equal(existsSync(join(work, 'self-test')), false, 'it leaves nothing');
+    assert.deepEqual([...synced], ['citadel-worker'], "the test's own worker never asks for turns: it would be handed this machine's");
 
     // One that breaks says where; what depends on it says it wasn't tried.
     pod.state.breakSync = true;

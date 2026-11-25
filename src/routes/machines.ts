@@ -229,6 +229,7 @@ export const agentRoutes: Route[] = [
     const at = (await owned(machine.id, dir)) ? placedAt(dir) : null;
     if (!at) throw new HttpError(410, 'Not a turn placed on this machine');
     return stateCall(stateDeps(app), params.rest, dir, at, req, res);
+  }),
   // A worker's own program (Build 7 T5, src/worker-join.ts): how it stands, every 2 s, and what its self-test measures.
   agent('POST', '/api/machines/worker', async ({ req, res, app }, machine) => json(res, 200, await workersOf(app).report(machine, await readJson(req, 50_000)))),
   agent('GET', '/api/machines/worker/scratch', async ({ res, app }, machine) => {

@@ -6,7 +6,7 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { systemPrompt } from '../src/prompts.ts';
 import { bootServer, PASSWORD, SECRET, type Booted, tempRoot } from './helpers.ts';
-import { agentEnv, mcpOnce } from './mcp-agent.ts';
+import { agentEnv, type McpResult, mcpOnce } from './mcp-agent.ts';
 
 // Personal instructions (#688): each person's own text for everywhere and per scheme, loaded last in the
 // minions assigned to them and never in the Taskmaster's prompt, which reads them with a tool instead.
@@ -88,13 +88,13 @@ test('My instructions: GET and PUT your own text per scope, capped at 4,000 char
   assert.equal(got.data.scheme.text, '', "another scheme's text is its own");
   const h = await srv.call(`/api/projects/${Delve.id}/my-instructions/history?scope=scheme`);
   assert.deepEqual(
-    h.data.history.map((x: any) => [x.by, x.diff]),
+    h.data.history.map((x: { by: string; diff: unknown }) => [x.by, x.diff]),
     [['Cara', [{ op: '+', text: 'Delve only.' }]]],
   );
 });
 
 /** One tools/call through the real MCP server, as Delve's Taskmaster. */
-async function mcpCall(name: string, args: object): Promise<any> {
+async function mcpCall(name: string, args: object): Promise<McpResult> {
   return mcpOnce(agentEnv(srv.base, tokens.agentToken(DelveTM.id), { id: DelveTM.id, project_id: Delve.id }, 'coordinator'), 'tools/call', { name, arguments: args }, tmp.track);
 }
 

@@ -18,6 +18,7 @@ after(() => tmp.teardown()); // ends the children and the detached turns (#271) 
 const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: "JSON.stringify({ prompt: JSON.parse(line), system: require('node:fs').readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8'), token: process.env.COORDINATOR_TOKEN })" } });
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
+type Tool = { name: string; inputSchema: { properties: Record<string, { enum: string[] }> } };
 let base = '';
 let cookie = '';
 let srv: Booted;
@@ -126,9 +127,9 @@ test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create
   const { data: page } = await call(`/api/projects/${p.id}`);
   const events = await until('the kickoff', async () => {
     const { data } = await call(`/api/tickets/${page.coordinator.id}/events?after=0`);
-    return data.some((e: any) => e.kind === 'user_message') && data;
+    return data.some((e: { kind: string; data: string }) => e.kind === 'user_message') && data;
   });
-  const sent = events.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  const sent = events.filter((e: { kind: string; data: string }) => e.kind === 'user_message').map((e: { kind: string; data: string }) => JSON.parse(e.data));
   assert.equal(sent.length, 1);
   assert.equal(sent[0].author, 'Citadel');
   assert.match(sent[0].text, /New scheme "Lanternfall" \(code: no code\), created by \w+\. \w+ wrote: "A small roguelike deckbuilder\."/);
@@ -142,7 +143,7 @@ test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create
   assert.equal(only.data.onboarding, 'skipped');
   const { data: scratch } = await call(`/api/projects/${only.data.id}`);
   const { data: none } = await call(`/api/tickets/${scratch.coordinator.id}/events?after=0`);
-  assert.ok(!none.some((e: any) => e.kind === 'user_message'), 'no kickoff');
+  assert.ok(!none.some((e: { kind: string; data: string }) => e.kind === 'user_message'), 'no kickoff');
 
   // The Taskmaster moves it along (set_project_settings), and onboarding never clears.
   const token = turn.token;
@@ -169,9 +170,9 @@ test('Tune up turns onboarding back on in tune-up mode and messages the Taskmast
   const { data: page } = await call(`/api/projects/${p.id}`);
   const events = await until('the tune-up message', async () => {
     const { data } = await call(`/api/tickets/${page.coordinator.id}/events?after=0`);
-    return data.some((e: any) => e.kind === 'user_message') && data;
+    return data.some((e: { kind: string; data: string }) => e.kind === 'user_message') && data;
   });
-  const sent = events.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  const sent = events.filter((e: { kind: string; data: string }) => e.kind === 'user_message').map((e: { kind: string; data: string }) => JSON.parse(e.data));
   assert.equal(sent.length, 1);
   assert.notEqual(sent[0].author, 'Citadel', 'from the person who clicked');
   assert.match(sent[0].text, /Tune up this scheme/);
@@ -189,14 +190,14 @@ test('Tune up turns onboarding back on in tune-up mode and messages the Taskmast
 // Without the turn's own COORDINATOR_* env: its ticket would make the tool server keep a tool list in this TMPDIR.
 test('Taskmasters get propose_plan and list_catalogue, and set_project_settings takes onboarding', async () => {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('COORDINATOR_'))), COORDINATOR_ROLE: 'coordinator' }, stdio: ['pipe', 'pipe', 'inherit'] });
-  const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  const reply = new Promise<{ result: { tools: Tool[] } }>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+  child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
   const tools = (await reply).result.tools;
   child.kill();
-  const names = tools.map((t: any) => t.name);
+  const names = tools.map((t) => t.name);
   assert.ok(names.includes('propose_plan'));
   assert.ok(names.includes('list_catalogue'));
-  const settings = tools.find((t: any) => t.name === 'set_project_settings').inputSchema.properties;
+  const settings = tools.find((t) => t.name === 'set_project_settings')!.inputSchema.properties;
   assert.deepEqual(settings.onboarding.enum, [...ONBOARDING]);
   assert.deepEqual(settings.onboarding_mode.enum, [...ONBOARDING_MODES]);
 });
@@ -207,7 +208,7 @@ test('keys and values an approved setup plan names go in approved, only while th
   const tm = page.coordinator.id;
   const mine = () => turns().filter((t) => t.token?.startsWith(`${tm}.`));
   const token = async (n: number) => (await until(`Taskmaster turn ${n}`, () => mine().length >= n && mine()))[n - 1].token;
-  const props = async () => (await call(`/api/projects/${p.id}/properties`)).data.keys.filter((k: any) => k.scope === 'scheme');
+  const props = async () => (await call(`/api/projects/${p.id}/properties`)).data.keys.filter((k: { scope: string }) => k.scope === 'scheme');
   const register = async (key: string, values: string[], t: string) => call(`/api/projects/${p.id}/properties/keys`, { method: 'POST', body: { key, description: 'x', values: values.map((value) => ({ value })) }, token: t });
   let t = await token(1);
 
@@ -221,9 +222,9 @@ test('keys and values an approved setup plan names go in approved, only while th
 
   // Approved: what the plan names is live and reviewed; what it doesn't name still waits.
   assert.equal((await register('game', ['wow', 'poe', 'all'], t)).data.status, 'active');
-  const game = (await props()).find((k: any) => k.key === 'game');
+  const game = (await props()).find((k: { key: string }) => k.key === 'game');
   assert.deepEqual(
-    game.values.map((v: any) => [v.value, v.reviewed]),
+    game.values.map((v: { value: string; reviewed: boolean }) => [v.value, v.reviewed]),
     [
       ['wow', true],
       ['poe', true],

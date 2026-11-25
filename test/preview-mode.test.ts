@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { listeningPort, PASSWORD, tempRoot, TEST_ZONE, until, holds } from './helpers.ts';
+import type { AddressInfo } from 'node:net';
+import { type ApiEvent, json } from './typed.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -53,7 +55,7 @@ before(async () => {
   // Someone else's real subscription: a state change by Cara would push to it outside a preview.
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
-  store.savePushSubscription('Josh', `http://127.0.0.1:${(pushServer.address() as any).port}/push`, ecdh.getPublicKey('base64url'), randomBytes(16).toString('base64url'));
+  store.savePushSubscription('Josh', `http://127.0.0.1:${(pushServer.address() as AddressInfo).port}/push`, ecdh.getPublicKey('base64url'), randomBytes(16).toString('base64url'));
   store.db.close();
 
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
@@ -86,7 +88,7 @@ before(async () => {
 });
 
 test('health says it is a preview, and the tab title says so too', async () => {
-  assert.equal((await (await fetch(`${base}/api/health`)).json()).preview, true);
+  assert.equal((await json<{ preview: boolean }>(await fetch(`${base}/api/health`))).preview, true);
   assert.match(await (await fetch(`${base}/`)).text(), /<title>Citadel preview<\/title>/);
 });
 
@@ -94,9 +96,9 @@ test('a message is kept but starts no turn; the chat says why', async () => {
   // Through the runner as live: stop isn't possible (nothing runs), so the message goes to a new turn.
   const res = await post(`/api/tickets/${ticket.id}/messages`, { text: 'hello' });
   assert.ok(res.status < 300, `messages answered ${res.status}`);
-  const events = await (await fetch(`${base}/api/tickets/${ticket.id}/events?after=0`, { headers: { Cookie: cookie } })).json();
-  assert.ok(events.some((e: any) => e.kind === 'user_message'));
-  assert.ok(events.some((e: any) => e.kind === 'note' && /preview/.test(JSON.parse(e.data).text)));
+  const events = await json<ApiEvent[]>(await fetch(`${base}/api/tickets/${ticket.id}/events?after=0`, { headers: { Cookie: cookie } }));
+  assert.ok(events.some((e) => e.kind === 'user_message'));
+  assert.ok(events.some((e) => e.kind === 'note' && /preview/.test(JSON.parse(e.data).text)));
 });
 
 test('no new minions, schemes or machine connections', async () => {

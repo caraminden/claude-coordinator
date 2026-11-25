@@ -7,6 +7,7 @@ import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
+import { json } from './typed.ts';
 import { until } from './wait.ts';
 
 // A minion started for another minion (#273) records it as its parent and rides its build, unless the
@@ -61,7 +62,7 @@ test("a new minion rides its parent's build unless the create sets one", async (
   const as = async (who: number, method: string, path: string, body?: object) => {
     const token = who === DelveTM.id && existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8') : tokens.agentToken(who);
     const res = await fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await json<{ id: number; properties: unknown; error: string; tickets: { number: number; parent: number | null }[] }>(res) };
   };
   const create = (extra: object) => as(DelveTM.id, 'POST', `/api/projects/${Delve.id}/tickets`, { message: 'do it', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', ...extra });
   const made = async (extra: object) => {
@@ -88,7 +89,7 @@ test("a new minion rides its parent's build unless the create sets one", async (
   t = await made({ parent: 1 });
   assert.deepEqual([t.parent, t.build, t.props.build], [1, 8, 8]);
   const listed = await as(DelveTM.id, 'GET', `/api/projects/${Delve.id}/tickets`);
-  assert.equal(listed.body.tickets.find((x: any) => x.number === t.number)?.parent, 1, 'list_tickets carries the parent');
+  assert.equal(listed.body.tickets.find((x) => x.number === t.number)?.parent, 1, 'list_tickets carries the parent');
 
   // An explicit build wins, and null means no build; so does the build property.
   t = await made({ parent: 1, build: 9 });

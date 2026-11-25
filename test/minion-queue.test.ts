@@ -27,8 +27,8 @@ test('a taken batch stays in the record until its turn is done; a start that bai
   q.put(1, msg('a'));
   q.hold(1, msg('mail'), 5);
   assert.deepEqual(texts(q.take(1)), ['a', 'mail'], 'queued first, then held mail');
-  assert.deepEqual(texts(s.getSetting<any>(queueKey(1)).taken), ['a', 'mail'], 'durable while the turn runs');
-  assert.equal(s.getSetting<any>(queueKey(1)).coldAt, undefined, 'the cold hold ends with the take');
+  assert.deepEqual(texts(s.getSetting<{ taken: QueuedMessage[] }>(queueKey(1))!.taken), ['a', 'mail'], 'durable while the turn runs');
+  assert.equal(s.getSetting<{ coldAt?: number }>(queueKey(1))!.coldAt, undefined, 'the cold hold ends with the take');
   q.put(1, msg('b'));
   q.giveBack(1);
   assert.deepEqual(texts(q.msgs(1)), ['a', 'mail', 'b']);

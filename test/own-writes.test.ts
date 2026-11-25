@@ -47,7 +47,7 @@ test('a reply shows what its request wrote, and the next request finds it, howev
   const added = await srv.call(`/api/projects/${scheme.id}/members`, { person: ids[0] }, 'POST');
   assert.equal(added.status, 200, JSON.stringify(added.data));
   assert.ok(
-    added.data.some((m: any) => m.id === ids[0]),
-    `Max is in the reply: ${added.data.map((m: any) => m.name)}`,
+    added.data.some((m: { id: number }) => m.id === ids[0]),
+    `Max is in the reply: ${added.data.map((m: { name: string }) => m.name)}`,
   );
 });

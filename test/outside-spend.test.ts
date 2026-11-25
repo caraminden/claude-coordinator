@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { monthStart } from '../src/openrouter.ts';
 import { OutsideSpend, parseSpend } from '../src/outside-spend.ts';
 import { bootServer, SECRET, stopTurns } from './helpers.ts';
+import { json } from './typed.ts';
 
 // Spend on outside APIs (#839): contraptions and minions report it, the bill is per scheme and service
 // by month beside OpenRouter's own calls, and a scheme's optional cap warns once without stopping anything.
@@ -97,7 +98,7 @@ test("POST /api/contraptions/spend books to the contraption's home scheme; the b
   try {
     const post = async (body: unknown, key: string | null = KEY) => {
       const res = await fetch(`${srv.base}/api/contraptions/spend`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(body) });
-      return { status: res.status, body: (await res.json()) as any };
+      return { status: res.status, body: await json<{ month_usd: number; over_cap: boolean }>(res) };
     };
     assert.equal((await post({ service: 'azure-speech', usd: 1 }, null)).status, 401);
     assert.equal((await post({ service: 'azure-speech', usd: -1 })).status, 400);

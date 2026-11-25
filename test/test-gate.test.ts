@@ -94,7 +94,7 @@ test('a file that waits prints one line, holds no place and starts anyway after 
   const holder = spawn(process.execPath, ['--import', gate, '-e', body(60_000)], { env: one, stdio: 'ignore' });
   await until('the holder up', () => readdirSync(run).some((f) => f.startsWith('up-')));
   assert.equal(await file(one, 50), 0, 'it started after the 1 s wait');
-  assert.match(readFileSync(one.CITADEL_TEST_GATE_NOTE!, 'utf8'), /^waiting for room: 1 test files may run at once on this box \(CPU pressure 20%\)/);
+  assert.match(readFileSync(env.CITADEL_TEST_GATE_NOTE!, 'utf8'), /^waiting for room: 1 test files may run at once on this box \(CPU pressure 20%\)/);
   assert.equal(peak(run), 2, 'it started past the limit, as the cap says');
   holder.kill('SIGKILL');
 });

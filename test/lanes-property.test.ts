@@ -91,3 +91,20 @@ test('a step awaited by its caller sees its lane free, or idle soon, never busy 
     params,
   );
 });
+
+test('a step that throws at once throws to its caller, and the lane goes idle and runs the next step', async () => {
+  const lanes = new Under();
+  let idled = 0;
+  lanes.onIdle = () => idled++;
+  assert.throws(
+    () =>
+      lanes.run(7, 'turn', () => {
+        throw new Error('no place to run');
+      }),
+    /no place to run/,
+  );
+  assert.equal(lanes.busy(7), true, 'until its tail has run');
+  let ran = 0;
+  await lanes.run(7, 'turn', () => ran++);
+  assert.deepEqual([ran, idled, lanes.busy(7)], [1, 1, false]);
+});

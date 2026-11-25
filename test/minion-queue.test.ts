@@ -83,6 +83,23 @@ test('remove takes back one queued message; refuse drops the queue but keeps hel
   assert.equal(s.m.size, 0);
 });
 
+test("held mail: the cold clock runs from the first one, a release puts it behind what is queued, a disabled person's goes with its clock", () => {
+  const s = mapStore();
+  const q = new MinionQueue(s);
+  q.hold(1, msg('first mail'), 5);
+  q.hold(1, msg('second mail'), 9);
+  assert.equal(q.get(1).coldAt, 5, 'later mail never puts the cap off');
+  q.put(1, msg('queued'));
+  assert.equal(q.release(1), 2);
+  assert.deepEqual(q.get(1), { msgs: [msg('queued'), msg('first mail'), msg('second mail')] });
+  q.take(1);
+  q.done(1);
+  q.put(1, { ...msg('theirs'), author: 'Gone' });
+  q.hold(1, { ...msg('their mail'), author: 'Gone' }, 5);
+  assert.deepEqual(texts(q.dropWhere(1, (m) => m.author === 'Gone')), ['theirs', 'their mail']);
+  assert.equal(s.m.size, 0, 'nothing of theirs is left to run later, nor a clock for mail that is gone');
+});
+
 test('migration folds every old store into one record each, keeps each message once, and leaves the rest of the rows alone', () => {
   const late = { end: 9, msg: msg('steered') };
   const s = mapStore({

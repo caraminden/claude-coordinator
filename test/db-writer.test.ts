@@ -126,6 +126,49 @@ test('a get-then-set of a setting on a stalled disk keeps every update', () => {
   assert.deepEqual(store.getSetting('goes'), ['again'], 'and the file agrees once they land');
 });
 
+test("a write inside a transaction on the server's thread goes with it, rolled back or kept", () => {
+  const { store, w } = open();
+  const keys = () =>
+    store.db
+      .prepare("SELECT key FROM settings WHERE key LIKE 'tx-%' ORDER BY key")
+      .all()
+      .map((r) => (r as { key: string }).key);
+  for (const end of ['ROLLBACK', 'COMMIT']) {
+    store.db.exec('BEGIN IMMEDIATE');
+    store.setSetting(`tx-${end}`, 1);
+    store.db.exec(end);
+  }
+  assert.ok(w.drain());
+  assert.deepEqual(keys(), ['tx-COMMIT']);
+});
+
+test("SQL run straight on the server's connection, and a write the worker can't be sent, come after what is queued", () => {
+  const { store, w } = open(50);
+  store.setSetting('by-sql', 'queued');
+  store.db.exec(`UPDATE settings SET value = '"sql"' WHERE key = 'by-sql'`);
+  store.setSetting('unsendable', 'queued');
+  store.setSetting('unsendable', { last: true, f() {} }); // a function: postMessage can't copy it
+  assert.ok(w.drain());
+  assert.deepEqual([store.getSetting('by-sql'), store.getSetting('unsendable')], ['sql', { last: true }]);
+});
+
+test('a key setSettings removes reads as gone at once, on a stalled disk', () => {
+  const { store } = open(300);
+  store.setSettings({ kept: 1, removed: 1 });
+  store.setSettings({ kept: 2 }, ['removed']);
+  assert.deepEqual([store.getSetting('kept'), store.getSetting('removed')], [2, null]);
+});
+
+test("a card's cached row is dropped when its change is sent, so a read that waits for the write sees it", () => {
+  const { store } = open(0, undefined, 30_000); // the read waits until the write lands, before the server hears it has
+  const t = ticket(store);
+  const e = store.addEvent(t.id, 'plan', { id: 'c1', status: 'pending' });
+  const card = () => JSON.parse(store.recentCards(t.project_id, 10).find((c) => c.id === e.id)!.data).status;
+  assert.equal(card(), 'pending');
+  store.setEventData(e.id, { id: 'c1', status: 'approved' });
+  assert.equal(card(), 'approved');
+});
+
 test("a card's cached row is dropped again when its change lands, not only when it is sent", async () => {
   const { store, w } = open(150);
   const t = ticket(store);

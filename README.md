@@ -199,6 +199,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |
 | `src/instructions.ts` | Finds Claude Code instruction and memory files to import as scheme instructions |
+| `src/turn-row.ts` | One turn's row: what a result event says of it, and its write, shared by `recordTurn` and `backfillTurns` (#1877) |
 | `src/db.ts`, `src/db-rows.ts` | SQLite schema and queries; `db-rows` holds the row types and the option lists and limits that go with them, which `db.ts` re-exports |
 | `src/auth.ts` | Per-person sign-in (and the admin's shared password), invite links, signed session cookies |
 | `src/access.ts`, `src/routes/people.ts`, `public/people.js` | Who sees what: news filtered by scheme membership, the turn gate, People and Members |

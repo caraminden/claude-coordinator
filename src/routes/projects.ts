@@ -170,15 +170,8 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
   await mkdir(cwd, { recursive: true });
   try {
     // A value write: the queue empties off the event loop first, so creating it never waits there (#1877).
-    const t = await afterAllWrites(() =>
-      store.createTicket({
-        project_id: project.id,
-        kind: 'coordinator',
-        title: 'Coordinator',
-        permission_mode: COORDINATOR_PERMISSION_MODE,
-        created_by: AGENT_NAME,
-      }),
-    );
+    const row = { project_id: project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: COORDINATOR_PERMISSION_MODE, created_by: AGENT_NAME } as const;
+    const t = await afterAllWrites(() => store.createTicket(row));
     store.setTicketDir(t.id, cwd, null);
   } catch (e) {
     // Lost a race with a concurrent request; the unique index kept a single coordinator. A queue still busy is a 503.

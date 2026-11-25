@@ -30,6 +30,7 @@ import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
+import { turnOf } from './turn-row.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
@@ -3239,15 +3240,11 @@ export class Runner {
   /** A keepalive's result: costed apart, and its miss stops its series; too many misses in a day switch keepalives off. */
   private async keepaliveResult(ticketId: number, ev: ClaudeEvent) {
     await this.store.recordTurn(ticketId, {
-      session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
+      ...turnOf(ev),
       ended_at: Date.now(),
-      session_cost_usd: ev.total_cost_usd!,
-      duration_ms: ev.duration_ms,
-      usage: ev.usage,
       payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person),
       keepalive: true,
       account: this.store.getSetting<TurnState>(turnKey(ticketId))?.account ?? null,
-      modelUsage: ev.modelUsage,
     });
     if (!missed(ev.usage)) return;
     this.stopSeries(ticketId, 'missed');
@@ -4876,15 +4873,11 @@ export class Runner {
       void this.store
         .recordTurn(ticketId, {
           event_id: row.id,
-          session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
+          ...turnOf(ev),
           ended_at: row.created_at,
-          session_cost_usd: ev.total_cost_usd,
-          duration_ms: ev.duration_ms,
-          usage: ev.usage,
           payer: this.payerOf(state?.person),
           hashes: state?.hashes ?? null,
           account: state?.account ?? null,
-          modelUsage: ev.modelUsage,
         })
         .then((turn) => {
           this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });

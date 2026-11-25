@@ -259,7 +259,7 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
     kind: 'reviewer',
     source: 'kit:citadel:self-review/references/verifier.md',
     when: 'Once switched on: changes that matter at runtime (turns, limits, restarts, saved state, two people at once), before they ship',
-    what: 'Runs the change on a scratch copy the way a person would, sets up the states bugs hide in, and reports what it saw go wrong. Off until you switch it on: about $1 and 10 minutes a change. In a small test it named 3 of 11 past bugs (the pre-ship review named 0 or 1) and raised findings on all 3 changes no bug was traced to.',
+    what: 'Runs the change on a scratch copy the way a person would, sets up the states bugs hide in, and reports what it saw go wrong. Starts off in every scheme; about $1 and 10 minutes a change. In a small test it named 3 of 11 past bugs (the pre-ship review named 0 or 1) and raised findings on all 3 changes no bug was traced to.',
     off: true,
   },
   { slug: 'fresh-eyes', name: 'Fresh eyes', kind: 'reviewer', source: 'kit:citadel:fresh-eyes', when: 'Feature PRs, after the retro', what: "Reads the requester's own words against the PR and says what was built that they didn't ask for, and what they asked for that wasn't built." },

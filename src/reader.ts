@@ -2,7 +2,8 @@
 // on READER_PATHS from its own read-only connection, with the real router, Auth, access checks and route objects, so
 // who sees what has one copy. What those pages show from the main thread's memory (a turn's steps, its approval
 // cards, the ship line, the Status page's live numbers) comes from main's snapshot (#1590, src/reader-live.ts). Anything it can't answer the same way the main thread would (a request it doesn't
-// know, a failure, writes it can't wait out) it hands back, and the front thread asks the main thread instead.
+// know, a failure) it hands back, and the front thread asks the main thread instead. Waiting is never a reason to
+// hand one back (#2003): the disk that slows a reader slows the main thread too, and there it holds up everyone.
 // First, so every module after it already sees a reader thread's guards (src/only-reads.ts).
 import { refusals, refusal } from './only-reads.ts';
 import { existsSync } from 'node:fs';
@@ -133,6 +134,14 @@ export const mainOnly = <T extends object>(o: T): T =>
 /** The steps the main thread has opened (src/db-writer.ts); 0 with no write worker (then readers answer nothing). */
 export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.load(shared, 1) === 1n ? Atomics.load(shared, 4) : 0n);
 
+const writerUp = (shared: BigInt64Array | null) => !!shared && Atomics.load(shared, 1) === 1n;
+/** The main thread is inside a step it has written in (src/db-writer.ts): what is written may be half of it. */
+const inStep = (shared: BigInt64Array | null) => !!shared && Atomics.load(shared, 5) < Atomics.load(shared, 4);
+/** How long a request waits for the writer to catch up with the main thread's steps. */
+const STEP_WAIT_MS = 1000;
+/** Begin a read transaction: one read of each file starts its snapshot, so it keeps the three as they are here. */
+const pin = (db: DatabaseSync) => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT count(*) FROM main.sqlite_master), (SELECT count(*) FROM state.sqlite_master), (SELECT count(*) FROM ${CHAT}.sqlite_master)`).get());
+
 /**
  * Begin a read transaction on `db` at a whole step of the main thread's (#1628): every write of every step it opened
  * so far has run and none of a later one's has, so a read never sees half of one (a turn's queue taken but the next
@@ -140,16 +149,14 @@ export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.
  * worker to count them (the main thread answers).
  */
 export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms = READ_WAIT_MS): bigint | null {
-  // One read of each file starts its snapshot: the transaction keeps the three as they were here.
-  const pin = () => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT count(*) FROM main.sqlite_master), (SELECT count(*) FROM state.sqlite_master), (SELECT count(*) FROM ${CHAT}.sqlite_master)`).get());
   // With no write worker the main thread writes in place, where a step can't be told from the next: it answers.
-  if (!shared || Atomics.load(shared, 1) !== 1n) return null;
+  if (!shared || !writerUp(shared)) return null;
   const until = Date.now() + ms;
   for (;;) {
     const opened = Atomics.load(shared, 4),
       closed = Atomics.load(shared, 3);
     if (closed >= opened) {
-      pin();
+      pin(db);
       // No step opened while it pinned, so nothing committed since the check.
       if (Atomics.load(shared, 4) === opened) return opened;
       db.exec('ROLLBACK');
@@ -192,6 +199,17 @@ class Collect {
   }
 }
 
+/**
+ * Null once this thread has been free for `ms`: time it was stuck in a disk read doesn't count, so an answer it comes
+ * back with is sent, not thrown away for the main thread to read again (#2003). `stop` ends the wait.
+ */
+function freeFor(ms: number) {
+  let left = Math.ceil(ms / 50),
+    timer!: NodeJS.Timeout;
+  const done = new Promise<null>((r) => (timer = setInterval(() => --left <= 0 && r(null), 50)));
+  return { done, stop: () => clearInterval(timer) };
+}
+
 /** Answer one request, or null to hand it to the main thread. */
 export async function answer(app: App, auth: Auth, routes: ReturnType<typeof router>, m: { method: string; url: string; headers: Record<string, string | string[] | undefined> }): Promise<Answer | null> {
   // Agents' tokens and contraptions' keys are the main thread's: their nonces and keys live there.
@@ -225,9 +243,9 @@ export async function answer(app: App, auth: Auth, routes: ReturnType<typeof rou
     json(res, err.status, { error: err.message });
   }
   // A gzipped answer comes a moment later; one that never comes is the main thread's to find out.
-  let timer: NodeJS.Timeout | undefined;
-  const a = await Promise.race([answered, new Promise<null>((r) => (timer = setTimeout(r, 1500, null)))]);
-  clearTimeout(timer);
+  const free = freeFor(1500);
+  const a = await Promise.race([answered, free.done]);
+  free.stop();
   // A refusal while it ran, caught or not (one in a request beside it too), sends it to the main thread.
   return a && a.status < 500 && refusals() === refused ? a : null;
 }
@@ -300,22 +318,33 @@ if (workerData?.reader) {
   // stands in, so these answer before main's first snapshot, as they did in slice 1.
   const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;
   // The requests running at once share one read transaction at a whole step; one that needs a newer step (main opened
-  // one since) waits a moment for them to finish, or the main thread answers it.
+  // one since) waits for them to finish.
   let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
   const inWholeStep = async <T>(run: () => Promise<T>): Promise<T | null> => {
-    const until = Date.now() + READ_WAIT_MS;
-    while (tx && tx.at < stepsOpened(data.shared)) {
-      const left = until - Date.now();
-      if (left <= 0) return null;
-      let timer: NodeJS.Timeout | undefined;
-      await Promise.race([tx.done, new Promise((r) => (timer = setTimeout(r, left)))]);
-      clearTimeout(timer);
-    }
-    if (!tx) {
-      const at = atWholeStep(store.db, data.shared);
-      if (at === null) return null;
-      let end!: () => void;
-      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
+    // While main is inside a step this waits for it. When it is only the writer that is behind, it waits a second: past
+    // that the main thread would answer from what is written too (READ_WAIT_MS there), so a reader does (#2003), from a
+    // transaction no other request shares. A person's own writes are in it: main holds their answer until they are.
+    let until = Date.now() + STEP_WAIT_MS,
+      wait = READ_WAIT_MS;
+    while (!tx || tx.at < stepsOpened(data.shared)) {
+      if (tx) {
+        await tx.done;
+        continue;
+      }
+      let at = atWholeStep(store.db, data.shared, wait);
+      if (at === null && !writerUp(data.shared)) return null;
+      if (inStep(data.shared)) until = Date.now() + STEP_WAIT_MS;
+      if (at === null && Date.now() >= until) {
+        pin(store.db);
+        at = -1n;
+      }
+      if (at !== null) {
+        let end!: () => void;
+        tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
+        break;
+      }
+      wait = 0;
+      await sleep(20);
     }
     const mine = tx;
     mine.refs++;
@@ -333,13 +362,13 @@ if (workerData?.reader) {
         mine.end();
       }
     };
-    // A slow one (a memory search waits on its embedding) lets go when the front thread has given up on it, so it
-    // doesn't keep everyone else at an old step: its answer, null here, goes to the main thread's.
-    let timer: NodeJS.Timeout | undefined;
+    // A slow one (a memory search waits on its embedding) lets go after a while, so it doesn't keep everyone else at an
+    // old step: its answer, null here, goes to the main thread's.
+    const free = freeFor(READER_ANSWER_MS);
     try {
-      return await Promise.race([run(), new Promise<null>((r) => (timer = setTimeout(r, READER_ANSWER_MS, null)))]);
+      return await Promise.race([run(), free.done]);
     } finally {
-      clearTimeout(timer);
+      free.stop();
       release();
     }
   };

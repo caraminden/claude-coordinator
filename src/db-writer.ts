@@ -192,7 +192,7 @@ export type Writer = {
   queued(): number;
   /** Stop the worker: writes run on the store's connection again. */
   stop(): Promise<number>;
-  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent, [3]: steps closed, [4]: steps opened.
+  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent, [3]: steps closed, [4]: steps opened, [5]: steps over.
    * Reader threads wait on it (src/reader.ts). */
   shared: BigInt64Array;
 };
@@ -209,8 +209,9 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   if (!store.statePath) return null;
   const db = store.db;
   // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent,
-  // [3]: the steps whose every write has run (the worker's), [4]: the steps this thread has opened.
-  const shared = new BigInt64Array(new SharedArrayBuffer(40));
+  // [3]: the steps whose every write has run (the worker's), [4]: the steps this thread has opened,
+  // [5]: the ones it is done with, though their writes may still be queued.
+  const shared = new BigInt64Array(new SharedArrayBuffer(48));
   const worker = new Worker(new URL(import.meta.url), { workerData: { writer: { path: store.path, shared, delayMs } } });
   worker.on('error', (err) => console.error(`DB write worker failed: ${thrown(err).stack ?? err}`));
   // Its start is a few ms of opening the file; waiting here keeps the boot's own writes in order.
@@ -243,6 +244,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const n = Atomics.add(shared, 4, 1n) + 1n;
     queueMicrotask(() => {
       stepOpen = false;
+      Atomics.store(shared, 5, n);
       try {
         worker.postMessage({ step: n });
       } catch {

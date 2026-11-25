@@ -71,9 +71,16 @@ export const READER_PATHS = new RegExp(`^(?:/c)?(?:${READER_ROUTES.map((p) => p.
 /** Headers the front thread sets on every request it passes to the main thread; a client's own copies are dropped. */
 export const PEER_HEADER = 'x-citadel-peer';
 export const LOCAL_HEADER = 'x-citadel-local';
-/** A request a reader hasn't answered in this long goes to the main thread instead (a GET is safe to ask twice). */
+/**
+ * A request a reader hasn't answered in this long is asked of another one too (a GET is safe to ask twice). It waits
+ * four times this for a reader in all, then gets a 503 its page retries (#2003): never the main thread, where one slow
+ * read on a swamped disk holds up everyone.
+ */
 export const READER_ANSWER_MS = 2000;
-/** A reader whose thread hasn't said it is alive for this long is replaced. */
+/**
+ * A reader whose thread hasn't said it is alive for this long gets a replacement, and goes once that is ready. With
+ * none heard from for six times this, requests go to the main thread.
+ */
 export const READER_STUCK_MS = 10_000;
 
 /**
@@ -410,23 +417,56 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   };
 
   // Readers: started here, so their answers never wait on the main thread.
+  // open: what it was asked and hasn't answered, oldest first: the oldest is the one it is busy with.
   // late: it missed an answer's deadline and gets no more requests until it posts something again.
+  // silent: it was silent for stuckMs and another was started in its place; it stays until that is ready, or it is heard
+  // again (one that was only slow on disk, #2003). ended: terminated here.
   // starting: resolves when the thread has said it is ready, or has died. A thread that hasn't is still evaluating its
   // module (it opens the database and hashes the sign-in keys there), and killing one then aborts the whole process:
   // V8's "Check failed: !is_null()", SIGTRAP, so the server dies on a signal instead of exiting 0 (#1625).
-  type Reader = { worker: Worker; ready: boolean; late: boolean; heard: number; open: Map<number, (a: Answer | null) => void>; starting: Promise<void> };
+  type Reader = { worker: Worker; ready: boolean; late: boolean; silent: boolean; ended: boolean; heard: number; open: Map<number, { a: Ask; done: (got: Answer | null) => void }>; starting: Promise<void> };
+  // A page read, and the readers asked for it so far.
+  type Ask = { req: IncomingMessage; res: ServerResponse; asked: Set<Reader>; timer: NodeJS.Timeout };
   const readers = new Set<Reader>();
+  const asks = new Set<Ask>();
   let nextId = 1;
   let failures = 0;
   let stopping = false;
+  let released = false; // a warm handover's: every request goes to the main thread, which passes it on
+  const end = (r: Reader) => {
+    r.ended = true;
+    void r.worker.terminate();
+  };
+  // Once there are enough that answer, the silent ones go, and any over: a silent one that came back outlives its replacement.
+  const trim = () => {
+    const up = [...readers].filter((r) => r.ready && !r.silent && !r.ended);
+    if (up.length < opts.readers) return;
+    for (const r of readers) if (r.ready && r.silent && !r.ended) end(r);
+    for (const r of up.slice(opts.readers)) end(r);
+  };
+  // At most twice opts.readers threads: one stuck in a disk read outlives its termination until the read ends.
+  const fill = () => {
+    const coming = () => [...readers].filter((r) => !r.ended && !(r.ready && r.silent)).length;
+    while (!stopping && coming() < opts.readers && readers.size < 2 * opts.readers) startReader(true);
+  };
   const startReader = (again = false) => {
     let started_up!: () => void;
-    const r: Reader = { worker: new Worker(new URL('./reader.ts', import.meta.url), { workerData: { reader: opts.reader, snap } }), ready: false, late: false, heard: Date.now(), open: new Map(), starting: new Promise<void>((done) => (started_up = done)) };
+    const r: Reader = {
+      worker: new Worker(new URL('./reader.ts', import.meta.url), { workerData: { reader: opts.reader, snap } }),
+      ready: false,
+      late: false,
+      silent: false,
+      ended: false,
+      heard: Date.now(),
+      open: new Map(),
+      starting: new Promise<void>((done) => (started_up = done)),
+    };
     readers.add(r);
     const started = Date.now();
     r.worker.on('message', (m: { ready?: true; alive?: true; id?: number; answer?: Answer | null; usage?: unknown[][]; setting?: [string, unknown] }) => {
+      const back = r.late || r.silent || m.ready;
       r.heard = Date.now();
-      r.late = false;
+      r.late = r.silent = false;
       if (m.ready) {
         r.ready = true;
         started_up();
@@ -434,71 +474,106 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
         if (again) console.log('Reader thread started again: ready.');
       }
       if (m.id !== undefined) {
-        r.open.get(m.id)?.(m.answer ?? null);
+        r.open.get(m.id)?.done(m.answer ?? null);
         r.open.delete(m.id);
       }
       if (m.usage || m.setting) parentPort!.postMessage({ usage: m.usage, setting: m.setting });
+      if (back) {
+        trim();
+        for (const a of asks) give(a);
+      }
     });
     r.worker.on('error', (err) => console.error(`Reader thread failed: ${thrown(err).stack ?? err}`));
     r.worker.once('exit', (code) => {
       readers.delete(r);
       started_up();
-      for (const done of r.open.values()) done(null); // to the main thread
+      const left = [...r.open.values()];
       r.open.clear();
+      // One that died: to the main thread. One replaced: the read it was stuck on is asked again by the page, the rest of another reader here.
+      if (!r.ended) for (const o of left) o.done(null);
+      else if (left.length) settle(left[0].a, () => busy(left[0].a.res));
       if (stopping) return;
+      if (r.ended) {
+        console.log('Reader thread replaced: the old one is gone.');
+        for (const a of asks) give(a);
+        return fill(); // the cap may have held one back
+      }
       // One that dies at once again and again (a database it can't open) waits longer each time, at most a minute.
       if (Date.now() - started < stuckMs) failures++;
       const wait = Math.min(60_000, failures ? 1000 * 2 ** Math.min(failures, 6) : 0);
       console.error(`Reader thread stopped (exit code ${code}): starting another${wait ? ` in ${wait / 1000} s` : ''}.`);
-      setTimeout(startReader, wait, true).unref();
+      setTimeout(fill, wait).unref();
+      for (const a of asks) give(a); // with none left, to the main thread
     });
   };
   for (let i = 0; i < opts.readers; i++) startReader();
-  // A reader whose thread stopped answering (a read that never ends) is replaced; its requests already went to the main thread.
+  // A reader whose thread stopped answering (a read that never ends, or a swamped disk) is replaced.
   setInterval(() => {
-    for (const r of readers)
-      if (Date.now() - r.heard > stuckMs) {
-        // One that has never said it is ready is still evaluating its module, and terminating it then aborts the whole
-        // process (see Reader above), so it is left alone. Accepted: a thread wedged there (a database it can't open)
-        // answers nothing until the next restart and its reads go to the main thread, which beats what this did before
-        // (#1625), which was to kill the server. The message that says it is ready sets `heard` again, which puts it
-        // back under this watch.
-        if (!r.ready) {
-          console.error(`Reader thread hasn't started in ${Math.round((Date.now() - r.heard) / 1000)} s: leaving it to finish.`);
-          r.heard = Infinity; // said once
-          continue;
-        }
-        console.error(`Reader thread silent for ${Math.round((Date.now() - r.heard) / 1000)} s: replacing it.`);
-        r.heard = Infinity; // terminated once
-        void r.worker.terminate();
-      }
+    for (const r of readers) {
+      if (r.silent || r.ended || Date.now() - r.heard <= stuckMs) continue;
+      r.silent = r.late = true; // said once
+      // One that has never said it is ready is still evaluating its module, and terminating it then aborts the whole
+      // process (see Reader above), so it is left alone. Accepted: while a thread is wedged there (a database it can't
+      // open) the reads it would have answered wait for the other readers, or the main thread (heardFrom), which beats
+      // what this did before (#1625), which was to kill the server. The message that says it is ready puts it back
+      // under this watch.
+      if (!r.ready) console.error(`Reader thread hasn't started in ${Math.round((Date.now() - r.heard) / 1000)} s: leaving it to finish.`);
+      else console.error(`Reader thread silent for ${Math.round((Date.now() - r.heard) / 1000)} s: replacing it once another is ready.`);
+      fill();
+    }
   }, 1000).unref();
 
   const forReader = (req: IncomingMessage) => req.method === 'GET' && !req.headers.authorization && !req.headers.upgrade && appHost(req, opts.appsDomain) === null && READER_PATHS.test((req.url ?? '').split('?')[0]);
 
+  // Whether a reader can still be hoped for. None that can't ever open its database holds up the pages for good: they
+  // go to the main thread, as before there were readers.
+  const heardFrom = () => [...readers].some((r) => !r.ended && Date.now() - r.heard < 6 * stuckMs);
+  const settle = (a: Ask, how: () => void) => {
+    if (!asks.delete(a)) return;
+    clearTimeout(a.timer);
+    if (!a.res.destroyed) how();
+  };
+  const main = (a: Ask) => settle(a, () => pass(a.req, a.res));
+  /**
+   * Ask a reader that is free to answer, if it has none yet or the one it has is stuck on another read; else it waits for
+   * one. The read a reader is stuck on stays with it, so one that never ends can't take every reader.
+   */
+  const give = (a: Ask) => {
+    if (!asks.has(a)) return;
+    if ([...a.asked].some((r) => !r.ended && readers.has(r) && (!r.late || [...r.open.values()][0]?.a === a))) return;
+    if (stopping || released || !heardFrom()) return main(a);
+    let best: Reader | null = null;
+    for (const r of readers) if (r.ready && !r.late && !r.ended && !a.asked.has(r) && (!best || r.open.size < best.open.size)) best = r;
+    if (!best) return;
+    const r = best,
+      id = nextId++;
+    a.asked.add(r);
+    const timer = setTimeout(() => {
+      r.late = true;
+      give(a);
+    }, answerMs);
+    const done = (got: Answer | null) => {
+      clearTimeout(timer);
+      if (!got) return main(a);
+      settle(a, () => {
+        a.res.setHeader('X-Citadel-Answered', 'reader'); // for tests and probes: who answered
+        a.res.writeHead(got.status, got.headers);
+        a.res.end(got.body);
+      });
+    };
+    r.open.set(id, { a, done });
+    r.worker.postMessage({ id, method: a.req.method, url: a.req.url, headers: a.req.headers });
+  };
   const ask = (req: IncomingMessage, res: ServerResponse) => {
     // So every change main posted reaches the reader before the request does.
     if (!caughtUp()) return pass(req, res);
-    let best: Reader | null = null;
-    for (const r of readers) if (r.ready && !r.late && r.heard !== Infinity && (!best || r.open.size < best.open.size)) best = r;
-    if (!best) return pass(req, res);
-    const r = best,
-      id = nextId++;
-    const timer = setTimeout(() => {
-      r.late = true;
-      r.open.get(id)?.(null);
-      r.open.delete(id);
-    }, answerMs);
-    r.open.set(id, (a) => {
-      clearTimeout(timer);
-      if (res.destroyed) return;
-      if (!a) return pass(req, res);
-      res.setHeader('X-Citadel-Answered', 'reader'); // for tests and probes: who answered
-      res.writeHead(a.status, a.headers);
-      res.end(a.body);
-    });
-    r.worker.postMessage({ id, method: req.method, url: req.url, headers: req.headers });
+    const a: Ask = { req, res, asked: new Set(), timer: setTimeout(() => settle(a, () => busy(res)), 4 * answerMs) };
+    asks.add(a);
+    res.once('close', () => settle(a, () => {}));
+    give(a);
   };
+  // No reader in time: the page asks again (public/base.js).
+  const busy = (res: ServerResponse) => res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '1', 'X-Citadel-Answered': 'front' }).end(JSON.stringify({ error: 'The server is waiting for its disk: try again in a moment', retry: true }));
 
   // The front end's files (#1628), as main last loaded them; a test's `citadel-test-reader=main` asks main for the reference.
   const testHooks = !!opts.reader.testHooks;
@@ -512,7 +587,6 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     return true;
   };
 
-  let released = false; // a warm handover's: every request goes to the main thread, which passes it on
   const front = createServer({ shouldUpgradeCallback: (req) => upgrades(req, opts.appsDomain) }, (req, res) => {
     stampServerTime(res);
     try {
@@ -550,6 +624,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     if (m === 'release') {
       // net's close, not http's, which would also close an idle connection whose request isn't read yet (ECONNRESET).
       released = true;
+      for (const a of asks) give(a);
       NetServer.prototype.close.call(front);
       return;
     }
@@ -567,6 +642,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     // New connections wait in systemd's socket for the next server; open ones finish what they asked, readers' and
     // the main thread's alike (it keeps listening until told this is done), then the main thread exits.
     stopping = true;
+    for (const a of asks) give(a); // those no reader has: the main thread's, within the stop's grace
     front.close(() => {
       // At once: the main thread closes its own connections when it hears this, and holding it back for the readers
       // below would hold every open connection open with it.

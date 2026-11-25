@@ -199,6 +199,8 @@ for (const own of [false, true])
     if (own) await page.eval(`Object.defineProperty(HTMLIFrameElement.prototype, 'contentDocument', { get: () => null }), 0`);
     await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
     assert.equal(await untilLayer(page, 'shown #/apps/toc inert'), 'shown #/apps/toc inert');
+    // Its hash shows before it has loaded, and a reload before that is still its first load: the parent owes it its 'go'.
+    await waitFor(page, 'the layer loaded', `document.querySelector('.citadel-layer iframe').contentWindow.document.readyState === 'complete'`);
     // After rail.js's own load listener, a message of ours: what it sent first has been handled by the time ours is.
     const settled = await page.eval(`new Promise((ok) => {
     const f = document.querySelector('.citadel-layer iframe');

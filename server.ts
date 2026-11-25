@@ -118,6 +118,7 @@ import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { POOL } from './src/turn-line.ts';
 import { pressure } from './src/pressure.ts';
 import { MemoryEase } from './src/memory-ease.ts';
+import { publishRooms, ROOM_EVERY_MS } from './src/container-room.ts';
 import { GrowthStop } from './src/growth-stop.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
@@ -2362,6 +2363,18 @@ if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, readStop(DATA_DIR));
   status.start();
   memoryStorms.start();
+  // Each container's memory room, for tools/mem-room inside it (#1982). A slow reading isn't run twice over.
+  let readingRooms = false;
+  every(
+    'container memory room',
+    ROOM_EVERY_MS,
+    async () => {
+      if (readingRooms) return;
+      readingRooms = true;
+      await publishRooms(await citadelSliceDir(), join(DATA_DIR, 'projects', '.heavy')).finally(() => (readingRooms = false));
+    },
+    0,
+  );
   void citadelSliceDir().then((dir) => {
     if (!dir || stoppingWork) return;
     containerRelief = startContainerRelief({

@@ -7,6 +7,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
+import { workerWaitText } from '../src/worker-wait.ts';
 testPins();
 
 // #1868: one pool of workers for all of Citadel's minion turns (Josh, 2026-11-24: "we have a pool of claude sessions that
@@ -47,10 +48,11 @@ store.addMember(project.id, josh.id);
 
 const inside = (r: Runner) => r as unknown as { turns: Map<number, { dir: string }>; launchTurn: () => Promise<unknown> };
 
+const sent: { type: string; line?: unknown }[] = [];
 function makeRunner() {
   const r = new Runner(
     store,
-    () => {},
+    (m) => sent.push(m as { type: string; line?: unknown }),
     (t: { id: number }) => ({ TEST_MINION: String(t.id) }),
     fake,
   );
@@ -314,6 +316,79 @@ test('paused, a turn that is cut off by a restart waits for the pause to end', a
   assert.deepEqual(runner.turnLine.waiting(), [a]);
   runner.turnLine.setPause(false, 'Cara');
   await until('the resume', () => turnsOf(a).length === 2);
+});
+
+test('paused and stopped, running turns stop and carry on after it, with what was queued; a Taskmaster runs on', async () => {
+  const [a, b, tm] = [minion(), minion(), taskmaster()];
+  const before = turnsOf(tm).length;
+  for (const id of [a, b, tm]) say(id);
+  await started(a);
+  await started(b);
+  await until('the Taskmaster to start', () => turnsOf(tm).length > before);
+  runner.send(a, 'Citadel', 'queued behind it');
+  runner.turnLine.setPause('stop', 'Josh');
+  await until('both to stop', () => !runner.isRunning(a) && !runner.isRunning(b));
+  await until('both to stand in the line', () => runner.turnLine.waiting().length === 2);
+  assert.ok(runner.isRunning(tm));
+  assert.equal(runner.turnLine.used(), 0);
+  assert.equal(store.listEvents(a).filter((e) => e.kind === 'error').length, 0, 'a pause is no failure');
+  assert.equal(store.getTicket(a)!.status, 'idle', 'stored: no process runs');
+  assert.equal(runner.view(store.getTicket(a)!).status, 'running', 'shown: working');
+  assert.equal(runner.view(store.getTicket(a)!).worker_wait?.paused, 'Josh');
+  await settle();
+  assert.deepEqual([turnsOf(a).length, turnsOf(b).length], [1, 1]);
+  say(b, 'and this, while paused');
+  runner.turnLine.setPause(false, 'Josh');
+  await until('both to carry on', () => turnsOf(a).length === 2 && turnsOf(b).length === 2);
+  assert.match(turnsOf(a)[1], /paused all minions/);
+  assert.match(turnsOf(a)[1], /queued behind it/);
+  assert.match(turnsOf(b)[1], /and this, while paused/);
+  end(a);
+  await idle(a);
+  await settle();
+  assert.equal(turnsOf(a).length, 2, 'carried on once');
+});
+
+test('a minion a pause stopped is still stopped for good by a person, and stays so over a restart', async () => {
+  const [a, b] = [minion(), minion()];
+  say(a);
+  say(b);
+  await started(a);
+  await started(b);
+  runner.turnLine.setPause('stop', 'Josh');
+  await until('both to stand in the line', () => runner.turnLine.waiting().length === 2);
+  assert.equal(runner.stop(a), true);
+  runner.detachAll();
+  runner = makeRunner();
+  runner.recover();
+  assert.deepEqual(runner.turnLine.waiting(), [b]);
+  await settle();
+  assert.deepEqual([turnsOf(a).length, turnsOf(b).length], [1, 1], 'the pause holds over a restart');
+  runner.turnLine.setPause(false, 'Josh');
+  await until('b to carry on', () => turnsOf(b).length === 2);
+  await settle();
+  assert.equal(turnsOf(a).length, 1);
+});
+
+test('a waiting minion shows as working with its place in the line', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, b, c] = [minion(), minion(), minion()];
+  for (const id of [a, b, c]) say(id);
+  await started(a);
+  const view = (id: number) => runner.view(store.getTicket(id)!);
+  assert.equal(view(a).worker_wait, null);
+  assert.deepEqual([view(b).status, view(b).worker_wait?.place, view(b).worker_wait?.of], ['running', 1, 2]);
+  assert.equal(view(c).worker_wait?.place, 2);
+  assert.equal(workerWaitText(view(c).worker_wait!), 'waiting for a worker, 2nd of 2 in line');
+  assert.deepEqual(runner.turnLine.people(), [{ person: cara.id, used: 1, waiting: 2 }]);
+  end(a);
+  await started(b);
+  assert.equal(view(b).worker_wait, null);
+  assert.equal(view(c).worker_wait?.place, 1);
+  assert.ok(
+    sent.some((m) => m.type === 'workers' && Array.isArray(m.line)),
+    'pages hear the line move',
+  );
 });
 
 test('a second turn of a running minion joins the line when the first ends', async () => {

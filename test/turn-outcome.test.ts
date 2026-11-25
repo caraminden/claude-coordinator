@@ -24,6 +24,8 @@ const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
   ['ended well after close_self', end({ closing: true }), { kind: 'closing', followUps: ['cleared', 'close'] }],
   ['stopped', end({ turn: { stopped: true }, exit: { code: null, signal: 'SIGTERM' } }), { kind: 'stopped', followUps: [] }],
   ['stopped, even after close_self', end({ turn: { stopped: true, result: ok }, closing: true }), { kind: 'stopped' }],
+  ['a pause stopped it: resumes, and counts towards no cap', end({ turn: { paused: true, retries: { kill: 1 } }, exit: { code: null, signal: 'SIGINT' } }), { kind: 'paused', followUps: [], retry: { via: 'restart', retries: { kill: 1 } } }],
+  ['a person stopped it during the pause', end({ turn: { paused: true, stopped: true }, exit: { code: null, signal: 'SIGINT' } }), { kind: 'stopped', retry: undefined }],
   ['killed by a signal', end({ turn: {}, exit: { code: null, signal: 'SIGKILL' } }), { kind: 'killed', retry: { via: 'kill', retries: { kill: 1 } } }],
   ['killed with no record of how', end({ turn: {}, exit: null }), { kind: 'killed', retry: { via: 'kill', retries: { kill: 1 } } }],
   ['exit 143 is a kill', end({ turn: {}, exit: { code: 143, signal: null } }), { kind: 'killed', retry: { via: 'kill', retries: { kill: 1 } } }],
@@ -70,7 +72,7 @@ for (const [name, input, want] of rows) {
 
 test('every kind has a row', () => {
   const kinds = new Set(rows.map(([, input]) => outcome(input).kind));
-  for (const k of ['ok', 'stopped', 'closing', 'limit', 'net', 'switch-account', 'account-error', 'killed', 'failed']) assert.ok(kinds.has(k as any), k);
+  for (const k of ['ok', 'stopped', 'paused', 'closing', 'limit', 'net', 'switch-account', 'account-error', 'killed', 'failed']) assert.ok(kinds.has(k as any), k);
 });
 
 test("today's caps are unchanged, and an account switch has one", () => {

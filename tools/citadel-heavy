@@ -93,6 +93,26 @@ cpu_ticks() { local s f; read -r s </proc/$$/stat 2>/dev/null || { echo 0; retur
 us() { local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}; echo "${t:-${SECONDS}000000}"; }
 here=${CITADEL_HEAVY_HERE:-}
 guess=${CITADEL_HEAVY_GUESS:-light}
+usage() {
+  cat <<'U'
+usage: citadel-heavy [--here] [--heavy] <command> [args...]
+       citadel-heavy --long <command> [args...]
+  --here   run the command on this machine, never on the scheme's CI.
+  --heavy  guess a command with no past runs is heavy (it is light by default); its own runs decide after.
+  --long   run the command on the scheme's CI only (not with --here); a long job.
+  -h, --help  print this usage. Options go before the command: after it they belong to the command.
+U
+}
+# Help is read before anything runs or waits, a nested call (CITADEL_HEAVY_HELD) included: it never starts a job (#1960).
+# Options are read up to the command; one citadel-heavy doesn't know is refused, not run as a command.
+for a in "$@"; do
+  case $a in
+    -h|--help) usage; exit 0 ;;
+    --here|--heavy|--long) ;;
+    -*) say "unknown option $a"; usage >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
 while :; do
   case ${1:-} in
     --here) here=1; shift ;;
@@ -105,7 +125,7 @@ if [ "${1:-}" = --long ]; then
   shift
   exec "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts" --long "$@"
 fi
-[ $# -gt 0 ] || { say "usage: citadel-heavy [--here] [--heavy] <command> [args...] | --long <command> [args...]"; exit 2; }
+[ $# -gt 0 ] || { usage >&2; exit 2; }
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || exec "$@"
 
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}

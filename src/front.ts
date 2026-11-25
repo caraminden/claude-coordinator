@@ -33,6 +33,7 @@ export const READER_ROUTES: readonly string[] = [
   '/api/projects/:project',
   '/api/projects/:project/memory',
   '/api/status',
+  '/api/box-capacity',
   // #1628: the rest that answer from the database and the snapshot. The main thread keeps the GETs that read its
   // memory or the disk, start a process (git), write, or reach a part a reader lacks once there are rows: /api/projects,
   // /api/me, /api/home, costs, releases, people, the me/* logins, machines, catalogue, ideas, recap, shared, spend,

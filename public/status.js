@@ -12,6 +12,7 @@ import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
 import { opening } from './releases.js';
 import { workersPanel } from './workers.js';
+import { capacityPanel } from './box-capacity.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
@@ -902,6 +903,7 @@ export function statusPane(onData = () => {}) {
   const el = h('div', { class: 'st-page' }, pills, detail);
   const lines = shipLinePanel(el);
   const workers = workersPanel(el);
+  const fit = capacityPanel(el);
   const pill = (key, name, v) =>
     h(
       'button',
@@ -944,7 +946,8 @@ export function statusPane(onData = () => {}) {
     }
     return '';
   };
-  const draw = () => keepView(el, drawNow);
+  // Putting the page in again would end a drag on the slider; the next read draws it.
+  const draw = () => fit.dragging() || keepView(el, drawNow);
   const drawNow = () => {
     const { citadel, apps, days, now, shipTimes = [] } = data;
     const mine = apps.filter((a) => scope === 'all' || a.scheme === scope).sort((x, y) => x.title.localeCompare(y.title));
@@ -962,7 +965,7 @@ export function statusPane(onData = () => {}) {
       h('div', { class: 'ci-head' }, h('h3', {}, app ? app.title : 'Citadel'), toneChip(CHIP[v.tone], WORD[v.tone]), app ? h('a', { href: `/apps/${app.name}/`, target: '_blank', rel: 'noopener' }, 'Open it') : '', h('span', { class: 'muted small' }, `read ${ago(now)}`)),
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
       app ? controls(app.name) : '',
-      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [workers, ...citadelTiles(citadel, days, now, shipTimes, draw), lines])),
+      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [workers, fit, ...citadelTiles(citadel, days, now, shipTimes, draw), lines])),
     );
   };
   let tried = false;
@@ -988,6 +991,7 @@ export function statusPane(onData = () => {}) {
     }
     refresh.now();
     lines.resume();
+    fit.resume();
   };
   return el;
 }

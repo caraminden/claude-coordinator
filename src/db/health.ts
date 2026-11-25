@@ -1,5 +1,6 @@
 // Health events and host samples (#1313: src/db.ts by area).
 import { HEALTH_KEEP_MS, HEALTH_MAX_ROWS, HOST_SAMPLE_KEEP_MS, type HostSample } from '../db-rows.ts';
+import type { BoxReading } from '../box-capacity.ts';
 import type { Store } from '../db.ts';
 
 export const healthQueries = {
@@ -48,6 +49,16 @@ export const healthQueries = {
 
   hostSamples(this: Store, since: number): HostSample[] {
     return this.db.prepare('SELECT * FROM host_samples WHERE at >= ? ORDER BY at').all(since) as unknown as HostSample[];
+  },
+
+  /** The readings since `since` that counted the turns running, oldest first (src/box-capacity.ts). */
+  boxReadings(this: Store, since: number): BoxReading[] {
+    return this.db
+      .prepare(
+        `SELECT at, json_extract(answer_time, '$.turns') AS turns, round(load1, 1) AS load, round(100 * (1 - mem_avail / CAST(mem_total AS REAL)), 1) AS used, round(mem_psi, 1) AS stall
+         FROM host_samples WHERE at >= ? AND json_valid(answer_time) AND json_type(answer_time, '$.turns') = 'integer' ORDER BY at`,
+      )
+      .all(since) as unknown as BoxReading[];
   },
 
   /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */

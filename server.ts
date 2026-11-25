@@ -486,6 +486,7 @@ outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.p
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
 // A reopened minion's held waits go back to waiting (the outbox), and one whose deploy came live meanwhile is found now.
+runner.onStop = (ticketId, eventIds) => outbox.stoppedMessages(ticketId, eventIds);
 runner.onTurnStart = (ticketId, eventIds) => {
   const held = store.listDeliveries({ to: ticketId, states: ['held'] }).some((r) => r.kind === 'wake_when_live' || r.kind === 'chain');
   outbox.turnStarted(ticketId, eventIds);

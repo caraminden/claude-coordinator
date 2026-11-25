@@ -763,6 +763,8 @@ export class Runner {
   onClose: (ticketId: number) => Promise<void> | void = () => {};
   /** A turn started and saved the messages it carries (their event ids): the outbox marks what it handed over as sent (server.ts). */
   onTurnStart: (ticketId: number, eventIds: number[]) => void = () => {};
+  /** A stop dropped the messages with these event ids from the minion's queue: the outbox settles the rows that handed them and answers with the ones whose message stays as held mail (server.ts). */
+  onStop: (ticketId: number, eventIds: number[]) => number[] = () => [];
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -2985,6 +2987,23 @@ export class Runner {
   }
 
   stop(ticketId: number): boolean {
+    const queued = this.queue.msgs(ticketId).filter((m) => m.id != null);
+    const stopped = this.stopTurn(ticketId);
+    // The stop dropped these from the queue: the outbox must not read that as a send that failed, and send them again.
+    // The ones it had handed (a chain's brief) stay as held mail: they start nothing, and ride with the next turn someone starts.
+    if (stopped && queued.length) {
+      const keep = new Set(
+        this.onStop(
+          ticketId,
+          queued.map((m) => m.id!),
+        ),
+      );
+      for (const m of queued) if (keep.has(m.id!)) this.queue.hold(ticketId, m);
+    }
+    return stopped;
+  }
+
+  private stopTurn(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
     const card = this.dropCard(ticketId, 'The turn was stopped while this waited.');
     const launching = this.launching.get(ticketId);

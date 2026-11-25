@@ -7,6 +7,8 @@ import { pacific } from '../../src/pacific.ts';
 import { replayStore } from './store.ts';
 import type { Act, ReplayCtx, ReplayResult } from './types.ts';
 
+/** A real kill is the replay's own when it hit the same container within this. */
+const SAME_KILL_MS = RELIEF.stuckMs / 2;
 const CONTAINER = /^citadel-claude-\d+\.service$/;
 
 export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
@@ -30,7 +32,12 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       hits.push({ at: t, key: `${storm.group}:${Math.floor(t / 60_000)}`, text: `${storm.group}: its biggest process, ${Math.round((t - e.at) / 1000)} s into the storm of ${pacific(e.at)} (${Math.round(avg10)}% stalled over ${seconds} s)` });
     }
   }
-  const real = store.healthEventsSince(['memory-kill'], start).map((e) => ({ at: e.at, key: `${(JSON.parse(e.detail) as { group: string }).group}:${Math.floor(e.at / 60_000)}`, text: e.detail }));
+  const real: Act[] = store.healthEventsSince(['memory-kill'], start).map((e) => ({ at: e.at, key: `${(JSON.parse(e.detail) as { group: string }).group}:${Math.floor(e.at / 60_000)}`, text: e.detail }));
+  for (const a of real) {
+    const group = a.key.slice(0, a.key.lastIndexOf(':'));
+    const near = hits.filter((h) => h.key.startsWith(`${group}:`) && Math.abs(h.at - a.at) <= SAME_KILL_MS).sort((x, y) => Math.abs(x.at - a.at) - Math.abs(y.at - a.at))[0];
+    if (near) a.key = near.key;
+  }
   return {
     inputs: `${storms} container memory storms over ${ctx.days} days`,
     hits,

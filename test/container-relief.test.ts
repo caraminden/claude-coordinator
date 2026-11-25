@@ -1,8 +1,8 @@
 // A container stuck at its memory limit has its biggest process killed, and only that one (#1876).
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -77,6 +77,7 @@ test('stuck for a minute: the process with the most anon plus swap dies, then th
   assert.deepEqual(r.killed, []);
   await r.run(10, 80);
   assert.deepEqual(r.killed, [12]);
+  await until('the kill is told', () => r.told.length > 0);
   assert.equal(r.told[0].ticket, 3832);
   assert.equal(r.told[0].bytes, 1200 * MB);
   assert.match(victimText(r.told[0]), /killed `cargo build` \(1\.2 GB\).*10\.0 GB memory limit for 60 s/);
@@ -99,6 +100,10 @@ test('a squeeze below the line, short of a minute, or with no high events kills 
   await r.run(55, 90);
   await r.run(5, 3);
   await r.run(300, 90, 0); // stalled, but not at its limit
+  for (let i = 0; i < 20; i++) {
+    await r.run(5, 35); // one reading over the line
+    await r.run(40, 15, 0); // then under it: those don't add up to a minute stuck
+  }
   assert.deepEqual(r.killed, []);
 });
 
@@ -113,7 +118,7 @@ test('only the containers of this server: another prefix, a slice or a turn scop
   }
 });
 
-test('a pid that was reused, or that will not take the signal, gives way to the next biggest', async () => {
+test('a pid that will not take the signal gives way to the next biggest', async () => {
   const f = fake();
   f.add(12, { anon: 3000 });
   f.add(13, { anon: 2000 });
@@ -130,6 +135,41 @@ test('a pid that was reused, or that will not take the signal, gives way to the 
     [13],
   );
 });
+
+test('two readings under the line do not start the minute over, so a flapping storm still ends', async () => {
+  const f = fake();
+  f.add(12, { anon: 3000 });
+  f.procs([12]);
+  const r = relief(f);
+  for (let i = 0; i < 6; i++) {
+    await r.run(5, 60);
+    await r.run(10, 20);
+  }
+  assert.deepEqual(r.killed, [12]);
+});
+
+for (const [what, change] of [
+  ['was reused', (f) => writeFileSync(join(f.proc, '12', 'stat'), `12 (x) S 1 ${'0 '.repeat(17)}501 0 0\n`)],
+  ['left the container', (f) => f.procs([13])],
+] as [string, (f: ReturnType<typeof fake>) => void][]) {
+  test(`a pid that ${what} after it was listed is not signalled`, async () => {
+    const f = fake();
+    f.add(12, { anon: 3000 });
+    f.add(13, { anon: 2000 });
+    f.procs([12, 13]);
+    const r = relief(f);
+    await r.run(65, 80); // the next reading kills
+    // Its command line is read between the listing and the kill: that read is held until the pid has changed.
+    const cmdline = join(f.proc, '12', 'cmdline');
+    rmSync(cmdline);
+    execFileSync('mkfifo', [cmdline]);
+    const reading = r.run(5, 80);
+    change(f);
+    closeSync(openSync(cmdline, 'r+'));
+    await reading;
+    assert.deepEqual(r.killed, [13]);
+  });
+}
 
 const gone = (c: ChildProcess) => (c.exitCode !== null || c.signalCode !== null ? Promise.resolve() : once(c, 'exit').then(() => {}));
 

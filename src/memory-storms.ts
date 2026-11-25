@@ -9,6 +9,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { every, type Job } from './every.ts';
 import { CGROUP_ROOT, hostText, SELF_CGROUP } from './host-signals.ts';
+import { shownCommand } from './reaper.ts';
 
 export const STORM_EVERY_MS = 15_000;
 /**
@@ -61,14 +62,16 @@ export interface Proc {
   pid: number;
   anon: number;
   swap: number;
-  /** Its command line, cut to CMD_CHARS; its name when that can't be read. */
+  /** Its command line, secrets masked, cut to CMD_CHARS; its name when that can't be read. */
   cmd: string;
 }
 
 /** How many processes a storm names, and how much of each command line. */
 export const TOP_N = 5;
-const CMD_CHARS = 120;
+const CMD_CHARS = 90;
 const CMD_WAIT_MS = 1000;
+/** Where Store.addHealthEvent (src/db.ts) cuts a detail. */
+const DETAIL_CHARS = 1000;
 
 /** The `n` processes in cgroup `dir` and every cgroup below it with the most anon memory (RSS plus swap), biggest first. */
 export async function topProcesses(dir: string, n = TOP_N, proc = '/proc'): Promise<Proc[]> {
@@ -90,16 +93,32 @@ export async function topProcesses(dir: string, n = TOP_N, proc = '/proc'): Prom
     .filter((p): p is Proc => p !== null)
     .sort((a, b) => b.anon + b.swap - (a.anon + a.swap))
     .slice(0, n);
-  // Only the named ones' command lines, each with a deadline: reading one waits on that process's memory lock, which a
-  // thrashing container holds for seconds, and a thread pool full of those waits stalls the whole server. Late: its name.
-  return Promise.all(
-    top.map(async (p) => {
-      const late = AbortSignal.timeout(CMD_WAIT_MS);
-      const line = await Promise.race([readFile(join(proc, String(p.pid), 'cmdline'), 'utf8').catch(() => ''), new Promise<string>((r) => late.addEventListener('abort', () => r('')))]);
-      const cmd = line.split('\0').filter(Boolean).join(' ').slice(0, CMD_CHARS);
-      return cmd ? { ...p, cmd } : p;
-    }),
-  );
+  // Only the named ones' command lines, one at a time: reading one waits on that process's memory lock, which a thrashing
+  // container holds for seconds, and the read keeps its thread of the server's pool of 4 until it returns, deadline or not.
+  // So one read is out at most, across every group; while it is, the rest keep their names.
+  for (const p of top) {
+    if (cmdReading) break;
+    const reading = readFile(join(proc, String(p.pid), 'cmdline'), 'utf8').catch(() => '');
+    cmdReading = true;
+    void reading.then(() => (cmdReading = false));
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<string>((r) => {
+      timer = setTimeout(() => r(''), CMD_WAIT_MS);
+    });
+    const line = await Promise.race([reading, late]);
+    clearTimeout(timer);
+    p.cmd = shownCommand(line.split('\0').filter(Boolean)).slice(0, CMD_CHARS) || p.cmd;
+  }
+  return top;
+}
+let cmdReading = false;
+
+/** A storm as its health event keeps it: the detail is cut at DETAIL_CHARS, so the smallest of `top` go until it fits. */
+export function stormDetail(storm: Storm): string {
+  const top = [...(storm.top ?? [])];
+  let out = JSON.stringify(storm);
+  while (out.length > DETAIL_CHARS && top.pop()) out = JSON.stringify({ ...storm, top });
+  return out;
 }
 
 /** The cgroup dir named citadel.slice above (or at) this process's own, from /proc/self/cgroup; null when there is none. */

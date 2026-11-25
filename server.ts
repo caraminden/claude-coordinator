@@ -26,7 +26,7 @@ import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
-import { citadelSliceDir, MemoryStorms, stormPeople } from './src/memory-storms.ts';
+import { citadelSliceDir, MemoryStorms, stormDetail, stormPeople } from './src/memory-storms.ts';
 import { startContainerRelief, victimText } from './src/container-relief.ts';
 import { readGrowth } from './src/growth-alarm.ts';
 import type { Delivery } from './src/db/deliveries.ts';
@@ -2166,11 +2166,11 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   res.writeHead(a.status, a.headers).end(a.body);
 }
 
-// Memory-limit storms (#1280): a Citadel slice or container stalling at its MemoryHigh, read every 15 s, recorded for the Status page.
 /** A person's container stuck at its memory limit loses its biggest process (#1876), from a worker thread; started with the storms below. */
 let containerRelief: { stop: () => void } | null = null;
 let stoppingWork = false;
-const memoryStorms = new MemoryStorms({ record: (at, storm) => store.addHealthEvent('memory-high', at, BOOT_COMMIT ?? null, JSON.stringify(storm)) });
+// Memory-limit storms (#1280): a Citadel slice or container stalling at its MemoryHigh, read every 15 s, recorded for the Status page.
+const memoryStorms = new MemoryStorms({ record: (at, storm) => store.addHealthEvent('memory-high', at, BOOT_COMMIT ?? null, stormDetail(storm)) });
 // The Status page (#1123): perigee's memory and disk every 5 minutes, and this start recorded with why it happened.
 /** One real GET /api/health a second from a worker thread (#1559); starts once the server is bound. */
 const answerProbe = new AnswerProbe();

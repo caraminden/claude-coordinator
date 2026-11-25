@@ -6,13 +6,15 @@
 // ends its turn, which resumes by itself (src/runner.ts waitForKillResume).
 //
 // It runs in a worker with sync reads: during that storm the server's own readings took up to 4 minutes (one 15 s storm
-// reading held 244 s of stalls), so a timer on the main thread, or a read in its thread pool, is late just when it matters.
-// Picking needs only /proc/<pid>/status and stat, which don't wait on the process's memory lock. The command line does, so
-// it gets CMD_WAIT_MS and is left out past that.
+// reading held 244 s of stalls), so a timer on the main thread is late just when it matters. Picking and killing need only
+// cgroup.procs and /proc/<pid>/status and stat, which don't wait on the process's memory lock. A command line does, and a
+// worker's async read of it waits in the thread pool the whole server shares, so one such read (the victim's) is waited for
+// CMD_WAIT_MS before the kill and left out past that; whose turn it was is looked up after the kill, one read at a time.
 import { readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { parentPort, Worker, workerData } from 'node:worker_threads';
+import { shownCommand } from './reaper.ts';
 
 export const RELIEF = {
   everyMs: 5000,
@@ -24,10 +26,14 @@ export const RELIEF = {
   calm: 10,
   /** Stuck this long before the first kill, and this long between kills. */
   stuckMs: 60_000,
+  /** Readings in a row that don't count as stuck, after which the minute starts over. */
+  quiet: 3,
   /** A gap between readings longer than this (a suspended box) starts the minute over. */
   maxGapMs: 5 * 60_000,
 };
 const CMD_WAIT_MS = 1000;
+/** How long, after the kill, the search for the victim's minion may take. */
+const TICKET_WAIT_MS = 30_000;
 const CMD_CHARS = 120;
 /** What holds the container up: killing one ends every turn in it. By /proc/<pid>/status Name. */
 const KEEP = new Set(['conmon', 'podman', 'podman-init', 'catatonit']);
@@ -37,7 +43,7 @@ export interface Victim {
   group: string;
   pid: number;
   name: string;
-  /** Its command line, '' when it couldn't be read in time. */
+  /** Its command line with secrets masked, '' when it couldn't be read in time. */
   cmd: string;
   /** Its RSS anon plus swap, bytes. */
   bytes: number;
@@ -55,6 +61,8 @@ interface Proc {
   name: string;
   bytes: number;
   start: string;
+  /** The cgroup.procs that listed it. */
+  listed: string;
 }
 
 /** One container's reading: `high` from memory.events.local, memory.pressure's `some` avg10 in percent. */
@@ -69,13 +77,15 @@ export interface Watched {
   at: number;
   /** When it became stuck, null while it isn't. */
   since: number | null;
+  /** Readings in a row that weren't stuck. */
+  quiet: number;
   killedAt: number;
   killed: Set<string>;
 }
 
 /** The next state, and whether a process in the container should die now. Pure but for `s`, which it updates; the replay runs it too. */
 export function step(s: Watched | undefined, r: Reading, now: number, stuckMs = RELIEF.stuckMs): { s: Watched; kill: boolean } {
-  if (!s || now - s.at > RELIEF.maxGapMs || r.high < s.high) return { s: { high: r.high, at: now, since: null, killedAt: -Infinity, killed: new Set() }, kill: false };
+  if (!s || now - s.at > RELIEF.maxGapMs || r.high < s.high) return { s: { high: r.high, at: now, since: null, quiet: 0, killedAt: -Infinity, killed: new Set() }, kill: false };
   const gained = r.high > s.high;
   s.high = r.high;
   s.at = now;
@@ -84,7 +94,11 @@ export function step(s: Watched | undefined, r: Reading, now: number, stuckMs = 
     s.killed.clear();
     return { s, kill: false };
   }
-  if (!gained || r.avg10 < RELIEF.line) return { s, kill: false };
+  if (!gained || r.avg10 < RELIEF.line) {
+    if (++s.quiet >= RELIEF.quiet) s.since = null;
+    return { s, kill: false };
+  }
+  s.quiet = 0;
   s.since ??= now;
   return { s, kill: now - s.since >= stuckMs && now - s.killedAt >= stuckMs };
 }
@@ -119,7 +133,8 @@ const startOf = (proc: string, pid: number): string => {
 function processes(dir: string, proc: string): Proc[] {
   const out: Proc[] = [];
   const walk = (at: string, depth: number) => {
-    for (const line of text(join(at, 'cgroup.procs')).split('\n')) {
+    const listed = join(at, 'cgroup.procs');
+    for (const line of text(listed).split('\n')) {
       if (!/^\d+$/.test(line)) continue;
       const pid = Number(line);
       const status = text(join(proc, line, 'status'));
@@ -127,7 +142,7 @@ function processes(dir: string, proc: string): Proc[] {
       const start = startOf(proc, pid);
       // No RssAnon: it exited meanwhile, or is a zombie.
       if (!start || field('RssAnon') === undefined) continue;
-      out.push({ pid, ppid: Number(field('PPid')), name: field('Name') ?? '', bytes: 1024 * (Number(field('RssAnon')) + Number(field('VmSwap') ?? 0)), start });
+      out.push({ pid, ppid: Number(field('PPid')), name: field('Name') ?? '', bytes: 1024 * (Number(field('RssAnon')) + Number(field('VmSwap') ?? 0)), start, listed });
     }
     if (depth >= 8) return;
     let kids: string[] = [];
@@ -144,10 +159,11 @@ function processes(dir: string, proc: string): Proc[] {
   return out;
 }
 
-async function argvOf(proc: string, pid: number): Promise<string[]> {
+/** A command line, [] when it isn't read within `ms`. */
+async function argvOf(proc: string, pid: number, ms: number): Promise<string[]> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<string>((r) => {
-    timer = setTimeout(() => r(''), CMD_WAIT_MS);
+    timer = setTimeout(() => r(''), ms);
   });
   const raw = await Promise.race([readFile(join(proc, String(pid), 'cmdline'), 'utf8').catch(() => ''), late]);
   clearTimeout(timer);
@@ -156,8 +172,9 @@ async function argvOf(proc: string, pid: number): Promise<string[]> {
 
 /** The minion whose turn wrapper (`<node> <pin>/turn-wrapper.mjs <dir>`, the dir named <ticket>-<started>) is above `p`. */
 async function ticketOf(p: Proc, byPid: Map<number, Proc>, proc: string): Promise<number | null> {
-  for (let at: Proc | undefined = p, hops = 0; at && hops < 32; at = byPid.get(at.ppid), hops++) {
-    const argv = await argvOf(proc, at.pid);
+  const by = Date.now() + TICKET_WAIT_MS;
+  for (let at: Proc | undefined = byPid.get(p.ppid), hops = 0; at && hops < 32 && Date.now() < by; at = byPid.get(at.ppid), hops++) {
+    const argv = await argvOf(proc, at.pid, by - Date.now());
     if (!/\/turn-wrapper\.(mjs|ts)$/.test(argv.at(-2) ?? '')) continue;
     const m = basename(argv.at(-1) ?? '').match(/^(\d+)-\d+$/);
     return m ? Number(m[1]) : null;
@@ -206,10 +223,9 @@ export class ContainerRelief {
     // One already killed that is still going away (it can take a while to free 10 GB) isn't the one to kill next.
     const picks = all.filter((p) => !KEEP.has(p.name) && !s.killed.has(`${p.pid}:${p.start}`)).sort((a, b) => b.bytes - a.bytes);
     for (const p of picks) {
-      const argv = await argvOf(proc, p.pid);
-      const ticket = await ticketOf(p, byPid, proc);
-      // Its pid may have ended and been reused while the command line was read.
-      if (startOf(proc, p.pid) !== p.start) continue;
+      const argv = await argvOf(proc, p.pid, CMD_WAIT_MS);
+      // Its pid may have ended, and been reused elsewhere, since it was listed.
+      if (startOf(proc, p.pid) !== p.start || !text(p.listed).split('\n').includes(String(p.pid))) continue;
       try {
         (this.d.kill ?? ((pid: number) => process.kill(pid, 'SIGKILL')))(p.pid);
       } catch {
@@ -218,7 +234,9 @@ export class ContainerRelief {
       s.killedAt = now;
       s.killed.add(`${p.pid}:${p.start}`);
       const limit = Number(text(join(dir, 'memory.high')).trim());
-      this.d.report({ group: name, pid: p.pid, name: p.name, cmd: argv.join(' ').slice(0, CMD_CHARS), bytes: p.bytes, stuckMs: now - (s.since ?? now), limit: Number.isFinite(limit) && limit > 0 ? limit : null, ticket });
+      const v = { group: name, pid: p.pid, name: p.name, cmd: shownCommand(argv).slice(0, CMD_CHARS), bytes: p.bytes, stuckMs: now - (s.since ?? now), limit: Number.isFinite(limit) && limit > 0 ? limit : null };
+      // Not awaited: the next container's reading doesn't wait for it.
+      void ticketOf(p, byPid, proc).then((ticket) => this.d.report({ ...v, ticket }));
       return;
     }
   }

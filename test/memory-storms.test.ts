@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { citadelSliceDir, largestUnit, MemoryStorms, parseStorm, readGroups, topProcesses, type GroupReading, type Storm } from '../src/memory-storms.ts';
+import { citadelSliceDir, largestUnit, MemoryStorms, parseStorm, readGroups, stormDetail, topProcesses, type GroupReading, type Storm } from '../src/memory-storms.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'memory-storms-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -76,8 +78,50 @@ test('topProcesses ranks every process in a container and its cgroups below by a
     ],
   );
   assert.equal(top[0].cmd, 'cargo build --release');
-  assert.equal(top[2].cmd.length, 120, 'a long command line is cut');
+  assert.equal(top[2].cmd, 'node …', 'a long word is masked as a secret might be');
+  ps(13, 500_000, 0, 0, ['curl', '-H', 'Authorization: Bearer s3cret', 'ab '.repeat(90)]);
+  const masked = (await topProcesses(c, 3, proc))[2].cmd;
+  assert.equal(masked.length, 90, 'a long command line is cut');
+  assert.doesNotMatch(masked, /s3cret/);
   assert.deepEqual(await topProcesses(join(root, 'procs', 'gone'), 3, proc), [], 'a cgroup that went away names nobody');
+});
+
+test('one stuck command line costs the rest their names, not the thread pool', async () => {
+  const c = join(root, 'stuck', 'cg');
+  const proc = join(root, 'stuck', 'proc');
+  mkdirSync(c, { recursive: true });
+  writeFileSync(join(c, 'cgroup.procs'), '1\n2\n3\n4\n5\n');
+  for (const pid of [1, 2, 3, 4, 5]) {
+    mkdirSync(join(proc, String(pid)), { recursive: true });
+    writeFileSync(join(proc, String(pid), 'status'), `Name:\tp${pid}\nRssAnon:\t${100 - pid} kB\nVmSwap:\t0 kB\n`);
+    execFileSync('mkfifo', [join(proc, String(pid), 'cmdline')]); // a read of it waits, as one on a process's memory lock does
+  }
+  const names = ['p1', 'p2', 'p3', 'p4', 'p5'];
+  try {
+    assert.deepEqual(
+      (await topProcesses(c, 5, proc)).map((p) => p.cmd),
+      names,
+    );
+    assert.deepEqual(
+      (await topProcesses(c, 5, proc)).map((p) => p.cmd),
+      names,
+      'nor does the next reading start another',
+    );
+    assert.match(await readFile(join(proc, '1', 'status'), 'utf8'), /p1/, 'the pool still answers');
+  } finally {
+    // Opening each for reading and writing frees a read waiting on it; closing ends that read.
+    for (const pid of [1, 2, 3, 4, 5]) closeSync(openSync(join(proc, String(pid), 'cmdline'), 'r+'));
+  }
+});
+
+test('a storm naming five long commands still fits its health event', () => {
+  const top = [1, 2, 3, 4, 5].map((i) => ({ pid: 4_000_000 + i, anon: 10 ** 11, swap: 10 ** 11, cmd: '"\\'.repeat(45) }));
+  const storm: Storm = { group: 'citadel-claude-2.service', seconds: 900, stalled: 800, highs: 10 ** 7, peak: 1, limit: 10 ** 10, unit: 'libpod-payload-'.padEnd(80, 'a'), unitBytes: 10 ** 10, top };
+  const kept = parseStorm(stormDetail(storm).slice(0, 1000));
+  assert.equal(kept?.group, storm.group);
+  assert.deepEqual(kept?.top, top.slice(0, kept?.top?.length), 'the biggest are the ones kept');
+  assert.ok(kept?.top?.length);
+  assert.equal(stormDetail({ ...storm, top: undefined }), JSON.stringify({ ...storm, top: undefined }));
 });
 
 /** A run of readings, one per 15 s: each [high, stalled seconds in that step] for one group. */

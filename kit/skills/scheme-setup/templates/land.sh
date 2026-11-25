@@ -699,19 +699,21 @@ queue_done() {
 
 # The tickets in line order (the header at "The line's order"), as Q_ORDER, and who set .order, as Q_ORDER_BY.
 queue_order() {
-  local t l i=0 old=0 seg k keys=() LC_ALL=C # C: the keys sort byte by byte
+  local t l i=0 old=0 seg k keys=() pins='' pin=0 LC_ALL=C # C: the keys sort byte by byte
   local -A rank=()
   Q_ORDER=() Q_ORDER_BY=''
   [ ! -f "$Q_DIR/.order" ] || while read -r t; do
-    if [[ $t =~ ^[0-9]{10}$ ]]; then rank[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then Q_ORDER_BY=${t#\# }; fi
+    if [[ $t =~ ^[0-9]{10}$ ]]; then rank[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then Q_ORDER_BY=${t#\# }; elif [[ $t == '#pin '* ]]; then pins=${t#\#pin }; fi
   done <"$Q_DIR/.order" 2>/dev/null || true
+  # A ship a person placed ("#pin": Citadel's "Person's drag wins") stays ahead of one that holds the line: it goes behind the last still here.
+  for t in $pins; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ -e "$Q_DIR/$t" ] && [ "${rank[$t]:-0}" -gt "$pin" ] && pin=${rank[$t]}; done
   for t in "$Q_DIR"/[0-9]*; do
     t=${t##*/}
     [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
     printf -v seg '1%05d' "$old" # the waiters from before .order (no "order" line) ahead of it, in arrival order
     if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t")
     elif [ "${l[4]:-}" != order ] && [ "${l[7]:-}" != order ]; then keys+=("${seg}3 $t") old=$((old + 1))
-    elif [ "${l[8]:-}" = hold ] || [ "${l[5]:-}" = hold ]; then keys+=("${seg}0 $t") # holds the line: before every rank (deploy-queue.sh's "hold" is its 6th line)
+    elif [ "${l[8]:-}" = hold ] || [ "${l[5]:-}" = hold ]; then printf -v k '%010d' "$pin"; keys+=("${seg}1${k}h $t") # holds the line: before every rank but a person's pins (deploy-queue.sh's "hold" is its 6th line)
     elif [ -n "${rank[$t]:-}" ]; then printf -v k '%010d' "${rank[$t]}"; keys+=("${seg}1$k $t")
     else keys+=("${seg}2 $t"); fi
   done

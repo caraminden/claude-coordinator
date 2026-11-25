@@ -177,7 +177,8 @@ const countsText = (c: TestCounts) => `${c.done} of ${c.total} ${c.rerun ? 'fail
 
 /**
  * `orders`: its landing follows queue/.order (deploy-queue.sh's 5th ticket line, #1002); one from an older branch doesn't.
- * `holds`: a Regenerate ship that holds the line (#1827: deploy-queue.sh's 6th line "hold", the kit's 9th): the first waiter, whatever .order says.
+ * `holds`: a Regenerate ship that holds the line (#1827: deploy-queue.sh's 6th line "hold", the kit's 9th): the first waiter, whatever .order says,
+ * except a ship a person placed (.order's "#pin" line) stays ahead of it (Cara, 2026-11-24, "Person's drag wins").
  */
 export interface LandTicket {
   seq: number;
@@ -198,6 +199,14 @@ const orderFrom = (text: string | null) =>
   (text ?? '')
     .split('\n')
     .filter((l) => /^\d{10}$/.test(l))
+    .map(Number);
+/** The ships a person placed (#1827, "Person's drag wins"): .order's "#pin <seq> ..." line. A holding ship goes behind the last of them still waiting. */
+const pinsFrom = (text: string | null) =>
+  (text ?? '')
+    .split('\n')
+    .filter((l) => l.startsWith('#pin '))
+    .flatMap((l) => l.slice(5).split(' '))
+    .filter((n) => /^\d+$/.test(n))
     .map(Number);
 const tookFrom = (text: string | null) =>
   (text ?? '')
@@ -248,7 +257,8 @@ export function readQueue(q: string, orderAt: number, alive = procAlive): LandTi
     .filter((n) => /^\d+$/.test(n))
     .sort()
     .map((name) => ({ name, text: read(join(q, name)), at: mtime(join(q, name)) }));
-  const line = queueFrom(orderFrom(read(join(q, '.order'))), tickets, orderAt, alive);
+  const order = read(join(q, '.order'));
+  const line = queueFrom(orderFrom(order), tickets, orderAt, alive, pinsFrom(order));
   for (const t of line) {
     const f = frozenCached(parseInt(t.proc));
     if (f) t.frozen = noteFrozen(t.label, f.cg);
@@ -265,7 +275,7 @@ export async function readQueueA(q: string, orderAt: number, alive = procAlive):
       .sort()
       .map(async (name) => ({ name, text: await readA(join(q, name)), at: await mtimeA(join(q, name)) })),
   );
-  const line = queueFrom(orderFrom(order), tickets, orderAt, alive);
+  const line = queueFrom(orderFrom(order), tickets, orderAt, alive, pinsFrom(order));
   await Promise.all(
     line.map(async (t) => {
       const f = await frozenCgroup(parseInt(t.proc));
@@ -275,10 +285,11 @@ export async function readQueueA(q: string, orderAt: number, alive = procAlive):
   return line;
 }
 
-function queueFrom(order: number[], tickets: { name: string; text: string | null; at: number | null }[], orderAt: number, alive: (proc: string) => boolean): LandTicket[] {
+function queueFrom(order: number[], tickets: { name: string; text: string | null; at: number | null }[], orderAt: number, alive: (proc: string) => boolean, pins: number[] = []): LandTicket[] {
   const line: LandTicket[] = [];
+  let lastPin = -1; // a holding ship goes right behind the last waiter a person placed, else first among the waiters
   // A waiter from before .order waits for every lower ticket, so nobody who arrived after it goes ahead (The Trans Agenda #76).
-  const rank = (t: LandTicket) => (t.got > 0 ? -1 : t.holds ? -0.5 : !t.orders ? order.length + 1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
+  const rank = (t: LandTicket) => (t.got > 0 ? -1 : t.holds ? lastPin + 0.5 : !t.orders ? order.length + 1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
   for (const { name, text, at } of tickets) {
     if (text == null || at == null) continue;
     const l = text.split('\n');
@@ -286,6 +297,7 @@ function queueFrom(order: number[], tickets: { name: string; text: string | null
     if (!alive(proc)) continue;
     line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' || l[7] === 'order', ...((l[5] === 'hold' || l[8] === 'hold') && { holds: true }) });
   }
+  for (const t of line) if (t.got === 0 && t.orders && pins.includes(t.seq)) lastPin = Math.max(lastPin, order.indexOf(t.seq));
   const old = line.filter((t) => t.got === 0 && !t.orders).map((t) => t.seq);
   const before = (t: LandTicket) => (t.got > 0 ? -1 : old.filter((s) => s < t.seq).length);
   return line.sort((a, b) => before(a) - before(b) || rank(a) - rank(b) || a.seq - b.seq);
@@ -305,14 +317,14 @@ export const behindOld = (line: LandTicket[], t: LandTicket) => line.some((o) =>
  * ticket, so ranking it ahead of one could deadlock), and so is one behind such a one (behindOld). `note` says who moved
  * what, for the waiters' output. Returns the order written.
  */
-export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
+export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string | ((order: number[]) => string), moved?: number, pins: number[] = []): number[] {
   const waiting = line.filter((t) => t.got === 0 && t.orders && !behindOld(line, t)).map((t) => t.seq);
   const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
   if (!order.length) throw new Error('Nothing is waiting in line to reorder');
   const f = join(q, '.order'),
     tmp = `${f}.tmp${process.pid}`;
   // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
-  writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
+  writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n${pins.length ? `#pin ${pins.join(' ')}\n` : ''}`);
   renameSync(tmp, f);
   return order;
 }
@@ -837,10 +849,10 @@ export class Waits {
    * the line's order (given `moved`, only it moves: moveIn); a holder, a ticket no longer waiting or one from an older branch
    * is left out. `note` says who moved what, for the waiters' output. Returns the order written.
    */
-  setOrder(seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
+  setOrder(seqs: number[], note: string | ((order: number[]) => string), moved?: number, pins: number[] = []): number[] {
     if (!this.d.deployState) throw new Error('This server has no ship line');
     this.pollNow();
-    const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved);
+    const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved, pins);
     this.pollNow();
     return order;
   }

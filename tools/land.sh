@@ -1663,7 +1663,7 @@ early_next() {
   [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()
-  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' regen_attrs='' # another ship's merges get no Regenerate files of this one's
+  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' QUEUE_PIN=0 regen_attrs='' # another ship's merges get no Regenerate files of this one's
   queue_order "$q"
   while read -r x t; do # the first in line that isn't on this train
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
@@ -1816,7 +1816,7 @@ train_build() {
   ! [[ $down_at =~ ^[0-9]+$ ]] || [ $(($(date +%s) - down_at)) -ge "$CI_DOWN" ] || return 0
   ! pipeline_touch "$old" "$own" || return 0
   local -A QUEUE_RANK=()
-  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' regen_attrs='' # another ship's merges get no Regenerate files of this one's
+  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' QUEUE_PIN=0 regen_attrs='' # another ship's merges get no Regenerate files of this one's
   queue_order "$q"
   mkdir -p -m 700 "$train_dir"
   find "$train_dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true # a killed rider's, or one never read

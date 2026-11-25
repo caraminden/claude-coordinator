@@ -139,12 +139,12 @@ queue_done() {
 }
 
 # <queue dir> <ticket>: its sort key in the line, "<the waiters from before .order ahead of it>" then "0<place in
-# .order>" ("0" and ten zeros and the ticket for one that holds the line), "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
+# .order>" ("0", the place of the last waiter a person placed (else ten zeros) and the ticket for one that holds the line), "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
 # those waits for every lower ticket, so nobody who arrived after it goes ahead of it: .order ranks the waiters between
 # two of them only among themselves (had a later one counted itself ahead, both would take the lock: The Trans Agenda #76).
 queue_order() {
-  local t i=0 l
-  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" "
+  local t i=0 l pins=''
+  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" " QUEUE_PIN=0
   for t in "$1"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
     [ "${l[5]:-}" != hold ] && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} " # the core's (kit template's) is its 9th line
@@ -152,8 +152,11 @@ queue_order() {
   done
   [ -f "$1/.order" ] || return 0
   while read -r t; do
-    if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; fi
+    if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; elif [[ $t == '#pin '* ]]; then pins=${t#\#pin }; fi
   done <"$1/.order" 2>/dev/null || true
+  # A ship a person placed ("#pin", #1827 "Person's drag wins") stays ahead of a holding ship: it goes behind the last still here.
+  for t in ${pins:-}; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ -e "$1/$t" ] && [ "${QUEUE_RANK[$t]:-0}" -gt "$QUEUE_PIN" ] && QUEUE_PIN=${QUEUE_RANK[$t]}; done
+  return 0
 }
 queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_proc)
   local o seg=0 k
@@ -162,7 +165,7 @@ queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_pr
     [[ $o > $1 ]] || seg=$((seg + 1))
   done
   # A ship that holds the line (6th line "hold") comes before every rank, which start at 1, then in arrival order.
-  if [ -n "${k:-}" ]; then :; elif [[ ${QUEUE_HOLD:-} == *" $1 "* ]]; then printf -v k '%05d0%010d%s' "$seg" 0 "$1"; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
+  if [ -n "${k:-}" ]; then :; elif [[ ${QUEUE_HOLD:-} == *" $1 "* ]]; then printf -v k '%05d0%010d%s' "$seg" "${QUEUE_PIN:-0}" "$1"; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
   if [ -n "${2:-}" ]; then printf -v "$2" %s "$k"; else printf %s "$k"; fi
 }
 
@@ -179,7 +182,7 @@ queue_lock() {
   local q=$1/queue label=$2 n me t l p st ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by="" took yield_from=$SECONDS
   local -A QUEUE_RANK=()
   local QUEUE_OLD=()
-  local QUEUE_ORDER_BY="" QUEUE_HOLD=" "
+  local QUEUE_ORDER_BY="" QUEUE_HOLD=" " QUEUE_PIN=0
   mkdir -p -m 700 "$q"
   # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).
   if ! exec 9>"$1/lock"; then

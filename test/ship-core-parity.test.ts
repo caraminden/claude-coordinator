@@ -7,7 +7,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { readQueue } from '../src/waits.ts';
+import { readQueue, writeOrder } from '../src/waits.ts';
 import { scriptEnv } from './script-env.ts';
 
 const env = { ...scriptEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
@@ -81,6 +81,29 @@ test('a ticket that holds the line goes first among the waiters in the core, dep
   assert.deepEqual(deploy, want, 'deploy-queue.sh');
   assert.deepEqual(server, want, 'the server (src/waits.ts)');
   assert.deepEqual(core, want, 'the kit core');
+});
+
+// Person's drag wins (Cara, 2026-11-24): a ship a person placed (.order's "#pin" line, written by the server) stays ahead
+// of one that holds the line; the holder goes right behind the last pinned ship still waiting, ahead of the other ranks.
+test('a holding ticket goes behind the ships a person placed, ahead of the rest, in the core, deploy-queue.sh and the server', () => {
+  const q = mkdtempSync(join(root, 'queue-pin-'));
+  writeFileSync(join(q, '0000000001'), deployTicket('deploy-a'));
+  writeFileSync(join(q, '0000000002'), coreTicket('core-b'));
+  writeFileSync(join(q, '0000000003'), deployTicket('deploy-c'));
+  writeFileSync(join(q, '0000000004'), [...deployTicket('deploy-held').trimEnd().split('\n').slice(0, 5), 'hold'].join('\n') + '\n');
+  // b and c placed by a person (9 shipped already, so it counts for nothing); a ranked first by a Taskmaster.
+  writeFileSync(join(q, '.order'), '# Cara moved core-b\n0000000001\n0000000002\n0000000003\n#pin 2 9\n');
+  const core = bash(`${fn(template, 'queue_order')}Q_DIR=$1; queue_order; printf '%s\\n' "\${Q_ORDER[@]}"`, q);
+  const deploy = bash(`. "$2"; queue_order "$1"; for t in "$1"/[0-9]*; do t=\${t##*/}; echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`, q, deployQueue);
+  const server = readQueue(q, 4, () => true).map((t) => String(t.seq).padStart(10, '0'));
+  const want = ['0000000001', '0000000002', '0000000004', '0000000003'];
+  assert.deepEqual(deploy, want, 'deploy-queue.sh');
+  assert.deepEqual(server, want, 'the server (src/waits.ts)');
+  assert.deepEqual(core, want, 'the kit core');
+  // The server writes the pins it is given, and a reader still finds every rank and who set it.
+  const line = readQueue(q, 4, () => true);
+  writeOrder(q, line, [2, 1], 'Cara moved core-b', 2, [2]);
+  assert.match(readFileSync(join(q, '.order'), 'utf8'), /^# Cara moved core-b\n0000000002\n0000000001\n0000000004\n0000000003\n#pin 2\n$/);
 });
 
 test("land.local.sh's land_deploy hands deploy.sh the core's place in line", () => {

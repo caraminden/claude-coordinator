@@ -211,6 +211,7 @@ export interface QueuedMessage {
   parked?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
   card?: string; // the kept card it answers (#1916): only the turn that gets this may have its pass
+  rerun?: true; // a cut-off turn's, given back to run again (#1958): it wakes nobody, so a seal set since stays
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
 
@@ -2026,7 +2027,7 @@ export class Runner {
           }
           const back = !turn?.stopped && !saving && !wrote;
           const rerun = back && !!this.queue.get(t.id).taken?.length;
-          if (back) this.queue.giveBack(t.id);
+          if (back) this.queue.giveBack(t.id, false, true);
           // The same rows as a watched turn's end (src/turn-outcome.ts), under the restart's own cap.
           const out = outcome({ turn, exit: null, stderr: [], closing: false, ran: { unit: false, container: false }, cut: { rerun } });
           const resumed = out.kind !== 'stopped' && !out.followUps.includes('rerun') ? out.retry : undefined;
@@ -2261,6 +2262,7 @@ export class Runner {
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
             if (via !== 'switch' && !killLine)
               this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
+            const carriesOn = !this.queue.wakes(ticketId);
             // It carries on the interrupted turn, so it runs for that turn's person.
             return this.ranTurn(
               this.startTurn(
@@ -2269,6 +2271,7 @@ export class Runner {
                 [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : paused ? RESUME_PAUSE_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
                 person,
                 retries,
+                carriesOn,
               ),
             );
           },
@@ -3488,7 +3491,8 @@ export class Runner {
               this.broadcastTicket(ticketId);
               return;
             }
-            return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person));
+            const carriesOn = !this.queue.wakes(ticketId);
+            return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person, {}, carriesOn));
           };
           const fresh = this.freshStep(ticketId);
           if (!fresh) return rest();
@@ -3524,7 +3528,7 @@ export class Runner {
 
   /** A turn a pause stopped waits in the line to carry on; one stopped before claude had its prompt runs its batch again. */
   private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }) {
-    const rerun = !turn.offset && this.queue.giveBack(ticketId).length > 0;
+    const rerun = !turn.offset && this.queue.giveBack(ticketId, false, true).length > 0;
     if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), paused: true });
     // Never takes a worker here: the turn ending still holds its own, and a Resume may have come already.
     this.turnLine.join(ticketId, rerun ? undefined : retry.via);
@@ -3721,7 +3725,7 @@ export class Runner {
    * then, with nothing more to await, the minion's changes and follow() in one go. Until then it isn't running: a message
    * waits for the next turn, as behind afterRestore's restore.
    */
-  private async launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}): Promise<{ ended: Promise<void> } | undefined> {
+  private async launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}, carriesOn = false): Promise<{ ended: Promise<void> } | undefined> {
     // An account switch alone isn't a resume here: it carries on its person's own turn on another account.
     const resumed = !!(retries.restart || retries.limit || retries.net || retries.kill);
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
@@ -4011,8 +4015,10 @@ export class Runner {
       // A trailer is its own turn's: a resume that never started leaves its carried one for nobody.
       if (!resumed) this.statuses.delete(ticket.id);
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
+      // A turn that only carries on a cut-off one wakes nobody: a seal set during that one stays (#1958), as it would at its end.
       // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
-      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
+      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'parked' && carriesOn) && !(ticket.state === 'outside' && this.serverWork(ticket.id, true)))
+        this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
       if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });

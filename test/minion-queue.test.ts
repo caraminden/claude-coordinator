@@ -40,6 +40,26 @@ test('a taken batch stays in the record until its turn is done; a start that bai
   assert.equal(s.m.size, 0, 'an empty record is deleted');
 });
 
+test('a batch given back to run again wakes nobody, across restarts and starts that bail; what is put after it does (#1958)', () => {
+  const s = mapStore();
+  const q = new MinionQueue(s);
+  q.put(1, msg('brief'));
+  assert.equal(q.wakes(1), true);
+  q.take(1);
+  q.giveBack(1, false, true);
+  assert.equal(new MinionQueue(s).wakes(1), false, 'the next server knows too');
+  q.take(1);
+  q.giveBack(1);
+  assert.equal(q.wakes(1), false, 'its rerun never started');
+  q.hold(1, msg('mail'));
+  assert.equal(q.wakes(1), false, 'held mail wakes nobody');
+  q.put(1, msg('wake'));
+  assert.equal(q.wakes(1), true);
+  q.take(1);
+  q.giveBack(1);
+  assert.equal(q.wakes(1), true, "a wake's start that bailed still owes the wake");
+});
+
 test("a resume's take keeps the cut-off turn's batch beside its own, and returns only what is new", () => {
   const q = new MinionQueue(mapStore());
   q.put(1, msg('cut off'));

@@ -51,7 +51,7 @@ import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CO
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
-import { placeTurn } from './machine-turn.ts';
+import { MachineTurn, placeTurn } from './machine-turn.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -4504,7 +4504,9 @@ export class Runner {
     const closeReason = this.closing.get(ticketId);
     this.closing.delete(ticketId);
     // What the ending means is src/turn-outcome.ts's (#1379); this carries it out.
-    const end: TurnEnd = { turn, exit, stderr, closing, ran: { unit: !!live.unit, container: !!live.container } };
+    // A machine's turn ran in its worker's container, out of this server's reach: a kill there is never this server's restart.
+    const onMachine = runningTurn(live) instanceof MachineTurn;
+    const end: TurnEnd = { turn, exit, stderr, closing, ran: { unit: !!live.unit || onMachine, container: !!live.container || onMachine } };
     let out = outcome(end);
     // A row that outlives the chat's (#1325): kill waves (systemd-oomd's, most often) are counted from these.
     if (out.killed) {

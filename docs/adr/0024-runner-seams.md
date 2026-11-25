@@ -137,3 +137,14 @@ no `podman exec`, no `/proc`. Five places asking "which kind" would become five 
   beside `runningTurn`. A new kind needs its case in both.
 - Stop stays the runner's three timed signals, with `endStart` the one step that differs by kind. A kind whose far side
   keeps that clock itself (a machine's supervisor) is T2's call.
+
+## T2 (#1962): the fourth kind, a turn on a connected machine
+
+- `MachineTurn` (`src/machine-turn.ts`) is the class, with its case in `runningTurn(at)` and `wrapperAlive(dir)`. Its kind
+  is read from the folder's `machine` file, and only when the record names no unit and no container.
+- The stop clock stays the runner's: each signal is a line in the folder's `signals` file, which the machine's agent applies
+  in order. A SIGKILL with the machine away writes the turn's end here, since nothing there will.
+- Away is not gone: with its agent not connected a machine turn counts as alive. T6 adds the wait before it comes home.
+- `ran` for `outcome()` says unit and container for a machine turn, so a kill there is never blamed on this server's restart.
+- The agent runs the turn's wrapper with `podman exec`, as a person's container at home does, not a supervisor of its own:
+  the wrapper already outlives the agent, and a second supervisor would need its own adoption across agent restarts.

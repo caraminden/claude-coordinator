@@ -47,7 +47,7 @@ import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
-import { machineLink, workerInfo } from './src/machine-turn.ts';
+import { machineLink, sameClaude, workerInfo } from './src/machine-turn.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
@@ -654,10 +654,17 @@ runner.machines = (project, askers) => machines.online().filter((m) => lendsMach
 // Turns on connected machines (Build 7 T2, src/machine-turn.ts). Nothing places one yet (T4 does): only CITADEL_WORKER_FORCE, for trying a worker.
 machineLink.online = (id) => machines.isOnline(id);
 machineLink.poke = (id) => machines.pokeWorker(id);
+// This box's claude, asked once: a machine whose worker has another version gets no turn (never silently run).
+let homeClaude: string | null = null;
+if (config.workerForce) execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => void (homeClaude = err ? null : out.trim().split('\n')[0]));
 runner.workerFor = (_ticket, person) => {
   const m = config.workerForce ? store.listMachines().find((x) => x.name === config.workerForce) : null;
   // Its owner's turns only (Josh, 2026-11-25), its switch on, and a worker agent there that has said so.
-  return m && person !== null && m.owner_id === person && machines.lendsWorker(m) && machines.isOnline(m.id) && workerInfo(m.id) ? { id: m.id, name: m.name } : null;
+  if (!(m && person !== null && m.owner_id === person && machines.lendsWorker(m) && machines.isOnline(m.id))) return null;
+  const there = workerInfo(m.id)?.claude ?? null;
+  if (sameClaude(homeClaude, there)) return { id: m.id, name: m.name };
+  console.log(`Machine ${m.name} gets no turn: its worker's claude is ${there ?? 'unknown'}, this server's is ${homeClaude ?? 'unknown'}`);
+  return null;
 };
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
 runner.placeFor = (person, warm) => turnPlace(store, claudeLink, person, warm);
@@ -2837,7 +2844,7 @@ if (MACHINES_URL) {
       try {
         const url = requestUrl(req);
         if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
-        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
+        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/machine-worker.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
         else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
         else throw new HttpError(404, 'Not found');
       } catch (err) {

@@ -2245,13 +2245,13 @@ async function main() {
   try {
     const block = configFile && existsSync(configFile) ? JSON.parse(readFileSync(configFile, 'utf8'))?.worker : null;
     if (block) {
-      // A computer set up by the one-line install has only this file: the worker's comes from the same app, once.
+      // A computer set up by the one-line install has only this file: the worker's comes from the same app.
       const file = join(dirname(fileURLToPath(import.meta.url)), 'machine-worker.mjs');
-      if (!existsSync(file)) {
-        const res = await fetch(new URL('/machine-worker.mjs', appUrl));
-        if (!res.ok) throw new Error(`could not download machine-worker.mjs (${res.status})`);
-        writeFileSync(file, await res.text());
-      }
+      // Taken again at each start, so it never falls behind the app's side of the sync; the copy here serves when the app can't be reached.
+      const res = await fetch(new URL('/machine-worker.mjs', appUrl)).catch(() => null);
+      const text = res?.ok ? await res.text() : null;
+      if (text === null && !existsSync(file)) throw new Error(`could not download machine-worker.mjs (${res?.status ?? 'no answer'})`);
+      if (text !== null && !(existsSync(file) && readFileSync(file, 'utf8') === text)) writeFileSync(file, text);
       worker = new (await import('./machine-worker.mjs')).Worker({ config: block, appUrl, token, log });
       await worker.start();
       log(`Minion turns: up to ${worker.cfg.max} at once, in ${worker.cfg.root}`);

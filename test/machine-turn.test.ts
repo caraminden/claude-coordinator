@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, lines, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
-import { MachineTurn, machineLink, placeTurn, placedAt, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
+import { MachineTurn, machineLink, placeTurn, placedAt, sameClaude, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
 import { runningTurn, wrapperAlive } from '../src/running-turn.ts';
 import { containerArgs, workerConfig, Worker } from '../public/machine-worker.mjs';
 
@@ -127,20 +127,20 @@ test('alive by its syncs while the agent is connected; away is not gone, and a k
   assert.deepEqual((await one(1, { dir, signals: 0 })).signals, ['SIGINT', 'SIGKILL'], 'and the machine still gets them when it returns');
 });
 
-test("the worker container holds only the turn's folders, the home volume and what the owner listed", () => {
-  const cfg = workerConfig({ root: '/w', image: 'img', mounts: [{ src: '/opt/claude', dst: '/opt/claude', ro: true }] });
+test("the worker container holds only the turn's folders, and the home volume", () => {
+  const cfg = workerConfig({ root: '/w', image: 'img', mounts: [{ src: '/mnt/c', dst: '/mnt/c' }] });
   const mounts = (args: string[]) => args.filter((_, i) => ['--mount', '-v'].includes(args[i - 1]));
-  assert.deepEqual(mounts(containerArgs(cfg, { home: '/home/x', roots: ['/data/turns', '/data/projects'] })), ['citadel-worker-home:/home/x:U', 'type=bind,src=/w/fs/data/turns,dst=/data/turns', 'type=bind,src=/w/fs/data/projects,dst=/data/projects', 'type=bind,src=/opt/claude,dst=/opt/claude,ro']);
+  // Nothing in the owner's file adds a folder: only the turn's own roots are in it.
+  assert.deepEqual(mounts(containerArgs(cfg, { home: '/home/x', roots: ['/data/turns', '/data/projects'] })), ['citadel-worker-home:/home/x:U', 'type=bind,src=/w/fs/data/turns,dst=/data/turns', 'type=bind,src=/w/fs/data/projects,dst=/data/projects']);
   // The seam host reach (T8) fills, for a marked minion only: nothing unless it is passed.
-  assert.deepEqual(mounts(containerArgs(cfg, { home: '/home/x', roots: [] }, [{ src: '/mnt/c/art', dst: '/host/art', ro: true }])), ['citadel-worker-home:/home/x:U', 'type=bind,src=/opt/claude,dst=/opt/claude,ro', 'type=bind,src=/mnt/c/art,dst=/host/art,ro']);
-  assert.ok(
-    !containerArgs(cfg, { home: '/home/x', roots: ['/data/turns'] })
-      .join(' ')
-      .includes('/mnt'),
-    'no part of a Windows disk',
-  );
-  assert.throws(() => workerConfig({ root: 'relative', image: 'img' }), /full path/);
-  assert.throws(() => workerConfig({ root: '/w', image: 'img', mounts: [{ src: 'x', dst: '/y' }] }), /full src and dst/);
+  assert.deepEqual(mounts(containerArgs(cfg, { home: '/home/x', roots: [] }, [{ src: '/mnt/c/art', dst: '/host/art', ro: true }])), ['citadel-worker-home:/home/x:U', 'type=bind,src=/mnt/c/art,dst=/host/art,ro']);
+  assert.throws(() => workerConfig({ root: 'relative', image: 'img' }));
+  assert.throws(() => workerConfig({ root: '/w' }));
+  // A turn is placed only when both versions are known and the same.
+  assert.equal(sameClaude('2.1.9 (Claude Code)', '2.1.9 (Claude Code)'), true);
+  assert.equal(sameClaude('2.1.9 (Claude Code)', '2.1.10 (Claude Code)'), false);
+  assert.equal(sameClaude('2.1.9 (Claude Code)', null), false);
+  assert.equal(sameClaude(null, null), false);
 });
 
 // ---- the whole path ----
@@ -161,6 +161,7 @@ const fakePodman = (turnsDir: string) =>
 const { spawn, spawnSync } = require('node:child_process');
 const a = process.argv.slice(2);
 require('node:fs').appendFileSync(${JSON.stringify(calls)}, a.join(' ') + '\\n');
+if (a.includes('--version')) { console.log('9.9.9 (fake)'); process.exit(0); }
 if (a[0] !== 'exec') process.exit(a[0] === 'run' ? 0 : 1);
 const detached = a[1] === '-d';
 const cmd = a.slice(detached ? 3 : 2).map((s) => (s === ${JSON.stringify(turnsDir)} || s.startsWith(${JSON.stringify(turnsDir + '/')}) ? ${JSON.stringify(join(workerRoot, 'fs'))} + s : s));
@@ -175,6 +176,7 @@ const claude = join(root, 'claude-steer');
 writeFileSync(
   claude,
   `#!${process.execPath}
+if (process.argv.includes('--version')) { console.log('9.9.9 (fake)'); process.exit(0); }
 const fs = require('node:fs');
 const out = (o) => console.log(JSON.stringify(o));
 const end = (result) => { out({ type: 'result', subtype: 'success', is_error: false, result }); process.exit(0); };

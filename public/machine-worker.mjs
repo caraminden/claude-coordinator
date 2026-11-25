@@ -3,12 +3,11 @@
 // when machine-agent.json has a "worker" block, which only this computer's owner edits:
 //
 //   "worker": { "root": "/home/me/citadel-worker", "image": "citadel-worker", "max": 6,
-//               "node": "/usr/local/bin/node", "claude": "/usr/local/bin/claude",
-//               "mounts": [{ "src": "/opt/tools", "dst": "/opt/tools", "ro": true }] }
+//               "node": "/usr/local/bin/node", "claude": "/usr/local/bin/claude" }
 //
 // root: where turns' files live here (under <root>/fs, by their path on the server). image: the worker image (podman).
-// max: turns at once. node, claude: where they are in the image, when not where the server has them. mounts: extra
-// folders every worker container gets. The server's side, and the contract, is src/machine-turn.ts: one call about every
+// max: turns at once. node, claude: where they are in the image, when not where the server has them. Nothing
+// else of this computer is in the container. The server's side, and the contract, is src/machine-turn.ts: one call about every
 // half second (`sync`) sends what is new in each turn's stream and takes back steers and signals, so nothing depends on
 // the connection staying up. A turn's own tool calls home go through `forward`, with this machine's token added.
 //
@@ -34,8 +33,6 @@ export function workerConfig(raw) {
   const c = /** @type {Record<string, unknown>} */ (raw ?? {});
   if (typeof c.root !== 'string' || !isAbsolute(c.root)) throw new Error('worker.root must be a full path');
   if (typeof c.image !== 'string' || !c.image) throw new Error('worker.image must name the worker image');
-  const mounts = Array.isArray(c.mounts) ? c.mounts : [];
-  for (const m of mounts) if (typeof m?.src !== 'string' || typeof m?.dst !== 'string' || !isAbsolute(m.src) || !isAbsolute(m.dst)) throw new Error('worker.mounts: each needs a full src and dst');
   return {
     root: c.root,
     image: c.image,
@@ -44,7 +41,6 @@ export function workerConfig(raw) {
     claude: typeof c.claude === 'string' ? c.claude : null,
     container: typeof c.container === 'string' ? c.container : 'citadel-worker',
     podman: typeof c.podman === 'string' ? c.podman : 'podman',
-    mounts: mounts.map((m) => ({ src: m.src, dst: m.dst, ro: m.ro === true })),
   };
 }
 
@@ -56,7 +52,7 @@ export function workerConfig(raw) {
  * @param {ReturnType<typeof workerConfig>} cfg @param {{ home: string, roots: string[] }} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts]
  */
 export function containerArgs(cfg, launch, extraMounts = []) {
-  const binds = [...launch.roots.map((r) => ({ src: join(cfg.root, 'fs', r), dst: r, ro: false })), ...cfg.mounts, ...extraMounts];
+  const binds = [...launch.roots.map((r) => ({ src: join(cfg.root, 'fs', r), dst: r, ro: false })), ...extraMounts];
   const spec = JSON.stringify([cfg.image, launch.home, binds]);
   const args = ['--rm', '--replace', '--name', cfg.container, '--init', '--userns=keep-id', '--network=host', '--pids-limit=32768', '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
   args.push('-e', `HOME=${launch.home}`, '-v', `${cfg.container}-home:${launch.home}:U`);
@@ -131,6 +127,8 @@ export class Worker {
   /** Start syncing, and the forwarder turns' tools call home through. */
   async start() {
     await this.forward();
+    // Its claude's version, before any turn: the server places none here while it differs from its own.
+    void this.version(['run', '--rm', this.cfg.image]);
     this.timer = setInterval(() => this.poke(), SYNC_MS);
     this.poke();
   }
@@ -334,8 +332,13 @@ export class Worker {
     if (running === 'true' && (has === want || others)) return;
     const r = await this.exec(podman, ['run', '-d', ...args], 15 * 60_000);
     if (r.code) throw new Error(`the worker container did not start: ${r.err.trim().split('\n').pop()}`);
-    const v = await this.exec(podman, ['exec', container, this.cfg.claude ?? 'claude', '--version']);
-    this.claude = v.code ? null : v.out.trim().split('\n')[0].slice(0, 80);
+    await this.version(['exec', container]);
+  }
+
+  /** `claude --version` there, by `podman <how…>`. @param {string[]} how */
+  async version(how) {
+    const v = await this.exec(this.cfg.podman, [...how, this.cfg.claude ?? 'claude', '--version'], 15 * 60_000);
+    if (!v.code) this.claude = v.out.trim().split('\n')[0].slice(0, 80) || null;
   }
 
   /**

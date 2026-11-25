@@ -94,6 +94,9 @@ function note(machineId: number, dir: string) {
   dirs.add(dir);
 }
 
+/** Both known and the same version (the first word of `claude --version`): the only case a turn is placed in. */
+export const sameClaude = (home: string | null, there: string | null): boolean => !!home && !!there && home.split(/\s/)[0] === there.split(/\s/)[0];
+
 export const workerInfo = (machineId: number): WorkerInfo | null => workers.get(machineId) ?? null;
 
 const size = (file: string) =>

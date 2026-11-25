@@ -14,6 +14,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { lendsMachine } from './access.ts';
 import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
@@ -813,7 +814,7 @@ export class MachineRelay {
       const r = await this.converse(w.machine, { check: w.machine }, 'ws', `Citadel, following job ${w.job} for ${this.minionName(w.ticket)}`, WATCH_MAX_MS, (ask) => this.followJob(w, ask));
       if (w.done || this.watchOver(w)) return;
       if (!r.ok) console.error(`[machines] following job ${w.job} on machine ${w.machine}: ${r.error}; trying again`);
-      await new Promise((ok) => setTimeout(ok, WATCH_RETRY_MS).unref?.());
+      await sleep(WATCH_RETRY_MS, undefined, { ref: false });
     }
   }
 

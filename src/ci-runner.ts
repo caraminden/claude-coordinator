@@ -4,6 +4,7 @@
 // needs a runner registration token, which only a repo admin can mint, so Citadel mints it with the scheme
 // owner's linked GitHub login and hands back just the token: it lasts about an hour and is never stored.
 // The caller is a machine's agent key (the Machines page), the same credential that PC already uses.
+import { setTimeout as sleep } from 'node:timers/promises';
 import { adminOwned } from './access.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { GithubLink } from './github-link.ts';
@@ -366,7 +367,7 @@ export class RunnerJobs {
         last = `couldn't ask GitHub: ${err.message}`;
       }
       if (Date.now() >= end) return { ok: false, text: `${last}; fewer than ${count} Idle after ${Math.round(this.idleWaitMs / 1000)}s` };
-      await new Promise((r) => setTimeout(r, this.pollMs));
+      await sleep(this.pollMs);
     }
   }
 

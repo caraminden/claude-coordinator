@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const ROOT = import.meta.dirname;
 const repo = join(ROOT, 'repo');
@@ -45,7 +46,7 @@ async function stop() {
     /* gone */
   }
   // Gone before a restart opens the same database and port.
-  for (let i = 0; i < 40 && alive(s.pgid); i++) await new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; i < 40 && alive(s.pgid); i++) await sleep(250);
   if (alive(s.pgid))
     try {
       process.kill(-s.pgid, 'SIGKILL');
@@ -131,7 +132,7 @@ async function start(mode = { turns: rest.includes('--turns'), clock: opt('--clo
   const url = `http://127.0.0.1:${port}/`;
   let up = false;
   for (let i = 0; i < 60 && !up; i++) {
-    await new Promise((r) => setTimeout(r, 500));
+    await sleep(500);
     up = await fetch(url, { signal: AbortSignal.timeout(2000) }).then(
       () => true,
       () => false,

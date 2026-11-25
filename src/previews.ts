@@ -14,6 +14,7 @@ import { get, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { copyDb } from './db-copy.ts';
 import { Auth, type Session } from './auth.ts';
 import type { Project, Store, Ticket } from './db.ts';
@@ -318,7 +319,7 @@ export class Previews {
       rmSync(dir, { recursive: true, force: true });
       return new PreviewError(502, `${why}${log ? `\n--- preview output ---\n${log}` : ''}`);
     };
-    for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((res) => setTimeout(res, 100))) {
+    for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await sleep(100)) {
       if (proc.exitCode !== null || proc.signalCode) throw await fail(`The preview exited during boot (code ${proc.exitCode})`);
       if (Date.now() > deadline) throw await fail(`The preview did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
       // A server that accepts and never answers must not hold the loop past its deadline: http alone waits for ever.

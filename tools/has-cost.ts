@@ -14,6 +14,7 @@
 //   #1534, load 57.3:             2.8 ms median (0.8 to 3.5), 0.7 ms with no :has() (calibration 30 to 54)
 //   #1534, load 74.2:             3.1 ms median (2.6 to 3.5), 0.7 ms with no :has() (calibration 37 to 133)
 import { loadavg } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { open } from './ui-shot.ts';
 
 const arg = (name: string, fallback: string) => {
@@ -24,7 +25,6 @@ const route = arg('route', '#/p/2');
 const width = Number(arg('width', '1440'));
 const rounds = Number(arg('rounds', '6'));
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const page = await open(route, { width });
 try {
   for (const end = Date.now() + 120_000; !(await page.evaluate(`!!document.querySelector('#log') && !document.body.classList.contains('navigating')`).catch(() => false)); await sleep(200)) {

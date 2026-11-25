@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const DIR = process.env.FAKE_CLAUDE_DIR ?? join(dirname(new URL(import.meta.url).pathname), 'fake');
 const args = process.argv.slice(2);
@@ -109,7 +110,7 @@ async function turn(line) {
   const log = { at: now().toISOString(), ...env, args, prompt, spec, tools: [] };
   const say = (text) => out({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake', content: [{ type: 'text', text }] }, session_id: session });
   out({ type: 'system', subtype: 'init', session_id: session, model: arg('--model') ?? 'claude-fake', cwd: process.cwd() });
-  if (spec.delayMs) await new Promise((r) => setTimeout(r, spec.delayMs));
+  if (spec.delayMs) await sleep(spec.delayMs);
   for (const ev of spec.lines ?? []) out(ev);
   for (const [i, tool] of (spec.tools ?? []).entries()) {
     const use = `toolu_fake_${i}`;

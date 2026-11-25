@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { connect } from 'node:net';
 import { request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { APP_NAME } from './appname.ts';
 import { APP_COOKIE, COOKIE, type Auth, type Session } from './auth.ts';
 import { IMAGE_FILE, MANIFEST_FILE, installCheck } from './pwa-check.ts';
@@ -120,7 +121,7 @@ export class RestartHolds {
     app.waiting++;
     const until = this.now() + this.holdMs;
     const poll = async () => {
-      while (!gone && this.now() < until && !(await accepts(port, until - this.now()))) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, until - this.now()))));
+      while (!gone && this.now() < until && !(await accepts(port, until - this.now()))) await sleep(Math.min(100, Math.max(0, until - this.now())));
     };
     void poll().finally(() => {
       app.waiting--;

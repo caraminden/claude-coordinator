@@ -6,6 +6,7 @@
 // p50 2 s, p99 52 s, p99.9 118 s. So a turn is quiet 5 min after its last output, or 2 min past an open tool's own
 // timeout when that is later (a test run with a 10 min timeout is not quiet until 12 min).
 import { readdirSync, readFileSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export const QUIET_MS = 5 * 60_000;
 export const GRACE_MS = 2 * 60_000;
@@ -137,7 +138,7 @@ export async function checkProcess(claudePid: number | null, sampleMs = 1000): P
   if (!claudePid) return { verdict: 'unknown', text: "Couldn't find this turn's process: it may run in a container or on another machine." };
   const a = procs();
   if (!a.has(claudePid)) return { verdict: 'gone', text: "The turn's process is gone: it should end by itself in a moment." };
-  await new Promise((r) => setTimeout(r, sampleMs));
+  await sleep(sampleMs);
   const b = procs();
   if (!b.has(claudePid)) return { verdict: 'gone', text: "The turn's process just ended." };
   const tree = descendants(b, claudePid);

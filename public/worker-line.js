@@ -177,7 +177,7 @@ function askRelease(row, holds) {
     title: 'You hold two workers already',
     className: 'own-full',
     body: [
-      h('p', {}, `Two each is the most. Release one and #${row.number} gets its worker, as soon as any turn that one is running ends.`),
+      h('p', {}, `Two each is the most. Release one and #${row.number} gets a worker as soon as that one is not mid-turn.`),
       h(
         'ul',
         { class: 'line-rows' },

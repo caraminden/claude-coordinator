@@ -185,13 +185,14 @@ test('--affected with nothing changed is not a failure: it says so and runs only
 });
 
 test('workers follow the memory room: a short room says so and runs fewer files at once (#1340)', async () => {
+  // Room for one: on 4 CPUs (a pinned heavy job, #1928, or a small runner) two workers is the normal half, not short.
   const f = file('room.test.ts', `test('one', () => {});`);
-  const short = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700' });
+  const short = await run([f], noList, { CITADEL_MEM_ROOM_MB: '350' });
   assert.equal(short.code, 0, short.out);
-  assert.match(short.out, /memory room is short \(700 MB free for heavy work\): running 2 worker\(s\) at a time/);
+  assert.match(short.out, /memory room is short \(350 MB free for heavy work\): running 1 worker\(s\) at a time/);
   const plenty = await run([f], noList, { CITADEL_MEM_ROOM_MB: '100000' });
   assert.doesNotMatch(plenty.out, /memory room is short/);
-  const pinned = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700', CITADEL_TEST_CONCURRENCY: '3' });
+  const pinned = await run([f], noList, { CITADEL_MEM_ROOM_MB: '350', CITADEL_TEST_CONCURRENCY: '3' });
   assert.doesNotMatch(pinned.out, /memory room is short/, 'an explicit CITADEL_TEST_CONCURRENCY wins');
 });
 
@@ -255,7 +256,17 @@ test('a run waits for a held place, starts anyway after the wait, and says so in
   const holder = spawn('flock', [join(heavyDir, 'test-slot-0'), 'sleep', '600'], { stdio: 'ignore', detached: true });
   try {
     await until('the place held', () => existsSync(join(heavyDir, 'test-slot-0')));
-    const r = await run([file('gated.test.ts', `test('ran', () => {});`)], noList, { CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '2', CITADEL_HEAVY_DIR: heavyDir, CITADEL_HEAVY_PRESSURE: join(tmp, 'no-psi') });
+    const r = await run([file('gated.test.ts', `test('ran', () => {});`)], noList, {
+      CITADEL_TEST_FILES: '1',
+      CITADEL_TEST_FILES_MIN: '1',
+      CITADEL_TEST_FILES_MAX: '1',
+      CITADEL_TEST_ROOM_WAIT: '2',
+      CITADEL_HEAVY_DIR: heavyDir,
+      CITADEL_HEAVY_PRESSURE: join(tmp, 'no-psi'),
+      RUNNER_TEMP: undefined,
+      GITHUB_ACTIONS: undefined,
+      CITADEL_HEAVY_HELD: undefined,
+    });
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other files hold them; each starts anyway after 2 s$/m);
     assert.equal(r.out.match(/waiting for room/g)?.length, 1);

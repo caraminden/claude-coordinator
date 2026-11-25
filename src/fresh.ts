@@ -9,7 +9,8 @@ import { COMPACT_COMMAND, handoffPrompt, minionHandoffPrompt } from './prompts.t
 import { turnSettings } from './turn-launch.ts';
 import type { KillResume, LimitResume, NetResume } from './resumes.ts';
 import { contextKey, freshKey, handoffKey } from './turn-keys.ts';
-import type { QueuedMessage, Runner, TurnState } from './runner.ts';
+import type { QueuedMessage } from './turn-messages.ts';
+import type { Runner, TurnState } from './runner.ts';
 
 /**
  * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with

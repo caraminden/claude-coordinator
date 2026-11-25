@@ -67,7 +67,7 @@ import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, losesPass, newCalls, noteCalls, readsSteers, repliedPrompt, sameCall, STEER_LAG_MS, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
-import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
+import { applyEvent, createProgress, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
 import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
@@ -85,10 +85,11 @@ import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
+import { describeActivity, DROPPED_TYPES, guessWindow, pushKind, slimEvent } from './stream-events.ts';
+import { usageWindow, type CodexLimits, type CodexWindow, type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type RateLimitInfo, type Usage } from './turn-messages.ts';
 import { contextKey, windowKey, freshKey, handoffKey, shippedKey, failNoteKey, closeCancelledKey, turnKey, warmKey, talkedKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
 
-const MAX_TOOL_OUTPUT = 20_000;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
 const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
 /** Whether `path` is there, asked off the server's thread (#1808). */
@@ -116,83 +117,7 @@ const CARD_KINDS = new Set(['question', 'question_more', 'plan', 'approval', 'qu
 const POSTED_KINDS = new Set(['question', 'question_more', 'plan', 'approval']);
 const EVERYONES = new Set(['question', 'plan', 'approval']);
 
-// Stream events that carry no information for the ticket view.
-const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
-
 export type Broadcast = (msg: object) => void;
-
-interface UsageWindow {
-  utilization: number; // 0..1 of the plan's limit
-  resetsAt: number | null; // epoch ms
-  status: string | null;
-}
-
-/** The Claude account's plan usage, as last reported by a turn. */
-export interface Usage {
-  weekly: UsageWindow | null;
-  session: UsageWindow | null; // the rolling five-hour window
-  updatedAt: number;
-}
-
-/** A rate_limit_event's `rate_limit_info`: each window's reading, by name (seven_day, five_hour). */
-interface RateLimitInfo {
-  unifiedWindows?: Record<string, Record<string, unknown> | null | undefined>;
-}
-
-/** One window of Codex's account/rateLimits. */
-interface CodexWindow {
-  usedPercent?: unknown;
-  windowDurationMins?: unknown;
-  resetsAt?: unknown;
-}
-interface CodexLimits {
-  primary?: CodexWindow | null;
-  secondary?: CodexWindow | null;
-}
-
-function usageWindow(w: Record<string, unknown> | null | undefined): UsageWindow | null {
-  if (!w || typeof w.utilization !== 'number') return null;
-  return {
-    utilization: w.utilization,
-    resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt * 1000 : null,
-    status: typeof w.status === 'string' ? w.status : null,
-  };
-}
-
-export interface MessageImage {
-  name: string;
-  path: string;
-  mediaType: string;
-}
-
-/** A file people attached, saved in the thread's files folder (src/uploads.ts). */
-export interface MessageFile {
-  name: string;
-  path: string;
-  size: number;
-  type: string;
-}
-
-export interface QueuedMessage {
-  author: string;
-  text: string;
-  images: MessageImage[];
-  files?: MessageFile[];
-  about?: string; // the file a comment is on
-  id?: number; // its user_message event, for taking it back while queued
-  from?: number; // the minion or Taskmaster that relayed it, whose turn's person it carries
-  typed?: boolean; // a signed-in person sent it from the chat; only these can be a go to merge (#201)
-  own?: boolean; // a person sent it themselves: typed, or a card's answer; only these carry their own secrets (#838)
-  asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
-  fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
-  cold?: true; // held mail left because its recipient was cold (#413), for the Held list (#1059)
-  fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
-  parked?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
-  keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
-  card?: string; // the kept card it answers (#1916): only the turn that gets this may have its pass
-  rerun?: true; // a cut-off turn's, given back to run again (#1958): it wakes nobody, so a seal set since stays
-  light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
-}
 
 /**
  * What a running turn's restart recovery needs, kept in the settings table under `turn:<ticket id>`
@@ -335,16 +260,9 @@ export interface LiveTurn {
 /** The stream reader's buffer: one for every followed turn, grown only for a line longer than it (readStream). */
 const STREAM_CHUNK = 1 << 20;
 
-/** The window before a result has reported one: a `[1m]` model id has 1M, the rest 200k. */
-export const guessWindow = (model: string | null | undefined) => (/\[1m\]/i.test(model ?? '') ? 1_000_000 : 200_000);
-
-/** The slash commands a chat's last turn loaded (its init event, #937), and the scheme's newest, for a chat with no turn yet. */
-export interface LoadedCommands {
-  names: string[];
-  plugins: { name: string; path: string }[];
-  cwd: string;
-}
 export { commandsKey, schemeCommandsKey };
+export { guessWindow, pushKind, slimEvent };
+export type { LoadedCommands, MessageFile, MessageImage, QueuedMessage, Usage };
 export { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, idleText, type FreshState } from './fresh.ts';
 
 // Kept in src/account-pick.ts, which claude-link.ts reads them from too (#793).
@@ -516,71 +434,6 @@ function owedOf(via: RetryKind, r: Retries): OwedResume {
 /** The retries an owed resume's turn starts with. */
 function owedRetries(o: OwedResume): Retries {
   return { ...retriesOf({ resumes: o.resumes, limitTries: o.limitTries, killTries: o.killTries }), ...(o.switchTries ? { switch: o.switchTries } : {}) };
-}
-
-function truncate(s: string): string {
-  return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
-}
-
-/**
- * Shrink a stream-json event before storing it, keeping only what the chat, the progress readout
- * and the coordinator's transcript read: thinking, usage, ids and background-task echoes are most
- * of a long thread's history and none of them are shown. Returns null for events not worth keeping.
- * `stored` is for events already in the database, whose tool output was capped when it was saved.
- */
-export function slimEvent(ev: ClaudeEvent, stored = false): ClaudeEvent | null {
-  if (ev.type === 'system') {
-    return ev.subtype === 'init' ? { type: 'system', subtype: 'init', session_id: ev.session_id, model: ev.model, cwd: ev.cwd } : null;
-  }
-  if ((ev.type === 'assistant' || ev.type === 'user') && Array.isArray(ev.message?.content)) {
-    const content = ev.message!.content!.flatMap((block: ContentBlock): ContentBlock[] => {
-      if (block?.type === 'thinking' || block?.type === 'redacted_thinking') return [];
-      if (block?.type === 'text' && typeof block.text === 'string') return [{ ...block, text: hideTokens(block.text) }];
-      if (block?.type !== 'tool_result' || stored) return [block];
-      let content = block.content;
-      if (Array.isArray(content)) {
-        content = content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
-      }
-      return [{ ...block, content: truncate(hideTokens(String(content ?? ''))) }];
-    });
-    if (!content.length) return null;
-    const slim: ClaudeEvent = { type: ev.type, message: { role: ev.message!.role, content } };
-    if (ev.parent_tool_use_id) slim.parent_tool_use_id = ev.parent_tool_use_id;
-    if (ev.turn_state) slim.turn_state = ev.turn_state;
-    return slim;
-  }
-  if (ev.type === 'result') {
-    const { subtype, is_error, duration_ms, num_turns, total_cost_usd } = ev;
-    // A successful turn's result repeats its last message; only a failure's says something new.
-    return { type: 'result', subtype, is_error, duration_ms, num_turns, total_cost_usd, ...(ev.is_error ? { result: ev.result } : {}) };
-  }
-  return null;
-}
-
-/** Whether a shell command pushes to GitHub or opens a pull request (for the chat note), by its words. */
-export function pushKind(command: string): 'push' | 'pr' | null {
-  // Quoted words are messages and arguments (git commit -m "then git push"), not commands.
-  command = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
-  if (/\bgh\s+pr\s+create\b/.test(command)) return 'pr';
-  return /\bgit\b(?:\s+-[cC]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+push\b/.test(command) ? 'push' : null;
-}
-
-function describeActivity(ev: ClaudeEvent): string | null {
-  if (ev.type !== 'assistant') return null;
-  const blocks = (ev.message?.content ?? []) as ContentBlock[];
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    // A Grunt's report (a subagent's words) isn't what the minion is doing; its tool calls are.
-    if (b?.type === 'text' && !ev.parent_tool_use_id && typeof b.text === 'string' && b.text.trim())
-      return b.text
-        .trim()
-        .split('\n')[0]
-        .replace(/\*\*|`/g, '')
-        .slice(0, 160);
-    // The same plain words as the readout ("Ran the tests", "Edited app.js"), not "Using Bash".
-    if (b.type === 'tool_use' && isWorkTool(b.name)) return activityLabel(b);
-  }
-  return null;
 }
 
 /** How a turn's MCP server reaches the API; without `token` it mints the ticket's next turn token, which retires the one before. */

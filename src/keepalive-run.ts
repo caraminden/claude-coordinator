@@ -16,7 +16,8 @@ import { sameAccount, type OnAccount } from './line-place.ts';
 import type { TurnLine } from './turn-line.ts';
 import { freshKey, turnKey, savingKey } from './turn-keys.ts';
 import { sleepKey, stateWord } from './needs.ts';
-import type { LiveTurn, QueuedMessage, TurnState } from './runner.ts';
+import type { QueuedMessage } from './turn-messages.ts';
+import type { LiveTurn, TurnState } from './runner.ts';
 
 /** What keepalives need from the Runner. */
 export interface KeepaliveDeps {

@@ -11,7 +11,7 @@ import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 import { startHoldKey, START_HOLD_PREFIX, startNote } from './minion-budget.ts';
 import type { MinionQueue } from './minion-queue.ts';
 import { sleepKey, type Sleep } from './needs.ts';
-import type { QueuedMessage } from './runner.ts';
+import type { QueuedMessage } from './turn-messages.ts';
 
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
 const STRIKE_SEARCH = 500;

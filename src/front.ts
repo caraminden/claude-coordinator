@@ -41,6 +41,7 @@ export const READER_ROUTES: readonly string[] = [
   // artifacts, the ci-files, ci-numbers and ci-runners, contraptions, reviews/schemes, and the Taskmaster-only GETs.
   '/api/tickets/:ticket/commands',
   '/api/tickets/:ticket/ship-risk',
+  '/api/tickets/:ticket/time-log',
   '/api/ship-lines',
   '/api/app/instructions',
   '/api/app/instructions/history',

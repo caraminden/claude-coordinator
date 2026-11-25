@@ -67,7 +67,7 @@ const PATHS = [
   '/api/status',
   '/api/box-capacity',
   // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
-  ...['commands', 'ship-risk'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
+  ...['commands', 'ship-risk', 'time-log'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
   ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns'].flatMap((r) => [
     `/api/projects/${A.id}/${r}`,
     `/api/projects/${B.id}/${r}`,
@@ -81,8 +81,8 @@ const PATHS = [
   '/api/ci-desktop',
   '/api/units',
 ];
-// What differs between two servers' boots (its start time, the answer probe, the machine's load) is compared on one server instead.
-const BOOT_BOUND = new Set(['/api/status', '/api/box-capacity']);
+// What differs between two servers' boots (its start time, the answer probe, the machine's load), or ends now (a time log), is compared on one server instead.
+const BOOT_BOUND = new Set(['/api/status', '/api/box-capacity', ...[M1.id, MB.id].map((id) => `/api/tickets/${id}/time-log`)]);
 // The clock a body carries, the one field that differs between two asks of the same answer.
 const unclocked = (body: string) => body.replace(/"(at|now)":\d+/g, '"$1":0');
 

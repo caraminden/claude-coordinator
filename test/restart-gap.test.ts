@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { Agent, createServer as createHttpServer, request, type IncomingMessage, type Server } from 'node:http';
+import { Agent, createServer as createHttpServer, request, type IncomingMessage, type RequestListener, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, freePort, tempRoot, testPins, until } from './helpers.ts';
+import type { McpReply, McpResult } from './mcp-agent.ts';
+import { json } from './typed.ts';
 
 const { MCP_SERVER } = testPins();
 
@@ -22,20 +24,20 @@ function threadMcp(port: number) {
     env: { PATH: process.env.PATH, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '7' },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
-  const replies = new Map<number, (r: any) => void>();
+  const replies = new Map<number, (r: McpReply) => void>();
   createInterface({ input: mcp.stdout! }).on('line', (l) => {
     const r = JSON.parse(l);
     replies.get(r.id)?.(r);
   });
   let rid = 0;
-  return (name: string, args: object): Promise<any> => {
+  return (name: string, args: object): Promise<McpResult> => {
     const id = ++rid;
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    return new Promise((r) => replies.set(id, (m) => r(m.result)));
+    return new Promise((r) => replies.set(id, (m) => r(m.result!)));
   };
 }
 
-async function listen(handler: Parameters<typeof createHttpServer>[0]): Promise<Server> {
+async function listen(handler: RequestListener): Promise<Server> {
   const api = createHttpServer(handler);
   await tmp.serve(api);
   return api;
@@ -83,7 +85,7 @@ test('on SIGTERM the server ends its event streams and exits within the grace pe
   const log = join(mkdtempSync(join(root, 'log-')), 'server.log');
   const { base, cookie, proc: server } = await bootServer({ root, log, env: { TURN_UNITS: '0' } });
   tmp.track(server);
-  const health = await (await fetch(`${base}/api/health`)).json();
+  const health = await json<{ interruptible: number }>(await fetch(`${base}/api/health`));
   assert.equal(health.interruptible, 0);
   const stream = await fetch(`${base}/api/stream`, { headers: { Cookie: cookie } });
   const reading = (async () => {

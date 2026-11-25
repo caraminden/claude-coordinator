@@ -20,7 +20,7 @@ function fakeGithub(tokens: Record<string, string>) {
     const path = url.replace('https://api.github.com', '');
     calls.push(`${method} ${path}`);
     if (opts.down) throw new Error('fetch failed');
-    const me = tokens[String((init?.headers as any)?.Authorization ?? '').replace('Bearer ', '')];
+    const me = tokens[String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '').replace('Bearer ', '')];
     const headers = { 'X-OAuth-Scopes': opts.scopes };
     if (!me) return Response.json({ message: 'Bad credentials' }, { status: 401, headers });
     let m: RegExpExecArray | null;
@@ -251,10 +251,12 @@ test("an invite GitHub made stays Citadel's when accepting it fails, so leaving 
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
   const real = w.gh.fetch;
-  (w.access as any).fetch = (async (url: string, init?: RequestInit) => {
-    if (init?.method === 'PATCH') throw new Error('timed out');
-    return real(url, init);
-  }) as typeof fetch;
+  Object.assign(w.access, {
+    fetch: (async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') throw new Error('timed out');
+      return real(url, init);
+    }) as typeof fetch,
+  });
   await w.access.sync(w.scheme.id, w.josh.id);
   assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'invited');
   assert.match(w.access.view(w.scheme.id, w.josh.id)!.error!, /Couldn't reach GitHub/);

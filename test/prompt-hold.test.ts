@@ -137,7 +137,7 @@ async function turn(id: number, text: string) {
   runner.send(id, 'Cara', text);
   await until('the turn', async () => jsonLines(seen).length > before && !runner.isRunning(id) && store.promptHashes(id, 99).length > turns);
   const t = jsonLines(seen).at(-1);
-  return { ...t, message: t.input.message.content.map((c: any) => c.text).join('\n'), hashes: store.promptHashes(id)[0].hashes };
+  return { ...t, message: t.input.message.content.map((c: { text: string }) => c.text).join('\n'), hashes: store.promptHashes(id)[0].hashes };
 }
 
 test('a Settings edit reaches the next warm turn as a note on the same system prompt, and the first cold turn whole', async () => {
@@ -151,7 +151,7 @@ test('a Settings edit reaches the next warm turn as a note on the same system pr
   assert.equal(first.resumed, false);
   assert.equal(first.toolHold, null, 'a new session lists the current tools');
   assert.match(first.system, /Reply in English\./);
-  const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, cwd, 'sess');
+  const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, cwd, 'sess')!;
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, '{}\n');
 

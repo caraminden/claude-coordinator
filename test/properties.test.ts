@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { Store, titleWithoutBuild } from '../src/db.ts';
+import { Store, titleWithoutBuild, type TicketStatus } from '../src/db.ts';
 import { nearDuplicate, PropertyError, type Actor } from '../src/properties.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'props-'));
@@ -27,9 +27,9 @@ const tm = (projectId: number): Actor => ({ kind: 'coordinator', name: 'Taskmast
 const minion = (projectId: number): Actor => ({ kind: 'thread', name: '#5 Thing', projectId, ticketId: 5 });
 const err = (status: number, re: RegExp) => (e: unknown) => e instanceof PropertyError && e.status === status && re.test(e.message);
 
-function ticket(s: Store, projectId: number, status = 'idle') {
+function ticket(s: Store, projectId: number, status: TicketStatus = 'idle') {
   const t = s.createTicket({ project_id: projectId, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  s.updateTicket(t.id, { status: status as any });
+  s.updateTicket(t.id, { status });
   return t.id;
 }
 

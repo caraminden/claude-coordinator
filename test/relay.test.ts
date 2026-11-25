@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { bootServer, tempRoot, type Booted } from './helpers.ts';
+import { json, type Refused } from './typed.ts';
 
 const tmp = tempRoot('relay-');
 let srv: Booted;
@@ -35,7 +36,7 @@ const relay = (path: string, init: RequestInit & { headers?: Record<string, stri
     ...init,
     headers: { Authorization: `Bearer ${peekKey}`, 'X-Citadel-Person': String(person), ...init.headers },
   });
-const error = async (res: Response) => [res.status, (await res.json()).error];
+const error = async (res: Response) => [res.status, (await json<Refused>(res)).error];
 
 before(async () => {
   const port = await tmp.serve(stub);

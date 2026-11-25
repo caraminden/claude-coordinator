@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { Project, Ticket } from '../src/db.ts';
 import { systemPrompt, turnContext } from '../src/prompts.ts';
+import { fake } from './typed.ts';
 
-const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
-const tm = { id: 1, number: 1, title: 'Taskmaster', kind: 'coordinator' } as any;
+const project = fake<Project>({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' });
+const tm = fake<Ticket>({ id: 1, number: 1, title: 'Taskmaster', kind: 'coordinator' });
 const prompt = (role: 'person' | 'overlord' | null, builds = true) => systemPrompt(project, tm, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, builds, null, null, false, role);
 
 test('a scheme with one Taskmaster gets no role line', () => {
@@ -32,14 +34,14 @@ test("a minion names its owner's Taskmaster", () => {
 });
 
 test('a stalled minion is stepped up a tier: the Taskmaster calls update_ticket, a Sonnet minion asks for it', () => {
-  const minion = { id: 2, number: 2, title: 'M', kind: 'ticket', branch: 'ticket/2-m' } as any;
+  const minion = fake<Ticket>({ id: 2, number: 2, title: 'M', kind: 'ticket', branch: 'ticket/2-m' });
   const m = systemPrompt(project, minion, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, true, null, null, false, null);
   assert.match(prompt(null), /Stalled minions step up: .*update_ticket with the next step from its tier's `then` before relaying/);
   assert.match(m, /On Sonnet, ask the Taskmaster for the next model or effort step \(`message_coordinator`, need: ask\)/);
 });
 
 test('only an advisor-trial model gets the consult lines (#954)', () => {
-  const turn = (model: string | null) => turnContext(project, { id: 2, number: 2, title: 'M', kind: 'ticket', branch: 'ticket/2-m', model } as any, '/s/1', '/s/p', '/t', '/m');
+  const turn = (model: string | null) => turnContext(project, fake<Ticket>({ id: 2, number: 2, title: 'M', kind: 'ticket', branch: 'ticket/2-m', model }), '/s/1', '/s/p', '/t', '/m');
   const on = turn('claude-sonnet-5-5+opus-advisor');
   assert.match(on, /opus advisor tool.*once with your plan before your first code edit, once with your diff summary before you ship, and again whenever a fix did not hold/);
   assert.ok(!turn('claude-sonnet-5-5').includes('advisor'));

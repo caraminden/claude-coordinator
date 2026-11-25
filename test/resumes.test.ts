@@ -5,7 +5,7 @@ import { WaitList } from '../src/resumes.ts';
 
 test('WaitList puts, replaces, takes and deletes the setting when empty', () => {
   const m = new Map<string, unknown>();
-  const store = { getSetting: (k: string) => m.get(k) as any, setSetting: (k: string, v: unknown) => void m.set(k, v), deleteSetting: (k: string) => void m.delete(k) };
+  const store = { getSetting: <T>(k: string) => m.get(k) as T | undefined, setSetting: (k: string, v: unknown) => void m.set(k, v), deleteSetting: (k: string) => void m.delete(k) };
   const w = new WaitList<{ ticket: number; tries: number }>(store, 'k');
   assert.deepEqual(w.all(), []);
   w.put({ ticket: 1, tries: 1 });

@@ -56,12 +56,12 @@ test('a minion with no folder runs no turn, and keeps the message for the turn o
   const t = minion(false);
   // As when Citadel can't make its worktree again (a repo that's gone, git failing).
   const restore = (runner as any).restoreDir;
-  (runner as any).restoreDir = () => {};
+  Object.assign(runner, { restoreDir: () => {} });
   try {
     runner.send(t.id, 'Cara', 'first');
     await idle(t.id);
   } finally {
-    (runner as any).restoreDir = restore;
+    Object.assign(runner, { restoreDir: restore });
   }
   assert.equal(runner.isRunning(t.id), false);
   assert.deepEqual(

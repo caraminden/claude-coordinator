@@ -3,6 +3,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process';
 import { createECDH, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -42,11 +43,14 @@ const received: { path: string; body: Buffer }[] = [];
 const cookies: Record<string, string> = {};
 
 let srv: Booted;
-const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> => {
+type Event = { id: number; kind: string; data: string };
+// The parts of the API's answers these tests read.
+type Answer = { id: number; coordinator: { id: number }; ticket: { status: string }; events: Event[]; items: { kind: string; ticketId: number; eventId: number; card: { by: string } }[]; onlyPinned: boolean; person: { id: number }; token: string; number: number; publicKey: string; subscribed: boolean };
+const call = async <T = Answer>(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> => {
   const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
   const r = await srv.as(token ? { token } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET');
   // This stands in for whichever turn is current: if a new turn began mid-call, ask again as that one.
-  if (r.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call(who, path, opts);
+  if (r.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call<T>(who, path, opts);
   return ok(r);
 };
 
@@ -121,7 +125,7 @@ before(async () => {
     });
   });
   await new Promise<void>((r) => pushService!.listen(0, '127.0.0.1', r));
-  pushBase = `https://127.0.0.1:${(pushService.address() as any).port}`;
+  pushBase = `https://127.0.0.1:${(pushService.address() as AddressInfo).port}`;
 
   srv = await bootServer({
     root,
@@ -166,7 +170,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   let got = await pushes(n, 3);
   // Clicking it opens the chat at the card (#236).
   // An event's own row can still be in the server's write queue when its push arrives (src/db-writer.ts), so wait for it.
-  const eventOf = async (ticketId: number, kind: string, match = (_: any) => true) => (await until(`a ${kind} event on #${ticketId}`, async () => (await call('Cara', `/api/tickets/${ticketId}/events`)).events.filter((e: any) => e.kind === kind && match(JSON.parse(e.data))).at(-1))).id;
+  const eventOf = async (ticketId: number, kind: string, match = (_: { id: number }) => true) => (await until(`a ${kind} event on #${ticketId}`, async () => (await call('Cara', `/api/tickets/${ticketId}/events`)).events.filter((e) => e.kind === kind && match(JSON.parse(e.data))).at(-1))).id;
   const card = await eventOf(t.id, 'question', (d) => d.id === asked.id);
   assert.deepEqual(got.cara, { title: '#1 Build it', body: 'Tabs or list?', tag: `thread-${t.id}`, url: `${url}?e=${card}` });
   assert.deepEqual(got.josh, got.cara);
@@ -238,7 +242,7 @@ test("taking a minion over or handing it on says so in its chat and the Taskmast
   const { coordinator } = await call('Cara', `/api/projects/${project.id}`);
   const t = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'build it', title: 'Hand me over' } });
   await until('the first turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
-  const notes = async (id: number) => (await call('Cara', `/api/tickets/${id}/events`)).events.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
+  const notes = async (id: number) => (await call('Cara', `/api/tickets/${id}/events`)).events.filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text);
   const assign = (who: string, assigned: string | null) => call(who, `/api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned } } });
 
   await assign('Josh', 'Josh');
@@ -268,7 +272,7 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   await subscribe('Josh', 'josh-m');
   // Josh's device hears only minions he pinned; Cara owns this one, so only a mention reaches him.
   await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers['josh-m'].endpoint, onlyPinned: true } });
-  const inbox = async (who: string) => (await call(who, `/api/projects/${project.id}/inbox`)).items.filter((i: any) => i.kind === 'mention');
+  const inbox = async (who: string) => (await call(who, `/api/projects/${project.id}/inbox`)).items.filter((i) => i.kind === 'mention');
 
   // Someone not in the scheme, and an email address, mention no one.
   let n = received.length;
@@ -284,8 +288,8 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   // A mention is said to its person, so it reaches every device of Josh's: his first test's too.
   const got = await pushes(n, 2);
   assert.deepEqual(Object.keys(got).sort(), ['josh', 'josh-m'], 'every device of Josh, and the sender hears nothing');
-  const events = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message');
-  const msg = events.at(-1);
+  const events = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e) => e.kind === 'user_message');
+  const msg = events.at(-1)!;
   // The agent reads the words as typed; the message names who it mentions, for the chip.
   assert.deepEqual(JSON.parse(msg.data).mentions, ['Josh']);
   assert.equal(JSON.parse(msg.data).text, '@josh can you look at this');
@@ -308,7 +312,7 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   await holds('an agent mentions no one', () => received.length === n, { ms: 300 });
   assert.equal(received.length, n);
   assert.deepEqual([await inbox('Josh'), await inbox('Cara')], [[], []]);
-  const last = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message').at(-1);
+  const last = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e) => e.kind === 'user_message').at(-1)!;
   assert.equal(JSON.parse(last.data).text, '@Josh and @Cara, a look please');
   assert.equal(JSON.parse(last.data).mentions, undefined);
 });

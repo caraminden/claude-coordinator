@@ -23,7 +23,9 @@ let base = '';
 let cookie = '';
 
 let srv: Booted;
-const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
+// The parts of the API's answers these tests read.
+type Event = { kind: string; data: string };
+const call = async <T = unknown>(path: string, opts: { method?: string; body?: unknown; token?: string } = {}): Promise<T> => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 // The token the minion's latest turn holds: each turn's token dies when the next turn starts.
@@ -31,10 +33,10 @@ const live = () =>
   turns()
     .filter((t) => t.token.startsWith(`${ticket.id}.`))
     .at(-1).token;
-const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
+const idle = (id: number) => until('the turn to end', async () => (await call<{ ticket: { status: string } }>(`/api/tickets/${id}`)).ticket.status !== 'running');
 
-let ticket: any;
-let turn: any;
+let ticket: { id: number };
+let turn: { shared: string; files: string; cwd: string; token: string };
 let shared = '';
 
 before(async () => {
@@ -42,8 +44,8 @@ before(async () => {
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);
-  const project = await call('/api/projects', { method: 'POST', body: { name: 'P' } });
-  ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'draw three takes' } });
+  const project = await call<{ id: number }>('/api/projects', { method: 'POST', body: { name: 'P' } });
+  ticket = await call<{ id: number }>(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'draw three takes' } });
   [turn] = await until('the first turn', () => turns().length >= 1 && turns());
   await idle(ticket.id);
   shared = join(root, 'data', 'projects', String(project.id), 'shared', String(ticket.id));
@@ -55,7 +57,7 @@ before(async () => {
 });
 
 const ask = (images: (string | undefined)[]) =>
-  call(`/api/tickets/${ticket.id}/questions`, {
+  call<{ id: number }>(`/api/tickets/${ticket.id}/questions`, {
     method: 'POST',
     token: live(),
     body: { questions: [{ question: 'Which take?', options: images.map((image, i) => ({ label: `Take ${i + 1}`, ...(image ? { image } : {}), ...(i ? {} : { recommended: true }) })) }] },
@@ -63,9 +65,9 @@ const ask = (images: (string | undefined)[]) =>
 
 test("a question card keeps option pictures from the thread's folders", async () => {
   const { id } = await ask(['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined]);
-  const card = (await call(`/api/tickets/${ticket.id}/events?after=0`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
+  const card = (await call<Event[]>(`/api/tickets/${ticket.id}/events?after=0`)).find((e) => e.kind === 'question' && JSON.parse(e.data).id === id)!;
   assert.deepEqual(
-    JSON.parse(card.data).questions[0].options.map((o: any) => o.image),
+    JSON.parse(card.data).questions[0].options.map((o: { image?: string }) => o.image),
     ['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined],
   );
   const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent('takes/a.png')}`, { headers: { Cookie: cookie } });
@@ -81,7 +83,7 @@ test('a question card refuses pictures outside those folders, missing or not pic
 });
 
 const askWith = (options: object[], multiSelect = false) =>
-  call(`/api/tickets/${ticket.id}/questions`, {
+  call<{ id: number }>(`/api/tickets/${ticket.id}/questions`, {
     method: 'POST',
     token: live(),
     body: { not_duplicate: true, questions: [{ question: 'Tabs or list?', multiSelect, options }] },
@@ -99,7 +101,7 @@ test('every question on a card recommends an option', async () => {
   await askWith([{ label: 'Tabs', recommended: true }, { label: 'List', recommended: true }, { label: 'Both' }], true);
   // A label that says "(Recommended)" itself becomes the flag, so the card doesn't show the words twice.
   const { id } = await askWith([{ label: 'Tabs' }, { label: 'List (Recommended)' }]);
-  const card = (await call(`/api/tickets/${ticket.id}/events?after=0`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
+  const card = (await call<Event[]>(`/api/tickets/${ticket.id}/events?after=0`)).find((e) => e.kind === 'question' && JSON.parse(e.data).id === id)!;
   assert.deepEqual(JSON.parse(card.data).questions[0].options, [{ label: 'Tabs' }, { label: 'List', recommended: true }]);
 });
 
@@ -108,7 +110,7 @@ test('a comment on a file is a chat message from the person that wakes the threa
   await call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: 'report.md', text: 'Shorter, please.', quote: 'The long intro' } });
   const next = (await until("the comment's turn", () => turns().length > before && turns())).at(-1);
   assert.deepEqual(withoutTurnNote(next.prompt.message.content), [{ type: 'text', text: '[Cara on report.md]: > The long intro\n\nShorter, please.' }]);
-  const message = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').at(-1);
+  const message = (await call<Event[]>(`/api/tickets/${ticket.id}/events?after=0`)).filter((e) => e.kind === 'user_message').at(-1)!;
   assert.deepEqual(JSON.parse(message.data), { author: 'Cara', text: '> The long intro\n\nShorter, please.', comment: { path: 'report.md', about: 'report.md' } });
   await idle(ticket.id);
 });
@@ -133,14 +135,14 @@ test('a thread can message its coordinator, which wakes with the thread named', 
 
 test('need (#851): a fyi to the coordinator is held mail that starts no turn; a missing need is refused', async () => {
   const before = turns().length;
-  const r = await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'landed, nothing needed', need: 'fyi', wake: true } });
+  const r = await call<{ mail: boolean }>(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'landed, nothing needed', need: 'fyi', wake: true } });
   assert.equal(r.mail, true);
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x' } }), /400 need is required/);
   // An older client's urgent changes nothing (#1603): a fyi is still held mail, not refused.
-  assert.equal((await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x', need: 'fyi', urgent: true } })).mail, true);
+  assert.equal((await call<{ mail: boolean }>(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x', need: 'fyi', urgent: true } })).mail, true);
   assert.equal(turns().length, before);
-  const evs = (await call(`/api/tickets/${ticket.id}/events?after=0`)).map((e: any) => ({ kind: e.kind, data: JSON.parse(e.data) }));
-  assert.ok(evs.some((e: any) => e.kind === 'note' && e.data.need === 'fyi'));
+  const evs = (await call<Event[]>(`/api/tickets/${ticket.id}/events?after=0`)).map((e) => ({ kind: e.kind, data: JSON.parse(e.data) }));
+  assert.ok(evs.some((e) => e.kind === 'note' && e.data.need === 'fyi'));
 });
 
 test("a zip in the thread's folders is served as a download, never shown", async () => {

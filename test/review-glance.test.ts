@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { changedPaths, coverage, folderOf, isTestOrDoc, ownGlobs } from '../src/review-glance.ts';
 import type { ReviewEntry } from '../src/review-set.ts';
+import { fake } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-glance-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -35,9 +36,9 @@ test("coverage counts what the scheme's own critics watch and ranks the rest by 
 });
 
 test("only the scheme's own critics that are on and watch a diff count", () => {
-  const e = (over: Partial<ReviewEntry>) => ({ enabled: true, source: null, triggers: { diff: ['src/**'] }, ...over }) as unknown as ReviewEntry;
+  const e = (over: Partial<ReviewEntry>) => fake<ReviewEntry>({ enabled: true, source: null, triggers: { diff: ['src/**'] }, ...over });
   assert.deepEqual(
-    ownGlobs([e({}), e({ enabled: false, triggers: { diff: ['off/**'] } }), e({ source: 'kit:reviewer', triggers: { diff: ['kit/**'] } }), e({ source: 'agent:shader-critic', triggers: { diff: ['agent/**'] } }), e({ triggers: { ask: true } as any }), e({ kind: 'teacher', triggers: { diff: ['teacher/**'] } })]),
+    ownGlobs([e({}), e({ enabled: false, triggers: { diff: ['off/**'] } }), e({ source: 'kit:reviewer', triggers: { diff: ['kit/**'] } }), e({ source: 'agent:shader-critic', triggers: { diff: ['agent/**'] } }), e({ triggers: { ask: true } }), e({ kind: 'teacher', triggers: { diff: ['teacher/**'] } })]),
     ['src/**'],
   );
 });

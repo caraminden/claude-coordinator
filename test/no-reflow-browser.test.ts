@@ -53,7 +53,7 @@ const STUB = pageStub(
   // that window and failed whenever the page was older. The working line under the chat is left out: it is the
   // chat's last row, and lines arriving above it carry it down the page as they do each other.
   window.shifts = [];
-  const working = (e) => e.sources.length > 0 && e.sources.every((s) => s.node?.closest?.('#log ~ .typing'));
+  const working = (e) => e.sources.length > 0 && e.sources.every((s) => s.node?.closest?.('#log ~ .typing-row'));
   new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!working(e)) window.shifts.push(e.value); }).observe({ type: 'layout-shift' });
 `,
   { open: true },

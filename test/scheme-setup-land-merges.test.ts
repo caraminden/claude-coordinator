@@ -90,6 +90,42 @@ test('a merge rule refuses what it is not sure of: a budget one side lowered sto
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
 });
 
+/** A list of caps, one to a line, by the count rule (#1917). */
+const caps = (a: string, b: string) => `export const CAPS = {\n  'a.ts': [${a}],\n  'b.ts': [${b}],\n};\n`;
+const CAPS = 'test/caps.test.ts';
+/** Main's and the branch's edits of the caps, both from <base>; the landing's result. */
+function capsLanding(rule: string, main: string, branch: string, base = caps("10, 'x'", "20, 'y'")) {
+  const r = setup('true', {}, `MERGES='${CAPS} ${rule} ^\\ \\ .[a-z.]+.:\\ \\[[0-9]+,'\n`);
+  change(r.main, { [CAPS]: base }, 'shared base');
+  git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  change(r.main, { [CAPS]: main }, 'main: #9');
+  change(r.wt, { [CAPS]: branch }, 'branch: #2');
+  const out = r.run();
+  return { out, list: show(r.main, CAPS), main };
+}
+for (const [what, main, branch, want] of [
+  ['both raise one', caps("13, 'x (+3 #9)'", "20, 'y'"), caps("15, 'x (+5 #2)'", "20, 'y'"), caps("18, 'x (+3 #9) (+5 #2)'", "20, 'y'")],
+  ['main lowers it, the branch raises it', caps("4, 'x (-6 #9)'", "20, 'y'"), caps("15, 'x (+5 #2)'", "20, 'y'"), caps("9, 'x (-6 #9) (+5 #2)'", "20, 'y'")],
+  ['each raises a neighbour', caps("13, 'x (+3 #9)'", "20, 'y'"), caps("10, 'x'", "25, 'y (+5 #2)'"), caps("13, 'x (+3 #9)'", "25, 'y (+5 #2)'")],
+])
+  test(`the count rule: ${what}, and main's change plus the branch's lands`, () => {
+    const { out, list } = capsLanding('count', main, branch);
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(list, want);
+  });
+
+for (const [what, rule, main, branch, base] of [
+  ['count refuses a number the two would take below 0', 'count', caps("3, 'x (-7 #9)'", "20, 'y'"), caps("4, 'x (-6 #2)'", "20, 'y'")],
+  ['count refuses a #number both changed', 'count', caps("10, 'x #9'", "20, 'y'"), caps("10, 'x #2'", "20, 'y'"), caps("10, 'x #1'", "20, 'y'")],
+  ['sum still refuses a lowered one', 'sum', caps("4, 'x'", "20, 'y'"), caps("15, 'x'", "20, 'y'")],
+])
+  test(`merge rules: ${what}`, () => {
+    const { out, list } = capsLanding(rule, main, branch, base);
+    assert.equal(out.status, 1, out.stderr);
+    assert.match(out.stderr, /conflicted files: test\/caps\.test\.ts/);
+    assert.equal(list, main, 'main stays');
+  });
+
 test("the hook rule: land.local.sh's land_merge merges the file, given main's side and the path; its failure stops the rebase", () => {
   // A list kept sorted: the hook takes both sides' lines, sorted, where git sees two edits of one line.
   const local = `MERGES='list.txt hook'\nland_merge() { echo "$1 $5" >>"$HOOK_LOG"; [ ! -e "$HOOK_RED" ] || return 1; sort -u "$3" "$4" >"$3.m" && mv "$3.m" "$3"; }\n`;

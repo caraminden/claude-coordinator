@@ -20,6 +20,8 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
  * Files with act calls that aren't judges, each with why and its count of act calls. A new act call in one of them is red:
  * if it decides on real inputs, register its judge in src/judges.ts (callers), new judges log-only; if not, bump the count.
  */
+// Two ships that change an entry merge by rule (count, MERGES in tools/land.local.sh, #1917).
+// biome-ignore format: one line per entry is what the merge rule reads
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 43 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },

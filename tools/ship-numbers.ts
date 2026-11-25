@@ -52,7 +52,7 @@ function onTexts(texts: string[], args: (paths: string[]) => string[]) {
   }
 }
 /** git's own three-way merge of the files' texts into `out`: 0 when clean. With LAND_MERGE_DIFF3=1 (the kit's land.sh,
- *  when the path has append or sum rules too) clashes keep its markers: diff3, size 31, the side that is main first. */
+ *  when the path has append, sum or count rules too) clashes keep its markers: diff3, size 31, the side that is main first. */
 function mergeFile(mainSide: string, out: string, base: string, ours: string, theirs: string): number {
   const r = onTexts([base, ours, theirs], ([o, a, b]) =>
     process.env.LAND_MERGE_DIFF3 === '1' ? ['merge-file', '-p', '--diff3', '--marker-size=31', '-L', 'main', '-L', 'base', '-L', 'branch', ...(mainSide === 'theirs' ? [b, o, a] : [a, o, b])] : ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b],

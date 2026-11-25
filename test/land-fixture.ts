@@ -100,6 +100,16 @@ exit "\${FAKE_DEPLOY_EXIT:-0}"
   return { dir, source, live, wt, run, commit, note };
 }
 
+/** Writes files and commits them, in a fixture checkout. */
+export function write(where: string, files: Record<string, string>, msg: string) {
+  for (const [f, text] of Object.entries(files)) {
+    mkdirSync(join(where, f, '..'), { recursive: true });
+    writeFileSync(join(where, f), text);
+  }
+  git(where, 'add', '-A');
+  git(where, 'commit', '-qm', msg);
+}
+
 // Run land.sh in its own process group, so a run that hangs can be stopped with everything it started.
 export function landAsync(cwd: string, extra: Record<string, string>, limit: number, seen?: (stderr: string) => void, args: string[] = []): Promise<{ status: number | null; stderr: string; ms: number }> {
   return new Promise((resolve) => {

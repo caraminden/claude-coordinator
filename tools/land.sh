@@ -290,13 +290,11 @@ under_of() {
   done < <(cat "$state/taken-back" 2>/dev/null || true)
   echo "$u"
 }
-# Ship-time merges (#1221, #1418): git with the kit core's merge driver (tools/land-core.sh --merge, by the MERGES rules
-# in land.local.sh) for the files tools/ship-numbers.attributes names. A SCHEMA_HISTORY number main took while this
-# waited goes to the branch's next free one (ship-numbers.ts), MIGRATIONS lines both sides added are kept, a prompt
-# budget both raised becomes main's plus the branch's raise, and the prompt baseline takes main's copy, measured again
-# below. What a rule isn't sure of conflicts as before. <main side> names which side of the merge is main or the build
-# (ours for merge-tree and a rebase, theirs for --build's merge of main). Only land.sh's own merges get it, not a
-# person's rebase. A tools/ that lacks the core (mid-rebase onto a build without it) renumbers only, or merges as git would.
+# Ship-time merges (#1221, #1418): git with the kit core's driver (tools/land-core.sh --merge, MERGES in land.local.sh) for
+# the files tools/ship-numbers.attributes names: a SCHEMA_HISTORY number main took moves on (ship-numbers.ts), MIGRATIONS
+# lines both added stay, budgets, size caps and judges' counts add up, the prompt baseline is main's, measured again below.
+# The rest conflicts as before. <main side>: main's or the build's (ours for merge-tree and a rebase, theirs for --build's
+# merge of main). Not for a person's rebase. A tools/ without the core (mid-rebase) renumbers only, or merges as git would.
 numbers_git() {
   local side=$1
   shift
@@ -1861,10 +1859,12 @@ train_build() {
     if [ -z "$skip" ]; then
       if [ -z "$wt" ]; then
         wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
+        regen_attrs=$(git -C "$wt" rev-parse --absolute-git-dir)/rider.attributes
+        grep ' rider$' "$tools/ship-numbers.attributes" >"$regen_attrs" || true # nothing runs after a rider's rebase (no renumbered ADRs, no measured baseline), so only the size lists merge there
       fi
       # Stacked already by the early next train (early_next), else rebased here.
       if { c=$(stacked_of "$cur" "$r") && git -C "$wt" checkout -q --detach "$c" 2>/dev/null; } ||
-        { git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { git -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" git && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; }; then
+        { git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { numbers_git ours -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" numbers_git ours && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; }; then
         c=$(git -C "$wt" rev-parse HEAD)
         if [ "$c" = "$cur" ]; then skip="main already has all of it"
         elif pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"

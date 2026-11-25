@@ -12,6 +12,9 @@ const CODE = /\.(ts|js|mjs|sh|html|css|ps1|py)$/;
 export const LIMIT = 1500;
 
 // path -> [lines it may have, why it is allowed]. A split that shrinks a file lowers its number in the same commit.
+// Two ships that change an entry merge by rule: the changes to its number add up and both reasons stay (count, MERGES in tools/land.local.sh, #1917).
+// Add your reason at the end. One line per entry (the runner's is older), so the formatter must not break a long one.
+// biome-ignore format: one line per entry is what the merge rule reads
 export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1514, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
@@ -25,7 +28,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   ],
   'src/db.ts': [1703, 'schema, migrations and settings; its queries are moving to src/db/<area>.ts, a piece at a time (#1842; 1683 plus room for the ships waiting in line beside it, tightened next piece)'],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],
-  'kit/skills/scheme-setup/templates/land.sh': [2879, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],
+  'kit/skills/scheme-setup/templates/land.sh': [2887, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted (+8: the count merge rule, #1917)'],
   'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],
   'src/routes/projects.ts': [2105, 'every /projects route; split by page is queued (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859)'],
   'src/tripwire.ts': [1830, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792)'],

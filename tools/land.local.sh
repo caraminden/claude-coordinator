@@ -150,10 +150,14 @@ SMOKE_TIMEOUT=$(( ${LAND_SMOKE_TIMEOUT:-300} * 3 ))
 # Citadel land.sh guards() (#1240): schema, prompt budget, one-until and UI contract tests on the rebased commit.
 GUARD_CMD=citadel_guards
 GUARD_TIMEOUT=$(( ${LAND_GUARD_TIMEOUT:-120} + 30 ))
-# Citadel numbers_git (#1221) and the prompt budget's sums: ship-time merges in place of a stopped rebase.
+# Citadel numbers_git (#1221), the prompt budget's sums and the size list's and judges' counts (#1917): ship-time merges in place of a stopped rebase.
 MERGES='src/db.ts hook
 src/db.ts append ^const\ MIGRATIONS
 test/prompt-budget.test.ts sum ^const\ (BUDGET|KIT_BUDGET|TOOLS_BUDGET)\ =
+test/size-budget.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \[[0-9]+,|^\ \ \ \ ([0-9]+|[^[:alnum:][:space:]].*[^[:alnum:][:space:]]),$
+test/size-budget.test.ts append ^export\ const\ ALLOWED:
+test/judges.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \{\ why:\ .*,\ calls:\ [0-9]+\ \},$
+test/judges.test.ts append ^const\ NOT_JUDGES:
 test/prompt-baseline.json main'
 
 # Citadel retro_log (land.sh 79-86), verbatim: one best-effort line in the day's retro-log/land.md.

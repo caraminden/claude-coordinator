@@ -29,8 +29,9 @@ the top, ship up to the deepest green commit, bisect the prefixes when the top i
   another script shares, as Citadel's deploy queue does). The smoke check is the core's `SMOKE_CMD`.
 - **Ship-time merges are a core setting**, `MERGES` (Cara, 2026-11-20, "Build it into step 3"): files two ships
   often change in the same place merge by rule during the rebase, as a git merge driver, alone and inside a batch:
-  `append` (both add to one list), `sum` (both raise a number: main's plus the branch's raise, never more), `main`
-  (a file `land_rebased` makes again), `hook` (`land_merge`). Anything a rule isn't sure of conflicts as before.
+  `append` (both add to one list), `sum` (both raise a number: main's plus the branch's raise, never more), `count`
+  (#1917: either may also lower it, the two changes added: size caps, call counts), `main` (a file `land_rebased`
+  makes again), `hook` (`land_merge`). Anything a rule isn't sure of conflicts as before.
   Ruled out: one budget file per bump.
 - **Step 3b (#1571) gives Citadel's last extras a core home** (Cara, 2026-11-22, on #1322's ship card: "A step 3b
   first"), each off by default: `FLAKE_RUNS` (several fresh runs for a flaky CI red), `PARK_RETRIES` (ask CI again in

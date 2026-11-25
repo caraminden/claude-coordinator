@@ -47,6 +47,13 @@
 # one that reads data only perigee has or uses its Android emulator (a job that runs Claude is light: below). Priority
 # jobs always run here.
 #
+# Four cores (#1928, Josh 2026-11-25, "Limit it to 4 cores"): a slot limits how many jobs start, not the CPU each takes, and
+# Chrome raises its own priority past our nice 19 (a burn-in's 4 browsers took the box). So a plain job's command runs under
+# taskset on CITADEL_HEAVY_CPUS (4; 0 = off) of the CPUs it may use, and everything it starts inherits that whatever nice it
+# sets. The set is fixed, the lowest-numbered CPUs, each with its hyperthread sibling (read from /sys) so two jobs never split a
+# core; jobs at once share the same set on purpose. Not pinned: priority jobs, light jobs (so Claude-bound ones), anything on CI
+# (RUNNER_TEMP, GITHUB_ACTIONS), nested calls (they inherit the outer job's set), and a box or container with that many CPUs or
+# fewer. No taskset, or one that refuses the set (CITADEL_HEAVY_TASKSET names the program, for tests): it says so and runs unpinned.
 # Perigee's small slot (#1160, Josh: "One small slot here"): plain jobs here use at most CITADEL_HEAVY_PLAIN_SLOTS (1)
 # of the slots, at nice 19 and idle disk priority, so minions never feel them; the other slots are for priority jobs
 # (deploy and APK builds), which take them from the top down.
@@ -108,6 +115,36 @@ first=${CITADEL_HEAVY_PRIORITY:+1}
 [ ${#what} -le 100 ] || what="${what:0:97}..."
 poll=${CITADEL_HEAVY_POLL:-2}
 
+# The CPUs a plain job is pinned to, as a taskset -c list; prints nothing when it should run unpinned (#1928, the header).
+pin_cpus() {
+  local want=${CITADEL_HEAVY_CPUS:-4} ts=${CITADEL_HEAVY_TASKSET:-taskset} out part a b c s i
+  local -a allowed=() pick=() sib
+  declare -A ok=() have=()
+  [ "$want" -gt 0 ] 2>/dev/null || return 0
+  [ -z "${RUNNER_TEMP:-}${GITHUB_ACTIONS:-}" ] || return 0
+  command -v "$ts" >/dev/null 2>&1 || { say "no taskset, so this runs on every CPU"; return 0; }
+  out=$("$ts" -pc $$ 2>/dev/null) && out=${out##*: } || { say "taskset can't read the CPUs this may use, so it runs on every CPU"; return 0; }
+  for part in ${out//,/ }; do
+    a=${part%-*} b=${part#*-}
+    for ((c = a; c <= b; c++)); do allowed+=("$c"); ok[$c]=1; done
+  done
+  [ ${#allowed[@]} -gt "$want" ] || return 0
+  for c in "${allowed[@]}"; do
+    [ ${#pick[@]} -lt "$want" ] || break
+    [ -z "${have[$c]:-}" ] || continue
+    s=$c
+    read -r s <"/sys/devices/system/cpu/cpu$c/topology/thread_siblings_list" 2>/dev/null || s=$c
+    for part in ${s//,/ }; do
+      a=${part%-*} b=${part#*-}
+      for ((i = a; i <= b; i++)); do
+        [ -n "${ok[$i]:-}" ] && [ -z "${have[$i]:-}" ] && [ ${#pick[@]} -lt "$want" ] && { pick+=("$i"); have[$i]=1; }
+      done
+    done
+  done
+  out=$(IFS=,; echo "${pick[*]}")
+  "$ts" -c "$out" true 2>/dev/null || { say "taskset refused CPUs $out, so this runs on every CPU"; return 0; }
+  echo "$out"
+}
 # Light or heavy (#1629, the header): prints "light <why>" or "heavy <why>".
 judge() {
   local claude='(^|[ /])(prompt-eval|skill-trigger-eval|skill-evals|citadel-replay|review-escapes|claude)([ /.]|$)'
@@ -475,6 +512,10 @@ export CITADEL_HEAVY_HELD=1
 t1=$(us) c0=$(cpu_ticks)
 nicer=()
 [ -n "$first" ] || { nicer=(nice -n 19); ! command -v ionice >/dev/null || nicer+=(ionice -c 3); }
+if [ -z "$first" ] && pinned=$(pin_cpus) && [ -n "$pinned" ]; then
+  say "runs on CPUs $pinned only"
+  nicer+=("${CITADEL_HEAVY_TASKSET:-taskset}" -c "$pinned")
+fi
 # The tees close fd 8 too: they must not hold the slot's lock past the command.
 if [ "$out" != /dev/null ] && [ ! -t 1 ] && [ ! -t 2 ]; then
   "${nicer[@]}" "$@" 8>&- > >(tee -a "$out" 8>&-) 2> >(tee -a "$out" 8>&- >&2)

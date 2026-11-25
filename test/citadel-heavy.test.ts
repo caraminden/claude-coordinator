@@ -45,6 +45,11 @@ function folder(slots?: number, pressure = 5) {
     CITADEL_HEAVY_GUESS: undefined,
     CITADEL_HEAVY_MIN_RUN: undefined,
     CITADEL_HEAVY_MIN_CPU: undefined,
+    // The CPU limit (#1928) is off (its message would break the quiet tests) except where a test turns it on: CI's two variables turn it off too.
+    CITADEL_HEAVY_CPUS: '0',
+    CITADEL_HEAVY_TASKSET: undefined,
+    RUNNER_TEMP: undefined,
+    GITHUB_ACTIONS: undefined,
   };
   return { dir, env, pressureFile };
 }
@@ -663,4 +668,61 @@ test("what the command prints is teed into its slot's .out file while it runs, a
   assert.match(out, /^out-line$/m);
   assert.match(err, /err-line/);
   assert.equal(existsSync(join(dir, 'slot-0.out')), false);
+});
+
+// #1928: a plain job's command, and a child of it, run on at most CITADEL_HEAVY_CPUS CPUs.
+const seen = 'grep Cpus_allowed_list /proc/self/status | cut -f2';
+const count = (list: string) =>
+  list
+    .trim()
+    .split(',')
+    .reduce((n, r) => {
+      const [a, b = a] = r.split('-').map(Number);
+      return n + b - a + 1;
+    }, 0);
+const allowedHere = count(readFileSync('/proc/self/status', 'utf8').match(/Cpus_allowed_list:\s*(\S+)/)![1]);
+function cpusSeen(extra: NodeJS.ProcessEnv = {}, flags: string[] = [], script = `${seen}; sh -c '${seen}'`) {
+  const { env } = folder();
+  const r = spawnSync(heavy, [...flags, 'sh', '-c', script], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const [own, child] = r.stdout.trim().split('\n');
+  return { own: count(own), child: count(child), own_list: own, stderr: r.stderr };
+}
+const two = { CITADEL_HEAVY_CPUS: '2' };
+
+test('a plain job and a child of it run on only the CPUs the limit allows, and say so', { skip: allowedHere < 3 && 'needs 3 CPUs' }, () => {
+  const r = cpusSeen(two);
+  assert.deepEqual([r.own, r.child], [2, 2]);
+  assert.match(r.stderr, /runs on CPUs \d+,\d+ only/);
+});
+
+test('the limit defaults to 4 CPUs, and a box with that many or fewer is left alone', () => {
+  const r = cpusSeen({ CITADEL_HEAVY_CPUS: undefined });
+  assert.deepEqual([r.own, r.child], [Math.min(4, allowedHere), Math.min(4, allowedHere)]);
+  assert.equal(cpusSeen({ CITADEL_HEAVY_CPUS: '64' }).own, allowedHere);
+});
+
+test('a priority job, CI, the knob at 0 and a missing or refusing taskset see every CPU', () => {
+  assert.equal(cpusSeen({ ...two, CITADEL_HEAVY_PRIORITY: '1' }).own, allowedHere, 'priority');
+  assert.equal(cpusSeen({ ...two, GITHUB_ACTIONS: 'true' }).own, allowedHere, 'GITHUB_ACTIONS');
+  assert.equal(cpusSeen({ ...two, RUNNER_TEMP: '/tmp' }).own, allowedHere, 'RUNNER_TEMP');
+  assert.equal(cpusSeen({ CITADEL_HEAVY_CPUS: '0' }).own, allowedHere, 'knob 0');
+  const none = cpusSeen({ ...two, CITADEL_HEAVY_TASKSET: 'no-such-taskset' });
+  assert.equal(none.own, allowedHere);
+  assert.match(none.stderr, /no taskset/);
+  const refuse = join(root, 'refusing-taskset');
+  writeFileSync(refuse, '#!/bin/sh\n[ "$1" = -pc ] && exec taskset "$@"\nexit 1\n', { mode: 0o755 });
+  const refused = cpusSeen({ ...two, CITADEL_HEAVY_TASKSET: refuse });
+  assert.equal(refused.own, allowedHere);
+  assert.match(refused.stderr, /refused CPUs/);
+});
+
+test("a nested call keeps the outer job's set and pins nothing again", { skip: allowedHere < 3 && 'needs 3 CPUs' }, () => {
+  const r = cpusSeen(two, [], `${heavy} sh -c '${seen}'; ${seen}`);
+  assert.deepEqual([r.own, r.child], [2, 2]);
+});
+
+test('a light job (a Claude-bound one here) is not pinned', () => {
+  const { env } = folder();
+  const r = spawnSync(heavy, ['sh', '-c', seen], { env: { ...env, ...two, CITADEL_HEAVY_JUDGE: '', CITADEL_HEAVY_WHAT: 'claude -p hi' }, encoding: 'utf8' });
+  assert.equal(count(r.stdout), allowedHere);
 });

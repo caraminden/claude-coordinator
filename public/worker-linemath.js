@@ -64,8 +64,8 @@ export function lineWhy(r) {
   return [r.quick ? 'or quick lane' : '', r.first ? 'ship refused, or others wait on it' : '', r.warm ? 'warm, about to go cold' : !r.first && r.fresh ? 'brand new' : ''].filter(Boolean).join(' · ');
 }
 
-/** The quick lane in words (#1986): its workers out, why it is smaller than 2, and the turns that moved to the pool. */
+/** The quick lane in words (#1986): its workers out, why it is smaller than 2, and the turns that moved to pool. */
 export function laneSaid({ used, size, moved }) {
   const now = size === 0 ? `${used ? `${used} working, ` : ''}closed while memory is tight` : `${used} of ${size} working${size === 1 ? ', 1 while memory is under strain' : ''}`;
-  return `${now}${moved ? ` · ${moved} moved to the pool` : ''}`;
+  return `${now}${moved ? ` · ${moved} moved to pool` : ''}`;
 }

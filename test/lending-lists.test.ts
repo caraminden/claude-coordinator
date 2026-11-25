@@ -6,6 +6,9 @@ import { after, test } from 'node:test';
 import { lendsMachine, ownerAsked } from '../src/access.ts';
 import { mayFetch } from '../src/ci-runner.ts';
 import { Store } from '../src/db.ts';
+import type { Machine } from '../src/db-rows.ts';
+
+type OldScheme = { id: number; name: string; owner_id: number | null; machine_tools: number };
 
 // The move to one lending list per machine (#438): a database from before it, opened by this code, lends every
 // machine to exactly the turns that got it under the old rules, which this file keeps as its oracle.
@@ -47,7 +50,7 @@ function before33(name: string) {
   store.setSetting('schema_version', 33);
   const old = {
     machines: store.listMachines(),
-    schemes: store.db.prepare('SELECT * FROM projects').all() as any[],
+    schemes: store.db.prepare('SELECT * FROM projects').all() as OldScheme[],
     rows: store.db.prepare('SELECT * FROM machine_projects').all() as { machine_id: number; project_id: number }[],
   };
   store.db.close();
@@ -57,11 +60,11 @@ function before33(name: string) {
 test('opening an older database gives every machine a list that lends it exactly as before (#438)', () => {
   const { path, old, cara, josh } = before33('a.db');
   const store = new Store(path);
-  const admin = (p: any) => !!store.getUser(p.owner_id ?? -1)?.admin;
-  const granted = (m: any, p: any) => old.rows.some((r) => r.machine_id === m.id && r.project_id === p.id);
+  const admin = (p: OldScheme) => !!store.getUser(p.owner_id ?? -1)?.admin;
+  const granted = (m: Machine, p: OldScheme) => old.rows.some((r) => r.machine_id === m.id && r.project_id === p.id);
   // The rules before #438: the scheme's switch, then a person's own / a scoped one's rows / every scheme an admin owns.
-  const lentBefore = (m: any, p: any, askers: number[]) => !!p.machine_tools && (m.owner_id !== null ? ownerAsked(store, m.owner_id, askers, p.id) : m.scoped ? granted(m, p) : admin(p));
-  const fetchedBefore = (m: any, p: any) => (m.owner_id !== null ? store.canSee({ uid: m.owner_id, admin: m.owner_id === cara.id }, p.id) : m.scoped ? granted(m, p) : admin(p));
+  const lentBefore = (m: Machine, p: OldScheme, askers: number[]) => !!p.machine_tools && (m.owner_id !== null ? ownerAsked(store, m.owner_id, askers, p.id) : m.scoped ? granted(m, p) : admin(p));
+  const fetchedBefore = (m: Machine, p: OldScheme) => (m.owner_id !== null ? store.canSee({ uid: m.owner_id, admin: m.owner_id === cara.id }, p.id) : m.scoped ? granted(m, p) : admin(p));
   let lent = 0;
   for (const was of old.machines) {
     const m = store.getMachine(was.id)!;

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { until } from './wait.ts';
 import { spawnSync } from 'node:child_process';
-import { byHandNote, CHECK_SCRIPT, dupCaseLabels, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
+import { type KitSyncDeps, type KitSyncState, byHandNote, CHECK_SCRIPT, dupCaseLabels, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
 
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const LAND = KIT_FILES[0];
@@ -188,8 +188,8 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     const kitHead = commit(kit, { [LAND.template]: land1.replace('# v1', '# v2: a kit fix') }, 'v2');
     const log = join(root, 'shipped.log');
     writeFileSync(log, '');
-    let saved: any;
-    const cards: { ticket: number; card: any }[] = [];
+    let saved: KitSyncState | undefined;
+    const cards: { ticket: number; card: Parameters<KitSyncDeps['postCard']>[1] }[] = [];
     const mails: [number, string][] = [];
     const notes: [number, string][] = [];
     const ks = new KitSync({
@@ -216,9 +216,9 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     });
     const polled = (what: string, ok: () => boolean) => until(what, async () => (await ks.poll(), ok()), 10_000);
     await polled('the checks end and the card is posted', () => cards.length > 0);
-    const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
+    const states = () => Object.fromEntries(saved!.round!.schemes.map((x) => [x.name, x.state]));
     assert.deepEqual(states(), { Green: 'green', Red: 'red', Elsewhere: 'green' });
-    assert.equal(saved.round.kit, kitHead);
+    assert.equal(saved!.round!.kit, kitHead);
     assert.deepEqual(
       cards.map((c) => [c.ticket, c.card.kind, c.card.kitSync]),
       [[102, 'merge', kitHead]],
@@ -234,7 +234,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     assert.equal(cards.length, 1, 'polling again posts no second card');
     await ks.decide({ ticket: 102, question: 'q1' }, SHIP, { id: 7, name: 'josh' });
     await polled('the green scheme ships', () => states().Green === 'shipped');
-    const synced = saved.round.schemes.find((x: any) => x.name === 'Green').commit;
+    const synced = saved!.round!.schemes.find((x) => x.name === 'Green')!.commit!;
     assert.equal(git(join(projectsDir, '3/repo'), ['branch', '--list', 'kit-sync/*']).trim(), '', 'a shipped sync leaves no branch behind');
     assert.equal(git(join(projectsDir, '3/repo'), ['log', '-1', '--format=%(trailers:key=Kit-Sync,valueonly)', synced]).trim(), kitHead);
     assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`${synced} 7`], 'land.sh ran once, on the sync commit, as the clicker');
@@ -267,8 +267,8 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
     commit(gated, { [LAND.path]: land1, 'tools/land.local.sh': `SMOKE_CMD='until [ -e ${gate} ]; do sleep 0.05; done'\n` }, 'setup');
     commit(repo(projectsDir, '4/repo'), { [LAND.path]: land1 }, 'setup, with no land.local.sh');
     const v2 = commit(kit, { [LAND.template]: land1.replace('# v1', '# v2') }, 'v2');
-    let saved: any;
-    const cards: any[] = [];
+    let saved: KitSyncState | undefined;
+    const cards: { ticket: number; card: Parameters<KitSyncDeps['postCard']>[1] }[] = [];
     const mails: [number, string][] = [];
     const ks = new KitSync({
       kitDir: kit,
@@ -290,7 +290,7 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
       note: () => {},
       mail: (t, text) => mails.push([t, text]),
     });
-    const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
+    const states = () => Object.fromEntries(saved!.round!.schemes.map((x) => [x.name, x.state]));
     const polled = (what: string, ok: () => boolean) => until(what, async () => (await ks.poll(), ok()));
 
     mkdirSync(join(kit, '.git', 'cc-deploy'));
@@ -300,19 +300,19 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
     rmSync(join(kit, '.git', 'cc-deploy', 'unchecked'));
 
     await ks.poll();
-    assert.equal(saved.round.kit, v2);
+    assert.equal(saved!.round!.kit, v2);
     await polled("the bare scheme's check to end", () => states().Bare !== 'checking');
     assert.equal(states().Bare, 'red');
     assert.match(mails.find(([t]) => t === 104)![1], /exit 4[\s\S]*the default check ran/);
 
     const v3 = commit(kit, { [LAND.template]: land1.replace('# v1', '# v3') }, 'v3');
     await ks.poll();
-    assert.equal(saved.round.kit, v2, 'a newer kit change waits for the running check');
+    assert.equal(saved!.round!.kit, v2, 'a newer kit change waits for the running check');
     assert.equal(states().Gated, 'checking');
 
     writeFileSync(gate, '');
-    await polled("the gated scheme's check to end", () => saved.round.kit !== v2);
-    assert.equal(saved.round.kit, v3, 'once the check ended, the newer change starts its own round');
+    await polled("the gated scheme's check to end", () => saved!.round!.kit !== v2);
+    assert.equal(saved!.round!.kit, v3, 'once the check ended, the newer change starts its own round');
   } finally {
     await tidy(jobs, root);
   }

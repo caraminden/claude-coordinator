@@ -126,7 +126,7 @@ test("mark_image copies a pasted picture to the minion's files folder and return
 });
 
 test("mark_image refuses marks it can't draw and pictures it can't reach, saying why", async () => {
-  const refused = async (body: object, why: RegExp) => assert.rejects(markImage(app, ticket, { image: pasted, marks, ...body }), (e: any) => e.status >= 400 && why.test(e.message));
+  const refused = async (body: object, why: RegExp) => assert.rejects(markImage(app, ticket, { image: pasted, marks, ...body }), (e: Error & { status: number }) => e.status >= 400 && why.test(e.message));
   await refused({ marks: [] }, /at least one/);
   await refused({ marks: Array(21).fill({ kind: 'pin', at: [1, 1] }) }, /At most 20/);
   await refused({ marks: [{ kind: 'circle', at: [1, 1] }] }, /box, arrow, pin or label/);
@@ -146,7 +146,7 @@ test("mark_image refuses marks it can't draw and pictures it can't reach, saying
 test('a pasted picture reaches the turn with its path and size, for mark_image', () => {
   const prompt = JSON.parse(promptMessage([{ author: 'Cara', text: 'Where is it?', images: [{ path: pasted, mediaType: 'image/png', name: 'a.png' }] } as never]));
   assert.deepEqual(
-    prompt.message.content.map((c: any) => (c.type === 'image' ? c.source.media_type : c.text)),
+    prompt.message.content.map((c: { type: string; source: { media_type: string }; text: string }) => (c.type === 'image' ? c.source.media_type : c.text)),
     ['[Cara]: Where is it?', 'image/png', `(Cara's picture, 37x21: ${pasted})`],
   );
 });

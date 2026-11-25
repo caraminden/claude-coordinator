@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ensurePool, keepTurn, readPool, registerTurn, type PoolInfo, type PoolSpec } from '../src/pool-client.mjs';
 import { REPO, tempRoot, until } from './helpers.ts';
+import { json } from './typed.ts';
 
 const tmp = tempRoot('mcp-pool-');
 let nRoots = 0;
@@ -30,7 +31,7 @@ function root(): string {
 /** A fake app: records each API call's method, path and token; the machine routes behave like test/machine-mcp.test.ts's. */
 async function fakeApp() {
   const calls: { method: string; path: string; token: string }[] = [];
-  const machine = { gets: 0, posts: [] as any[], stream: null as ServerResponse | null, session: '', lent: undefined as string | undefined };
+  const machine = { gets: 0, posts: [] as { id?: number; method?: string; params?: { name?: string } }[], stream: null as ServerResponse | null, session: '', lent: undefined as string | undefined };
   const srv = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
@@ -85,16 +86,19 @@ function turn(api: string, ticket: number, project: number, extra: Record<string
   return { env: { COORDINATOR_API: api, COORDINATOR_PROJECT: String(project), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket), ...extra }, cwd: tmpdir() };
 }
 
+/** The parts of an MCP answer these tests read. */
+type Rpc = { status: number; text: string; result: { isError?: boolean; tools: { name: string }[]; serverInfo: { name: string }; content: { text: string }[] } };
+
 /** One MCP request over HTTP, as Claude Code sends it; the answer may come as JSON or as an event stream. */
-async function rpc(port: number, token: string, path: string, message: object): Promise<any> {
+async function rpc(port: number, token: string, path: string, message: object): Promise<Rpc> {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', ...message }),
   });
   const text = await res.text();
-  if (!res.ok) return { status: res.status, text };
-  if (!(res.headers.get('content-type') ?? '').includes('event-stream')) return text ? JSON.parse(text) : {};
+  if (!res.ok) return { status: res.status, text } as Rpc;
+  if (!(res.headers.get('content-type') ?? '').includes('event-stream')) return text ? JSON.parse(text) : ({} as Rpc);
   const data = text
     .split('\n')
     .filter((l) => l.startsWith('data:'))
@@ -122,7 +126,7 @@ test('each turn acts only as itself: its token picks its own identity, and an un
   );
 
   // The tool list is each turn's own: only A deploys, so only A is offered start_preview.
-  const names = async (t: string) => (await rpc(pool.port, t, '/mcp', { id: 3, method: 'tools/list' })).result.tools.map((x: any) => x.name);
+  const names = async (t: string) => (await rpc(pool.port, t, '/mcp', { id: 3, method: 'tools/list' })).result.tools.map((x) => x.name);
   assert.ok((await names('token-a')).includes('start_preview'));
   assert.ok(!(await names('token-b')).includes('start_preview'));
 
@@ -217,11 +221,11 @@ test('two pinned versions run side by side, each serving only its own turns, and
   await registerTurn(newPool, 'token-new', turn(app.base, 2, 1));
   const keep = setInterval(() => registerTurn(newPool, 'token-new', turn(app.base, 2, 1)).catch(() => {}), 300).unref();
   assert.notEqual(oldPool.port, newPool.port);
-  const names = async (p: PoolInfo, t: string) => (await rpc(p.port, t, '/mcp', { id: 1, method: 'tools/list' })).result.tools.map((x: any) => x.name);
+  const names = async (p: PoolInfo, t: string) => (await rpc(p.port, t, '/mcp', { id: 1, method: 'tools/list' })).result.tools.map((x) => x.name);
   assert.ok((await names(oldPool, 'token-old')).includes('close_self'));
   assert.ok((await names(newPool, 'token-new')).includes('close_self_v2'));
   assert.equal((await rpc(newPool.port, 'token-old', '/mcp', { id: 2, method: 'tools/list' })).status, 401);
-  assert.equal((await (await fetch(`http://127.0.0.1:${oldPool.port}/health`)).json()).version, 'old');
+  assert.equal((await json<{ version: string }>(await fetch(`http://127.0.0.1:${oldPool.port}/health`))).version, 'old');
 
   // The old version's last turn ends (its wrapper stops refreshing): that pool exits; the new one keeps its turn.
   clearInterval(keepOld);
@@ -257,7 +261,7 @@ test("machine tools are lazy: a remembered tool list answers the turn's start, a
   assert.equal((await rpc(pool.port, 'token-a', path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } })).result.serverInfo.name, 'box');
   const listed = await rpc(pool.port, 'token-a', path, { id: 2, method: 'tools/list' });
   assert.deepEqual(
-    listed.result.tools.map((t: any) => t.name),
+    listed.result.tools.map((t) => t.name),
     ['run_task'],
   );
   assert.equal(app.machine.gets, 1);
@@ -269,7 +273,7 @@ test("machine tools are lazy: a remembered tool list answers the turn's start, a
   const init = await rpc(pool.port, 'token-b', path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } });
   assert.equal(init.result.serverInfo.name, 'box');
   assert.deepEqual(
-    (await rpc(pool.port, 'token-b', path, { id: 2, method: 'tools/list' })).result.tools.map((t: any) => t.name),
+    (await rpc(pool.port, 'token-b', path, { id: 2, method: 'tools/list' })).result.tools.map((t) => t.name),
     ['run_task'],
   );
   assert.equal(app.machine.gets, gets, 'the machine was opened for a turn that has not used it');

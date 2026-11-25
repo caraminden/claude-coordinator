@@ -75,9 +75,9 @@ test('a batch of only success notices launches at low effort, and its steps and 
   m.r.send(m.id, 'Citadel', LANDED, [], { light: true });
   await until('m.efforts().length === 1', () => m.efforts().length === 1);
   assert.deepEqual(m.efforts(), ['low']);
-  const turn = store.getSetting<any>(`turn:${m.id}`);
-  assert.equal(turn.light, true);
-  assert.equal(turn.hashes.effort, 'low', 'the turn row records the effort it ran at');
+  const turn = store.getSetting<{ light: boolean; hashes: { effort: string } }>(`turn:${m.id}`);
+  assert.equal(turn!.light, true);
+  assert.equal(turn!.hashes.effort, 'low', 'the turn row records the effort it ran at');
   await release(m);
 });
 

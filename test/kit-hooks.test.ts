@@ -15,6 +15,7 @@ import { anyNudgeHook } from '../kit/hooks/any-nudge.ts';
 import { BIG_READ_MATCHER } from '../src/hook-matchers.ts';
 import { hookRunMatcher } from '../src/hook-run.ts';
 
+type HookEntry = { matcher: string; hooks: { command: string }[] };
 const HOOKS = join(import.meta.dirname, '..', 'kit', 'hooks');
 const running = { id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite', command: 'node --test' };
 const stop = (over: object = {}) => ({ hook_event_name: 'Stop', session_id: 's1', prompt_id: 'p1', cwd: '/tmp', background_tasks: [running], ...over });
@@ -35,15 +36,15 @@ const logLines = (dir: string) => {
 };
 
 test('hooks.json is valid and every script it names exists in kit/hooks', () => {
-  const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
+  const { hooks }: { hooks: Record<string, HookEntry[]> } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
   const commands = Object.values(hooks)
     .flat()
-    .flatMap((m: any) => m.hooks.map((h: any) => h.command));
+    .flatMap((m) => m.hooks.map((h) => h.command));
   for (const c of commands) {
     const file = c.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/([\w.-]+)/)?.[1];
     assert.ok(file && readdirSync(HOOKS).includes(file), c);
   }
-  assert.ok(hooks.Stop[0].hooks.some((h: any) => h.command.includes('job-check.ts')));
+  assert.ok(hooks.Stop[0].hooks.some((h: { command: string }) => h.command.includes('job-check.ts')));
   // Every node hook starts with the turn's compile cache (#1296); outside a Citadel turn the variable is empty, which leaves it off.
   for (const c of commands.filter((c: string) => /\bnode /.test(c))) assert.ok(c.startsWith('NODE_COMPILE_CACHE="$CITADEL_HOOK_CACHE" node '), c);
 });
@@ -488,7 +489,7 @@ test('after-call runner: on a recorded session it says and logs exactly what the
       .flatMap(([, files]) => files)
       .map((f) => script(f, input, old));
     // hooks.json starts run.ts on exactly the calls the old entries took.
-    const entries = (hooks[event] ?? []).filter((m: any) => exact(m.matcher).test(tool));
+    const entries = (hooks[event] ?? []).filter((m: HookEntry) => exact(m.matcher).test(tool));
     assert.equal(entries.length, 1, `${event} ${tool}`);
     assert.match(entries[0].hooks[0].command, /hooks\/run\.ts/);
     const got = script('run.ts', input, now);
@@ -506,7 +507,7 @@ test('after-call runner: on a recorded session it says and logs exactly what the
     ['PostToolUseFailure', 'Read'],
     ['PostToolUseFailure', 'Edit'],
   ])
-    assert.ok(!(hooks[event] ?? []).some((m: any) => exact(m.matcher).test(tool)), `${event} ${tool}`);
+    assert.ok(!(hooks[event] ?? []).some((m: HookEntry) => exact(m.matcher).test(tool)), `${event} ${tool}`);
   assert.equal(script('run.ts', 'not json', now), '');
 });
 
@@ -609,7 +610,7 @@ test('grunt-model guard: sends back an Agent call with no deliberate model or ef
   assert.match(run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', cwd: repo, tool_input: { prompt: 'p' } })).stdout, /"deny"/);
   assert.equal(run('not json').stdout, '');
   const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
-  assert.ok(hooks.PreToolUse.some((m: any) => new RegExp(m.matcher).test('Agent') && m.hooks.some((h: any) => h.command.includes('grunt-model.ts'))));
+  assert.ok(hooks.PreToolUse.some((m: HookEntry) => new RegExp(m.matcher).test('Agent') && m.hooks.some((h: { command: string }) => h.command.includes('grunt-model.ts'))));
 });
 
 test('grunt-model table: every kit agent pins model and effort, and its frontmatter matches its row in citadel:subagents', () => {
@@ -643,7 +644,7 @@ test('batch nudge: third single lookup in a row, even-numbered minions only, nev
   const { batchNudgeLine, BATCH_LINE, readOnlyBash, callsInMessage } = await import('../kit/hooks/batch-nudge.ts');
   const dir = mkdtempSync(join(tmpdir(), 'batch-'));
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_NUMBER: '1278', COORDINATOR_TICKET: '1279' };
-  const call = (tool_name: string, extra: object = {}, e: any = env, sid = 's1') => batchNudgeLine({ session_id: sid, tool_name, tool_input: {}, ...extra }, e, dir);
+  const call = (tool_name: string, extra: object = {}, e: NodeJS.ProcessEnv = env, sid = 's1') => batchNudgeLine({ session_id: sid, tool_name, tool_input: {}, ...extra }, e, dir);
   assert.equal(call('Read'), null);
   assert.equal(call('Grep'), null);
   assert.equal(call('Bash', { tool_input: { command: 'git log -1 | head -3' } }), BATCH_LINE, 'third');
@@ -668,7 +669,7 @@ test('batch nudge: third single lookup in a row, even-numbered minions only, nev
 
 test('a kit hook runs through bash as Claude Code runs it, cached in CITADEL_HOOK_CACHE when the turn sets it (#1296)', () => {
   const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
-  const command = hooks.PreToolUse.find((m: any) => m.matcher.includes('Agent')).hooks[0].command.replaceAll('${CLAUDE_PLUGIN_ROOT}', join(HOOKS, '..'));
+  const command = hooks.PreToolUse.find((m: HookEntry) => m.matcher.includes('Agent')).hooks[0].command.replaceAll('${CLAUDE_PLUGIN_ROOT}', join(HOOKS, '..'));
   const dir = mkdtempSync(join(tmpdir(), 'kit-hook-cache-'));
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', cwd: dir, tool_input: { description: 'd', prompt: 'p' } });
   const run = (env: Record<string, string>) => spawnSync('bash', ['-c', command], { cwd: dir, input, encoding: 'utf8', env: { ...process.env, CITADEL_HOOK_CACHE: '', ...env } });

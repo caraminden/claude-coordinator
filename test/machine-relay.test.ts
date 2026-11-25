@@ -207,10 +207,10 @@ test("a test box's beats carry who has its screen and who waits (#1422), cut to 
   relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
   assert.equal(relay.view(box).screen, null, 'nothing said yet');
   const changes: number[] = [];
-  (relay as any).onChange = () => changes.push(1);
+  Object.assign(relay, { onChange: () => changes.push(1) });
   relay.beat(box, { holder: { what: 'desktop CI job build, run 1', who: 'GitHub Actions (caraminden/peek-auras)', since: 5 }, line: [{ what: 'task run in peek', who: 'Peek Auras #777 (Cara)', since: 6 }, ...Array(60).fill({ what: 'x'.repeat(300), who: 'y', since: 7 })] });
-  const screen = relay.view(box).screen;
-  assert.equal(screen.holder.who, 'GitHub Actions (caraminden/peek-auras)');
+  const screen = relay.view(box).screen!;
+  assert.equal(screen.holder!.who, 'GitHub Actions (caraminden/peek-auras)');
   assert.equal(screen.line[0].who, 'Peek Auras #777 (Cara)');
   assert.equal(screen.line.length, 50);
   assert.equal(screen.line[1].what.length, 200);
@@ -343,7 +343,7 @@ test("a minion whose job waits for the test box's screen can end its turn (#1425
     relay.boxWatches().map((w) => [w.job, w.ticket, w.what]),
     [['ab12cd34', minion.id, 'run in w']],
   );
-  assert.equal((store.getSetting('box-watches') as any[]).length, 1, 'kept for a restart');
+  assert.equal(store.getSetting<unknown[]>('box-watches')!.length, 1, 'kept for a restart');
 
   const [init] = opened(/^Citadel, following job ab12cd34 for Peek #1$/);
   let call = await answer(init.session, null);

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { bootServer, freePort, until, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
+import { json, type Refused } from './typed.ts';
 
 // With MACHINES_URL set, agents connect only there (the tailnet), and that listener serves nothing
 // but agents.
@@ -50,7 +51,7 @@ test('agents connect only at the machines URL, which the setup is given', async 
   assert.match(refused.output(), new RegExp(`connect at ${agentBase}`));
 
   startMachineAgent({ base: agentBase, token });
-  await until('laptop to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'laptop' && m.online));
+  await until('laptop to come online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'laptop' && m.online));
 });
 
 test('the machines listener serves nothing but agents', async () => {
@@ -75,7 +76,7 @@ test('every route the agent calls is served at the machines URL, and refused at 
     assert.equal((await fetch(agentBase + path, { method })).status, 401, `${path} at the machines URL`);
     const here = await fetch(base + path, { method, headers: auth });
     assert.equal(here.status, 403, `${path} at the app address`);
-    assert.match((await here.json()).error, new RegExp(`connect at ${agentBase}`));
+    assert.match((await json<Refused>(here)).error, new RegExp(`connect at ${agentBase}`));
   }
   // Not connected yet: info says so, and an upload has no workspace session to go to.
   assert.equal((await fetch(`${agentBase}/api/machines/info`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{}' })).status, 409);
@@ -92,7 +93,7 @@ test('a workspace turn works end to end with the agent on the machines URL: its 
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'studio' } });
   startMachineAgent({ base: agentBase, token, run: ['--config', configFile] });
   // The workspaces arrive through /api/machines/info.
-  const online = await until('studio to report its workspace', async () => (await call('/api/machines')).find((m: any) => m.name === 'studio' && m.workspaces.length));
+  const online = await until('studio to report its workspace', async () => (await call('/api/machines')).find((m: { name: string; workspaces: unknown[] }) => m.name === 'studio' && m.workspaces.length));
   assert.deepEqual(online.servers, ['ws']);
   assert.equal(online.reason, 'Lends nothing: nothing is ticked', 'a folder is lent once it is ticked (#439)');
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: null, workspaces: ['w'] } } });

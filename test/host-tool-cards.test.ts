@@ -41,7 +41,7 @@ git('commit', '-qm', 'start');
 let base = '';
 const cookies: Record<string, string> = {};
 const ids: Record<string, number> = {};
-let ticket: any;
+let ticket: { id: number };
 
 let srv: Booted;
 const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
@@ -60,7 +60,7 @@ const idle = () =>
     const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}`);
     return t.status !== 'running' && t.queued === 0;
   });
-const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
+const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: { kind: string; data: string }) => e.kind === kind).map((e: { kind: string; data: string }) => JSON.parse(e.data));
 const propose = (body: object) => call('minion', `/api/tickets/${ticket.id}/host-tool`, { method: 'POST', body });
 const verdict = (who: string, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });
 const lastMessage = async () => (await events('user_message')).at(-1).text;

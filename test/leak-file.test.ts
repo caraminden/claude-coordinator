@@ -62,7 +62,7 @@ test('a file that leaves a process, a port, a unit and a temp folder goes red na
     writeFileSync(join(dir, 'leaky.test.mjs'), LEAKY);
     writeFileSync(join(dir, 'clean.test.mjs'), CLEAN);
     const out = join(dir, 'out.json');
-    const env = { ...process.env, LEAKFIX_OUT: out, ...(hasUnits ? { LEAKFIX_UNITS: '1' } : {}) };
+    const env: NodeJS.ProcessEnv = { ...process.env, LEAKFIX_OUT: out, ...(hasUnits ? { LEAKFIX_UNITS: '1' } : {}) };
     delete env.NODE_TEST_CONTEXT; // else the nested node --test runs as this file's child, not as a runner
     const r = await new Promise<{ code: number | null; text: string }>((resolve) => {
       const p = spawn(process.execPath, ['--test', '--test-reporter=spec', `--test-global-setup=${GUARD}`, 'leaky.test.mjs', 'clean.test.mjs'], { cwd: dir, env });

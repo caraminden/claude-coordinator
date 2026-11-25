@@ -48,11 +48,11 @@ test("a scheme's inbox: open cards and ones offering replies, not ready or compl
   approvals.request(elsewhere, 'Bash', { command: 'id' });
 
   const items = inboxItems(store, approvals, p1, 'Cara');
-  assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as any).id], ['approval', a, approvalId]);
+  assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as { id: string; tool: string }).id], ['approval', a, approvalId]);
   assert.deepEqual(
     items
       .slice(1)
-      .map((i) => [i.kind, i.ticketId, (i.card as any)?.id ?? null])
+      .map((i) => [i.kind, i.ticketId, (i.card as { id: string } | undefined)?.id ?? null])
       .sort(),
     [
       ['plan', b, 'p-open'],
@@ -62,7 +62,7 @@ test("a scheme's inbox: open cards and ones offering replies, not ready or compl
     'a ready or complete minion is for looking at, not an answer: not listed, its replies neither (#1121)',
   );
   for (let i = 2; i < items.length; i++) assert.ok(items[i - 1].at >= items[i].at);
-  assert.equal((items[0].card as any).tool, 'Bash');
+  assert.equal((items[0].card as { id: string; tool: string }).tool, 'Bash');
 });
 
 test("a card stays in the inbox past typed messages (#812), relays and other cards' clicks; only its own answer clears it", () => {
@@ -375,14 +375,14 @@ test('a card addressed to one person (#687) is in their list alone, waits past t
   // Cara types in the Taskmaster's chat: it answers none of them (#812).
   store.addEvent(tm, 'user_message', { author: 'Cara', text: 'carry on', typed: true });
 
-  const ids = (items: { card?: unknown }[]) => items.map((i) => (i.card as any)?.id).sort();
+  const ids = (items: { card?: unknown }[]) => items.map((i) => (i.card as { id: string } | undefined)?.id).sort();
   assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'Cara')), ['q-all'], "the card for everyone stays, Josh's are not in Cara's list");
   assert.deepEqual(ids(inboxItems(store, approvals, citadel, 'josh')), ['p-josh', 'q-all', 'q-josh'], "the addressee's, even on a parked minion");
   assert.equal(inboxCount(store, approvals, citadel, 'Josh', {}), 2);
 
   const there = directCards(store, peek, 'Josh');
   assert.deepEqual(ids(there), ['p-josh', 'q-josh'], "shown in his own scheme too, never from a scheme he isn't in");
-  assert.deepEqual(there.find((i) => (i.card as any).id === 'q-josh')!.from, { projectId: citadel, scheme: 'Citadel', number: store.getTicket(tm)!.number, kind: 'coordinator', title: 'Taskmaster' });
+  assert.deepEqual(there.find((i) => (i.card as { id: string }).id === 'q-josh')!.from, { projectId: citadel, scheme: 'Citadel', number: store.getTicket(tm)!.number, kind: 'coordinator', title: 'Taskmaster' });
   assert.deepEqual(directCards(store, citadel, 'Josh'), [], 'the scheme he is looking at lists them already');
   assert.equal(inboxCount(store, approvals, peek, 'Josh', {}), 0, 'only the asking scheme counts them');
 
@@ -405,7 +405,7 @@ test('warmCardRows reads a few card rows a step, and recentCards then finds them
   assert.equal(store.warmCardRows(p, 500, 2), 0);
   assert.equal(store.warmCardRows(p, 500, 2), 0, 'nothing more to read');
   // Changed behind the store's back, it still shows what the warm-up read: the rows were not read again.
-  (store as any).db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify({ id: 'p-1', summary: 'behind', plan: 'p', status: 'pending' }), plan.id);
+  store.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify({ id: 'p-1', summary: 'behind', plan: 'p', status: 'pending' }), plan.id);
   const cards = store.recentCards(p, 500);
   assert.equal(cards.length, 5);
   assert.equal(JSON.parse(cards[0].data).summary, 's');
@@ -425,7 +425,7 @@ test('recentCards reads each card row once, and a card changed or deleted after 
   assert.deepEqual(ids(), ['p-1', 'q-1']);
 
   // The second read takes the rows it has: changed under it by a write that skips the store, it doesn't see it.
-  const db = (store as any).db;
+  const db = store.db;
   db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify({ id: 'p-1', summary: 'changed behind its back', plan: 'p', status: 'pending' }), plan.id);
   assert.equal(JSON.parse(store.recentCards(p, 10)[0].data).summary, 's', 'the card row is read once, not on every call');
 
@@ -496,13 +496,13 @@ test('recentCards keeps what it found across a restart, and never shows a card a
 
   // A restart: the same file, nothing in memory. The fates come from the file, not from a scan of the chats.
   const second = new Store(file);
-  assert.equal((second as any).cardFates.size, 0);
+  assert.equal(second.cardFates.size, 0);
   assert.deepEqual(view(second), before);
-  assert.equal((second as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n, 3);
+  assert.equal((second.db.prepare('SELECT count(*) AS n FROM card_fates').get() as { n: number }).n, 3);
   // …proved by planting a fate the chat doesn't hold: it is taken as saved, so the scan isn't what produced it.
-  (second as any).db.prepare('UPDATE card_fates SET reply = \'{"text":"planted"}\' WHERE cid = \'q-2\'').run();
+  second.db.prepare('UPDATE card_fates SET reply = \'{"text":"planted"}\' WHERE cid = \'q-2\'').run();
   assert.equal(view(new Store(file))[2][1], 'planted');
-  (second as any).db.prepare("UPDATE card_fates SET reply = NULL WHERE cid = 'q-2'").run();
+  second.db.prepare("UPDATE card_fates SET reply = NULL WHERE cid = 'q-2'").run();
 
   // A reply that comes after the restart still shows, and is kept for the next one.
   second.addEvent(b, 'user_message', { author: 'Cara', text: 'late', answer: { questionId: 'q-2', answers: [] } });
@@ -511,7 +511,7 @@ test('recentCards keeps what it found across a restart, and never shows a card a
 
   // A saved fate of another card, or one that outruns the events, is not used.
   const third = new Store(file);
-  const db = (third as any).db;
+  const db = third.db;
   db.prepare("UPDATE card_fates SET cid = 'someone-else' WHERE cid = 'q-1'").run();
   db.prepare("UPDATE card_fates SET up_to = 999999 WHERE cid = 'ap-1'").run();
   assert.deepEqual(
@@ -535,9 +535,9 @@ test('recentCards keeps what it found across a restart, and never shows a card a
   assert.equal(view(new Store(file)).at(-1)![1], null, "a new card on a deleted one's id has no reply");
 
   // Whoever deletes events, an older release after a rollback included, drops the saved fates with a trigger.
-  assert.ok(first.recentCards(p, 10).length && (first as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n > 0);
-  (new Store(file) as any).db.prepare("DELETE FROM events WHERE kind = 'approval_result'").run();
-  assert.equal((first as any).db.prepare('SELECT count(*) AS n FROM card_fates').get().n, 0);
+  assert.ok(first.recentCards(p, 10).length && (first.db.prepare('SELECT count(*) AS n FROM card_fates').get() as { n: number }).n > 0);
+  new Store(file).db.prepare("DELETE FROM events WHERE kind = 'approval_result'").run();
+  assert.equal((first.db.prepare('SELECT count(*) AS n FROM card_fates').get() as { n: number }).n, 0);
 });
 
 test('a card posted before #812 that someone answered by typing stays handled, so deploying it reopens nothing', () => {

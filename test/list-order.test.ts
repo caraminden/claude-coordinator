@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { inOrder, moved } from '../public/reorder.js';
 import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
+import { json, type Reply } from './typed.ts';
 
 // Dragging the schemes shelf or the app rail into your own order (#649): saved per person, followed by the lists.
 const repo = join(import.meta.dirname, '..');
@@ -15,13 +16,13 @@ after(async () => {
 let base = '';
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
+async function call<T = unknown>(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<Reply<T>> {
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { Cookie: cookies[who], ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  return { status: res.status, data: await res.json() };
+  return { status: res.status, data: await json<T>(res) };
 }
 
 let joshId = 0;
@@ -49,8 +50,8 @@ before(async () => {
     body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
   });
   cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
-  caraId = (await call('Cara', '/api/me')).data.id;
-  const { data: made } = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
+  caraId = (await call<{ id: number }>('Cara', '/api/me')).data.id;
+  const { data: made } = await call<{ person: { id: number }; token: string }>('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
   joshId = made.person.id;
   const invite = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'josh-password-1' }) });
   cookies.Josh = invite.headers.get('set-cookie')!.split(';')[0];
@@ -74,19 +75,19 @@ test('inOrder puts what the order names first, in its order, and the rest after 
   );
   // Ids saved as numbers still match ids that come as numbers or strings.
   assert.deepEqual(
-    inOrder([{ id: 1 }, { id: 2 }], (p: { id: number }) => p.id, [2, 1]).map((p) => p.id),
+    inOrder([{ id: 1 }, { id: 2 }], (p: { id: number }) => p.id, [2, 1]).map((p: { id: number }) => p.id),
     [2, 1],
   );
   assert.deepEqual(moved(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd']);
   assert.deepEqual(moved(['a', 'b', 'c', 'd'], 3, 0), ['d', 'a', 'b', 'c']);
 });
 
-const names = async (who: string) => (await call(who, '/api/projects')).data.map((p: { name: string }) => p.name);
+const names = async (who: string) => (await call<{ name: string }[]>(who, '/api/projects')).data.map((p) => p.name);
 
 test("a scheme order is the dragger's own, and a scheme they never placed goes at the end", async () => {
   const ids: Record<string, number> = {};
   for (const name of ['Alpha', 'Bravo', 'Charlie']) {
-    ids[name] = (await call('Cara', '/api/projects', { method: 'POST', body: { name } })).data.id;
+    ids[name] = (await call<{ id: number }>('Cara', '/api/projects', { method: 'POST', body: { name } })).data.id;
     assert.equal((await call('Cara', `/api/projects/${ids[name]}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   }
   const usual = await names('Cara');
@@ -106,9 +107,9 @@ test("a scheme order is the dragger's own, and a scheme they never placed goes a
   );
 
   // The shelf saves its whole list on a drop, so a scheme made after the drag goes at the end of it.
-  const all = (await call('Cara', '/api/projects')).data.map((p: { id: number }) => p.id);
+  const all = (await call<{ id: number }[]>('Cara', '/api/projects')).data.map((p) => p.id);
   await call('Cara', '/api/me/order/schemes', { method: 'PUT', body: { keys: all } });
-  const { data: delta } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Aardvark' } });
+  const { data: delta } = await call<{ id: number }>('Cara', '/api/projects', { method: 'POST', body: { name: 'Aardvark' } });
   assert.equal((await names('Cara')).at(-1), 'Aardvark');
   // Dragged again: the newer order wins whole.
   await call('Cara', '/api/me/order/schemes', { method: 'PUT', body: { keys: [delta.id, ids.Bravo, ids.Alpha, ids.Charlie] } });
@@ -124,7 +125,7 @@ test("an app order is the dragger's own and the rail's list follows it", async (
     assert.equal((await call('Cara', '/api/contraptions', { method: 'POST', body: { name, title, port } })).status, 201);
     for (const id of [caraId, joshId]) await call('Cara', `/api/contraptions/${name}/people/${id}`, { method: 'PUT', body: { enabled: true } });
   }
-  const apps = async (who: string) => (await call(who, '/api/contraptions/mine')).data.map((c: { name: string }) => c.name);
+  const apps = async (who: string) => (await call<{ name: string }[]>(who, '/api/contraptions/mine')).data.map((c) => c.name);
   assert.deepEqual(await apps('Cara'), ['amber', 'moss', 'zed'], 'by title until dragged');
   assert.equal((await call('Cara', '/api/me/order/apps', { method: 'PUT', body: { keys: ['zed', 'amber'] } })).status, 200);
   assert.deepEqual(await apps('Cara'), ['zed', 'amber', 'moss']);

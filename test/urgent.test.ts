@@ -273,7 +273,7 @@ async function call(method: string, path: string, app: unknown, ctx: Record<stri
   } catch (err) {
     const e = err as HttpError;
     if (!e.status) throw err;
-    return { status: e.status, body: e.message, data: { urgent: null, said: '', line: [], forced: [] } };
+    return { status: e.status, body: e.message, data: { urgent: null, said: '', line: [], lane: [], forced: [] } };
   }
 }
 

@@ -226,12 +226,20 @@ test('while the main thread is busy for 2 s, the slice still answers within 100 
   // timing-ok: a busy main thread can't say it is busy; 200 ms puts these reads inside its 2 s loop
   await new Promise((r) => setTimeout(r, 200));
   for (const p of [PATHS[0], PATHS[6], PATHS[9], `/api/projects/${A.id}`, `/api/tickets/${M1.id}`, '/api/status']) {
-    const s = Date.now();
-    const got = await get(srv, p, srv.cookie);
-    assert.equal(got.status, viaMain[`cara ${p}`].status, p);
-    assert.ok(got.reader, p);
+    // The fastest of up to three asks is the slice's own time (#1903). One ask's wall time also holds every moment the
+    // machine ran something else in place of the reader or of this process: with ten copies of this file at once, each
+    // spinning a main thread for 2 s, that alone was 112 and 115 ms. A read that waits on the main thread is slow every
+    // time, so the fastest ask still catches it; each ask must still be a reader's, with the right answer.
+    const took: number[] = [];
+    while (took.length < 3 && !(Math.min(...took) < 100)) {
+      const s = Date.now();
+      const got = await get(srv, p, srv.cookie);
+      took.push(Date.now() - s);
+      assert.equal(got.status, viaMain[`cara ${p}`].status, p);
+      assert.ok(got.reader, p);
+    }
     // timing-ok: the slice's done line is "within 100 ms while the main thread is blocked 2 s" (#1563)
-    assert.ok(Date.now() - s < 100, `${p} took ${Date.now() - s} ms`);
+    assert.ok(Math.min(...took) < 100, `${p} took ${took.join(', ')} ms`);
   }
   const read = Date.now();
   assert.equal((await blocked).status, 200);

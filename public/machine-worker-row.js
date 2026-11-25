@@ -25,7 +25,7 @@ const mine = (m) => m.owner_id !== null && m.owner_id === account?.id;
 export function workerState(m) {
   const w = m.worker;
   if (!w.on) return { tone: 'neutral', word: 'Off', why: w.here ? 'It is set up and connected, and takes no turns while this is off.' : mine(m) ? 'Let your own minions run on this PC.' : 'Its owner can let their own minions run on it.' };
-  if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: 'Run the command below once on that PC.' };
+  if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: 'Nothing runs there until that PC is set up: its row follows it from then on.' };
   if (!w.here) return { tone: 'warn', word: 'Away', why: `Last heard from ${w.seen ? ago(w.seen) : 'some time ago'}. ${w.wsl ? 'Signing out of Windows stops it: sign in there, and it comes back by itself.' : 'Turn that PC on; if it is on, "sudo citadel-worker status" there says why.'}` };
   if (w.twice) return { tone: 'warn', word: 'Two workers', why: "This PC's Citadel agent has a worker block in its config too, and is refused: take that block out. Its minion turns run in citadel-worker." };
   if (w.image?.state === 'failed') return { tone: 'danger', word: 'Image failed', why: `${w.image.text} It tries again in 10 minutes.` };
@@ -186,7 +186,7 @@ function signIns(m, k) {
     ['Claude', w.signed_in, 'signin', 'Claude Code opens its own sign-in. Type /exit once it says you are in.'],
     ['GitHub', w.github, 'signin-github', 'So turns can push and open pull requests as you.'],
   ];
-  const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, name), ' ', note), shell(tag, workerCommand(win, verb)));
+  const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', note), shell(tag, workerCommand(win, verb)));
   const todo = steps.filter(([, is]) => is === false);
   const done = steps.filter(([, is]) => is !== false);
   return h(

@@ -140,6 +140,8 @@ export class WorkerJoin {
     const facts = this.facts.get(machineId);
     if (typeof from === 'string' && from === facts?.boot) return false;
     if (!facts || this.d.now() - facts.at >= HERE_MS) return false;
+    // A program's own new boot syncs once before its first word, and one replaced syncs until it hears: only a sync with no header is an agent's block.
+    if (typeof from === 'string') return true;
     if (!this.twice.has(machineId) || this.d.now() - this.twice.get(machineId)! > 30_000) this.d.changed();
     this.twice.set(machineId, this.d.now());
     return true;

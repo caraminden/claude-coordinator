@@ -62,12 +62,14 @@ test('a worker says only whether a sign-in is there: anything else in its word i
 });
 
 test('of two workers on one token the newest install has it, also after a reboot of the other; the old one ends its turns first', async () => {
-  const { at, say, join } = joined();
+  const { at, say, join, machine } = joined();
   assert.deepEqual(await say({ boot: 'old', installed: 10 }), { ...(await say({ boot: 'old', installed: 10 })), wait: false }, 'one alone has nothing to wait for');
   at.now += 2000;
   assert.equal(((await say({ boot: 'new', installed: 20 })) as { wait: boolean }).wait, true);
   assert.deepEqual(await say({ boot: 'old', installed: 10 }), { replaced: true });
   assert.equal(join.host(7), 'PC');
+  assert.deepEqual([join.refuses(7, 'new'), join.refuses(7, 'old'), join.view(machine).twice], [false, true, false], "another boot of the program is refused, and isn't two workers");
+  assert.deepEqual([join.refuses(7, undefined), join.view(machine).twice], [true, true], 'a sync with no header is an agent block');
   at.now += 10_000;
   assert.equal(((await say({ boot: 'new', installed: 20 })) as { wait: boolean }).wait, false);
   at.now += 3_600_000;
@@ -384,7 +386,13 @@ test('a build that fails says why and is not tried again for a while; nothing is
   agent.worker.turns.set('t', {} as never);
   await agent.keepImage('2.4.12', want);
   assert.deepEqual([agent.worker.cfg.image, agent.image!.state, agent.worker.cfg.max], [old, 'building', 0]);
+  // A reboot took its container: the turns' next checkpoint makes it from the new image, at once.
+  pod.state.from = '';
+  agent.builtAt = 0;
+  await agent.keepImage('2.4.13', want);
+  assert.deepEqual([agent.worker.cfg.image, agent.image!.state], ['localhost/citadel-worker:abcdef12-2.4.13', 'ready']);
   agent.worker.turns.clear();
+  agent.builtAt = 0;
   await agent.keepImage('2.4.12', want);
   assert.deepEqual([agent.worker.cfg.image, agent.image!.state], ['localhost/citadel-worker:abcdef12-2.4.12', 'ready']);
   // A claude or a hash that isn't one never reaches a build file.

@@ -211,9 +211,12 @@ export class WorkerAgent {
     this.builtAt = Date.now();
     try {
       if ((await this.exec(this.cfg.podman, ['image', 'exists', tag])).code) await this.build(tag, claude, want);
-      const from = (await this.exec(this.cfg.podman, ['container', 'inspect', '--format', '{{.ImageName}}', 'citadel-worker'])).out.trim();
+      const there = await this.exec(this.cfg.podman, ['container', 'inspect', '--format', '{{.ImageName}}', 'citadel-worker']);
+      const from = there.code ? '' : there.out.trim();
       // Running turns keep the container they are in, and a turn started now would join them there: none is (fit), and the new image takes over when they end.
-      if (this.worker.cfg.image !== tag && this.worker.turns.size && from !== tag) {
+      // With no container (a reboot), the turns' next checkpoint makes one from the new image.
+      if (this.worker.cfg.image !== tag && this.worker.turns.size && from && from !== tag) {
+        if (this.worker.cfg.image === NO_IMAGE) this.worker.cfg.image = from;
         this.image = { state: 'building', text: 'Its new image is ready, and takes over when the turns running there end.' };
         return;
       }

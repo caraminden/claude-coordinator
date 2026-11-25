@@ -3,7 +3,7 @@
 //  - Optional runs (citadel-heavy jobs, the suite started by hand on a branch) are stopped while a ship is
 //    in line or testing, or main's full run is queued or running. A stop is a cancel on GitHub; Citadel starts the same
 //    run again (its rerun, so from the start) once the line has been empty for a settle time.
-//  - Main's full run waits for ships, MAIN_WAIT_MS at most, and goes before anything optional.
+//  - Main's full run waits for a gap in the ships, MAIN_WAIT_MS at most (Josh, 2026-11-25, picked "Wait for a gap, max 4 h"), and goes before anything optional.
 //  - A ship's run (land/) is never touched.
 // One job at a time (#1906; Josh, 2026-11-24, picked "One Citadel job, one Peek build": "Citadel never runs two heavy jobs at
 // once"): the runs of Citadel's own repo go one by one, in the order ship, main's full run, a ship's own check (check/, a
@@ -34,7 +34,9 @@ export const NIGHT = { from: 23, until: 6 };
 /** A run stopped again after it came back needs twice the quiet before it starts again, up to 8 times: in a busy day a long
  *  job would otherwise be started and stopped in every gap (38 times for one run, the replay of Nov 22 to 24). */
 export const MAX_BACKOFF = 8;
-export const MAIN_WAIT_MS = 30 * 60_000;
+export const MAIN_WAIT_MS = 4 * 3600_000;
+/** A gap in the ships must last this long before main's stopped run starts again: in most the next ship is a minute off (the replay of Nov 22 to 25: 105 stops without it). A starting value. */
+export const MAIN_SETTLE_MS = 2 * 60_000;
 /** The most another scheme's job waits (a starting value). */
 export const OTHERS_CAP_MS = 4 * 3600_000;
 /** A starting value: a job that has run this long keeps no other waiting, so a hung one can't hold the line. */
@@ -221,6 +223,8 @@ export class CiHold {
   private pausedUntil = 0;
   private busy = false;
   private offNow = false;
+  /** Since when no ship holds the desktop, as of the last look. */
+  private shipFree: number | null = null;
   private job: Job | null = null;
   private said = '';
   private publishing: Promise<unknown> = Promise.resolve();
@@ -305,7 +309,7 @@ export class CiHold {
   }
 
   private mainWhy(now: number): string | null {
-    const mainWaits = [...this.held.values()].some((h) => h.kind === 'main' && h.phase !== 'resumed' && now - h.since < SHIP_RUN_MS);
+    const mainWaits = [...this.held.values()].some((h) => h.kind === 'main' && h.phase !== 'resumed' && now - h.since < MAIN_WAIT_MS + SHIP_RUN_MS);
     return mainWaits || (this.fresh(now) && this.seen.main) ? "main's full test run goes first" : null;
   }
 
@@ -349,12 +353,30 @@ export class CiHold {
 
   /** Why this run must not be running now for a ship's or main's sake, or null. `start`: optional work also waits the settle time. */
   private shipsFirst(kind: HoldKind, h: HeldRun | undefined, start: boolean, now: number): string | null {
-    if (kind === 'main') return this.mainPast(h, now) ? null : this.shipWhy(now);
+    if (kind === 'main') {
+      if (this.mainPast(h, now)) return null;
+      return this.shipWhy(now) ?? (start && h && !this.gap(now) ? 'the ship line only just emptied' : null);
+    }
     // No ship stops a proof; main's run does, as it stops any lower job, once it may go itself.
-    if (kind === 'proof') return !this.shipWhy(now) || [...this.held.values()].some((m) => m.kind === 'main' && this.mainPast(m, now)) ? this.mainWhy(now) : null;
+    if (kind === 'proof') return this.mainMay(now) && (start || this.seen.main || this.gap(now) || this.mainDue(now)) ? this.mainWhy(now) : null;
     if (!sideRun(kind)) return start ? this.gate(now, h?.stops) : this.stopWhy(now);
     if (!this.fresh(now)) return null;
-    return this.seen.ship ? "a ship's tests are running" : start ? this.mainWhy(now) : null;
+    // While main's run waits for ships it keeps no ship's own check or early run from starting (hours, at most).
+    return this.seen.ship ? "a ship's tests are running" : start && this.mainMay(now) ? this.mainWhy(now) : null;
+  }
+
+  /** Whether a main run that waits may go itself: no ship, or one held its full time. */
+  private mainMay(now: number) {
+    return !this.shipWhy(now) || this.mainDue(now);
+  }
+
+  private mainDue(now: number) {
+    return [...this.held.values()].some((m) => m.kind === 'main' && this.mainPast(m, now));
+  }
+
+  /** Whether no ship has held the desktop for MAIN_SETTLE_MS: a shorter gap starts no stopped main run, so it stops no proof for one. */
+  private gap(now: number) {
+    return this.shipFree !== null && now - this.shipFree >= MAIN_SETTLE_MS;
   }
 
   /** Why optional work must not start now: as stopWhy, or the line only just emptied. */
@@ -437,6 +459,7 @@ export class CiHold {
     }
     for (const path of this.cache.keys()) if (!used.has(path) && path.includes('?status=')) this.cache.delete(path);
     this.seen = { at: now, ship, main };
+    this.shipFree = this.shipWhy(now) ? null : (this.shipFree ?? now);
     this.running = running;
     this.ships = ships;
     this.takeSlot(own, [...active.values()], now);
@@ -573,7 +596,7 @@ export class CiHold {
         if (taken && !this.slotPast(h, now)) return;
         if (sideRun(h.kind) && this.queued.size) return;
       }
-      const clear = sideRun(h.kind) || h.kind === 'proof' ? !this.shipsFirst(h.kind, h, true, now) : h.kind === 'main' ? !this.shipWhy(now) || this.mainPast(h, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
+      const clear = sideRun(h.kind) || h.kind === 'proof' || h.kind === 'main' ? !this.shipsFirst(h.kind, h, true, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
       if ((!off && !clear) || (group && groups.has(group)) || (h.misses && now - h.at < RECANCEL_MS)) return;
       const { status } = await post('rerun');
       if (status >= 200 && status < 300) {

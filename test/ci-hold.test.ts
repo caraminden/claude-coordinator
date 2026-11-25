@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, heldRows, isNight, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -217,7 +217,7 @@ test("main's queued run starts before anything optional, and a running optional 
   assert.deepEqual(w.posts, ['cancel 1', 'rerun 1']);
 });
 
-test("main's run waits for ships off the runner, is back first when they end, and after 30 minutes goes anyway", async () => {
+test("main's run waits for ships off the runner, is back first when they end, and after 4 hours goes anyway", async () => {
   const w = world();
   w.line = 1;
   w.heavy();
@@ -227,15 +227,18 @@ test("main's run waits for ships off the runner, is back first when they end, an
   assert.equal(w.told.length, 1, 'main has no minion to tell');
   w.line = 0;
   await w.tick();
-  await w.tick();
-  assert.deepEqual(w.posts.slice(2), ['rerun 2'], 'no settle time for main');
+  assert.deepEqual(w.posts.slice(2), [], 'the gap is a moment old: the next ship may be a minute off');
+  await w.for(MAIN_SETTLE_MS);
+  assert.deepEqual(w.posts.slice(2), ['rerun 2'], 'two quiet minutes are enough for main');
   await w.for(20 * MIN);
   assert.ok(!w.posts.includes('rerun 1'), 'the proof waits for it');
 
   const v = world();
   v.line = 1;
   v.main({ status: 'queued' });
-  await v.for(MAIN_WAIT_MS + MIN);
+  await v.for(4 * 60 * MIN - 2 * MIN);
+  assert.deepEqual(v.posts, ['cancel 1'], 'no 30 minutes: it waits for a gap');
+  await v.for(3 * MIN);
   assert.deepEqual(v.posts, ['cancel 1', 'rerun 1']);
   assert.equal((await v.hold.ask(OWN, 1, v.now)).go, true, 'and it is not stopped again');
   v.runs[0].status = 'in_progress';
@@ -651,16 +654,41 @@ test('a run GitHub leaves queued for over an hour holds up no check', async () =
   assert.equal(await w.ask(next), true);
 });
 
-test("main's full run that ships held for 30 minutes runs beside a ship's tests", async () => {
+test("main's full run held for hours still goes before optional work in the first gap", async () => {
+  const w = world();
+  w.line = 1;
+  const heavy = w.heavy();
+  const main = w.main({ status: 'queued' });
+  await w.for(3 * 60 * MIN);
+  const check = w.check({ head_branch: 'check/2' });
+  assert.equal(await w.ask(check), true, 'meanwhile a ship checks itself');
+  await w.tick();
+  end(check);
+  w.line = 0;
+  assert.match(w.hold.why(OWN, undefined, w.now)!, /main's full test run goes first/);
+  await w.tick();
+  await w.for(2 * MIN);
+  assert.ok(w.posts.includes(`rerun ${main.id}`));
+  assert.ok(!w.posts.includes(`rerun ${heavy.id}`));
+});
+
+test("main's full run that ships held for 4 hours runs beside a ship's tests", async () => {
   const w = world();
   await w.for(10 * MIN);
   w.land({ id: 50 });
   await w.tick();
   const main = w.main();
   assert.equal(await w.ask(main), false);
-  await w.for(MAIN_WAIT_MS - 2 * MIN);
+  // The ships that keep it waiting: each a run of its own, none of an hour.
+  const ships = async (ms: number) => {
+    for (let t = 0; t < ms; t += 10 * MIN) {
+      w.runs.find((r) => r.id === 50)!.run_started_at = new Date(w.now).toISOString();
+      await w.for(10 * MIN);
+    }
+  };
+  await ships(MAIN_WAIT_MS - 10 * MIN);
   assert.ok(!w.posts.includes(`rerun ${main.id}`));
-  await w.for(4 * MIN);
+  await ships(20 * MIN);
   assert.ok(w.posts.includes(`rerun ${main.id}`));
   main.status = 'in_progress';
   assert.equal(await w.ask(main), true);
@@ -1023,7 +1051,12 @@ test("main's run stops a proof once it may start, not while it waits for ships i
   await w.for(5 * MIN);
   assert.deepEqual(w.posts, ['cancel 2']);
   w.line = 0;
-  await w.for(2 * MIN);
+  await w.tick();
+  w.line = 1;
+  await w.for(5 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2'], 'a momentary gap starts no main, so it stops no proof');
+  w.line = 0;
+  await w.for(MAIN_SETTLE_MS + 2 * MIN);
   assert.deepEqual(w.posts, ['cancel 2', 'cancel 1', 'rerun 2']);
   assert.match(w.told[0].text, /main's full test run goes first.*counted from zero/s);
   assert.doesNotMatch(w.told[0].text, /ships go first/);

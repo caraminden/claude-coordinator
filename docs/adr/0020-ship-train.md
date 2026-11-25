@@ -267,6 +267,8 @@ took: Peek's own ship can wait behind a Peek build already queued, the label sta
 
 Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card ("one flaky-test proof may run beside ships"), which narrows that pick and "Deploys first" for flake proofs only: a running proof keeps no early run, own check or light check off the desktop, so `ci_busy` doesn't count one.
 
+Josh, 2026-11-25, picked "Wait for a gap, max 4 h" on #1902's card about main's full run (30 minutes before): it starts in a gap of 2 quiet minutes, or beside ships after 4 hours. It is still first once ships are through; the hours it waits keep no early run or own check off the desktop.
+
 ### While the train ahead's CI runs (#1568)
 
 Cara, 2026-11-21, "Go" on fix F of #1549's report (ship stalls), and 2026-11-22, picked "Low-priority run on a ship

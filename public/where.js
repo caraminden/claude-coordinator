@@ -96,12 +96,15 @@ export function whereView(w) {
 }
 
 /** Fetch your summary and draw it into `into`, which keeps its reserved height until then; a failure leaves a line saying so. */
-export async function renderWhere(into, range = 'week') {
+export async function renderWhere(into, range = 'week', current = () => true) {
+  let view;
   try {
-    into.replaceChildren(whereView(await api(`api/costs/mine${range === 'all' ? '?range=all' : ''}`)));
+    view = whereView(await api(`api/costs/mine${range === 'all' ? '?range=all' : ''}`));
   } catch (err) {
-    into.replaceChildren(h('p', { class: 'key' }, `Couldn't load where it went: ${err.message}`));
+    view = h('p', { class: 'key' }, `Couldn't load where it went: ${err.message}`);
   }
+  if (!current()) return; // another range was picked while this one loaded: its answer must not paint over the newer
+  into.replaceChildren(view);
   into.classList.remove('loading');
 }
 
@@ -121,7 +124,7 @@ export function usagePage() {
     pickedRange = key;
     for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.range === key));
     slot.classList.add('loading');
-    renderWhere(slot, key);
+    renderWhere(slot, key, () => pickedRange === key);
   };
   setTimeout(() => choose(pickedRange));
   return h(

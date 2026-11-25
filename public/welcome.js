@@ -92,12 +92,19 @@ export function welcomePanel(pid, schemes) {
     // Gone at once; the server hears behind it, and a failure brings it back with a retry.
     const before = account.welcome;
     account.welcome = null;
-    el.remove();
-    live = null;
-    api('api/welcome', { method: 'POST', body: { dismiss: true } }).catch(() => {
-      account.welcome = before;
-      toast("Couldn't hide the welcome. It's back for now.", { tone: 'danger' });
-    });
+    el.hidden = true;
+    wrote++;
+    api('api/welcome', { method: 'POST', body: { dismiss: true } }).then(
+      () => {
+        el.remove();
+        if (live?.el === el) live = null;
+      },
+      () => {
+        el.hidden = false; // still mounted, so it really is back
+        account.welcome = before;
+        toast("Couldn't hide the welcome. It's back for now.", { tone: 'danger' });
+      },
+    );
   });
   setFolded(folded);
   draw(w);
@@ -116,6 +123,7 @@ export function welcomePanel(pid, schemes) {
         const o = b.dataset.option;
         if (!account.welcome || account.welcome.card) return; // answered, or finished: it's a practice card, not a setting
         const before = account.welcome;
+        wrote++;
         account.welcome = { ...before, card: o, steps: { ...before.steps, card: true } };
         draw(account.welcome);
         api('api/welcome', { method: 'POST', body: { card: o } })
@@ -143,11 +151,13 @@ function welcomeLooked(w) {
 }
 
 let asking = null;
+let wrote = 0; // counts the hides and picks sent: a read that began before one is older than it and is dropped
 /** Ask the server again (on mount, on focus, after you write): a step done elsewhere ticks here. */
 export function refreshWelcome() {
   if (!account?.welcome || asking) return;
+  const at = wrote;
   asking = api('api/welcome')
-    .then((r) => welcomeLooked(r.welcome))
+    .then((r) => at === wrote && welcomeLooked(r.welcome))
     .catch(() => {})
     .finally(() => (asking = null));
 }

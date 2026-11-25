@@ -190,11 +190,17 @@ export function schemeCount(p) {
   pillTips ??= mountTips(document.body, { selector: '.scheme-count[data-tip]', acts: '.scheme-count' });
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, shipping, fresh, label } = schemePill(openPill(p, view?.projectId, seenHere));
+  // The CSP refuses a style attribute; the CSSOM isn't blocked.
+  const shipDots = () => {
+    const i = h('i', {}, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'));
+    i.style.setProperty('--ship-delay', `-${Date.now() % 1500}ms`);
+    return i;
+  };
   return h(
     'span',
     { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, phase(h('i'), 900), working ? h('b', {}, working) : null) : null,
-    shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `--ship-delay: -${Date.now() % 1500}ms` }, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'))) : null,
+    shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), shipDots()) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null,
   );
 }

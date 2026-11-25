@@ -57,6 +57,7 @@ export async function renderCost() {
   if (budget !== before && view?.kind === 'project') renderSidebar();
   for (const el of document.querySelectorAll('.cost-detail')) {
     el.hidden = false;
+    if (el.contains(document.activeElement) && document.activeElement.matches('.cap-input')) continue; // typing a cap: a redraw would take the focus and the text
     drawPop(el);
   }
 }

@@ -518,20 +518,21 @@ function confirmOff(item) {
 /** Saves at once and rolls back with a toast if the save fails (Cara 2026-11-08). */
 function setOff(item, off) {
   const p = view.project;
-  const was = data.off;
+  const d = data; // a scheme switch swaps `data`: a late answer must not write this scheme's list into another's page
+  const was = d.off;
   const next = off ? [...new Set([...was, item.slug])].sort() : was.filter((s) => s !== item.slug);
   optimistic({
     key: `scheme-settings:${p.id}`,
     apply: () => {
-      data.off = next;
+      if (data === d) d.off = next;
       if (view.project?.id === p.id) view.project.skills_off = next.join(' ');
-      draw();
+      if (data === d) draw();
     },
     send: () => api(`api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: next } }),
     undo: () => {
-      data.off = was;
+      if (data === d) d.off = was;
       if (view.project?.id === p.id) view.project.skills_off = was.join(' ');
-      draw();
+      if (data === d) draw();
     },
     label: `turn ${item.name} ${off ? 'off' : 'on'}`,
   });

@@ -18,10 +18,10 @@ export function unusedPage() {
         h('p', { class: 'meta' }, `${idle} of ${items.length} items had nothing in the last 30 days. Counting began ${since ?? 'just now'}; anything used before that is not here.`),
         h(
           'div',
-          { style: 'overflow-x:auto' },
+          { class: 'unused-scroll' },
           h(
             'table',
-            { class: 'unused-table', style: 'min-width:max-content' },
+            { class: 'unused-table' },
             h(
               'thead',
               {},

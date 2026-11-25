@@ -107,15 +107,19 @@ export function servicePanel(c, summary = () => {}) {
     deployTodo.replaceChildren(...(d.todo ?? []).map((t) => h('li', {}, h('strong', {}, 'To do: '), t)));
     deployLog.textContent = d.tail ?? '';
     deployLog.hidden = d.state === 'running' || d.state === 'deployed' || !d.tail;
-    if (d.state === 'running')
-      setTimeout(
-        () =>
-          deployLine.isConnected &&
-          api(`api/contraptions/${c.name}/deploy`)
-            .then(showDeploy)
-            .catch(() => {}),
-        3000,
-      );
+    if (d.state === 'running') {
+      // One failed poll (Citadel restarting, a phone losing signal) must not end the line: try again.
+      const poll = () =>
+        setTimeout(
+          () =>
+            deployLine.isConnected &&
+            api(`api/contraptions/${c.name}/deploy`)
+              .then(showDeploy)
+              .catch(poll),
+          3000,
+        );
+      poll();
+    }
     else
       api(base)
         .then(show)

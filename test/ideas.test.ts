@@ -63,6 +63,7 @@ test('derive: a link beats the pick, a ship makes it built', () => {
   assert.equal(derive({ pick: 'later', ticket_id: null }, false), 'later');
   assert.equal(derive({ pick: 'now', ticket_id: null }, false), 'picked', 'a pick that only starts with no is not a skip (ME4)');
   assert.equal(derive({ pick: 'Notes first', ticket_id: null }, false), 'picked');
+  for (const p of ['skipped', 'dropped', 'no_thanks', 'skip_it', 'Cut it', 'not now']) assert.equal(derive({ pick: p, ticket_id: null }, false), 'skipped', p);
   assert.equal(derive({ pick: 'no, later', ticket_id: null }, false), 'skipped');
   assert.equal(derive({ pick: 'cut', ticket_id: null }, false), 'skipped');
   assert.equal(derive({ pick: 'later', ticket_id: 4 }, false), 'started');

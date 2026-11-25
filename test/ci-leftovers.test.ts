@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ciLeftovers, jobTmp, sweep } from './ci-leftovers.ts';
+import { ciLeftovers, jobTmp, ownDirs, sweep } from './ci-leftovers.ts';
 import { until } from './wait.ts';
 
 const base = mkdtempSync(join(tmpdir(), 'cileft-'));
@@ -136,6 +136,16 @@ test('each runner has a short temp folder of its own', () => {
   const [a, b] = ['/opt/actions-runner-x/_work/_temp', '/opt/actions-runner-x-2/_work/_temp'].map(jobTmp);
   assert.notEqual(a, b);
   assert.match(a, /^\/tmp\/j-[0-9a-f]{6}$/);
+});
+
+// A server of a killed job runs the checkout's server.ts and may name nothing else (one spun for 8 hours, its TMPDIR in /tmp, #1900).
+test('what runs from this runner’s checkout is its own, and from another runner’s is not', () => {
+  const dirs = (runner: string) => ownDirs({ RUNNER_TEMP: `${runner}/_work/_temp`, GITHUB_WORKSPACE: `${runner}/_work/repo/repo` });
+  const mine = dirs('/opt/actions-runner-x');
+  assert.deepEqual(mine, [jobTmp('/opt/actions-runner-x/_work/_temp'), '/opt/actions-runner-x/_work/_temp', '/opt/actions-runner-x/_work/repo/repo']);
+  assert.ok(!dirs('/opt/actions-runner-x-2').some((d) => mine.some((m) => d === m || d.startsWith(`${m}/`))));
+  assert.deepEqual(ownDirs({}), [], 'outside a job');
+  for (const v of ['', '/']) assert.deepEqual(ownDirs({ RUNNER_TEMP: '/r/_temp', GITHUB_WORKSPACE: v }), [jobTmp('/r/_temp'), '/r/_temp'], 'never the whole disk');
 });
 
 // Every workflow that runs Citadel's tests on the shared runner sweeps at its start and, however the job went, as its last step.

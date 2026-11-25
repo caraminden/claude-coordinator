@@ -17,6 +17,15 @@
     "real": 30,
     "summary": "26 as before, 2 new, 4 gone"
   },
+  "container-relief": {
+    "hash": "061d572b9ceb74cc",
+    "at": "2026-11-25",
+    "days": 14,
+    "inputs": "6 container memory storms over 14 days",
+    "hits": 9,
+    "real": 0,
+    "summary": "0 as before, 9 new, 0 gone"
+  },
   "deploy-watch": {
     "hash": "bfeb5b90b4633551",
     "at": "2026-11-21",

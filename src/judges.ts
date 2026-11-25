@@ -246,6 +246,15 @@ export const JUDGES: Judge[] = [
     pins: [{ path: 'src/effort-retros.ts', symbols: ['TroubleRetros.tick', 'TroubleRetros.due'] }],
     callers: ['src/effort-retros.ts'],
   },
+  {
+    id: 'container-relief',
+    name: 'Container relief (#1876)',
+    mode: 'act', // Josh, 2026-11-24: "Kill its biggest process"
+    replay: true,
+    acts: "SIGKILLs the process with the most anon memory in a person's container stuck at its memory limit for a minute, again each minute while it lasts, and notes it in the chat of the turn that ran it",
+    pins: [{ path: 'src/container-relief.ts', symbols: ['RELIEF', 'KEEP', 'step', 'processes', 'ContainerRelief.look', 'ContainerRelief.relieve'] }],
+    callers: ['src/container-relief.ts'],
+  },
 ];
 
 export const judge = (id: string): Judge | undefined => JUDGES.find((j) => j.id === id);

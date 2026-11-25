@@ -215,7 +215,7 @@ export class ClaudeLink {
   private claudeBin: string;
   private containers: Containers;
   /** Names its containers: "citadel-claude-" for the live server, with a tag for a dev copy so the two never share one. */
-  private prefix: string;
+  readonly prefix: string;
   /** Whether a turn is running in this config folder now (Runner.turnIn): unlinking its account would end it on a 401. */
   turnOn?: (configDir: string) => boolean;
 

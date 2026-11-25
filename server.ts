@@ -27,6 +27,7 @@ import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
 import { citadelSliceDir, MemoryStorms, stormPeople } from './src/memory-storms.ts';
+import { startContainerRelief, victimText } from './src/container-relief.ts';
 import { readGrowth } from './src/growth-alarm.ts';
 import type { Delivery } from './src/db/deliveries.ts';
 import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
@@ -2166,6 +2167,9 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 }
 
 // Memory-limit storms (#1280): a Citadel slice or container stalling at its MemoryHigh, read every 15 s, recorded for the Status page.
+/** A person's container stuck at its memory limit loses its biggest process (#1876), from a worker thread; started with the storms below. */
+let containerRelief: { stop: () => void } | null = null;
+let stoppingWork = false;
 const memoryStorms = new MemoryStorms({ record: (at, storm) => store.addHealthEvent('memory-high', at, BOOT_COMMIT ?? null, JSON.stringify(storm)) });
 // The Status page (#1123): perigee's memory and disk every 5 minutes, and this start recorded with why it happened.
 /** One real GET /api/health a second from a worker thread (#1559); starts once the server is bound. */
@@ -2192,6 +2196,18 @@ if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, readStop(DATA_DIR));
   status.start();
   memoryStorms.start();
+  void citadelSliceDir().then((dir) => {
+    if (!dir || stoppingWork) return;
+    containerRelief = startContainerRelief({
+      dir,
+      prefix: claudeLink.prefix,
+      report: (v) => {
+        console.log(`[container-relief] ${v.group}: ${victimText(v)}`);
+        store.addHealthEvent('memory-kill', Date.now(), BOOT_COMMIT ?? null, JSON.stringify(v));
+        if (v.ticket !== null && store.getTicket(v.ticket)) runner.emit(v.ticket, 'note', { text: victimText(v) });
+      },
+    });
+  });
 }
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
@@ -2569,6 +2585,8 @@ const SHUTDOWN_GRACE_MS = 5000;
 // Let go of the work a next server picks up: turns, app turns, the usage ledger, a storm going on.
 let holdsLifted: Promise<void> = Promise.resolve();
 function stopWork() {
+  stoppingWork = true;
+  containerRelief?.stop();
   services.stopping = true;
   contraptionTurns.stopping = true; // an app turn systemd's SIGTERM cuts off now says Citadel restarted (#1382)
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it

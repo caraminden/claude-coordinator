@@ -61,13 +61,14 @@ export interface Proc {
   pid: number;
   anon: number;
   swap: number;
-  /** Its command line, cut to CMD_CHARS. */
+  /** Its command line, cut to CMD_CHARS; its name when that can't be read. */
   cmd: string;
 }
 
 /** How many processes a storm names, and how much of each command line. */
 export const TOP_N = 5;
 const CMD_CHARS = 120;
+const CMD_WAIT_MS = 1000;
 
 /** The `n` processes in cgroup `dir` and every cgroup below it with the most anon memory (RSS plus swap), biggest first. */
 export async function topProcesses(dir: string, n = TOP_N, proc = '/proc'): Promise<Proc[]> {
@@ -80,19 +81,25 @@ export async function topProcesses(dir: string, n = TOP_N, proc = '/proc'): Prom
   await walk(dir, 0);
   const kb = (status: string, key: string) => 1024 * Number(status.match(new RegExp(`^${key}:\\s+(\\d+) kB`, 'm'))?.[1] ?? 0);
   const read = await Promise.all(
-    pids.map(async (pid): Promise<Proc | null> => {
-      try {
-        const [status, cmdline] = await Promise.all([readFile(join(proc, String(pid), 'status'), 'utf8'), readFile(join(proc, String(pid), 'cmdline'), 'utf8').catch(() => '')]);
-        return { pid, anon: kb(status, 'RssAnon'), swap: kb(status, 'VmSwap'), cmd: cmdline.split('\0').filter(Boolean).join(' ').slice(0, CMD_CHARS) };
-      } catch {
-        return null; // it exited meanwhile
-      }
+    pids.map(async (pid) => {
+      const status = await readFile(join(proc, String(pid), 'status'), 'utf8').catch(() => null); // null: it exited meanwhile
+      return status === null ? null : { pid, anon: kb(status, 'RssAnon'), swap: kb(status, 'VmSwap'), cmd: status.match(/^Name:\s+(.*)$/m)?.[1] ?? '' };
     }),
   );
-  return read
+  const top = read
     .filter((p): p is Proc => p !== null)
     .sort((a, b) => b.anon + b.swap - (a.anon + a.swap))
     .slice(0, n);
+  // Only the named ones' command lines, each with a deadline: reading one waits on that process's memory lock, which a
+  // thrashing container holds for seconds, and a thread pool full of those waits stalls the whole server. Late: its name.
+  return Promise.all(
+    top.map(async (p) => {
+      const late = AbortSignal.timeout(CMD_WAIT_MS);
+      const line = await Promise.race([readFile(join(proc, String(p.pid), 'cmdline'), 'utf8').catch(() => ''), new Promise<string>((r) => late.addEventListener('abort', () => r('')))]);
+      const cmd = line.split('\0').filter(Boolean).join(' ').slice(0, CMD_CHARS);
+      return cmd ? { ...p, cmd } : p;
+    }),
+  );
 }
 
 /** The cgroup dir named citadel.slice above (or at) this process's own, from /proc/self/cgroup; null when there is none. */

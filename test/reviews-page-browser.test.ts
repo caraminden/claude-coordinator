@@ -1,6 +1,6 @@
 // public/reviews.js (#1309): the Reviewers and critics page shows the shared loading line until its set arrives, then its head and tabs, and empty set draws without error. Citadel's real front end in headless Chromium (test/browser.ts), with fetch answered in the page.
 import assert from 'node:assert/strict';
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App, type Page } from './browser.ts';
 
 const bin = chromium();
@@ -123,9 +123,15 @@ before(async () => {
   if (!skip) drafts = await serveApp({ stub: DRAFTS });
 });
 after(() => drafts?.close());
+// Some fifty open pages in one browser slow each other's boot on a loaded box.
+const opened: Page[] = [];
+afterEach(async () => {
+  for (const page of opened.splice(0)) await page.send('Page.close');
+});
 
 async function reviews(scheme = 1): Promise<Page> {
   const page = await browser.page(`${drafts.base}#/p/${scheme}/reviews`, { width: 1440, height: 900 });
+  opened.push(page);
   await waitFor(page, 'the board', `$('.rv-card') && streams.at(-1)?.onmessage`);
   return page;
 }

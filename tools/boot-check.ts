@@ -180,7 +180,12 @@ try {
   // Each step's limit is sized for a quiet box and stretched by the load when it starts (src/load-stretch.ts, #1514);
   // the backstop above still bounds all the steps together at 3 minutes.
   const boot = loadStretch();
-  const base = `http://127.0.0.1:${await listeningPort(server, boot.ms(20_000)).catch((err) => fail(err.message + boot.why))}`;
+  const { appendFileSync } = await import('node:fs');
+  const raw = () => readFileSync('/proc/loadavg', 'utf8').trim() + ' psi ' + readFileSync('/proc/pressure/cpu', 'utf8').split('\n')[0];
+  const t0 = Date.now(), raw0 = raw();
+  const note = (w: string) => appendFileSync(process.env.PROBE_LOG!, `[DEBUG-2009] ${w} after ${((Date.now() - t0) / 1000).toFixed(1)} s, limit ${boot.ms(20_000)}; start: ${raw0}; now: ${raw()}\n`);
+  const base = `http://127.0.0.1:${await listeningPort(server, boot.ms(20_000)).catch((err) => { note('FAIL'); return fail(err.message + boot.why); })}`;
+  note('ok');
 
   begin('/api/health');
   let health: any = null;

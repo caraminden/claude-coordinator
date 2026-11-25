@@ -84,6 +84,8 @@ export interface ClaudeEvent {
   claude_code_version?: string;
   plugin_errors?: LoadError[];
   mcp_server_errors?: LoadError[];
+  /** system background_tasks_changed: every one that runs now */
+  tasks?: { task_type?: string }[];
   /** rate_limit_event */
   rate_limit_info?: Record<string, unknown>;
   /** The Codex adapter's own lines (src/codex-turn.ts): codex_waiting, codex_gate, codex_rate_limits, and codex_* on init. */

@@ -200,6 +200,7 @@ test('an empty line picks nothing', () => assert.equal(pick([], new Map(), 0), n
 function line(saved: Record<string, unknown> = {}) {
   const busy = new Set<number>();
   const started: number[] = [];
+  const stopped: number[] = [];
   const turns: TurnLine = new TurnLine({
     store: { getSetting: <T>(k: string) => saved[k] as T, setSetting: (k: string, v: unknown) => void (saved[k] = v), deleteSetting: (k: string) => void delete saved[k], addHealthEvent: () => {} },
     exempt: () => false,
@@ -209,12 +210,12 @@ function line(saved: Record<string, unknown> = {}) {
       started.push(e.ticket);
       turns.enter(e.ticket, e.via);
     },
-    pauseTurn: () => {},
+    pauseTurn: (id) => void stopped.push(id),
     changed: () => {},
     gapMs: 0,
     detached: false,
   });
-  return { turns, busy, started, saved };
+  return { turns, busy, started, stopped, saved };
 }
 
 test('a paused turn resumed before it ended joins the line and leaks no worker', async () => {
@@ -234,6 +235,43 @@ test('a paused turn resumed before it ended joins the line and leaks no worker',
   await until('it to start', () => started.length > 0);
   assert.deepEqual(started, [7]);
   turns.stop();
+});
+
+// #1916. Josh, 2026-11-24: "shouldnt a minion waiting on a card just release to the pool until the card is answered?"
+test('a turn waiting on a card gives its worker back, and takes it again without waiting for one', async () => {
+  const { turns, started } = line({ 'turn-pool': { size: 1, at: 1 } });
+  turns.enter(7);
+  turns.hold(7, () => new Promise(() => {}));
+  assert.equal(turns.enter(8), false, 'the pool is full');
+  turns.setLent(7, true);
+  assert.deepEqual([turns.used(), turns.lent()], [0, 1]);
+  await until('the next to start', () => started.includes(8));
+  assert.deepEqual(turns.people(), [{ person: 1, used: 1, waiting: 0, lent: 1 }]);
+  turns.setLent(7, true); // a second card of the same turn
+  turns.setLent(7, false);
+  assert.deepEqual([turns.used(), turns.lent()], [2, 0], 'over the size until one ends');
+  assert.equal(turns.enter(9), false, 'and nothing new starts until then');
+  turns.stop();
+});
+
+test('a turn that ends while its worker is lent leaks nothing', async () => {
+  const { turns } = line({ 'turn-pool': { size: 1, at: 1 } });
+  turns.enter(7);
+  let end = () => {};
+  const held = turns.hold(7, () => new Promise<void>((done) => (end = done)));
+  turns.setLent(7, true);
+  end();
+  await held;
+  turns.setLent(7, false);
+  assert.deepEqual([turns.used(), turns.lent(), turns.people()], [0, 0, []]);
+});
+
+test('pausing and stopping stops a turn that waits on a card too', () => {
+  const { turns, stopped } = line();
+  turns.enter(7);
+  turns.setLent(7, true);
+  turns.setPause('stop', 'Josh');
+  assert.deepEqual(stopped, [7]);
 });
 
 test("a boot check's copy forgets the line and the pause", () => {

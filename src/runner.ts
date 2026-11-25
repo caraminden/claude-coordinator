@@ -86,6 +86,7 @@ import {
 } from './keepalive.ts';
 import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { cardWait, newCalls, noteCalls, type TurnCalls } from './card-wait.ts';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
@@ -292,6 +293,8 @@ interface TurnState {
   fpParts?: Record<string, string>;
   /** It runs at low effort (#951): its batch was only machine notices of success, or it keeps such a turn's cache warm. */
   light?: true;
+  /** The kinds of its background tasks that run now (TurnCalls.background), which its stored events don't keep. */
+  background?: string[];
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -310,6 +313,8 @@ interface LiveTurn {
   stopGraceTimer?: ClockTimer;
   /** What it last did and the tool calls still open (#906): when it counts as quiet. */
   activity: Activity;
+  /** Its open calls and background work, for what it does while a card waits (#1916). */
+  calls: TurnCalls;
   /** Stopped before its claude had started (no pid.json): signalled once it has. */
   stopPending?: boolean;
   /** Resolves once the turn has ended and its session is saved: its step on the minion's lane. */
@@ -983,6 +988,7 @@ export class Runner {
     this.approvals = new Approvals(
       (ticketId, kind, data) => {
         this.emit(ticketId, kind, data);
+        this.lendWorker(ticketId);
         // The threads list shows which threads are waiting on an approval.
         this.broadcastTicket(ticketId);
       },
@@ -2096,7 +2102,14 @@ export class Runner {
     }
     if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);
     if (turn.deployed) this.deployedMidTurn.add(ticketId);
-    this.lanes.run(ticketId, 're-attached turn', () => this.turnLine.reattach(ticketId, () => live.ended));
+    // The calls it had open, in what the chat kept of this turn.
+    for (const e of this.store.eventsOfKinds(ticketId, ['claude'], this.store.lastTurnEvent(ticketId))) if (e.created_at >= live.startedAt) noteCalls(live.calls, JSON.parse(e.data));
+    this.lanes.run(ticketId, 're-attached turn', () =>
+      this.turnLine.reattach(ticketId, () => {
+        this.lendWorker(ticketId);
+        return live.ended;
+      }),
+    );
     console.log(`Ticket ${ticketId}: re-attached to its running turn${live.unit ? ` in ${live.unit}` : ''}.`);
     return true;
   }
@@ -2395,6 +2408,12 @@ export class Runner {
     if (carry?.from) this.turnFrom.set(ticketId, carry.from);
     if (carry?.parkedAs) this.parkedAs.set(ticketId, carry.parkedAs as { state: TicketState | null; note: string | null });
     if (carry?.status) this.statuses.set(ticketId, carry.status as StatusFields);
+  }
+
+  /** A running turn that only waits on approval cards has no worker until one is answered (#1916). */
+  private lendWorker(ticketId: number) {
+    const live = this.turns.get(ticketId);
+    if (live) this.turnLine.setLent(ticketId, cardWait(live.calls, this.approvals.cards(ticketId)) !== 'working');
   }
 
   /** Merge into the saved state of a ticket's running turn. */
@@ -4285,6 +4304,7 @@ export class Runner {
       had: null,
       // After a restart the clock starts again: what ran before isn't known.
       activity: { at: Date.now(), tools: [] },
+      calls: newCalls(turn.background),
     };
     // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
     live.timer.unref();
@@ -4767,6 +4787,9 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (live) {
       live.activity = noteEvent(live.activity, ev, Date.now());
+      noteCalls(live.calls, ev);
+      if (ev.type === 'system' && ev.subtype === 'background_tasks_changed') this.saveTurn(ticketId, { background: live.calls.background });
+      this.lendWorker(ticketId);
       if (this.quietSince(ticketId, live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);
     }
     // A keepalive (#862) shows nothing: only its session id and its cost are kept.

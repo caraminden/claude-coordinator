@@ -288,7 +288,7 @@ interface Request {
   decision: Decision;
   wake: Set<() => void>;
   /** The card as the chat shows it, and when it was posted, for the Needs-you inbox. */
-  card: unknown;
+  card: { id: string; tool: string; use?: string };
   at: number;
 }
 
@@ -314,11 +314,11 @@ export class Approvals {
   }
 
   /** Post a card in the thread's chat for one tool call; returns its id. `merge` is the PR a `gh pr merge` names (src/merge-card.ts). */
-  request(ticketId: number, tool: string, input: unknown, tripwire?: { reason: string; explanation: string }, merge?: object): string {
+  request(ticketId: number, tool: string, input: unknown, tripwire?: { reason: string; explanation: string }, merge?: object, use?: string): string {
     const id = randomBytes(8).toString('hex');
     let shown = JSON.stringify(input ?? {});
     if (shown.length > MAX_INPUT) shown = JSON.stringify({ truncated: shown.slice(0, MAX_INPUT) });
-    const card = { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}), ...(merge ? { merge } : {}) };
+    const card = { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}), ...(merge ? { merge } : {}), ...(use ? { use } : {}) };
     this.requests.set(id, { ticketId, tripwire: !!tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: Date.now() });
     this.emit(ticketId, 'approval', card);
     return id;
@@ -331,7 +331,7 @@ export class Approvals {
    * tripwire card needs an explanation, shows the whole call, and is one at a time; after a deny, the
    * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
    */
-  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null, retry?: { target: MergeTarget; command: string } | null): { id: string } | { refused: string } {
+  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null, retry?: { target: MergeTarget; command: string } | null, use?: string): { id: string } | { refused: string } {
     // A throwaway saves list: the hook already saved what a file checkout throws away (#1716), so it passes here too.
     const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true }, []);
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
@@ -348,7 +348,7 @@ export class Approvals {
           refused: `${near.go.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.`,
         };
       }
-      const id = this.request(ticketId, tool, input, undefined, merge);
+      const id = this.request(ticketId, tool, input, undefined, merge, use);
       // A person's go typed in any of the scheme's chats covers its PR until that merges or closes (#260).
       const found = target && this.goFor(scheme, target);
       const go = found?.go;
@@ -366,7 +366,7 @@ export class Approvals {
     const mine = [...this.requests.values()].filter((r) => r.ticketId === ticketId && r.tripwire);
     if (mine.some((r) => r.decision.state === 'pending')) return { refused: 'An approval card for a tripwire block is already waiting in this chat; only one at a time. This was not run.' };
     if (mine.some((r) => r.decision.state === 'denied')) return { refused: 'A person denied a tripwire card earlier this turn, so no more are shown. This was not run: stop, and hand the commands to a person in your reply.' };
-    return { id: this.request(ticketId, tool, input, { reason: verdict.reason, explanation: why }) };
+    return { id: this.request(ticketId, tool, input, { reason: verdict.reason, explanation: why }, undefined, use) };
   }
 
   /**
@@ -466,6 +466,11 @@ export class Approvals {
     let n = 0;
     for (const r of this.requests.values()) if (r.ticketId === ticketId && r.decision.state === 'pending') n++;
     return n;
+  }
+
+  /** A thread's waiting cards: the tool each is for and its call's id, which cards from before #1916 lack. */
+  cards(ticketId: number): { id: string; tool: string; use?: string }[] {
+    return [...this.requests.values()].filter((r) => r.ticketId === ticketId && r.decision.state === 'pending').map((r) => r.card);
   }
 
   /** Every card still waiting on a person, in any thread. */

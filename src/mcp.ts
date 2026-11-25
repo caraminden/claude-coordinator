@@ -1976,7 +1976,7 @@ const APPROVE = {
 async function approve(args: Record<string, unknown>): Promise<string> {
   let decision: { state: string; by?: string; reason?: string } | undefined;
   try {
-    const { id, refused } = await call<{ id: string; refused?: string }>('POST', `/api/tickets/${C().TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
+    const { id, refused } = await call<{ id: string; refused?: string }>('POST', `/api/tickets/${C().TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {}, tool_use_id: args.tool_use_id });
     if (refused) return JSON.stringify({ behavior: 'deny', message: refused });
     // Each request waits up to half a minute on the server; keep asking until the card is settled.
     for (let failures = 0; !decision || decision.state === 'pending'; ) {

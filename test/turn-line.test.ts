@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -28,11 +28,16 @@ const prompts = join(root, 'prompts.log');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { appendFileSync, existsSync } = require('node:fs');
+const { appendFileSync, existsSync, readFileSync, unlinkSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   appendFileSync(${JSON.stringify(prompts)}, process.env.TEST_MINION + ' ' + input + '\\n');
   console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } }));
   setInterval(() => {
+    const print = ${JSON.stringify(root)} + '/print-' + process.env.TEST_MINION;
+    if (existsSync(print)) {
+      console.log(readFileSync(print, 'utf8'));
+      unlinkSync(print);
+    }
     if (!existsSync(${JSON.stringify(root)} + '/end-' + process.env.TEST_MINION)) return;
     console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
     process.exit(0);
@@ -192,6 +197,70 @@ test('a freed worker goes to whoever is furthest below their share, which grows 
   assert.equal(turnsOf(more).length, 0, 'Josh wants 6 and Cara 3 of 5 by now: his share is 3 of them');
   end(caras[3]);
   await started(more); // Cara is down to 1, under the first 2 everyone gets.
+});
+
+/** The minion's turn makes this call, and a card asks about it: the card's id. */
+async function carded(id: number, use = `use-${id}`) {
+  await print(id, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: use, name: 'Bash', input: { command: 'gh pr merge 1' } }] } });
+  return runner.approvals.request(id, 'Bash', { command: 'gh pr merge 1' }, undefined, undefined, use);
+}
+/** Its turn prints a line, which the Runner has read. */
+async function print(id: number, ev: object) {
+  const at = runner['turns'].get(id)!.offset;
+  writeFileSync(join(root, `print-${id}.tmp`), JSON.stringify(ev));
+  renameSync(join(root, `print-${id}.tmp`), join(root, `print-${id}`));
+  await until('its line to be read', () => runner['turns'].get(id)!.offset > at);
+}
+
+// #1916. Josh, 2026-11-24: "shouldnt a minion waiting on a card just release to the pool until the card is answered?"
+test('a minion waiting on an approval card frees its worker until the answer', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, b, c] = [minion(), minion(), minion()];
+  say(a);
+  await started(a);
+  for (const id of [b, c]) say(id);
+  await settle();
+  const card = await carded(a);
+  await started(b);
+  assert.deepEqual([runner.turnLine.used(), runner.turnLine.lent()], [1, 1]);
+  const tile = await workers('GET');
+  assert.deepEqual([tile.used, tile.lent, tile.waiting], [1, 1, 1]);
+  runner.approvals.decide(a, card, true, 'Josh');
+  assert.deepEqual([runner.turnLine.used(), runner.turnLine.lent()], [2, 0], 'answered, it goes on at once, over the size');
+  end(a);
+  await idle(a);
+  await settle();
+  assert.equal(turnsOf(c).length, 0, 'back under the size first');
+  end(b);
+  await started(c);
+});
+
+test('a turn that does something besides its card keeps its worker', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, b] = [minion(), minion()];
+  say(a);
+  await started(a);
+  say(b);
+  await print(a, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'read', name: 'Read', input: {} }] } });
+  await carded(a);
+  await settle();
+  assert.equal(turnsOf(b).length, 0, 'its Read still runs');
+  await print(a, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read', content: 'x' }] } });
+  await started(b);
+});
+
+test('after a restart, a turn still waiting on its card has no worker', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, b] = [minion(), minion()];
+  say(a);
+  await started(a);
+  await carded(a);
+  runner.detachAll();
+  runner = makeRunner();
+  runner.recover();
+  assert.deepEqual([runner.turnLine.used(), runner.turnLine.lent()], [0, 1]);
+  say(b);
+  await started(b);
 });
 
 test('the line survives a restart: order kept, nothing lost, nothing started twice', async () => {
@@ -429,7 +498,7 @@ test('a waiting minion shows as working with its place in the line', async () =>
   assert.deepEqual([view(b).status, view(b).worker_wait?.place, view(b).worker_wait?.of], ['running', 1, 2]);
   assert.equal(view(c).worker_wait?.place, 2);
   assert.equal(workerWaitText(view(c).worker_wait!), 'waiting for a worker, 2nd of 2 in line');
-  assert.deepEqual(runner.turnLine.people(), [{ person: cara.id, used: 1, waiting: 2 }]);
+  assert.deepEqual(runner.turnLine.people(), [{ person: cara.id, used: 1, waiting: 2, lent: 0 }]);
   end(a);
   await started(b);
   assert.equal(view(b).worker_wait, null);

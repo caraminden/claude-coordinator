@@ -185,3 +185,14 @@ test('a file can be named by its absolute path, and one the check does not cover
     done();
   }
 });
+
+test('a string continued onto the next line with a backslash does not hide an any after it (#2007)', () => {
+  for (const eol of ['\n', '\r\n']) {
+    for (const q of ["'", '"', '`']) {
+      const code = `type A = { a: ${q}x\\${eol}y${q}; b: any; c: ${q}z${q} };${eol}`;
+      assert.equal(escapes(code), 1, `stripped: ${JSON.stringify(code)}`);
+      assert.equal(escapes(code, 'x.d.ts'), 1, `d.ts: ${JSON.stringify(code)}`);
+      assert.equal(escapes(code, 'x.tsx'), 1, `pattern: ${JSON.stringify(code)}`);
+    }
+  }
+});

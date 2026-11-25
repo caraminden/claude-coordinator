@@ -593,16 +593,17 @@ const HOST_CHECK = {
   },
 };
 
-/** A scheme's CI runners on Cara's desktop (#328), through the runner agent there. */
+/** A scheme's CI runners on the PCs that host CI (#328), through the runner agent on each. */
 const CI_RUNNERS = {
   name: 'ci_runners',
   description:
-    "Add, list or remove this scheme's self-hosted GitHub Actions runners on Cara's desktop, through the CI runner agent there (tools/ci-runner/README.md). add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo (with os linux, Linux runners labelled <scheme-slug>-ci-linux, in WSL on the same PC, for jobs Windows can't run), skipping ones already there, then waits until GitHub shows them Idle; remove takes this scheme's runners off the PC and GitHub; list shows every runner service on that PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
+    "Add, list or remove this scheme's self-hosted GitHub Actions runners on a CI PC (more than one can host CI; list shows each), through the CI runner agent there (tools/ci-runner/README.md). `host` names the PC (its machine name from list_machines, or its hostname): add goes there and waits for that PC's own runners to show Idle (left out, it takes the first free PC); list and remove with no host reach every PC. add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo (with os linux, Linux runners labelled <scheme-slug>-ci-linux, in WSL on the same PC, for jobs Windows can't run), skipping ones already there, then waits until GitHub shows them Idle; remove takes this scheme's runners off the PC and GitHub; list shows every runner service on the PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
   inputSchema: {
     type: 'object',
     properties: {
       op: { type: 'string', enum: ['add', 'list', 'remove'] },
       count: { type: 'number', description: 'add only: how many runners this scheme should have, 1 to 4 (default 1)' },
+      host: { type: 'string', description: 'Which PC: its machine name or hostname. Left out: add takes the first free PC; list and remove reach every PC' },
       os: { type: 'string', enum: ['windows', 'linux'], description: 'Which runners: windows (the default) or linux, which the runner agent inside WSL on that PC adds, lists and removes' },
     },
     required: ['op'],
@@ -2512,12 +2513,11 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       return `${files.slice(0, 50).map(line).join('\n')}${files.length > 50 ? `\n… and ${files.length - 50} older` : ''}\n${(usage.scheme / 1024 ** 2).toFixed(1)} MiB in this scheme's store.`;
     }
     case 'ci_runners': {
-      const started = await call<CiJob>('POST', `/api/projects/${C().PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}) });
+      const started = await call<CiJob>('POST', `/api/projects/${C().PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}), ...(args.host !== undefined ? { host: args.host } : {}) });
       let job = started;
       for (const end = Date.now() + 10 * 60_000; job.ok === null && Date.now() < end; ) {
         const now = await call<{ job?: CiJob }>('GET', `/api/projects/${C().PROJECT}/ci-runners?wait=50`);
-        // The server restarted mid-job: the agent carries on, and its answer has nowhere to go.
-        if (!now.job) return `${started.op} on ${started.machine}: ${APP_NAME} restarted while it ran, so its outcome is lost; ci_runners list shows what is on the PC now.`;
+        if (!now.job) return `${started.op} on ${started.machine}: ${APP_NAME} restarted while it ran, so its outcome is lost; ci_runners list shows what is on the PCs now.`;
         job = now.job;
       }
       const head = `${job.op}${job.count ? ` ${job.count}` : ''}${job.os === 'linux' ? ' Linux' : ''} on ${job.machine}, asked by ${job.by}`;

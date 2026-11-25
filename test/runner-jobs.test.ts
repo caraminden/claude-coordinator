@@ -256,3 +256,48 @@ test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-
   assert.deepEqual(w.notes, ['Peek Auras: ✓ Josh added 1 Linux CI runner for Peek Auras on cara-desktop-linux']);
   w.relay.disconnect(wsl.id);
 });
+
+/** A second PC with a runner agent, as a second host (C1 of the worker machines plan). */
+function secondPc(w: ReturnType<typeof world>, host = 'LAPTOP-JOSH') {
+  const pc = w.store.createMachine('josh-laptop-runners', 'z', 'Cara', w.cara.id);
+  const agent = stream();
+  w.relay.connectAgent(pc, agent, { host, command: 'citadel runner agent', runners: true });
+  const answer = (ok: boolean, output: string) => {
+    const job = agent.sent.filter((m) => m.runners).at(-1).runners;
+    assert.equal(w.relay.runnerResult(pc, { id: job.id, ok, output }), true);
+    return job;
+  };
+  return { pc, agent, answer };
+}
+
+test("an add on a second PC waits for that PC's own runners, not the first PC's", async () => {
+  const w = world(300);
+  const two = secondPc(w);
+  // The first PC already has an Idle runner for the scheme; the add names the laptop.
+  w.gh.runners.push({ name: 'DESKTOP-G248IJ8', status: 'online', busy: false, labels: [{ name: 'peek-auras-ci' }] });
+  const started = await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', host: 'josh-laptop-runners' });
+  assert.equal(started.machine, 'josh-laptop-runners');
+  two.answer(true, 'Done');
+  const done = (await w.jobs.wait(w.scheme.id, 3000))!;
+  assert.equal(done.ok, false, "the desktop's Idle runner doesn't count for the laptop");
+  w.gh.runners.push({ name: 'LAPTOP-JOSH', status: 'online', busy: false, labels: [{ name: 'peek-auras-ci' }] });
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', host: 'LAPTOP-JOSH' });
+  two.answer(true, 'Done');
+  assert.equal((await w.jobs.wait(w.scheme.id, 3000))!.ok, true);
+});
+
+test('a host is named by its machine or its hostname; list and remove with none reach every host; an unknown host says which exist', async () => {
+  const w = world();
+  const two = secondPc(w);
+  await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null, os: 'windows', host: 'nope' }), { status: 409, message: /No CI runner host named nope.*cara-desktop-runners.*josh-laptop-runners/s });
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null, os: 'windows' });
+  w.answer(true, 'one');
+  await tick();
+  two.answer(true, 'two');
+  const done = (await w.jobs.wait(w.scheme.id, 3000))!;
+  assert.equal(done.ok, true);
+  assert.match(done.text, /cara-desktop-runners[\s\S]*one[\s\S]*josh-laptop-runners[\s\S]*two/);
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null, os: 'windows', host: 'laptop-josh' });
+  assert.equal(two.agent.sent.filter((m) => m.runners).length, 2);
+  assert.equal(w.agent.sent.filter((m) => m.runners).length, 1, 'the desktop got nothing');
+});

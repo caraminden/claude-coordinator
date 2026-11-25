@@ -146,6 +146,14 @@ test("Citadel's server goes back in a job of its own, with only deploy.sh's own 
   assert.equal(j.ticketId, 0);
 });
 
+test('an empty deploy.sh path is left to its default', async () => {
+  const w = world({ env: { DEPLOY_LIVE: '/scratch', DEPLOY_DB: '' } });
+  await w.r.starters[CITADEL_TARGET](tv(CITADEL_TARGET, CITADEL_TARGET), TO, 'Cara', 9);
+  const { env } = w.named('job')[0][1] as { env: Record<string, string> };
+  assert.equal(env.DEPLOY_LIVE, '/scratch');
+  assert.ok(!('DEPLOY_DB' in env));
+});
+
 test('only the scheme this server runs, with a clone, can roll Citadel back', () => {
   const cases: ((w: ReturnType<typeof world>) => void)[] = [(w) => (w.s.own = 5), (w) => (w.s.project = undefined), (w) => (w.s.project!.repo_dir = null)];
   for (const set of cases) {

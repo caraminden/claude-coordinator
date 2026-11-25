@@ -13,7 +13,7 @@ import { ciState, ciVerdict } from './ci-verdict.ts';
 import { every } from './every.ts';
 import { thrown } from './thrown.ts';
 import { rateLimited } from './gh-api.ts';
-import type { GhErrorBody, GhRun, GhRunsBody } from './gh-bodies.ts';
+import type { GhRun, GhRunsBody } from './gh-bodies.ts';
 
 export const POLL_MS = 20_000;
 /** Past this many runs in flight, each is looked at every SLOW_MS instead. */

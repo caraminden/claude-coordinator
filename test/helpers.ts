@@ -498,7 +498,7 @@ case $verb in
       case $verb in enable) touch "$d/$u.enabled"; [ -n "$now" ] && touch "$d/$u.active";;
         disable) rm -f "$d/$u.enabled"; [ -n "$now" ] && rm -f "$d/$u.active";;
         start|restart) touch "$d/$u.active";; stop) rm -f "$d/$u.active";; esac; done;;
-  daemon-reload) ;;
+  daemon-reload|set-property) ;;
   *) echo "unknown $verb" >&2; exit 1;;
 esac
 exit 0

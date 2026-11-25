@@ -8,7 +8,7 @@ import { type GhGet, ghGet, RateLimited, rateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { every, type Job } from './every.ts';
 import { thrown } from './thrown.ts';
-import type { GhErrorBody, GhJobsBody, GhRunsBody } from './gh-bodies.ts';
+import type { GhJobsBody, GhRunsBody } from './gh-bodies.ts';
 
 export const SHIP_POLL_MS = 15_000;
 const RATE_LIMITED_MS = 5 * 60_000;

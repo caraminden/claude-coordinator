@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { owners, prOwners, repoSlug } from '../src/prlinks.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { until } from './wait.ts';
 import type { Project, Ticket } from '../src/db.ts';
 
@@ -159,6 +160,7 @@ test('a copy older than 5 minutes answers at once while GitHub is asked behind i
       .filter((l) => l.startsWith('pr '));
     assert.equal(prCalls.length, 2, 'one refresh in flight, not one per page');
   } finally {
+    writeFileSync(join(dir, 'go'), '');
     restore();
   }
 });
@@ -177,7 +179,7 @@ test('a cold start asks every repo before the first has answered', async () => {
 
 test('a failed refresh keeps the last good list', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'prlinks-gh-'));
-  const restore = standInGh(dir, `echo "$1" >> ${dir}/calls\n[ -e ${dir}/fail ] && exit 1\n[ "$1" = pr ] && echo '[{"number":7,"headRefName":"x"}]' || echo '[{"number":8}]'`);
+  const restore = standInGh(dir, `trap 'echo >> ${dir}/done' EXIT\n[ -e ${dir}/fail ] && exit 1\n[ "$1" = pr ] && echo '[{"number":7,"headRefName":"x"}]' || echo '[{"number":8}]'`);
   try {
     let clock = 5_000_000;
     const p = [proj(1, 'stub/fail-a')];
@@ -193,9 +195,9 @@ test('a failed refresh keeps the last good list', async () => {
       () => [],
       () => clock,
     ); // starts the failing refresh
-    await until('the failing calls ran', () => readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean).length >= 4);
-    await new Promise((r) => setTimeout(r, 200)); // timing-ok: gh exited, its answer is still being read
-    clock += 6 * 60_000;
+    await until('the failing calls exited', () => existsSync(join(dir, 'done')) && readFileSync(join(dir, 'done'), 'utf8').split('\n').length > 4);
+    // timing-ok: gh has exited; its answer is still being read in this process, which has no signal
+    await sleep(100, undefined, { ref: false });
     const [r] = await prOwners(
       p,
       () => [],

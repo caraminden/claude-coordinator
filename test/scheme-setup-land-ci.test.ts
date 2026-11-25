@@ -199,6 +199,38 @@ test("CI gate: a landed commit's runs on the scratch branch are left to finish; 
   }
 });
 
+// #1894: GitHub lists a run some seconds after its push; a stop in between cancels it all the same, and only this branch's.
+test('CI gate: a landing stopped before GitHub lists the run it pushed waits for it and cancels it, within a cap', async () => {
+  const c = ciSetup(2, { stack: '1', builtin: true }); // two workflows
+  const log = () => readFileSync(join(c.ci, 'gh.log'), 'utf8');
+  const cancelled = () => [...new Set([...log().matchAll(/actions\/runs\/(\d+)\/cancel/g)].map((m) => m[1]))];
+  const looks = () => log().split('runs?branch=land/').length;
+  try {
+    const a = c.land(1, { LAND_CI_LATE: '20' });
+    const sha = git(c.origin, 'rev-parse', await c.tip(a));
+    const before = looks();
+    signalTree(a.child.pid!, 'SIGTERM');
+    await until('its first look for the run', () => a.child.exitCode !== null || a.child.signalCode !== null || looks() > before);
+    writeFileSync(join(c.ci, 'branch-runs'), `31\t${sha}\n`);
+    const seen = looks();
+    await until('two looks that list only its first workflow', () => a.child.exitCode !== null || a.child.signalCode !== null || looks() > seen + 2);
+    writeFileSync(join(c.ci, 'branch-runs'), `32\t${sha}\n31\t${sha}\n`);
+    await a.exit;
+    assert.deepEqual(cancelled(), ['31', '32']);
+    assert.deepEqual(c.scratch(), [], 'the scratch branch goes after it');
+    // Never listed: it ends at the cap, on its own.
+    writeFileSync(join(c.ci, 'branch-runs'), '');
+    const b = c.land(2, { LAND_CI_LATE: '3' });
+    await c.tip(b);
+    signalTree(b.child.pid!, 'SIGTERM');
+    await b.exit;
+    assert.deepEqual(cancelled(), ['31', '32']);
+    assert.deepEqual(c.scratch(), []);
+  } finally {
+    c.stop();
+  }
+});
+
 test('the stack: three in line run CI at once, each on top of the one ahead, and land in order on one run each', async () => {
   const c = ciSetup(3);
   try {

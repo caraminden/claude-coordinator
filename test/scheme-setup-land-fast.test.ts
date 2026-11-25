@@ -29,7 +29,7 @@ function fakeCi(dir: string) {
       return [];
     }
   };
-  return { env: { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_START: '3' }, answer, asked };
+  return { env: { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_LATE: '0', LAND_CI_START: '3' }, answer, asked };
 }
 const CI = { CI_STATUS: '"$CI_FAKE"' };
 const red = (...files: string[]) => `printf "test at %s:3:1\\n" ${files.join(' ')}; exit 1`;

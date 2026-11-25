@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { ci, git, seen } from './land-fixture.ts';
-import { line, shipped, bad, realOf } from './land-train-fixture.ts';
+import { type Ship, line, shipped, bad, realOf } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 
 test('five ships waiting in line ship as one train: one CI run, one deploy, each with its own shipped line', async () => {
@@ -87,6 +87,23 @@ test('a red train is bisected: the ship that turned it red is refused with its o
   assert.equal(l.runs(), 5, "ship 1's, the train's, two for the bisect, and the next train's");
   assert.equal(l.deployed().length, 3);
   l.done();
+});
+
+test("a ship stopped during its train's bisect cancels the step's run, whose id it hasn't read yet (#1894)", async () => {
+  const two: Ship = {};
+  const l = await line([{}, two, {}, { change: ['red.txt', 'red\n'] }], { FAKE_RED_PATH: 'red.txt' }, (r) => {
+    two.env = { FAKE_UNLISTED: `f2.txt ${join(r.dir, 'listed')}`, LAND_CI_LATE_POLL: '0.2' };
+  });
+  const all = l.go();
+  await until("the bisect's first step in CI", () => /bisect: testing the first 1 of 3/.test(l.out[1]) && l.hubAt('land/ticket/2-x') === 'f2.txt: 2');
+  const id = 6 + l.runs();
+  l.stop(2);
+  writeFileSync(join(l.r.dir, 'listed'), '');
+  const done = await all;
+  assert.notEqual(done[1].status, 0);
+  assert.deepEqual(l.cancelled(), [String(id)]);
+  assert.equal(l.hubAt('land/ticket/2-x'), '', 'its scratch branch goes');
+  assert.equal(done[2].status, 0, done[2].stderr); // the ships behind it carry on
 });
 
 // Suspects first (#1346): a real failure (the fake's log says test/real.test.ts failed again alone) is pinned on the ships

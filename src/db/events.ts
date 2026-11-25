@@ -276,6 +276,25 @@ export const eventQueries = {
     return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND id > ? AND kind IN ('claude', 'note', 'user_message', 'error') ORDER BY id LIMIT ?").all(ticketId, after, limit) as unknown as EventRow[];
   },
 
+  /** A minion's saved Explain (src/time-log-explain.ts), as stored. */
+  timeLogExplain(this: Store, ticketId: number): string | undefined {
+    return (this.db.prepare('SELECT data FROM time_log_explains WHERE ticket_id = ?').get(ticketId) as { data: string } | undefined)?.data;
+  },
+
+  saveTimeLogExplain(this: Store, ticketId: number, data: string) {
+    this.db.prepare('INSERT INTO time_log_explains (ticket_id, data, at) VALUES (?, ?, ?) ON CONFLICT (ticket_id) DO UPDATE SET data = excluded.data, at = excluded.at').run(ticketId, data, Date.now());
+  },
+
+  /** When the first of a chat's time-log events after event `after` was written, or null: what an Explain hasn't seen. */
+  timeLogNewSince(this: Store, ticketId: number, after: number): number | null {
+    return (this.db.prepare("SELECT MIN(created_at) AS at FROM events WHERE ticket_id = ? AND id > ? AND kind IN ('claude', 'note', 'user_message', 'error')").get(ticketId, after) as { at: number | null }).at;
+  },
+
+  /** A chat's events after event `after` that an Explain reads (the time log's, and its cards), at most `limit`, oldest first. */
+  explainEvents(this: Store, ticketId: number, after: number, limit: number): EventRow[] {
+    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND id > ? AND kind IN ('claude', 'note', 'user_message', 'error', 'question', 'plan', 'approval') ORDER BY id LIMIT ?").all(ticketId, after, limit) as unknown as EventRow[];
+  },
+
   /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
   eventIdAt(this: Store, at: number): number {
     // Two one-row lookups on the primary key: the one-query MIN(id), MAX(id) scanned the whole events table (0.7-1.3 s of stall).

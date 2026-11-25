@@ -30,8 +30,11 @@ export function settingsText(s: Settings): string {
   return [s.gate !== undefined ? `gate: ${s.gate ?? 'none'}` : '', s.panel !== undefined ? `panel: ${s.panel ?? 'none'}` : '', s.on_fail !== undefined ? `on_fail: ${s.on_fail?.length ? onFailText(s.on_fail) : 'the default'}` : '', s.position !== undefined ? `run order: ${s.position}` : ''].filter(Boolean).join('\n');
 }
 
-/** The cheap tier for a known-shape edit (the model table, public/model-table.js): Sonnet at medium. */
-const ARGS = ['-p', '--output-format', 'json', '--model', 'sonnet', '--effort', 'medium', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence'];
+/**
+ * One call and out: no tools, no settings or hooks, no MCP, no session kept. The model and effort default to the cheap
+ * tier for a known-shape edit (the model table, public/model-table.js): Sonnet at medium.
+ */
+const args = (model = 'sonnet', effort = 'medium', system?: string) => ['-p', '--output-format', 'json', '--model', model, '--effort', effort, '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', ...(system ? ['--system-prompt', system] : [])];
 const TIMEOUT_MS = 4 * 60_000;
 
 /** What the model reads: the ask, then the set as JSON with each entry's editable text. */
@@ -105,7 +108,24 @@ export const describesIn = (container: string) => running.get(container) ?? 0;
  * ultra reviews do) and return the model's text. `cwd` is a scratch folder the place can see. The Settings repeat
  * check (src/instructions-save.ts) runs its Sonnet call here too, with a shorter timeout.
  */
-export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeBin: string; hostEnv: Record<string, string>; cwd: string; timeoutMs?: number }): Promise<string> {
+export async function runDescribe(place: TurnPlace, prompt: string, o: OneShot): Promise<string> {
+  return (await runOneShot(place, prompt, o)).text;
+}
+
+export interface OneShot {
+  claudeBin: string;
+  hostEnv: Record<string, string>;
+  cwd: string;
+  timeoutMs?: number;
+  /** Another model or effort than the cheap tier's, and a system prompt in place of Claude Code's own. */
+  model?: string;
+  effort?: string;
+  system?: string;
+}
+
+/** runDescribe with what it cost: the model's text and the call's dollars, as Claude reported them (null when it didn't). */
+export async function runOneShot(place: TurnPlace, prompt: string, o: OneShot): Promise<{ text: string; cost: number | null }> {
+  const ARGS = args(o.model, o.effort, o.system);
   let argv: string[];
   let env: Record<string, string>;
   if (place.host) {
@@ -136,7 +156,7 @@ export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeB
       throw new Error(`The agent didn't answer: ${out.trim().slice(0, 300)}`);
     }
     if (r?.is_error || typeof r?.result !== 'string') throw new Error(`The agent didn't answer: ${String(r?.result ?? r?.subtype ?? 'no result').slice(0, 300)}`);
-    return r.result;
+    return { text: r.result, cost: typeof r.total_cost_usd === 'number' ? r.total_cost_usd : null };
   } finally {
     if (!place.host) running.set(place.container, describesIn(place.container) - 1);
   }

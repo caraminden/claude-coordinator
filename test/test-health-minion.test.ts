@@ -15,14 +15,15 @@ const store = new Store(join(root, 'coordinator.db'));
 async function read(projectId: number) {
   const route = projectRoutes.find((r) => r.method === 'GET' && r.path === '/api/projects/:project/test-health')!;
   let body = '';
-  const res: any = { destroyed: false, writeHead() {}, end: (b: Buffer | string) => (body += b), setHeader() {}, on() {} };
-  const app: any = { store, dataDir: root, ciHealth: null, fastMode: null };
-  await (route.handler as any)({ res, app, project: { id: projectId, repo_dir: null, land_mode: 'land' } });
-  return JSON.parse(body);
+  const res = { destroyed: false, writeHead() {}, end: (b: Buffer | string) => (body += b), setHeader() {}, on() {} };
+  const app = { store, dataDir: root, ciHealth: null, fastMode: null };
+  const project = { ...store.getProject(projectId)!, repo_dir: null, land_mode: 'land' };
+  await (route.handler as unknown as (c: unknown) => Promise<void>)({ res, app, project });
+  return JSON.parse(body) as { flakes: { file: string; minion: number | null }[] };
 }
 
 test('a flaky file whose fix minion is closed shows no owner unless its proof is held', async () => {
-  const project = store.createProject('Scheme', null as any) as any;
+  const project = store.createProject('Scheme', null);
   const now = Date.now();
   const mk = (title: string) => store.createTicket({ project_id: project.id, title, permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const files = { open: 'test/open.test.ts', closed: 'test/closed.test.ts', held: 'test/held.test.ts' };
@@ -35,7 +36,7 @@ test('a flaky file whose fix minion is closed shows no owner unless its proof is
   store.addFlakeFix(project.id, files.held, heldT.id, now - 5000, { state: 'held', clean_runs: 50, held_at: now - 2000 });
   store.updateTicket(closedT.id, { status: 'closed' });
   store.updateTicket(heldT.id, { status: 'closed' });
-  const by = Object.fromEntries((await read(project.id)).flakes.map((f: any) => [f.file, f.minion]));
+  const by = Object.fromEntries((await read(project.id)).flakes.map((f) => [f.file, f.minion]));
   assert.equal(by[files.open], openT.number, 'an open fix minion is on it');
   assert.equal(by[files.closed], null, 'a closed minion with no proof is nobody');
   assert.equal(by[files.held], heldT.number, 'a held fix still reads fixed it');

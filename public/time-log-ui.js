@@ -41,7 +41,7 @@ export async function readLog(force = false) {
   if (!force && e.failed && age < FRESH_MS) return;
   e.busy = true;
   try {
-    const log = await api(`/api/tickets/${id}/time-log`);
+    const log = await api(`api/tickets/${id}/time-log`);
     Object.assign(e, { log, sig, failed: '' });
   } catch (err) {
     // A kept chat opens before the network is asked (`replay`, base.js): not a failure, and asked again on the next redraw.

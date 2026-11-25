@@ -291,11 +291,14 @@ export function renderProgress() {
     const detail = log.parentElement === prevDetail && prevDetail ? prevDetail : h('div', { class: 'progress-detail timed' }, log);
     for (const c of [...detail.children]) if (c !== log) c.remove();
     detail.prepend(...[waitLine, request].filter(Boolean));
+    // The turn's own actions, which its line in the chat lists only once it ends.
+    if (running && view.turnActions.length) detail.append(phaseRows(view.turnActions, true, 'turn')[1]);
     for (const c of [...progressEl.children]) if (c !== detail) c.remove();
     progressEl.prepend(...[bar, meter, caption, w ? waitTail(view.ticket.id, w) : ''].filter(Boolean));
     if (detail.parentElement !== progressEl) progressEl.append(detail);
     progressEl.hidden = false;
     drawTimeLog();
+    detail.scrollTop = scrollTop;
     return;
   }
   let detail = '';

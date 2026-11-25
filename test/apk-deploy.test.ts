@@ -56,7 +56,7 @@ test('it waits and names its head by what is pending', async () => {
 
 test('a bumped version starts its release workflow, says so, and reads the releases again', async () => {
   const { d, did } = deployer(DISPATCH);
-  assert.match(String(await d.start(T, 'Cara', 3)), /^No signed APK newer.*started a release run of main/);
+  assert.match(String(await d.start(T, 'Cara', 3)), /release run of main \(\.github\/workflows\/release\.yml\)/);
   assert.deepEqual(did, [...RELEASE, ['refresh']]);
 });
 
@@ -68,7 +68,7 @@ test('a signed run is published, with no new release run', async () => {
 
 test('an APK signed before the version bump is marked too old and main is signed instead', async () => {
   const { d, did } = deployer(PUBLISH, { published: new OldApk('old') });
-  assert.match(String(await d.start(T, 'Cara', 3)), /^No signed APK newer/);
+  assert.match(String(await d.start(T, 'Cara', 3)), /release run of main/);
   assert.deepEqual(did.slice(1), [['tooOld', 42], ...RELEASE, ['refresh']]);
 });
 

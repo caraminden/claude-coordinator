@@ -127,7 +127,7 @@ export function capacityPanel(page) {
           'table',
           { class: 'ci-pools' },
           h('thead', {}, h('tr', {}, ...['Turns at once', 'Readings', 'Typical load', '1 in 10 above', 'Stalled'].map((t, i) => h('th', { scope: 'col', class: i ? 'num' : null }, t)))),
-          h('tbody', {}, ...d.bands.map((b) => h('tr', {}, h('th', { scope: 'row' }, b.to === null ? `${b.from} or more` : `${b.from} to ${b.to}`), ...[b.count, load(b.typical), load(b.high), b.stallOf ? `${pct(b)} (${b.stalls})` : '–'].map((v) => h('td', { class: 'num' }, String(v)))))),
+          h('tbody', {}, ...d.bands.map((b) => h('tr', {}, h('th', { scope: 'row' }, b.to === null ? `${b.from}+` : `${b.from} to ${b.to}`), ...[b.count, load(b.typical), load(b.high), b.stallOf ? `${pct(b)} (${b.stalls})` : '–'].map((v) => h('td', { class: 'num' }, String(v)))))),
         ),
       ),
       h('p', { class: 'look-prose' }, `Stalled: memory pressure of ${d.stallPct}% or more. Fewer than ${d.enough} readings in a row say little.`),

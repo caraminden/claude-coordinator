@@ -666,7 +666,7 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-fit-notes p { margin: 0; }
 .st-fit-tick.halo { stroke: var(--panel); stroke-width: 4px; paint-order: stroke; }
 .st-fit-scroll { overflow-x: auto; font-size: 0.9em; }
-.st-fit-scroll .ci-pools th { white-space: normal; vertical-align: bottom; }
+.st-fit-scroll .ci-pools thead th { white-space: normal; vertical-align: bottom; }
 @media (max-width: 480px) {
   .st-fit-numbers { min-height: 8.6rem; }
   .st-fit-numbers .stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }

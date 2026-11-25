@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { themeCss } from '../src/theme.ts';
 import { chromium, launch, serve, skipMessage, waitFor, type App, type Browser, type Page } from './browser.ts';
 import { holds } from './holds.ts';
+import { until } from './wait.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -217,10 +218,12 @@ test('lightbox: one finger swipes, two zoom and never step, and neither does a c
             ],
     });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
-  await touches('touchStart', 150, 220);
-  for (let d = 10; d <= 110; d += 10) await touches('touchMove', 150 - d, 220 + d);
-  await touches('touchEnd', 0, 0);
-  await waitFor(page, 'the page to zoom', 'visualViewport.scale > 1.2');
+  // How far one pinch zooms depends on how the browser batches its moves: paced 100 ms apart this one reaches 2.3
+  // (from the 0.65 the wide #box starts the page at), a frame apart 1.39, and all in one batch, as on a loaded
+  // runner, only 0.98 (#1969). So each pinch goes out as one batch, the least it can do, and a person who sees no
+  // zoom pinches again: a stage that refuses the pinch never gets there.
+  const pinch = () => Promise.all([touches('touchStart', 150, 220), ...[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110].map((d) => touches('touchMove', 150 - d, 220 + d)), touches('touchEnd', 0, 0)]);
+  await until('the page to zoom', async () => (await page.eval<number>('visualViewport.scale')) > 1.2 || void (await pinch()));
   assert.equal(await page.eval('lb.at'), 0);
 });
 

@@ -18,9 +18,9 @@ const LIMIT = "Claude AI usage limit reached: You've hit your session limit · r
 const onAccount = (turn: EndedTurn = {}) => ({ person: 7, account: 2, result: { error: true, text: LIMIT }, ...turn });
 
 const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
-  ['ended well', end(), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note', 'seam'] }],
-  ['ended well with a cached prefix', end({ turn: { result: ok, fp: 'f', fpParts: { a: 'b' } } }), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note', 'seam', 'keepalive'] }],
-  ["a fresh step's turn ended well: no seam enrolment", end({ turn: { result: ok, fresh: 'handoff' } }), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note'] }],
+  ['ended well', end(), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note'] }],
+  ['ended well with a cached prefix', end({ turn: { result: ok, fp: 'f', fpParts: { a: 'b' } } }), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note', 'keepalive'] }],
+  ["a fresh step's turn ended well", end({ turn: { result: ok, fresh: 'handoff' } }), { kind: 'ok', followUps: ['cleared', 'fresh', 'deploy-note'] }],
   ['ended well after close_self', end({ closing: true }), { kind: 'closing', followUps: ['cleared', 'close'] }],
   ['stopped', end({ turn: { stopped: true }, exit: { code: null, signal: 'SIGTERM' } }), { kind: 'stopped', followUps: [] }],
   ['stopped, even after close_self', end({ turn: { stopped: true, result: ok }, closing: true }), { kind: 'stopped' }],

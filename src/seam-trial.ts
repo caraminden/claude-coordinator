@@ -1,6 +1,6 @@
 // The fresh-sessions-at-seams trial (#1129, Josh 2026-11-19: "Go on F3"). A long minion re-reads everything it ever
 // said on every call, and compaction hits it at a moment nobody chose. In this trial, minions of every scheme whose
-// turn ends past SEAM_CONTEXT_TOKENS are enrolled one by one, alternately into two groups of ARM_SIZE: the fresh
+// next turn starts past SEAM_CONTEXT_TOKENS are enrolled one by one, alternately into two groups of ARM_SIZE: the fresh
 // group is told (a turn line) to hand off at a seam it picks and carry on in a fresh Claude session (fresh_session);
 // the control group carries on as today and is told nothing. tools/seam-trial.ts compares the two. Once both groups
 // are full nobody else is enrolled: nothing goes wider without a person's go on the readout's card.
@@ -8,8 +8,8 @@ import type { Ticket } from './db.ts';
 
 /** The trial's one setting: who is in which group, since when. */
 export const SEAM_TRIAL_KEY = 'seam-trial';
-/** A minion whose turn ends past this much context (tokens) is enrolled. */
-export const SEAM_CONTEXT_TOKENS = 150_000;
+/** A minion whose turn starts past this much context (tokens) is enrolled. Josh's 150k can't be reached: minions compact at about 147k (TURN_SETTINGS, #703), so nobody was enrolled Nov 20-24. */
+export const SEAM_CONTEXT_TOKENS = 120_000;
 /** Minions per group. */
 export const ARM_SIZE = 20;
 
@@ -40,7 +40,7 @@ export function eligible(t: Ticket | undefined, codex: boolean): boolean {
 }
 
 /**
- * Enrol a minion whose turn just ended with `context` tokens, if it qualifies and a group has room: groups take turns,
+ * Enrol a minion whose turn starts with `context` tokens, if it qualifies and a group has room: groups take turns,
  * so they stay the same size. Returns the trial to save and the minion's group, or null when nothing changes.
  */
 export function enrol(trial: SeamTrial | null | undefined, ticketId: number, context: number, now: number): { trial: SeamTrial; arm: Arm; filled: boolean } | null {

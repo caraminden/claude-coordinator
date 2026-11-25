@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The fresh-sessions-at-seams trial's readout (#1129): the fresh group against the control group, each minion counted
-// from the moment it was enrolled (its turn ended past 150k of context). Reads the database read-only.
+// from the moment it was enrolled (its turn started past SEAM_CONTEXT_TOKENS). Reads the database read-only.
 //
 //   node tools/seam-trial.ts [--db <path>] [--out <file>|-]
 //
@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { SEAM_TRIAL_KEY, SEAM_WHY, type Arm, type Enrolled, type SeamTrial } from '../src/seam-trial.ts';
+import { SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, SEAM_WHY, type Arm, type Enrolled, type SeamTrial } from '../src/seam-trial.ts';
 import { attachEventsIfThere } from '../src/events-db.ts';
 
 /** A person telling a minion it already had the answer: "I already said", "as I told you", "you asked me that". */
@@ -105,7 +105,7 @@ export function render(trial: SeamTrial, rows: MinionRow[], date: string): strin
   return [
     `# Fresh sessions at seams: trial readout (${date})`,
     '',
-    `Minions of every scheme whose turn ended past 150k of context, enrolled from ${pacific(trial.since)} PT${trial.full ? ` until both groups filled at ${pacific(trial.full)} PT` : ' (still enrolling)'}, alternately into the fresh group (told to hand off at a seam and carry on fresh) and the control group (carried on as before). Everything is counted from each minion's enrolment. Rebuilt with \`node tools/seam-trial.ts\` (#1129).`,
+    `Minions of every scheme whose turn started past ${SEAM_CONTEXT_TOKENS / 1000}k of context, enrolled from ${pacific(trial.since)} PT${trial.full ? ` until both groups filled at ${pacific(trial.full)} PT` : ' (still enrolling)'}, alternately into the fresh group (told to hand off at a seam and carry on fresh) and the control group (carried on as before). Everything is counted from each minion's enrolment. Rebuilt with \`node tools/seam-trial.ts\` (#1129).`,
     '',
     line(['Metric', 'Fresh: total', 'Fresh: per minion', 'Control: total', 'Control: per minion']),
     line(['---', '---', '---', '---', '---']),

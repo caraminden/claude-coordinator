@@ -29,7 +29,7 @@ export type Kind = 'ok' | 'stopped' | 'closing' | 'limit' | 'net' | 'switch-acco
  * `deploy-note` (a deploy that went live mid-turn). `close` dismisses the minion; `rerun` runs the batch of a turn a
  * restart cut off before claude had it as a plain turn.
  */
-export type FollowUp = 'cleared' | 'close' | 'fresh' | 'seam' | 'keepalive' | 'deploy-note' | 'rerun';
+export type FollowUp = 'cleared' | 'close' | 'fresh' | 'keepalive' | 'deploy-note' | 'rerun';
 
 /** The ways the server carries a turn on by itself, each counted in a row. */
 export type RetryKind = 'restart' | 'kill' | 'limit' | 'net' | 'switch';
@@ -152,7 +152,6 @@ export function outcome(end: TurnEnd): Outcome {
   if (!killed && sawResult && code === 0 && !turn?.result?.error) {
     if (end.closing) return { kind: 'closing', followUps: ['cleared', 'close'], ...base };
     const followUps: FollowUp[] = ['cleared', 'fresh', 'deploy-note'];
-    if (!turn?.fresh && !turn?.keepalive) followUps.push('seam');
     if (turn?.fp && turn.fpParts) followUps.push('keepalive');
     return { kind: 'ok', followUps, ...base };
   }

@@ -161,12 +161,28 @@ function sameSchemeTarget(app: App, from: Ticket, scheme: unknown, person: unkno
   return { own, person: asked, who: { uid: asked?.id, admin: !!asked?.admin }, project: own, to };
 }
 
-/** The project's coordinator ticket, created the first time someone opens the project. */
+/**
+ * The project's coordinator ticket, created the first time someone opens the project. Always with its folder (#1903):
+ * the row is made on this thread and its folder set by the write worker, so while that write is queued a read still
+ * finds the row with no folder (a read waits 50 ms for the queue, src/db-writer.ts, and a loaded box takes longer).
+ * Such a row is read again once the queue has landed, and one still without a folder then (a restart between the two
+ * writes) is given it.
+ */
 export async function ensureCoordinator(app: App, project: Project): Promise<Ticket> {
   const { store } = app;
+  // Read only when a folder is to be made: a reader has no dataDir, so that it throws there and the main thread does it.
+  const folder = () => join(projectDir(app.dataDir, project.id), 'coordinator');
+  const withFolder = async () => {
+    const t = await afterAllWrites(() => store.getCoordinator(project.id)!);
+    if (t.cwd) return t;
+    const cwd = folder();
+    await mkdir(cwd, { recursive: true });
+    store.setTicketDir(t.id, cwd, null);
+    return { ...t, cwd };
+  };
   const existing = store.getCoordinator(project.id);
-  if (existing) return existing;
-  const cwd = join(projectDir(app.dataDir, project.id), 'coordinator');
+  if (existing) return existing.cwd ? existing : withFolder();
+  const cwd = folder();
   await mkdir(cwd, { recursive: true });
   try {
     // A value write: the queue empties off the event loop first, so creating it never waits there (#1877).
@@ -177,7 +193,7 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
     // Lost a race with a concurrent request; the unique index kept a single coordinator. A queue still busy is a 503.
     if (e instanceof HttpError) throw e;
   }
-  return store.getCoordinator(project.id)!;
+  return withFolder();
 }
 
 /**

@@ -80,8 +80,14 @@ test('a live-style server (no exit-with-parent) whose pipes died keeps serving a
   const { tmp, proc, port } = await deadPipeServer(false);
   try {
     process.kill(proc.pid!, 'SIGHUP');
-    await sleep(2000); // timing-ok: lets the reload's own work finish before CPU is measured
-    assert.ok((await burned(proc.pid!, 1500)) < 50, 'under half a core over 1.5 s'); // 100 ticks a second
+    // The server is still starting when it first listens (about 3 CPU-seconds more, across threads), and a loaded
+    // runner stretches that past any fixed sleep (#2035). That work ends; the spin this guards against never does.
+    await until(
+      'a 1.5 s window under half a core',
+      async () => (await burned(proc.pid!, 1500)) < 50, // 100 ticks a second
+      undefined,
+      () => `${cpu(proc.pid!)} ticks`,
+    );
     assert.equal(exited(proc), false);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).status, 200);
   } finally {

@@ -2205,7 +2205,7 @@ export class Runner {
     return this.held.coldSweep(now);
   }
 
-  releaseMail(t: Ticket, p: Project, by = ''): number {
+  releaseMail(t: TicketFields, p: Project, by = ''): number {
     return this.held.releaseMail(t, p, by);
   }
 
@@ -2680,7 +2680,7 @@ export class Runner {
   }
 
   /** Who a turn runs for (its GitHub login, and #177's Claude plan): src/access.ts turnPayer, the one rule (#1270). */
-  private turnPerson(ticket: Ticket, project: Project, waiting: QueuedMessage[] | { msgs: QueuedMessage[]; held: QueuedMessage[] }, resuming = false): number | null {
+  private turnPerson(ticket: TicketFields, project: Project, waiting: QueuedMessage[] | { msgs: QueuedMessage[]; held: QueuedMessage[] }, resuming = false): number | null {
     return turnPayer(this.store, ticket, project, waiting, (author, from) => this.personOf?.(author, from) ?? null, resuming);
   }
 

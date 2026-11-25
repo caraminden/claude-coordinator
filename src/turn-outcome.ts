@@ -147,8 +147,10 @@ export function outcome(end: TurnEnd): Outcome {
   if (end.cut) return cutOutcome(turn, r, end.cut.rerun);
   if (stopped) return { kind: 'stopped', followUps: [], ...base };
   if (turn?.card) return { kind: 'card', followUps: [], ...base };
-  // Not the turn's doing, so it counts towards no cap.
-  if (turn?.paused) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
+  // Not the turn's doing, so it counts towards no cap. Not one that had already finished (a good result, a clean exit): a
+  // pause landing that late would run it again. An interrupted claude's result is an error, even on exit 0.
+  const finished = !!turn?.result && !turn.result.error && exit?.code === 0 && !exit.signal;
+  if (turn?.paused && !finished) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
   const code = exit?.code ?? null;
   // Citadel never sends SIGABRT: claude raises it on itself when it can't go on (#1848: five turns whose container was refused threads).
   const abort = exit?.signal === 'SIGABRT';

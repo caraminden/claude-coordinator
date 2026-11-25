@@ -107,7 +107,7 @@ async function pass(): Promise<void> {
       if (kind === 'link') await linkTree(now.src, dir);
       else await cp(now.src, dir, { recursive: true, verbatimSymlinks: true });
     } catch (e) {
-      failed = true;
+      if (at === now) failed = true; // a re-pin removed this pass's folder under it: that failure isn't the new spares'
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       console.warn(`pin spares: making a ${kind} spare failed, trying again at the next turn: ${(e as Error).message}`);
       return;

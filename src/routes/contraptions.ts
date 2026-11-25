@@ -246,8 +246,14 @@ const ASK_LIMIT = 10;
 /** Data asks wake no one, so they get more room (one per save, say); a loop backstop on their count, not their size. */
 const DATA_ASK_LIMIT = 60;
 const ASK_WINDOW_MS = 10 * 60_000;
-/** Big-file uploads for asks (#1841): a loop backstop on their count; ASK_UPLOAD_PENDING_MAX bounds the disk. */
+/**
+ * Big-file uploads for asks (#1841), per contraption and person in ASK_WINDOW_MS: a count backstop for loops, a byte
+ * budget so a loop can't fill the home scheme's inbox, and one at a time, so the byte checks hold while one streams.
+ */
 const UPLOAD_LIMIT = 20;
+const UPLOAD_WINDOW_BYTES = 1024 ** 3;
+const uploadLog = new Map<string, { at: number; bytes: number }[]>();
+const uploading = new Set<string>();
 const askTimes = new Map<string, number[]>();
 
 /** A turn API route: 'contraption' routes get the calling contraption (src/contraptions.ts caller) as ctx.contraption. */
@@ -780,23 +786,40 @@ export const contraptionRoutes: Route[] = [
     async handler({ req, res, url, app, contraption: c }) {
       const person = enabledPerson(app, c, url);
       homeOf(app, c, person);
-      const key = `${c.name}:${person}:upload`;
-      const recent = (askTimes.get(key) ?? []).filter((t) => Date.now() - t < ASK_WINDOW_MS);
+      const key = `${c.name}:${person}`;
+      if (uploading.has(key)) throw new HttpError(429, 'One upload at a time per person: send the next once the last has finished');
+      const recent = (uploadLog.get(key) ?? []).filter((u) => Date.now() - u.at < ASK_WINDOW_MS);
       if (recent.length >= UPLOAD_LIMIT) throw new HttpError(429, `At most ${UPLOAD_LIMIT} uploads per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`);
-      const dir = askUploadsDir(app.dataDir);
-      await sweepAskUploads(dir);
-      const room = ASK_UPLOAD_PENDING_MAX - (await pendingUploadBytes(dir, c.name, person));
-      const full = new HttpError(429, `At most ${ASK_UPLOAD_PENDING_MAX / 1024 ** 3} GiB of uploads per person not yet sent with an ask: send one, or wait a day for unsent ones to clear`);
+      const tooBig = new HttpError(413, `An uploaded file is at most ${ASK_UPLOAD_MAX / 1024 ** 2} MiB`);
       const declared = Number(req.headers['content-length'] ?? 0);
-      if (declared > ASK_UPLOAD_MAX) throw new HttpError(413, `An uploaded file is at most ${ASK_UPLOAD_MAX / 1024 ** 2} MiB`);
-      if (declared > room || room <= 0) throw full;
-      askTimes.set(key, [...recent, Date.now()]);
-      const max = Math.min(ASK_UPLOAD_MAX, room);
+      if (declared > ASK_UPLOAD_MAX) throw tooBig;
+      uploading.add(key);
       try {
-        return json(res, 201, await stageAskUpload(dir, c.name, person, url.searchParams.get('name') ?? '', req, max));
-      } catch (err) {
-        if (err instanceof HttpError && err.status === 413) throw max < ASK_UPLOAD_MAX ? full : new HttpError(413, `An uploaded file is at most ${ASK_UPLOAD_MAX / 1024 ** 2} MiB`);
-        throw err;
+        const entry = { at: Date.now(), bytes: 0 };
+        uploadLog.set(key, [...recent, entry]);
+        const dir = askUploadsDir(app.dataDir);
+        await sweepAskUploads(dir);
+        const unsent = ASK_UPLOAD_PENDING_MAX - (await pendingUploadBytes(dir, c.name, person));
+        const budget = UPLOAD_WINDOW_BYTES - recent.reduce((sum, u) => sum + u.bytes, 0);
+        const room = Math.min(unsent, budget);
+        const full = new HttpError(
+          429,
+          unsent <= budget
+            ? `At most ${ASK_UPLOAD_PENDING_MAX / 1024 ** 3} GiB of uploads per person not yet sent with an ask: send one, or wait a day for unsent ones to clear`
+            : `At most ${UPLOAD_WINDOW_BYTES / 1024 ** 3} GiB uploaded per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`,
+        );
+        if (declared > room || room <= 0) throw full;
+        const max = Math.min(ASK_UPLOAD_MAX, room);
+        try {
+          const up = await stageAskUpload(dir, c.name, person, url.searchParams.get('name') ?? '', req, max);
+          entry.bytes = up.size;
+          return json(res, 201, up);
+        } catch (err) {
+          if (err instanceof HttpError && err.status === 413) throw max < ASK_UPLOAD_MAX ? full : tooBig;
+          throw err;
+        }
+      } finally {
+        uploading.delete(key);
       }
     },
   },

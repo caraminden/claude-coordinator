@@ -200,7 +200,14 @@ async function moveIn(from: string, to: string) {
     if (code !== 'EXDEV') throw err;
     await copyFile(from, to, constants.COPYFILE_EXCL); // a data dir split over two filesystems
   }
-  await unlink(from);
+  try {
+    await unlink(from);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // Another ask linked it too and took it first: that one files it, this one leaves no copy.
+    await rm(to, { force: true });
+    throw new HttpError(409, 'An upload was used by another ask meanwhile');
+  }
   await rm(join(from, '..'), { recursive: true, force: true });
 }
 

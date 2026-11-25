@@ -294,6 +294,9 @@ finding (`citadel:self-review`, "UI findings"). Its "UI checks for every front e
   spend, relay, media): `fake-citadel/fake-citadel.ts` in this skill's folder, `startFakeCitadel({ app })`. Copy
   it into your repo's test folder; don't write your own. Citadel's `test/fake-citadel-contract.test.ts` checks it
   against the real API.
+- Your server's plumbing (`readJson` with a size limit and `unknown` typing, `HttpError`, `json`, `env`, `citadelUrl`):
+  copy `new-app/template/src/http.ts` rather than writing your own. Read `CITADEL_URL`; never type Citadel's address
+  (a dev-only fallback is in `citadelUrl()`); `BASE_PATH` likewise comes from the environment.
 - Using a part from the table above: its file in the table's last column, before writing the code.
 - Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).
 - A view that draws names, counts or lists, before its screenshots: [references/worst-case-data.md](references/worst-case-data.md).

@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDb } from './src/db.ts';
+import { env, json, send, sendError } from './src/http.ts';
 import { identityChecker, type Person } from './src/identity.ts';
 
 export const APP = '{{name}}';
@@ -37,9 +38,6 @@ export interface Running {
   url: string;
   close(): Promise<void>;
 }
-
-const send = (res: ServerResponse, status: number, body = '', type = 'text/plain; charset=utf-8') => void res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
-const json = (res: ServerResponse, status: number, body: unknown) => send(res, status, JSON.stringify(body), 'application/json');
 
 export async function start(opts: Options): Promise<Running> {
   const who = identityChecker(APP, opts.keysDir);
@@ -79,10 +77,7 @@ export async function start(opts: Options): Promise<Running> {
   }
 
   const server = createServer((req, res) => {
-    handle(req, res).catch((err) => {
-      console.error(err);
-      if (!res.headersSent) send(res, 500, 'Something went wrong');
-    });
+    handle(req, res).catch((err) => sendError(res, err));
   });
   await new Promise<void>((ok) => server.listen(opts.port, '127.0.0.1', ok));
   const { port } = server.address() as AddressInfo;
@@ -95,11 +90,6 @@ export async function start(opts: Options): Promise<Running> {
 }
 
 if (import.meta.main) {
-  const env = (name: string) =>
-    process.env[name] ||
-    (() => {
-      throw new Error(`${name} is not set: Citadel sets it on the service`);
-    })();
   const running = await start({ port: Number(env('PORT')), base: env('BASE_PATH'), dataDir: env('DATA_DIR'), keysDir: env('CITADEL_KEYS') });
   console.log(`${APP} listening on ${running.url}`);
   for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => void running.close().then(() => process.exit(0)));

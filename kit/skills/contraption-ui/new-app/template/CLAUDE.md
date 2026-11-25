@@ -14,7 +14,7 @@ deploys and the UI kit: the `citadel:contraption-ui` skill (its `references/api.
 - The database is `$DATA_DIR/app.db`. A schema change is a new `migrations/NNNN-what.sql`; a shipped migration
   is never edited. They run at start (`src/db.ts`).
 - Anything new kept in DATA_DIR goes into the nightly backup (`src/backup.ts`), or it isn't backed up.
-- PORT, BASE_PATH, DATA_DIR, CITADEL_KEYS and CITADEL_URL come from Citadel: never hard-code them.
+- PORT, BASE_PATH, DATA_DIR, CITADEL_KEYS and CITADEL_URL come from Citadel: never hard-code them. Read `CITADEL_URL` through `citadelUrl()` in `src/http.ts`; never type Citadel's address. Request bodies go through `readJson` (size-limited, `unknown`: check its shape), errors are `HttpError`, replies are `json()`.
 - Pages are on Citadel UI (`/apps/_citadel/`); follow the `citadel:contraption-ui` skill for any front-end work.
 
 ## Project facts

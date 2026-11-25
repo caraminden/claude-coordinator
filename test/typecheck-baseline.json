@@ -1,5 +1,4 @@
 {
-  "kit/hooks/retro-log.ts": [0, 2],
   "src/access.ts": [0, 1],
   "src/backup.ts": [0, 3],
   "src/db/deliveries.ts": [0, 2],

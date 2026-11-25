@@ -22,7 +22,7 @@
 import { execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import * as nodeModule from 'node:module';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 // --- config: set these to this repo (everything below is the kit's, the same in every scheme) ---
@@ -43,17 +43,39 @@ export async function tscErrors(root = ROOT, projects = PROJECTS): Promise<TscEr
   const out: TscError[] = [];
   for (const p of projects.map((p) => join(root, p))) {
     if (!existsSync(p)) throw new Error(`${p} is in PROJECTS but isn't there: fix the config block (\`[]\` counts escapes only)`);
-    const tsc = [root, dirname(p), ROOT].map((d) => join(d, 'node_modules', 'typescript', 'bin', 'tsc')).find((t) => existsSync(t));
-    if (!tsc) throw new Error('typescript is not installed in node_modules: run `npm ci` (the type check needs it as a devDependency)');
+    const tsc = tscPath(root, p);
     // tsc exits 2 when it found errors; anything else on stderr with no parsed error is tsc itself failing.
-    const stdout = await run(process.execPath, [tsc, '-p', p, '--noEmit', '--pretty', 'false'], { cwd: root, maxBuffer: 64 * 1024 * 1024 }).then(
+    // --extendedDiagnostics: its "Check time" line is there only when tsc got as far as checking types.
+    const stdout = await run(process.execPath, [tsc, '-p', p, '--noEmit', '--pretty', 'false', '--extendedDiagnostics'], { cwd: root, maxBuffer: 64 * 1024 * 1024 }).then(
       (r) => r.stdout,
       (e: { stdout?: string; stderr?: string; message: string }) => {
-        if (e.stdout && /error TS\d+/.test(e.stdout)) return e.stdout;
+        if (e.stdout && /error TS\d+/.test(e.stdout)) {
+          if (/^Check time:/m.test(e.stdout)) return e.stdout;
+          // After a syntax error, or one in the config, tsc skips every file's types: those zeros would pass as clean.
+          // shortcut: TypeScript before 5.9 prints the line either way, so there a skipped run still reads as clean.
+          const why = parseTsc(e.stdout, root).map((x) => (x.line ? `  ${x.file}(${x.line},${x.col}) ${x.code} ${x.text}` : `  ${x.text}`));
+          throw new Error(`tsc stopped before it checked any types, so no count can be trusted: fix these first\n${why.slice(0, 40).join('\n')}`);
+        }
         throw new Error(`tsc failed to run: ${e.stderr || e.message}`);
       },
     );
     out.push(...parseTsc(stdout, root));
+  }
+  return out;
+}
+
+function tscPath(root: string, project: string): string {
+  const tsc = [root, dirname(project), ROOT].map((d) => join(d, 'node_modules', 'typescript', 'bin', 'tsc')).find((t) => existsSync(t));
+  if (!tsc) throw new Error('typescript is not installed in node_modules: run `npm ci` (the type check needs it as a devDependency)');
+  return tsc;
+}
+
+/** The files tsc reads over every project, paths from `root`. */
+async function tscFiles(root = ROOT, projects = PROJECTS): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (const p of projects.map((p) => join(root, p))) {
+    const { stdout } = await run(process.execPath, [tscPath(root, p), '-p', p, '--listFilesOnly'], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
+    for (const f of stdout.split('\n').filter(Boolean)) out.add(relative(root, resolve(root, f)));
   }
   return out;
 }
@@ -94,6 +116,7 @@ function stripTypes(code: string): string {
 }
 
 const DIRECTIVE = /^[ \t]*(?:\/\/|\/\*+)[ \t]*@ts-(?:ignore|expect-error|nocheck)\b/gm;
+const TEXT = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/y;
 const WORD = /(?<![\w$])any(?![\w$])/g;
 
 /** Code with comments and string literals blanked to spaces, so positions stay put. Template `${}` holes are kept. */
@@ -102,6 +125,52 @@ function blankText(code: string): string {
     if (m[0] !== '`') return m.replace(/[^\n]/g, ' ');
     return m.replace(/\$\{([^}]*)\}|[^\n]/g, (part, hole: string | undefined) => (hole === undefined ? ' ' : `  ${hole} `));
   });
+}
+
+/**
+ * Code that is all types, with comments and quoted text blanked to spaces so positions stay put. A template type's
+ * `${}` holes hold types, so they are kept. Read left to right, so a `//` in text or a quote in a comment is no trap;
+ * only for type code, where no regex can hold a stray quote or backtick.
+ */
+function blankTypeText(types: string): string {
+  let out = '';
+  const holes: number[] = []; // open templates, each with its hole's depth of open braces
+  let inTemplate = false;
+  for (let i = 0; i < types.length; ) {
+    const rest = types.slice(i, i + 2);
+    if (inTemplate) {
+      if (rest === '${') {
+        holes.push(0);
+        inTemplate = false;
+        out += '  ';
+        i += 2;
+        continue;
+      }
+      if (types[i] === '`') inTemplate = false;
+      const n = types[i] === '\\' ? 2 : 1;
+      out += types.slice(i, i + n).replace(/[^\n]/g, ' ');
+      i += n;
+      continue;
+    }
+    TEXT.lastIndex = i;
+    const text = TEXT.exec(types)?.[0];
+    if (text) {
+      out += text.replace(/[^\n]/g, ' ');
+      i += text.length;
+      continue;
+    }
+    const c = types[i]!;
+    const top = holes.length - 1;
+    if (c === '`') inTemplate = true;
+    else if (c === '{' && top >= 0) holes[top]!++;
+    else if (c === '}' && top >= 0 && holes[top]!-- === 0) {
+      holes.pop();
+      inTemplate = true;
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 /**
@@ -125,8 +194,8 @@ function anysByPattern(code: string): number {
  * How many ways round the checker one TypeScript file takes: each `any` in a type, and each `@ts-ignore`,
  * `@ts-expect-error` or `@ts-nocheck` comment at the start of a line.
  * Types are found by Node's own stripper, which blanks every type in place: an `any` the stripper blanked was a type,
- * one it kept is a value, a property or text in a comment or string. A `.d.ts` is all types, so there every `any`
- * outside a comment counts. What the stripper can't parse (JSX) falls back to a pattern.
+ * one it kept is a value, a property or text in a comment or string. Comments and quoted text inside what it blanked
+ * don't count. A `.d.ts` is all types, so there every `any` outside a comment or quoted text counts. What the stripper can't parse (JSX) falls back to a pattern.
  */
 export function escapes(code: string, file = 'x.ts'): number {
   return countEscapes(code, file).n;
@@ -139,8 +208,7 @@ export function escapes(code: string, file = 'x.ts'): number {
 export function countEscapes(code: string, file = 'x.ts', byPattern = false): { n: number; by: 'types' | 'pattern' | 'dts' } {
   const directives = code.match(DIRECTIVE)?.length ?? 0;
   if (/\.d\.[cm]?ts$/.test(file)) {
-    const bare = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-    return { n: directives + (bare.match(WORD)?.length ?? 0), by: 'dts' };
+    return { n: directives + (blankTypeText(code).match(WORD)?.length ?? 0), by: 'dts' };
   }
   let stripped: string;
   try {
@@ -151,7 +219,12 @@ export function countEscapes(code: string, file = 'x.ts', byPattern = false): { 
     return { n: directives + anysByPattern(code), by: 'pattern' };
   }
   let anys = 0;
-  for (const m of code.matchAll(WORD)) if (stripped.slice(m.index, m.index + 3) !== 'any') anys++;
+  // Each stretch the stripper changed is read by itself, so a quote or backtick in the code it kept can't hide a type.
+  for (let i = 0; i < code.length; i++) {
+    const from = i;
+    while (i < code.length && (code[i] !== stripped[i] || /\s/.test(code[i]!))) i++;
+    if (i - from >= 3) anys += blankTypeText(code.slice(from, i)).match(WORD)?.length ?? 0;
+  }
   return { n: directives + anys, by: 'types' };
 }
 
@@ -252,9 +325,19 @@ async function main(args: string[]) {
   const { table, errors } = await measure();
   const files = args.filter((a) => !a.startsWith('--'));
   if (files.length) {
-    for (const f of files.map((f) => relative(ROOT, join(process.cwd(), f)))) {
+    const [tracked, typed] = await Promise.all([tsFiles(), tscFiles()]);
+    for (const f of files.map((f) => relative(ROOT, resolve(f)))) {
+      const counted = tracked.includes(f);
+      const checked = typed.has(f) && /\.(?:[cm]?ts|tsx)$/.test(f);
+      if (!counted && !checked) {
+        console.log(`${f}: not a file this check covers (a typo, not TypeScript, or not yet in git)`);
+        process.exitCode = 1;
+        continue;
+      }
       const base = existsSync(BASELINE) ? readBaseline()[f] : undefined;
       console.log(`${f}: errors ${table[f]?.errors ?? 0} (baseline ${base?.errors ?? 0}), escapes ${table[f]?.escapes ?? 0} (baseline ${base?.escapes ?? 0})`);
+      if (!checked) console.log('  not in any tsconfig of PROJECTS: its type errors are not checked');
+      if (!counted) console.log('  not tracked by git: its escapes are not counted');
       for (const e of errors.filter((e) => e.file === f)) console.log(`  ${e.line}:${e.col} ${e.code} ${e.text.replace(/\n/g, '\n    ')}`);
     }
     return;

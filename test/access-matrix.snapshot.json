@@ -4532,6 +4532,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/workers": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/workers": {
+  "anon": "401 Not logged in",
+  "person": "400 size or pause is needed, not both",
+  "member": "400 size or pause is needed, not both",
+  "outsider": "400 size or pause is needed, not both",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /apps/cx/link": {
   "anon": "200",
   "person": "200",

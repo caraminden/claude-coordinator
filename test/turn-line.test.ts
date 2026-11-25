@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { after, beforeEach, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { workerRoutes } from '../src/routes/workers.ts';
 import { Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -330,7 +332,7 @@ test('paused and stopped, running turns stop and carry on after it, with what wa
   await until('both to stop', () => !runner.isRunning(a) && !runner.isRunning(b));
   await until('both to stand in the line', () => runner.turnLine.waiting().length === 2);
   assert.ok(runner.isRunning(tm));
-  assert.equal(runner.turnLine.used(), 0);
+  await until('their workers to be free', () => runner.turnLine.used() === 0);
   assert.equal(store.listEvents(a).filter((e) => e.kind === 'error').length, 0, 'a pause is no failure');
   assert.equal(store.getTicket(a)!.status, 'idle', 'stored: no process runs');
   assert.equal(runner.view(store.getTicket(a)!).status, 'running', 'shown: working');
@@ -424,4 +426,40 @@ test("Auto moves the size and lets turns through as it grows; a person's number 
   runner.turnLine.tick(calm);
   await started(b);
   assert.equal(makeRunner().turnLine.size(), 2, 'a restart keeps it');
+});
+
+/** A call to the Workers tile's route, as Josh. */
+async function workers(method: 'GET' | 'PUT', body?: unknown) {
+  const route = workerRoutes.find((r) => r.method === method)!;
+  const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? null))]), { headers: { 'content-type': 'application/json' } });
+  let out = '';
+  const res = { writeHead: () => res, setHeader: () => {}, end: (text: string) => void (out = text) };
+  await route.handler({ req, res, app: { runner, store }, session: { name: 'Josh', uid: josh.id, exp: 0 } } as unknown as Parameters<typeof route.handler>[0]);
+  return JSON.parse(out);
+}
+
+test('the Workers tile reads the pool, and a person sets its size and the pause', async () => {
+  const [a, b] = [minion(), minion(false, 'Josh')];
+  await workers('PUT', { size: 1 });
+  say(a);
+  await started(a);
+  say(b, 'hello', 'Josh');
+  const tile = await workers('GET');
+  assert.deepEqual([tile.used, tile.size, tile.waiting, tile.pool.fixed], [1, 1, 1, { size: 1, by: 'Josh' }]);
+  assert.deepEqual(tile.people.map((p: { name: string; used: number; waiting: number }) => [p.name, p.used, p.waiting]).sort(), [
+    ['Cara', 1, 0],
+    ['Josh', 0, 1],
+  ]);
+  const paused = await workers('PUT', { pause: true });
+  assert.equal(paused.paused.by, 'Josh');
+  assert.equal((await workers('PUT', { size: null })).pool.fixed, undefined);
+  end(a);
+  await idle(a);
+  await settle();
+  assert.equal(turnsOf(b).length, 0, 'paused');
+  assert.equal((await workers('PUT', { pause: false })).paused, null);
+  await started(b);
+  const before = runner.turnLine.pool();
+  for (const bad of [{}, null, { size: 3, pause: true }, { size: 0 }, { size: 51 }, { size: 2.5 }, { size: '4' }, { pause: 'now' }]) await assert.rejects(workers('PUT', bad), { status: 400 }, JSON.stringify(bad));
+  assert.deepEqual(runner.turnLine.pool(), before, 'a refused change changes nothing');
 });

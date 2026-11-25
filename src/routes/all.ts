@@ -17,5 +17,25 @@ import { pushRoutes } from './push.ts';
 import { unitRoutes } from './units.ts';
 import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
+import { workerRoutes } from './workers.ts';
 
-export const apiRoutes = [...usageRoutes, ...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...proposalRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes];
+export const apiRoutes = [
+  ...usageRoutes,
+  ...appRoutes,
+  ...peopleRoutes,
+  ...projectRoutes,
+  ...reviewRoutes,
+  ...ticketRoutes,
+  ...proposalRoutes,
+  ...memoryCuratorRoutes,
+  ...fileRoutes,
+  ...machineRoutes,
+  ...jobRoutes,
+  ...ciStoreRoutes,
+  ...desktopRoutes,
+  ...pushRoutes,
+  ...unitRoutes,
+  ...contraptionRoutes,
+  ...skillRoutes,
+  ...workerRoutes,
+];

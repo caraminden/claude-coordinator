@@ -86,7 +86,7 @@ export function renderTicketHead() {
   // A dismissed minion's message box is tinted and says so (style.css), following reopen and dismiss live.
   const chat = el.closest('.chat');
   chat?.classList.toggle('dismissed', t.status === 'closed');
-  chat?.classList.toggle('turn-running', t.status === 'running');
+  chat?.classList.toggle('turn-running', t.status === 'running' && !t.worker_wait);
   // A spend card's buttons are for its own turn only (#723).
   for (const card of chat?.querySelectorAll('.scard') ?? []) card.classList.toggle('stale', Number(card.dataset.turn) !== t.turnStartedAt);
   // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
@@ -260,7 +260,7 @@ export function renderTicketHead() {
   syncHeldBrief();
   // While a turn runs, Send steers it (composer.js); said on hover rather than in a line of its own.
   const send = document.querySelector('.composer button[type=submit]');
-  if (send) send.title = t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
+  if (send) send.title = t.worker_wait ? 'Claude reads it when its turn starts' : t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
   scheduleProgress();
 }
 

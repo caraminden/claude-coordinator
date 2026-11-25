@@ -100,6 +100,16 @@ test('a slot is skipped while the last run still works, and a start that throws 
   assert.deepEqual(made, []);
   assert.match(store.schedules.get(sch.id)!.last_error ?? '', /was still working, so this slot was skipped/);
 
+  // Waiting for a worker (#1868) is still working: its stored status is idle, its turn is in the line.
+  store.updateTicket(busy.id, { status: 'idle' });
+  store.setSetting('turn-line', [{ ticket: busy.id, since: 1 }]);
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.deepEqual(made, []);
+  store.setSetting('turn-line', []);
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.equal(made.length, 1, 'out of the line, the next slot starts it');
+  made.length = 0;
+
   const broken = store.schedules.create({ project_id: project.id, name: 'broken', cron: '* * * * *', brief: 'b', type: 'chore', created_by: 'Cara' });
   await runs.run(broken);
   assert.equal(store.schedules.get(broken.id)!.last_error, 'no worktree');

@@ -583,7 +583,7 @@ export function threadRow(t, href = threadHref(t)) {
   // A minion setting up its first turn has no activity yet: a word holds the subtitle's line, so the row doesn't grow (#696).
   // A dismissed minion's row says when, in Pacific (#1072); its full date and time is the hover.
   const gone = !coord && st.label === 'Dismissed' ? dismissedWhen(t.closed_at) : null;
-  const note = (t.status === 'running' ? activity : t.note || activity) || (st.rank !== 1 ? '' : st.server ? st.label : t.status === 'new' ? 'Starting…' : 'Working…');
+  const note = (t.worker_wait ? t.note : t.status === 'running' ? activity : t.note || activity) || (st.rank !== 1 ? '' : st.server ? st.label : t.status === 'new' ? 'Starting…' : 'Working…');
   const share = t.host_cost && weekShare(t.host_cost); // the meter is the server login's plan
   // People's own note (#146), on a line of its own so the minion's note keeps its place.
   const pnote = !coord && view.personNotes?.[t.id];

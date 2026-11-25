@@ -9,6 +9,7 @@ import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
 import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
+import { onWorkers } from './workers.js';
 import { costSoon } from './cost.js';
 import { homeScheme, openStartScheme, renderSidebar, scheduleSidebar } from './sidebar.js';
 import { openBroken } from './home.js';
@@ -500,6 +501,7 @@ function connectStream(catchUp = false) {
       if (view.id) renderTicketHead();
     }
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
+    if (msg.type === 'workers') onWorkers(msg);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'machine_job') onJobUpdate(msg.job);
     if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) {

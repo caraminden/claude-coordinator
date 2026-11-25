@@ -68,6 +68,8 @@ test('the brief names the file, the count, the skill and the failing outputs', (
 // A flake fix has to prove it held (#1120).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { FlakeFixes } from '../src/flake-fixes.ts';
+import type { Job, Run } from '../src/ci-health.ts';
+import { fake } from './typed.ts';
 import { execFileSync } from 'node:child_process';
 import { branchShippedAt, cleanRuns, parseRetroFlakes } from '../src/flakes.ts';
 
@@ -120,8 +122,8 @@ test('a third sighting starts exactly one minion; a held fix reopens on the next
   put([30, 20, 2], 'test/two.test.ts');
   put([40, 30], 'test/pair.test.ts');
   const started: string[] = [];
-  let runs: any[] = [];
-  let jobs: any[] = [];
+  let runs: Run[] = [];
+  let jobs: Job[] = [];
   let n = 100;
   let clock = Date.now();
   const fx = new FlakeFixes({
@@ -144,14 +146,14 @@ test('a third sighting starts exactly one minion; a held fix reopens on the next
 
   const fix = st.flakeFix(project.id, 'test/two.test.ts')!;
   assert.equal(fix.state, 'open');
-  runs = [{ id: 7, display_title: 'flake-proof test/two.test.ts', created_at: new Date(clock + 60_000).toISOString(), status: 'in_progress', conclusion: null }];
+  runs = [fake<Run>({ id: 7, display_title: 'flake-proof test/two.test.ts', created_at: new Date(clock + 60_000).toISOString(), status: 'in_progress', conclusion: null })];
   jobs = [
-    {
+    fake<Job>({
       steps: [
         { name: '10 clean runs (1 of 5)', conclusion: 'success' },
         { name: '10 clean runs (2 of 5)', conclusion: 'success' },
       ],
-    },
+    }),
   ];
   clock += 120_000;
   await fx.tick([project]);

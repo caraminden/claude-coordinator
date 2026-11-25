@@ -4,6 +4,10 @@ import { after, before, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/db.ts';
 import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
+import { json, type Reply } from './typed.ts';
+
+/** The parts of the API's answers these tests read. */
+type View = { id: number; name: string; picks: unknown; owner: string };
 
 // Saved views: named property filters, each person's own list per scheme (#194).
 const repo = join(import.meta.dirname, '..');
@@ -14,13 +18,13 @@ after(() => scratch.teardown()); // ends the server and its detached turns befor
 let base = '';
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
+async function call<T = View[]>(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<Reply<T>> {
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { Cookie: cookies[who], ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  return { status: res.status, data: await res.json() };
+  return { status: res.status, data: await json<T>(res) };
 }
 
 let joshId = 0;
@@ -52,15 +56,15 @@ before(async () => {
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   await login('Cara');
   // Josh signs in through an invite: the shared password signs in only an admin.
-  const { data: made } = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
+  const { data: made } = await call<{ person: { id: number }; token: string }>('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
   joshId = made.person.id;
   const res = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'josh-password-1' }) });
   cookies.Josh = res.headers.get('set-cookie')!.split(';')[0];
 });
 
 test("views are each person's own per scheme, replaced by name, deletable only by their owner, and validated", async () => {
-  const { data: p } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Views' } });
-  const { data: other } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Elsewhere' } });
+  const { data: p } = await call<{ id: number }>('Cara', '/api/projects', { method: 'POST', body: { name: 'Views' } });
+  const { data: other } = await call<{ id: number }>('Cara', '/api/projects', { method: 'POST', body: { name: 'Elsewhere' } });
   await call('Cara', `/api/projects/${p.id}/members`, { method: 'POST', body: { person: joshId } });
   const url = `/api/projects/${p.id}/views`;
   assert.deepEqual((await call('Cara', url)).data, []);
@@ -68,12 +72,12 @@ test("views are each person's own per scheme, replaced by name, deletable only b
   const saved = await call('Cara', url, { method: 'POST', body: { name: ' Build 8 art ', picks: { type: ['art'], build: [8] } } });
   assert.equal(saved.status, 200);
   assert.deepEqual(
-    saved.data.map((v: any) => [v.name, v.picks, v.owner]),
+    saved.data.map((v) => [v.name, v.picks, v.owner]),
     [['Build 8 art', { type: ['art'], build: [8] }, 'Cara']],
   );
   await call('Cara', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug'] } } });
   assert.deepEqual(
-    (await call('Cara', url)).data.map((v: any) => v.name),
+    (await call('Cara', url)).data.map((v) => v.name),
     ['Bugs', 'Build 8 art'],
   );
   assert.deepEqual((await call('Josh', url)).data, [], "Josh doesn't see Cara's");
@@ -81,15 +85,15 @@ test("views are each person's own per scheme, replaced by name, deletable only b
 
   const josh = await call('Josh', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug', 'feature'] } } });
   assert.deepEqual(
-    josh.data.map((v: any) => [v.name, v.picks, v.owner]),
+    josh.data.map((v) => [v.name, v.picks, v.owner]),
     [['Bugs', { type: ['bug', 'feature'] }, 'Josh']],
     'the same name is his own view',
   );
   const caras = (await call('Cara', url)).data;
-  assert.deepEqual(caras.find((v: any) => v.name === 'Bugs').picks, { type: ['bug'] }, "and leaves Cara's alone");
+  assert.deepEqual(caras.find((v) => v.name === 'Bugs')!.picks, { type: ['bug'] }, "and leaves Cara's alone");
 
   const replaced = await call('Cara', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug', 'idea'] } } });
-  assert.deepEqual(replaced.data.find((v: any) => v.name === 'Bugs').picks, { type: ['bug', 'idea'] });
+  assert.deepEqual(replaced.data.find((v) => v.name === 'Bugs')!.picks, { type: ['bug', 'idea'] });
   assert.equal(replaced.data.length, 2);
 
   for (const picks of [undefined, {}, [], { type: [] }, { type: 'bug' }, { type: [{}] }, { type: [null] }]) {
@@ -97,12 +101,12 @@ test("views are each person's own per scheme, replaced by name, deletable only b
   }
   assert.equal((await call('Cara', url, { method: 'POST', body: { name: '  ', picks: { type: ['bug'] } } })).status, 400);
 
-  const art = replaced.data.find((v: any) => v.name === 'Build 8 art');
+  const art = replaced.data.find((v) => v.name === 'Build 8 art')!;
   assert.equal((await call('Cara', `/api/projects/${other.id}/views/${art.id}`, { method: 'DELETE' })).status, 404, 'not through another scheme');
   assert.equal((await call('Josh', `${url}/${art.id}`, { method: 'DELETE' })).status, 404, "not someone else's");
   const left = await call('Cara', `${url}/${art.id}`, { method: 'DELETE' });
   assert.deepEqual(
-    left.data.map((v: any) => v.name),
+    left.data.map((v) => v.name),
     ['Bugs'],
   );
   assert.equal((await call('Cara', `${url}/${art.id}`, { method: 'DELETE' })).status, 404);

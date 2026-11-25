@@ -17,7 +17,7 @@ const scratch = tempRoot('linux-runner-');
 const tmp = scratch.dir;
 let root: string, units: string, log: string, base: string, sha: string;
 const USER = `ci-theory-of-crafting-${createHash('sha256').update('caraminden/theory-of-crafting').digest('hex').slice(0, 6)}`;
-const asked: any[] = [];
+const asked: { scheme: number; mint?: boolean; kind?: string }[] = [];
 const server = createServer((req, res) => {
   let body = '';
   req
@@ -76,10 +76,10 @@ function run(script: string, args: string[], env: Record<string, string> = {}): 
       env: { PATH: process.env.PATH_FOR_SCRIPTS!, HOME: tmp, CC_MACHINE_TOKEN: TOKEN, CITADEL_RUNNER_ROOT: root, CITADEL_RUNNER_UNITS: units, USERS: join(tmp, 'users'), RUNNER_SHA256: sha, RUNNER_NAME: 'DESK', CITADEL_RUNNER_SETTLE: '0', FAKE_TARBALL: join(tmp, 'runner.tar.gz'), LOG: log, ...env },
     });
     let out = '';
-    child.stdout.on('data', (c) => {
+    child.stdout!.on('data', (c) => {
       out += c;
     });
-    child.stderr.on('data', (c) => {
+    child.stderr!.on('data', (c) => {
       out += c;
     });
     child.on('close', (code) => resolve({ code: code ?? -1, out }));

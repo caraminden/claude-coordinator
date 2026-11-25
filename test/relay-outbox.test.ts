@@ -237,7 +237,7 @@ test('a relay whose minion was dismissed without shipping is dropped with a reas
   store.updateTicket(from.id, { status: 'closed' });
   await s.waiters.check(base);
   assert.equal(rows()[0].state, 'waiting', 'a fresh dismissal may still ship (a PR merged later)');
-  (store as any).db.prepare('UPDATE tickets SET closed_at = ? WHERE id = ?').run(Date.now() - 4 * 86_400_000, from.id);
+  store.db.prepare('UPDATE tickets SET closed_at = ? WHERE id = ?').run(Date.now() - 4 * 86_400_000, from.id);
   await s.waiters.check(base);
   assert.equal(rows()[0].state, 'dropped');
   assert.match(rows()[0].reason ?? '', /dismissed without shipping/);

@@ -437,7 +437,7 @@ test('a leader already live when the chain is set starts it at once', async () =
   const leader = minion();
   live.work(leader.branch);
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
-  w.head = live.git('rev-parse', 'HEAD');
+  w.head = w.proven = live.git('rev-parse', 'HEAD');
   store.updateTicket(leader.id, { status: 'closed' });
   assert.equal((await w.follow(leader.id, 'live')).state, 'go');
 });

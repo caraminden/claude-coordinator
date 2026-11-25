@@ -9,6 +9,7 @@ import { Store, type Ticket } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { STUCK_GAP_MS, stuckItems, stuckList } from '../src/stuck-list.ts';
 import { jsonLines, stopTurns, testPins, until, fakeClaude } from './helpers.ts';
+import { fake as fakeOf } from './typed.ts';
 testPins();
 
 const H = 3_600_000;
@@ -21,11 +22,11 @@ function world() {
   const p = store.createProject('Delve', null, cara.id).id;
   const tm = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
   const views = new Map<number, object>();
-  const runner = { view: (t: Ticket) => ({ queued: 0, open_cards: [], outbox_waits: [], ...views.get(t.id) }) as any };
+  const runner = { view: (t: Ticket) => fakeOf<ReturnType<Runner['view']>>({ queued: 0, open_cards: [], outbox_waits: [], ...views.get(t.id) }) };
   /** A minion idle for `idleH` hours, with view fields `view` and ticket fields `fields`. */
   const minion = (title: string, idleH: number, view: object = {}, fields: Partial<Ticket> = {}) => {
     const t = store.createTicket({ project_id: p, title, permission_mode: 'default', created_by: 'Cara' });
-    store.updateTicket(t.id, { status: 'idle', ...fields } as any);
+    store.updateTicket(t.id, { status: 'idle', ...fields });
     store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(NOW - idleH * H, t.id);
     views.set(t.id, view);
     return store.getTicket(t.id)!;
@@ -160,7 +161,7 @@ test("the block rides on a Taskmaster turn a person started, not on one a minion
     () => ({}),
     fake,
   );
-  const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: any) => c.text).join('\n'));
+  const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: { text: string }) => c.text).join('\n'));
   runner.send(tm.id, `#${old.number} Forgotten work`, 'an update', [], { from: old.id });
   await until('the minion-started turn', () => texts().length === 1 && !runner.isRunning(tm.id));
   assert.doesNotMatch(texts()[0], /Stuck list/);

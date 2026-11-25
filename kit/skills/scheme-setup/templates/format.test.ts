@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,7 +22,8 @@ test('every .ts, .js and .mjs file is formatted', { skip: !existsSync(bin) && !p
 test('the check is red on an unformatted file and green once formatted', { skip: !existsSync(bin) ? 'Biome is not installed here' : false }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'fmt-'));
   try {
-    copyFileSync(join(root, 'biome.json'), join(dir, 'biome.json'));
+    // Its own config, not the repo's: the repo's includes may leave x.ts out, and its style is its own.
+    writeFileSync(join(dir, 'biome.json'), '{ "formatter": { "enabled": true } }\n');
     writeFileSync(join(dir, 'x.ts'), 'const  a = {b:1}\n');
     const run = (...args: string[]) => spawnSync(bin, ['format', ...args, '.'], { cwd: dir, encoding: 'utf8' });
     assert.notEqual(run().status, 0);

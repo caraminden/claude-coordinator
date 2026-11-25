@@ -32,6 +32,8 @@ after(async () => {
   await tmp.teardown();
 });
 
+type ToolDef = { name: string; description: string; inputSchema: { properties: Record<string, { description: string; items: { properties: { options: { items: { properties: Record<string, { description: string }> } } } } }> } };
+
 async function tool(ticket: { id: number }, name: string, args: object): Promise<{ isError?: boolean; text: string }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
@@ -46,8 +48,8 @@ async function tool(ticket: { id: number }, name: string, args: object): Promise
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+    const reply = new Promise<{ result: { isError?: boolean; content: { text: string }[] } }>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
     const r = (await reply).result;
     return { isError: r.isError, text: r.content[0].text };
   } finally {
@@ -160,9 +162,9 @@ test("close_self's refusal with a card open says to leave it open and say why in
 test('the four descriptions are one sentence each, and "put it first" lives in the recommended flag', () => {
   const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n';
   const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '', COORDINATOR_DEPLOYS: '1' } });
-  const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools;
+  const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools as ToolDef[];
   for (const name of ['ask_question', 'message_coordinator', 'hand_off_land', 'close_self']) {
-    const d = tools.find((t: any) => t.name === name).description;
+    const d = tools.find((t) => t.name === name)!.description;
     // One sentence: its only full stop ends it (close_self's first sentence carries a parenthesis with a colon).
     assert.equal(
       d
@@ -173,10 +175,10 @@ test('the four descriptions are one sentence each, and "put it first" lives in t
       `${name}: ${d}`,
     );
   }
-  const ask = tools.find((t: any) => t.name === 'ask_question');
+  const ask = tools.find((t) => t.name === 'ask_question')!;
   const option = ask.inputSchema.properties.questions.items.properties.options.items.properties;
   assert.match(option.recommended.description, /listed first/);
   assert.match(option.image.description, /pictured options show as a gallery/);
   // A start that waits on a ship must say so in the message itself, so start_after is read before the send (#1573's move10 case).
-  assert.match(tools.find((t: any) => t.name === 'message_coordinator').inputSchema.properties.need.description, /start: start a minion \(one that waits on a ship: name it, for create_ticket's start_after\)/);
+  assert.match(tools.find((t) => t.name === 'message_coordinator')!.inputSchema.properties.need.description, /start: start a minion \(one that waits on a ship: name it, for create_ticket's start_after\)/);
 });

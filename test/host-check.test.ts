@@ -79,7 +79,7 @@ test('journal, status and units run the fixed commands; bad arguments say what t
   for (const body of [{ what: 'status' }, { what: 'status', unit: 'x; rm -rf /' }, { what: 'journal', lines: 0 }, { what: 'journal', since: '$(id)' }, { what: 'db', sql: '' }, { what: 'shell' }]) {
     assert.throws(
       () => hostCheck(opts, body),
-      (err: any) => err.status === 400,
+      (err: Error & { status: number }) => err.status === 400,
       JSON.stringify(body),
     );
   }

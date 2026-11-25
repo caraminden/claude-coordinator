@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { systemPrompt, turnContext } from '../src/prompts.ts';
+import type { Project, Ticket } from '../src/db-rows.ts';
+import { systemPrompt, turnContext, type TurnMachine } from '../src/prompts.ts';
+import { fake } from './typed.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
 // Budgets are characters (minion 36,400 on 2026-11-18: #975 added the finishing-work lines, AG-01; Taskmaster 39,500 on 2026-11-19: #1030 added the .env grep habit; 39,700 the same day: #1056 added the design-brief ambition line; minion 37,000 and Taskmaster 40,100 the same day: #1043 added the Shipping line both read, path, go threshold and try-first, in place of each scheme's own shipping paragraph; Taskmaster 40,800 on 2026-11-19: #1154 added the rule-to-hook trigger) (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
@@ -15,8 +17,8 @@ const BUDGET = {
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);
-const project = { id: 2, name: 'Citadel', instructions: 'y'.repeat(10_123), approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
-const minion = { id: 929, number: 415, title: 'Prompt size budget check', kind: 'ticket', branch: 'ticket/415-prompt-size-budget-check' } as any;
+const project = fake<Project>({ id: 2, name: 'Citadel', instructions: 'y'.repeat(10_123), approval_rules: '', onboarding: 'done', repo_dir: '/repo' });
+const minion = fake<Ticket>({ id: 929, number: 415, title: 'Prompt size budget check', kind: 'ticket', branch: 'ticket/415-prompt-size-budget-check' });
 const prompts = {
   minion: systemPrompt(project, minion, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app),
   taskmaster: systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app),
@@ -127,12 +129,12 @@ test("a minion's always-loaded tool definitions stay within their budget", () =>
   for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }, { COORDINATOR_DEPLOYS: '1', COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {
     const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n';
     const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '', COORDINATOR_DEPLOYS: '', COORDINATOR_HOME_CONTRAPTIONS: '', TMPDIR: '', ...env } }); // no TMPDIR: no held tool list (src/tool-hold.ts) left behind
-    const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools.filter((t: any) => t._meta?.['anthropic/alwaysLoad']);
-    assert.deepEqual(tools.map((t: any) => t.name).sort(), ['ask_question', 'close_self', 'hand_off_land', 'message_coordinator', 'plan', 'set_properties', 'set_thread_status'], JSON.stringify(env));
-    const sizes = tools.map((t: any) => ({ name: t.name, n: JSON.stringify({ name: t.name, description: t.description, input_schema: t.inputSchema }).length }));
-    const total = sizes.reduce((s: number, x: any) => s + x.n, 0);
-    const added = sizes.filter((x: any) => x.name === 'plan' || x.name === 'hand_off_land').reduce((s: number, x: any) => s + x.n, 0);
-    const lines = sizes.sort((a: any, b: any) => b.n - a.n).map((x: any) => `  ${x.n} ${x.name}`);
+    const tools = (JSON.parse(r.stdout.split('\n')[0]).result.tools as { name: string; description: string; inputSchema: unknown; _meta?: Record<string, unknown> }[]).filter((t) => t._meta?.['anthropic/alwaysLoad']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_question', 'close_self', 'hand_off_land', 'message_coordinator', 'plan', 'set_properties', 'set_thread_status'], JSON.stringify(env));
+    const sizes = tools.map((t) => ({ name: t.name, n: JSON.stringify({ name: t.name, description: t.description, input_schema: t.inputSchema }).length }));
+    const total = sizes.reduce((s, x) => s + x.n, 0);
+    const added = sizes.filter((x) => x.name === 'plan' || x.name === 'hand_off_land').reduce((s, x) => s + x.n, 0);
+    const lines = sizes.sort((a, b) => b.n - a.n).map((x) => `  ${x.n} ${x.name}`);
     assert.ok(added <= ADDED_BUDGET, [`plan and hand_off_land (${JSON.stringify(env)}) are ${added} characters, over the ${ADDED_BUDGET} (1k tokens) #1275 added them for. Trim them.`, ...lines].join('\n'));
     assert.ok(
       total <= TOOLS_BUDGET,
@@ -143,7 +145,7 @@ test("a minion's always-loaded tool definitions stay within their budget", () =>
 
 // #760: a minion hears about ci-failures and dispatched-workflow watching only while its branch has an open PR.
 test('the PR line says more only with an open PR', () => {
-  const args = ['/shared/929', '/shared/project', '/tickets', '/memory', [], true, app] as const;
+  const args = ['/shared/929', '/shared/project', '/tickets', '/memory', [] as TurnMachine[], true, app] as const;
   // In the turn message since #878, so opening a PR no longer changes system-prompt.md.
   const without = turnContext(project, minion, ...args);
   const withPr = turnContext(project, minion, ...args, null, [], null, false, null, null, true);

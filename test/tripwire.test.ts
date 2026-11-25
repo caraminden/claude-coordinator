@@ -912,19 +912,19 @@ test('the tripwire hook is set to block the call when its check times out', () =
 // ---------- the card a tripwire ask turns into (Approvals.ask; the MCP round trip is in approvals.test.ts) ----------
 
 test('cards: approve settles that exact call, deny blocks it, and one card at a time', async () => {
-  const events: any[] = [];
+  const events: { ticketId: number; kind: string; data: unknown }[] = [];
   const a = new Approvals((ticketId, kind, data) => events.push({ ticketId, kind, data }));
   const input = { command: 'rm ~/.local/share/claude-coordinator/coordinator.db.bak-x', description: WHY };
   const first = a.ask(1, 'Bash', input, worktree, cfg, false);
   assert.ok('id' in first, JSON.stringify(first));
-  const card = events.at(-1).data;
+  const card = events.at(-1)!.data as { input: unknown; tripwire: { explanation: string; reason: string } };
   assert.deepEqual(card.input, input, 'the card shows the call in full');
   assert.equal(card.tripwire.explanation, WHY);
   assert.match(card.tripwire.reason, /live data dir/);
 
   // While it waits, no second tripwire card, from this minion; another minion still can.
   const second = a.ask(1, 'Bash', { command: 'systemctl --user enable x.timer', description: WHY }, worktree, cfg, false);
-  assert.match((second as any).refused, /already waiting/);
+  assert.match((second as { refused: string }).refused, /already waiting/);
   assert.ok('id' in a.ask(2, 'Bash', input, worktree, cfg, false));
 
   const decided = a.wait(1, first.id, 10_000);
@@ -935,14 +935,14 @@ test('cards: approve settles that exact call, deny blocks it, and one card at a 
   const next = a.ask(1, 'Bash', { command: 'systemctl --user enable x.timer', description: WHY }, worktree, cfg, false);
   assert.ok('id' in next);
   assert.deepEqual(a.decide(1, next.id, false, 'Cara'), { state: 'denied', by: 'Cara' });
-  assert.match((a.ask(1, 'Bash', input, worktree, cfg, false) as any).refused, /denied a tripwire card earlier this turn/);
+  assert.match((a.ask(1, 'Bash', input, worktree, cfg, false) as { refused: string }).refused, /denied a tripwire card earlier this turn/);
   a.endTurn(1, 'The turn ended while this waited.');
   assert.ok('id' in a.ask(1, 'Bash', input, worktree, cfg, false), 'a new turn starts afresh');
 });
 
 test('cards: refused for hard blocks, missing explanations, long calls, and other prompts without rules', () => {
   const a = new Approvals(() => {});
-  const refused = (input: object, rules = false) => (a.ask(5, 'Bash', input, worktree, cfg, rules) as any).refused;
+  const refused = (input: object, rules = false) => (a.ask(5, 'Bash', input, worktree, cfg, rules) as { refused: string }).refused;
   assert.match(refused({ command: 'systemctl --user restart claude-coordinator', description: WHY }), /The tripwire blocks this/);
   assert.match(refused({ command: 'systemctl --user enable x.timer' }), /explanation/);
   assert.match(refused({ command: `rm ${data}/x.bak # ${'x'.repeat(20_000)}`, description: WHY }), /too long to show in full/);

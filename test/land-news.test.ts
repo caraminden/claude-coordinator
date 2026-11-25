@@ -78,6 +78,7 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
       .slice(1),
     ['#1311 itself red; back in line: #1348, #1331, #1351, #1350'],
   );
+  assert.deepEqual(at('land: the CI run on d66e2d82 lost its runner before any step failed (https://ci/1), so it says nothing about this commit: running CI once more').slice(-1), [{ tone: 'warn', text: 'CI run lost its runner before any test failed (https://ci/1): one more run' }]);
   assert.deepEqual(at('land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone'), [{ tone: 'warn', text: 'CI gave no answer (a timeout): #1311 goes on alone; back in line: #1348, #1331, #1351, #1350' }]);
   assert.deepEqual(
     at(...red, 'land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone', "land: waiting for CI on 0123abcd: the full suite on Cara's desktop")
@@ -145,6 +146,11 @@ test("readTail: the log's end, read again only once it grows; a cut first line i
   assert.equal(readTail(f), 'land: one\nland: two\n');
   writeFileSync(f, `${'x'.repeat(300 * 1024)}\nland: last\n`);
   assert.equal(readTail(f), 'land: last\n');
+});
+
+test("a red on main too says it isn't the ship's, with what main needs", () => {
+  const n = landNews([...front, ...red.slice(0, -1), "land: red on main too: not this train's: test/x.test.ts fails run alone on main's tip 1a2b3c4 here, so no ship on the train is to blame and none is refused. Main needs a fix for test/x.test.ts"].join('\n'), name);
+  assert.deepEqual(n.at(-1), { tone: 'warn', text: "Red on main too, not this train's: x; main needs a fix" });
 });
 
 test('suspects: the ships pulled off the train replace the bisect line, naming each with its failing tests (G2)', () => {

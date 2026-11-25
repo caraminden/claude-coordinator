@@ -174,8 +174,8 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .account-card { display: flex; flex-direction: column; gap: 0.5rem; max-width: 36rem; margin-top: 1.25rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .account-card h3 { margin: 0; font-size: 1rem; display: flex; gap: 0.5rem; align-items: center; }
 .account-card p { margin: 0; }
-.replay-card .toggle { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding: 0.15rem 0; color: var(--ink); cursor: pointer; }
-.replay-card .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
+:is(.replay-card, .avatars-card) .toggle { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding: 0.15rem 0; color: var(--ink); cursor: pointer; }
+:is(.replay-card, .avatars-card) .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
 .account-card .kv { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; margin: 0; font-size: 0.9em; }
 .account-card .kv dt { color: var(--muted); }
 .account-card .kv dd { margin: 0; overflow-wrap: anywhere; }

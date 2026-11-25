@@ -101,7 +101,7 @@ test('the alerts out are cleared once a job gets its own unit again, and what Ma
   });
   f.started();
   await settle();
-  assert.deepEqual(cleared, [], 'nothing out, nothing cleared');
+  assert.deepEqual(cleared, [] as string[], 'nothing out, nothing cleared');
 
   // A job starting before the alert's put has landed still clears it: they run in order.
   f.record(ticket.id, 'A turn', 'Unit citadel-turns.slice not found.', DAY);

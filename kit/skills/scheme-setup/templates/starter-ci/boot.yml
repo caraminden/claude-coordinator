@@ -1,0 +1,38 @@
+# Citadel's starter CI (the kit's scheme-setup/templates/starter-ci/README.md, #1782): the nightly boot check.
+# Copy to .github/workflows/boot.yml. Swap <scheme-slug> and <minute>.
+#
+# Every night it builds the default branch, starts the app the way Citadel does and gets its health page. A red one
+# reaches the scheme's Taskmaster by itself (Citadel's CI health, #588), once per red streak; it looks for an open minion on it
+# before starting one. Separate from ci.yml so that a ship waiting on ci.yml never sees a skipped job.
+name: boot
+
+on:
+  schedule:
+    - cron: '<minute> 14 * * *' # UTC: 6am PST, 7am PDT. A minute of the scheme's own, so the apps don't all start at once
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boot
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  boot:
+    # Never GitHub's runners (ci.yml says why).
+    runs-on: [self-hosted, <scheme-slug>-ci-linux]
+    timeout-minutes: 75 # past the longest build_timeout (60), so a slow build ends with the check's own message
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # the same as ci.yml's, with the same other toolchains
+      - name: Boot check
+        # An app in a subfolder: exec node tools/boot-check.ts apps/<name>
+        # exec: a cancelled run's signal reaches the check itself, which stops the app.
+        run: exec node tools/boot-check.ts

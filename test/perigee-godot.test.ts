@@ -219,7 +219,7 @@ process.stdin.setEncoding('utf8').on('data', (d) => {
 function fakeBridge(s: ReturnType<typeof stub>, keepEveryMs = 20, stampGapMs = 5_000) {
   const input = new PassThrough();
   const output = new PassThrough();
-  const replies: any[] = [];
+  const replies: { id: number; result: { params: { arguments: { text: string } } } }[] = [];
   let pendingOut = '';
   output.setEncoding('utf8').on('data', (d) => {
     pendingOut += d;
@@ -270,7 +270,7 @@ test('bridge: the handshake goes straight through, a tool call waits for the edi
   await until('b.fresh', b.fresh);
   b.send({ jsonrpc: '2.0', method: 'test/release' });
   await until('b.seen(2)', () => b.seen(2));
-  assert.equal(b.replies.find((r) => r.id === 2).result.params.arguments.text, 'a\u2028b\u2029c');
+  assert.equal(b.replies.find((r) => r.id === 2)!.result.params.arguments.text, 'a\u2028b\u2029c');
   // Answered (the bridge stamped before it passed the answer on): nothing in flight, so nothing stamps it any more.
   s.used(NOW - 3 * H);
   // timing-ok: waits to show nothing happens (several keep-alive rounds pass with no stamp)

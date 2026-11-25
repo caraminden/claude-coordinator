@@ -185,7 +185,7 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   // The host's runtime folder isn't in the container: .NET's named mutexes need one that exists (#225).
   assert.equal(env.XDG_RUNTIME_DIR, env.TMPDIR);
   assert.ok(statSync(env.XDG_RUNTIME_DIR).isDirectory());
-  assert.equal(store.getSetting<any>(usageKey(josh.id))?.weekly?.utilization, 0.42);
+  assert.equal(store.getSetting<{ weekly?: { utilization: number } }>(usageKey(josh.id))?.weekly?.utilization, 0.42);
   assert.equal(store.getSetting('usage'), null);
   // Josh's meter shows his own plan; the server login's owner keeps the server's.
   assert.equal(r.usageOf(josh.id)?.weekly?.utilization, 0.42);

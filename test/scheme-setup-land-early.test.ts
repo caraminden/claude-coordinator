@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { git, rebasedCalls, rebasedHook, setup } from './scheme-setup-land-fixture.ts';
+import { git, queueSetup, rebasedCalls, rebasedHook, setup, until } from './scheme-setup-land-fixture.ts';
 
 // Red while a file named "red" is in the tree, saying so last; every run leaves a line in $COUNT.
 const CHECK = 'echo run >>"$COUNT"; test ! -e red || { echo "the check saw red"; exit 1; }';
@@ -157,4 +157,37 @@ test('land_rebased runs before the early check too; with main unmoved at the fro
   assert.deepEqual(rebasedCalls(r.main), [`${base} ticket/1-x`], 'once, before the early check');
   assert.equal(count(r.dir), 1, 'the check ran once');
   assert.equal(git(r.main, 'log', '--format=%s', 'main', '-2'), `rebased on ${base}\nb.txt: b`);
+});
+
+// CO4 and DR6 (#1866): the early check's note of where the branch was named nobody, so a second run there took the first
+// one's worktree from under its check, and a landing stopped mid-check left the worktree off its branch.
+const held = 'touch "$GATE.on"; until [ -e "$GATE" ]; do sleep 0.05; done';
+test('a land.sh run again during the early check touches nothing, and the first ships', async () => {
+  for (const local of [undefined, rebasedHook]) {
+    const q = queueSetup(1, held, on(held), undefined, local);
+    const a = q.land(1);
+    await until('the early check', () => existsSync(`${q.dir}/gate.on`));
+    const at = git(q.wt, 'rev-parse', 'HEAD');
+    const again = q.run();
+    assert.equal(again.status, 1, again.stderr);
+    assert.match(again.stderr, /a landing is still running in .* \(pid \d+\) and has its HEAD detached on purpose, so this touched nothing/);
+    assert.equal(git(q.wt, 'rev-parse', 'HEAD'), at, 'the worktree is where the check runs');
+    assert.equal(git(q.wt, 'branch', '--show-current'), '');
+    q.open();
+    assert.equal(await a.exit, 0, a.stderr());
+  }
+});
+
+test('a landing stopped during the early check puts its worktree back on the branch as it was', async () => {
+  const q = queueSetup(1, held, on(held));
+  q.commit(q.main, 'm.txt', 'main moved\n');
+  const was = git(q.wt, 'rev-parse', 'ticket/1-x');
+  const a = q.land(1);
+  await until('the early check', () => existsSync(`${q.dir}/gate.on`));
+  a.child.kill('SIGTERM');
+  q.open(); // the check's own processes outlive the stop until now
+  await a.exit;
+  assert.equal(git(q.wt, 'branch', '--show-current'), 'ticket/1-x');
+  assert.equal(git(q.wt, 'rev-parse', 'HEAD'), was);
+  assert.match(a.stderr(), /^ship: refused /m);
 });

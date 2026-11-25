@@ -94,7 +94,7 @@ test('ship notes are read through events_notes, never a walk over every event si
   store.addEvent(minion(peek, 'one').id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
   const seen: string[] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => {
+  store.db.prepare = ((sql: string, ...r: []) => {
     seen.push(sql);
     return prepare(sql, ...r);
   }) as typeof store.db.prepare;
@@ -200,11 +200,11 @@ test("Home's ship cache fills in ranges of event ids, then reads only notes past
   store.db.prepare("INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (20000, ?, 'note', '{}', ?)").run(one.id, Date.now());
   const reads: unknown[][] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => {
+  store.db.prepare = ((sql: string, ...r: []) => {
     const st = prepare(sql, ...r);
     if (!/Shipped/.test(sql)) return st;
     const all = st.all.bind(st);
-    st.all = ((...a: any[]) => (reads.push(a), all(...a))) as typeof st.all;
+    st.all = ((...a: Parameters<typeof st.all>) => (reads.push(a), all(...a))) as typeof st.all;
     return st;
   }) as typeof store.db.prepare;
   const cache = new HomeBucketCache();

@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
-import { accountUsageKey } from '../src/account-pick.ts';
-import { Store } from '../src/db.ts';
+import { accountUsageKey, type Meter } from '../src/account-pick.ts';
+import { Store, type Ticket } from '../src/db.ts';
+import type { LimitResume } from '../src/resumes.ts';
 import { MAX_LIMIT_RESUMES, nextLimitResume, Runner } from '../src/runner.ts';
 import { clockTime, parseResetTime } from '../src/pacific.ts';
 import { RETRIES } from '../src/turn-outcome.ts';
@@ -32,8 +33,8 @@ const pushes: { ticket: number; text: string }[] = [];
 function makeRunner() {
   const r = new Runner(
     store,
-    (m: any) => {
-      if (m.type === 'ticket') shown.push([m.ticket.id, m.ticket.context_live]);
+    (m: { type?: string; ticket?: { id: number; context_live: number | null } }) => {
+      if (m.type === 'ticket') shown.push([m.ticket!.id, m.ticket!.context_live]);
     },
     () => ({}),
     fake,
@@ -49,7 +50,7 @@ let runner = makeRunner();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function minion(state: any = null) {
+function minion(state: Ticket['state'] = null) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   store.updateTicket(t.id, { status: 'idle', state, note: 'before' });
@@ -326,13 +327,13 @@ test("an event reporting one window keeps the other's last reading, without its 
   const week = Math.floor(Date.now() / 1000) + 3 * 86400;
   runner.recordUsage({ unifiedWindows: { seven_day: { utilization: 0.99, resetsAt: week, status: 'rejected' } } }, 7, 7, 2);
   runner.recordUsage({ unifiedWindows: { five_hour: { utilization: 0.1, status: 'allowed' } } }, 7, 7, 2);
-  const u = store.getSetting<any>('usage:user:7:account:2');
+  const u = store.getSetting<Meter>('usage:user:7:account:2')!;
   assert.deepEqual(u.weekly, { utilization: 0.99, resetsAt: week * 1000, status: null }, 'the account pick still sees the spent week');
-  assert.equal(u.session.utilization, 0.1);
+  assert.equal(u.session!.utilization, 0.1);
   // Past its reset, a kept window goes.
   store.setSetting('usage:user:7:account:2', { ...u, weekly: { ...u.weekly, resetsAt: Date.now() - 1000 } });
   runner.recordUsage({ unifiedWindows: { five_hour: { utilization: 0.2, status: 'allowed' } } }, 7, 7, 2);
-  assert.equal(store.getSetting<any>('usage:user:7:account:2').weekly, null);
+  assert.equal(store.getSetting<Meter>('usage:user:7:account:2')!.weekly, null);
   store.deleteSetting('usage:user:7:account:2');
 });
 
@@ -362,7 +363,7 @@ test('the wait and its held messages outlive a restart', async () => {
   runner.send(id, 'Cara', 'held across the restart');
   const before = turnsRun();
   // A new server on the same database, once the reset time has come.
-  const list = store.getSetting<any[]>('limit-resumes')!;
+  const list = store.getSetting<LimitResume[]>('limit-resumes')!;
   store.setSetting(
     'limit-resumes',
     list.map((w) => ({ ...w, at: Date.now() })),
@@ -475,7 +476,7 @@ test('a restart after a switch to the next account, before its resume starts, st
     assert.equal(s.inUse, 2);
     assert.match(lines(prompts).at(-1)!, /another of your person's Claude accounts/, 'it resumes as the account switch, not as a plain restart');
     assert.equal(store.getTicket(id)!.status, 'idle');
-    assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null, 'the debt is paid once the resume starts');
+    assert.equal(store.getSetting<{ owed?: unknown }>(`minion-queue:${id}`)?.owed ?? null, null, 'the debt is paid once the resume starts');
   } finally {
     noAccounts();
   }
@@ -515,7 +516,7 @@ test('a restart while a limit resume restores the session keeps the resume and i
   runner.send(id, 'Cara', 'held through the restore');
   // A stored session file this login's folder lacks: the resume restores it off the event loop before its turn starts.
   store.putClaudeState({ path: `projects/a2/${id}.jsonl`, project_id: project.id, ticket_id: id, size: 2, mtime: Date.now(), data: gzipSync('{}') });
-  const list = store.getSetting<any[]>('limit-resumes')!;
+  const list = store.getSetting<LimitResume[]>('limit-resumes')!;
   store.setSetting(
     'limit-resumes',
     list.map((w) => ({ ...w, at: Date.now() })),
@@ -540,7 +541,7 @@ test('a restart while a limit resume restores the session keeps the resume and i
 test('a limit resume that starts no turn still ends its wait, though it is kept until a turn takes it (A2)', async () => {
   const id = minion();
   await turn(id, "You've hit your session limit");
-  const list = store.getSetting<any[]>('limit-resumes')!;
+  const list = store.getSetting<LimitResume[]>('limit-resumes')!;
   store.setSetting(
     'limit-resumes',
     list.map((w) => ({ ...w, at: Date.now() })),
@@ -629,13 +630,13 @@ test('weekly on one account and 5-hour on another: the note says which account i
     const v = runner.view(store.getTicket(id)!);
     assert.equal(v.limit_resume_at! < week, true, 'waits for the 5-hour account, not the week');
     assert.deepEqual(
-      v.limit_accounts!.map((a: any) => [a.label, !!a.here]),
+      v.limit_accounts!.map((a) => [a.label, !!a.here]),
       [
         ['one@x', false],
         ['two@x', true],
       ],
     );
-    assert.equal(v.limit_accounts!.find((a: any) => a.here)!.kind, 'weekly');
+    assert.equal(v.limit_accounts!.find((a) => a.here)!.kind, 'weekly');
     assert.equal(runner.stop(id), true);
   } finally {
     noAccounts();

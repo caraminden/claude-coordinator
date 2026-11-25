@@ -2,12 +2,13 @@
 // scheme's owner picks who else is in it.
 import type { User } from '../db.ts';
 import type { IncomingMessage } from 'node:http';
-import { clientIp, HttpError, isSecure, json, ownWrites, publicOrigin, readJson, type App, type Route } from '../http.ts';
+import { clientIp, HttpError, isSecure, json, ownWrites, publicOrigin, readJson, SECURITY_HEADERS, send, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { dropKeptPerson, keptDirs, optOutKey } from '../replay-keep.ts';
 import { thrown } from '../thrown.ts';
+import { AVATAR_MAX_BYTES, avatarsOnKey, avatarsView, dropAvatar, readAvatar, saveAvatar } from '../avatar.ts';
 
 /** A person as Settings → People shows them: never a hash or a token. */
 function personView(app: App, u: User) {
@@ -138,13 +139,15 @@ export const peopleRoutes: Route[] = [
     method: 'DELETE',
     path: '/api/people/:person',
     ...admin,
-    handler({ res, app, params, session }) {
+    async handler({ res, app, params, session }) {
       const user = person(app, params.person);
       if (user.id === session.uid) throw new HttpError(400, "You can't remove yourself");
       app.store.deleteUser(user.id, uidOf(session));
+      app.store.deleteSetting(avatarsOnKey(user.id));
       dropStreams(app, user.id);
       // Their collaborator invites go too (#310); a refusal stays on its row for the next boot's sweep.
       void app.repoAccess.tidy().catch((err) => console.error('repo access after removing a person', err));
+      await dropAvatar(app.store, app.dataDir, user.id).catch((err) => console.error('avatar after removing a person', err));
       return json(res, 200, {});
     },
   },
@@ -436,6 +439,54 @@ export const peopleRoutes: Route[] = [
       app.store.setSetting(optOutKey(uid), !keep);
       if (!keep) dropKeptPerson(keptDirs(app.dataDir), uid);
       return json(res, 200, { keep });
+    },
+  },
+  {
+    // Speaker avatars in chat (#1976): your own switch, off until you turn it on.
+    method: 'PUT',
+    path: '/api/me/avatars',
+    who: ['person'],
+    async handler({ req, res, app, session }) {
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'on must be true or false');
+      const uid = uidOf(session);
+      app.store.setSetting(avatarsOnKey(uid), on);
+      return json(res, 200, avatarsView(app.store, uid));
+    },
+  },
+  {
+    // Your picture, as base64: the page crops it to a small square first.
+    method: 'PUT',
+    path: '/api/me/avatar',
+    who: ['person'],
+    async handler({ req, res, app, session }) {
+      const { data } = await readJson(req, AVATAR_MAX_BYTES * 2);
+      const body = Buffer.from(typeof data === 'string' ? data : '', 'base64');
+      if (body.length > AVATAR_MAX_BYTES) throw new HttpError(413, `The picture must be under ${AVATAR_MAX_BYTES / 1024} KB`);
+      const uid = uidOf(session);
+      await saveAvatar(app.store, app.dataDir, uid, body);
+      return json(res, 200, avatarsView(app.store, uid));
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/api/me/avatar',
+    who: ['person'],
+    async handler({ res, app, session }) {
+      const uid = uidOf(session);
+      await dropAvatar(app.store, app.dataDir, uid);
+      return json(res, 200, avatarsView(app.store, uid));
+    },
+  },
+  {
+    // A person's picture. Its URL carries its version, so that version's bytes can be kept long.
+    method: 'GET',
+    path: '/api/people/:person/avatar',
+    who: ['person'],
+    async handler({ res, app, params, url }) {
+      const pic = await readAvatar(app.store, app.dataDir, person(app, params.person).id);
+      if (!pic) throw new HttpError(404, 'No picture');
+      send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': pic.type, 'Content-Security-Policy': "sandbox; default-src 'none'", 'Cache-Control': url.searchParams.get('v') === pic.v ? 'private, max-age=31536000, immutable' : 'no-store' }, pic.body);
     },
   },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, members(app, project.id)) },

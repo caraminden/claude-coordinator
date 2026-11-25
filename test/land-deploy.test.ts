@@ -19,7 +19,7 @@ test('the real deploy.sh takes the lock land.sh holds, lets go of it once the re
     assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
   }));
 
-// The light lane (#753): a land touching only light paths in tools/lanes runs no tests anywhere, starts no CI, and the
+// The light lane (#753): a land touching only light paths in tools/lanes runs only the tests the affected map picks for them (none here), starts no CI, and the
 // real deploy.sh skips the boot check and goes live by SIGHUP, with no restart.
 let running = '';
 // Main gets a map with docs/ light, the server runs it, and the worktree commits a doc.
@@ -41,7 +41,7 @@ test('a light land runs no tests and no boot check, and goes live without a rest
       lightLand(r);
       const res = await run(land, r.wt);
       assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
-      assert.match(res.stderr, /no tests and no CI/);
+      assert.match(res.stderr, /no CI: the server reads/);
       assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests|boot check: the new code/);
       assert.match(res.stderr, /live now: docs and config only, nothing to reload\. No restart\./);
       assert.deepEqual(runs(), [], 'no test ran anywhere');
@@ -242,6 +242,64 @@ test("a restart that can't be queued says to run deploy.sh again, and leaves nob
     assert.match(err.stderr, /deploy: could not queue the restart \(Failed to start transient service unit: Access denied\), so nothing restarted: the live checkout is at \w+ "b\.txt: mine", but the server still runs \w+\. Run tools\/deploy\.sh again to queue it/);
     assert.match(err.stderr.trimEnd().split('\n').at(-1)!, /land: the deploy failed after main moved; main keeps \w+\. The deploy's lines above say why and what to do$/);
     for (const f of ['reporters', 'reporter-commits']) assert.ok(!existsSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', f)), `no ${f} line left behind`);
+  }));
+
+test('a queued restart reports to the minions riding the train too, each with its own commit (#1865)', () =>
+  withRealDeploy(async (r, run) => {
+    r.commit(r.wt, 'a.txt', 'rider\n');
+    const rider = git(r.wt, 'rev-parse', 'HEAD');
+    r.commit(r.wt, 'b.txt', 'front\n');
+    git(r.source, 'merge', '-q', '--ff-only', git(r.wt, 'rev-parse', 'HEAD'));
+    const riders = join(r.dir, 'riders');
+    writeFileSync(riders, `http://127.0.0.1:1 tok8 8 ${rider}\n`);
+    await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { DEPLOY_RIDERS: riders, COORDINATOR_TICKET: '7', COORDINATOR_TOKEN: 'tok', COORDINATOR_API: 'http://127.0.0.1:1' });
+    const read = (f: string) =>
+      readFileSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', f), 'utf8')
+        .trim()
+        .split('\n');
+    assert.deepEqual(read('reporters'), ['http://127.0.0.1:1 tok 7', 'http://127.0.0.1:1 tok8 8']);
+    assert.deepEqual(read('reporter-commits'), [`7 ${git(r.wt, 'rev-parse', 'HEAD')}`, `8 ${rider}`]);
+  }));
+
+// A commit rolled back late is still on main; its revert has the code the server runs, under a new commit (#1865).
+test('a deploy with nothing to deploy still takes its commit as live: SIGHUP, last-good and GitHub', () =>
+  withRealDeploy(
+    async (r, run) => {
+      const ran = git(r.live, 'rev-parse', 'HEAD');
+      git(r.live, 'tag', 'last-good', ran);
+      const remote = join(r.dir, 'remote.git');
+      git(r.dir, 'init', '-q', '--bare', remote);
+      r.commit(r.source, 'b.txt', 'theirs\n');
+      git(r.source, 'revert', '--no-edit', 'HEAD');
+      const tip = git(r.source, 'rev-parse', 'HEAD');
+      const res = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { DEPLOY_REMOTE: remote });
+      assert.match(res.stderr, /^deploy: nothing to deploy: the server already runs/m);
+      assert.ok(existsSync(join(r.dir, 'sighups')), 'the server takes the new commit as live');
+      assert.equal(git(r.live, 'rev-parse', 'last-good'), tip);
+      assert.equal(git(remote, 'rev-parse', 'main'), tip);
+    },
+    () => ({ reload: 'sighup' }),
+  ));
+
+// A git gc --auto detaches, and a lock's fd it inherited keeps the lock until it ends (#1865). git asks this hook before one.
+test('no git gc starts holding the deploy lock or the restart lock while a ship lands and deploys', () =>
+  withRealDeploy(async (r, run) => {
+    const log = join(r.dir, 'gc-log');
+    for (const git_ of [r.source, r.live]) {
+      git(git_, 'config', 'gc.auto', '1');
+      writeFileSync(join(git_, '.git', 'hooks', 'pre-auto-gc'), `#!/bin/sh\nfor l in /proc/self/fd/*; do case "$(readlink "$l")" in */cc-deploy/lock | */cc-deploy/restart.lock) echo "$(pwd) $(tr '\\0' ' ' </proc/$(ps -o ppid= -p $PPID | tr -d ' ')/cmdline)" >>${JSON.stringify(log)} ;; esac; done\nexit 1\n`, {
+        mode: 0o755,
+      });
+      // Over gc.auto=1: git counts the loose objects in objects/17.
+      const d = join(git_, '.git', 'objects', '17');
+      mkdirSync(d, { recursive: true });
+      for (const n of ['a', 'b', 'c']) writeFileSync(join(d, n.repeat(38)), '');
+    }
+    r.commit(r.source, 'a.txt', 'theirs\n'); // so the landing rebases
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const res = await run(land, r.wt);
+    assert.match(res.stderr, /live now: the server restarted on/);
+    assert.equal(existsSync(log) ? readFileSync(log, 'utf8') : '', '');
   }));
 
 // F12a, in deploy.sh: its test run that can't write its temp file never ran a test.

@@ -5,7 +5,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
-import { agentEnv, mcpOnce } from './mcp-agent.ts';
+import { agentEnv, type McpTool, mcpOnce } from './mcp-agent.ts';
 
 // #167: a missing or misnamed argument to a set_* / update_* tool must be refused with nothing
 // changed. It used to clear the scheme instructions.
@@ -130,8 +130,10 @@ test('explicit empties still go through: replies [], note null', async () => {
 });
 
 // #481: the wrong arguments models send most often are accepted, and every limit is in the schema.
-async function listTools(role: 'coordinator' | 'thread', ticket: { id: number }): Promise<any[]> {
-  return (await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), { id: ticket.id, project_id: Citadel.id }, role, { COORDINATOR_DEPLOYS: '1', COORDINATOR_APP_INSTRUCTIONS: '1' }), 'tools/list', undefined, tmp.track)).tools;
+type Schema = { maxLength: number; items: Schema; properties: Record<string, Schema> };
+type ToolDef = McpTool & { inputSchema: Schema };
+async function listTools(role: 'coordinator' | 'thread', ticket: { id: number }): Promise<ToolDef[]> {
+  return (await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), { id: ticket.id, project_id: Citadel.id }, role, { COORDINATOR_DEPLOYS: '1', COORDINATOR_APP_INSTRUCTIONS: '1' }), 'tools/list', undefined, tmp.track)).tools as ToolDef[];
 }
 
 const saw = (ticketId: number, text: string) => store.listEvents(ticketId).some((e) => e.data.includes(text));
@@ -163,11 +165,11 @@ test('state enum error: the string "null" is read as null', async () => {
 
 test('"is too long": the limit is in the schema, and the error names it', async () => {
   const thread = await listTools('thread', Minion);
-  const status = thread.find((t) => t.name === 'set_thread_status').inputSchema.properties;
+  const status = thread.find((t) => t.name === 'set_thread_status')!.inputSchema.properties;
   assert.equal(status.note.maxLength, 60);
   assert.equal(status.title.maxLength, 120);
   assert.equal(status.replies.items.maxLength, 40);
-  const option = thread.find((t) => t.name === 'ask_question').inputSchema.properties.questions.items.properties.options.items.properties;
+  const option = thread.find((t) => t.name === 'ask_question')!.inputSchema.properties.questions.items.properties.options.items.properties;
   assert.equal(option.description.maxLength, 300);
   assert.equal(option.label.maxLength, 80);
   // Every string the server caps carries its cap: none of these tools' text arguments is left without one.
@@ -183,7 +185,7 @@ test('"is too long": the limit is in the schema, and the error names it', async 
     [thread, 'strike_text', 'reason'],
     [coord, 'set_project_instructions', 'instructions'],
   ] as const) {
-    const p = (list as any[]).find((t) => t.name === name).inputSchema.properties[field];
+    const p = list.find((t) => t.name === name)!.inputSchema.properties[field];
     assert.ok(p.maxLength > 0, `${name}.${field} has no maxLength`);
   }
   refused(await tool(Minion, 'thread', 'set_thread_status', { note: 'x'.repeat(61) }), /Note is too long: 61 characters, at most 60/);

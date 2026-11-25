@@ -3,10 +3,10 @@
 // This file: shipping through main's red, conflict prep, the early next train, and a ship's own and light check (split from
 // land-train.test.ts, #1723).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { ci, git, seen, setup, landAsync } from './land-fixture.ts';
 import { line, shipped, bad, realOf, shared } from './land-train-fixture.ts';
@@ -394,12 +394,15 @@ test('early next train: with no free runner nothing is pushed early, and with LA
   assert.deepEqual(retro(l.r.dir, ' · early train · '), []);
   l.done();
   for (const how of ['env', 'file', 'hold'] as const) {
-    const off = await line([{}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', ...(how === 'env' ? { LAND_EARLY: '0' } : {}) }));
+    // With the hold on (#1906) it goes at a deploy alone, and not while another job is on the CI desktop.
+    const off = await line([{}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', ...(how === 'env' ? { LAND_EARLY: '0' } : {}), ...(how === 'hold' ? { FAKE_ACTIVE: '1' } : {}) }), how === 'hold' ? holdOn : undefined);
     if (how === 'file') writeFileSync(join(off.state, 'early-off'), '');
-    if (how === 'hold') rmSync(join(off.state, 'hold-off'));
     const offDone = await off.go();
     offDone.forEach((d, i) => assert.equal(d.status, 0, `${how}: ship ${i + 1}: ${d.stderr}`));
-    assert.doesNotMatch(offDone.map((d) => d.stderr).join('\n'), /early next train/, how);
+    const said = offDone.map((d) => d.stderr).join('\n');
+    if (how === 'hold') assert.match(said, /early next train: another Citadel job is on the CI desktop or queued, so ticket\/\d-x's CI waits for its turn/);
+    assert.doesNotMatch(said, how === 'hold' ? /is stacked on this train's top/ : /early next train/, how);
+    assert.deepEqual(retro(off.r.dir, ' · early train · '), [], how);
     off.done();
   }
 });
@@ -409,9 +412,32 @@ test('early next train: with no free runner nothing is pushed early, and with LA
 const own = (d: string) => ({ ...shared(d), FAKE_CHECK_RUNNERS: '1', LAND_OWN_CHECK_POLL: '0.05' });
 const pushLog = (r: ReturnType<typeof setup>) => writeFileSync(join(r.dir, 'hub.git', 'hooks', 'post-receive'), `#!/bin/sh\nwhile read -r old new ref; do echo "$new $ref" >>'${join(r.dir, 'pushes')}'; done\n`, { mode: 0o755 });
 const pushes = (dir: string) => (existsSync(join(dir, 'pushes')) ? readFileSync(join(dir, 'pushes'), 'utf8').trim().split('\n') : []);
+const holdOn = (r: ReturnType<typeof setup>) => rmSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'hold-off'));
+test('with the CI hold on, the next train goes early at the deploy on an idle desktop, and an own check only when nothing else runs (#1906)', async () => {
+  const l = await line([{}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }), holdOn);
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  const said = done.map((d) => d.stderr).join('\n');
+  assert.match(said, /early next train: ticket\/\d-x.* its CI starts now, while this one deploys/);
+  assert.doesNotMatch(said, /while this one's CI runs/);
+  l.done();
+  for (const active of ['0', '1']) {
+    const c = await line([{}, {}], (d) => ({ ...own(d), FAKE_ACTIVE: active }), holdOn);
+    const ships = await c.go();
+    ships.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    if (active === '0') assert.match(ships[1].stderr, /own check: green/);
+    else assert.match(ships[1].stderr, /own check: another Citadel job is on the CI desktop or queued, so this joins the line unchecked/);
+    c.done();
+  }
+});
+
 // Ship 2, landed while ship 1 holds the line in its deploy; ship 2 is refused before it gets a ticket, so line() can't wait for it.
-async function refusedBehind(change: [string, string], extra: Record<string, string>) {
-  const l = await line([{}], (d) => ({ ...own(d), ...extra }), pushLog);
+async function refusedBehind(change: [string, string], extra: Record<string, string>, before: (r: ReturnType<typeof setup>) => void = () => {}) {
+  const l = await line(
+    [{}],
+    (d) => ({ ...own(d), ...extra }),
+    (r) => (pushLog(r), before(r)),
+  );
   const wt = join(l.r.dir, 'wt2');
   git(l.r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-x', wt);
   l.r.commit(wt, ...change);
@@ -472,6 +498,22 @@ test('own check: a file that failed again alone in CI, and here fails with the s
   assert.deepEqual(
     retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')),
     ['own check · ticket/2-x · red: test/p2.test.ts · Ns'],
+  );
+  l.done();
+});
+
+test("own check: a refusal before the line has its timing line and leaves no times file, its own or an old killed landing's (#1864)", async () => {
+  const { l, d } = await refusedBehind(bad(2).change as [string, string], { FAKE_REAL: realOf(2) }, (r) => {
+    const old = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'times-999999');
+    mkdirSync(dirname(old), { recursive: true });
+    writeFileSync(old, 'start 1\n');
+    utimesSync(old, 1, 1);
+  });
+  assert.equal(d.status, 1, d.stderr);
+  assert.match(retro(l.r.dir, 'timing · ticket/2-x').join('\n'), /^timing · ticket\/2-x · .* · refused at line$/);
+  assert.deepEqual(
+    readdirSync(l.state).filter((f) => f.startsWith('times-')),
+    [],
   );
   l.done();
 });
@@ -632,6 +674,25 @@ test('riders of a restart held for a starved box say when it expects to be live;
     done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
     for (const i of [3, 4]) assert.match(done[i - 1].stderr, /^deploy: not live yet: the restart ticket\/2-x's ship train queued carries it; the box is starved \(CPU pressure 63%\), so it waits for it to ease, live by about \d\d?:\d\d P[SD]T at the latest/m, `ship ${i}`);
     assert.equal(existsSync(join(l.state, 'urgent')), urgent, urgent ? 'the urgent rider marks the restart' : 'no urgent rider, no mark');
+    l.done();
+  }
+});
+
+// Its restart takes the mark as it starts (#1865): one left later would let the next, unrelated restart skip the hold.
+test('an urgent rider marks its restart only while it still waits: for turns, yes; once it is under way or over, no', async () => {
+  for (const [at, active, underWay] of [
+    ['waiting', true, false],
+    ['under way', true, true],
+    ['over', false, false],
+  ] as const) {
+    const l = await line([{}, { env: { FAKE_NOT_LIVE: '1' } }, { env: { LAND_URGENT: '1' } }], {}, (r) => {
+      writeFileSync(join(r.dir, 'bin', 'systemctl'), `#!/bin/sh\ncase "$*" in *'is-active -q cc-restart-when-idle'*) exit ${active ? 0 : 3} ;; esac\nexit 1\n`, { mode: 0o755 });
+    });
+    if (underWay) writeFileSync(join(l.state, 'restart'), `${process.pid} ${readFileSync('/proc/self/stat', 'utf8').split(') ').pop()!.split(' ')[19]}\nrestarting claude-coordinator since 10:00\n`);
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    assert.match(done[2].stderr, /^deploy: not live yet: the restart ticket\/2-x's ship train queued carries it, and reports here too/m);
+    assert.equal(existsSync(join(l.state, 'urgent')), at === 'waiting', at);
     l.done();
   }
 });

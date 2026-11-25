@@ -23,7 +23,7 @@ const note = (line: string) => {
 };
 const pathOf = (p: unknown): string => (typeof p === 'string' ? p : p instanceof URL ? p.pathname : Buffer.isBuffer(p) ? p.toString() : '');
 
-const wrap = (obj: any, name: string, label: string) => {
+const wrap = (obj: Record<string, unknown>, name: string, label: string) => {
   const real = obj[name];
   if (typeof real !== 'function') return;
   obj[name] = function (this: unknown, p: unknown, ...rest: unknown[]) {
@@ -36,7 +36,7 @@ for (const n of ['readFileSync', 'readFile', 'readdirSync', 'readdir', 'openSync
 for (const n of ['readFile', 'readdir', 'open', 'stat']) wrap(fs.promises, n, `fs/promises.${n}`);
 for (const n of ['loadavg', 'availableParallelism', 'cpus', 'freemem', 'totalmem'] as const) {
   const real = os[n] as (...a: unknown[]) => unknown;
-  (os as any)[n] = (...a: unknown[]) => (note(`os.${n}()`), real(...a));
+  Object.assign(os, { [n]: (...a: unknown[]) => (note(`os.${n}()`), real(...a)) });
 }
 syncBuiltinESMExports(); // `import { readFile } from 'node:fs/promises'` and the like see the wrapped functions
 
@@ -56,7 +56,7 @@ for (const m of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'] a
   Date.prototype[m] = function (this: Date, locales?: unknown, opts?: unknown) {
     pacificAsked(`Date.${m}`, opts);
     return real.call(this, locales, opts);
-  } as any;
+  };
 }
 
 // The zone the server's local clock (getHours, setHours, a formatter with no zone) ran in.

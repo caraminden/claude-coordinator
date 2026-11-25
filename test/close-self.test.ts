@@ -46,7 +46,7 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const broadcasts: any[] = [];
+const broadcasts: { type?: string; ticket?: { id: number; status: string } }[] = [];
 const runner = new Runner(
   store,
   (m) => broadcasts.push(m),
@@ -103,7 +103,7 @@ test('closes after a clean turn, with the reason as a close note', async () => {
   assert.equal(store.getTicket(id)!.status, 'closed');
   assert.deepEqual(notes(id), ['Claude dismissed this minion: Merged abc1234']);
   assert.equal(runner.view(store.getTicket(id)!).closing, false);
-  assert.ok(broadcasts.some((m) => m.type === 'ticket' && m.ticket.id === id && m.ticket.status === 'closed'));
+  assert.ok(broadcasts.some((m) => m.type === 'ticket' && m.ticket!.id === id && m.ticket!.status === 'closed'));
 });
 
 test('a failed turn stays open', async () => {

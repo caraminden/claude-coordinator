@@ -343,8 +343,8 @@ test('while ships are in line a job is not dispatched: after its wait it is hand
   hold(r);
   const res = run(r, 'ok', { CITADEL_HEAVY_HOLD_WAIT: '0.2', COORDINATOR_TICKET: '42' });
   assert.equal(res.status, 75, res.stderr);
-  assert.match(res.stderr, /waiting: 3 ships are in line, and ships go first/);
-  assert.match(res.stderr, /Citadel starts it by itself once the line is empty, and wakes you/);
+  assert.match(res.stderr, /waiting: 3 ships are in line \(0 min\)/);
+  assert.match(res.stderr, /Citadel starts it by itself when it may go, and wakes you/);
   assert.equal(existsSync(join(r.gh, 'dispatch.json')), false, 'nothing was dispatched');
   assert.doesNotMatch(res.stdout, /ran here/);
   const [job] = jobs(r);
@@ -375,7 +375,7 @@ test('a running job stopped for a ship is handed to Citadel, which starts the sa
   hold(r, { why: null, held: [{ run: 7 }] });
   const res = run(r, 'held', { COORDINATOR_TICKET: '42' });
   assert.equal(res.status, 75, res.stderr);
-  assert.match(res.stderr, /a ship joined the line, so this job was stopped: Citadel starts it again by itself/);
+  assert.match(res.stderr, /another CI job goes first, so this job was stopped: Citadel starts it again by itself/);
   const [job] = jobs(r);
   assert.deepEqual([job.state, job.run_id, job.quiet], ['running', 7, true]);
   assert.equal(git(r.bare, 'rev-parse', `refs/citadel-heavy/${job.id}`), job.sha, 'the run needs its snapshot again');

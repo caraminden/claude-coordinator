@@ -64,7 +64,7 @@ test('PATCH /api/projects/:id renames, with friendly errors', async () => {
   assert.equal(page.project.name, 'New name');
   assert.equal(page.project.instructions, '', 'a refused rename saves none of the other fields');
   const notes = await call(`/api/tickets/${page.coordinator.id}/events?after=0`);
-  const texts = notes.data.map((e: any) => JSON.parse(e.data).text);
+  const texts = notes.data.map((e: { data: string }) => JSON.parse(e.data).text);
   assert.ok(texts.includes('Cara renamed the scheme from "Old name" to "New name".'), 'the coordinator hears about it');
 });
 
@@ -86,7 +86,7 @@ test("PATCH sets a scheme's repo_url, refuses to replace one without replace_rep
   const swap = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'https://github.com/me/two', replace_repo: true } });
   assert.equal(swap.data.repo_url, 'https://github.com/me/two');
   const { data: page } = await call(`/api/projects/${p.id}`);
-  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: { data: string }) => JSON.parse(e.data).text);
   assert.ok(
     notes.some((t: string) => /set the scheme's repo to https:\/\/github.com\/me\/one.*clone/.test(t)),
     notes.join('\n'),
@@ -101,7 +101,7 @@ test('GET /api/projects/:id/instructions/history shows the last saves with their
   const { status, data } = await call(`/api/projects/${p.id}/instructions/history`);
   assert.equal(status, 200);
   assert.deepEqual(
-    data.history.map((h: any) => [h.by, h.diff]),
+    data.history.map((h: { by: string; diff: string }) => [h.by, h.diff]),
     [
       [
         'Cara',
@@ -184,7 +184,7 @@ test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it
   assert.equal(on.data.land_mode, 'fast');
   const off = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { land_mode: 'off' } });
   assert.equal(off.data.land_mode, 'off');
-  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: { data: string }) => JSON.parse(e.data).text);
   assert.equal(notes.filter((t: string) => /fast mode/i.test(t)).length, 2, notes.join('\n'));
 });
 

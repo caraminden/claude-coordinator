@@ -82,3 +82,26 @@ test('Resume on a paused file while another is sending waits its turn: one file 
     await hang.close();
   }
 });
+
+// #1945: pausing the first row gave the next one its turn, so every waiting file was started, then cancelled.
+test('Pause all with files waiting starts and cancels nothing', { skip }, async () => {
+  const hang = await serveUi(HANG.replace('window.fetch = () => new Promise(() => {});', 'window.calls = []; window.fetch = (url, o) => (calls.push(o.method), new Promise(() => {}));'));
+  try {
+    const page = await browser.page(hang.base, { width: 1000, height: 700 });
+    await page.eval(files('a.bin', 'b.bin', 'c.bin'));
+    await page.eval(`up.pause()`);
+    assert.deepEqual(await page.eval(states), ['paused', 'paused', 'paused']);
+    assert.deepEqual(await page.eval('calls'), ['POST'], 'only a, which was sending already');
+    // A paused file told to resume is waiting too: Pause all takes its turn away as well.
+    await page.eval(`up.resume()`); // a sends again, b and c wait
+    await page.eval(`document.querySelectorAll('.cui-upload-file')[0].querySelector('.cui-btn').click()`); // pause a: b starts
+    await page.eval(`document.querySelectorAll('.cui-upload-file')[0].querySelector('.cui-btn').click()`); // resume a: it waits
+    assert.deepEqual(await page.eval(states), ['waiting', 'sending', 'waiting']);
+    const before = await page.eval<number>('calls.length');
+    await page.eval(`up.pause()`);
+    assert.deepEqual(await page.eval(states), ['paused', 'paused', 'paused']);
+    assert.equal(await page.eval('calls.length'), before);
+  } finally {
+    await hang.close();
+  }
+});

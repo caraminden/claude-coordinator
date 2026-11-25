@@ -204,6 +204,51 @@ static class TrialTests
             Is(Trial.TryNow(new State { Current = B(6) }, ask), false, "nothing waiting");
         });
 
+        // A roll back on the feed (#1942): a build it took back isn't tried, however it came to wait.
+        Test("the feed rolled back to the build that runs: the waiting one is withdrawn", () =>
+        {
+            Is(Trial.Withdrawn(Waiting(), 6), true, "feed names the current build");
+        });
+        Test("the feed rolled back past the build that runs: the waiting one is withdrawn, the older one is downloaded", () =>
+        {
+            var s = Waiting();
+            Is(Trial.Withdrawn(s, 5), true, "feed names an older build");
+            Is(Trial.WantsBuild(s, 5), true, "the older build is wanted");
+        });
+        Test("a crashed build waiting for its second go is withdrawn by a roll back", () =>
+        {
+            var s = Waiting();
+            Trial.Started(s);
+            Trial.Crashed(s);
+            Is(s.Pending.Id, 7, "waits for its second go");
+            Is(Trial.Withdrawn(s, 7), false, "while the feed still names it");
+            Is(Trial.Withdrawn(s, 6), true, "once the feed is rolled back");
+        });
+        Test("a roll back taken back: the older build waiting is withdrawn once the feed names the current one again", () =>
+        {
+            var s = new State { Current = B(7), Previous = B(6), Pending = B(6) };
+            Is(Trial.Withdrawn(s, 6), false, "while the feed names the older build");
+            Is(Trial.Withdrawn(s, 7), true, "once it names the current one");
+        });
+        Test("a crash back to the build a roll back was waiting to try: it runs already, so nothing is left to try", () =>
+        {
+            var s = Waiting();
+            Trial.Started(s);
+            s.Pending = B(6);
+            Trial.Crashed(s);
+            Is(s.Current.Id, 6, "current");
+            Is(s.Pending.Id, 6, "still pending");
+            Is(Trial.Withdrawn(s, 6), true, "withdrawn");
+        });
+        Test("the waiting build stays while the feed names it or a newer one, and with nothing to run instead", () =>
+        {
+            Is(Trial.Withdrawn(Waiting(), 7), false, "the feed names it");
+            Is(Trial.Withdrawn(Waiting(), 8), false, "the feed names a newer one");
+            Is(Trial.Withdrawn(Waiting(), 0), false, "a feed with no build");
+            Is(Trial.Withdrawn(new State { Pending = B(7) }, 6), false, "a first build");
+            Is(Trial.Withdrawn(new State { Current = B(6) }, 6), false, "nothing waiting");
+        });
+
         // Saved data: a state.json written by launcher 1 reads as it is.
         Test("launcher 1's state.json: its current build is good and its refused builds stay refused", () =>
         {

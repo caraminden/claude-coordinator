@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { SCHEMA_VERSION, Store } from '../src/db.ts';
-import { router, routeGroup } from '../src/http.ts';
+import { type App, router, routeGroup } from '../src/http.ts';
+import type { Session } from '../src/auth.ts';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { fake } from './typed.ts';
 import { pacificDay } from '../src/pacific.ts';
 import { unusedList, UsageLedger } from '../src/usage-ledger.ts';
 
@@ -26,9 +29,9 @@ test('uses add up by day, kind and name, and people counts each person once, acr
   l.used('tool', 'list_tickets', 2);
   l.used('tool', 'list_tickets', 3);
   assert.ok(l.flush());
-  const row = (s as any).db.prepare('SELECT day, kind, name, people, n FROM usage_counts').all();
+  const row = (s as any).db.prepare('SELECT day, kind, name, people, n FROM usage_counts').all() as { day: string }[];
   assert.deepEqual(
-    row.map((r: any) => ({ ...r })),
+    row.map((r) => ({ ...r })),
     [{ day: '2026-11-20', kind: 'tool', name: 'list_tickets', people: 3, n: 5 }],
   );
   assert.ok(SCHEMA_VERSION >= 99);
@@ -45,7 +48,7 @@ test('names keep only plain characters and a bad kind is ignored', () => {
     (s as any).db
       .prepare('SELECT name FROM usage_counts')
       .all()
-      .map((r: any) => r.name),
+      .map((r: { name: string }) => r.name),
     ['p/n/scriptx'],
   );
 });
@@ -65,19 +68,19 @@ test('a failing write throws nothing and keeps the counts for the next flush', (
   }
   db.exec('ALTER TABLE usage_counts_gone RENAME TO usage_counts');
   assert.equal(l.flush(), true);
-  assert.equal(db.prepare('SELECT n FROM usage_counts').get().n, 1);
+  assert.equal((db.prepare('SELECT n FROM usage_counts').get() as { n: number }).n, 1);
 });
 
 test('a route still answers when the ledger throws', async () => {
-  const handle = router([{ method: 'GET', path: '/api/things/:thing/parts', who: ['person'], handler: () => 'answered' as any }]);
-  const store = {
-    usage: {
+  const handle = router([{ method: 'GET', path: '/api/things/:thing/parts', who: ['person'], handler: () => 'answered' }]);
+  const store = fake<Store>({
+    usage: fake<UsageLedger>({
       used: () => {
         throw new Error('disk full');
       },
-    },
-  };
-  const out = await handle({ store } as any, { method: 'GET', headers: {} } as any, {} as any, new URL('http://x/api/things/3/parts'), { name: 'Cara', uid: 1, exp: 0 } as any);
+    }),
+  });
+  const out = await handle(fake<App>({ store }), fake<IncomingMessage>({ method: 'GET', headers: {} }), fake<ServerResponse>({}), new URL('http://x/api/things/3/parts'), fake<Session>({ name: 'Cara', uid: 1, exp: 0 }));
   assert.equal(out, 'answered');
   assert.deepEqual(handle.groups(), ['/api/things/parts']);
 });

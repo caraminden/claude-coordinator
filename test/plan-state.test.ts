@@ -77,7 +77,8 @@ const HISTORY: object[] = [
   say('Still going.'),
 ];
 
-const plain = (p: any) => JSON.parse(JSON.stringify({ ...p, pendingCreates: [...p.pendingCreates] }));
+type Saved = { p: { tasks: unknown[] }; upTo: number; rules?: string };
+const plain = (p: { pendingCreates?: Iterable<unknown>; [k: string]: unknown }) => JSON.parse(JSON.stringify({ ...p, pendingCreates: [...p.pendingCreates!] }));
 function fullReplay(ticketId: number) {
   // As the runner replays: timed by the stored events, collecting the steps that finish after (#571).
   const p = createProgress();
@@ -129,7 +130,7 @@ test('a minion with no saved state is replayed in full once, then saved', () => 
   feed(restart(), t.id, HISTORY.slice(0, 8)); // mid-turn, no result yet
   store.deleteSetting(planKey(t.id));
   assert.deepEqual(restart().view(store.getTicket(t.id)!).steps, { done: 0, total: 3 });
-  const saved = store.getSetting<any>(planKey(t.id));
+  const saved = store.getSetting<Saved>(planKey(t.id))!;
   assert.equal(saved.p.tasks.length, 3);
   assert.equal(saved.upTo, store.planEvents(t.id).at(-1)!.id);
 });
@@ -137,12 +138,12 @@ test('a minion with no saved state is replayed in full once, then saved', () => 
 test('a state saved by other task-list rules, or a broken one, is thrown away and rebuilt', () => {
   const t = newTicket();
   feed(restart(), t.id, HISTORY.slice(0, HISTORY.indexOf(result) + 1));
-  const saved = store.getSetting<any>(planKey(t.id));
+  const saved = store.getSetting<Saved>(planKey(t.id))!;
   const wrong = { ...saved.p, tasks: [{ id: '1', subject: 'Wrong', status: 'completed', actions: 0 }] };
   for (const bad of [{ ...saved, rules: 'older', p: wrong }, { ...saved, p: { ...wrong, tasks: 'x' } }, { ...saved, upTo: 'x', p: wrong }, 'junk']) {
     store.setSetting(planKey(t.id), bad);
     assert.deepEqual(restart().view(store.getTicket(t.id)!).steps, { done: 1, total: 2 }, JSON.stringify(bad).slice(0, 60));
-    assert.deepEqual(store.getSetting<any>(planKey(t.id)), saved, 'and saved again');
+    assert.deepEqual(store.getSetting<Saved>(planKey(t.id)), saved, 'and saved again');
   }
 });
 

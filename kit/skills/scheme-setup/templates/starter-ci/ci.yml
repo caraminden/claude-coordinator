@@ -1,0 +1,58 @@
+# Citadel's starter CI (the kit's scheme-setup/templates/starter-ci/README.md, #1782): install, typecheck, build, tests.
+# Copy to .github/workflows/ci.yml. Swap <scheme-slug>, and make the steps this repo's own check.
+#
+# It runs on the scheme's own Linux runner only (`ci_runners` add, `os: linux`), never on GitHub's: those cost Actions
+# minutes, so there is no switch to them here.
+name: ci
+
+# After a ship: the commit main now holds. Not on pull requests: they'd run the same check twice, on a stale commit
+# (#603). A scheme whose tools/land.sh waits for CI (CI_WORKFLOWS=ci.yml) swaps this for `branches: ['land/**']`, the
+# commit it is about to ship, so main isn't run again.
+on:
+  push:
+    branches: [main] # the repo's default branch
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # tools/ci-numbers.sh: the run's own token, no secret (citadel:ci-store)
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # The run that is going finishes; of those waiting, GitHub keeps the newest.
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: [self-hosted, <scheme-slug>-ci-linux]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # what package.json's engines asks for
+      # Other toolchains go here: astral-sh/setup-uv, jdx/mise-action, dtolnay/rust-toolchain.
+
+      # A repo with one check command (tools/check.sh, `npm run check`) runs that in place of Typecheck and Tests, so CI
+      # and a ship agree. Delete a step the repo has no script for; don't hide it with --if-present, which passes when
+      # the script goes missing.
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Tests
+        id: tests
+        run: |
+          started=$SECONDS
+          npm test
+          echo "secs=$((SECONDS - started))" >> "$GITHUB_OUTPUT"
+      - name: Keep the suite's time
+        if: success()
+        continue-on-error: true
+        run: tools/ci-numbers.sh suite-time=${{ steps.tests.outputs.secs }}s

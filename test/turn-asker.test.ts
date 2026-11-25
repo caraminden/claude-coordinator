@@ -9,6 +9,7 @@ import { askerKey, Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, PASSWORD, SECRET, stopTurns, testPins } from './helpers.ts';
+import { json } from './typed.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -165,7 +166,7 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
       headers: { Authorization: `Bearer ${tokens.agentToken(CitadelTM.id)}`, 'Content-Type': 'application/json' },
       body: body && JSON.stringify(body),
     });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await json<{ error: string; id: number }>(res) };
   };
   const askedBy = (who: { id: number }) => store.setSetting(askerKey(CitadelTM.id), who.id);
   const admin = [

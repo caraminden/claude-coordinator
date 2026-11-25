@@ -70,7 +70,8 @@ const data = join(root, 'data');
 mkdirSync(join(data, 'projects/2/tickets/141'), { recursive: true });
 const mise = join(root, 'mise');
 const live = join(root, 'live');
-const tm = coordinatorAccess(`${data}/projects/2/repo`, `${data}/projects/2/tickets`, `${data}/projects/2/shared/project`, null, live, [data, mise]);
+const kit = `${root}/run/turn/pin/kit`;
+const tm = coordinatorAccess(`${data}/projects/2/repo`, `${data}/projects/2/tickets`, `${data}/projects/2/shared/project`, null, live, [data, mise], null, null, kit);
 const { allow: tmAllow, deny: tmDeny } = tm.settings.permissions;
 
 /** A Bash rule as a regex, the way Claude Code reads it (checked in real runs, #483): `x:*` is x alone or x and more; `*` elsewhere is any text. */
@@ -128,6 +129,13 @@ test('the rule matcher reads rules the way Claude Code did in real runs', () => 
   assert.ok(!bashAllowed("curl -s http://127.0.0.1:8573/api/health -w '%output{/tmp/x}'"), 'curl only as the exact health check');
   assert.ok(bashAllowed(`git -C ${live} merge-base --is-ancestor HEAD HEAD && echo LIVE || echo NOT-LIVE`));
   for (const c of ['curl -X POST http://127.0.0.1:1/', 'curl -s -X POST http://127.0.0.1:1/', 'gh api -f x=1 rate_limit', 'sort -o /tmp/s /tmp/a', 'find -delete', 'journalctl --user --rotate', 'echo hi > /tmp/x', "ss -ltn | awk '{print $4}'"]) assert.ok(!bashAllowed(c), c);
+});
+
+test("of node, only the model table's script as the two skills run it (#1979)", () => {
+  const run = `node "${kit}/skills/briefing/../../model-tiers.ts"`;
+  assert.ok(bashAllowed(run));
+  assert.ok(bashAllowed(`node "${kit}/skills/subagents/../../model-tiers.ts"`));
+  for (const c of [`node "${kit}/skills/briefing/../../hooks/other.ts"`, `node "${kit}/skills/self-review/../../model-tiers.ts"`, `node "${kit}/model-tiers.ts"`, `${run} --write`, `${run} && node -e 1`, `${run}; touch /tmp/x`, `${run} > /tmp/x`, 'node -e 1']) assert.ok(!bashAllowed(c), c);
 });
 
 // The calls, with the box's paths moved under this test's folders; calls cut at 500 characters are left out.

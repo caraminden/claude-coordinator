@@ -22,7 +22,7 @@ test('long unchanged stretches collapse, keeping a line beside each change', () 
   const old = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].join('\n');
   const runs = collapseRuns(planChanges(old, old.replace('a', 'A')).ops);
   assert.deepEqual(
-    runs.map((r: any) => (r.gap ? `gap${r.gap.length}` : r.op + r.text)),
+    runs.map((r) => (r.gap ? `gap${r.gap.length}` : r.op + r.text)),
     ['-a', '+A', ' b', 'gap5'],
   );
 });

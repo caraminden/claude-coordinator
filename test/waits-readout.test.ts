@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { NewDelivery } from '../src/db/deliveries.ts';
 import { DROPPED_SHOWN_MS, firstLine, waitsFor } from '../src/waits-readout.ts';
 import { testPins } from './helpers.ts';
 testPins();
@@ -20,7 +21,7 @@ test('chips: a time, another minion, an event; dropped rows age out after 7 days
   const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const a = mk(),
     b = mk();
-  const add = (d: any) => store.addDelivery({ project_id: p.id, kind: 'k', to_kind: 'minion', to_id: a.id, set_by: 'minion:1', when_kind: 'at', ...d }, NOW);
+  const add = (d: Partial<NewDelivery>) => store.addDelivery({ project_id: p.id, kind: 'k', to_kind: 'minion', to_id: a.id, set_by: 'minion:1', when_kind: 'at', ...d }, NOW);
   add({ when_arg: NOW + 14 * 3_600_000, due: NOW + 14 * 3_600_000, payload: { note: 'check' } }); // 02:00 next day PST
   add({ when_kind: 'live', when_arg: { ticket: b.id } });
   add({ when_kind: 'ci', when_arg: { sha: 'abc' } });

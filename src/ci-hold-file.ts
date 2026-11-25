@@ -10,6 +10,9 @@ export interface HoldFile {
   why: string | null;
   /** The repos with runners on that PC; another repo's jobs are never held. */
   repos: string[];
+  /** Citadel's own repo, and the lower Citadel job running now, which its jobs wait for (#1906); absent from an older server. */
+  own?: string | null;
+  busy?: string | null;
   held: { run: number }[];
 }
 

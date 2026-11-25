@@ -75,13 +75,13 @@ after(async () => {
 });
 
 const ticket = async () => (await srv.call(`/api/tickets/${ticketId}`)).data.ticket;
-const events = async () => (await srv.call(`/api/tickets/${ticketId}/events?after=0`)).data as any[];
+const events = async () => (await srv.call(`/api/tickets/${ticketId}/events?after=0`)).data as { kind: string; data: string }[];
 const replies = async () =>
   (await events())
     .filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'assistant')
     .map((e) =>
       JSON.parse(e.data)
-        .message.content.map((b: any) => b.text)
+        .message.content.map((b: { text: string }) => b.text)
         .join(''),
     );
 const notes = async () => (await events()).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);

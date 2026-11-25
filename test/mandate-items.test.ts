@@ -11,6 +11,7 @@ import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, jsonLines, tempRoot, until, type Booted, testPins } from './helpers.ts';
+import { json, type Refused } from './typed.ts';
 testPins();
 
 const tmp = tempRoot('mandate-items-');
@@ -59,8 +60,8 @@ const mandate = createServer((req, res) => {
 });
 
 let srv: Booted;
-let project: any;
-let minion: any;
+let project: { id: number };
+let minion: { id: number; number: number };
 let mandateKey = '';
 let mandatePub = '';
 let peekKey = '';
@@ -83,7 +84,7 @@ async function typed(plan: object[], text = 'please') {
       turns().length > n &&
       turns()
         .slice(n)
-        .find((t: any) => t.ticket === minion.id),
+        .find((t) => t.ticket === minion.id),
   );
   writeFileSync(join(root, `plan-${minion.id}.json`), '[]');
   await idle(minion.id);
@@ -96,10 +97,10 @@ const hook = (scheme: string, body: unknown, key = mandateKey, person = cara) =>
     headers: { Authorization: `Bearer ${key}`, 'X-Citadel-Person': String(person), 'Content-Type': 'application/json' },
   });
 const said = async (id: number) =>
-  ((await srv.call(`/api/tickets/${id}/events?after=0`)).data as any[])
-    .map((e) => e.kind === 'user_message' && JSON.parse(e.data))
-    .filter((d) => d && d.author === 'Mandate')
-    .map((d) => d.text);
+  (await srv.call(`/api/tickets/${id}/events?after=0`)).data
+    .map((e: { kind: string; data: string }) => e.kind === 'user_message' && JSON.parse(e.data))
+    .filter((d: { author: string } | false) => d && d.author === 'Mandate')
+    .map((d: { text: string }) => d.text);
 
 before(async () => {
   const port = await tmp.serve(mandate);
@@ -178,7 +179,7 @@ test('an item the chat put can be cleared on any turn, for the person it was put
     `turns: ${JSON.stringify(
       turns()
         .slice(first)
-        .map((x: any) => ({ prompt: JSON.stringify(x.prompt).slice(-300), out: x.out })),
+        .map((x) => ({ prompt: JSON.stringify(x.prompt).slice(-300), out: x.out })),
     )}\nMandate saw: ${JSON.stringify(seen.slice(-6).map((x) => [x.method, x.path]))}`;
   assert.equal(put[0].data.status, 200, ran());
   // The next turn is Mandate's own hook (no one typed it), as a GitHub message or a wake would be.
@@ -196,7 +197,7 @@ test('an item the chat put can be cleared on any turn, for the person it was put
   const t = await until('the turn', () =>
     turns()
       .slice(n)
-      .find((x: any) => x.ticket === minion.id),
+      .find((x) => x.ticket === minion.id),
   );
   writeFileSync(join(root, `plan-${minion.id}.json`), '[]');
   await idle(minion.id);
@@ -212,7 +213,7 @@ test("only Mandate's hook, for a person on the scheme, reaches a minion; a close
   const body = { key: `${minion.number}.k`, event: 'ticked', at: '2026-11-02T08:14:00Z' };
   const status = async (r: Promise<Response>) => {
     const res = await r;
-    return [res.status, (await res.json()).error];
+    return [res.status, (await json<Refused>(res)).error];
   };
   assert.deepEqual(await status(hook(`scheme-${project.id}`, body, peekKey)), [404, 'no_route'], 'only Mandate');
   assert.deepEqual(

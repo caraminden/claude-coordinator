@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { test } from 'node:test';
@@ -152,7 +153,7 @@ $script, $rest = $args
 exit $LASTEXITCODE
 `,
   );
-  const asked: any[] = [];
+  const asked: { auth?: string; url?: string; kind?: string; mint?: boolean; name?: string; scheme?: string; label?: string }[] = [];
   const citadel = createServer((req, res) => {
     let text = '';
     req.on('data', (c) => {
@@ -169,7 +170,7 @@ exit $LASTEXITCODE
   });
   await new Promise<void>((r) => citadel.listen(0, '127.0.0.1', r));
   try {
-    const url = `http://127.0.0.1:${(citadel.address() as any).port}`;
+    const url = `http://127.0.0.1:${(citadel.address() as AddressInfo).port}`;
     const child = spawn(psRun[0], [...psRun.slice(1), '-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
     let out = '';
     child.stdout.on('data', (c) => {

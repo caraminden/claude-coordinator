@@ -173,7 +173,7 @@ setInterval(() => {}, 1000);
   chmodSync(claude, 0o755);
   const code = repo({ '.gitignore': 'node_modules/\n', 'package.json': '{}', 'package-lock.json': LOCK });
   const srv = await bootServer({ root: home, env: { HOME: root, CLAUDE_BIN: claude, CITADEL_HEAVY_UNIT: '0', PATH: `${join(fake, 'bin')}:${process.env.PATH}` } });
-  const log = (): any[] => jsonLines(turns);
+  const log = (): { cwd: string; modules?: boolean; said?: string }[] => jsonLines(turns);
   try {
     const scheme = await srv.call('/api/projects', { name: 'Deps', source: 'folder', folder: code });
     assert.equal(scheme.status, 201, JSON.stringify(scheme.data));
@@ -186,12 +186,12 @@ setInterval(() => {}, 1000);
     };
     setMode('ok');
     const ok = await minion('first');
-    assert.equal(log().find((e) => e.cwd === ok.cwd && 'modules' in e).modules, true, 'node_modules was there when the turn began');
+    assert.equal(log().find((e) => e.cwd === ok.cwd && 'modules' in e)!.modules, true, 'node_modules was there when the turn began');
     assert.ok(calls().some((c) => c.cwd === ok.cwd && c.cache === join(srv.data, 'projects', '.build-cache', 'npm')));
 
     setMode('fail');
     const failed = await minion('second');
-    assert.equal(log().find((e) => e.cwd === failed.cwd && 'modules' in e).modules, false);
+    assert.equal(log().find((e) => e.cwd === failed.cwd && 'modules' in e)!.modules, false);
     await until('the note in its turn', () => log().some((e) => e.cwd === failed.cwd && /npm error code EBOOM/.test(e.said ?? '')));
   } finally {
     await srv.stop();

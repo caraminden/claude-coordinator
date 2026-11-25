@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { thrown } from '../src/thrown.ts';
 import { testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -195,8 +196,8 @@ test('a turn that stops being followed closes its files', async () => {
       try {
         fs.fstatSync(fd);
         return false;
-      } catch (err: any) {
-        return err.code === 'EBADF';
+      } catch (err) {
+        return thrown(err).code === 'EBADF';
       }
     }),
   );

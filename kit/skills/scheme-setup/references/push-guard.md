@@ -120,6 +120,11 @@ is online, or the job failed, put its words in your done note and tell the Taskm
 a bare hosted runner and, if the repo has workflows, `ci_runners` came back done with the runner
 Idle (or its failure is in your done note).
 
+**A repo with no CI** starts from this skill's `templates/starter-ci/` when the plan gives it CI: the check on the
+scheme's Linux runner after each ship, and a nightly boot check that starts the app and gets its health page. Its
+`README.md` says where each file goes; the one exception to the `runs-on` above is its jobs, which name the Linux runner with no hosted
+fallback. *Done when* each workflow copied has run green on the default branch.
+
 **A Windows app's CI** starts from this skill's `templates/windows-ci/` when the plan gives the
 scheme Windows CI: its `README.md` says where each file goes, and its lint line joins the check
 commands in Project facts. Its workflows run only as a change ships, so they need land.sh's CI gate

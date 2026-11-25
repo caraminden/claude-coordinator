@@ -56,9 +56,8 @@ test('an account-error push is allowed once an hour, and old texts are forgotten
 });
 
 test('a heartbeat stops when its response closes, even if the call never answers', async () => {
-  const res: any = new EventEmitter();
   let beats = 0;
-  res.write = () => beats++;
+  const res = Object.assign(new EventEmitter(), { write: () => beats++ });
   beatWhileOpen(res, 5);
   await until('two beats', () => beats >= 2);
   res.emit('close');

@@ -12,7 +12,7 @@ test('approvals: ticking adds the rules, unticking removes only them, and hand r
   stored = toggleApproval(stored, 'merge', true);
   assert.deepEqual(stored.split('\n'), ['Bash(tools/deploy.sh:*)', 'Bash(gh pr merge:*)', 'mcp__*__merge_pull_request']);
   assert.deepEqual(
-    ticked(stored.split('\n')).map((a: any) => a.id),
+    ticked(stored.split('\n')).map((a) => a.id),
     ['merge'],
   );
   assert.deepEqual(handRules(stored), ['Bash(tools/deploy.sh:*)']);
@@ -27,7 +27,7 @@ test('approvals: a box with only some of its rules is unticked and its rule show
 });
 
 test('every catalogue rule is one the server accepts as stored', () => {
-  assert.doesNotThrow(() => cleanRules(APPROVALS.flatMap((a: any) => a.rules).join('\n')));
+  assert.doesNotThrow(() => cleanRules(APPROVALS.flatMap((a) => a.rules).join('\n')));
 });
 
 test('plugins: off, picked and every minion move a folder between the two stored lists', () => {

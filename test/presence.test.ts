@@ -7,7 +7,7 @@ import { Presence, VIEW_TTL_MS, WROTE_MS } from '../src/presence.ts';
 
 function world() {
   let now = 1_000_000;
-  const sent: any[] = [];
+  const sent: Parameters<ConstructorParameters<typeof Presence>[0]['broadcast']>[0][] = [];
   const projectOf = (id: number) => (({ 1: 10, 2: 10, 3: 20 }) as Record<number, number>)[id];
   const p = new Presence({ projectOf, broadcast: (m) => sent.push(m), now: () => now });
   return { p, sent, tick: (ms: number) => (now += ms) };
@@ -47,13 +47,13 @@ test('a missed heartbeat drops the viewer; a write counts for ten minutes', () =
   assert.deepEqual(p.forScheme(10), { 1: ['Josh'], 2: ['Cara'] });
   tick(VIEW_TTL_MS + 1);
   p.sweep();
-  assert.deepEqual(sent.at(-1).tickets, { 2: ['Cara'] });
+  assert.deepEqual(sent.at(-1)!.tickets, { 2: ['Cara'] });
   tick(WROTE_MS);
   p.sweep();
-  assert.deepEqual(sent.at(-1).tickets, {});
+  assert.deepEqual(sent.at(-1)!.tickets, {});
   // A heartbeat after the drop brings the viewer back.
   p.view('s1', 'Josh', 1);
-  assert.deepEqual(sent.at(-1).tickets, { 1: ['Josh'] });
+  assert.deepEqual(sent.at(-1)!.tickets, { 1: ['Josh'] });
 });
 
 test("presence goes only to people who can see the minion's scheme", () => {

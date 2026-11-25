@@ -36,9 +36,9 @@ function browser(network: Record<string, { version: string; body?: string; statu
 
 /** Load a worker script into a fake browser; returns how to fire its events. */
 function worker(script: string, b: ReturnType<typeof browser>) {
-  const listeners: Record<string, (e: any) => void> = {};
+  const listeners: Record<string, (e: unknown) => void> = {};
   const self = {
-    addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+    addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
     skipWaiting: () => {},
     location: { origin: ORIGIN },
     clients: { claim: async () => {}, matchAll: async () => b.windows },
@@ -51,7 +51,7 @@ function worker(script: string, b: ReturnType<typeof browser>) {
   };
   /** A request through the worker: its answer's body, or null when the worker left it to the browser. */
   const request = async (path: string, mode = 'no-cors', method = 'GET') => {
-    let answer: Promise<Response> | null = null;
+    let answer = null as Promise<Response> | null;
     listeners.fetch({ request: { url: ORIGIN + path, mode, method }, respondWith: (p: Promise<Response>) => (answer = p) });
     return answer ? (await answer).text() : null;
   };
@@ -111,7 +111,7 @@ test("a worker keeps its version's files and opens the app from them with no net
     fetch: async () => {
       throw new TypeError('Failed to fetch');
     },
-  } as any);
+  });
   assert.equal(await offline.request('/c/', 'navigate'), 'v1 /c/');
   assert.equal(await offline.request('/c/index.html', 'navigate'), 'v1 /c/');
   assert.equal(await offline.request('/c/app.js'), 'v1 /c/app.js');
@@ -163,7 +163,7 @@ test('a ship fetches only the files whose content changed; the rest are copied f
   const hashes = new Map(H('v2'));
   for (const n of ['icon.svg', 'style.css', 'ui/chat.js']) hashes.set(n, `v1 /c/${n}`);
   const b2 = browser(n2);
-  const v2 = worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b, fetch: b2.fetch } as any);
+  const v2 = worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b, fetch: b2.fetch });
   await v2.lifecycle('install');
   assert.deepEqual(b2.fetched.sort(), ['/c/', '/c/app.js'], 'two fetched, not five');
   await v2.lifecycle('activate');
@@ -176,7 +176,7 @@ test('a ship fetches only the files whose content changed; the rest are copied f
   await w1.lifecycle('install');
   await w1.lifecycle('activate');
   const raced = browser({ ...n2, '/c/app.js': { version: 'v3', body: 'v3 /c/app.js' } });
-  await assert.rejects(worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b3, fetch: raced.fetch } as any).lifecycle('install'), /\/c\/app\.js is not front end v2/);
+  await assert.rejects(worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b3, fetch: raced.fetch }).lifecycle('install'), /\/c\/app\.js is not front end v2/);
   assert.deepEqual([...b3.stores.keys()], ['shell-v1']);
   assert.equal(await w1.request('/c/app.js'), 'v1 /c/app.js');
   assert.equal(await w1.request('/c/style.css'), 'v1 /c/style.css');

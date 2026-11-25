@@ -8,6 +8,8 @@ import { MemoryEase, LEVEL_FILE, parseEpisode, type Episode, type RawMemory } fr
 import { createPressure } from '../src/pressure.ts';
 import { HeldStarts } from '../src/held-starts.ts';
 import { Store } from '../src/db.ts';
+import type { Runner } from '../src/runner.ts';
+import { fake } from './typed.ts';
 
 const GB = 1024 ** 3;
 const temps: string[] = [];
@@ -200,11 +202,11 @@ test('easing holds scheduled starts and pauses background passes; back at ok the
     emit: () => {},
     send: (id: number) => {
       sent.push(id);
-      return {} as any;
+      return fake<ReturnType<Runner['send']>>({});
     },
   };
   const held = new HeldStarts({ store, runner: runner as any, read: () => p.read(), now: b.now });
-  const id = store.createTicket({ project_id: project.id, title: 'A run', permission_mode: 'bypass', created_by: 'Citadel' } as any).id;
+  const id = store.createTicket({ project_id: project.id, title: 'A run', permission_mode: 'bypass', created_by: 'Citadel' }).id;
 
   b.free(5);
   await b.run(10);

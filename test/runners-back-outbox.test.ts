@@ -5,10 +5,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, beforeEach, test } from 'node:test';
-import { addRunnerWaiter, CiHealth, registerRunnersBack, RUNNER_WAITERS, runnerWaiters } from '../src/ci-health.ts';
-import { Store } from '../src/db.ts';
+import { addRunnerWaiter, CiHealth, type CiHealthDeps, registerRunnersBack, RUNNER_WAITERS, runnerWaiters } from '../src/ci-health.ts';
+import { type Project, Store } from '../src/db.ts';
+import type { Runner } from '../src/ci-view.ts';
 import { Outbox, type OutboxRunner } from '../src/outbox.ts';
 import { testPins } from './helpers.ts';
+import { fake } from './typed.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'rb-outbox-'));
@@ -16,7 +18,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const T0 = Date.UTC(2026, 10, 14, 20, 0);
 const now = { t: T0 };
 let store: Store;
-let project: { id: number; name: string };
+let project: Project;
 let k = 0;
 let boxes: Outbox[] = [];
 beforeEach(() => {
@@ -45,25 +47,25 @@ function world() {
   const outbox = new Outbox(store, runner as unknown as OutboxRunner, { author: 'Citadel', now: () => now.t });
   boxes.push(outbox);
   registerRunnersBack(store, outbox);
-  const health = new CiHealth(store, { outbox } as any);
+  const health = new CiHealth(store, fake<CiHealthDeps>({ outbox }));
   return { sent, outbox, health };
 }
-const runner = (online: boolean) => [{ name: 'DESKTOP', status: online ? 'online' : 'offline', labels: [{ name: 'peek-auras-ci' }] }] as any;
+const runner = (online: boolean) => [{ name: 'DESKTOP', status: online ? 'online' : 'offline', labels: [{ name: 'peek-auras-ci' }] }] satisfies Runner[];
 
 test('a wait set while runners are down fires on the poll after they return', async () => {
   const w = world();
   await w.outbox.boot();
   const id = minion();
   addRunnerWaiter(store, id, 'run tools/land.sh again.', w.outbox);
-  w.health.wakeParked(project as any, runner(false));
+  w.health.wakeParked(project, runner(false));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 0);
   now.t += 5 * 60_000;
-  w.health.wakeParked(project as any, runner(true));
+  w.health.wakeParked(project, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 1);
   assert.match(w.sent[0].text, /^Peek Auras's CI runners are back \(DESKTOP online\): run tools\/land\.sh again\. If land seals/);
-  w.health.wakeParked(project as any, runner(true));
+  w.health.wakeParked(project, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 1, 'once');
 });
@@ -73,7 +75,7 @@ test('an unreadable runner list still tells the minion to ask a person', async (
   await w.outbox.boot();
   const id = minion();
   addRunnerWaiter(store, id, 'run tools/land.sh again.', w.outbox);
-  w.health.wakeParked(project as any, null);
+  w.health.wakeParked(project, null);
   await w.outbox.poke({ type: 'tick' });
   assert.match(w.sent[0].text, /can't read Peek Auras's CI runners .* ask a person whether they are, then run tools\/land\.sh again\./);
 });
@@ -84,13 +86,13 @@ test('a dismissed minion keeps its wait for 3 days, and hears it after a reopen'
   const id = minion();
   addRunnerWaiter(store, id, 'go.', w.outbox);
   store.updateTicket(id, { status: 'closed' });
-  w.health.wakeParked(project as any, runner(true));
+  w.health.wakeParked(project, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 0);
   assert.equal(store.listDeliveries({ kind: 'runners_back' })[0].state, 'held');
   store.updateTicket(id, { status: 'idle' });
   await w.outbox.poke({ type: 'reopened', ticket: id });
-  w.health.wakeParked(project as any, runner(true));
+  w.health.wakeParked(project, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 1);
 });
@@ -114,7 +116,7 @@ test('saved waits move into the table at boot in one go, none dropped, and the k
   assert.deepEqual(runnerWaiters(store), []);
   await w.outbox.poke({ type: 'tick' }); // a second pass moves nothing twice
   assert.equal(store.listDeliveries({ kind: 'runners_back' }).length, 2);
-  w.health.wakeParked(project as any, runner(true));
+  w.health.wakeParked(project, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.deepEqual(
     w.sent.map((s) => s.id),

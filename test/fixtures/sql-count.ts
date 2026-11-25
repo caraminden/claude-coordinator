@@ -6,20 +6,22 @@ import { StatementSync } from 'node:sqlite';
 
 const request = new AsyncLocalStorage<{ n: number }>();
 const emit = http.Server.prototype.emit;
-http.Server.prototype.emit = function (this: http.Server, event: string, ...args: any[]) {
+http.Server.prototype.emit = function (this: http.Server, event: string, ...args: unknown[]) {
   return event === 'request' ? request.run({ n: 0 }, () => emit.call(this, event, ...args)) : emit.call(this, event, ...args);
 } as typeof emit;
 for (const m of ['run', 'get', 'all', 'iterate'] as const) {
   const f = StatementSync.prototype[m] as (...a: unknown[]) => unknown;
-  (StatementSync.prototype as any)[m] = function (this: StatementSync, ...a: unknown[]) {
-    const r = request.getStore();
-    if (r) r.n++;
-    return f.apply(this, a);
-  };
+  Object.assign(StatementSync.prototype, {
+    [m]: function (this: StatementSync, ...a: unknown[]) {
+      const r = request.getStore();
+      if (r) r.n++;
+      return f.apply(this, a);
+    },
+  });
 }
 const writeHead = http.ServerResponse.prototype.writeHead;
-http.ServerResponse.prototype.writeHead = function (this: http.ServerResponse, ...a: any[]) {
+http.ServerResponse.prototype.writeHead = function (this: http.ServerResponse, ...a: unknown[]) {
   const r = request.getStore();
   if (r && !this.headersSent) this.setHeader('x-sql-statements', String(r.n));
-  return (writeHead as any).apply(this, a);
+  return (writeHead as (...a: unknown[]) => unknown).apply(this, a);
 } as typeof writeHead;

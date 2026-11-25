@@ -27,6 +27,8 @@ test('each red run gets one cause from its own lines, and greens and cancels are
     run(9, 'ticket/9-i', '09:00', '09:10', 'cancelled'),
     run(10, 'ticket/10-j', '10:00', '10:10', 'failure'), // its lead's suspects pin the lead itself
     run(11, 'ticket/11-k', '11:00', '11:10', 'failure'), // a known flake
+    run(12, 'ticket/12-l', '12:00', '12:10', 'failure'), // green, then red in its check of the PC's own ports
+    run(13, 'ticket/13-m', '13:00', '13:10', 'failure'), // main's own red, and refused for it
   ];
   const lines = day(
     [
@@ -39,10 +41,13 @@ test('each red run gets one cause from its own lines, and greens and cancels are
       '- 07:11:00Z · timing · ticket/7-g · line 30 · rebase 1 · ci-queue 2 · ci-run 300 · fallback - · deploy - · live - · refused at ci',
       `- 10:12:00Z · ship train suspects · ticket/10-j · #10 (test/w.test.ts) · failed alone here: #10 · ${U}10`,
       `- 11:12:00Z · known flake · ticket/11-k · test/k.test.ts (seen on 3 other branches in 14 days) · ${U}11`,
+      `- 12:11:00Z · CI ports red · ticket/12-l · counted as green · ${U}12`,
+      `- 13:11:00Z · red on main too: not this ship's · ticket/13-m · test/m.test.ts · ${U}13`,
+      '- 13:11:00Z · timing · ticket/13-m · line 0 · rebase 2 · ci-queue 19 · ci-run 179 · fallback - · deploy - · live - · refused at ci',
     ].join('\n'),
   );
   const out = landReds(runs, lines, SINCE);
-  assert.deepEqual({ runs: out.runs, green: out.green, red: out.red, other: out.other, riders: out.riders }, { runs: 11, green: 1, red: 9, other: 1, riders: 1 });
+  assert.deepEqual({ runs: out.runs, green: out.green, red: out.red, other: out.other, riders: out.riders }, { runs: 13, green: 2, red: 10, other: 1, riders: 1 });
   assert.deepEqual(Object.fromEntries(out.reds.map((r) => [r.id, `${r.cause}${r.rider ? ' rider' : ''}`])), {
     2: 'main',
     3: 'change rider',
@@ -53,8 +58,9 @@ test('each red run gets one cause from its own lines, and greens and cancels are
     8: 'unknown',
     10: 'change',
     11: 'flaky',
+    13: 'main',
   });
-  assert.deepEqual(out.causes, { change: 4, flaky: 3, main: 1, unknown: 1 });
+  assert.deepEqual(out.causes, { change: 4, flaky: 3, main: 2, unknown: 1 });
   assert.equal(out.reds.find((r) => r.id === 11)?.why, 'known flake: test/k.test.ts');
 });
 

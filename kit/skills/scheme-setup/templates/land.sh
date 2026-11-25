@@ -699,19 +699,21 @@ queue_done() {
 
 # The tickets in line order (the header at "The line's order"), as Q_ORDER, and who set .order, as Q_ORDER_BY.
 queue_order() {
-  local t l i=0 old=0 seg k keys=() LC_ALL=C # C: the keys sort byte by byte
+  local t l i=0 old=0 seg k keys=() pins='' pin=0 LC_ALL=C # C: the keys sort byte by byte
   local -A rank=()
   Q_ORDER=() Q_ORDER_BY=''
   [ ! -f "$Q_DIR/.order" ] || while read -r t; do
-    if [[ $t =~ ^[0-9]{10}$ ]]; then rank[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then Q_ORDER_BY=${t#\# }; fi
+    if [[ $t =~ ^[0-9]{10}$ ]]; then rank[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then Q_ORDER_BY=${t#\# }; elif [[ $t == '#pin '* ]]; then pins=${t#\#pin }; fi
   done <"$Q_DIR/.order" 2>/dev/null || true
+  # A ship a person placed ("#pin": Citadel's "Person's drag wins") stays ahead of one that holds the line: it goes behind the last still waiting (not landing: line 2 is 0).
+  for t in $pins; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ "$(sed -n 2p "$Q_DIR/$t" 2>/dev/null || echo x)" = 0 ] && [ "${rank[$t]:-0}" -gt "$pin" ] && pin=${rank[$t]}; done
   for t in "$Q_DIR"/[0-9]*; do
     t=${t##*/}
     [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
     printf -v seg '1%05d' "$old" # the waiters from before .order (no "order" line) ahead of it, in arrival order
     if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t")
     elif [ "${l[4]:-}" != order ] && [ "${l[7]:-}" != order ]; then keys+=("${seg}3 $t") old=$((old + 1))
-    elif [ "${l[8]:-}" = hold ] || [ "${l[5]:-}" = hold ]; then keys+=("${seg}0 $t") # holds the line: before every rank (deploy-queue.sh's "hold" is its 6th line)
+    elif [ "${l[8]:-}" = hold ] || [ "${l[5]:-}" = hold ]; then printf -v k '%010d' "$pin"; keys+=("${seg}1${k}h $t") # holds the line: before every rank but a person's pins (deploy-queue.sh's "hold" is its 6th line)
     elif [ -n "${rank[$t]:-}" ]; then printf -v k '%010d' "${rank[$t]}"; keys+=("${seg}1$k $t")
     else keys+=("${seg}2 $t"); fi
   done
@@ -1364,10 +1366,10 @@ case $mode in
     claims_gate
     # This run changes the claims: its mark, until it ends (claims_inflight).
     if [ "$mode" = into ] && ! git diff --quiet "$(git merge-base "refs/heads/$build" HEAD)" HEAD -- build-claims.md; then
-      claims_flag=$(claims_mark).$$
-      trap 'rm -f "$claims_flag" "$claims_flag-new"' EXIT
-      # Written whole, then moved into place: a feeder reading it half-written would take it for a dead one's.
-      queue_proc $$ >"$claims_flag-new" && mv -f "$claims_flag-new" "$claims_flag"
+      claims_flag=$(claims_mark).$$ claims_new=$(claims_mark)-new.$$
+      trap 'rm -f "$claims_flag" "$claims_new"' EXIT
+      # Written whole, then moved into place: a feeder reading it half-written would take it for a dead one's, and drop it.
+      queue_proc $$ >"$claims_new" && mv -f "$claims_new" "$claims_flag"
     fi
     ;;
 esac
@@ -1407,7 +1409,7 @@ fi
 # its command runs on the newest $BRANCH, and nobody's batch carries a ship past it.
 if [ -n "$Q_HOLD" ]; then
   CI_STACK=1 CI_BATCH=1 BATCH='' UNRUN=old
-  [ -n "$check" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, and nothing ships ahead of it"
+  [ -n "$check" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, behind only ships a person placed"
 fi
 # A landing that changes the pipeline ships alone the same way: a batch would carry its untested land.sh into the
 # others' landings, and a red in it would take them all down with it.
@@ -1480,6 +1482,7 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
            # from their tickets if a red landing holding up the ones behind it ever costs real time.
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
 green='' pushed='' pushed_at='' retried='' flaked=0 ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
+ci_fail_n=0 ci_fail_at='' # how many polls in a row CI gave no answer to, and since when
 ci_more=0 ci_more_keys='' # land_ci_more: the seconds it added to CI_LIMIT for this run, and the keys it gave them under
 main_pushed='' # step 7 runs land_after only once this is set
 made_up=() # land_after owed by earlier landings whose push failed, made up after this one's push (KT4)
@@ -1488,6 +1491,7 @@ verdict=-  # CI's verdict on $tip, as its ticket says it: -, running, green or r
 B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Batches" below
 fronted='' # with batches: it has been in the head's batch, so CI's limits count
 g_last='' g_quiet='' # with batches, the head: when it last asked CI about the commit it lands, and since when with no answer
+g_wait='' # ... and the commit whose green it waits on its own landing to run again, and since when
 
 # The timing line: when each phase began ($SECONDS; '' for not yet), and the phase a refusal from here on is at.
 # line: from getting in line to holding the lock (with batches: to its batch reaching the front); rebase: the rebase
@@ -1644,6 +1648,16 @@ ci_read() {
   return "$worst"
 }
 
+# green_note: $tip is green: the lane its run took, the commit the lane's range starts from and the known reds it was
+# let past go in <state>/land-green/<tip> (a day's are kept), where a batch's head asking CI about it again reads them
+# (batch_green). Without one (a full disk), the head asks without them.
+green_note() {
+  local d=$state/land-green
+  mkdir -p "$d" && printf '%s %s\n%s' "$ci_lane" "$ci_from" "${LAND_KNOWN_RED:-}" >"$d/$tip.$$" && mv -f "$d/$tip.$$" "$d/$tip" || true
+  find "$d" -type f -mmin +1440 -delete 2>/dev/null || true
+}
+ci_from=-
+
 # The commit goes to the scratch branch, which starts CI on it. Deleted first: a push of the commit
 # the branch already has (a run to repeat) would start nothing. Forced on purpose: only this script
 # writes land/<branch>, so there is no one's work to overwrite. --no-verify: the check ran above.
@@ -1653,8 +1667,9 @@ ci_read() {
 # range, from the commit under its first member (B_BASE[1], from batch_look) to $tip; one not under $tip is full.
 ci_start() {
   local rc=0 l
-  ci_clock=$SECONDS ci_last=$SECONDS ci_begun='' T_ci=$SECONDS T_cirun='' T_gate='' at=ci ci_more=0 ci_more_keys=''
+  ci_clock=$SECONDS ci_last=$SECONDS ci_fail_n=0 ci_begun='' T_ci=$SECONDS T_cirun='' T_gate='' at=ci ci_more=0 ci_more_keys='' ci_from=-
   if [ -n "$BATCH" ] && [ -n "$LANES" ]; then
+    ci_from=${B_BASE[1]:--}
     l="full (${B_BASE[1]:--} is not under ${tip:0:12})"
     ! git merge-base --is-ancestor "${B_BASE[1]:--}" "$tip" 2>/dev/null || l=$(lane_of "${B_BASE[1]}" "$tip" "refs/heads/$BRANCH")
     ci_lane=${l%% *}
@@ -1662,6 +1677,7 @@ ci_start() {
   fi
   if ! lane_ci "$ci_lane"; then
     green=1 verdict=green T_gate=$SECONDS at=line
+    green_note
     say "lane $ci_lane runs no CI, so nothing is pushed and ${tip:0:12} is green as checked"
     queue_set 5 green
     queue_phase "checked ${tip:0:12}: lane $ci_lane runs no CI"
@@ -1669,7 +1685,7 @@ ci_start() {
   fi
   ci_verdict || rc=$?
   case $rc in
-    0) green=1 T_gate=$SECONDS at=line && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
+    0) green=1 T_gate=$SECONDS at=line && rm -f "$state/ci-down" && green_note && say "CI already passed ${tip:0:12}" ;;
     2) say "CI is already running on ${tip:0:12}" ;;
     *) ci_push ;;
   esac
@@ -1720,7 +1736,7 @@ ci_red() {
   say "$1"
   [ "$Q_AHEAD" = 0 ] || say "that commit sits on $Q_PREDNAME's, which hasn't landed: waiting to see whether it does before giving up"
   blocked="$1 (above), so $BRANCH is untouched. Fix it, commit, then run this again"
-  keep=$tip verdict=red T_gate=$SECONDS
+  keep=${bare:-$tip} verdict=red T_gate=$SECONDS
   queue_set 5 red
   # Nobody builds on a red commit. In a batch they already have: it stays, and the bisect finds where the fault is.
   [ -n "$BATCH" ] || { tip=''; queue_set 4 skip; }
@@ -1764,10 +1780,16 @@ park_retry() {
 
 # Asks CI about $tip, at most every CI_POLL seconds: sets green, refuses on red, repeats a lost run once, parks at the limits.
 ci_ask() {
-  local rc=0 waited busy down=''
-  [ $((SECONDS - ci_last)) -ge "$CI_POLL" ] || return 0
+  local rc=0 waited busy down='' every=$CI_POLL
+  # GitHub failing: asking faster only spends what is left of the hour, so each failed poll in a row waits a poll longer, up to 60 s.
+  if [ "$ci_fail_n" -gt 0 ] && [ "$every" -lt 60 ]; then every=$((CI_POLL * (1 + ci_fail_n))); [ "$every" -le 60 ] || every=60; fi
+  [ $((SECONDS - ci_last)) -ge "$every" ] || return 0
   ci_last=$SECONDS
   ci_verdict || rc=$?
+  case $rc in
+    [0-4]) ci_fail_n=0 ;;
+    *) ci_fail_n=$((ci_fail_n + 1)); [ "$ci_fail_n" -gt 1 ] || ci_fail_at=$(date +%H:%M) ;;
+  esac
   if [ -n "$pushed_at" ] && [ $((SECONDS - pushed_at)) -lt "$CI_GRACE" ]; then
     case $rc in 1 | 4) rc=3 ;; esac
   fi
@@ -1776,6 +1798,7 @@ ci_ask() {
     0)
       green=1 verdict=green T_gate=$SECONDS at=line
       rm -f "$state/ci-down"
+      green_note
       say "CI is green on ${tip:0:12}"
       queue_set 5 green
       queue_phase "CI passed ${tip:0:12}"
@@ -1812,6 +1835,7 @@ ci_ask() {
   # Under a fresh note, not before CI_GRACE after the push: GitHub may not have handed the run to a runner yet, and
   # until then a red or lost verdict shows as rc 3 (above).
   if [ -z "$ci_begun" ] && { [ "$waited" -ge "$CI_START" ] || { [ "$rc" = 3 ] && { [ -z "$pushed_at" ] || [ $((SECONDS - pushed_at)) -ge "$CI_GRACE" ]; } && [ "$park_retried" = 0 ] && ci_down_fresh; }; }; then
+    [ "$ci_fail_n" != 1 ] || return 0 # one missed answer: asked again
     cat "$cilog" >&2
     [ "$rc" = 3 ] || { ci_none "CI gave no answer about ${tip:0:12} for $(((CI_START + 59) / 60)) min (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. That is GitHub or this box's gh login, not the runners or the branch: a person needs to look. Park, and run this again after"; return 0; }
     # Runs going elsewhere in the repo mean the runners are there and busy (the ones stacked behind this, say): the
@@ -1827,8 +1851,12 @@ ci_ask() {
     ci_none "no runner has started CI on ${tip:0:12} within $(((CI_START + 59) / 60)) min (the machine they run on is probably off or asleep), so nothing landed. Park, and run this again once a person says the runners are back"
     return 0
   fi
-  if [ "$waited" -ge $((CI_LIMIT + ci_more)) ] && ! ci_more_ask; then
+  if [ "$waited" -ge $((CI_LIMIT + ci_more)) ]; then
+    # One missed answer is not a verdict, so it asks again; a run of them is GitHub's, and no word about the runners (#1655).
+    [ "$ci_fail_n" != 1 ] || return 0
+    ! ci_more_ask || return 0
     cat "$cilog" >&2
+    [ "$ci_fail_n" = 0 ] || { ci_none "GitHub didn't answer since $ci_fail_at ($ci_fail_n polls failed in a row; exit $rc from ${CI_STATUS:-gh}; above), so nothing landed, and whether CI on ${tip:0:12} finished isn't known. That is GitHub or this box's gh login, not the runners or the branch. Park, and run this again once GitHub answers"; return 0; }
     ci_down "CI on ${tip:0:12} didn't finish within $(((CI_LIMIT + 59) / 60)) min"
     ci_none "CI on ${tip:0:12} hasn't finished within $(((CI_LIMIT + 59) / 60)) min, so nothing landed. Park, and run this again later"
   fi
@@ -1879,8 +1907,8 @@ guards() {
     (cd "$here" && land_preflight "$(git rev-parse HEAD)" "$lane") </dev/null >&2 9>&- 6>&- 7>&- &
     wait $! || rc=$?
     if [ "$rc" != 0 ]; then
-      keep=$(git rev-parse HEAD)
-      blocked="land.local.sh's land_preflight refused ${keep:0:12} (exit $rc, above), so $BRANCH is untouched"
+      keep=${bare:-$(git rev-parse HEAD)}
+      blocked="land.local.sh's land_preflight refused $(git rev-parse --short=12 HEAD) (exit $rc, above), so $BRANCH is untouched"
       return 1
     fi
   fi
@@ -1893,16 +1921,16 @@ guards() {
     2 | 124 | 137) say "the guards didn't decide (exit $rc$([ "$rc" = 2 ] || echo ", past ${GUARD_TIMEOUT}s")), so the check decides" ;;
     *)
       tail -n 40 "$log" >&2
-      keep=$(git rev-parse HEAD)
+      keep=${bare:-$(git rev-parse HEAD)}
       blocked="the guards ($GUARD_CMD) failed on the rebased branch (exit $rc, full log: $log), so $BRANCH is untouched"
       return 1 ;;
   esac
 }
 
-# The branch as it was, rebased onto <commit> and checked: sets base, and tip when it passed (with the
-# CI gate on, CI then runs on it), or blocked when it can't sit on that commit.
-# land.local.sh's land_rebased <base> <branch>, if it has one: on the branch just rebased onto <base>, before its check,
-# in this worktree; a commit it makes ships with the branch. 1: it failed or left uncommitted changes (dropped here).
+# note_branch <commit>: the branch, the commit this leaves the worktree on and who wrote it: how the next run puts things
+# back if this one is killed, and knows it isn't while it runs.
+note_branch() { printf '%s\n' "$branch" "$1" "$(queue_proc $$)" >"$gitdir/land-branch"; }
+
 # regen_run <command> <patterns...>: run a Regenerate command (above) on the branch just rebased and commit what it
 # changed, if anything. It may change only files the patterns (all the branch declared) name: when it fails or writes
 # elsewhere, the worktree is put back and it fails (1, hook_failed set). Its fds 6, 7 and 9 (the locks) are closed, so
@@ -1941,22 +1969,32 @@ regen_run() {
   git diff --cached --quiet || git commit -q -m "${n:+#$n: }regenerated at ship time: $cmd" -m "Made again on the rebased branch by tools/land.sh (#1827)." 9>&- 6>&-
 }
 hook_failed=''
+# The Regenerate commands, then land.local.sh's land_rebased <base> <branch>, if it has one: on the branch just rebased onto
+# <base>, before its check, in this worktree; a commit it makes ships with the branch. 1: one failed or left uncommitted
+# changes (dropped here).
+# bare: the commit under what they made ('' when they made none). A branch that doesn't ship goes back to that: the next
+# try makes their commits again, and the lost-title check took one left behind for the branch's own (#1866).
+bare=''
 rebased_hook() {
-  local c
+  local c rc=0 new untracked
+  local -x GIT_REFLOG_ACTION=land_rebased # on what is made here, for into_left
   hook_failed=''
+  bare=$(git rev-parse HEAD)
   if [ ${#regen_cmds[@]} -gt 0 ]; then
     queue_phase "making the Regenerate files again"
     for c in "${regen_cmds[@]}"; do regen_run "$c" "${regen_pats[@]}" || return 1; done
-    [ ! -e "$gitdir/land-branch" ] || printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+    [ ! -e "$gitdir/land-branch" ] || note_branch "$(git rev-parse HEAD)"
   fi
-  declare -F land_rebased >/dev/null || return 0
-  local rc=0 new untracked
+  if ! declare -F land_rebased >/dev/null; then
+    [ "$(git rev-parse HEAD)" != "$bare" ] || bare=''
+    return 0
+  fi
   untracked=$(git ls-files -o --exclude-standard)
   queue_phase "running land_rebased"
   # In the background and waited on, so set -e holds inside it.
   (cd "$here" && land_rebased "$1" "$branch") </dev/null >&2 9>&- 6>&- &
   wait $! || rc=$?
-  [ ! -e "$gitdir/land-branch" ] || printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+  [ ! -e "$gitdir/land-branch" ] || note_branch "$(git rev-parse HEAD)"
   if [ "$rc" != 0 ]; then
     say "land.local.sh's land_rebased failed (exit $rc)"
   elif [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -1967,13 +2005,35 @@ rebased_hook() {
     rc=1
   fi
   [ "$rc" = 0 ] || { git reset -q --hard HEAD 9>&- 6>&-; hook_failed="land.local.sh's land_rebased"; }
+  [ "$(git rev-parse HEAD)" != "$bare" ] || bare=''
   return "$rc"
 }
 
+# titles <what a refusal leaves> <git log's range...>: commit titles (#1489). A rebase stopped on a conflict and continued
+# with GIT_EDITOR=true reads "#N: ..." as a comment and drops it. A commit with an empty subject, or none starting "#N"
+# while a sibling has one, is refused by name. A read that fails refuses: passing would skip the check (#1626).
+titles() {
+  local kept=$1 subs empty lost
+  shift
+  subs=$(git log --no-merges --format='%h %s' "$@") || refuse "could not read the commits of $branch ($*: git log failed, above), so their titles are unchecked: $kept. Run this again; if it keeps failing, a person needs to look"
+  # grep finding nothing exits 1, which pipefail would turn into the script's own exit: each ends in || x=''.
+  empty=$(grep -E '^[0-9a-f]+ *$' <<<"$subs" | head -n 1) || empty=''
+  if grep -qE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs"; then
+    # Some commit starts "#N", so the ones that don't lost it.
+    lost=$(grep -vE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" | head -n 1) || lost=''
+    [ -z "$lost" ] || refuse "commit ${lost%% *} (\"${lost#* }\") lost its #N: title, which a rebase continued with GIT_EDITOR=true drops, so $kept: reword it (git rebase -i, or git commit --amend) to start with #N:, then run this again"
+  elif [ -n "$empty" ]; then
+    # No title starts "#N" (a scheme whose titles end in "(#N)"): only the empty one is the lost title.
+    refuse "commit ${empty%% *} has an empty subject, which a rebase continued with GIT_EDITOR=true can leave behind when it drops a title, so $kept: give it a subject in this scheme's title style (git rebase -i, or git commit --amend), then run this again"
+  fi
+}
+
+# The branch as it was, rebased onto <commit> and checked: sets base, and tip when it passed (with the
+# CI gate on, CI then runs on it), or blocked when it can't sit on that commit.
 build() {
   local want=$1 on phase rc=0 clashes fork log chk v reuse=''
   [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
-  base=$want tip='' blocked='' keep='' green='' retried='' flaked=0 pushed_at='' verdict=-
+  base=$want tip='' blocked='' keep='' bare='' green='' retried='' flaked=0 pushed_at='' verdict=-
   T_build=$SECONDS T_built='' T_ci='' T_cirun='' T_gate='' at=rebase
   queue_set 4 -
   queue_set 5 "$UNRUN"
@@ -1987,21 +2047,20 @@ build() {
   [ "$mode" != build ] || phase="merging $BRANCH into $build"
   queue_phase "$phase"
   if [ "$mode" = build ]; then say "merging $on into $build on $branch"; else say "rebasing $branch onto $on"; fi
-  # The branch, the commit this leaves the worktree on and who wrote it: how the next run puts things back if this one is killed.
-  printf '%s\n' "$branch" "$pre" "$(queue_proc $$)" >"$gitdir/land-branch"
+  note_branch "$pre"
   # 9>&- on git: a git gc --auto it starts detaches, and mustn't keep the lock.
   git checkout -q --detach "$pre" 9>&- 6>&-
   if [ "$mode" = build ]; then
     # A build takes $BRANCH in by merge: a rebase would flatten its merges of $BRANCH and change its feeders' commits.
     if git merge-base --is-ancestor "$want" HEAD || land_git theirs merge -q -m "Merge $BRANCH into $build" "$want" 9>&- 6>&-; then
-      printf '%s\n' "$branch" "$(git rev-parse HEAD)" "$(queue_proc $$)" >"$gitdir/land-branch"
+      note_branch "$(git rev-parse HEAD)"
     else
       git merge --abort 2>/dev/null || true
       blocked="merging $BRANCH into $build failed (see git's output above), so nothing landed. Take $BRANCH in on your branch by hand (git merge $BRANCH), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again"
       return 0
     fi
   elif land_rebase "$want" 9>&- 6>&-; then
-    printf '%s\n' "$branch" "$(git rev-parse HEAD)" "$(queue_proc $$)" >"$gitdir/land-branch"
+    note_branch "$(git rev-parse HEAD)"
   else
     git rebase --abort 2>/dev/null || true # nothing to abort if it never started
     prep_say "$want"
@@ -2030,22 +2089,8 @@ build() {
     refuse "nothing landed and $branch is back where it was. A squash onto a newer $BRANCH keeps the branch's old files, which reverts what landed since (git reset --soft from a branch that started further back). Find the branch's last commit before the squash (git reflog), rebase that onto $BRANCH, and squash only then: git reset --soft \$(git merge-base HEAD $BRANCH). If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
 
-  # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true reads "#N: ..." as a comment
-  # and drops it. Not checked in --build mode. A commit with an empty subject, or none starting "#N" while a sibling has one, is refused by name.
-  # A read that fails refuses: passing would skip the check (#1626).
-  subs=$(git log --no-merges --format='%h %s' "$want..HEAD") || refuse "could not read the commits of $branch above ${want:0:12} (git log failed, above), so their titles are unchecked and nothing landed; $branch is back where it was. Run this again; if it keeps failing, a person needs to look"
-  # grep finding nothing exits 1, which pipefail would turn into the script's own exit: each ends in || x=''.
-  empty=$(grep -E '^[0-9a-f]+ *$' <<<"$subs" | head -n 1) || empty=''
-  if [ "$mode" = build ]; then
-    : # --build (#1698): feeders' commits are already merged and their hashes can't be reworded, so a mix of titles passes
-  elif grep -qE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs"; then
-    # Some commit starts "#N", so the ones that don't lost it.
-    lost=$(grep -vE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" | head -n 1) || lost=''
-    [ -z "$lost" ] || refuse "commit ${lost%% *} (\"${lost#* }\") lost its #N: title, which a rebase continued with GIT_EDITOR=true drops, so nothing landed and $branch is back where it was: reword it (git rebase -i, or git commit --amend) to start with #N:, then run this again"
-  elif [ -n "$empty" ]; then
-    # No title starts "#N" (a scheme whose titles end in "(#N)"): only the empty one is the lost title.
-    refuse "commit ${empty%% *} has an empty subject, which a rebase continued with GIT_EDITOR=true can leave behind when it drops a title, so nothing landed and $branch is back where it was: give it a subject in this scheme's title style (git rebase -i, or git commit --amend), then run this again"
-  fi
+  # Not in --build mode (#1698): feeders' commits are already merged and their hashes can't be reworded, so a mix passes.
+  [ "$mode" = build ] || titles "nothing landed and $branch is back where it was" "$want..HEAD"
 
   # Its lane, over what it changes on $want, and that lane's check.
   lane=full lane_why='' chk=$CHECK
@@ -2064,7 +2109,8 @@ build() {
   if [ -n "$reuse" ]; then
     # The early check passed this same rebase onto this same commit: its commit (with any the check made) is the build.
     git checkout -q --detach "$early_tip" 9>&- 6>&-
-    printf '%s\n' "$branch" "$early_tip" >"$gitdir/land-branch"
+    bare=$early_bare
+    note_branch "$early_tip"
   fi
   guards || return 0
   if [ -z "$chk" ]; then
@@ -2086,7 +2132,7 @@ build() {
     fi
     if [ "$rc" != 0 ] && { [ "$rc" = 124 ] || [ "$rc" = 137 ] || ! known_red "the check" <"$log"; }; then
       tail -n 40 "$log" >&2
-      keep=$(git rev-parse HEAD)
+      keep=${bare:-$(git rev-parse HEAD)}
       blocked="the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
       return 0
     fi
@@ -2103,7 +2149,8 @@ build() {
 
 # Batches (CI_BATCH over 1; the header at "Batches"). batch_look walks the line from the head: the ones ahead as
 # queue_look saw them, this one, then the ones behind, leaving out the gone, the skipped and the stopped, as
-# queue_look does ahead. It sets B_NUM (this one's batch, from the head's, 1), B_I (its place in the batch, from 1),
+# queue_look does ahead, and the landed (B_ON): a landed batch's members leave one by one, and the batches behind must
+# not be cut anew, with another top pushing a run, at each. It sets B_NUM (this one's batch, from the head's, 1), B_I (its place in the batch, from 1),
 # B_LABEL, B_SHA, B_VER, B_BASE and B_PID (each member's, from 1), and B_RED when a ticket ahead of this one is red.
 batch_add() { # <label> <commit> <verdict> <base> <pid and start>: the next in line joins the last batch, or starts one
   if [ "$B_N" != 0 ] && { [ "$3" = old ] || [ "$B_N" = "$CI_BATCH" ]; }; then
@@ -2114,11 +2161,33 @@ batch_add() { # <label> <commit> <verdict> <base> <pid and start>: the next in l
   B_LABEL+=("$1") B_SHA+=("$2") B_VER+=("$3") B_BASE+=("$4") B_PID+=("$5")
 }
 
+# B_ON[<commit>]: 1 for one on $BRANCH, 0 for one that isn't, as of B_MAIN, $BRANCH's commit. While B_MAIN's deploy runs
+# (it may go back) or with this one's own commit on it (batch_landed's), no one counts as landed.
+declare -A B_ON=()
+B_MAIN=''
+batch_main() {
+  local m st=''
+  m=$(git rev-parse "refs/heads/$BRANCH")
+  [ "$m" = "$B_MAIN" ] || B_MAIN=$m B_ON=()
+  B_SKIP=1
+  ! batch_on "${tip:--}" || B_SKIP=''
+  read -r st _ 2>/dev/null <"$state/land-deploy/$m" || true
+  [ "$st" != running ] || B_SKIP=''
+}
+batch_on() { # <commit>
+  [[ $1 =~ ^[0-9a-f]{40,}$ ]] || return 1
+  [ -n "${B_ON[$1]:-}" ] || { B_ON[$1]=0 && ! git merge-base --is-ancestor "$1" "$B_MAIN" 2>/dev/null || B_ON[$1]=1; }
+  [ "${B_ON[$1]}" = 1 ]
+}
+batch_left() { [ -n "$B_SKIP" ] && batch_on "$1"; } # <commit>: landed, so out of the line
+
 batch_look() {
   local e t l label sha ver bas pid p st behind=''
+  batch_main
   B_AT=1 B_N=0 B_LABEL=('') B_SHA=('') B_VER=('') B_BASE=('') B_PID=('') B_RED=''
   for e in "${Q_LINE[@]}"; do
     read -r label sha ver bas pid <<<"$e"
+    ! batch_left "$sha" || continue
     [ "$ver" != red ] || B_RED=1
     batch_add "$label" "$sha" "$ver" "$bas" "$pid"
   done
@@ -2130,6 +2199,7 @@ batch_look() {
     mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue
     [ -n "${l[0]:-}" ] && queue_proc "${l[0]%% *}" p && [ "$p" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
     if [ "${l[1]:-0}" = 0 ] && { queue_state "${l[0]%% *}" st; [[ $st == [Tt] ]]; }; then continue; fi
+    ! batch_left "${l[4]:--}" || continue
     [[ ${l[5]:-} =~ ^(-|running|green|red)$ ]] || break # older than batches, fast mode's or another script's: the next batch
     batch_add "${l[2]:-?}" "${l[4]:--}" "${l[5]}" "${l[6]:--}" "${l[0]}"
   done
@@ -2189,13 +2259,32 @@ batch_push() {
   [ "$B_I" = $((${#B_SHA[@]} - 1)) ] || [ "$(batch_mid)" = "$B_I" ]
 }
 
+# This one is green, but in a lane for a range that starts above its batch now (a part of the batch ahead landed, so the
+# rest joined this one's), and the whole range takes another lane: CI never saw the members under it, so it is green no
+# more and runs in the batch's lane when it is due (batch_push).
+g_base=''
+batch_regreen() {
+  local from=${B_BASE[1]:--} l
+  [ "$verdict" = green ] && [ -n "$LANES" ] && [ "$B_NUM" = 1 ] && [ -n "$B_SKIP" ] && [ "$from $tip" != "$g_base" ] || return 0
+  [ "$ci_lane" != full ] && [ ! -e "$state/land-fallback/$tip" ] && git merge-base --is-ancestor "$from" "$tip" 2>/dev/null || return 0
+  g_base="$from $tip"
+  ! git merge-base --is-ancestor "$ci_from" "$from" 2>/dev/null || return 0
+  l=$(lane_of "$from" "$tip" "refs/heads/$BRANCH") || return 0
+  [ "${l%% *}" != "$ci_lane" ] || return 0
+  green='' verdict=- at=line retried='' flaked=0
+  queue_set 5 "$UNRUN"
+  queue_phase "checked ${tip:0:12}: CI runs on its batch's top"
+  say "${tip:0:12} is green in lane $ci_lane, but its batch now starts at ${from:0:12} and takes lane ${l%% *}, so its CI runs again when it is due"
+  B_VER[B_I]=$verdict
+}
+
 # The head: the deepest green member of its batch, as G (its commit) and GI, once it may land. Its ticket's green is
 # checked: main and every member's commit, the head's down to G's, sit under G, each built on the one ahead (the
 # head on main: a member killed since leaves a gap), CI passes G when asked again now (or land_fallback passed it, ci_none), and the members up to G are
 # all still running (one killed meanwhile must not land). CI is asked at most every CI_POLL, and with no answer for
 # CI_START it parks, as ci_ask does.
 batch_green() {
-  local i rc=0 under main gl=full
+  local i rc=0 under main gl=full known l from LAND_KNOWN_RED=${LAND_KNOWN_RED:-}
   G='' GI=''
   for ((i = ${#B_VER[@]} - 1; i >= 1; i--)); do [ "${B_VER[i]}" != green ] || { GI=$i; break; }; done
   [ -n "$GI" ] && [[ ${B_SHA[GI]} =~ ^[0-9a-f]{40,}$ ]] || return 1
@@ -2207,8 +2296,20 @@ batch_green() {
   done
   [ -z "$g_last" ] || [ $((SECONDS - g_last)) -ge "$CI_POLL" ] || return 1
   g_last=$SECONDS
-  # In the lane of main..G: inside the range G's run had, so no heavier than the lane that run took.
+  # In the lane G's run took, past the known reds it went past (green_note), if that run's range holds main..G (it
+  # starts on main, or its lane is full) or main..G takes that lane too. No note: the lane of main..G.
   [ -z "$LANES" ] || { gl=$(lane_of "$main" "$G" "refs/heads/$BRANCH") && gl=${gl%% *}; }
+  if [ -f "$state/land-green/$G" ]; then
+    { read -r l from && known=$(cat); } <"$state/land-green/$G"
+    if [ "$l" = full ] || git merge-base --is-ancestor "$from" "$main" 2>/dev/null; then gl=$l; fi
+    # G's own landing is about to run it in the lane of main..G (batch_regreen). One that works that lane out otherwise
+    # (its branch's LANES or map differs) never does, so after CI_START CI is asked all the same.
+    if [ "$l" != "$gl" ] && [ ! -e "$state/land-fallback/$G" ]; then
+      [ "${g_wait%% *}" = "$G" ] || g_wait="$G $SECONDS"
+      [ $((SECONDS - ${g_wait#* })) -ge "$CI_START" ] || return 1
+    fi
+    LAND_KNOWN_RED+=${known:+${LAND_KNOWN_RED:+$'\n'}$known}
+  fi
   # land_fallback passed G in CI's place (ci_none): CI still has no answer, so its word stands.
   [ -e "$state/land-fallback/$G" ] || ci_verdict "$G" "$gl" || rc=$?
   case $rc in
@@ -2408,7 +2509,7 @@ leave() {
 # The early check (EARLY_CHECK, the header's step 0): CHECK_LIGHT as early_cmd, or '' none: off, not a plain land, a
 # fast land, no CHECK_LIGHT, or a lane whose check is neither CHECK nor CHECK_LIGHT (none, or a CHECK_<LANE> of its
 # own). A merge into a build and a build itself never run it.
-early_cmd='' early_on='' early_tree='' early_tip=''
+early_cmd='' early_on='' early_tree='' early_tip='' early_bare=''
 early_plan() {
   local lane=full why v chk=$CHECK
   [ "$EARLY_CHECK" = 1 ] && [ "$mode" = land ] && [ -z "$FAST" ] && [ -n "$CHECK_LIGHT" ] || return 0
@@ -2424,9 +2525,9 @@ early_plan() {
 # tracked files goes; the worktree was clean before it.
 early_back() {
   if [ -n "${1:-}" ] && [ "$(git rev-parse "refs/heads/$branch")" = "$pre" ]; then
-    git checkout -q -f -B "$branch" "$1" 6>&-
+    git checkout -q -f -B "$branch" "$1" 6>&- || return
   else
-    git checkout -q -f "$branch" 6>&-
+    git checkout -q -f "$branch" 6>&- || return
   fi
   rm -f "$gitdir/land-branch"
 }
@@ -2439,7 +2540,7 @@ early_check() {
   local t0=$1 t1=$SECONDS want rb log rc=0
   want=$(git rev-parse "refs/heads/$BRANCH")
   say "smoke: running $early_cmd on $branch rebased onto $BRANCH ($(git log -1 --format=%h "$want"))"
-  printf '%s\n' "$branch" "$pre" >"$gitdir/land-branch"
+  note_branch "$pre"
   git checkout -q --detach "$pre" 6>&-
   if ! land_rebase "$want" >/dev/null 2>&1 6>&-; then
     git rebase --abort 2>/dev/null || true
@@ -2448,7 +2549,7 @@ early_check() {
     return 1
   fi
   rb=$(git rev-parse HEAD)
-  printf '%s\n' "$branch" "$rb" >"$gitdir/land-branch"
+  note_branch "$rb"
   if ! rebased_hook "$want"; then
     early_back
     say "smoke: so the check doesn't decide here: getting in line, where it runs again"
@@ -2462,7 +2563,7 @@ early_check() {
     timeout -k 30 "$CHECK_LIMIT" bash -c "$early_cmd" >"$log" 2>&1 9>&- 8>&- 7>&- 6>&-
   ) 8>"$state/land-early.lock" 7>"$state/land-check.lock" 9>&- 6>&- || rc=$?
   if [ "$rc" = 0 ]; then
-    early_on=$want early_tree=$(git rev-parse "$rb^{tree}") early_tip=$(git rev-parse HEAD)
+    early_on=$want early_tree=$(git rev-parse "$rb^{tree}") early_tip=$(git rev-parse HEAD) early_bare=$bare
     early_back
     say "smoke: the check passed on the rebased branch in $((SECONDS - t1)) s"
     return 0
@@ -2479,7 +2580,7 @@ early_check() {
     return 1
   fi
   tail -n 40 "$log" >&2
-  early_back "$(git rev-parse HEAD)"
+  early_back "${bare:-$(git rev-parse HEAD)}"
   refuse "smoke: the check failed on the rebased branch (full log: $log), before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it; $branch is now on that rebase onto $BRANCH, so the fix starts from there. Fix it, re-test, commit, then run this again"
 }
 
@@ -2652,8 +2753,26 @@ if [ -n "$build" ]; then
   [ "$mode" != build ] || [ "$bbase" = "$pre" ] || refuse "$build moved on while this waited ($(git log -1 --format='%h "%s"' "$bbase")): bring $branch to it (git merge --ff-only $build) and run it again. Nothing landed"
 fi
 
+# A feeder's merge that stops after rebased_hook's commits leaves the branch without it (bare), unless HEAD's reflog says
+# that something else committed since too: this worktree is on the branch, and that commit stays.
+into_left() {
+  local rc=$? at='' how c
+  set +e
+  [ -z "${claims_flag:-}" ] || rm -f "$claims_flag" "$claims_new"
+  if [ -n "$bare" ] && [ "$(git branch --show-current)" = "$branch" ]; then
+    while read -r c how; do
+      at=$c
+      [ "$c" != "$bare" ] && [[ $how == land_rebased* ]] || break
+    done < <(git reflog --format='%H %gs')
+    [ "$at" != "$bare" ] || git reset -q --keep "$bare" 6>&-
+  fi
+  exit "$rc"
+}
+
 # --into and --full (the header's "Build branches"): out of the line, under the build's lock only.
 if [ "$mode" = into ] || [ "$mode" = full ]; then
+  # Before the rebase, so $BRANCH's own commits, which a merge of it brought and the rebase would copy, don't count.
+  [ "$mode" = full ] || titles "$build and $branch are untouched" "$bbase..HEAD" "^refs/heads/$BRANCH"
   if git merge-base --is-ancestor "$bbase" HEAD; then
     say "$build is already under $branch: no rebase"
   else
@@ -2681,6 +2800,7 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
     refuse "$build is untouched. If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
   # A feeder's land_rebased first: its commit is part of what is checked.
+  trap into_left EXIT
   [ "$mode" != into ] || rebased_hook "$bbase" || refuse "$hook_failed failed on the rebased branch (above), so $build is untouched"
   # The commit the check runs on is the one the build moves to: one made in the worktree while the check runs was
   # never checked (KT5, #1519; Citadel's own land.sh reads its tip here too).
@@ -2726,11 +2846,13 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
     esac
   fi
   git update-ref -m "land.sh --into $branch" "refs/heads/$build" "$tip" "$bbase" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
+  bare=''
   say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); $BRANCH is untouched"
   exit 0
 fi
 
-trap 'ship_end $?' EXIT # until leave takes over
+# Until leave takes over: a landing stopped during the early check (or what it runs) puts the worktree back.
+trap 'rc=$?; set +e; [ -n "$(git branch --show-current)" ] || { git rebase --abort 2>/dev/null; early_back; }; ship_end "$rc"' EXIT
 [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 at=line
 D_SINCE=$(date +%s) # deploy_look: the deploys since it got in line
@@ -2809,6 +2931,7 @@ while :; do
     [ "$Q_AHEAD" != 0 ] || refuse "$blocked"
   elif [ -n "$tip" ] && [ -n "$BATCH" ]; then
     if [ -n "$looked" ]; then
+      batch_regreen
       [ "$verdict" != - ] || ! batch_push || ci_start
       [ "$verdict" != running ] || ci_ask
       B_VER[B_I]=$verdict

@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { TicketKind } from '../src/db.ts';
-import { Runner, unsentSteers } from '../src/runner.ts';
+import { type QueuedMessage, Runner, unsentSteers } from '../src/runner.ts';
 import { holds, lines, tempRoot, testPins } from './helpers.ts';
+import { fake as fakeOf } from './typed.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -213,7 +214,7 @@ test('✕ takes back a queued message, which then never reaches claude', async (
     events(t.id, 'unqueued').map((e) => [e.id, e.by]),
     [[msg.id, 'Cara']],
   );
-  assert.equal(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs, undefined, 'a restart would not bring it back');
+  assert.equal(store.getSetting<{ msgs?: unknown }>(`minion-queue:${t.id}`)?.msgs, undefined, 'a restart would not bring it back');
   writeFileSync(join(t.dir, 'release'), '');
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
   await holds('the unqueued message starts no turn', () => !r.isRunning(t.id), { ms: 100 });
@@ -277,7 +278,7 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
 
 test('an unreadable steer.sent redelivers nothing; a missing one, everything', () => {
   const dir = mkdtempSync(join(root, 'sent-'));
-  const msg = (text: string) => ({ author: 'Cara', text }) as any;
+  const msg = (text: string) => fakeOf<QueuedMessage>({ author: 'Cara', text });
   const turn = {
     dir,
     steered: [

@@ -61,10 +61,12 @@ const MODEL_LIST = [
 const MP3 = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(15996)]);
 const PNG = Buffer.from('fake png bytes');
 
+type Sent = { prompt?: string; background?: string; output_format?: string; input?: string; stream?: boolean; seed?: number; response_format?: string; voice?: string };
+
 /** OpenRouter, faked. `hold` delays POST /images until released; `answer` overrides a path's response. */
 function fakeOpenRouter(answer: Record<string, () => Response | Promise<Response>> = {}) {
-  const calls: { url: string; method: string; auth: string | null; body: any; raw: string | null }[] = [];
-  const fetch = (async (url: string, init: RequestInit = {}) => {
+  const calls: { url: string; method: string; auth: string | null; body: Sent | null; raw: string | null }[] = [];
+  const fetch: typeof globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
     const path = url.replace('https://or.test/api/v1', '');
     calls.push({ url: path, method: init.method ?? 'GET', auth: new Headers(init.headers).get('authorization'), body: init.body ? JSON.parse(String(init.body)) : null, raw: init.body ? String(init.body) : null });
     const auth = new Headers(init.headers).get('authorization');
@@ -86,7 +88,7 @@ function fakeOpenRouter(answer: Record<string, () => Response | Promise<Response
       return new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
     }
     return new Response('?', { status: 500 });
-  }) as typeof fetch;
+  }) as typeof globalThis.fetch;
   return { fetch, calls };
 }
 
@@ -103,12 +105,13 @@ async function setup(opts: { cap?: number; user?: number; answer?: Record<string
   mkdirSync(cwd, { recursive: true });
   mkdirSync(shared, { recursive: true });
   // Each test spends from a clean month: old rows move to last month.
-  (store as any).db.prepare('UPDATE openrouter_calls SET created_at = ? WHERE user_id = ?').run(monthStart() - 1, user);
+  store.db.prepare('UPDATE openrouter_calls SET created_at = ? WHERE user_id = ?').run(monthStart() - 1, user);
   fake.calls.length = 0;
   return { or, fake, cwd, ctx: { userId: user, ticketId: 7, projectId: 2, roots: [cwd, shared] } };
 }
 
-const rows = (user = cara.id) => (store as any).db.prepare('SELECT * FROM openrouter_calls WHERE user_id = ? AND created_at >= ? ORDER BY id').all(user, monthStart()) as any[];
+type CallRow = { id: number; status: string; estimate_usd: number; cost_usd: number | null; kind: string; model: string; ticket_id: number; project_id: number };
+const rows = (user = cara.id) => store.db.prepare('SELECT * FROM openrouter_calls WHERE user_id = ? AND created_at >= ? ORDER BY id').all(user, monthStart()) as CallRow[];
 
 test('connecting checks the key with OpenRouter and seals it; the meta keeps the cap, never the key or its label', async () => {
   const fake = fakeOpenRouter();
@@ -151,7 +154,7 @@ test('an image is written with a note of how it was made, and the ledger keeps i
   assert.equal(r.left_usd, 9.991);
   const post = fake.calls.find((c) => c.url === '/images')!;
   assert.equal(post.auth, `Bearer ${KEY}`);
-  assert.equal(post.body.output_format, 'png');
+  assert.equal(post.body!.output_format, 'png');
   assert.deepEqual(
     rows().map((x) => [x.status, x.estimate_usd, x.cost_usd, x.kind, x.ticket_id]),
     [['ok', 0.009, 0.0091, 'image', 7]],
@@ -211,7 +214,7 @@ test('OpenRouter refusing the key marks it failed; its own limit reads as the ca
 test('calls still pending when the server stopped count at their estimate', async () => {
   const id = store.addOpenrouterCall({ user_id: josh.id, ticket_id: 1, project_id: 2, model: 'm/x', kind: 'image', estimate_usd: 0.2 });
   new OpenRouter(store, creds, fakeOpenRouter().fetch, 'https://or.test/api/v1');
-  assert.equal(rows(josh.id).find((r) => r.id === id).status, 'unknown');
+  assert.equal(rows(josh.id).find((r) => r.id === id)!.status, 'unknown');
   assert.equal(store.openrouterSpent(josh.id, monthStart()), 0.2);
 });
 
@@ -220,14 +223,14 @@ test('a sound effect is costed by its length; music comes from the stream with i
   const fx = await or.tool('generate_audio', { kind: 'effect', prompt: 'a door creaks', out: 'sfx/door.mp3', seconds: 2 }, ctx);
   assert.deepEqual(readFileSync(fx.paths[0]), MP3);
   assert.equal(fx.cost_usd, 0.0025);
-  assert.equal(fake.calls.find((c) => c.url === '/audio/speech')!.body.input, 'a door creaks\nLength: about 2 seconds.');
+  assert.equal(fake.calls.find((c) => c.url === '/audio/speech')!.body!.input, 'a door creaks\nLength: about 2 seconds.');
   assert.equal(rows()[0].estimate_usd, 0.15);
   await assert.rejects(or.tool('generate_audio', { kind: 'effect', prompt: 'x', out: 'x.wav' }, ctx), /\.mp3/);
 
   const song = await or.tool('generate_audio', { kind: 'music', prompt: 'calm village theme', out: join(cwd, 'music/village.mp3') }, ctx);
   assert.equal(readFileSync(song.paths[0], 'utf8'), 'fake music bytes');
   assert.equal(song.cost_usd, 0.04);
-  assert.equal(fake.calls.find((c) => c.url === '/chat/completions')!.body.stream, true);
+  assert.equal(fake.calls.find((c) => c.url === '/chat/completions')!.body!.stream, true);
   assert.deepEqual(
     rows().map((r) => [r.kind, r.status, r.estimate_usd]),
     [
@@ -322,8 +325,8 @@ test('through the server: a person connects on their account page and their mini
       stdio: ['pipe', 'pipe', 'inherit'],
     });
     try {
-      const reply = new Promise<any>((ok) => createInterface({ input: child.stdout }).once('line', (l) => ok(JSON.parse(l))));
-      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
+      const reply = new Promise<{ result: { tools: { name: string }[]; isError?: boolean; content: { text: string }[] } }>((ok) => createInterface({ input: child.stdout! }).once('line', (l) => ok(JSON.parse(l))));
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
       return (await reply).result;
     } finally {
       child.kill();
@@ -338,7 +341,7 @@ test('through the server: a person connects on their account page and their mini
     assert.equal((await srv.call('/api/me/openrouter', { cap: 3 }, 'PATCH')).data.cap_usd, 3);
     assert.ok(!JSON.stringify((await srv.call('/api/me/openrouter')).data).includes(KEY.slice(-12)), 'the key never comes back out');
 
-    const names = async (media: boolean) => (await mcp(media, 'tools/list')).tools.map((t: any) => t.name);
+    const names = async (media: boolean) => (await mcp(media, 'tools/list')).tools.map((t) => t.name);
     assert.deepEqual(
       (await names(true)).filter((n: string) => /^(generate_image|edit_image|generate_audio|generate_speech)$/.test(n)),
       ['generate_image', 'edit_image', 'generate_audio', 'generate_speech'],
@@ -371,8 +374,8 @@ test('transparent on a model without it: black is asked for and taken out on the
   const { or, fake, cwd, ctx } = await setup({ answer: { '/images': imageAnswer(realPng()) } });
   const r = await or.tool('generate_image', { prompt: 'a frost glow', out: 'glow.png', background: 'transparent' }, ctx);
   const sent = fake.calls.find((c) => c.url === '/images')!.body;
-  assert.match(sent.prompt, /^a frost glow\n\n.*black/s);
-  assert.equal(sent.background, undefined);
+  assert.match(sent!.prompt!, /^a frost glow\n\n.*black/s);
+  assert.equal(sent!.background, undefined);
   assert.deepEqual([...decodePng(readFileSync(join(cwd, 'glow.png')))!.rgba], [0, 0, 0, 0, 255, 0, 0, 128]);
   assert.equal(JSON.parse(readFileSync(join(cwd, 'glow.png.json'), 'utf8')).background, 'transparent (matte)');
   assert.equal(r.warnings, undefined);
@@ -393,8 +396,8 @@ test('transparent on a model with it is passed through, untouched', async () => 
   const { or, fake, cwd, ctx } = await setup({ answer: { '/images/models/bytedance-seed/seedream-5-0-flash/endpoints': () => Response.json({ endpoints: SEEDREAM }) } });
   await or.tool('generate_image', { prompt: 'an ice shard icon', out: 'ice.png', model: 'bytedance-seed/seedream-5-0-flash', background: 'transparent' }, ctx);
   const sent = fake.calls.find((c) => c.url === '/images')!.body;
-  assert.equal(sent.prompt, 'an ice shard icon');
-  assert.equal(sent.background, 'transparent');
+  assert.equal(sent!.prompt, 'an ice shard icon');
+  assert.equal(sent!.background, 'transparent');
   assert.deepEqual(readFileSync(join(cwd, 'ice.png')), PNG);
   assert.equal(JSON.parse(readFileSync(join(cwd, 'ice.png.json'), 'utf8')).background, 'transparent (native)');
 });
@@ -402,7 +405,7 @@ test('transparent on a model with it is passed through, untouched', async () => 
 test('a music seed goes to a model that lists one; an effect model or a bad seed is refused before anything is spent', async () => {
   const { or, fake, cwd, ctx } = await setup();
   await or.tool('generate_audio', { kind: 'music', prompt: 'calm', out: 'calm.mp3', seed: 42 }, ctx);
-  assert.equal(fake.calls.find((c) => c.url === '/chat/completions')!.body.seed, 42);
+  assert.equal(fake.calls.find((c) => c.url === '/chat/completions')!.body!.seed, 42);
   assert.equal(JSON.parse(readFileSync(join(cwd, 'calm.mp3.json'), 'utf8')).seed, 42);
   await assert.rejects(or.tool('generate_audio', { kind: 'effect', prompt: 'x', out: 'x.mp3', seed: 1 }, ctx), /takes no seed/);
   await assert.rejects(or.tool('generate_audio', { kind: 'music', prompt: 'x', out: 'y.mp3', seed: -1 }, ctx), /whole number/);
@@ -450,7 +453,7 @@ test('speech input reaches OpenRouter byte for byte: phoneme tags, SSML, IPA and
   });
   const r = await or.tool('generate_speech', { model: 'fish-audio/drama-3', input: PHONEMES, voice: 'narrator-1', instructions: 'calm, low', speed: 0.9, out: 'voice/klebkitch.mp3' }, ctx);
   const sent = fake.calls.find((c) => c.url === '/audio/speech')!;
-  assert.equal(sent.body.input, PHONEMES);
+  assert.equal(sent.body!.input, PHONEMES);
   assert.ok(sent.raw!.includes('<|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|>'), 'sent as UTF-8, not escaped');
   assert.ok(sent.raw!.includes('<phoneme alphabet=\\"ipa\\" ph=\\"ˈɹɛ.lən\\">Relc</phoneme> &amp;'));
   assert.deepEqual({ ...sent.body, input: undefined }, { model: 'fish-audio/drama-3', input: undefined, voice: 'narrator-1', response_format: 'mp3', instructions: 'calm, low', speed: 0.9 });
@@ -512,7 +515,7 @@ test('generate_speech checks its arguments: model and input required, the format
   await assert.rejects(go({ voice: 3 }), /voice/);
   assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
   const r = await go({ out: 'raw/a.pcm' });
-  assert.equal(fake.calls.find((c) => c.url === '/audio/speech')!.body.response_format, 'pcm');
-  assert.ok(!('voice' in fake.calls.find((c) => c.url === '/audio/speech')!.body), "no voice sent when none was asked: the provider's default");
+  assert.equal(fake.calls.find((c) => c.url === '/audio/speech')!.body!.response_format, 'pcm');
+  assert.ok(!('voice' in fake.calls.find((c) => c.url === '/audio/speech')!.body!), "no voice sent when none was asked: the provider's default");
   assert.match(r.paths[0], /raw\/a\.pcm$/);
 });

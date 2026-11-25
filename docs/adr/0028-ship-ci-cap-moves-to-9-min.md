@@ -1,4 +1,4 @@
-# 0027: A ship's CI wait moves from 6 to 9 minutes, on numbers
+# 0028: A ship's CI wait moves from 6 to 9 minutes, on numbers
 
 Date: 2026-11-22. Minion #1606, from the daily pipeline check (#1600): Cara picked "CI suite back under the cap" on
 its "Pipeline fixes" card. Done when: "median green tests.yml on land/** is under 4 min over a day, or the cap is moved

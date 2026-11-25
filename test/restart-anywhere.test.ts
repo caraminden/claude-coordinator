@@ -39,6 +39,7 @@ import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
 import { Outbox } from '../src/outbox.ts';
 import { RESUME_PROMPT } from '../src/prompts.ts';
 import { Runner } from '../src/runner.ts';
+import type { LimitResume } from '../src/resumes.ts';
 import { chainedStep, LiveWaiters, TimedWakes } from '../src/wake.ts';
 import { releaseFake, stopTurns, testPins, followed } from './helpers.ts';
 import { pickRoot } from './shm-root.ts';
@@ -151,7 +152,7 @@ const FLOWS: Flow[] = [
           setRelease('ok');
           c.store.setSetting(
             'limit-resumes',
-            c.store.getSetting<any[]>('limit-resumes')!.map((w) => ({ ...w, at: Date.now() })),
+            c.store.getSetting<LimitResume[]>('limit-resumes')!.map((w) => ({ ...w, at: Date.now() })),
           );
           const before = turnsRun();
           (c.runner as any).limitResumeNext();
@@ -617,12 +618,14 @@ async function record(flow: Flow) {
   const rec = new Recorder(store, t.id, dir);
   const watch = (r: Runner) => {
     const start = (r as any).startTurn.bind(r);
-    (r as any).startTurn = (p: unknown, ticket: { id: number }, batch: Msg[], ...rest: unknown[]) => {
-      const out = start(p, ticket, batch, ...rest);
-      // Handed over once its turn is saved (startTurn writes turn: before it returns); a turn that didn't start hands nothing.
-      if (ticket.id === t.id && r.isRunning(t.id)) rec.log.push({ kind: 'start', texts: batch.map((m) => m.text), at: rec.cuts.length, step: rec.step });
-      return out;
-    };
+    Object.assign(r, {
+      startTurn: (p: unknown, ticket: { id: number }, batch: Msg[], ...rest: unknown[]) => {
+        const out = start(p, ticket, batch, ...rest);
+        // Handed over once its turn is saved (startTurn writes turn: before it returns); a turn that didn't start hands nothing.
+        if (ticket.id === t.id && r.isRunning(t.id)) rec.log.push({ kind: 'start', texts: batch.map((m) => m.text), at: rec.cuts.length, step: rec.step });
+        return out;
+      },
+    });
     return r;
   };
   const outboxes: Outbox[] = [];
@@ -716,15 +719,17 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
   const store = new Store(join(cut.dir, 'test.db'));
   const r = makeRunner(store, hooks);
   const started: Msg[][] = [];
-  (r as any).startTurn = (_p: unknown, ticket: { id: number }, batch: (Msg & { id?: number })[]) => {
-    if (ticket.id !== id) return;
-    started.push(batch);
-    r.onTurnStart(
-      id,
-      batch.flatMap((m) => (m.id == null ? [] : [m.id])),
-    ); // as the real one does once the turn is saved
-  };
-  (r as any).reattach = () => false; // its turn died with the old server
+  Object.assign(r, {
+    startTurn: (_p: unknown, ticket: { id: number }, batch: (Msg & { id?: number })[]) => {
+      if (ticket.id !== id) return;
+      started.push(batch);
+      r.onTurnStart(
+        id,
+        batch.flatMap((m) => (m.id == null ? [] : [m.id])),
+      ); // as the real one does once the turn is saved
+    },
+    reattach: () => false, // its turn died with the old server
+  });
   const outbox = flow.outbox ? new Outbox(store, r, { author: 'Citadel' }) : null;
   if (outbox) {
     r.onTurnStart = (ticketId, ids) => outbox.turnStarted(ticketId, ids);

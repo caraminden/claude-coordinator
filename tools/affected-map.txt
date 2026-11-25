@@ -54,6 +54,11 @@ src/**: test/boot-imports.test.ts test/layout-map.test.ts test/size-budget.test.
 public/**: test/layout-map.test.ts test/size-budget.test.ts
 tools/**: test/layout-map.test.ts test/size-budget.test.ts
 README.md: test/layout-map.test.ts
+docs/design-system/media/**: test/media-browser.test.ts
+
+# The light lane's paths (tools/lanes): a ship of only these runs no CI, so land.sh runs what these rows pick (#1864).
+CLAUDE.md: test/rule-homes.test.ts test/affected.test.ts
+.claude/**: test/rule-homes.test.ts test/frontmatter-strict.test.ts
 
 # Routes and who sees what. The route test takes over 5 CPU-seconds, so it runs for these paths, not on every run (#1544);
 # land.sh's quick check adds it when this map picks it. server.ts holds the router() calls it reads, src/http.ts the 403
@@ -75,7 +80,7 @@ test/land-train-fixture.ts: test/land-train.test.ts test/land-train-riders.test.
 test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
-public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts
+public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts test/show-parts.test.ts
 public/reviews.js: test/review-set-api.test.ts
 # home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
 public/home.js: test/inbox.test.js test/home.test.ts
@@ -147,7 +152,9 @@ tools/judge-replays/**: test/judges.test.ts
 
 # The pre-ship reviewer's text, lenses and model (#1738): a change needs its benchmark rerun and recorded.
 kit/agents/reviewer.md: test/reviewer-benchmark.test.ts
-kit/skills/self-review/**: test/reviewer-benchmark.test.ts
+kit/skills/self-review/**: test/reviewer-benchmark.test.ts test/review-set.test.ts
+src/review-backfill.json: test/review-set.test.ts
+tools/citadel-where: test/show-parts.test.ts
 kit/skills/ponytail-review/**: test/reviewer-benchmark.test.ts
 kit/skills/citadel-words/**: test/citadel-words.test.ts
 src/wording.ts: test/citadel-words.test.ts

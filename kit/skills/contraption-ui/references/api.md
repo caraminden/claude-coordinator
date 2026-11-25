@@ -557,9 +557,10 @@ you don't need a Firebase project or key of your own.
 then registers this phone's token for the signed-in person and your app. Make the call from a button
 the person taps, not on load. `disablePush()` forgets the phone, and `pushStatus()` answers
 `{ enabled, available, permission }`. The shell calls `/apps/_citadel/push/<app>` itself, on your host
-(`POST {token, platform: "android"}` registers the phone and `DELETE {token}` forgets it, 204 either way;
-401 when the person is signed out, 403 when your app isn't enabled for them). A token belongs to one
-person and one app: when a phone registers it again, the token moves to whoever is signed in now.
+(`POST {token, platform: "android"}` registers the phone, 204; 401 when the person is signed out, 403
+when your app isn't enabled for them. `DELETE {token}` forgets the phone, signed in or not, 204). A token
+belongs to one person and one app: when a phone registers it again, the token moves to whoever is signed in
+now, and a login change on the phone ends the old person's push.
 
 **The send.**
 
@@ -866,16 +867,18 @@ host only, under the same gate as your pages (signed in, your app enabled for th
   `folder` is a path under the person's uploads (`"Japan 2026/day 1"`, at most 8 deep, no part starting
   with a dot). 507 when the file would take the server's disk below its floor (50 GB free, counting
   the uploads already under way).
-- `GET …/<id>` → `{ id, offset, size }`: how many bytes Citadel has.
+- `GET …/<id>` → `{ id, offset, size }`: how many bytes Citadel has. With `?finished=1`, an upload that has finished
+  gets its finished file again (below), for at least 3 days, even once your app has moved it; without it, a 404 once it's finished.
 - `PUT …/<id>?offset=<n>` with the next bytes (at most 16 MiB; the kit sends 8) → `{ id, offset, size }`.
   A wrong offset, or a chunk still landing, is a 409: GET and go on from its offset. A connection that
   breaks off keeps what arrived. The last chunk's answer is the finished file:
-  `{ done: true, path, name, size, app: { status, answer } }`.
+  `{ done: true, path, name, size, app: { status, answer } }`, and a PUT to it again, its answer lost, answers the same.
 - `DELETE …/<id>` → 204, what arrived deleted. An upload untouched for 3 days goes the same way.
+  Once the file is in place it's a 409, and the file stays.
 
 The finished file lands at `DATA_DIR/uploads/<login>/<folder>/<name>`: the name cleaned (no slashes,
 leading dots or brackets), and never over a file already there (`IMG_1 (2).jpg`). Then Citadel calls
-your server, signed as the person who sent it:
+your server, signed as the person who sent it (again, for the same `path`, if Citadel restarted before you answered):
 
 - `POST $BASE_PATH/app-api/uploaded` `{ "path", "name", "size", "folder" }`, `path` relative to
   `DATA_DIR` (`"uploads/cara/Japan 2026/IMG_1.jpg"`). Move it, import it or leave it there; it's yours.

@@ -1,6 +1,7 @@
 package zip.citadel.shell;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -50,8 +51,26 @@ public final class PushMessage {
     static String open(String path, String origin, String self) {
         if (origin == null || self == null) return null;
         String home = origin + self + "/";
-        if (path == null || !Links.under(path, self) || path.contains("//") || path.contains("\\") || path.contains("/../") || path.endsWith("/..") || path.toLowerCase(java.util.Locale.ROOT).contains("%2e")) return home;
-        return origin + path;
+        return path != null && opens(path, self) ? origin + path : home;
+    }
+
+    /**
+     * The server's rule for a push's page (openOk in src/fcm.ts): under the app's own path, and nothing a decoder could
+     * turn into another page. Dots, encodings and {@code //} are refused in the path alone: a query or fragment may carry
+     * any address. push-open-cases.txt in the tests' resources is run against both.
+     */
+    private static boolean opens(String open, String self) {
+        if (!open.startsWith(self + "/")) return false;
+        for (int i = 0; i < open.length(); i++) {
+            char c = open.charAt(i);
+            if (c < 0x20 || c == 0x7f || c == '\\') return false;
+        }
+        String path = open.split("[?#]", 2)[0].toLowerCase(Locale.ROOT);
+        if (path.contains("//") || path.contains("%2e") || path.contains("%2f") || path.contains("%5c")) return false;
+        for (String segment : path.split("/")) {
+            if (segment.equals(".") || segment.equals("..")) return false;
+        }
+        return true;
     }
 
     private static String blank(String s) {

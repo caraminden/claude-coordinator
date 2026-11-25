@@ -85,6 +85,8 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
   const train = (kind: string) => after.find((l) => l.kind === kind && l.run != null && sameShip(l.parts[0] ?? '', lead));
   const of = (kind: string) => own.find((l) => l.kind === kind) ?? (borrow && TRAIN.includes(kind) ? train(kind) : undefined);
   if (of("shipped through main's red")) return { cause: 'main', rider: false, why: `main was red on ${of("shipped through main's red")!.parts[1] ?? 'the same test'} too` };
+  const main = own.find((l) => l.kind.startsWith('red on main too')); // refused or sent back in line for main's own red test (#1478)
+  if (main && borrow) return { cause: 'main', rider: false, why: `main was red on ${main.parts[1] ?? 'the same test'} too` };
   const bisect = of('ship train red');
   if (bisect) {
     const culprit = bisect.parts[1] ?? '';
@@ -130,7 +132,9 @@ export function landReds(runs: LandRun[], lines: RetroLine[], since: number): La
   const out: LandReds = { since, runs: land.length, green: 0, red: 0, other: 0, causes: { change: 0, flaky: 0, main: 0, unknown: 0 }, riders: 0, reds: [] };
   const sorted = [...lines].sort((a, b) => a.at - b.at);
   for (const [i, r] of land.entries()) {
-    if (r.status === 'completed' && r.conclusion === 'success') {
+    const own = sorted.filter((l) => l.run === r.id);
+    // Red on GitHub only for its last step, the check of the PC's own ports: land.sh counts it as the green its suite was (#1864).
+    if (r.status === 'completed' && (r.conclusion === 'success' || own.some((l) => l.kind === 'CI ports red'))) {
       out.green++;
       continue;
     }
@@ -143,7 +147,6 @@ export function landReds(runs: LandRun[], lines: RetroLine[], since: number): La
     const start = Date.parse(r.created_at);
     const next = land.slice(i + 1).find((x) => x.head_branch === r.head_branch);
     const end = Math.min(Date.parse(r.updated_at ?? r.created_at) + RUN_TAIL_MS, next ? Date.parse(next.created_at) : Infinity);
-    const own = sorted.filter((l) => l.run === r.id);
     // The lead's own lines up to its next run; its train's suspects and bisect verdicts, which come after the bisect's runs, for longer.
     const after = sorted.filter((l) => l.at >= start && l.run !== r.id && l.parts.includes(lead) && l.at < (l.run == null ? end : start + TRAIN_MS));
     const c = causeOf(lead, own, after);

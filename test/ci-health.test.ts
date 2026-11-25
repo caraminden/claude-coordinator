@@ -37,6 +37,7 @@ import {
   firstTickDelay,
   START_DELAY_MS,
   clock,
+  CHAT_STEP,
   ORPHAN_MS,
   orphanRuns,
   landProblems,
@@ -2484,4 +2485,72 @@ test('a problem that opens 2-9 AM Pacific counts its hour from 9, when its Taskm
   assert.equal(held({ key: 'k', title: 'CI: t' }, four, ten).quiet, undefined, 'rings at 10');
   const noon = Date.parse('2026-11-05T20:00:00Z');
   assert.equal(held({ key: 'k', title: 'CI: t' }, noon, noon).held, noon + RED_FIX_MS, 'by day the hour starts at once');
+});
+
+// #1974: the poll held the server reading every message of every candidate minion off disk, every few minutes.
+test("a poll with an open red reads each candidate's first message once, not every message, and a later poll reads none again (#1974)", async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  w.gh.jobs.set(9001, [job({ run_id: 9001, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [runOf({ id: 9001, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  await health.tick(NOW);
+  const minions = Array.from({ length: 12 }, (_, i) => {
+    const t = w.minion(w.peek.id, `ticket/${i + 1}-long`);
+    w.store.addEvent(t.id, 'user_message', { text: i === 7 ? 'Fix the red desktop run 9001 on main' : 'unrelated work' });
+    for (let n = 0; n < 30; n++) w.store.addEvent(t.id, 'user_message', { text: `follow-up ${n}` });
+    return t;
+  });
+  let rows = 0;
+  const all = w.store.eventsOfKinds.bind(w.store);
+  w.store.eventsOfKinds = (id, kinds, after) => {
+    const out = all(id, kinds, after);
+    if (kinds.includes('user_message')) rows += out.length;
+    return out;
+  };
+  const first = w.store.firstMessage?.bind(w.store);
+  w.store.firstMessage = (id) => {
+    rows++;
+    return first(id);
+  };
+  await health.tick(NOW + 5 * MIN);
+  assert.ok(rows <= minions.length, `read ${rows} messages for ${minions.length} minions`);
+  assert.equal(health.hold(minions[7].id) != null, true, 'the brief that names the run in its first message still holds it');
+  assert.equal(health.hold(minions[6].id), null);
+  rows = 0;
+  await health.tick(NOW + 10 * MIN);
+  assert.equal(rows, 0, 'a first message is not read again');
+});
+
+test('the chat search for a red reads events by id, not minion by minion, and in steps still finds a mention far back (#1974)', async () => {
+  const w = outsideWorld();
+  const t = w.minion(w.peek.id, 'ticket/1-fix');
+  const other = w.minion(w.peek.id, 'ticket/2-other');
+  w.store.addEvent(t.id, 'user_message', { text: 'unrelated' });
+  w.store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'I see run 9001' }] } });
+  const sql: string[] = [];
+  const prepare = w.store.db.prepare.bind(w.store.db);
+  w.store.db.prepare = (q: string) => (sql.push(q), prepare(q));
+  assert.deepEqual(w.store.minionsNaming(w.peek.id, ['9001'], 0).ids, [t.id]);
+  w.store.db.prepare = prepare;
+  const search = sql.find((q) => q.includes('SELECT DISTINCT'))!;
+  const plan = prepare(`EXPLAIN QUERY PLAN ${search}`).all(0, 100, w.peek.id, '%9001%') as { detail: string }[];
+  assert.match(plan[0].detail, /^SEARCH e USING INTEGER PRIMARY KEY/);
+
+  for (let n = 0; n < CHAT_STEP * 2; n++) w.store.addEvent(other.id, 'note', { text: 'filler' });
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  w.quietDelve();
+  w.gh.jobs.set(9001, [job({ run_id: 9001, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [runOf({ id: 9001, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  const naming = w.store.minionsNaming.bind(w.store);
+  const spans: number[] = [];
+  w.store.minionsNaming = (pid, needles, after, atMost = Infinity) => {
+    spans.push(atMost - after);
+    return naming(pid, needles, after, atMost);
+  };
+  await health.tick(NOW);
+  assert.ok(spans.length >= 3 && spans.every((n) => n === CHAT_STEP), `searched in steps: ${spans}`);
+  const mark = w.store.getSetting<Record<string, { chat: { ids: number[]; upTo: number } }>>(`ci-health:red:${w.peek.id}`)!['7'];
+  assert.deepEqual(mark.chat.ids, [t.id]);
+  assert.equal(mark.chat.upTo, (prepare('SELECT max(id) AS id FROM events').get() as { id: number }).id);
 });

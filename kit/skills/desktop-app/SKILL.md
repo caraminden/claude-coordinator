@@ -25,6 +25,8 @@ On every start the launcher:
    crashes or stays silent, the launcher kills it and starts the old build. A `file` build waits while
    a copy of the app is already running (a new start would only hand off to it), with no strike, and is
    tried on the first start with nothing running. So a build reaches a PC on its start after next.
+   Before it tries the build, the launcher reads the feed, for 5 s at most: a build rolled back since it
+   was downloaded is dropped and the current one starts. With no answer, the build is tried as if there were no feed.
 4. A build that started is current but on probation: the launcher stays and watches it for 10 minutes.
    Running that long, or closing with exit code 0 first, makes it good; a clean exit within 30 s of the
    start proves nothing (it may have handed off to a copy already running), so the build stays on
@@ -75,7 +77,9 @@ its current build is good and the builds it refused stay refused.
   `release.needs`), and tells the Taskmaster. A failed publish is reported, and PCs keep their build.
   The target's current release on the Releases page links the first-install zip.
 - **Roll back:** a roll back on that ci target pins an older run. The feed names that build again, and
-  PCs go back to it on their next start but one.
+  PCs that run the newer one go back to it on their next start but one; a PC that only has the newer one
+  downloaded doesn't start it, unless the feed doesn't answer in 5 s or the older run is past the newest
+  three builds: that one is published again under a new number, so PCs try what waits first.
 
 Builds are kept under `<DATA_DIR>/projects/<id>/desktop/<app>/`: the newest three. The feed is open
 (no login) on the tailnet, like the app itself.

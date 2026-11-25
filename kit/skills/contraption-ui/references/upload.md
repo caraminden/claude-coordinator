@@ -24,7 +24,7 @@ It draws (base.css's `cui-upload`):
 
 - a dashed drop zone with **Choose files** and **Choose a folder** (`folders: false` hides it); dropped
   folders are walked, their folders kept;
-- a row per file: its name, `40% · 1.2 GB of 3.0 GB`, **Pause** / **Resume**, ✕ to cancel, and its bar;
+- a row per file: its name, `40% · 1.2 GB of 3.0 GB`, **Pause** / **Resume**, ✕ to cancel (one already in place stays, and the row says so), and its bar;
   `data-state` is `waiting`, `sending`, `paused`, `done` or `cancelled`;
 - a total over the batch with **Pause all** / **Resume all**;
 - one line naming what it left out: hidden files and folders (a dot first, `.DS_Store`), and kinds

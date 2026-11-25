@@ -9,8 +9,9 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { Runner } from '../src/runner.ts';
+import { type QueuedMessage, Runner } from '../src/runner.ts';
 import { agentToken, bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'overlord-'));
@@ -81,8 +82,8 @@ const cards = (ticketId: number) =>
 
 test("the Overlord hears of every start, and gets a card when one reads like another person's open minion", async () => {
   // Josh's minion has to be indexed before a look-alike can be found.
-  const hits = async () => (await (await fetch(`${srv.base}/api/projects/${Shared.id}/memory?q=${encodeURIComponent('retry loop land.sh')}&scope=minions`, { headers: { Cookie: cookie } })).json()).hits ?? [];
-  await until('the hit', async () => (await hits()).some((h: any) => h.ticket_id === joshWork.id), 10000);
+  const hits = async () => (await json<{ hits?: { ticket_id: number }[] }>(await fetch(`${srv.base}/api/projects/${Shared.id}/memory?q=${encodeURIComponent('retry loop land.sh')}&scope=minions`, { headers: { Cookie: cookie } }))).hits ?? [];
+  await until('the hit', async () => (await hits()).some((h) => h.ticket_id === joshWork.id), 10000);
 
   const twin = await start(Shared.id, 'Fix the retry loop in land.sh after a refused push');
   const heard = await until(`mail naming #${twin.number}`, () => {
@@ -100,7 +101,7 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
   assert.ok(card, 'a card for the look-alike');
   const q = card.questions[0];
   assert.match(q.question, new RegExp(`Cara started #${twin.number} .*Josh's #${joshWork.number} `));
-  assert.equal(q.options.find((o: any) => o.recommended).label, 'Both stay');
+  assert.equal(q.options.find((o: { recommended?: boolean; label: string }) => o.recommended).label, 'Both stay');
   assert.equal(card.to, undefined, 'any member answers it');
 
   // A start that reads like nothing still reaches it, with no card.
@@ -223,8 +224,8 @@ test("dismissing a Taskmaster's card for everyone tells the Taskmaster that aske
     return t.length && t;
   });
   assert.ok(
-    told.some((t) => t.includes('"Pause the nightly sweep?"')),
-    told.join('\n'),
+    (told as string[]).some((t) => t.includes('"Pause the nightly sweep?"')),
+    (told as string[]).join('\n'),
   );
   assert.ok(!events(overlord.id).some((e) => e.kind === 'user_message' && String(e.data.text).includes('dismissed your card')), 'the Overlord, where the card is, gets no note');
   assert.equal(cards(overlord.id).find((c) => c.id === id).settled.dismissed, true);
@@ -246,7 +247,7 @@ test("an Overlord turn runs for whoever started it, else the scheme's owner, nev
     '/bin/false',
   );
   runner.personOf = (author) => s.findUser('name', author)?.id ?? null;
-  const turnPerson = (batch: any[]) => (runner as any).turnPerson(s.getTicket(lord.id), s.getProject(p.id), batch);
+  const turnPerson = (batch: QueuedMessage[]) => (runner as any).turnPerson(s.getTicket(lord.id), s.getProject(p.id), batch);
   assert.equal(turnPerson([{ author: 'Josh', text: 'Both stay', images: [], own: true }]), josh.id, 'the starter');
   assert.equal(turnPerson([{ author: 'Citadel', text: 'CI went red', images: [] }]), cara.id, 'an alert: the owner, not Josh from last time');
   s.db.close();

@@ -187,7 +187,7 @@ function readHold(): HoldFile | null {
 }
 function holdWhy(slug: string): string | null {
   const h = readHold();
-  return h?.repos.includes(slug.toLowerCase()) ? h.why : null;
+  return h?.repos.includes(slug.toLowerCase()) ? (h.why ?? (h.own === slug.toLowerCase() ? (h.busy ?? null) : null)) : null;
 }
 const heldRun = (run: number) => readHold()?.held.some((h) => h.run === run) ?? false;
 /** The exit status of a job handed to Citadel's queue: nothing has run yet, or it was stopped and starts again. */
@@ -201,7 +201,7 @@ async function waitForHold(slug: string, poll: number): Promise<boolean> {
   for (let why = holdWhy(slug); why; why = holdWhy(slug)) {
     if (Date.now() - from >= limit) return false;
     if (Date.now() - told >= 300_000) {
-      say(`waiting: ${why}, and ships go first on the CI desktop (${Math.round((Date.now() - from) / 60000)} min)`);
+      say(`waiting: ${why} (${Math.round((Date.now() - from) / 60000)} min)`);
       told = Date.now();
     }
     await sleep(poll);
@@ -235,7 +235,7 @@ function handOver(job: { id: string; slug: string; sha: string; command: string;
   const now = Date.now();
   writeJob({ ...rest, ticket, what, who: (process.env.CITADEL_HEAVY_WHO || 'someone').slice(0, 200), queued_at: now, quiet: true, ...(run ? { state: 'running', dispatched_at: now, run_id: run.id, url: run.url } : { state: 'queued' }) });
   say(
-    `${run ? 'a ship joined the line, so this job was stopped' : 'ships still hold the CI desktop'}: Citadel ${run ? 'starts it again' : 'starts it'} by itself once the line is empty, and wakes you with its exit status and output (${join(longDir(), `${job.id}.log`)}). Nothing has passed or failed (exit ${HANDED_OVER}); end your turn, and don't run it again`,
+    `${run ? 'another CI job goes first, so this job was stopped' : 'the CI desktop is still taken'}: Citadel ${run ? 'starts it again' : 'starts it'} by itself when it may go, and wakes you with its exit status and output (${join(longDir(), `${job.id}.log`)}). Nothing has passed or failed (exit ${HANDED_OVER}); end your turn, and don't run it again`,
   );
   return true;
 }
@@ -304,7 +304,7 @@ async function main(argv: string[]): Promise<number> {
   const queueLimit = Number(process.env.CITADEL_HEAVY_CI_QUEUE) || 600;
   const slug = repo();
   const command = remoteCommand(argv);
-  const ship = process.env.CITADEL_HEAVY_SHIP === '1'; // a ship's own light check (#1620): never held
+  const ship = process.env.CITADEL_HEAVY_SHIP === '1'; // a ship's own light check (#1620): stopped only, never handed over
   const id = `${ship ? 'ship' : ''}${newId()}`;
   const ref = `refs/citadel-heavy/${id}`;
   let sha: string;
@@ -405,7 +405,8 @@ async function main(argv: string[]): Promise<number> {
     for (;;) {
       if (run.status === 'completed') {
         // Stopped for a ship (#1902): the same run starts again, so this is no result.
-        if (!heldRun(run.id)) {
+        if (ship || !heldRun(run.id)) {
+          // a ship's light check is never waited for: no verdict, and its ship goes on
           completed = true;
           break;
         }

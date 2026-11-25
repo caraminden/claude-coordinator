@@ -1,6 +1,7 @@
 # The kit desktop launcher's trial rules on real Windows (#1396): probation, the roll back after a crash inside it,
-# one more try before a build is refused, and no try while a copy runs (#1522). Each scenario is a made-up install folder under %TEMP%\launcher-trial with
-# state.json written by hand and builds already unpacked, so no feed is needed (the feed URL refuses at once).
+# one more try before a build is refused, no try while a copy runs (#1522), and a roll back on the feed dropping the
+# waiting build (#1942). Each scenario is a made-up install folder under %TEMP%\launcher-trial with state.json written by
+# hand and builds already unpacked. 1 to 6 need no feed (the feed URL refuses at once); the rest read one served here.
 # -From is a URL folder serving launcher.exe (built from kit/desktop-launcher) and testapp.exe (kit/desktop-launcher/testapp).
 # Prints PASS or FAIL per check and exits with the number failed. While it waits (-Pause seconds) after a roll back, the
 # launcher's one-line notice is on screen for a screenshot.
@@ -21,11 +22,17 @@ function Stop-Install([string]$Dir) {
     Start-Sleep -Milliseconds 500
 }
 
-function New-Install([string]$Name, [string]$State, [hashtable]$Builds) {
+$offline = 'http://127.0.0.1:9/feed.json'
+
+function Set-Feed([string]$Dir, [string]$Url) {
+    Set-Content -Path (Join-Path $Dir 'launcher.json') -Value ('{"app":"trialapp","feed":"' + $Url + '","title":"Trial app"}') -Encoding ASCII
+}
+
+function New-Install([string]$Name, [string]$State, [hashtable]$Builds, [string]$Feed = $offline) {
     $dir = Join-Path $root $Name
     New-Item -ItemType Directory -Path $dir | Out-Null
     Copy-Item (Join-Path $root 'bin\launcher.exe') (Join-Path $dir 'app.exe')
-    Set-Content -Path (Join-Path $dir 'launcher.json') -Value '{"app":"trialapp","feed":"http://127.0.0.1:9/feed.json","title":"Trial app"}' -Encoding ASCII
+    Set-Feed $dir $Feed
     Set-Content -Path (Join-Path $dir 'state.json') -Value $State -Encoding ASCII
     foreach ($id in $Builds.Keys) {
         $v = Join-Path $dir "versions\$id"
@@ -79,6 +86,52 @@ function Wait-Notice($Launcher) {
         Start-Sleep -Milliseconds 250
     }
     return $false
+}
+
+# A feed at $feedRoot\<name>.json, served on localhost: a <file>.wait beside a file holds the seconds its answer takes.
+function Start-Feed {
+    $probe = New-Object System.Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, 0)
+    $probe.Start(); $script:feedPort = $probe.LocalEndpoint.Port; $probe.Stop()
+    New-Item -ItemType Directory -Path $feedRoot | Out-Null
+    $serve = Join-Path $root 'bin\serve.ps1'
+    Set-Content -Path $serve -Encoding ASCII -Value @'
+param([int]$Port, [string]$Dir)
+$l = New-Object Net.HttpListener
+$l.Prefixes.Add("http://localhost:$Port/")
+$l.Start()
+while ($true) {
+    $c = $l.GetContext()
+    try {
+        $f = Join-Path $Dir ([IO.Path]::GetFileName($c.Request.Url.AbsolutePath))
+        if (Test-Path "$f.wait") { Start-Sleep -Seconds ([int](Get-Content "$f.wait")) }
+        $b = [IO.File]::ReadAllBytes($f)
+        $c.Response.ContentLength64 = $b.Length
+        $c.Response.OutputStream.Write($b, 0, $b.Length)
+    } catch { $c.Response.StatusCode = 404 }
+    try { $c.Response.Close() } catch { $null = $_ }
+}
+'@
+    $script:feed = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $serve, '-Port', $feedPort, '-Dir', $feedRoot -WindowStyle Hidden -PassThru
+    # Up once the port answers.
+    $until = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $until) {
+        try { (New-Object Net.Sockets.TcpClient).Connect('localhost', $feedPort); return } catch { Start-Sleep -Milliseconds 250 }
+    }
+    throw 'the feed server did not start'
+}
+
+function New-Feed([string]$Name, [int]$Build, [int]$Wait = 0, [string]$Zip = '', [int]$ZipWait = 0) {
+    $f = @{ app = 'trialapp'; build = $Build; exe = 'App.exe'; started = 'file'; zip = "none.zip"; sha256 = ('0' * 64); size = 1 }
+    if ($Zip) {
+        $f.zip = Split-Path $Zip -Leaf
+        $f.sha256 = (Get-FileHash $Zip -Algorithm SHA256).Hash.ToLower()
+        $f.size = (Get-Item $Zip).Length
+        if ($ZipWait) { Set-Content -Path "$Zip.wait" -Value $ZipWait -Encoding ASCII }
+    }
+    $at = Join-Path $feedRoot "$Name.json"
+    [IO.File]::WriteAllText($at, ($f | ConvertTo-Json -Compress))
+    if ($Wait) { Set-Content -Path "$at.wait" -Value $Wait -Encoding ASCII }
+    return "http://localhost:$feedPort/$Name.json"
 }
 
 function Close-App([string]$Dir) {
@@ -189,6 +242,73 @@ $l = Start-Launcher $d
 Test-That 'copy: with nothing running, 11 is tried' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
 Show-Install $d
 Stop-Install $d
+
+# 7. Rolled back on the feed (#1942): the waiting build isn't tried, and it is dropped.
+$feedRoot = Join-Path $root 'feed'
+Start-Feed
+$d = New-Install 'rollback' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'rollback' 6)
+$l = Start-Launcher $d
+Test-That 'rollback: 6 starts' (Wait-Log $d 'starting build 6' 45)
+Test-That 'rollback: the launcher leaves without a probation watch' ($l.WaitForExit(30000))
+Test-That 'rollback: 11 is never tried' (-not ((Get-Log $d) -match 'trying build 11'))
+Stop-Install $d
+$s = Get-State $d
+Test-That 'rollback: 6 is current, 11 no longer waits, nothing struck' ($s.current.id -eq 6 -and -not $s.pending -and -not ($s.failed -contains 11) -and -not ($s.struck -contains 11))
+Test-That "rollback: 11's folder is gone, 6's is whole" ((-not (Test-Path (Join-Path $d 'versions\11'))) -and (Test-Path (Join-Path $d 'versions\6\App.exe')))
+Show-Install $d
+
+# 8. The feed still names the waiting build: it is tried as before.
+$d = New-Install 'named' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'named' 11)
+$l = Start-Launcher $d
+Test-That 'named: 11 is tried' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
+Show-Install $d
+Stop-Install $d
+
+# 9. The waiting build is put off by a running copy, and the roll back is read beside it: a later start, offline, runs 6.
+$d = New-Install 'copyrollback' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'copyrollback' 6)
+Start-Process -FilePath (Join-Path $d 'versions\6\App.exe') -WorkingDirectory (Join-Path $d 'versions\6')
+Start-Sleep -Seconds 2
+$l = Start-Launcher $d
+Test-That 'copyrollback: 11 waits while a copy runs' (Wait-Log $d 'build 11 waits: a copy of Trial app is already running' 30)
+[void]$l.WaitForExit(45000)
+Stop-Install $d
+Test-That 'copyrollback: 11 no longer waits' (-not (Get-State $d).pending)
+Set-Feed $d $offline
+$l = Start-Launcher $d
+[void]$l.WaitForExit(45000)
+Test-That 'copyrollback: the next start, offline, runs 6 and not 11' (([regex]::Matches((Get-Log $d), 'starting build 6').Count -eq 2) -and -not ((Get-Log $d) -match 'trying build 11'))
+Show-Install $d
+Stop-Install $d
+
+# 10. A build on probation crashes while the build the feed was rolled back to downloads: the running 6 keeps its files.
+$z = Join-Path $root 'zip6'
+New-Item -ItemType Directory -Path $z | Out-Null
+Copy-Item (Join-Path $root 'bin\testapp.exe') (Join-Path $z 'App.exe')
+Set-Content -Path (Join-Path $z 'label.txt') -Value '6 (downloaded again)' -Encoding ASCII
+Compress-Archive -Path (Join-Path $z '*') -DestinationPath (Join-Path $feedRoot 'b6.zip')
+$d = New-Install 'crashdownload' '{"current":{"id":7,"exe":"App.exe","started":"file"},"previous":{"id":6,"exe":"App.exe","started":"file"},"failed":[],"probation":7}' @{ 6 = 'good'; 7 = 'crashy' } (New-Feed 'crashdownload' 6 0 (Join-Path $feedRoot 'b6.zip') 15)
+$l = Start-Launcher $d
+Test-That 'crashdownload: 7 crashes and 6 starts' (Wait-Log $d 'build 7 crashed on probation.*rolling back to build 6' 45)
+[void](Wait-Notice $l)
+Test-That 'crashdownload: the download that ended after the crash is not put in place' (Wait-Log $d 'build 6 was downloaded, but it isn.t wanted any more' 45)
+Test-That 'crashdownload: 7 is dropped' (Wait-Log $d 'build 7 is not tried: the feed now names build 6' 15)
+Stop-Install $d
+$s = Get-State $d
+Test-That 'crashdownload: 6 is current and 7 no longer waits' ($s.current.id -eq 6 -and -not $s.pending)
+Test-That "crashdownload: the running 6's files are untouched" ((Test-Path (Join-Path $d 'versions\6\App.exe')) -and (Test-Path (Join-Path $d 'versions\6\label.txt')) -and ((Get-Content (Join-Path $d 'versions\6\label.txt')) -eq '6 (good)'))
+Show-Install $d
+
+# 11. A feed that doesn't answer holds the app up by a few seconds at most, then the waiting build is tried as before.
+# Last: its held-up answers would hold up the next one's.
+$d = New-Install 'slow' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'slow' 6 12)
+$at = Get-Date
+$l = Start-Launcher $d
+Test-That 'slow: 11 starts' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
+$took = ((Get-Date) - $at).TotalSeconds
+Test-That ('slow: before the feed answers (took {0:n1} s)' -f $took) ($took -lt 11)
+Show-Install $d
+Stop-Install $d
+Stop-Process -Id $script:feed.Id -Force
 
 if ($script:failed -eq 0) { Write-Output 'all passed' } else { Write-Output "$($script:failed) failed" }
 exit $script:failed

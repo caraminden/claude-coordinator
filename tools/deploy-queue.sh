@@ -139,12 +139,12 @@ queue_done() {
 }
 
 # <queue dir> <ticket>: its sort key in the line, "<the waiters from before .order ahead of it>" then "0<place in
-# .order>" ("0" and ten zeros and the ticket for one that holds the line), "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
+# .order>" ("0", the place of the last waiter a person placed (else ten zeros) and the ticket for one that holds the line), "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
 # those waits for every lower ticket, so nobody who arrived after it goes ahead of it: .order ranks the waiters between
 # two of them only among themselves (had a later one counted itself ahead, both would take the lock: The Trans Agenda #76).
 queue_order() {
-  local t i=0 l
-  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" "
+  local t i=0 l pins=''
+  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" " QUEUE_PIN=0
   for t in "$1"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
     [ "${l[5]:-}" != hold ] && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} " # the core's (kit template's) is its 9th line
@@ -152,8 +152,11 @@ queue_order() {
   done
   [ -f "$1/.order" ] || return 0
   while read -r t; do
-    if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; fi
+    if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; elif [[ $t == '#pin '* ]]; then pins=${t#\#pin }; fi
   done <"$1/.order" 2>/dev/null || true
+  # A ship a person placed ("#pin", #1827 "Person's drag wins") stays ahead of a holding ship: it goes behind the last still waiting (not landing: line 2 is 0).
+  for t in ${pins:-}; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ "$(sed -n 2p "$1/$t" 2>/dev/null || echo x)" = 0 ] && [ "${QUEUE_RANK[$t]:-0}" -gt "$QUEUE_PIN" ] && QUEUE_PIN=${QUEUE_RANK[$t]}; done
+  return 0
 }
 queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_proc)
   local o seg=0 k
@@ -161,8 +164,8 @@ queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_pr
     [ "$o" != "$1" ] || { printf -v k '%05d2' "$seg"; break; }
     [[ $o > $1 ]] || seg=$((seg + 1))
   done
-  # A ship that holds the line (6th line "hold") comes before every rank, which start at 1, then in arrival order.
-  if [ -n "${k:-}" ]; then :; elif [[ ${QUEUE_HOLD:-} == *" $1 "* ]]; then printf -v k '%05d0%010d%s' "$seg" 0 "$1"; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
+  # A ship that holds the line (6th line "hold") sits right behind the last ship a person placed (QUEUE_PIN, else 0: before every rank), then in arrival order.
+  if [ -n "${k:-}" ]; then :; elif [[ ${QUEUE_HOLD:-} == *" $1 "* ]]; then printf -v k '%05d0%010d%s' "$seg" "${QUEUE_PIN:-0}" "$1"; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
   if [ -n "${2:-}" ]; then printf -v "$2" %s "$k"; else printf %s "$k"; fi
 }
 
@@ -179,7 +182,7 @@ queue_lock() {
   local q=$1/queue label=$2 n me t l p st ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by="" took yield_from=$SECONDS
   local -A QUEUE_RANK=()
   local QUEUE_OLD=()
-  local QUEUE_ORDER_BY="" QUEUE_HOLD=" "
+  local QUEUE_ORDER_BY="" QUEUE_HOLD=" " QUEUE_PIN=0
   mkdir -p -m 700 "$q"
   # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).
   if ! exec 9>"$1/lock"; then
@@ -213,7 +216,7 @@ queue_lock() {
     echo "$n"
   ); fi
   export DEPLOY_QUEUE_TICKET="$q/$n"
-  trap queue_done EXIT
+  trap "${QUEUE_EXIT:-queue_done}" EXIT
 
   queue_order "$q"
   by=$QUEUE_ORDER_BY # an order set before this joined is no news to it
@@ -383,9 +386,10 @@ taken_back() {
 # So the restart no longer needs the deploy lock, and the next landing rebases and passes its gate beside it; only
 # its fast-forward and its deploy wait for the restart's verdict. A restart still waiting on busy turns holds nothing.
 #   restart_lock <state>   hold it on fd 7. Returns 1 when it wasn't let go within DEPLOY_RESTART_WAIT seconds (a
-#                          restart ends within about 5 min: two restarts with their settle checks, and the reports).
+#                          restart ends within about 13 min at its slowest: the database copy, a handover that times out, two
+#                          restarts with their settle checks, each health ask up to 4 s, and the reports).
 restart_lock() {
-  local phase said="" started=$SECONDS limit=${DEPLOY_RESTART_WAIT:-600}
+  local phase said="" started=$SECONDS limit=${DEPLOY_RESTART_WAIT:-900}
   if ! exec 7>"$1/restart.lock"; then
     echo "queue: can't open the restart lock $1/restart.lock for writing, so nothing landed or deployed: a person needs to look at it" >&2
     return 1
@@ -403,4 +407,17 @@ restart_lock() {
       return 1
     fi
   done
+}
+
+# <hub function> <slug>: 0 when Citadel's hold is on and a run of its own (ship, check, proof, heavy job, suite) is on the CI
+# desktop or queued: a check or early run starts on an idle one only (#1906, src/ci-hold.ts, which stops one that slips through).
+# Fails open: off, or GitHub not read, it isn't busy. A run left queued over an hour is one GitHub abandoned.
+ci_busy() {
+  local st n
+  [ ! -e "$state/hold-off" ] || return 1
+  for st in in_progress queued; do
+    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|flake-proof|citadel-heavy)\\.yml")) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
+    [[ ! $n =~ ^[1-9][0-9]*$ ]] || return 0
+  done
+  return 1
 }

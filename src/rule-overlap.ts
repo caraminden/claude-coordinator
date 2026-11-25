@@ -2,6 +2,7 @@
 // instruction edit, every paragraph elsewhere that already speaks to the same thing. Pure functions over texts, so the
 // repo test (test/rule-homes.test.ts) and the server's Settings check run the same code.
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { githubHref, norm } from './decisions.ts';
 import { PHRASE_HITS, RULE_HOMES, RUN_WORDS, type RuleHome } from './rule-homes.ts';
@@ -176,7 +177,7 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
 
 /**
  * Markdown files (or those matching `re`) under a folder of a repo, as repo-relative paths; none when it is missing.
- * The one walker for instruction files: the Decisions page (src/decisions-load.ts) reads its sources with it too.
+ * The one walker for instruction files; the Decisions page (src/decisions-load.ts) uses its twin, mdFilesA.
  */
 export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): string[] {
   if (depth < 0) return [];
@@ -199,6 +200,21 @@ export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): st
   });
 }
 
+/** mdFiles with every folder read off the server's thread (#1980). */
+export async function mdFilesA(repo: string, dir: string, depth = 6, re = /\.md$/i): Promise<string[]> {
+  if (depth < 0) return [];
+  const names = await readdir(join(repo, dir)).catch((): string[] => []);
+  const found = await Promise.all(
+    names.sort().map(async (n) => {
+      const rel = dir ? `${dir}/${n}` : n;
+      const st = await lstat(join(repo, rel)).catch(() => null);
+      if (!st) return [];
+      return st.isDirectory() ? mdFilesA(repo, rel, depth - 1, re) : re.test(n) ? [rel] : [];
+    }),
+  );
+  return found.flat();
+}
+
 export const readIn = (root: string, f: string): string | null => {
   try {
     return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null;
@@ -213,7 +229,7 @@ const fileSources = (root: string, files: string[], href: (f: string) => string 
   });
 
 /** Citadel's own files whose words reach every scheme's agents: the prompt, the tool descriptions, the tripwire line, the model table and the kit. */
-const CITADEL_FILES = ['src/prompts.ts', 'src/mcp.ts', 'src/mcp-apps.ts', 'src/mcp-ship.ts', 'src/mcp-cards.ts', 'src/tripwire-blocks.ts', 'public/model-table.js'];
+const CITADEL_FILES = ['src/prompts.ts', 'src/mcp.ts', 'src/mcp-apps.ts', 'src/mcp-ship.ts', 'src/mcp-cards.ts', 'src/mcp-scheme.ts', 'src/mcp-call.ts', 'src/mcp-minions.ts', 'src/mcp-lookup.ts', 'src/tripwire-blocks.ts', 'public/model-table.js'];
 
 /** The repo files whose words reach agents: Citadel's own (above), CLAUDE.md, AGENTS.md and the rule files. */
 export function repoSources(root: string): Source[] {

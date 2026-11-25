@@ -1,6 +1,7 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, ago, api, h, noAutofill, icon, view } from './base.js';
 import { gloss } from './help-words.js';
+import { avatarsCard } from './avatar-card.js';
 import { codexToggle, codexWindowsBlock, renderUsage, setCodex } from './core.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { hideButton } from './hidden.js';
@@ -358,6 +359,7 @@ export function accountPage() {
       accountRow('globe', 'held', 'OpenRouter', openrouterCard()),
       accountRow('vault', 'done', 'Secrets', secretsCard(), 'Passwords and keys for minions and apps', { part: 'secrets' }),
       accountRow('check', 'teal', 'App chats for replay tests', replayCard(), 'Whether apps may keep your first few turns'),
+      accountRow('user', 'held', 'Speaker avatars in chat', avatarsCard(), '', { part: 'avatars' }),
       // Last, and closed until asked for (Cara picked "Password behind a button").
       settingsRow({ part: 'password', icon: 'lock', hue: 'muted', title: 'Password', summary: 'Change the password you sign in with' }, form)[0],
     ),

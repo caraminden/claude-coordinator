@@ -119,7 +119,7 @@ export interface HostLoad {
   now: number;
 }
 
-export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, owners?: AppOwners, heavy: ReturnType<typeof readHeavy> = readHeavy(dir, now)): HostLoad {
+export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, owners?: AppOwners, heavy: ReturnType<typeof readHeavy> = readHeavy(dir, now), longs = readLongJobs(dir)): HostLoad {
   const { holders, waiters } = heavy;
   const tag = (j: HeavyJob) => ({ ...j, scheme: schemeOfWho(j.who, owners) });
   let history = '';
@@ -136,7 +136,7 @@ export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, o
     maxPressure: MAX_PRESSURE,
     loadWaitS: LOAD_WAIT_S,
     week: parseHistory(history, now - WEEK_MS, owners),
-    long: longView(readLongJobs(dir), now).map((j) => ({ ...j, scheme: schemeOfWho(j.who, owners) })),
+    long: longView(longs, now).map((j) => ({ ...j, scheme: schemeOfWho(j.who, owners) })),
     now,
   };
 }

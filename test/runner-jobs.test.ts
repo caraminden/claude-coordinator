@@ -11,9 +11,12 @@ import { Store } from '../src/db.ts';
 import { GithubLink } from '../src/github-link.ts';
 import { MachineRelay } from '../src/machines.ts';
 
+/** A job as the hub writes it to an agent. */
+type AgentJob = { id: string; op: string; scheme: number; count: number | null; os?: string };
+
 /** An agent's event stream: what the hub writes to it, parsed. */
 function stream() {
-  const res = new EventEmitter() as EventEmitter & ServerResponse & { sent: any[] };
+  const res = new EventEmitter() as EventEmitter & ServerResponse & { sent: { runners: AgentJob }[] };
   res.sent = [];
   Object.assign(res, {
     writableLength: 0,
@@ -38,7 +41,7 @@ function fakeGithub() {
   const fetch = (async (url: string, init?: RequestInit) => {
     const path = url.replace('https://api.github.com', '');
     calls.push(`${init?.method ?? 'GET'} ${path}`);
-    if (String((init?.headers as any)?.Authorization) !== 'Bearer gho_cara') return Response.json({ message: 'Bad credentials' }, { status: 401 });
+    if (String((init?.headers as Record<string, string> | undefined)?.Authorization) !== 'Bearer gho_cara') return Response.json({ message: 'Bad credentials' }, { status: 401 });
     if (refuse.unreadable && path.includes('/runners?')) return new Response('<html>');
     if (path.startsWith('/repos/caraminden/peek-auras/actions/runners?')) return Response.json({ total_count: runners.length, runners: runners.map((r, i) => Object.assign(r, { id: r.id ?? i + 1 })) });
     const put = init?.method === 'PUT' && /^\/repos\/caraminden\/peek-auras\/actions\/runners\/(\d+)\/labels$/.exec(path);
@@ -87,7 +90,7 @@ function world(idleMs = 10_000) {
   relay.connectAgent(pc, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true });
   /** Answer the last job the agent got. */
   const answer = (ok: boolean, output: string) => {
-    const job = agent.sent.filter((m) => m.runners).at(-1).runners;
+    const job = agent.sent.filter((m) => m.runners).at(-1)!.runners;
     assert.equal(relay.runnerResult(pc, { id: job.id, ok, output }), true);
     return job;
   };
@@ -198,7 +201,7 @@ test('only members ask; one job per scheme and per agent; a failed or lost job c
 test('an agent only answers its own jobs, and a machine that may not act for the scheme is never picked', async () => {
   const w = world();
   await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'windows' });
-  const job = w.agent.sent.find((m) => m.runners).runners;
+  const job = w.agent.sent.find((m) => m.runners)!.runners;
   const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id);
   assert.equal(w.relay.runnerResult(stranger, { id: job.id, ok: true, output: 'forged' }), false);
   assert.equal(w.relay.runnerResult(w.pc, { id: 'nope', ok: true, output: '' }), false);
@@ -251,7 +254,7 @@ test('a list notes nothing; a remove notes once, failed or not; a token its scri
 test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-linux label, and says Linux in its note', async () => {
   const w = world();
   // With only the Windows agent online, a Linux ask has nowhere to go.
-  await assert.rejects(w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' }), (e: any) => e.status === 409 && /Linux CI runner agent/.test(e.message));
+  await assert.rejects(w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' }), (e: Error & { status: number }) => e.status === 409 && /Linux CI runner agent/.test(e.message));
   const wsl = w.store.createMachine('cara-desktop-linux', 'y', 'Cara', w.cara.id);
   w.store.setMachineProjects(wsl.id, [w.scheme.id]);
   const agent = stream();
@@ -269,7 +272,7 @@ test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-
   const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' });
   assert.equal(started.machine, 'cara-desktop-linux');
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0, 'the Windows agent got nothing');
-  const job = agent.sent.filter((m) => m.runners).at(-1).runners;
+  const job = agent.sent.filter((m) => m.runners).at(-1)!.runners;
   assert.deepEqual({ ...job, id: undefined }, { id: undefined, op: 'add', scheme: w.scheme.id, count: 1 }, 'the same job shape: the agent picks its scripts');
   assert.equal(w.relay.runnerResult(wsl, { id: job.id, ok: true, output: 'Added' }), true);
   // A Windows runner with the scheme's -ci label doesn't count for a Linux add.
@@ -291,7 +294,7 @@ function secondPc(w: ReturnType<typeof world>, host = 'LAPTOP-JOSH') {
   const agent = stream();
   w.relay.connectAgent(pc, agent, { host, command: 'citadel runner agent', runners: true });
   const answer = (ok: boolean, output: string) => {
-    const job = agent.sent.filter((m) => m.runners).at(-1).runners;
+    const job = agent.sent.filter((m) => m.runners).at(-1)!.runners;
     assert.equal(w.relay.runnerResult(pc, { id: job.id, ok, output }), true);
     return job;
   };
@@ -347,7 +350,7 @@ test("a member's own CI host runs CI only for the schemes they lent it to and ar
   w.store.setMachineProjects(pc.id, [w.scheme.id]);
   assert.equal((await token()).label, 'peek-auras-ci');
   assert.equal((await add()).machine, 'josh-pc');
-  const job = agent.sent.find((m) => m.runners).runners;
+  const job = agent.sent.find((m) => m.runners)!.runners;
   w.relay.runnerResult(pc, { id: job.id, ok: true, output: 'none' });
   await tick();
   w.store.setMachineProjects(pc.id, []);

@@ -80,6 +80,18 @@ namespace Citadel.Desktop
             return !copyRuns();
         }
 
+        /// <summary>
+        /// Whether the feed, naming `build`, took back the pending build (a roll back, #1942): it names an older one, or the
+        /// current one, which leaves nothing to try. A higher number reads as a newer build, so the pending one is
+        /// tried meanwhile: else an app published often would never get past downloading.
+        /// shortcut: a roll back to a run Citadel no longer keeps is published under a new number, so it isn't seen as one; a
+        /// field in the feed if that happens. With no current build there is nothing to run instead, so the pending one stays.
+        /// </summary>
+        public static bool Withdrawn(State s, int build)
+        {
+            return build > 0 && s.Pending != null && s.Current != null && (build == s.Current.Id || build < s.Pending.Id);
+        }
+
         /// <summary>The pending build said it started: it is current, on probation, and the last good build stays to go back to.</summary>
         public static void Started(State s)
         {

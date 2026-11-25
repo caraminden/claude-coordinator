@@ -140,6 +140,14 @@ test("a ship whose land script is too old to move still can't be moved by a Task
   );
 });
 
+test("a person's drag writes its pin for the land scripts, and a Taskmaster's move keeps it without adding its own (#1827, \"Person's drag wins\")", () => {
+  const { app, p, q } = scheme('Peek Auras');
+  moveShip(app, p.id, 3, [3, 2, 4, 5], CARA);
+  assert.match(readFileSync(join(q, '.order'), 'utf8'), /\n#pin 3\n$/);
+  moveShip(app, p.id, 5, [3, 5, 2, 4], TM, 'x');
+  assert.match(readFileSync(join(q, '.order'), 'utf8'), /\n#pin 3\n$/);
+});
+
 test("a ship that holds the line (a Regenerate ship, #1827) can't be moved, and says why", () => {
   const { app, p, q, line } = scheme('Peek Auras');
   writeFileSync(join(q, '0000000003'), readFileSync(join(q, '0000000003'), 'utf8') + 'hold\n');

@@ -7,6 +7,7 @@ import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
 import { listeningPort, PASSWORD, SECRET, tempRoot, TEST_ZONE } from './helpers.ts';
 import { git } from './git.ts';
+import { json } from './typed.ts';
 
 // A build's preview (src/previews.ts, build branches): /preview/build/<n>/ serves the tip of build/<n>
 // in the scheme whose code this server runs, from a worktree the live server keeps of its own.
@@ -35,7 +36,7 @@ const worktree = join(data, 'projects', String(project.id), 'build-previews', '7
 let base = '';
 let cookie = '';
 const page = (path: string) => fetch(`${base}${path}`, { headers: { Accept: 'text/html', Cookie: cookie }, redirect: 'manual' });
-const health = async () => (await fetch(`${base}/preview/build/7/api/health`, { headers: { Cookie: cookie } })).json();
+const health = async () => json<{ preview: boolean; commit: string }>(await fetch(`${base}/preview/build/7/api/health`, { headers: { Cookie: cookie } }));
 
 before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {

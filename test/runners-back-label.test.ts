@@ -6,6 +6,7 @@ import { Auth } from '../src/auth.ts';
 import { runnerWaiters } from '../src/ci-health.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, type Booted, tempRoot } from './helpers.ts';
+import { json } from './typed.ts';
 
 // #541 review fix: wake_when_runners_back from a scheme whose name makes no runner label ("!!!") can never
 // be matched by a runner, so the route refuses it (409) instead of storing a wait that never ends.
@@ -53,6 +54,6 @@ test('the wait route: a scheme whose name makes no runner label is refused 409 w
   assert.equal(waiting(badMinion.id), 0, 'no outbox row either');
   const ok = await post(goodMinion.id);
   assert.equal(ok.status, 201);
-  assert.equal((await ok.json()).label, 'peek-auras-ci');
+  assert.equal((await json<{ label: string }>(ok)).label, 'peek-auras-ci');
   assert.equal(waiting(goodMinion.id), 1);
 });

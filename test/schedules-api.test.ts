@@ -31,7 +31,7 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
   const url = `/api/projects/${p.id}/schedules`;
   // A new scheme comes with the weekly Memory curator (#1111) and the monthly Architecture check (#1797); this test starts from none.
   const { data: starting } = await call(url);
-  assert.deepEqual(starting.schedules.map((s: any) => s.name).sort(), ['Architecture check', 'Memory curator']);
+  assert.deepEqual(starting.schedules.map((s: { name: string }) => s.name).sort(), ['Architecture check', 'Memory curator']);
   for (const s of starting.schedules) assert.equal((await call(`/api/schedules/${s.id}`, { method: 'DELETE' })).status, 200);
   const nightly = { name: 'Nightly', cron: '0 3 * * *', brief: 'Is main healthy?' };
 
@@ -79,7 +79,7 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
   assert.equal((await call(`/api/schedules/${tm.data.id}`, { method: 'DELETE', as: page.coordinator.id })).status, 200);
   const { data: list } = await call(url);
   assert.deepEqual(
-    list.schedules.map((s: any) => s.name),
+    list.schedules.map((s: { name: string }) => s.name),
     ['Nightly'],
   );
 });
@@ -108,7 +108,7 @@ test("the Taskmaster's schedule tools", async () => {
   const audit = await tool('schedule_audit', { template: 'test-audit', notes: 'vitest only.' });
   assert.match(audit, /^Scheduled\. \[\d+\] Test audit \(Tests\): .*\(`0 7 \d+ \* \*`\), type research, model claude-opus-5-5, effort high; skips under 250 minions; runs after 400 ships \(0 so far\); standard audit test-audit with notes; next /);
   const aid = Number(audit.match(/\[(\d+)\]/)![1]);
-  const brief = async () => (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((x: any) => x.id === aid).brief;
+  const brief = async () => (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((x: { id: number; brief: string }) => x.id === aid).brief;
   assert.match(await brief(), /^Test audit for Tools[\s\S]*\n\nFor Tools:\nvitest only\.$/);
   assert.match(await tool('schedule_audit', { template: 'test-audit' }), /Tools already has the standard Test audit \(kit\/schedules\/test-audit.md\): schedule \d+/);
   assert.match(await tool('schedule_audit', { template: 'lint' }), /must be one of|no standard audit "lint"/);

@@ -48,6 +48,8 @@
 //     green; new trouble rings again as a new item (Mandate pushes only new ones); it links Home's "Broken now" list.
 import { createHash } from 'node:crypto';
 import { quietUntil, type AlertPart } from './alert-wakes.ts';
+import { breather } from './breathe.ts';
+import { briefNumbers } from './ci-brief.ts';
 import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
 import { runnerLabel, schemeLabels } from './ci-runner.ts';
@@ -154,6 +156,8 @@ export function firstTickDelay(lastTick: number | null | undefined, pausedUntil:
 }
 // Runs looked at for jobs that didn't start or wait for a runner; older ones are history.
 const RUNS = 50;
+/** How many event ids one step of a red's chat search covers, the loop yielding between steps (#1974). */
+export const CHAT_STEP = 2000;
 const WINDOW_MS = 24 * 3600_000;
 // A workflow with no run on main this long is a manual or retired one, never "missing a verdict".
 const ACTIVE_MS = 7 * 24 * 3600_000;
@@ -960,6 +964,12 @@ export class CiHealth {
     const c = mark.fixer ? this.store.getTicket(mark.fixer.ticket) : null;
     return c && c.project_id === p.id && c.number != null ? { number: c.number, closedAt: c.status === 'closed' ? c.updated_at : null, via: `shipped ${short(mark.fixer!.sha)} touching ${mark.fixer!.file}` } : null;
   }
+
+  /** The minions that could be fixing a red: made since its Taskmaster heard of it, or naming it in their chat. */
+  private candidates(p: Project, mark: RedMark): Ticket[] {
+    return this.store.listTickets(p.id).filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000));
+  }
+
   /** The red's named fix minion: only these are held open and re-run for (#1074); a credited fixer (mark.fixer) only touched the file. */
   fixTicket(p: Project, mark: RedMark): Ticket | null {
     const held = mark.rerun ? this.store.getTicket(mark.rerun.ticket) : null;
@@ -967,11 +977,9 @@ export class CiHealth {
     // #1491: any red run of the streak, not only its first: a minion started later names the newest.
     const ids = [mark.run, ...(mark.runs ?? [])].map(String);
     // #1849: a title or brief naming a run is the strong claim; a chat mention alone only counts when no strong one is open.
-    const cands = this.store
-      .listTickets(p.id)
-      .filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000))
+    const cands = this.candidates(p, mark)
       .sort((a, b) => a.created_at - b.created_at)
-      .map((x) => ({ x, strong: ids.some((id) => x.title.includes(id) || (this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '').includes(id)) }))
+      .map((x) => ({ x, strong: ids.some((id) => x.title.includes(id) || briefNumbers(this.store, x).includes(id)) }))
       .filter((c) => c.strong || mark.chat?.ids.includes(c.x.id));
     const open = (c: { x: Ticket }) => c.x.status !== 'closed';
     // First open strong one (Josh, 2026-11-19), then an open holder, then an open chat-named one; else the newest closed one.
@@ -1000,10 +1008,29 @@ export class CiHealth {
     }
     // Her pick's words: a minion that "names the run anywhere in its chat"; read from where the last poll stopped.
     // A run can't be named before it exists, so any minion counts, however old (#1336 started the run it fixed), from the red on.
-    const chat = this.store.minionsNaming(p.id, [mark.run, ...(mark.runs ?? [])].map(String), mark.chat?.upTo ?? this.store.eventIdAt(at(mark.at)) - 1);
-    if (chat.upTo !== mark.chat?.upTo) {
-      mark.chat = { ids: [...new Set([...(mark.chat?.ids ?? []), ...chat.ids])], upTo: chat.upTo };
+    // In steps, the loop yielding between them (#1974): a red's first search can cover hours of every chat.
+    const breathe = breather();
+    const needles = [mark.run, ...(mark.runs ?? [])].map(String);
+    let from = mark.chat?.upTo ?? this.store.eventIdAt(at(mark.at)) - 1;
+    const found = new Set(mark.chat?.ids);
+    let upTo: number;
+    for (;;) {
+      const chat = this.store.minionsNaming(p.id, needles, from, from + CHAT_STEP);
+      for (const id of chat.ids) found.add(id);
+      upTo = chat.upTo;
+      if (upTo !== from + CHAT_STEP) break;
+      from = upTo;
+      await breathe();
+    }
+    // Saved once, whole: a press of Investigate between steps must not see a half-done search.
+    if (upTo !== mark.chat?.upTo) {
+      mark.chat = { ids: [...found], upTo };
       save();
+    }
+    // The briefs fixTicket reads (src/ci-brief.ts), in the same paced way: after a restart that is every candidate's.
+    for (const t of this.candidates(p, mark)) {
+      briefNumbers(this.store, t);
+      await breathe();
     }
     if (!mark.failures) {
       const failures = await this.failuresOf(slug, runs.find((r) => r.id === mark.run) ?? ({ id: mark.run } as Run), as);

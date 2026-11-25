@@ -981,7 +981,7 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
 
 // Fast mode (#1017): in a fast scheme a low or medium land gets LAND_FAST=1 and a high one doesn't; both get the
 // scheme's known reds. Peek-like scheme, not Citadel (the every-scheme skill).
-test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, and the known-red ledger to every land', async () => {
+test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, and the known-red ledger and its risk label to every land', async () => {
   const srv = await bootServer();
   try {
     const store = new Store(join(srv.data, 'coordinator.db'));
@@ -994,7 +994,7 @@ test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, an
       mkdirSync(join(cwd, 'tools'), { recursive: true });
       const dump = join(srv.root, `${name}.env`);
       // Written whole, then renamed in: a bare redirect creates the file empty first, and the wait below saw it that way under load.
-      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" >${JSON.stringify(dump + '.part')}\nmv ${JSON.stringify(dump + '.part')} ${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\nrisk=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" "\${LAND_RISK:-}" >${JSON.stringify(dump + '.part')}\nmv ${JSON.stringify(dump + '.part')} ${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
       git(cwd, 'init', '-q');
       git(cwd, 'add', '.');
       git(cwd, 'commit', '-qm', 'init');
@@ -1004,9 +1004,9 @@ test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, an
       await until(`${name} land.sh ran`, () => existsSync(dump), 20_000);
       return readFileSync(dump, 'utf8');
     };
-    assert.equal(await landWith('low', { risk: 'low' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\n');
-    assert.equal(await landWith('medium', { risk: 'medium' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\n');
-    assert.equal(await landWith('high', { risk: 'high', go: 'Cara, 10:00 PST' }), 'fast=\nknown=test/x.test.ts\t#41 is fixing it\n', 'high keeps the full gate');
+    assert.equal(await landWith('low', { risk: 'low' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\nrisk=low\n');
+    assert.equal(await landWith('medium', { risk: 'medium' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\nrisk=medium\n');
+    assert.equal(await landWith('high', { risk: 'high', go: 'Cara, 10:00 PST' }), 'fast=\nknown=test/x.test.ts\t#41 is fixing it\nrisk=high\n', 'high keeps the full gate');
   } finally {
     await srv.stop();
   }
@@ -1051,6 +1051,7 @@ test("landPhase reads the phase from land.sh's newest phase line", () => {
   assert.equal(landPhase("queue: 2nd in line\nland: riding in ticket/3-a's ship train: waiting for CI on the train\nland: pulled off ticket/3-a's ship train on a guess, red in test/a.test.ts: waiting for CI on the train without it\n"), 'landing: pulled off its train');
   assert.equal(landPhase('land: CI passed\nland: master is now at d1a5c2f "x"\n'), 'landing: deploying', 'any default branch (KT2)');
   assert.equal(landPhase('land: waiting for CI on abc\nland: build/3 is now at d1a5c2f "x"; master is untouched\n'), 'landing: waiting on CI', 'a build merge is not a deploy');
+  for (const lock of ['deploy', 'land']) assert.equal(landPhase(`queue: 2nd in line (ahead: #12)\nqueue: got the ${lock} lock\n`), 'landing: starting'); // land-core.sh's lock is the land lock
   assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');
   assert.equal(landPhase('land: rebasing a onto main\nland: running test/a.test.ts on abc1234\nok 1\n'), 'landing: running tests');
   assert.equal(landPhase("land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara's desktop (at most 6 min, then it runs here)\n"), 'landing: waiting on CI');

@@ -159,9 +159,9 @@ test("a dismissed minion's wake is held: delivered on a reopen on day 2, dropped
   store.updateTicket(kept, { status: 'idle' });
   await outbox.poke({ type: 'reopened', ticket: kept });
   assert.equal(r.sent.length, 1);
-  assert.equal(r.sent[0].id, kept);
-  assert.match(r.sent[0].text, /kept for the reopen/);
-  assert.match(r.sent[0].text, /came due while this minion was dismissed/);
+  assert.equal((r.sent as Sent[])[0].id, kept);
+  assert.match((r.sent as Sent[])[0].text, /kept for the reopen/);
+  assert.match((r.sent as Sent[])[0].text, /came due while this minion was dismissed/);
 
   now.t = T0 + 4 * DAY;
   await outbox.poke({ type: 'tick' });
@@ -181,8 +181,8 @@ test("a dismissed minion's wake is held: delivered on a reopen on day 2, dropped
   await outbox.poke({ type: 'reopened', ticket: back });
   now.t += DAY;
   await outbox.poke({ type: 'tick' });
-  assert.equal(r.sent.at(-1)!.id, back);
-  assert.doesNotMatch(r.sent.at(-1)!.text, /dismissed/);
+  assert.equal((r.sent as Sent[]).at(-1)!.id, back);
+  assert.doesNotMatch((r.sent as Sent[]).at(-1)!.text, /dismissed/);
 });
 
 test('a far-off wake outlives a dismissal until 3 days past its own time', async () => {
@@ -207,8 +207,8 @@ test('a far-off wake outlives a dismissal until 3 days past its own time', async
   now.t = T0 + 10 * DAY;
   await outbox.poke({ type: 'tick' });
   assert.equal(r.sent.length, 1);
-  assert.equal(r.sent[0].id, back);
-  assert.doesNotMatch(r.sent[0].text, /dismissed/);
+  assert.equal((r.sent as Sent[])[0].id, back);
+  assert.doesNotMatch((r.sent as Sent[])[0].text, /dismissed/);
   now.t = T0 + 12 * DAY;
   await outbox.poke({ type: 'tick' });
   assert.equal(rows(gone)[0].state, 'held', 'still held 2 days past its time');
@@ -219,7 +219,7 @@ test('a far-off wake outlives a dismissal until 3 days past its own time', async
 
 test("a send that fails is retried 1, 5, 30, 120 and 360 minutes on, then fails and wakes the setter's Taskmaster", async () => {
   const id = minion();
-  const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' } as any).id;
+  const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' }).id;
   const now = { t: T0 };
   const r = fakeRunner();
   const { outbox, wakes } = server(r, now);

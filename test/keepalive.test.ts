@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { QueueRecord } from '../src/minion-queue.ts';
 import type { MinionJob } from '../src/minion-jobs.ts';
 import {
   changedParts,
@@ -219,13 +220,14 @@ function minion() {
   store.setTicketDir(t.id, cwd, null);
   store.updateTicket(t.id, { session_id: 'sess', status: 'idle' });
   const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, cwd, 'sess');
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, '{}\n');
+  mkdirSync(dirname(file!), { recursive: true });
+  writeFileSync(file!, '{}\n');
   return t.id;
 }
 
 const callCount = () => lines(calls).length;
-const promptText = (p: any) => (typeof p === 'string' ? p : p.map((b: any) => b.text).join('\n'));
+type Prompt = string | { text: string }[];
+const promptText = (p: Prompt) => (typeof p === 'string' ? p : p.map((b) => b.text).join('\n'));
 const series = (id: number) => store.getSetting<KeepaliveSeries>(keepaliveKey(id));
 const turnsOf = (id: number) => store.listTurns(id);
 const notesOf = (id: number) =>
@@ -263,7 +265,7 @@ test('a waiting minion gets one hidden keepalive 55 minutes after its turn, whic
   runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
   await until('the keepalive to run', () => callCount() > before);
   await idle(id);
-  const call = jsonLines(calls).at(-1) as { args: string[]; prompt: any };
+  const call = jsonLines(calls).at(-1) as { args: string[]; prompt: Prompt };
   assert.ok(promptText(call.prompt).includes(KEEPALIVE_TEXT));
   assert.ok(call.args.includes('--resume'), 'it resumes the session, or there is no cache to keep');
   const t = store.getTicket(id)!;
@@ -316,7 +318,7 @@ test('a Settings edit keeps the series: the keepalive runs on the prompt its war
     runner.now = () => Date.now();
     store.setAppInstructions('', 'Cara');
   }
-  const ping = jsonLines(calls).at(-1) as { system: string; prompt: any };
+  const ping = jsonLines(calls).at(-1) as { system: string; prompt: Prompt };
   assert.ok(promptText(ping.prompt).includes(KEEPALIVE_TEXT));
   assert.equal(ping.system, real.system, 'the system prompt its session cached, not the edited one');
   assert.doesNotMatch(ping.system, /Say times in Pacific/);
@@ -335,7 +337,7 @@ test('a real wake that arrives while a keepalive waits goes first, and the keepa
   runner.send(id, 'Cara', 'here is my answer');
   free();
   await until('the real turn to start', () => callCount() > before);
-  const call = jsonLines(calls).at(-1) as { prompt: any };
+  const call = jsonLines(calls).at(-1) as { prompt: Prompt };
   assert.ok(promptText(call.prompt).includes('here is my answer'));
   assert.ok(!promptText(call.prompt).includes(KEEPALIVE_TEXT));
   writeFileSync(join(store.getTicket(id)!.cwd, 'release'), 'ok');
@@ -654,7 +656,7 @@ test('a keepalive turn left by a restart is killed and dropped, not resumed', as
   assert.equal(store.getSetting(`turn:${id}`), null);
   assert.equal(existsSync(join(root, 'gone-turn')), false);
   assert.equal(r.isRunning(id), false, 'no resume started');
-  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null);
+  assert.equal(store.getSetting<QueueRecord>(`minion-queue:${id}`)?.owed ?? null, null);
 });
 
 test('the weekly readout switches keepalives off when they cost more than they saved', async () => {
@@ -679,12 +681,12 @@ test('the weekly readout switches keepalives off when they cost more than they s
 });
 
 test('countGate adds one to a gate on a day, moves one away, and keeps the last 14 days', () => {
-  let c = countGate(null, '2026-11-01', 'passed');
+  let c: Record<string, Record<string, number>> = countGate(null, '2026-11-01', 'passed');
   c = countGate(c, '2026-11-01', 'passed');
   c = countGate(c, '2026-11-01', 'state complete');
-  assert.deepEqual(c, { '2026-11-01': { passed: 2, 'state complete': 1 } });
+  assert.deepEqual<Record<string, Record<string, number>>>(c, { '2026-11-01': { passed: 2, 'state complete': 1 } });
   c = countGate(c, '2026-11-01', 'state complete', -1);
-  assert.deepEqual(c, { '2026-11-01': { passed: 2 } }, 'a gate counted to nothing goes');
+  assert.deepEqual<Record<string, Record<string, number>>>(c, { '2026-11-01': { passed: 2 } }, 'a gate counted to nothing goes');
   for (let d = 2; d <= 20; d++) c = countGate(c, `2026-11-${String(d).padStart(2, '0')}`, 'hours');
   assert.equal(Object.keys(c).length, 14);
   assert.ok(!c['2026-11-06'] && c['2026-11-07'] && c['2026-11-20'], 'the oldest days go');

@@ -34,10 +34,10 @@ import { healthQueries } from './db/health.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
 import { viewQueries } from './db/views.ts';
 
-import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
+import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from './db-keys.ts';
 import { scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
-export { askerKey, buildOwnerKey, pagePlanKey, planKey };
+export { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey };
 import { SCHEMA } from './db-schema.ts';
 import { type ClaudeStateRow, type EventRow, type Machine, titleWithoutBuild, type CardFate, PUT_CLAUDE_STATE } from './db-rows.ts';
 export * from './db-rows.ts';

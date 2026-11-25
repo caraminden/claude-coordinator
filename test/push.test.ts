@@ -142,7 +142,7 @@ test('notify skips whoever caused it, muted devices and people outside the schem
 
   const status: Record<string, number> = { [browsers.joshOld.endpoint]: 410, [browsers.joshGone.endpoint]: 404, [browsers.flaky.endpoint]: 500 };
   const sent: { url: string; headers: Record<string, string>; body: Buffer }[] = [];
-  const fakeFetch = (async (url: string, init: any) => {
+  const fakeFetch = (async (url: string, init: { headers: Record<string, string>; body: Buffer }) => {
     sent.push({ url, headers: init.headers, body: init.body });
     return new Response('', { status: status[url] ?? 201 });
   }) as unknown as typeof fetch;

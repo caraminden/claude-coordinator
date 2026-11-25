@@ -126,7 +126,7 @@ test('the backfill rewires named copies in place, adds only the picked audits, s
 
 test("the Taskmaster's audit tools offer exactly the kit's templates", async () => {
   const { readFileSync } = await import('node:fs');
-  const src = readFileSync(join(import.meta.dirname, '..', 'src', 'mcp.ts'), 'utf8');
+  const src = readFileSync(join(import.meta.dirname, '..', 'src', 'mcp-scheme.ts'), 'utf8');
   const listed = [...src.match(/export const SCHEDULE_TEMPLATES = \[([^\]]*)\]/)![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual(listed.sort(), [...loadTemplates().keys()].sort());
 });

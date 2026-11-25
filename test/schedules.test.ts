@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { Project } from '../src/db-rows.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -297,7 +298,7 @@ test('a slot whose minion was made before a kill finishes with that minion, not 
   let made = 0;
   const deps = {
     store,
-    newMinion: async (project: any, m: any, by: string) => {
+    newMinion: async (project: Project, m: ReturnType<typeof runMinion>, by: string) => {
       made++;
       const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
       return { id: t.id, number: t.number! };

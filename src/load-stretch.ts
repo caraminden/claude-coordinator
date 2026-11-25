@@ -4,7 +4,7 @@
 import { cores as hostCores, loadavg } from './host-signals.ts';
 
 /** Capped at 4. The stretch lets one slow step through; it doesn't raise the boot check's 3-minute backstop on all
- * the steps after the copy together (kept under deploy.sh's 420 s), so past about 3x the backstop is what refuses. */
+ * the steps after the copy together (kept under deploy.sh's 600 s), so past about 3x the backstop is what refuses. */
 export const MAX_STRETCH = 4;
 
 /** A step's limit for the load now: `ms(base)` in whole seconds, and `why` to add to its failure (empty on a quiet box). */

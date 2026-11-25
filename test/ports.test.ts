@@ -47,5 +47,5 @@ test('freePort never picks a port fetch refuses (10080, a Fetch spec "bad port")
   const port = await freePort();
   assert.notEqual(port, 10_080);
   assert.ok(picks.length < 3, 'it picked again');
-  await assert.rejects(fetch('http://127.0.0.1:10080/'), (err: any) => err.cause?.message === 'bad port', 'fetch still refuses 10080');
+  await assert.rejects(fetch('http://127.0.0.1:10080/'), (err: Error) => (err.cause as Error | undefined)?.message === 'bad port', 'fetch still refuses 10080');
 });

@@ -52,17 +52,18 @@ const live = () =>
     .filter((t) => t.token.startsWith(`${ticket.id}.`))
     .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
-const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
+const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: { kind: string }) => e.kind === kind).map((e: { data: string }) => JSON.parse(e.data));
 const ask = (contraption: string) => call('minion', `/api/tickets/${ticket.id}/release-key`, { method: 'POST', body: { contraption } });
 const verdict = (who: string, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });
 const press = (who: string, projectId: number, contraption: string) => call(who, '/api/releases/release-key', { method: 'POST', body: { projectId, contraption } });
 const lastMessage = async () => (await events('user_message')).at(-1).text;
 const keytoolRuns = () => (existsSync(join(root, 'keytool.jsonl')) ? jsonLines(join(root, 'keytool.jsonl')) : []);
 
-let ticket: any;
+type Card = { id: string; status: string; releaseKey?: { app: string } };
+let ticket: { id: number; project_id: number; number: number };
 let dataDir = '';
-let project: any;
-let other: any;
+let project: { id: number };
+let other: { id: number };
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, HOME: home } });
@@ -111,10 +112,10 @@ test('a plan card and a key card for another app leave it open; a newer one for 
   const first = (await events('plan')).at(-1);
   await call('minion', `/api/tickets/${ticket.id}/plans`, { method: 'POST', body: { summary: 'A plan', plan: 'Steps' } });
   const later = await ask('later');
-  let status = Object.fromEntries((await events('plan')).map((c: any) => [c.id, c.status]));
+  let status = Object.fromEntries((await events('plan')).map((c: Card) => [c.id, c.status]));
   assert.equal(status[first.id], 'pending');
   const again = await ask('twi');
-  status = Object.fromEntries((await events('plan')).map((c: any) => [c.id, c.status]));
+  status = Object.fromEntries((await events('plan')).map((c: Card) => [c.id, c.status]));
   assert.deepEqual([status[first.id], status[again.id], status[later.id]], ['superseded', 'pending', 'pending']);
   await assert.rejects(verdict('Dana', first.id, 'approve'), /409 A newer card for this key replaced this one/);
   const store = new Store(join(dataDir, 'coordinator.db'));
@@ -123,9 +124,9 @@ test('a plan card and a key card for another app leave it open; a newer one for 
 });
 
 test('a member approves: the key is made, mode 600, its password only in its file; it is never made twice', async () => {
-  const card = (await events('plan')).filter((c: any) => c.releaseKey?.app === 'twi').at(-1);
+  const card = (await events('plan')).filter((c: Card) => c.releaseKey?.app === 'twi').at(-1);
   await verdict('Dana', card.id, 'approve');
-  assert.equal((await events('plan')).find((c: any) => c.id === card.id).status, 'approved');
+  assert.equal((await events('plan')).find((c: Card) => c.id === card.id).status, 'approved');
   for (const f of ['twi-release.jks', 'twi-release.pass']) assert.equal(statSync(join(keyDir, f)).mode & 0o777, 0o600, f);
   const pw = readFileSync(join(keyDir, 'twi-release.pass'), 'utf8').trim();
   assert.equal(keytoolRuns().length, 1);
@@ -140,7 +141,7 @@ test('a member approves: the key is made, mode 600, its password only in its fil
 });
 
 test('a rejected key card makes nothing, with or without a reason', async () => {
-  const later = (await events('plan')).filter((c: any) => c.releaseKey?.app === 'later').at(-1);
+  const later = (await events('plan')).filter((c: Card) => c.releaseKey?.app === 'later').at(-1);
   await verdict('Dana', later.id, 'revise', 'Not yet');
   assert.equal(await lastMessage(), 'Rejected the release key card for LATER; no key was made.\n\nNot yet');
   assert.ok(!existsSync(join(keyDir, 'later-release.jks')));
@@ -156,8 +157,8 @@ test("the Releases button makes the key for a member of the app's scheme, and no
 });
 
 test('make_release_key is offered with the home apps, and its call posts the card', async () => {
-  const list = (await mcp('tools/list', {})).tools.find((t: any) => t.name === 'make_release_key');
-  assert.deepEqual(list.inputSchema.properties.contraption.enum, ['later', 'twi']);
+  const list = (await mcp('tools/list', {})).tools.find((t: { name: string }) => t.name === 'make_release_key');
+  assert.deepEqual(list!.inputSchema.properties!.contraption.enum, ['later', 'twi']);
   const r = await mcp('tools/call', { name: 'make_release_key', arguments: { contraption: 'later' } });
   assert.equal(r.isError, undefined, r.content[0].text);
   assert.match(r.content[0].text, new RegExp(`\\[the key card below\\]\\(#/p/${ticket.project_id}/t/${ticket.number}\\?e=\\d+\\)`));
@@ -166,7 +167,7 @@ test('make_release_key is offered with the home apps, and its call posts the car
 
 test('approving and rejecting one key card at the same moment gives the minion one answer (#1287 F3)', async () => {
   await idle();
-  const card = (await events('plan')).filter((c: any) => c.releaseKey?.app === 'later').at(-1);
+  const card = (await events('plan')).filter((c: Card) => c.releaseKey?.app === 'later').at(-1);
   assert.equal(card.status, 'pending');
   const before = (await events('user_message')).length;
   const both = await Promise.allSettled([verdict('Dana', card.id, 'approve'), verdict('Cara', card.id, 'revise', 'No')]);
@@ -174,11 +175,11 @@ test('approving and rejecting one key card at the same moment gives the minion o
   assert.match(String((both.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason), /409/);
   await idle();
   assert.equal((await events('user_message')).length, before + 1, 'one answer reached the minion');
-  const done = (await events('plan')).find((c: any) => c.id === card.id);
+  const done = (await events('plan')).find((c: Card) => c.id === card.id);
   assert.equal(existsSync(join(keyDir, 'later-release.jks')), done.status === 'approved', 'the card says what happened');
 });
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, whose scheme's apps are twi and later. */
-async function mcp(method: string, params: object): Promise<any> {
+async function mcp(method: string, params: object) {
   return mcpOnce(agentEnv(base, live(), ticket, 'thread', { COORDINATOR_HOME_CONTRAPTIONS: 'later,twi' }), method, params, tmp.track);
 }

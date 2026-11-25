@@ -321,7 +321,7 @@ test('the page lists the skills, and a member turns a kit skill off and on, with
   await call(`/api/projects/${p.id}`); // opening the page makes its Taskmaster
   const page = await call(`/api/projects/${p.id}/skills`);
   assert.equal(page.status, 200);
-  assert.ok(page.data.items.some((i: any) => i.name === 'citadel:self-review'));
+  assert.ok(page.data.items.some((i: { name: string }) => i.name === 'citadel:self-review'));
   assert.deepEqual(page.data.off, []);
   // The list never carries a scan's wait: its usage is the last report or null, and /skills/usage is where the counts come from.
   assert.ok(page.data.usage === null || typeof page.data.usage.skills === 'object');
@@ -344,7 +344,7 @@ test('the page lists the skills, and a member turns a kit skill off and on, with
   assert.deepEqual((await call(`/api/projects/${p.id}/skills`)).data.off, ['grilling', 'self-review']);
   await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: ['grilling'] } });
   const { data: again } = await call(`/api/projects/${p.id}`);
-  const notes = (await call(`/api/tickets/${again.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${again.coordinator.id}/events?after=0`)).data.map((e: { data: string }) => JSON.parse(e.data).text);
   assert.ok(notes.includes("Cara turned off citadel:grilling, citadel:self-review on the Skills page. It applies from each minion's next turn."), notes.join('\n'));
   assert.ok(notes.includes("Cara turned back on citadel:self-review on the Skills page. It applies from each minion's next turn."));
 });
@@ -359,5 +359,5 @@ test("+ New skill starts a minion with the edited brief as its first message (th
   assert.equal(data.ticket.title, 'New skill: weekly-digest');
   assert.equal(data.ticket.properties.type, 'feature');
   const events = (await call(`/api/tickets/${made.data.id}/events?after=0`)).data;
-  assert.equal(JSON.parse(events.find((e: any) => e.kind === 'user_message').data).text, brief);
+  assert.equal(JSON.parse(events.find((e: { kind: string; data: string }) => e.kind === 'user_message').data).text, brief);
 });

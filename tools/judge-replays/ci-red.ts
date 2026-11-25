@@ -53,7 +53,7 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   minionsAsOf(store, () => now);
   // Chat that names a run counts only once it was written.
   const naming = store.minionsNaming.bind(store);
-  store.minionsNaming = (pid, needles, after) => naming(pid, needles, after, store.eventIdAt(now));
+  store.minionsNaming = (pid, needles, after, atMost = Infinity) => naming(pid, needles, after, Math.min(atMost, store.eventIdAt(now)));
   const projects = store.listProjects().filter((p) => repoSlug(p.repo_url) && (ctx.scheme == null || p.id === ctx.scheme));
   const unread: string[] = [];
   const hits: Act[] = [];

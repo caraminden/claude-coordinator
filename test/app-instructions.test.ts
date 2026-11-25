@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { systemPrompt } from '../src/prompts.ts';
 import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 
 // The Citadel-wide instructions (#148): one app-wide text with history, in every prompt right before
 // the scheme's own, and edited only by people and the Citadel scheme's Taskmaster.
@@ -49,8 +50,10 @@ const as = (id: number, method = 'GET', body?: object) =>
     body: body ? JSON.stringify(body) : undefined,
   });
 
+type McpResult = { tools: { name: string }[]; isError?: boolean; content: { text: string }[] };
+
 /** One tools/list or tools/call through the real MCP server, as `ticket`'s Taskmaster. */
-async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, appTools: boolean): Promise<any> {
+async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, appTools: boolean): Promise<McpResult> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env,
@@ -64,8 +67,8 @@ async function mcp(ticket: { id: number; project_id: number }, method: string, p
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
+    const reply = new Promise<{ result: McpResult }>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
     return (await reply).result;
   } finally {
     child.kill();
@@ -112,19 +115,19 @@ test('people save it with a history row; the store keeps who and when', async ()
 
 test("the Citadel scheme's Taskmaster reads and sets it; another scheme's Taskmaster and a minion are refused", async () => {
   assert.equal((await as(CitadelTM.id, 'PUT', { text: 'Two rules.' })).status, 200);
-  assert.equal((await (await as(CitadelTM.id)).json()).text, 'Two rules.');
+  assert.equal((await json<{ text: string }>(await as(CitadelTM.id))).text, 'Two rules.');
 
   for (const method of ['GET', 'PUT']) {
     const r = await as(DelveTM.id, method, method === 'PUT' ? { text: 'Mine now.' } : undefined);
     assert.equal(r.status, 403, `${method} by Delve's Taskmaster`);
-    assert.match((await r.json()).error, /message_taskmaster/);
+    assert.match((await json<{ error: string }>(r)).error, /message_taskmaster/);
     assert.equal((await as(Minion.id, method, method === 'PUT' ? { text: 'Mine now.' } : undefined)).status, 403, `${method} by a minion`);
   }
   assert.equal((await srv.call('/api/app/instructions')).data.text, 'Two rules.');
 });
 
 test("the MCP tools: listed only for the Citadel scheme's Taskmaster, and refused for another scheme's if called anyway", async () => {
-  const names = async (t: typeof DelveTM, on: boolean) => (await mcp(t, 'tools/list', {}, on)).tools.map((x: any) => x.name);
+  const names = async (t: typeof DelveTM, on: boolean) => (await mcp(t, 'tools/list', {}, on)).tools.map((x) => x.name);
   assert.ok((await names(CitadelTM, true)).includes('set_app_instructions'));
   assert.ok(!(await names(DelveTM, false)).includes('set_app_instructions'));
   assert.ok(!(await names(DelveTM, false)).includes('get_app_instructions'));

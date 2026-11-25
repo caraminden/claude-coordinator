@@ -109,7 +109,7 @@ test('ingest stores the message and class of a CI sighting, none for others, and
     evidence: async (_p, _b, file) => (file === 'test/a.test.ts' ? { name: 'case', message: 'Timed out waiting for x' } : null),
   });
   await fx.ingest(project, Date.now());
-  const rows = st.db.prepare('SELECT file, test_name, message, class FROM flake_events ORDER BY file').all() as any[];
+  const rows = st.db.prepare('SELECT file, test_name, message, class FROM flake_events ORDER BY file').all() as { file: string; test_name: string; message: string; class: string }[];
   assert.deepEqual(
     rows.map((r) => [r.file, r.message, r.class]),
     [

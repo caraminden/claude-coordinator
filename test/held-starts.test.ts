@@ -1,10 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { runnerSource } from './runner-files.ts';
 import { Store } from '../src/db.ts';
 import { HeldStarts, HOLD_MAX_MS } from '../src/held-starts.ts';
 import { ScheduledRuns } from '../src/schedules.ts';
+import type { EventRow } from '../src/db.ts';
+import type { PressureReading } from '../src/pressure.ts';
+import type { Runner } from '../src/runner.ts';
+import { fake } from './typed.ts';
 
-const reading = (starved: boolean) => ({ cpu: starved ? 63 : 5, mem: 0, starved, why: starved ? 'CPU pressure 63%' : '' });
+const reading = (starved: boolean) => fake<PressureReading>({ cpu: starved ? 63 : 5, mem: 0, starved, why: starved ? 'CPU pressure 63%' : '' });
 
 function setup(initial = true) {
   const store = new Store(':memory:');
@@ -13,16 +18,17 @@ function setup(initial = true) {
     t = 1_700_000_000_000;
   const sent: { id: number; text: string }[] = [];
   const notes: string[] = [];
-  const runner = {
-    emit: (_i: number, _k: string, d: any) => {
-      notes.push(d.text);
+  const runner = fake<Runner>({
+    emit: (_i, _k, d) => {
+      notes.push((d as { text: string }).text);
+      return fake<EventRow>({});
     },
-    send: (id: number, _a: string, text: string) => {
+    send: (id, _a, text) => {
       sent.push({ id, text });
-      return {} as any;
+      return fake<ReturnType<Runner['send']>>({});
     },
-  };
-  const held = new HeldStarts({ store, runner: runner as any, read: async () => reading(starved), now: () => t });
+  });
+  const held = new HeldStarts({ store, runner, read: async () => reading(starved), now: () => t });
   return {
     store,
     project,
@@ -38,7 +44,7 @@ function setup(initial = true) {
     },
   };
 }
-const mkTicket = (s: ReturnType<typeof setup>) => s.store.createTicket({ project_id: s.project.id, title: 'A run', permission_mode: 'bypass', created_by: 'Citadel' } as any);
+const mkTicket = (s: ReturnType<typeof setup>) => s.store.createTicket({ project_id: s.project.id, title: 'A run', permission_mode: 'bypass', created_by: 'Citadel' });
 
 test('starved: the brief is held and the minion parked; cleared: the tick sends it once', async () => {
   const s = setup();
@@ -95,7 +101,7 @@ test('a restart mid-hold: a new HeldStarts on the same store sends it once', asy
   const s = setup();
   const id = mkTicket(s).id;
   await s.held.start({ ticket: id, from: 'Citadel', message: 'b', opts: {} }, () => {});
-  const again = new HeldStarts({ store: s.store, runner: s.runner as any, read: async () => reading(false) });
+  const again = new HeldStarts({ store: s.store, runner: s.runner, read: async () => reading(false) });
   await again.tick();
   await again.tick();
   await s.held.tick();
@@ -108,13 +114,13 @@ test('a schedule run held for the box says how long in its log, and still sends 
   const runs = new ScheduledRuns({
     store: s.store,
     held: s.held,
-    runner: s.runner as any,
+    runner: s.runner,
     broadcast: () => {},
     by: 'Citadel',
     dataDir: '/tmp',
     newMinion: async (p, m, by) => {
-      const t: any = s.store.createTicket({ project_id: p.id, title: m.title, permission_mode: 'bypass', created_by: by } as any);
-      return { id: t.id, number: t.number };
+      const t = s.store.createTicket({ project_id: p.id, title: m.title, permission_mode: 'bypass', created_by: by });
+      return { id: t.id, number: t.number! };
     },
   });
   await runs.run(s.store.schedules.get(sch.id)!);
@@ -130,7 +136,7 @@ test('a person, a Taskmaster, a follow-on and a wake never read the pressure', a
   // The reader is only given to HeldStarts, which only ScheduledRuns and the flake fixer call, and by server.ts to the
   // runner's line of kill resumes (#1364), which holds only those; runner.send has no gate.
   const { readFileSync } = await import('node:fs');
-  const runner = readFileSync(new URL('../src/runner.ts', import.meta.url), 'utf8');
+  const runner = runnerSource();
   const wake = readFileSync(new URL('../src/wake.ts', import.meta.url), 'utf8');
   assert.ok(!/pressure/.test(runner) && !/pressure|held-starts/.test(wake));
   const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');

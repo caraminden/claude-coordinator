@@ -34,7 +34,7 @@ test('told to wait, it says what for and asks again until it may go', async () =
   const r = await ask([wait, wait, { body: { go: true } }]);
   assert.equal(r.went, true);
   assert.equal(asked.length, 3);
-  assert.match(r.lines, /2 ships are in line, and ships go first: Citadel stops this run and starts it again/);
+  assert.match(r.lines, /2 ships are in line: Citadel stops this run and starts it again/);
 });
 
 test('never stopped, it gives its looks up and says so rather than hold a runner', async () => {

@@ -163,7 +163,7 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   const start = calls().find((c) => c.method === 'thread/start');
   assert.equal(start.params.model, 'gpt-6-astra', 'Opus maps to the frontier Codex model');
   const first = calls().filter((c) => c.method === 'turn/start')[0].params;
-  const said = first.input.map((i: any) => i.text).join('\n');
+  const said = first.input.map((i: { text: string }) => i.text).join('\n');
   assert.match(said, /<conversation>[\s\S]*\[Message\] \[Josh\]: first ask[\s\S]*\[Claude\] CLAUDE REPLY[\s\S]*<\/conversation>/);
   assert.match(said, /second ask/);
   const [handed, fresh] = said.split('</conversation>');
@@ -183,7 +183,7 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   assert.equal(resumed[0].params.threadId, 'th1');
   const third = calls()
     .filter((c) => c.method === 'turn/start')[1]
-    .params.input.map((i: any) => i.text)
+    .params.input.map((i: { text: string }) => i.text)
     .join('\n');
   assert.doesNotMatch(third, /<conversation>/, 'a resumed thread needs no hand-over');
 
@@ -225,7 +225,7 @@ test('a hand-back Claude turn that fails keeps the Codex turns but not their thr
   assert.equal(calls().filter((c) => c.method === 'thread/start').length, 2);
   const said = calls()
     .filter((c) => c.method === 'turn/start')[1]
-    .params.input.map((i: any) => i.text)
+    .params.input.map((i: { text: string }) => i.text)
     .join('\n');
   assert.match(said, /<conversation>[\s\S]*on codex[\s\S]*<\/conversation>[\s\S]*codex again/);
   r.setCodexSwitch(josh.id, false);
@@ -264,7 +264,7 @@ test('the server login runs its Codex turns in its own container, from its Claud
   assert.ok(exec.at(-1).startsWith(caraPlace.turnsDir + '/'), `its turn folder is the one her container mounts: ${exec.at(-1)}`);
   const said = calls()
     .find((c) => c.method === 'turn/start')
-    .params.input.map((i: any) => i.text)
+    .params.input.map((i: { text: string }) => i.text)
     .join('\n');
   assert.match(said, /\[Message\] \[Cara\]: first ask[\s\S]*\[Claude\] CLAUDE REPLY/, 'the hand-over is her host Claude conversation');
 
@@ -313,7 +313,7 @@ test("switching on carries a minion waiting out Claude's limit on at once, on Co
   await until("calls().some((c) => c.method === 'turn/start') && idle(t.id)() && ...", () => calls().some((c) => c.method === 'turn/start') && idle(t.id)() && store.getTicket(t.id)!.state === 'limited');
   const said = calls()
     .find((c) => c.method === 'turn/start')
-    .params.input.map((i: any) => i.text)
+    .params.input.map((i: { text: string }) => i.text)
     .join('\n');
   assert.match(said, /switched to Codex/);
   assert.ok(notes(t.id).includes('Resumed on Codex: its person switched to Codex'));

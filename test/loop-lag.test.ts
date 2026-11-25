@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
+import type { Profiler } from 'node:inspector';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -214,8 +215,8 @@ test('console profiles handed over overlapping give each window its profile with
   const { Session } = await import('node:inspector/promises');
   const s = new Session();
   s.connect();
-  const done = new Map<string, any>();
-  s.on('Profiler.consoleProfileFinished', (m: any) => done.set(m.params.title, m.params.profile));
+  const done = new Map<string, Profiler.Profile>();
+  s.on('Profiler.consoleProfileFinished', (m) => done.set(m.params.title!, m.params.profile));
   try {
     await s.post('Profiler.enable');
     console.profile('t0');
@@ -225,9 +226,9 @@ test('console profiles handed over overlapping give each window its profile with
     spin(60);
     console.profile('t2');
     console.profileEnd('t1');
-    const a = done.get('t0'),
-      b = done.get('t1');
-    assert.ok(a.samples.length > 0 && b.samples.length > 0);
+    const a = done.get('t0')!,
+      b = done.get('t1')!;
+    assert.ok(a.samples!.length > 0 && b.samples!.length > 0);
     assert.ok(b.startTime <= a.endTime, 'the next profile starts before the last ends: no gap');
     console.profileEnd('t2');
   } finally {

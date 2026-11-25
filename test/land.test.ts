@@ -184,7 +184,7 @@ test('a light land asks GitHub nothing and runs no test; kit, unlisted paths and
   let res = c.run();
   assert.equal(res.status, 0, res.stderr);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
-  assert.match(res.stderr, /lane: light .*no tests and no CI/s);
+  assert.match(res.stderr, /lane: light .*no CI: /s);
   assert.equal(c.calls(), '', 'not a word to GitHub');
   assert.equal(c.localRuns(), 0);
   assert.equal(r.note(), 'locked=1 held=yes', 'and it deployed');
@@ -205,6 +205,46 @@ test('a light land asks GitHub nothing and runs no test; kit, unlisted paths and
   // The loosened map is main's now, and judges the next land.
   r.commit(r.wt, 'b.txt', 'three\n');
   assert.match(c.run().stderr, /lane: light \(tools\/lanes; the path that decided it: b\.txt\)/);
+});
+
+// #1864 (LA2): a light ship gets no CI, so the tests the affected map picks for its paths run on its rebased commit.
+test('a light land runs the tests that read its paths, and one that breaks them is refused', () => {
+  const r = setup();
+  const c = ci(r);
+  const log = join(r.dir, 'light.log');
+  mkdirSync(join(r.source, 'docs'));
+  mkdirSync(join(r.source, 'test'), { recursive: true });
+  copyFileSync(join(import.meta.dirname, '..', 'tools', 'affected.ts'), join(r.source, 'tools', 'affected.ts'));
+  // The stand-in runner: which tests it was given, and red once the list doc and the index disagree.
+  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash\nshift 2\necho "$*" >>"${log}"\n[ "$(cat docs/a.md)" = "$(cat docs/b.md)" ] || { echo "✖ test/doc.test.ts › the two agree"; exit 1; }\n`);
+  chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
+  writeFileSync(join(r.source, 'test', 'doc.test.ts'), '');
+  writeFileSync(join(r.source, 'tools', 'affected-map.txt'), '@tests test/*.test.ts\ndocs/*.md: test/doc.test.ts\n');
+  writeFileSync(join(r.source, 'docs', 'a.md'), 'one\n');
+  writeFileSync(join(r.source, 'docs', 'b.md'), 'one\n');
+  r.commit(r.source, 'tools/lanes', 'light docs/*\n');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'docs/a.md', 'two\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  let res = c.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /guard tests failed on [0-9a-f]+, the branch rebased onto main/);
+  assert.match(res.stderr, /land: guard: ✖ test\/doc\.test\.ts › the two agree/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  r.commit(r.wt, 'docs/b.md', 'two\n');
+  res = c.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /guard tests passed on .*no CI: /s);
+  assert.equal(c.calls(), '', 'not a word to GitHub');
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), ['test/doc.test.ts', 'test/doc.test.ts']);
+  // A map that can't answer holds nobody up, and says so.
+  writeFileSync(join(r.wt, 'docs', 'a.md'), 'three\n');
+  git(r.source, 'reset', '-q', '--hard');
+  r.commit(r.source, 'tools/affected-map.txt', '@fallback sometimes\n');
+  git(r.wt, 'commit', '-qam', 'docs: three');
+  res = c.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /the affected map couldn't answer, so no test that reads these paths ran/);
 });
 
 // #565: one line per landing with how long each phase took, landed or refused.
@@ -316,6 +356,30 @@ test("a retro log that can't be written changes neither a landing's output nor i
   });
   assert.deepEqual(runs[1], runs[0]);
   assert.equal(runs[0].status, 0);
+});
+
+// #1912: judged and logged as a ship joins the line, never acted on (tools/quick-train.ts).
+test('a ship logs whether it would ride the quick train, and ships the same either way', () => {
+  const r = setup();
+  r.commit(r.source, 'tools/pipeline-files.txt', 'p.txt\n');
+  r.commit(r.source, 'tools/affected-map.txt', '*.txt: test/a.test.ts\n');
+  const lines = (dir: string) => landLog(dir).match(/quick train · .*/g);
+  const go = (n: number, file: string, risk: string) => {
+    r.commit(r.wt, file, `${n}\n`);
+    const shared = join(r.dir, `shared-${n}`);
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared, LAND_RISK: risk });
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+    assert.doesNotMatch(res.stdout + res.stderr, /quick train/, 'nothing of it reaches the landing itself');
+    return lines(shared);
+  };
+  // The branch starts behind main and rebases onto it: the judge runs once, not again in the rebased copy.
+  assert.deepEqual(go(1, 'b.txt', 'low'), ['quick train · ticket/1-x · would qualify']);
+  assert.deepEqual(go(2, 'p.txt', 'low'), ['quick train · ticket/1-x · not: sensitive: pipeline (p.txt)']);
+  assert.deepEqual(go(3, 'b.txt', ''), ['quick train · ticket/1-x · not: no risk label']);
+  // A map that can't be read: the ship goes on, and the line says it wasn't judged.
+  r.commit(r.source, 'tools/affected-map.txt', 'no colon here\n');
+  assert.deepEqual(go(4, 'b.txt', 'low'), ['quick train · ticket/1-x · not: could not be judged']);
 });
 
 test('a run of this very commit that is already green lands at once; one that was red is run again', () => {
@@ -583,6 +647,57 @@ test('a CI run killed from outside before any test failed is no verdict: one fre
   }
 });
 
+// #1864 (DR1): a runner that went away fails its job with no step of it failed, so the red says nothing about the commit.
+test('a CI run that lost its runner is no verdict: one fresh run decides, and a second lost one is no answer', () => {
+  for (const [cut, result, fallback] of [
+    ['0 1', 'green', 0],
+    ['0 2', 'no answer', 1],
+  ] as const) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const shared = join(r.dir, 'shared');
+    const res = c.run({ FAKE_CUT: cut, FAKE_CUT_KIND: 'lost', COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /the CI run on \w+ lost its runner before any step failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more/);
+    assert.doesNotMatch(res.stderr, /tests failed/);
+    if (fallback) assert.match(res.stderr, /CI FALLBACK: CI's one fresh run lost its runner before any step failed \(https:\/\/ci\/8\), after one that lost its runner before any step failed \(https:\/\/ci\/7\)/);
+    assert.match(landLog(shared), new RegExp(`· cut-off rerun · ticket/1-x · https://ci/7 · ${result}$`, 'm'));
+    assert.equal(c.localRuns(), fallback);
+  }
+});
+
+test("a question about a red run that GitHub misses is asked again: the run's own step still decides", () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'red', FAKE_STEP: "the runner user's systemd", FAKE_STEP_MISS: '2' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /failed in its setup step "the runner user's systemd"/);
+});
+
+// #1864 (LB6): the Windows port check runs after a green suite and measures the PC, not the change.
+test("a run red only in the check of the PC's own ports counts as green, and says so", () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_CI: 'red', FAKE_STEP: 'Windows ports left behind', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI's full suite passed on \w+, and then its check of the PC's own ports went red .*it counts as green \(https:\/\/ci\/7\)/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|tests failed/);
+  assert.match(landLog(shared), /· CI ports red · ticket\/1-x · counted as green · https:\/\/ci\/7$/m);
+  assert.equal(c.localRuns(), 0);
+});
+
+// The step's name in land.sh and land.local.sh is the workflow's.
+test('the ports step land.sh counts as green is the one tests.yml runs after a green suite', () => {
+  const name = (f: string) => /^(?:CITADEL_)?CI_PORTS_STEP='([^']+)'/m.exec(readFileSync(join(import.meta.dirname, '..', f), 'utf8'))?.[1];
+  const step = name('tools/land.sh')!;
+  assert.equal(name('tools/land.local.sh'), step);
+  assert.match(readFileSync(join(import.meta.dirname, '..', '.github', 'workflows', 'tests.yml'), 'utf8'), new RegExp(`- name: ${step}\n {8}if: \\$\\{\\{ success\\(\\) \\}\\}`));
+});
+
 test('a CI run killed from outside after a test had failed is a real red: refused, not run again', () => {
   const r = setup();
   const c = ci(r);
@@ -612,6 +727,8 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
     ['GitHub stops answering while CI runs (#1655)', { FAKE_CI: 'running', FAKE_CI_FAIL_AFTER: '2', LAND_CI_TIMEOUT: '4' }, /CI FALLBACK: GitHub didn't answer since \d\d:\d\d \(\d+ polls failed in a row\) \(gh: API rate limit exceeded.*, so it isn't known whether CI finished/],
     ['the run was cancelled', { FAKE_CI: 'cancelled' }, /ended as cancelled/],
     ['the run failed before the tests', { FAKE_CI: 'red', FAKE_STEP: "the runner user's systemd" }, /failed in its setup step "the runner user's systemd", before any test ran/],
+    ["GitHub doesn't say which step failed (#1864)", { FAKE_CI: 'red', FAKE_STEP: 'down' }, /CI FALLBACK: GitHub didn't say which step of the red CI run failed \(https:\/\/ci\/7\), so it isn't known whether its tests are red/],
+    ["GitHub doesn't send the red run's log (#1864)", { FAKE_CI: 'red', FAKE_LOG: 'down' }, /CI FALLBACK: GitHub didn't send the red CI run's log \(https:\/\/ci\/7\)/],
     ["the runner's clock stayed skewed", { FAKE_CI: 'red', FAKE_STEP: "the runner's clock" }, /CI FALLBACK: runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran/],
     ['LAND_CI=0', { LAND_CI: '0' }, /LAND_CI=0 was set/],
   ];
@@ -921,6 +1038,24 @@ test('CI with no answer and a perigee busy past the limit refuse the ship: main 
     }
   }
 });
+
+// A test that takes the runner down: every run is red with no failed step, so each gate ends with no answer, from runs
+// that did finish. The time CI runs for doesn't count as a busy perigee's (#1361), so the runs do.
+for (const [what, env] of [
+  ['', {}],
+  [', its runner gone for the fresh run', { FAKE_RUNNERS_ODD: '1' }],
+] as const) {
+  test(`a run that ends without a verdict every time holds the line for three goes, not for ever${what} (#1864)`, async () => {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const res = await c.runAsync({ FAKE_CI: 'red', FAKE_STEP: 'lost', FAKE_CI_SLOW: '1', ...env, ...procAt(r, { load: 999 }), LAND_QUIET_POLL: '0.2' }, () => {});
+    assert.equal(res.status, 1, res.stderr);
+    assert.match(res.stderr, /refused by the pipeline \(CI's runs were lost or cut off 3 times, and perigee is busy\), not your change: keeping its place/);
+    assert.match(res.stderr, /CI and perigee both busy, try again: CI: .*\(its runs were lost or cut off 3 times\); perigee/);
+    assert.equal(c.localRuns(), 0);
+  });
+}
 
 // #1360 (Cara, 2026-11-20, "Refused ships keep their place"): a refusal by the pipeline, not the ship's change, keeps its
 // ticket and goes again once; alone in line it goes again at once (no ship to let by: land-train-riders.test.ts has the line).

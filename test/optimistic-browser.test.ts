@@ -189,7 +189,7 @@ for (const [label, opts] of [
     const page = await open(opts);
     for (const text of ["Couldn't reject speculation", "Couldn't reject the speculation about the Scion's ascendancy tree and 4 more things"]) {
       await page.eval(`toast(${JSON.stringify(text)}, { tone: 'danger', action: { label: 'Retry', run: () => {} } })`);
-      const [t, txt, btn] = await page.eval<DOMRect[]>('[".cui-toast", ".cui-toast-text", ".cui-toast-action"].map((s) => document.querySelector(s).getBoundingClientRect().toJSON())');
+      const [t, txt, btn] = await page.eval<{ top: number; bottom: number; left: number; right: number }[]>('[".cui-toast", ".cui-toast-text", ".cui-toast-action"].map((s) => document.querySelector(s).getBoundingClientRect().toJSON())');
       const top = Math.min(txt.top, btn.top) - t.top;
       const bottom = t.bottom - Math.max(txt.bottom, btn.bottom);
       assert.ok(top > 0 && Math.abs(top - bottom) <= 1, `equal room above and below (${top} / ${bottom})`);

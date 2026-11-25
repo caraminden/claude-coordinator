@@ -1,7 +1,9 @@
 package zip.citadel.shell;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -35,6 +37,16 @@ public class LinksTest {
         assertNull(out("https://citadel.example/apps/mandate/"));
         assertNull(out("https://citadel.example/apps/mandate/?item=3"));
         assertNull(out("https://citadel.example/api/me"));
+    }
+
+    @Test
+    public void citadelsSignInForTheAppIsKnown() {
+        assertTrue(Links.isSignIn("https://citadel.example/c/?next=%2Fapps%2Fmandate%2F", CITADEL, "/apps/mandate"));
+        assertFalse(Links.isSignIn("https://citadel.example/c/?next=%2Fapps%2Fvoice%2F", CITADEL, "/apps/mandate"));
+        assertFalse(Links.isSignIn("https://citadel.example/c/", CITADEL, "/apps/mandate"));
+        assertFalse(Links.isSignIn("https://mandate.citadel.example/apps/mandate/", CITADEL, "/apps/mandate"));
+        assertFalse(Links.isSignIn(null, CITADEL, "/apps/mandate"));
+        assertFalse(Links.isSignIn("https://citadel.example/c/?next=%2Fapps%2Fmandate%2F", null, null));
     }
 
     @Test

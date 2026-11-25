@@ -37,7 +37,7 @@ test('Enter elsewhere is left alone', () => {
 
 // A textarea 3 lines of 20px tall, whose copies measure 20px per line of their value.
 const fakeBox = (value: string, caret: number, scrollTop = 0) => {
-  const box: any = {
+  const box = {
     value,
     selectionStart: caret,
     selectionEnd: caret,
@@ -46,12 +46,12 @@ const fakeBox = (value: string, caret: number, scrollTop = 0) => {
     offsetWidth: 300,
     setSelectionRange() {},
     after() {},
-    cloneNode: () => ({
+    cloneNode: (): { style: { cssText: string }; value?: string; removeAttribute(): void; remove(): void; readonly scrollHeight: number } => ({
       style: { cssText: '' },
       removeAttribute() {},
       remove() {},
       get scrollHeight() {
-        return this.value.split('\n').length * 20;
+        return this.value!.split('\n').length * 20;
       },
     }),
   };
@@ -59,7 +59,7 @@ const fakeBox = (value: string, caret: number, scrollTop = 0) => {
 };
 
 test('Only the key that adds a line continues a list; plain Enter still sends', () => {
-  (globalThis as any).document = { execCommand: () => true };
+  Object.assign(globalThis, { document: { execCommand: () => true } });
   const key = (e: object, enterAddsLine?: boolean) => {
     const box = fakeBox('1. a', 4);
     return continueList(box, { key: 'Enter', preventDefault() {}, ...e }, enterAddsLine);
@@ -68,22 +68,24 @@ test('Only the key that adds a line continues a list; plain Enter still sends', 
   assert.equal(key({ shiftKey: true }), true);
   assert.equal(key({}, true), true);
   assert.equal(key({ shiftKey: true, ctrlKey: true }), false);
-  delete (globalThis as any).document;
+  Reflect.deleteProperty(globalThis, 'document');
 });
 
 test('A new item below the bottom edge scrolls the box down to it; one in view leaves it be', () => {
   // The scripted insert stands in for execCommand: it adds the item and moves the caret past it.
   const press = (value: string, caret: number, scrollTop: number) => {
     const box = fakeBox(value, caret, scrollTop);
-    (globalThis as any).document = {
-      execCommand: (_: string, __: boolean, text: string) => {
-        box.value = box.value.slice(0, caret) + text + box.value.slice(caret);
-        box.selectionStart = box.selectionEnd = caret + text.length;
-        return true;
+    Object.assign(globalThis, {
+      document: {
+        execCommand: (_: string, __: boolean, text: string) => {
+          box.value = box.value.slice(0, caret) + text + box.value.slice(caret);
+          box.selectionStart = box.selectionEnd = caret + text.length;
+          return true;
+        },
       },
-    };
+    });
     continueList(box, { key: 'Enter', shiftKey: true, preventDefault() {} });
-    delete (globalThis as any).document;
+    Reflect.deleteProperty(globalThis, 'document');
     return box.scrollTop;
   };
   const list = '1. a\n2. b\n3. c\n4. d';

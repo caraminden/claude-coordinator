@@ -6,7 +6,7 @@ import { after, before, test } from 'node:test';
 import { agentToken, bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 import { agentEnv, mcpOnce } from './mcp-agent.ts';
-import { lendLines, lendPatch } from '../src/machine-lend.ts';
+import { lendLines, lendPatch, type MachineNow } from '../src/machine-lend.ts';
 import { Store } from '../src/db.ts';
 
 // propose_machine_lend (#1638; Cara, 2026-11-22, "Propose, card, link", "Who can save the page", "Both", "Machine
@@ -31,20 +31,22 @@ const cookies: Record<string, string> = {};
 /** As a person (by name) or an agent ('agent:<ticket id>'). */
 const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who.startsWith('agent:') ? { token: agentToken(srv.data, Number(who.slice(6))) } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 
-let project: any;
-let minion: any;
-let joshs: any;
-let taskmaster: any;
-let box: any;
+let project: { id: number };
+let minion: { id: number };
+let joshs: { id: number };
+let taskmaster: { id: number };
+let box: { id: number };
 let output: () => string;
 
-const events = async (t: any, kind = 'plan') => (await call('Cara', `/api/tickets/${t.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
-const card = async (t: any, id: string) => (await events(t)).find((c: any) => c.id === id);
+/** A chat event's data, as the tests read a lending card or a message. */
+type Card = { id: string; status: string; summary: string; plan: string; text: string; machineLend: { lines: string[]; after: unknown } };
+const events = async (t: { id: number }, kind = 'plan'): Promise<Card[]> => (await call('Cara', `/api/tickets/${t.id}/events?after=0`)).filter((e: { kind: string }) => e.kind === kind).map((e: { data: string }) => JSON.parse(e.data) as Card);
+const card = async (t: { id: number }, id: string) => (await events(t)).find((c) => c.id === id)!;
 const propose = (body: object, t = minion) => call(`agent:${t.id}`, `/api/tickets/${t.id}/machine-lend`, { method: 'POST', body });
-const verdict = (who: string, t: any, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${t.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });
-const boxNow = async () => (await call('Cara', '/api/machines')).find((m: any) => m.name === 'box');
-const idle = (t: any) => until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status !== 'running');
-const lastMessage = async (t: any) => (await events(t, 'user_message')).at(-1).text;
+const verdict = (who: string, t: { id: number }, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${t.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });
+const boxNow = async () => (await call('Cara', '/api/machines')).find((m: { name: string }) => m.name === 'box');
+const idle = (t: { id: number }) => until('the turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status !== 'running');
+const lastMessage = async (t: { id: number }) => (await events(t, 'user_message')).at(-1)!.text;
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
@@ -80,7 +82,7 @@ before(async () => {
 });
 
 test('the change is worked out against the machine as it is: only what differs, keeping the GPU switch', () => {
-  const now = { projects: [1], lend: { server: 'own', workspaces: ['w'], gpu_off: true }, workspace_tools: false, always_on: false };
+  const now: MachineNow = { projects: [1], lend: { server: 'own', workspaces: ['w'], gpu_off: true }, workspace_tools: false, always_on: false };
   assert.deepEqual(lendPatch({ here: true, tick: ['w'], server: 'own', always_on: false }, now, 1), {}, 'all of it already so');
   assert.deepEqual(lendPatch({ tick: ['x'], untick: ['w'] }, now, 2), { lend: { server: 'own', workspaces: ['x'], gpu_off: true } });
   assert.deepEqual(lendPatch({ here: false, always_on: true }, now, 1), { projects: [], always_on: true });
@@ -118,7 +120,7 @@ test("a minion's call posts a card with the change and what it lends after; bad 
 });
 
 test('only its owner or an admin approves: Approve saves it as the page would, and the agent is told', async () => {
-  const [c] = (await events(minion)).filter((e: any) => e.status === 'pending');
+  const [c] = (await events(minion)).filter((e) => e.status === 'pending');
   await assert.rejects(verdict('Dana', minion, c.id, 'approve'), /403 Only an admin can change what it lends/);
   await assert.rejects(verdict(`agent:${minion.id}`, minion, c.id, 'approve'), /403/);
   assert.equal((await card(minion, c.id)).status, 'pending');
@@ -141,7 +143,7 @@ test('only its owner or an admin approves: Approve saves it as the page would, a
   await idle(joshs);
   const again = await propose({ machine: 'josh-box', here: true }, joshs);
   await verdict('Josh', joshs, again.id, 'approve');
-  assert.deepEqual((await call('Josh', '/api/machines')).find((m: any) => m.name === 'josh-box').projects, [project.id]);
+  assert.deepEqual((await call('Josh', '/api/machines')).find((m: { name: string }) => m.name === 'josh-box').projects, [project.id]);
   await idle(joshs);
 });
 
@@ -187,7 +189,7 @@ test("taking the scheme off ends its minions' open sessions, as the page does", 
 });
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as an agent of this scheme. */
-async function mcp(t: any, role: string, method: string, params: object) {
+async function mcp(t: { id: number }, role: string, method: string, params: object) {
   return mcpOnce(agentEnv(srv.base, agentToken(srv.data, t.id), { id: t.id, project_id: project.id }, role, { COORDINATOR_MACHINES: '' }), method, params, tmp.track);
 }
 
@@ -196,14 +198,14 @@ test('end to end: the tool call posts the card, its reply links it and the Machi
     [minion, 'thread'],
     [taskmaster, 'coordinator'],
   ] as const) {
-    const tools = (await mcp(t, role, 'tools/list', {})).tools.map((x: any) => x.name);
+    const tools = (await mcp(t, role, 'tools/list', {})).tools.map((x) => x.name);
     assert.ok(tools.includes('propose_machine_lend'), `${role} has it`);
   }
   const r = await mcp(taskmaster, 'coordinator', 'tools/call', { name: 'propose_machine_lend', arguments: { machine: 'box', here: true, why: 'for the test' } });
   assert.equal(r.isError, undefined, r.content[0].text);
   assert.match(r.content[0].text, new RegExp(`\\[the lending card below\\]\\(#/p/${project.id}\\?e=\\d+\\)`), "a Taskmaster's card is in its scheme's chat");
   assert.match(r.content[0].text, new RegExp(`\\[box on the Machines page\\]\\(#/p/${project.id}/machines/box\\)`));
-  const [c] = (await events(taskmaster)).filter((e: any) => e.status === 'pending' && e.machineLend);
+  const [c] = (await events(taskmaster)).filter((e) => e.status === 'pending' && e.machineLend);
   assert.deepEqual(c.machineLend.lines, ['+ Lend box to Cantrips']);
   await verdict('Cara', taskmaster, c.id, 'approve');
   assert.deepEqual((await boxNow()).projects, [project.id]);

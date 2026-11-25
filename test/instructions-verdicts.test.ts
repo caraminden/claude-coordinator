@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { bootServer, jsonLines, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
+
+// The parts of the API's answers these tests read.
+type Verdicts = { verdicts?: { verdict: string; why: string }[]; places: string[]; unlinked: string; failed: string };
 
 // #1211 (Josh, 2026-11-20: "Matcher, then a Grunt"): when the matcher finds repeats in a person's Settings save, a
 // one-shot Sonnet call on their own Claude login says whether each really repeats or conflicts. "Hold the save until
@@ -30,7 +34,7 @@ process.stdin.on('end', () => {
 chmodSync(fakeClaude, 0o755);
 
 let srv: Booted;
-let project: any;
+let project: { id: number };
 let joshCookie = '';
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
@@ -52,7 +56,7 @@ after(async () => {
 const REPEAT = 'Hello.\n\nOne card, one choice: ask early and together, with your pick marked.';
 const verdicts = async (text: string, cookie = srv.cookie) => {
   const r = await fetch(`${srv.base}/api/projects/${project.id}/instructions/overlaps/verdicts`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'scheme', text }) });
-  return { status: r.status, data: await r.json() };
+  return { status: r.status, data: await json<Verdicts>(r) };
 };
 const calls = () => jsonLines(prompts);
 

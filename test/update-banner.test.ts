@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-// @ts-ignore: a plain JS module with its types beside it
+import { fake } from './typed.ts';
 import { checkUpdate, mountUpdate } from '../public/ui/update.js';
 
 // public/ui/update.js (#837): the banner's check, with Capacitor's App plugin, fetch and the page's base faked.
@@ -49,6 +49,6 @@ test('the same or an older build, a bad feed, a failed fetch or a browser (no na
 test("an app on Citadel's shared Android shell asks natively, so the banner steps aside without reading the feed", async () => {
   const asked = phone('3', { versionCode: 5, apk: 'twireader-5.apk' });
   g.Capacitor.isPluginAvailable = (name: string) => name === 'CitadelShell';
-  assert.equal(await mountUpdate({} as any), null);
+  assert.equal(await mountUpdate(fake<Parameters<typeof mountUpdate>[0]>({})), null);
   assert.deepEqual(asked, []);
 });

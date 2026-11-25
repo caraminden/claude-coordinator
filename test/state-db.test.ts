@@ -48,7 +48,7 @@ test('opening a database moves its session state into state.db, and the main fil
   assert.equal(s.getClaudeState('projects/a/1.jsonl', true)!.data!.length, 2_000_000);
   assert.equal(s.listClaudeState(1, null).length, 1);
   assert.equal(s.listClaudeState(1, 1).length, 1);
-  assert.equal((s.db.prepare('PRAGMA state.auto_vacuum').get() as any).auto_vacuum, 2, 'incremental, for the prune');
+  assert.equal((s.db.prepare('PRAGMA state.auto_vacuum').get() as { auto_vacuum: number }).auto_vacuum, 2, 'incremental, for the prune');
   s.db.exec('PRAGMA state.wal_checkpoint(TRUNCATE)');
   s.putClaudeState(row('projects/a/big.jsonl', 1, 20_000_000));
   s.db.exec('PRAGMA state.wal_checkpoint(PASSIVE)');

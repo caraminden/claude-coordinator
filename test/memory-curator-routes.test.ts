@@ -21,18 +21,18 @@ const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: 
 
 let base = '';
 const cookies: Record<string, string> = {};
-let ticket: any;
-let project: any;
+let ticket: { id: number };
+let project: { id: number };
 let dir = '';
 
 let srv: Booted;
 const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: agentToken(srv.data, ticket.id) } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
-const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
+const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: { kind: string }) => e.kind === kind).map((e: { data: string }) => JSON.parse(e.data));
 const propose = (changes: unknown) => call('minion', `/api/tickets/${ticket.id}/memory-proposal`, { method: 'POST', body: { changes } });
 // An answer wakes the run: wait for that turn to have run and ended, so its new token is the one read next.
-const answered = async (act: () => Promise<unknown>) => {
+const answered = async <T>(act: () => Promise<T>) => {
   const n = turns().length;
   const out = await act();
   await until("the answer's turn", () => turns().length > n);
@@ -41,7 +41,7 @@ const answered = async (act: () => Promise<unknown>) => {
 };
 const applyMine = () => call('minion', `/api/tickets/${ticket.id}/memory-proposal/apply`, { method: 'POST', body: {} });
 const verdict = (who: string, planId: string, v: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v } });
-const cardOf = async (proposal: number) => (await events('plan')).find((c: any) => c.memory?.proposal === proposal);
+const cardOf = async (proposal: number) => (await events('plan')).find((c: { memory?: { proposal: number } }) => c.memory?.proposal === proposal);
 const proposals = () => call('Cara', `/api/projects/${project.id}/memory-proposals`);
 const read = (f: string) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null);
 const B = '---\nname: B\ndescription: second\n---\nbeta\n';
@@ -90,7 +90,7 @@ test('a run proposes; the card waits, nothing is written, and the run cannot app
   const { open } = await proposals();
   assert.equal(open.id, r.proposal);
   assert.deepEqual(
-    open.changes.map((c: any) => [c.file, c.drifted]),
+    open.changes.map((c: { file: string; drifted: boolean }) => [c.file, c.drifted]),
     [
       ['a.md', false],
       ['b.md', false],
@@ -102,9 +102,9 @@ test('a run proposes; the card waits, nothing is written, and the run cannot app
 
 test('applying the ticked changes leaves the unticked delete, tells the run, and Put back undoes it', async () => {
   const { open } = await proposals();
-  const out: any = await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${open.id}/decide`, { method: 'POST', body: { apply: [1, 3] } }));
+  const out = await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${open.id}/decide`, { method: 'POST', body: { apply: [1, 3] } }));
   assert.deepEqual(
-    out.changes.map((c: any) => c.outcome),
+    out.changes.map((c: { outcome: string }) => c.outcome),
     ['applied', 'turned down', 'applied'],
   );
   assert.equal(read('a.md'), 'alpha and beta\n');
@@ -126,15 +126,15 @@ test('applying the ticked changes leaves the unticked delete, tells the run, and
 test('a newer proposal supersedes the open one, and turning it all down changes nothing', async () => {
   const first = await propose([{ action: 'flag', file: 'b.md', reason: 'live state: make it a pointer' }]);
   const sent = (await events('user_message')).length;
-  const second = (await propose([{ action: 'delete', file: 'b.md', reason: 'stale' }])) as any;
+  const second = await propose([{ action: 'delete', file: 'b.md', reason: 'stale' }]);
   // 2ME2: the run's own earlier proposal is settled but the run isn't told to close itself (that would withdraw its new card).
   assert.equal((await events('user_message')).length, sent, 'no "close yourself" message to the run that superseded its own tidy');
   const cards = await events('plan');
-  assert.equal(cards.find((c: any) => c.memory?.proposal === first.proposal).status, 'superseded');
+  assert.equal(cards.find((c: { memory?: { proposal: number } }) => c.memory?.proposal === first.proposal).status, 'superseded');
   await assert.rejects(call('Cara', `/api/projects/${project.id}/memory-proposals/${first.proposal}/decide`, { method: 'POST', body: { apply: [] } }), /409 A newer tidy replaced this one/);
   await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${second.proposal}/decide`, { method: 'POST', body: { apply: [] } }));
   assert.equal(read('b.md'), B);
-  assert.equal((await events('plan')).find((c: any) => c.memory?.proposal === second.proposal).status, 'rejected');
+  assert.equal((await events('plan')).find((c: { memory?: { proposal: number } }) => c.memory?.proposal === second.proposal).status, 'rejected');
   assert.match((await events('user_message')).at(-1).text, /^Cara turned the memory tidy down; nothing changed/);
   await idle();
 });
@@ -167,7 +167,7 @@ test("approved on the card, the run applies the whole tidy through the page's pa
   const out = await applyMine();
   assert.match(out.line, /^Applied 2 of the 2 changes Cara approved \(1 edit, 1 delete\)\.$/);
   assert.deepEqual(
-    out.changes.map((c: any) => c.outcome),
+    out.changes.map((c: { outcome: string }) => c.outcome),
     ['applied', 'applied', 'noted'],
   );
   assert.equal(read('c.md'), 'gamma, tidied\n');
@@ -216,7 +216,7 @@ test('ticked on the page, then approved on the card: applied once', async () => 
   await assert.rejects(applyMine(), /409 Cara already applied this tidy/);
   assert.equal(read('c.md'), 'once\n');
   assert.doesNotMatch(read('MEMORY.md')!, /again/, 'the unticked change stays unapplied');
-  const kept = (await proposals()).kept.find((k: any) => k.id === r.proposal);
+  const kept = (await proposals()).kept.find((k: { id: number }) => k.id === r.proposal);
   assert.equal(kept.counts, '1 edit');
   await call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/restore`, { method: 'POST' });
   assert.equal(read('c.md'), was);

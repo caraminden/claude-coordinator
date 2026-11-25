@@ -1,7 +1,8 @@
 // Per-person logins and who sees what: signing in, invites, scheme owners and members, the live stream
 // and push filtered by membership, and turns only for people allowed on the server's Claude login.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import type { IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,6 +12,7 @@ import { Auth, hashPassword } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { APP_NAME } from '../src/appname.ts';
 import { Runner } from '../src/runner.ts';
+import { fake } from './typed.ts';
 import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'people-'));
@@ -31,7 +33,7 @@ function world(file = ':memory:') {
   const games = store.createProject('Games', null, josh.id);
   return { store, auth, cara, josh, olive, citadel, games };
 }
-const cookie = (auth: Auth, user: { id: number; name: string }) => ({ headers: { cookie: auth.issueCookie(user, false).split(';')[0] } }) as any;
+const cookie = (auth: Auth, user: { id: number; name: string }) => fake<IncomingMessage>({ headers: { cookie: auth.issueCookie(user, false).split(';')[0] } });
 
 test('people sign in with their own password; the shared one signs in an admin only', async () => {
   const { store, auth, josh } = world();
@@ -58,9 +60,9 @@ test('a session takes its name and rights from the row; an old name-only cookie 
   // A cookie from the shared-password days has a name and no id.
   const payload = Buffer.from(JSON.stringify({ name: 'cara', exp: Date.now() + 60_000 })).toString('base64url');
   const sig = (auth as any).sign(payload);
-  assert.equal(auth.session({ headers: { cookie: `cc_session=${payload}.${sig}` } } as any)?.admin, true);
+  assert.equal(auth.session(fake<IncomingMessage>({ headers: { cookie: `cc_session=${payload}.${sig}` } }))?.admin, true);
   const stranger = Buffer.from(JSON.stringify({ name: 'Stranger', exp: Date.now() + 60_000 })).toString('base64url');
-  assert.equal(auth.session({ headers: { cookie: `cc_session=${stranger}.${(auth as any).sign(stranger)}` } } as any), null);
+  assert.equal(auth.session(fake<IncomingMessage>({ headers: { cookie: `cc_session=${stranger}.${(auth as any).sign(stranger)}` } })), null);
 });
 
 test('an invite link works until it expires, and a new one replaces the old', () => {
@@ -213,7 +215,7 @@ test("a member taken out of a scheme stops paying for their old minions' automat
   // A usage-limit wait is on the plan its resume will run on: the owner's turn getting through releases it.
   store.setSetting('limit-resumes', [{ ticket: hers.id, at: Date.now() + 3600_000, tries: 1 }]);
   (runner as any).limitCleared(josh.id);
-  assert.equal(store.getSetting<any[]>('limit-resumes')![0].proven, true, "the owner's reset resumes her old minion");
+  assert.equal(store.getSetting<{ proven: boolean }[]>('limit-resumes')![0].proven, true, "the owner's reset resumes her old minion");
   // Back in the scheme, her minion's turns are hers again.
   store.addMember(games.id, olive.id);
   assert.match(turnRefusal(store, hers, 'GitHub', linked([josh.id]))!, /Turns for Olive start/);
@@ -268,7 +270,7 @@ test("a disabled person's minion runs no turn on any start path, not only a new 
 /** Swap the runner's turn start for a record of who each turn would run for and what it carries. */
 const stubStarts = (runner: Runner) => {
   const started: { person: number | null; texts: string[] }[] = [];
-  (runner as any).startTurn = (_p: unknown, _t: unknown, batch: { text: string }[], person: number | null) => void started.push({ person, texts: batch.map((m) => m.text) });
+  Object.assign(runner, { startTurn: (_p: unknown, _t: unknown, batch: { text: string }[], person: number | null) => void started.push({ person, texts: batch.map((m) => m.text) }) });
   return started;
 };
 
@@ -436,7 +438,7 @@ test('people make their own schemes, add others to them, and see nothing else', 
   const josh = await as('Josh', '/api/projects', { name: 'Joshs' });
   assert.equal(josh.status, 201);
   assert.deepEqual(
-    (await as('Josh', '/api/projects')).data.map((p: any) => [p.name, p.owner]),
+    (await as('Josh', '/api/projects')).data.map((p: { name: string; owner: number }) => [p.name, p.owner]),
     [['Joshs', 'Josh']],
   );
   assert.deepEqual((await as('Olive', '/api/projects')).data, []);
@@ -457,11 +459,11 @@ test('people make their own schemes, add others to them, and see nothing else', 
   // Josh adds Olive: she sees it, and as a member changes its settings and members like its owner (#621).
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members`, { person: people.Josh.id })).status, 404);
   assert.deepEqual(
-    (await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).data.map((m: any) => m.name),
+    (await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).data.map((m: { name: string }) => m.name),
     ['Josh', 'Olive'],
   );
   assert.deepEqual(
-    (await as('Olive', '/api/projects')).data.map((p: any) => p.name),
+    (await as('Olive', '/api/projects')).data.map((p: { name: string }) => p.name),
     ['Joshs'],
   );
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { instructions: 'x' }, 'PATCH')).status, 200);
@@ -482,8 +484,8 @@ test('a member of the Citadel scheme can do anything an admin can, without the f
   try {
     assert.equal((await me('Josh')).admin, true, '/api/me says admin, so the settings tabs show');
     assert.equal((await as('Josh', '/api/app/instructions')).status, 200);
-    assert.equal((await as('Josh', '/api/people')).data.find((u: any) => u.name === 'Olive')?.login, 'olive');
-    const caras = (await as('Cara', '/api/projects')).data.find((x: any) => x.name === 'Caras');
+    assert.equal((await as('Josh', '/api/people')).data.find((u: { name: string }) => u.name === 'Olive')?.login, 'olive');
+    const caras = (await as('Cara', '/api/projects')).data.find((x: { name: string }) => x.name === 'Caras');
     assert.equal((await as('Josh', `/api/projects/${caras.id}`)).status, 200, 'and sees every scheme');
     // Making a repo goes on the person's own GitHub still: the box's login is Cara's (the flag, not membership).
     assert.equal((await as('Josh', '/api/projects', { name: 'Repo', source: 'new' })).status, 403);
@@ -518,9 +520,9 @@ test('schema 17 leaves the server login to its owner, the first admin, once (#21
 });
 
 test("Josh's message waits until he links his own Claude; the server's login is Cara's alone (#213)", async () => {
-  const p = (await as('Josh', '/api/projects')).data.find((x: any) => x.name === 'Joshs');
+  const p = (await as('Josh', '/api/projects')).data.find((x: { name: string }) => x.name === 'Joshs');
   const t = (await as('Josh', `/api/projects/${p.id}/tickets`, { message: 'build it', title: 'Build it' })).data;
-  const notes = async () => (await as('Josh', `/api/tickets/${t.id}/events`)).data.events.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
+  const notes = async () => (await as('Josh', `/api/tickets/${t.id}/events`)).data.events.filter((e: { kind: string }) => e.kind === 'note').map((e: { data: string }) => JSON.parse(e.data).text);
   await until('the waiting note', async () => (await notes()).some((n: string) => /Turns for Josh start once/.test(n)));
   assert.notEqual((await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status, 'running');
 
@@ -533,7 +535,7 @@ test("Josh's message waits until he links his own Claude; the server's login is 
   assert.match(refused.data.error, /Only the server login's owner/);
   const list = (await as('Cara', '/api/people')).data;
   assert.deepEqual(
-    list.map((u: any) => [u.name, u.server_login, u.server_login_owner, u.claude]).filter(([n]: any) => n === 'Cara' || n === 'Josh'),
+    list.map((u: { name: string; server_login: boolean; server_login_owner: boolean; claude: unknown }) => [u.name, u.server_login, u.server_login_owner, u.claude]).filter(([n]: unknown[]) => n === 'Cara' || n === 'Josh'),
     [
       ['Cara', true, true, null],
       ['Josh', false, false, null],
@@ -542,7 +544,7 @@ test("Josh's message waits until he links his own Claude; the server's login is 
 });
 
 test("the stream doesn't carry other schemes' news; disabling someone ends theirs", async () => {
-  const caras = (await as('Cara', '/api/projects')).data.find((x: any) => x.name === 'Caras');
+  const caras = (await as('Cara', '/api/projects')).data.find((x: { name: string }) => x.name === 'Caras');
   const ctl = new AbortController();
   const res = await fetch(`${srv.base}/api/stream`, { headers: { Cookie: people.Olive.cookie }, signal: ctl.signal });
   const reader = res.body!.getReader();
@@ -556,7 +558,7 @@ test("the stream doesn't carry other schemes' news; disabling someone ends their
   })().catch(() => {});
   await until('hello', () => seen.includes('"hello"'));
   await as('Cara', `/api/projects/${caras.id}/tickets`, { message: 'secret plans', title: 'Secret' });
-  const joshs = (await as('Josh', '/api/projects')).data.find((x: any) => x.name === 'Joshs');
+  const joshs = (await as('Josh', '/api/projects')).data.find((x: { name: string }) => x.name === 'Joshs');
   await as('Josh', `/api/projects/${joshs.id}/tickets`, { message: 'open plans', title: 'Open' });
   await until("Josh's scheme's news", () => seen.includes('open plans'));
   assert.ok(!seen.includes('secret plans'));
@@ -597,14 +599,14 @@ test("each person's meter shows their own plan: the stream's hello and usage new
   assert.match(josh.seen, /"hello".*"utilization":0\.22/);
   assert.doesNotMatch(cara.seen, /0\.22/);
   // A turn on the server login (Cara's): its usage goes to her meter, not Josh's.
-  const caras = (await as('Cara', '/api/projects')).data.find((x: any) => x.name === 'Caras');
+  const caras = (await as('Cara', '/api/projects')).data.find((x: { name: string }) => x.name === 'Caras');
   await as('Cara', `/api/projects/${caras.id}/tickets`, { message: 'go', title: 'Meter' });
   await until("Cara's usage news", () => cara.seen.includes('"type":"usage"'));
   assert.match(cara.seen, /"type":"usage".*"utilization":0\.41/);
   assert.ok(!josh.seen.includes('"type":"usage"'));
   assert.equal((await as('Josh', '/api/me/claude')).data.usage.weekly.utilization, 0.22);
   assert.deepEqual(
-    (await as('Cara', '/api/people')).data.filter((u: any) => u.name === 'Cara' || u.name === 'Josh').map((u: any) => u.week?.utilization),
+    (await as('Cara', '/api/people')).data.filter((u: { name: string }) => u.name === 'Cara' || u.name === 'Josh').map((u: { week?: { utilization: number } }) => u.week?.utilization),
     [0.41, 0.22],
   );
   cara.stop();
@@ -644,9 +646,70 @@ test("turning off kept app chats deletes the person's kept files and no one else
   assert.equal((await as('Josh', '/api/me')).data.keepChats, true);
 });
 
+test('speaker avatars (#1976): off until you turn them on, yours alone, and a picture is a small real image', async () => {
+  const on = async (who: string) => (await as(who, '/api/me')).data.avatars;
+  const { people: all, ...first } = await on('Josh');
+  assert.deepEqual(first, { on: false, pic: null });
+  assert.equal(Object.keys(all)[0], 'Josh', 'yours first');
+  assert.ok('Cara' in all && Object.values(all).every((p) => p === null));
+  assert.equal((await as('Josh', '/api/me/avatars', { on: 'yes' }, 'PUT')).status, 400);
+  assert.equal((await as('Josh', '/api/me/avatars', { on: true }, 'PUT')).status, 200);
+  assert.equal((await on('Josh')).on, true);
+  assert.equal((await on('Cara')).on, false, 'nobody else');
+
+  const put = (who: string, body: Buffer) => as(who, '/api/me/avatar', { data: body.toString('base64') }, 'PUT');
+  const png = Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'), Buffer.alloc(40)]);
+  assert.equal((await put('Cara', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'))).status, 400);
+  assert.equal((await put('Cara', Buffer.concat([png, Buffer.alloc(300 * 1024)]))).status, 413);
+  assert.equal((await as('Cara', '/api/me/avatar', { data: 7 }, 'PUT')).status, 400);
+  assert.equal((await put('Cara', png)).status, 200);
+  const mine = await on('Cara');
+  assert.match(mine.pic, /^api\/people\/\d+\/avatar\?v=\w+$/);
+  const seen = (await on('Josh')).people;
+  assert.equal(seen.Cara, mine.pic);
+  assert.equal(seen.Josh, null);
+  const got = await fetch(`${srv.base}/${mine.pic}`, { headers: { cookie: people.Josh.cookie } });
+  assert.equal(got.headers.get('content-type'), 'image/png');
+  assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(got.headers.get('content-security-policy') ?? '', /sandbox/);
+  assert.deepEqual(Buffer.from(await got.arrayBuffer()), png);
+  assert.equal((await fetch(`${srv.base}/${mine.pic}`)).status, 401, 'signed-in people only');
+
+  // Replaced: the old address shows the new picture without keeping it as the old one, and the old file is gone.
+  await put('Cara', Buffer.concat([png, Buffer.from('2')]));
+  const late = await fetch(`${srv.base}/${mine.pic}`, { headers: { cookie: people.Josh.cookie } });
+  assert.equal(late.headers.get('cache-control'), 'no-store');
+  assert.equal(readdirSync(join(srv.data, 'avatars')).length, 1);
+  assert.equal((await as('Cara', '/api/me/avatar', undefined, 'DELETE')).data.pic, null);
+  assert.deepEqual(readdirSync(join(srv.data, 'avatars')), []);
+  assert.equal((await on('Josh')).people.Cara, null);
+  assert.equal((await as('Josh', new URL(`${srv.base}/${mine.pic}`).pathname)).status, 404);
+  await as('Josh', '/api/me/avatars', { on: false }, 'PUT');
+});
+
+test('removing a person removes their picture and their switch (#1976)', async () => {
+  const made = (await as('Cara', '/api/people', { name: 'Paula' })).data;
+  const id = (await as('Cara', '/api/people')).data.find((u: { name: string }) => u.name === 'Paula').id;
+  const claimed = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'paula-password' }) });
+  const cookie = claimed.headers.get('set-cookie')!.split(';')[0];
+  await fetch(`${srv.base}/api/me/avatars`, { method: 'PUT', headers: { cookie, 'Content-Type': 'application/json' }, body: '{"on":true}' });
+  const jpeg = Buffer.from('\xff\xd8\xff\xe0 sample', 'latin1').toString('base64');
+  assert.equal((await fetch(`${srv.base}/api/me/avatar`, { method: 'PUT', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: jpeg }) })).status, 200);
+  const file = join(srv.data, 'avatars', readdirSync(join(srv.data, 'avatars')).find((f) => f.startsWith(`${id}-`))!);
+  assert.ok(existsSync(file));
+  assert.ok('Paula' in (await as('Josh', '/api/me')).data.avatars.people);
+  await as('Cara', `/api/people/${id}`, { disabled: true }, 'PATCH');
+  assert.ok(!('Paula' in (await as('Josh', '/api/me')).data.avatars.people), 'disabled people are left out');
+  assert.equal((await as('Cara', `/api/people/${id}`, undefined, 'DELETE')).status, 200);
+  assert.ok(!existsSync(file));
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
+  assert.equal(db.prepare('SELECT count(*) AS n FROM settings WHERE key IN (?, ?)').get(`chat_avatars:${id}`, `avatar_pic:${id}`)?.n, 0);
+  db.close();
+});
+
 test('publicOrigin: citadel.zip by default, CITADEL_PUBLIC_URL overrides, a preview answers on its own host (#1635)', async () => {
   const { publicOrigin } = await import('../src/http.ts');
-  const req = { headers: { host: 'cara.apps.webplatformisbestplatform.net', 'x-forwarded-proto': 'https' } } as any;
+  const req = fake<IncomingMessage>({ headers: { host: 'cara.apps.webplatformisbestplatform.net', 'x-forwarded-proto': 'https' } });
   const old = process.env.CITADEL_PUBLIC_URL;
   try {
     delete process.env.CITADEL_PUBLIC_URL;

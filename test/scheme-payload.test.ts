@@ -37,7 +37,7 @@ test('the scheme payload: everything, the open minions with a count of the dismi
     assert.equal(status, 200);
     assert.equal(data.coordinator.id, TM.id);
     assert.equal(data.dismissed, 2);
-    return data.tickets.map((t: any) => t.id).sort();
+    return data.tickets.map((t: { id: number }) => t.id).sort();
   };
   assert.deepEqual(await ids(''), [open, gone, gone2].sort());
   assert.deepEqual(await ids('?tickets=open'), [open]);
@@ -45,7 +45,7 @@ test('the scheme payload: everything, the open minions with a count of the dismi
   // ?tickets=none: the scheme's own fields alone, for get_project_instructions (every minion's view took 9 to 31 s, #1514).
   assert.deepEqual(await ids('?tickets=none'), []);
   // The Taskmaster's tools turn a number into an id with ?number= (#609), a dismissed minion's too.
-  const n = (id: number) => (srv.call(`/api/tickets/${id}`) as Promise<any>).then((r) => r.data.ticket.number);
+  const n = (id: number) => srv.call(`/api/tickets/${id}`).then((r) => r.data.ticket.number);
   assert.deepEqual(await ids(`?number=${await n(gone)}`), [gone]);
   assert.deepEqual(await ids(`?number=${await n(open)}`), [open]);
   assert.deepEqual(await ids('?number=9999'), []);
@@ -53,7 +53,7 @@ test('the scheme payload: everything, the open minions with a count of the dismi
 
 test("the scheme list names each scheme's Taskmaster", async () => {
   const { data } = await srv.call('/api/projects');
-  assert.equal(data.find((p: any) => p.id === P.id).coordinator_id, TM.id);
+  assert.equal(data.find((p: { id: number }) => p.id === P.id).coordinator_id, TM.id);
 });
 
 test('the dismissed list pages newest first with limit and before, and finds by q, since and ids', async () => {
@@ -67,11 +67,11 @@ test('the dismissed list pages newest first with limit and before, and finds by 
   assert.notEqual(page2.tickets[0].id, last.id);
   assert.equal(page2.more, false);
   assert.deepEqual(
-    (await get('&q=two')).tickets.map((t: any) => t.id),
+    (await get('&q=two')).tickets.map((t: { id: number }) => t.id),
     [gone2],
   );
   assert.deepEqual(
-    (await get(`&ids=${gone}`)).tickets.map((t: any) => t.id),
+    (await get(`&ids=${gone}`)).tickets.map((t: { id: number }) => t.id),
     [gone],
   );
   assert.equal((await get('&since=99999999999999')).tickets.length, 0);

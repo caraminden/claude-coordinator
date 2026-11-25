@@ -35,7 +35,7 @@ const loadPrev = async () => {
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
   const mod = await import(join(prevDir, 'src', 'db.ts'));
   const stale = staleBase(prev, mod.SCHEMA_VERSION ?? 0, SCHEMA_VERSION);
-  assert.ok(!stale, stale);
+  assert.ok(!stale, stale!);
   return mod;
 };
 
@@ -73,7 +73,7 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
 
   const old = new PrevStore(file);
   assert.deepEqual(
-    old.listProjects().map((p: any) => p.name),
+    old.listProjects().map((p: { name: string }) => p.name),
     ['Compat'],
   );
   assert.equal(old.getTicket(ticket.id).title, 'Before');

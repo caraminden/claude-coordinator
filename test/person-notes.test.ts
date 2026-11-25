@@ -55,7 +55,7 @@ test('a person sets a note: folded to one line, capped, shown to people with who
   const { data: page } = await srv.call(`/api/projects/${P.id}`);
   assert.equal(page.person_notes[M.id].text, SECRET_NOTE);
   // The minion's own note is untouched.
-  assert.equal(page.tickets.find((t: any) => t.id === M.id).note, 'the minion note');
+  assert.equal(page.tickets.find((t: { id: number; note: string }) => t.id === M.id).note, 'the minion note');
 
   assert.equal((await srv.call(`/api/tickets/${M.id}/person-note`, { text: 'x'.repeat(201) }, 'PUT')).status, 400);
   assert.equal((await srv.call(`/api/tickets/${M.id}/person-note`, {}, 'PUT')).status, 400);

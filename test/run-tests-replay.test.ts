@@ -36,7 +36,7 @@ test('watch', async () => {
   chmodSync(stale, 0o444);
   const log = join(dir, 'land-test.log');
   const code = await new Promise<number | null>((resolve) => {
-    const p = execFile('bash', [join(dir, 'tools', 'run-tests.sh'), log], { cwd: dir, encoding: 'utf8', timeout: 90_000, env: { ...env, COORDINATOR_SHARED_DIR: join(dir, 'shared') } }, (err) => resolve(err ? ((err as any).code ?? null) : 0));
+    const p = execFile('bash', [join(dir, 'tools', 'run-tests.sh'), log], { cwd: dir, encoding: 'utf8', timeout: 90_000, env: { ...env, COORDINATOR_SHARED_DIR: join(dir, 'shared') } }, (err) => resolve(err ? ((err as Error & { code?: number }).code ?? null) : 0));
     scratch.track(p).stdin?.end();
   });
   assert.equal(code, 0, readFileSync(log, 'utf8'));

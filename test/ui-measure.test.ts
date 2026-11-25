@@ -8,9 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from './browser.ts';
-// @ts-ignore: a kit script in plain JS, so other schemes run it with no type stripping
 import { launch, openPage, shot } from '../kit/skills/critique/scripts/ui-measure.mjs';
-// @ts-ignore
 import { measure } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
 const bin = chromium();
@@ -93,15 +91,17 @@ before(async () => {
 after(() => server?.close());
 
 const opts = (url: string, more = {}) => ({ urls: [base + url], widths: [1440, 390], settle: 100, cookies: [], headers: [], ignore: [], dark: false, chrome: bin, ...more });
-const at = (r: any, width: number) => r.pages.find((p: any) => p.width === width).findings;
-const has = (fs: any[], check: string, selector: string) => fs.some((f) => f.check === check && f.selector.includes(selector));
+type Finding = { check: string; selector: string; text?: string; min?: number; top: number; bottom: number; disabled?: unknown[]; outer?: unknown };
+type Page = { width: number; findings: Finding[] };
+const at = (r: { pages: Page[] }, width: number) => r.pages.find((p) => p.width === width)!.findings;
+const has = (fs: Finding[], check: string, selector: string) => fs.some((f) => f.check === check && f.selector.includes(selector));
 
 test('a clean page has no findings at either width', { skip }, async () => {
   const r = await measure(opts('/clean'));
   assert.deepEqual(
-    r.pages.map((p: any) => p.findings),
+    r.pages.map((p) => p.findings),
     [[], []],
-    JSON.stringify(r.pages.map((p: any) => p.findings)),
+    JSON.stringify(r.pages.map((p) => p.findings)),
   );
   assert.equal(r.ok, true);
   assert.equal(r.pages[0].truncated[0].full_text_in, 'data-tip-overflow');
@@ -111,18 +111,18 @@ test('each planted defect is found, with its numbers', { skip }, async () => {
   const r = await measure(opts('/broken'));
   const desk = at(r, 1440);
   const phone = at(r, 390);
-  const lop = desk.find((f: any) => f.check === 'padding' && f.selector === '#lop');
+  const lop = desk.find((f) => f.check === 'padding' && f.selector === '#lop');
   assert.ok(lop && lop.bottom - lop.top >= 7, JSON.stringify(lop));
   // #small's line-height is pinned (20 px tall with its padding and border): left to the font, it came out
   // 24 px under DejaVu Sans in a person's container, over the 22 px desktop cut, and under it on the host (#458).
-  assert.ok(has(desk, 'tap', '#small') && has(phone, 'tap', '#small'), JSON.stringify(desk.concat(phone).filter((f: any) => f.selector === '#small')));
-  assert.equal(phone.find((f: any) => f.selector === '#small' && f.check === 'tap').min, 40);
+  assert.ok(has(desk, 'tap', '#small') && has(phone, 'tap', '#small'), JSON.stringify(desk.concat(phone).filter((f) => f.selector === '#small')));
+  assert.equal(phone.find((f) => f.selector === '#small' && f.check === 'tap')!.min, 40);
   assert.ok(has(desk, 'clip', '#clip'));
   assert.ok(has(phone, 'overflow', '#wide'));
-  const dbl = desk.find((f: any) => f.check === 'double-border');
+  const dbl = desk.find((f) => f.check === 'double-border');
   assert.ok(dbl && dbl.selector === '#ta' && dbl.outer === '#outer', JSON.stringify(dbl));
   assert.ok(has(desk, 'close-scrolls', '#close'));
-  assert.equal(desk.find((f: any) => f.check === 'bare-link' && f.selector === '#bare')?.text, 'https://x.io/a');
+  assert.equal(desk.find((f) => f.check === 'bare-link' && f.selector === '#bare')?.text, 'https://x.io/a');
   assert.ok(has(desk, 'bare-link', '#tipped'));
   assert.ok(has(desk, 'bare-link', '#tipwrap'), "a link inside to somewhere else does not make the tooltip's address clickable");
   assert.equal(r.ok, false);
@@ -137,12 +137,12 @@ test('--ignore drops a finding and counts it', { skip }, async () => {
 test('--click flags a click that disables the other controls, not one that shows its result', { skip }, async () => {
   const bad = at(await measure(opts('/clicks', { widths: [1440], click: '#bad' })), 1440);
   assert.ok(
-    bad.some((f: any) => f.check === 'click-froze' && f.disabled?.length === 2),
+    bad.some((f) => f.check === 'click-froze' && f.disabled?.length === 2),
     JSON.stringify(bad),
   );
   const good = at(await measure(opts('/clicks', { widths: [1440], click: '#good' })), 1440);
   assert.deepEqual(
-    good.filter((f: any) => f.selector === '#good'),
+    good.filter((f) => f.selector === '#good'),
     [],
   );
 });
@@ -154,7 +154,7 @@ test("a modal dialog's ✕ that scrolls away is found, and a pinned one isn't", 
 
 test('--click also clicks the existing controls: a dead one fails the check, one that works or navigates does not', { skip }, async () => {
   const r = await measure(opts('/sweep', { widths: [1440], click: '#good' }));
-  const f = at(r, 1440).filter((x: any) => x.check.startsWith('click'));
+  const f = at(r, 1440).filter((x) => x.check.startsWith('click'));
   assert.equal(f.length, 1, JSON.stringify(f));
   assert.ok(f[0].check === 'click-no-result' && f[0].selector.includes('#dead'), JSON.stringify(f));
   assert.equal(r.ok, false);
@@ -199,7 +199,7 @@ test('a shot settles first: a spinner is frozen on its first frame and the point
 
 test('sweep: false keeps --click to its one control, and shot() leaves a hover the flow asked for', { skip }, async () => {
   const r = await measure(opts('/sweep', { widths: [1440], click: '#good', sweep: false }));
-  assert.equal(at(r, 1440).filter((f: any) => f.check.startsWith('click')).length, 0);
+  assert.equal(at(r, 1440).filter((f) => f.check.startsWith('click')).length, 0);
   assert.equal(r.pages[0].sweep, undefined);
   const browser = launch(bin);
   try {

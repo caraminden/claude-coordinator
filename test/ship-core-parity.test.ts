@@ -7,7 +7,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { readQueue } from '../src/waits.ts';
+import { readQueue, writeOrder } from '../src/waits.ts';
 import { scriptEnv } from './script-env.ts';
 
 const env = { ...scriptEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
@@ -81,6 +81,52 @@ test('a ticket that holds the line goes first among the waiters in the core, dep
   assert.deepEqual(deploy, want, 'deploy-queue.sh');
   assert.deepEqual(server, want, 'the server (src/waits.ts)');
   assert.deepEqual(core, want, 'the kit core');
+});
+
+// Person's drag wins (Cara, 2026-11-24): a ship a person placed (.order's "#pin" line, written by the server) stays ahead
+// of one that holds the line; the holder goes right behind the last pinned ship still waiting, ahead of the other ranks.
+test('a holding ticket goes behind the ships a person placed, ahead of the rest, in the core, deploy-queue.sh and the server', () => {
+  const q = mkdtempSync(join(root, 'queue-pin-'));
+  writeFileSync(join(q, '0000000001'), deployTicket('deploy-a'));
+  writeFileSync(join(q, '0000000002'), coreTicket('core-b'));
+  writeFileSync(join(q, '0000000003'), deployTicket('deploy-c'));
+  writeFileSync(join(q, '0000000004'), [...deployTicket('deploy-held').trimEnd().split('\n').slice(0, 5), 'hold'].join('\n') + '\n');
+  // b and c placed by a person (9 shipped already, so it counts for nothing); a ranked first by a Taskmaster.
+  writeFileSync(join(q, '.order'), '# Cara moved core-b\n0000000001\n0000000002\n0000000003\n#pin 2 9\n');
+  const core = bash(`${fn(template, 'queue_order')}Q_DIR=$1; queue_order; printf '%s\\n' "\${Q_ORDER[@]}"`, q);
+  const deploy = bash(`. "$2"; queue_order "$1"; for t in "$1"/[0-9]*; do t=\${t##*/}; echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`, q, deployQueue);
+  const server = readQueue(q, 4, () => true).map((t) => String(t.seq).padStart(10, '0'));
+  const want = ['0000000001', '0000000002', '0000000004', '0000000003'];
+  assert.deepEqual(deploy, want, 'deploy-queue.sh');
+  assert.deepEqual(server, want, 'the server (src/waits.ts)');
+  assert.deepEqual(core, want, 'the kit core');
+  // The server writes the pins it is given, and a reader still finds every rank and who set it.
+  const line = readQueue(q, 4, () => true);
+  writeOrder(q, line, [2, 1], 'Cara moved core-b', 2, [2]);
+  assert.match(readFileSync(join(q, '.order'), 'utf8'), /^# Cara moved core-b\n0000000002\n0000000001\n0000000004\n0000000003\n#pin 2\n$/);
+});
+
+// A placed ship that is landing has left the line: it pins nothing, or the holder would wait behind a ship it passed.
+test('a pinned ship that is landing no longer keeps a holding ticket behind the waiters it was placed after', () => {
+  const q = mkdtempSync(join(root, 'queue-pin-landing-'));
+  writeFileSync(join(q, '0000000001'), deployTicket('deploy-a'));
+  writeFileSync(join(q, '0000000002'), coreTicket('core-b').replace('\n0\n', '\n1764000000\n')); // it has the lock
+  writeFileSync(join(q, '0000000003'), [...deployTicket('deploy-held').trimEnd().split('\n').slice(0, 5), 'hold'].join('\n') + '\n');
+  writeFileSync(join(q, '.order'), '0000000001\n0000000002\n#pin 2\n');
+  const core = bash(`${fn(template, 'queue_order')}Q_DIR=$1; queue_order; printf '%s\\n' "\${Q_ORDER[@]}"`, q);
+  const deploy = bash(`. "$2"; queue_order "$1"; for t in 0000000001 0000000003; do echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`, q, deployQueue);
+  const server = readQueue(q, 4, () => true).map((t) => String(t.seq).padStart(10, '0'));
+  assert.deepEqual(deploy, ['0000000003', '0000000001'], 'deploy-queue.sh');
+  assert.deepEqual(
+    server.filter((t) => t !== '0000000002'),
+    ['0000000003', '0000000001'],
+    'the server (src/waits.ts)',
+  );
+  assert.deepEqual(
+    core.filter((t) => t !== '0000000002'),
+    ['0000000003', '0000000001'],
+    'the kit core',
+  );
 });
 
 test("land.local.sh's land_deploy hands deploy.sh the core's place in line", () => {
@@ -173,7 +219,7 @@ test('land.local.sh refuses a CI red that skipped a test as land.sh does, whatev
   const status = (skips: number, then = '', edit = (log: string) => log) => {
     writeFileSync(join(dir, 'run-7.log'), edit(readFileSync(join(dir, 'run-7.log'), 'utf8')).replace(/^ℹ skipped \d+$/m, `ℹ skipped ${skips}`));
     const names = ['citadel_flake_only', 'citadel_skipped', 'citadel_skipped_said', 'citadel_cut_off', 'citadel_ci_digest', 'citadel_ci_status'];
-    const stubs = `citadel_retro_log() { echo "retro: $1"; }\ncitadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ncitadel_slug() { echo o/r; }\ncitadel_hub() { printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n'; }\ncitadel_ci_log() { echo ${JSON.stringify(dir)}/run-7.log; }\ncitadel_ci_known() { echo 'a known flake'; }\ncitadel_ci_rerun_said() { :; }\nCITADEL_CI_WORKFLOW=w CITADEL_CI_CLOCK_STEP=c CITADEL_CI_STEP="$(printf '7\\tcompleted\\tfailure\\thttps://ci/7')" CITADEL_CI_BURN_STEP=b`;
+    const stubs = `citadel_retro_log() { echo "retro: $1"; }\ncitadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ncitadel_slug() { echo o/r; }\ncitadel_hub() { printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n'; }\ncitadel_ci_log() { echo ${JSON.stringify(dir)}/run-7.log; }\ncitadel_ci_known() { echo 'a known flake'; }\ncitadel_ci_rerun_said() { :; }\nCITADEL_CI_WORKFLOW=w CITADEL_CI_CLOCK_STEP=c CITADEL_CI_STEP="$(printf '7\\tcompleted\\tfailure\\thttps://ci/7')" CITADEL_CI_BURN_STEP=b CITADEL_CI_PORTS_STEP=p`;
     return bash(`set -euo pipefail\n${names.map((n) => fn(local, n)).join('')}${stubs}\nrc=0; citadel_ci_status 0123456789abcdef >${JSON.stringify(dir)}/cilog || rc=$?; cat ${JSON.stringify(dir)}/cilog; echo "rc $rc"\n${then}`).filter((l) => /^rc |^waived|^refused|^land: (a test|only known)/.test(l));
   };
   const [why, rc] = status(1);
@@ -210,4 +256,93 @@ test('tests.yml fails a run that skipped a test, red runs included, and says not
   assert.deepEqual(end(1, 'ℹ skipped 2\n'), [1, true], 'a red run says so too');
   assert.deepEqual(end(3, 'ℹ skipped 2\n'), [3, true], "a red run keeps run-tests.sh's code");
   assert.deepEqual(end(1, ''), [1, false], 'cut short: no summary');
+});
+
+// #1864 (DR1, LB6): GitHub's answers as each script reads them. A lost runner leaves a failed job with no failed
+// step, an unanswered call is no answer, and the PC's port check runs after a green suite: none is a red.
+const JOBS = {
+  suite: { jobs: [{ steps: [{ name: 'the full suite', conclusion: 'failure' }] }] },
+  lost: {
+    jobs: [
+      {
+        steps: [
+          { name: 'Set up job', conclusion: 'success' },
+          { name: 'the full suite', conclusion: null },
+        ],
+      },
+    ],
+  },
+  unstarted: { jobs: [{ steps: null }] },
+  ports: {
+    jobs: [
+      {
+        steps: [
+          { name: 'the full suite', conclusion: 'success' },
+          { name: 'Windows ports left behind', conclusion: 'failure' },
+        ],
+      },
+    ],
+  },
+  setup: { jobs: [{ steps: [{ name: "the runner user's systemd", conclusion: 'failure' }] }] },
+  none: { jobs: [] },
+};
+// What both scripts' jq says of each, worked out here: CI's runners have no jq. A change to the expression changes both.
+const STEP_JQ = '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // (if (.jobs | length) == 0 then "no jobs" else "no failed step" end)';
+const stepOf = (j: { jobs: { steps: { name: string; conclusion: string | null }[] | null }[] }) => j.jobs.flatMap((job) => job.steps ?? []).find((s) => s.conclusion === 'failure')?.name ?? (j.jobs.length === 0 ? 'no jobs' : 'no failed step');
+test('what a failed run means is the same in land.sh and land.local.sh: 1 only when a step that runs the tests failed', () => {
+  const land = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
+  const cut = (a: string, b: string) => land.slice(land.indexOf(a), land.indexOf(b, land.indexOf(a)));
+  const verdict = cut('    failure)\n      # Red only when', '    timed_out) return 1');
+  const consts = [...land.matchAll(/^CI_(?:CLOCK_|PORTS_)?STEP=.*$/gm)].map((m) => m[0]).join('\n');
+  const local = join(repo, 'tools', 'land.local.sh');
+  const fns = ['citadel_ci_status', 'citadel_ci_rerun_said', 'citadel_cut_off', 'citadel_flake_only', 'citadel_ci_digest', 'citadel_ci_log'].map((n) => fn(local, n)).join('\n');
+  const localConsts = [...readFileSync(local, 'utf8').matchAll(/^CITADEL_CI_[A-Z_]*(?:STEP|WORKFLOW|LABEL)=.*$/gm)].map((m) => m[0]).join('\n');
+  const dir = mkdtempSync(join(root, 'verdict-'));
+  // `gh api … --jq <expr>` answers $STEP, what that expression says of the run; `down` answers nothing.
+  const gh = `fake() { case "$*" in
+    *head_sha*) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
+    *"/jobs"*) [ "$STEP" != down ] || return 1; local e; while [ $# -gt 0 ]; do [ "$1" != --jq ] || e=$2; shift; done; [ "$e" = "$STEP_JQ" ] && echo "$STEP" ;;
+    *"run view"*) [ "$LOG" != down ] || return 1; printf 'job\\tstep\\t2026-11-24T00:00:00Z %s\\n' "$LOG" ;;
+  esac; }`;
+  const landRc = (step: string) => {
+    const script = `${gh}
+say() { :; }; retro_log() { :; }; ci_said() { :; }; ci_down() { :; }; hub() { fake "$@"; }; state=${dir} CI_POLL=0 ci_slug=o/r ci_id=7 ci_url=u short=s branch=b ci_lost='' burn_red='' CI_BURN_STEP='burn in new and changed tests'
+${consts}
+${fn(join(repo, 'tools', 'land.sh'), 'ci_fact')}
+v() { case failure in
+${verdict}
+esac; }
+rc=0; v || rc=$?; echo "$rc\${ci_lost:+ lost}"`;
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, STEP_JQ, STEP: step } });
+  };
+  const localRc = (step: string, log = 'run-tests: broken') => {
+    const d = mkdtempSync(join(dir, 'd-'));
+    const script = `${gh}
+${localConsts}
+citadel_hub() { fake "$@"; }; citadel_ci_dir() { echo ${d}; }; citadel_slug() { echo o/r; }; citadel_retro_log() { :; }; citadel_ci_known() { return 1; }; citadel_ci_burn_lines() { :; }
+${fns}
+citadel_ci_status abcdef0123456789; echo "rc $?"`;
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8', cwd: d, env: { ...env, STEP_JQ, STEP: step, LOG: log } });
+  };
+  // Where there is a jq, its own answer is held to the one worked out here.
+  if (spawnSync('jq', ['--version']).status === 0) for (const [k, j] of Object.entries(JOBS)) assert.equal(spawnSync('jq', ['-r', STEP_JQ], { encoding: 'utf8', input: JSON.stringify(j) }).stdout.trim(), stepOf(j), k);
+  const want: [string, string, string][] = [
+    ['suite', '1', '1'],
+    ['lost', '1 lost', '4'],
+    ['unstarted', '1 lost', '4'],
+    ['ports', '0', '0'],
+    ['setup', '2', '4'],
+    ['none', '1', '1'],
+    ['down', '2', '5'],
+  ];
+  for (const [k, a, b] of want) {
+    const step = k === 'down' ? 'down' : stepOf(JOBS[k as keyof typeof JOBS]);
+    const l = landRc(step);
+    assert.equal(l.stdout.trim(), a, `land.sh, ${k}: ${l.stdout}${l.stderr}`);
+    const c = localRc(step);
+    assert.equal(c.stdout.trim().split('\n').at(-1), `rc ${b}`, `land.local.sh, ${k}: ${c.stdout}${c.stderr}`);
+  }
+  const noLog = localRc(stepOf(JOBS.suite), 'down');
+  assert.equal(noLog.stdout.trim().split('\n').at(-1), 'rc 5', noLog.stdout + noLog.stderr);
+  assert.match(noLog.stdout, /GitHub didn't send the red CI run's log/);
 });

@@ -43,7 +43,7 @@ const wait = (what: string, expression: string) => waitFor(page, what, expressio
 const shown = () => page.eval<string[]>('[...document.querySelectorAll("#machine-setup .machine-setup-way:not([hidden]) pre")].map((p) => p.textContent)');
 const pressed = () => page.eval<string>('document.querySelector("#machine-setup [aria-pressed=true]")?.textContent ?? ""');
 const row = (name: string) => `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.settings-row-title').textContent === ${JSON.stringify(name)})`;
-const machine = async (name: string) => (await srv.call('/api/machines')).data.find((m: any) => m.name === name);
+const machine = async (name: string) => (await srv.call('/api/machines')).data.find((m: { name: string }) => m.name === name);
 
 async function openMachines() {
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/machines` });
@@ -183,7 +183,7 @@ test('Who gets it is one list of scheme chips: + scheme adds one at once, × tak
   await page.eval(`${row}.open = true`);
   await wait("chip-box's body", `!!${row}.querySelector('.machine-body')`);
   const chips = () => page.eval<string[]>(`[...${row}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`);
-  const saved = async () => (await srv.call('/api/machines')).data.find((m: any) => m.id === machine.id).projects;
+  const saved = async () => (await srv.call('/api/machines')).data.find((m: { id: number; projects: unknown }) => m.id === machine.id).projects;
   assert.deepEqual(await chips(), []);
   assert.match(await page.eval<string>(`${row}.querySelector('.machine-lending').textContent`), /No scheme gets it yet/);
   assert.equal(await page.eval(`!!${row}.querySelector('input[type=radio]')`), false, 'no "every scheme an admin owns" radio');

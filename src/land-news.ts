@@ -78,8 +78,8 @@ export function landNews(output: string, name: (branch: string) => string): News
     } else if ((m = s.match(/^CI's full run ended red and it is rerunning the failed files alone.*?waits up to (.+?) more/))) {
       slow = { tone: 'warn', text: `CI's full run ended red: rerunning the failed files alone, to tell flakes from real failures (up to ${m[1]} more)` };
     } else if (/^CI passed on /.test(s)) slow = null;
-    else if ((m = s.match(/^the CI run on \S+ was cut off before any test failed \((.*)\), so/))) {
-      news.push({ tone: 'warn', text: `CI run cut off before any test failed (${m[1]}): one more run` });
+    else if ((m = s.match(/^the CI run on \S+ (was cut off before any test failed|lost its runner before any step failed) \((.*)\), so/))) {
+      news.push({ tone: 'warn', text: `CI run ${m[1].startsWith('lost') ? 'lost its runner' : 'cut off'} before any test failed (${m[2]}): one more run` });
     } else if ((m = s.match(/^CI is red on the ship train/))) {
       slow = null;
       redNews(i);
@@ -116,6 +116,10 @@ export function landNews(output: string, name: (branch: string) => string): News
       news.push({ tone: 'bad', text: `${m[1]} is sent back: the train without it passed ${list(m[2].split(', ').map(short))}, and no pulled ship failed it alone` });
     } else if ((m = s.match(/^(\S+) steps aside: /))) {
       news.push({ tone: 'warn', text: `${name(m[1])} steps aside: the next ship in line runs the train with what is left` });
+    } else if ((m = s.match(/^red on main too: (not .*?): (.*?) fails run alone on main's tip/))) {
+      slow = null;
+      done();
+      news.push({ tone: 'warn', text: `Red on main too, ${m[1]}: ${list(m[2].split(', ').map(short))}; main needs a fix` });
     } else if ((m = s.match(/^bisect: the first (\d+) of (\d+) ships tested green, so they ship now; back in line with nobody refused: ([^;]*)/))) {
       done();
       news.push({ tone: 'warn', text: `The first ${m[1]} of ${m[2]} ships tested green, so they ship now${backInLine(m[3].split(' ').filter(Boolean))}` });

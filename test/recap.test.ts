@@ -48,7 +48,7 @@ test('the scheme recap: your last action in the scheme, and turns finished since
   // A database from before last_actions: the first recap reads the time from the events, and keeps it.
   store.db.exec('DELETE FROM last_actions');
   assert.deepEqual(store.recap('Cara', p1), { since, turns: { [a]: 2, [b]: 1 } });
-  assert.equal((store.db.prepare("SELECT at FROM last_actions WHERE name = 'Cara' AND project_id = ?").get(p1) as any).at, since);
+  assert.equal((store.db.prepare("SELECT at FROM last_actions WHERE name = 'Cara' AND project_id = ?").get(p1) as { at: number }).at, since);
   // Acting again brings you back: no recap, and the new time.
   const now = store.addEvent(b, 'user_message', { author: 'Cara', text: 'back' });
   assert.deepEqual(store.recap('Cara', p1), { since: now.created_at, turns: {} });

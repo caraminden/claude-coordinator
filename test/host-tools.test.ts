@@ -27,7 +27,7 @@ test('a proposal names one source, a plain package name, one exact version and w
     [{ ...ok, why: '  ' }, /why is required/],
     [{ ...ok, why: 'x'.repeat(501) }, /at most 500/],
   ] as const)
-    assert.throws(() => parseHostTool(body as any), msg, JSON.stringify(body));
+    assert.throws(() => parseHostTool(body), msg, JSON.stringify(body));
 });
 
 test('the command is mise use for every source but Arch packages, which a person runs with sudo', () => {

@@ -1,6 +1,6 @@
 // Deploys first (CiHold, src/ci-hold.ts) over Citadel's real CI runs: the real code looks every 15 s at the runs as they
 // stood (gh reads them once, read-only), its cancels and re-runs land on a copy in memory, and each stop it would make is a
-// hit. It throws if it would stop a ship's run or own check, or leave a stopped run un-started at the end of a quiet spell.
+// hit. It throws if it would stop a ship's run, or leave a stopped run un-started at the end of a quiet spell.
 import { execFile, execFileSync } from 'node:child_process';
 import { CiHold, HOLD_POLL_MS, kindOf } from '../../src/ci-hold.ts';
 import { repoSlug } from '../../src/prlinks.ts';
@@ -60,6 +60,8 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     report: (_repo, text) => void hits.push({ at: now, key: `report ${now}`, text }),
     store: { getSetting: <T>(k: string) => (settings.get(k) as T) ?? null, setSetting: (k, v) => void settings.set(k, v) },
     get: async (path) => {
+      // land.sh deletes a check's branch when its ship goes on, so a stopped one stays stopped.
+      if (path.includes('/git/ref/')) return { status: 404, etag: null, body: {} };
       const one = /runs\/(\d+)$/.exec(path);
       const sim = one && byId.get(Number(one[1]));
       const body = sim ? shown(sim) : { workflow_runs: path.includes('status=in_progress') ? sims.filter(active).map(shown) : [] };
@@ -82,11 +84,22 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       return { status: 201 };
     },
   });
-  for (; now <= ctx.now; now += HOLD_POLL_MS) await hold.tick(now);
-  // Quiet from here: whatever is still held must come back. Two proofs of one file go one after the other, after a back-off of up to 40 min.
-  for (const end = now + 3 * 3600_000; now < end; now += HOLD_POLL_MS) await hold.tick(now);
+  // Each run asks as it starts, as its workflow does (tools/ci-hold-ask.ts); told to wait, it is stopped (post, above).
+  const asked = new Map<number, number>();
+  const look = async () => {
+    await hold.tick(now);
+    for (const sim of sims) {
+      const kind = active(sim) && asked.get(sim.run.id) !== sim.attempt ? kindOf(sim.run, true) : null;
+      if (!kind || kind === 'ship') continue;
+      asked.set(sim.run.id, sim.attempt);
+      await hold.ask(slug, sim.run.id, now);
+    }
+  };
+  for (; now <= ctx.now; now += HOLD_POLL_MS) await look();
+  // Quiet from here: whatever is still held must come back. Two proofs of one file go one after the other, after a back-off of up to 40 min, and jobs one at a time (#1906).
+  for (const end = now + 24 * 3600_000; now < end; now += HOLD_POLL_MS) await look();
   const stuck = hold.state(now).held.filter((h) => h.phase !== 'resumed');
-  if (stuck.length) throw new Error(`still held after 3 hours with nothing running: ${stuck.map((h) => h.what).join(', ')}`);
+  if (stuck.length) throw new Error(`still held after 24 hours with nothing running: ${stuck.map((h) => h.what).join(', ')}`);
   const sorted = waits.sort((a, b) => a - b);
   const min = (ms: number | undefined) => Math.round((ms ?? 0) / 60_000);
   return {

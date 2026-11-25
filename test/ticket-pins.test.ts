@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 
 // Pinned minions (#179): each person's own, keyed by their login name like ticket_seen; agents get none.
 const root = mkdtempSync(join(tmpdir(), 'ticket-pins-'));
@@ -36,7 +37,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const pins = async (cookie?: string) => (await (await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Cookie: cookie ?? srv.cookie } })).json()).pins;
+const pins = async (cookie?: string) => (await json<{ pins: number[] }>(await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Cookie: cookie ?? srv.cookie } }))).pins;
 
 test('a pin is the pinner’s alone, listed oldest first, and unpinning drops it', async () => {
   assert.deepEqual(await pins(), []);
@@ -58,7 +59,7 @@ test('bad bodies, the Taskmaster and agents are refused', async () => {
     body: JSON.stringify({ pinned: true }),
   });
   assert.equal(asTM.status, 403);
-  const page = await (await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}` } })).json();
+  const page = await json<{ pins: number[] }>(await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}` } }));
   assert.deepEqual(page.pins, [], 'the Taskmaster sees no one’s pins');
   assert.deepEqual(await pins(), [M1.id]);
 });

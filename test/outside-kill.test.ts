@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
-import { stopTurns, testPins, followed } from './helpers.ts';
+import { stopTurns, testPins, followed, runnerInsides } from './helpers.ts';
 import { realClock } from '../src/clock.ts';
 import { FakeClock } from './fake-clock.ts';
 import { until } from './wait.ts';
@@ -93,7 +93,7 @@ test('a claude that exits while a poll is between its exit and liveness checks s
   // every-20th liveness check, which then took the turn for one killed without a record (idle).
   const r = runner as any;
   const readStream = r.readStream;
-  r.readStream = function (this: any, id: number, live: any, toEnd: boolean) {
+  r.readStream = function (this: unknown, id: number, live: { dir: string; ticks: number }, toEnd: boolean) {
     if (!toEnd && !existsSync(join(live.dir, 'exit.json'))) {
       const sleeper = new Int32Array(new SharedArrayBuffer(4));
       for (let i = 0; i < 250 && wrapperAlive(live.dir) !== false; i++) Atomics.wait(sleeper, 0, 0, 20);
@@ -133,12 +133,12 @@ test('a turn killed together with its wrapper (no exit record) is resumed, and k
   try {
     runner.send(t.id, 'Cara', 'wait');
     for (const n of [1, 2]) {
-      await until(`claude ${n} to be up`, async () => store.listEvents(t.id).filter((e) => e.kind === 'claude').length >= n && existsSync(join((runner as any).turns.get(t.id)?.dir ?? root, 'pid.json')), 10000);
-      const live = (runner as any).turns.get(t.id);
+      await until(`claude ${n} to be up`, async () => store.listEvents(t.id).filter((e) => e.kind === 'claude').length >= n && existsSync(join(runnerInsides(runner).turns.get(t.id)?.dir ?? root, 'pid.json')), 10000);
+      const live = runnerInsides(runner).turns.get(t.id)!;
       const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
       process.kill(pids.wrapper, 'SIGKILL');
       process.kill(-pids.claude, 'SIGKILL');
-      await until('the server to see the kill', async () => (runner as any).turns.get(t.id) !== live, 10000);
+      await until('the server to see the kill', async () => runnerInsides(runner).turns.get(t.id) !== live, 10000);
       if (n === 1) {
         assert.equal(store.listEvents(t.id).filter((e) => e.kind === 'error').length, 0, 'the first kill is resumed, not an error');
         assert.match(notes(t.id).find((x) => x.startsWith("The turn's process")) ?? '', /^The turn's process was killed before it finished/);
@@ -193,7 +193,7 @@ test('a stop before claude has started signals it as soon as it starts, not at t
   store.setTicketDir(t.id, root, null);
   runner.send(t.id, 'Cara', 'wait');
   await until('the turn is running', () => followed(runner, t.id));
-  const dir = (runner as any).turns.get(t.id).dir;
+  const dir = runnerInsides(runner).turns.get(t.id)!.dir;
   assert.ok(!existsSync(join(dir, 'pid.json')), 'stopped before the wrapper started claude');
   // The stop's kill timers run on a clock nobody moves: the turn can only end by the signal sent once claude
   // starts, never by the SIGKILL retry, which would need the clock advanced by stopKillMs.

@@ -10,6 +10,7 @@ import { Store } from '../src/db.ts';
 import { repoSlug } from '../src/prlinks.ts';
 import { repoName } from '../src/scheme-repo.ts';
 import { bootServer, lines, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 
 // A new scheme's code sources (#173). The server runs with HOME set to the scratch folder (so its
 // data dir is under HOME) and a stub `gh` first on PATH: no test makes a real GitHub repo.
@@ -199,7 +200,7 @@ test('a failed clone leaves no scheme and no folder behind', async () => {
   assert.match(r.data.error, /Could not clone repo/);
   const after = (await s.call('/api/projects')).data;
   assert.equal(after.length, before);
-  assert.ok(!after.some((p: any) => p.name === 'Broken'));
+  assert.ok(!after.some((p: { name: string }) => p.name === 'Broken'));
   // The id it had is free again (SQLite reuses the top one), and its folder is gone.
   const next = await create({ name: 'After broken', source: 'none' });
   assert.ok(!existsSync(repoOf(next.data.id)));
@@ -337,7 +338,7 @@ test('non-admins: New repo goes on their own GitHub with their token, or is refu
   const auth = new Auth(PASSWORD, SECRET);
   const as = (u: { id: number; name: string }) => async (path: string, body?: unknown) => {
     const r = await fetch(s.base + path, { method: body === undefined ? 'GET' : 'POST', headers: { Cookie: auth.issueCookie(u, false).split(';')[0], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { status: r.status, data: await r.json() };
+    return { status: r.status, data: await json<{ error: string; repo_url: string; owner_id: number; repo_dir: string; github_error: string; id: number }>(r) };
   };
   const asJosh = as(josh);
   const asOlive = as(olive);

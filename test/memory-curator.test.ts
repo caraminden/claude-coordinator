@@ -90,7 +90,7 @@ test('nothing changes until approve, and only the ticked changes apply', () => {
   assert.equal(readFileSync(join(dir, 'a.md'), 'utf8'), 'merged a+b\n');
   assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), B, 'an unticked delete leaves the note');
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A](a.md) — a and b\n- [B](b.md) — second\n- [C](c.md) — unindexed\n- [D](d.md) — new\n');
-  assert.deepEqual(gone, []);
+  assert.deepEqual<string[]>(gone, []);
   assert.equal(backup.length, 3);
   // Put back restores every note and line, and removes the note the proposal added.
   assert.deepEqual(

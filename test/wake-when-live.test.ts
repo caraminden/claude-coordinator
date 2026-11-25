@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -227,7 +227,7 @@ test('pending-deploy minions whose branch the live commit contains are found, wh
   // #81: a deploy reports only to the minions that ran it, so one waiting on a commit that went live
   // in someone else's restart stayed pending-deploy.
   store.setProjectRepoDir(project.id, repo);
-  const withBranch = (state: any, branch: string | null) => {
+  const withBranch = (state: Parameters<Store['updateTicket']>[1]['state'], branch: string | null) => {
     const id = minion();
     store.setTicketDir(id, root, branch);
     store.updateTicket(id, { state });
@@ -408,4 +408,147 @@ test('a waiter set while a deploy goes live is checked against the new commit, n
   };
   assert.equal(await w.add(minion(), work, 'x'), false, 'live by the time it was set');
   assert.equal(w.list().length, 0);
+});
+
+// A deploy's restart is rolled back when it doesn't stay up: until deploy.sh tags it last-good, a minion closed or told "live" over it was misled.
+test('nothing goes live on a restart that can still be rolled back; a settled one does all it held', async () => {
+  store.setProjectRepoDir(project.id, repo);
+  store.setSetting('wake-when-live', []);
+  mkdirSync(join(repo, '.git', 'cc-deploy'), { recursive: true });
+  const good = commit();
+  git('tag', '-f', 'last-good', good);
+  git('checkout', '-q', '-b', 'ticket/on-trial');
+  const head = commit();
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--ff-only', 'ticket/on-trial');
+  const shipper = minion();
+  store.setTicketDir(shipper, root, 'ticket/on-trial');
+  store.updateTicket(shipper, { state: 'pending-deploy' });
+  const [byCommit, nextDeploy, onGood, early] = [minion(), minion(), minion(), minion()];
+  const boot = () => Object.assign(waiters(head), { proven: null });
+  const relayed: string[] = [];
+  const heard = (w: LiveWaiters) => ((w.deliver = (r) => relayed.push(r.text)), w);
+  sent.length = 0;
+  try {
+    const bad = heard(boot());
+    assert.equal(await bad.add(early, null, 'asked before the first look'), true);
+    let verdict: boolean | null = null;
+    const proving = bad.prove(5).then((v) => (verdict = v));
+    await until('it knows the restart is on trial', () => bad.proven === good);
+    assert.equal(await bad.add(byCommit, head, 'try it'), true, 'its commit is not live yet');
+    assert.equal(await bad.add(nextDeploy, null, 'look again'), true);
+    assert.equal(await bad.add(onGood, good, 'old news'), false, 'what last-good holds is live whatever happens');
+    assert.equal((await bad.addRelay({ ticket: shipper, commit: head, text: 'shipped', to: { scheme: 'P', taskmaster: shipper } })).queued, true);
+    assert.equal(await bad.check(), 0);
+    assert.equal((await bad.pendingLive()).includes(shipper), false, 'a pending-deploy minion waits too');
+    assert.equal(verdict, null);
+
+    // Rolled back: the server boots on last-good, and nobody hears "live".
+    const back = heard(Object.assign(waiters(good), { proven: null }));
+    assert.equal(await back.prove(5), true);
+    assert.equal(await back.check(), 0);
+    assert.deepEqual([sent, relayed], [[], []]);
+    assert.equal((await back.pendingLive()).includes(shipper), false);
+
+    // Settled instead: deploy.sh tags it, and everything held happens.
+    git('tag', '-f', 'last-good', head);
+    await proving;
+    assert.equal(verdict, true);
+    assert.equal(await bad.check(), 3);
+    assert.deepEqual(sent.map((s) => s.id).sort(), [byCommit, nextDeploy, early].sort());
+    assert.deepEqual(relayed, ['shipped']);
+    assert.equal((await bad.pendingLive()).includes(shipper), true);
+  } finally {
+    git('tag', '-d', 'last-good');
+    store.updateTicket(shipper, { state: null });
+    store.setSetting('wake-when-live', []);
+    store.setSetting('relay-when-live', []);
+  }
+});
+
+test('a look that git fails leaves a boot unproven, and the next one settles it', async () => {
+  mkdirSync(join(repo, '.git', 'cc-deploy'), { recursive: true });
+  const good = commit();
+  git('tag', '-f', 'last-good', good);
+  const PATH = process.env.PATH;
+  try {
+    const w = Object.assign(waiters(commit()), { proven: 'not looked yet' as string | null });
+    process.env.PATH = '/nonexistent';
+    const proving = w.prove(5);
+    await until('a look to fail', () => w.proven !== 'not looked yet');
+    assert.equal(w.proven, null);
+    process.env.PATH = PATH;
+    await until('on trial', () => w.proven === good);
+    git('tag', '-f', 'last-good', w.head!);
+    assert.equal(await proving, true);
+  } finally {
+    process.env.PATH = PATH;
+    git('tag', '-d', 'last-good');
+  }
+});
+
+test('a restart on last-good is proven at once, a roll back once it is tagged, one whose deploy died before its tag after a while, and a newer commit ends the wait', async () => {
+  mkdirSync(join(repo, '.git', 'cc-deploy'), { recursive: true });
+  const good = commit();
+  git('tag', '-f', 'last-good', good);
+  try {
+    const again = Object.assign(waiters(good), { proven: null as string | null });
+    assert.equal(await again.prove(60_000), true, 'a crash restart of code that settled long ago');
+    assert.equal(again.proven, again.head);
+    const back = git('rev-parse', 'HEAD~1'); // an explicit roll back's target, live before last-good was (#1271)
+    const rolling = Object.assign(waiters(back), { proven: good as string | null });
+    const tried = rolling.prove(5);
+    await until('asked', () => rolling.proven !== good);
+    assert.equal(rolling.proven, null, 'a roll back on trial can itself be undone: not live yet');
+    git('tag', '-f', 'last-good', back);
+    assert.equal(await tried, true);
+    assert.equal(rolling.proven, back);
+    git('tag', '-f', 'last-good', good);
+    const orphan = Object.assign(waiters(commit()), { proven: null as string | null });
+    assert.equal(await orphan.prove(5, 50), true);
+    assert.equal(orphan.proven, orphan.head);
+    const moved = Object.assign(waiters(commit()), { proven: null as string | null });
+    const proving = moved.prove(5);
+    await until('on trial', () => moved.proven === good);
+    const next = commit();
+    await moved.check(next); // a front-end deploy reloads the server onto a newer commit
+    assert.equal(await proving, false);
+    assert.equal(moved.proven, next);
+  } finally {
+    git('tag', '-d', 'last-good');
+  }
+});
+
+test('through the server: a minion in pending-deploy stays open on a restart that can be rolled back, and is dismissed once it settles', async () => {
+  // A live checkout of its own (a cc-deploy folder, a last-good tag behind its head), running the code under test.
+  const live = join(root, 'live-server');
+  execFileSync('git', ['clone', '-q', '--shared', REPO, live]);
+  cpSync(join(REPO, 'src'), join(live, 'src'), { recursive: true });
+  copyFileSync(join(REPO, 'server.ts'), join(live, 'server.ts'));
+  const lg = (...args: string[]) => execFileSync('git', args, { cwd: live, encoding: 'utf8' }).trim();
+  lg('config', 'user.email', 't@example.com');
+  lg('config', 'user.name', 'T');
+  lg('tag', '-f', 'last-good', 'HEAD');
+  mkdirSync(join(live, '.git', 'cc-deploy'));
+  lg('checkout', '-q', '-b', 'ticket/ships');
+  lg('commit', '-q', '--allow-empty', '-m', 'the work');
+  const boot = join(root, 'boot-trial');
+  mkdirSync(join(boot, 'data'), { recursive: true });
+  const seed = new Store(join(boot, 'data', 'coordinator.db'));
+  const p = seed.createProject('Citadel', null);
+  seed.setProjectRepoDir(p.id, live);
+  const t = seed.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  seed.setTicketDir(t.id, root, 'ticket/ships');
+  seed.updateTicket(t.id, { status: 'idle', state: 'pending-deploy' });
+  const waits = seed.createTicket({ project_id: p.id, title: 'W', permission_mode: 'default', created_by: 'Cara' });
+  const { call, stop } = await bootServer({ root: boot, script: join(live, 'server.ts') });
+  try {
+    const asked = await call(`/api/tickets/${waits.id}/wake`, { commit: lg('rev-parse', 'HEAD'), reason: 'try it' });
+    assert.deepEqual([asked.status, asked.data.waiting], [201, true], 'the running commit is not live while it can be rolled back');
+    assert.equal(seed.getTicket(t.id)!.status, 'idle');
+    lg('tag', '-f', 'last-good', 'HEAD');
+    await until('it is dismissed', () => seed.getTicket(t.id)!.status === 'closed');
+  } finally {
+    await stop();
+  }
 });

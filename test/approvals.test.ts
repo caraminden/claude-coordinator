@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -8,7 +9,10 @@ import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, mintedAgentToken, tempRoot, testPins, until } from './helpers.ts';
-import { agentEnv, mcpAgent } from './mcp-agent.ts';
+import { agentEnv, mcpAgent, type McpResult, type McpTool } from './mcp-agent.ts';
+import { json } from './typed.ts';
+
+type Posted = { id: string; input: unknown; merge?: unknown; tripwire: { reason: string } };
 testPins();
 
 const tmp = tempRoot('approvals-');
@@ -73,7 +77,7 @@ test("a turn loads the scheme's folders, then its minion's picks that are still 
 // ---------- cards ----------
 
 test('a card is settled once, by a person, and an unknown one counts as expired', async () => {
-  const events: any[] = [];
+  const events: { ticketId?: number; kind: string; data: unknown }[] = [];
   const a = new Approvals((ticketId, kind, data) => events.push({ ticketId, kind, data }));
   const id = a.request(1, 'Bash', { command: 'gh pr merge 3' });
   assert.equal(a.waiting(1), 1);
@@ -88,7 +92,7 @@ test('a card is settled once, by a person, and an unknown one counts as expired'
 });
 
 test('the end of a turn expires what still waits', async () => {
-  const events: any[] = [];
+  const events: { ticketId?: number; kind: string; data: unknown }[] = [];
   const a = new Approvals((_t, kind, data) => events.push({ kind, data }));
   const id = a.request(1, 'Bash', {});
   const waiting = a.wait(1, id, 10_000);
@@ -107,8 +111,8 @@ test('the end of a turn expires what still waits', async () => {
 });
 
 test('a merge card carries the PR it names; a refused call posts nothing', () => {
-  const posted: any[] = [];
-  const a = new Approvals((_t, kind, data) => kind === 'approval' && posted.push(data));
+  const posted: Posted[] = [];
+  const a = new Approvals((_t, kind, data) => kind === 'approval' && posted.push(data as Posted));
   const cfg = { home: '/home/u', data: '/home/u/data', checkout: '/home/u/app', project: 1, claudeConfig: '/home/u/.claude', deployScript: true };
   const merge = { target: '192', method: 'squash', pr: { number: 192, title: 'Port the guard' } };
   assert.ok('id' in a.ask(1, 'Bash', { command: 'gh pr merge 192 --squash' }, '/w', cfg, true, merge));
@@ -122,8 +126,8 @@ test('a merge card carries the PR it names; a refused call posts nothing', () =>
 // A stand-in for the app's two approval routes, backed by a real Approvals.
 const TICKET = 7;
 const TRIPWIRE_CFG = { home: '/home/u', data: '/home/u/data', checkout: '/home/u/app', project: 1, claudeConfig: '/home/u/.claude', deployScript: true };
-const posted: any[] = [];
-const cards = new Approvals((_t, kind, data) => kind === 'approval' && posted.push(data));
+const posted: Posted[] = [];
+const cards = new Approvals((_t, kind, data) => kind === 'approval' && posted.push(data as Posted));
 const api = createServer(async (req, res) => {
   let body = '';
   for await (const c of req) body += c;
@@ -143,10 +147,10 @@ const listening = tmp.serve(api);
 
 async function mcpServer(approvals: boolean) {
   await listening;
-  const env = agentEnv(`http://127.0.0.1:${(api.address() as any).port}`, `${TICKET}.sig`, { id: TICKET, project_id: 1 }, 'thread', approvals ? { COORDINATOR_APPROVALS: '1' } : {});
+  const env = agentEnv(`http://127.0.0.1:${(api.address() as AddressInfo).port}`, `${TICKET}.sig`, { id: TICKET, project_id: 1 }, 'thread', approvals ? { COORDINATOR_APPROVALS: '1' } : {});
   const agent = mcpAgent(env, tmp.track);
   after(() => agent.close());
-  return (method: string, params: object): Promise<any> => agent.call(method, params);
+  return (method: string, params: object): Promise<McpResult> => agent.call(method, params);
 }
 let server: ReturnType<typeof mcpServer> | null = null;
 const rpc = async (method: string, params: object) => (await (server ??= mcpServer(true)))(method, params);
@@ -154,12 +158,12 @@ const rpc = async (method: string, params: object) => (await (server ??= mcpServ
 const ask = (input: object) => rpc('tools/call', { name: 'approve', arguments: { tool_name: 'Bash', input, tool_use_id: 'toolu_1' } }).then((r) => JSON.parse(r.content[0].text));
 async function nextCard() {
   while (!posted.length) await wait(10);
-  return posted.shift();
+  return posted.shift()!;
 }
 
 test('the approve tool is offered only to threads in projects with rules', async () => {
-  assert.ok((await rpc('tools/list', {})).tools.some((t: any) => t.name === 'approve'));
-  assert.ok(!(await (await mcpServer(false))('tools/list', {})).tools.some((t: any) => t.name === 'approve'));
+  assert.ok((await rpc('tools/list', {})).tools.some((t: McpTool) => t.name === 'approve'));
+  assert.ok(!(await (await mcpServer(false))('tools/list', {})).tools.some((t: McpTool) => t.name === 'approve'));
 });
 
 test('Approve answers allow with the input unchanged, after several waits', async () => {
@@ -361,13 +365,13 @@ test("through the route, a card is judged with the turn's own TMPDIR, not the se
     await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion })).ok);
     const bak = join(srv.data, 'coordinator.db.bak-x');
     const command = `cp ${bak} "$TMPDIR/" && rm ${bak}`;
-    const r = await (
+    const r = await json<{ id?: string }>(
       await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, {
         method: 'POST',
         headers: minion,
         body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Move the stale copy Cara named out of the data dir' } }),
-      })
-    ).json();
+      }),
+    );
     assert.ok(r.id, JSON.stringify(r));
   } finally {
     await srv.stop();

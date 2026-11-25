@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { fake } from './typed.ts';
 import { readProposals } from '../src/review-describe.ts';
 import {
   agentKind,
@@ -219,12 +220,12 @@ test('the import reads only inside the repo, brings a file the store refuses in 
     getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null,
     setSetting: (k: string, v: unknown) => void settings.set(k, v),
     listProjects: () => [{ id: 9, name: 'G', repo_dir: repo }],
-    reviews: {
+    reviews: fake<ReviewSet>({
       get: () => null,
       create: () => {
         throw new Error('disk full');
       },
-    } as any,
+    }),
   };
   assert.match(importAllRubrics(store)[0], /FAILED r\/bad-model\.md \(disk full\)/);
   assert.equal(settings.get(IMPORT_KEY), undefined);
@@ -381,7 +382,7 @@ test('run order, panels and hand-offs: saved, checked, rendered, and told to the
     /rising/,
   );
   assert.throws(() => set.save(3, 'look', { panel: 'x'.repeat(41) }, 'Josh', 'x'), /1 to 40/);
-  assert.equal(set.save(3, 'taste-b', { panel: '  ' } as any, 'Josh', 'x').panel, null, 'an empty panel is none');
+  assert.equal(set.save(3, 'taste-b', { panel: '  ' }, 'Josh', 'x').panel, null, 'an empty panel is none');
 });
 
 test('the run record: dots, first-round pass rate, a stuck entry, and the ship hold', () => {

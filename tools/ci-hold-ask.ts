@@ -20,13 +20,13 @@ export async function askHold(env: NodeJS.ProcessEnv, o: { tries?: number; every
       if (!r.ok) throw new Error(`Citadel answered HTTP ${r.status}`);
       const { go, why } = (await r.json()) as { go?: boolean; why?: string };
       if (go !== false) {
-        log('no ship is in the way: starting');
+        log('nothing is in the way: starting');
         return true;
       }
-      log(`${why}, and ships go first: Citadel stops this run and starts it again by itself once the line is empty`);
+      log(`${why}: Citadel stops this run and starts it again by itself when it may go (a ship's own check only if its ship still waits)`);
     } catch (err) {
       const e = err as { message?: string; cause?: { code?: string } };
-      log(`::warning::couldn't ask Citadel whether ships go first (${e?.cause?.code ?? e?.message ?? err}): starting`);
+      log(`::warning::couldn't ask Citadel whether this may start (${e?.cause?.code ?? e?.message ?? err}): starting`);
       return true;
     }
   }

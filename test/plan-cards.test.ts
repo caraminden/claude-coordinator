@@ -22,6 +22,7 @@ const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: 
 let base = '';
 let cookie = '';
 
+type Ev = { kind: string; data: string };
 let srv: Booted;
 const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 
@@ -33,8 +34,8 @@ const live = () =>
     .at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
-let ticket: any;
-let turn: any;
+let ticket: { id: number };
+let turn: { token: string };
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
@@ -48,8 +49,8 @@ before(async () => {
 });
 
 const propose = (summary: string) => call(`/api/tickets/${ticket.id}/plans`, { method: 'POST', token: live(), body: { summary, plan: `## ${summary}\n\n- step one` } });
-const plans = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'plan').map((e: any) => JSON.parse(e.data));
-const results = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'plan_result').map((e: any) => JSON.parse(e.data));
+const plans = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: Ev) => e.kind === 'plan').map((e: Ev) => JSON.parse(e.data));
+const results = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: Ev) => e.kind === 'plan_result').map((e: Ev) => JSON.parse(e.data));
 
 test('a plan card is stored as pending, and the minion cannot approve it', async () => {
   const { id } = await propose('First plan');
@@ -76,11 +77,11 @@ test('Revise needs notes, sends them to the minion, and the next plan supersedes
 
   const second = await propose('Second plan');
   assert.deepEqual(
-    (await plans()).map((p: any) => p.status),
+    (await plans()).map((p: { status: string }) => p.status),
     ['superseded', 'pending'],
   );
   assert.deepEqual(
-    (await results()).map((r: any) => [r.id, r.status]),
+    (await results()).map((r: { id: number; status: string }) => [r.id, r.status]),
     [
       [id, 'revising'],
       [id, 'superseded'],
@@ -101,14 +102,14 @@ test('Approve sends the go once and records who and when', async () => {
   assert.equal(approved.status, 'approved');
   assert.equal(approved.by, 'Cara');
   assert.ok(approved.at >= t0);
-  const go = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').at(-1);
+  const go = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: Ev) => e.kind === 'user_message').at(-1);
   assert.deepEqual(JSON.parse(go.data).plan, { planId: id, verdict: 'approve' });
   await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'approve' } }), /409 Cara already approved this plan/);
   await idle(ticket.id);
   // An approved plan stays approved when a later one arrives.
   await propose('Third plan');
   assert.deepEqual(
-    (await plans()).map((p: any) => p.status),
+    (await plans()).map((p: { status: string }) => p.status),
     ['superseded', 'approved', 'pending'],
   );
 });
@@ -123,7 +124,7 @@ test("a dismissed minion's token stops working, except for its deploy report", a
 });
 
 test("dismissing a dismissed minion, or reopening one that isn't, changes nothing (#468 S07-3)", async () => {
-  const notes = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
+  const notes = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: Ev) => e.kind === 'note').map((e: Ev) => JSON.parse(e.data).text);
   const count = async (re: RegExp) => (await notes()).filter((t: string) => re.test(t)).length;
   assert.equal(await count(/dismissed this minion/), 1);
   assert.equal((await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'closed' } })).status, 'closed');

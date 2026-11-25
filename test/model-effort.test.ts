@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { turnSettings } from '../src/turn-launch.ts';
 import { bootServer, tempRoot, type Booted } from './helpers.ts';
+import type { ApiEvent } from './typed.ts';
 
 const repo = join(import.meta.dirname, '..');
 const tmp = tempRoot('model-effort-');
@@ -79,7 +80,7 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.equal((await call(`/api/tickets/${chore.data.id}`)).data.ticket.picked_because, 'set by Cara: Opus 5.5 high: fix did not hold twice');
   const picks = (await call(`/api/tickets/${chore.data.id}`)).data.picks;
   assert.deepEqual(
-    picks.map((x) => [x.model, x.effort, x.reason]),
+    picks.map((x: { model: string; effort: string; reason: string }) => [x.model, x.effort, x.reason]),
     [
       ['claude-sonnet-5-5', 'medium', 'chore → Sonnet 5.5 medium'],
       ['claude-opus-5-5', 'medium', 'set by Cara: Opus 5.5 medium'],
@@ -98,7 +99,7 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.equal(cleared.data.default_effort, '');
   assert.equal((await call(`/api/tickets/${plain.data.id}`)).data.ticket.default_effort, null);
 
-  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: ApiEvent) => JSON.parse(e.data).text);
   assert.ok(notes.includes("Cara set the scheme's default effort to medium. It applies from each minion's next turn."));
 
   // The scheme's machine tools switch is retired (#438): a machine's own list of schemes decides.
@@ -121,7 +122,7 @@ test("a minion's Workflow switch (#359): off by default, set at creation or late
   const tm = await call(`/api/tickets/${page.coordinator.id}`, { method: 'PATCH', body: { workflow: true } });
   assert.equal(tm.status, 400);
   assert.match(tm.data.error, /Only minions/);
-  const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: ApiEvent) => JSON.parse(e.data).text);
   // Its first turn may still be running, so the note says now or the next turn.
   assert.ok(
     notes.some((n: string) => /^Cara turned the Workflow tool on for this minion from (now on|the next turn)\.$/.test(n)),
@@ -152,18 +153,21 @@ test("a minion's plugin picks (#361): from the scheme's optional folders, at cre
   const tm = await call(`/api/tickets/${page.coordinator.id}`, { method: 'PATCH', body: { plugin_dirs: ['tools/plugins/devtools'] } });
   assert.equal(tm.status, 400);
   assert.match(tm.data.error, /Only minions/);
-  const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: ApiEvent) => JSON.parse(e.data).text);
   assert.ok(
     notes.some((n: string) => /^Cara set this minion's extra plugin folders to tools\/plugins\/lsp, tools\/plugins\/devtools from (now on|the next turn)\.$/.test(n)),
     notes.join('\n'),
   );
   assert.ok(notes.some((n: string) => /^Cara took this minion's extra plugin folders off/.test(n)));
-  const tmNotes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  const tmNotes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: ApiEvent) => JSON.parse(e.data).text);
   assert.ok(tmNotes.includes('Cara set the optional plugin folders to: tools/plugins/devtools, tools/plugins/lsp. Minions load them only when they pick them, from their next turn.'), tmNotes.join('\n'));
 });
 
+type ToolInfo = { name: string; inputSchema: { properties?: { model?: { enum: unknown[] } }; required: string[] } };
+type ToolResult = { isError?: boolean; content: { text: string }[]; tools: ToolInfo[] };
+
 test("the Taskmaster's create_ticket and update_ticket pass model and effort on", async () => {
-  const bodies: { method: string; path: string; body: any }[] = [];
+  const bodies: { method: string; path: string; body: { model?: string; effort?: string; workflow?: boolean; plugin_dirs?: string[] } | null }[] = [];
   const api = createHttpServer((req, res) => {
     let raw = '';
     req
@@ -190,14 +194,14 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const replies = new Map<number, (r: any) => void>();
+    const replies = new Map<number, (r: { id: number; result: ToolResult }) => void>();
     createInterface({ input: mcp.stdout! }).on('line', (l) => {
       const r = JSON.parse(l);
       replies.get(r.id)?.(r);
     });
     let rid = 0;
     const tool = (name: string, args: object) =>
-      new Promise<any>((r) => {
+      new Promise<ToolResult>((r) => {
         replies.set(++rid, (x) => r(x.result));
         mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
       });
@@ -212,10 +216,10 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
       bodies.map((b) => `${b.method} ${b.path}`),
       ['POST /api/projects/2/tickets', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40'],
     );
-    assert.equal(bodies[0].body.model, 'claude-haiku-5-5');
-    assert.equal(bodies[0].body.effort, 'low');
-    assert.equal(bodies[0].body.workflow, true);
-    assert.deepEqual(bodies[0].body.plugin_dirs, ['tools/plugins/devtools']);
+    assert.equal(bodies[0].body!.model, 'claude-haiku-5-5');
+    assert.equal(bodies[0].body!.effort, 'low');
+    assert.equal(bodies[0].body!.workflow, true);
+    assert.deepEqual(bodies[0].body!.plugin_dirs, ['tools/plugins/devtools']);
     assert.deepEqual(bodies[2].body, { effort: 'high' }, 'what is left out stays');
     assert.deepEqual(bodies[4].body, { workflow: false, plugin_dirs: [] }, 'false and [] are sent, not dropped');
   } finally {
@@ -234,7 +238,7 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const listed = new Promise<any>((resolve) =>
+    const listed = new Promise<ToolResult>((resolve) =>
       createInterface({ input: mcp.stdout! }).on('line', (l) => {
         const r = JSON.parse(l);
         if (r.id === 2) resolve(r.result);
@@ -242,13 +246,13 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
     );
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }) + '\n');
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
-    const withModel = (await listed).tools.filter((t: any) => t.inputSchema.properties?.model && t.name !== 'review_set'); // review_set's model is a critic's alias (opus, sonnet, haiku), not a ticket's model id
-    assert.ok(withModel.some((t: any) => t.name === 'create_ticket') && withModel.some((t: any) => t.name === 'update_ticket'), 'create_ticket and update_ticket take a model');
-    for (const t of withModel) assert.deepEqual(t.inputSchema.properties.model.enum, t.name === 'update_ticket' ? [...MODELS, null] : [...MODELS], `${t.name}'s model enum`);
+    const withModel = (await listed).tools.filter((t: ToolInfo) => t.inputSchema.properties?.model && t.name !== 'review_set'); // review_set's model is a critic's alias (opus, sonnet, haiku), not a ticket's model id
+    assert.ok(withModel.some((t: ToolInfo) => t.name === 'create_ticket') && withModel.some((t: ToolInfo) => t.name === 'update_ticket'), 'create_ticket and update_ticket take a model');
+    for (const t of withModel) assert.deepEqual(t.inputSchema.properties!.model!.enum, t.name === 'update_ticket' ? [...MODELS, null] : [...MODELS], `${t.name}'s model enum`);
     for (const name of ['create_ticket', 'schedule_minion']) {
-      const t = withModel.find((x: any) => x.name === name);
+      const t = withModel.find((x: ToolInfo) => x.name === name);
       assert.ok(
-        ['model', 'effort'].every((k) => t.inputSchema.required.includes(k)),
+        ['model', 'effort'].every((k) => t!.inputSchema.required.includes(k)),
         `${name} requires a model and effort`,
       );
     }

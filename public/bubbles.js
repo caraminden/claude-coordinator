@@ -1,4 +1,5 @@
 // What a person sent, drawn in the chat: the bubble, its images and files, a long message's clamp, a taken-back line.
+import { asSpeaker, authorKind } from './avatars.js';
 import { GITHUB_NAME, machineAuthor, senderTone } from './chattext.js';
 import { api, fileHref, formatSize, h, me, taskmasterName, view } from './base.js';
 import { askHeader } from './askcard.js';
@@ -168,7 +169,7 @@ export function showTakenBack(bubble, by, mine = true) {
 
 export function userBubble(author, text, imageSrcs, about = null, event = null, files = []) {
   const github = author === GITHUB_NAME;
-  const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author, about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''));
+  const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, asSpeaker(h('div', { class: 'who' }, author, about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''), authorKind(author), author));
   // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
   if (github && text) text = text.replace(/(^|\s)(https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]])/g, '$1[$2]($2)');
   if (text) msg.append(event ? messageBody(text, event.strikes, null, event.id) : markdown(text));
@@ -190,7 +191,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   // A contraption's ask: its header and summary, the full text behind the toggle (askcard.js).
   if (event?.ask) {
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user ask' }, h('summary', {}, h('div', { class: 'who' }, askHeader(event.ask)), h('div', { class: 'ask-summary' }, event.ask.summary)), msg);
+    return h('details', { class: 'msg user ask' }, h('summary', {}, asSpeaker(h('div', { class: 'who' }, askHeader(event.ask)), 'person', event.ask.person ?? author), h('div', { class: 'ask-summary' }, event.ask.summary)), msg);
   }
   // Messages between Claudes and from the app aren't meant for people, so they start collapsed to one line,
   // except the brief that started the minion: it says what the minion is for.
@@ -203,7 +204,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
     msg.className += tone;
   } else if (who) {
     msg.querySelector('.who').remove();
-    return h('details', { class: `msg user coord${tone}` }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, event?.schedule ? `${who}: ${event.schedule}` : who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
+    return h('details', { class: `msg user coord${tone}` }, h('summary', {}, asSpeaker(h('span', { class: 'who' }, h('span', { class: 'name' }, event?.schedule ? `${who}: ${event.schedule}` : who)), authorKind(author)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }
   return msg;
 }

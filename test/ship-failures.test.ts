@@ -29,6 +29,7 @@ test('a failed ship sums up as its kind, the first three names and "+N more", an
   assert.deepEqual(failureDetail(conflict, 1), { kind: 'merge conflict', names: ['src/a.ts', 'public/b.js'], more: 0, ci: null });
   assert.equal(failureDetail('land: smoke: src/x.ts fails its test, before the line (12 s), so nothing landed', 1).kind, 'smoke check');
   assert.equal(failureDetail('land: waiting for CI on abc', 75).kind, 'CI timeout');
+  assert.equal(failureDetail('land: CI and perigee both busy, try again: CI: no runner took it; perigee for 40 min: the heavy slot is taken. So main is untouched', 1).kind, 'CI timeout');
   assert.equal(failureDetail('land: main is now at abc "x"\ndeploy: boot check failed: /api/health never answered', 1).kind, 'deploy or boot');
   // #1487: red twice on a broken test, which passed alone each time; the fresh run red on another file that failed again alone is that file's.
   const broken = (again: string) =>

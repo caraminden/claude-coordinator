@@ -1760,6 +1760,8 @@ test("a CI job's runs are read again early only when main's new head is in its p
 test('landProgress: in line for the lock with its place, then landing', () => {
   const line = landProgress('…\nqueue: 2nd in line for the land lock, about 9 min (ahead: ticket/441-x, checked 10:02)\n', 5);
   assert.deepEqual(line, { stage: 'land', since: 5, usual: null, waitingOn: 'in line to ship (2nd)', text: 'in line to ship (2nd)', brief: '2nd' });
+  const told = landProgress('queue: 2nd in line for the land lock, about 9 min\nqueue: the wait has no time limit: run this in the background\n', 5);
+  assert.equal(told.brief, '2nd', 'a line about the wait is no place: still in line');
   const got = landProgress('queue: 2nd in line for the land lock, about 9 min\nqueue: got the land lock\n', 5);
   assert.deepEqual([got.waitingOn, got.text], [null, 'shipping: tests, then onto main']);
   assert.equal(landProgress('', 5).waitingOn, null, 'no queue lines yet: landing');

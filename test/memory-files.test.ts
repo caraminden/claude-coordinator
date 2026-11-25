@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deleteNote, indexNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags } from '../src/memory-files.ts';
+import { deleteNote, indexNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags, type MemoryFolder } from '../src/memory-files.ts';
+import { fake } from './typed.ts';
 
 test("memoryFolders maps a repo path to each login's projects/<slug>/memory, once per distinct dir", () => {
   const repo = '/home/cara/.local/share/claude-coordinator/projects/7/repo';
@@ -98,7 +99,7 @@ test('edit replaces a note whole and refuses one that is not there', () => {
 
 test('readFolder lists notes in index order with stale flags; a missing folder is not reachable', () => {
   const dir = setup();
-  const v = readFolder({ label: 'L', dir }, (n) => n === 5, Date.parse('2026-11-19T12:00:00-08:00'));
+  const v = readFolder(fake<MemoryFolder>({ label: 'L', dir }), (n) => n === 5, Date.parse('2026-11-19T12:00:00-08:00'));
   assert.deepEqual(
     v.notes.map((n) => [n.file, n.name, n.type]),
     [
@@ -107,7 +108,7 @@ test('readFolder lists notes in index order with stale flags; a missing folder i
     ],
   );
   assert.deepEqual(v.notes[0].flags, { closed: [5], datesPast: ['2020-01-01'], datesSoon: [] });
-  assert.equal(readFolder({ label: 'L', dir: join(dir, 'nope') }, () => false).reachable, false);
+  assert.equal(readFolder(fake<MemoryFolder>({ label: 'L', dir: join(dir, 'nope') }), () => false).reachable, false);
 });
 
 test('staleFlags: only dates after a recheck-style word, past or within 3 days', () => {
@@ -122,7 +123,7 @@ test('a note that is a symlink is neither listed, edited nor deleted', () => {
   writeFileSync(outside, 'secret');
   symlinkSync(outside, join(dir, 'link.md'));
   assert.equal(
-    readFolder({ label: 'L', dir }, () => false).notes.some((n) => n.file === 'link.md'),
+    readFolder(fake<MemoryFolder>({ label: 'L', dir }), () => false).notes.some((n) => n.file === 'link.md'),
     false,
   );
   assert.throws(() => saveNote(dir, 'link.md', 'x'), /No such note/);
@@ -134,19 +135,19 @@ test('an unreadable index still lists the notes; a past date in prose ("decided 
   const dir = setup();
   rmSync(join(dir, 'MEMORY.md'));
   mkdirSync(join(dir, 'MEMORY.md'));
-  assert.equal(readFolder({ label: 'L', dir }, () => false).notes.length, 2);
+  assert.equal(readFolder(fake<MemoryFolder>({ label: 'L', dir }), () => false).notes.length, 2);
   assert.deepEqual(staleFlags('Cara decided on 2026-11-10; set by Josh 2026-11-12', () => false, Date.parse('2026-11-19T12:00:00-08:00')).datesPast, []);
 });
 
 test('indexNote appends a linked line once, makes MEMORY.md when missing, and readFolder reports inIndex', () => {
   const dir = setup();
   writeFileSync(join(dir, 'c.md'), '---\nname: C [draft]\ndescription: third one\n---\nbody\n');
-  assert.equal(readFolder({ label: 'x', dir, id: 'i', rel: 'r' }, () => false).notes.find((n) => n.file === 'c.md')!.inIndex, false);
+  assert.equal(readFolder(fake<MemoryFolder>({ label: 'x', dir, id: 'i', rel: 'r' }), () => false).notes.find((n) => n.file === 'c.md')!.inIndex, false);
   assert.equal(indexNote(dir, 'c.md'), true);
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A note](a.md) — first\n- [B](b.md) — second\n- [C  draft ](c.md) — third one\n');
   assert.equal(indexNote(dir, 'c.md'), false, 'a second add leaves the index alone');
   assert.equal(
-    readFolder({ label: 'x', dir, id: 'i', rel: 'r' }, () => false).notes.every((n) => n.inIndex),
+    readFolder(fake<MemoryFolder>({ label: 'x', dir, id: 'i', rel: 'r' }), () => false).notes.every((n) => n.inIndex),
     true,
   );
   rmSync(join(dir, 'MEMORY.md'));
@@ -160,7 +161,7 @@ test('indexNote appends a linked line once, makes MEMORY.md when missing, and re
   writeFileSync(join(dir, 'MEMORY.md'), lines(200));
   assert.throws(
     () => indexNote(dir, 'a.md'),
-    (e: any) => e.status === 409 && /full/.test(e.message),
+    (e: Error & { status: number }) => e.status === 409 && /full/.test(e.message),
   );
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), lines(200));
 });
@@ -174,7 +175,7 @@ test('a note counts as listed when MEMORY.md links it by [[name]] or through a n
   writeFileSync(join(dir, 'two-hops.md'), '---\nname: two-hops\n---\nonly deep-note links it: two hops is too far\n');
   writeFileSync(join(dir, 'orphan.md'), '---\nname: orphan\n---\nnothing links it\n');
   writeFileSync(join(dir, 'MEMORY.md'), '- [Topics](topic-index.md) — every note by topic\n- see [[named]]\n');
-  const listed = Object.fromEntries(readFolder({ label: 'x', dir }, () => false).notes.map((n) => [n.file, n.inIndex]));
+  const listed = Object.fromEntries(readFolder(fake<MemoryFolder>({ label: 'x', dir }), () => false).notes.map((n) => [n.file, n.inIndex]));
   assert.deepEqual(listed, { 'topic-index.md': true, 'named.md': true, 'deep-note.md': true, 'by-stem.md': true, 'two-hops.md': false, 'orphan.md': false });
   rmSync(dir, { recursive: true, force: true });
 });

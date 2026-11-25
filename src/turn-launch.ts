@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { PoolSpec } from './pool-client.mjs';
 import { linkTree, pinSparesAt, takeSpare } from './pin-spares.ts';
+import { thrown } from './thrown.ts';
 import { cp, rm } from 'node:fs/promises';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
 import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
@@ -31,8 +32,8 @@ export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err: any) {
-    return err.code === 'EPERM';
+  } catch (err) {
+    return thrown(err).code === 'EPERM';
   }
 }
 
@@ -560,9 +561,17 @@ export interface EveryScheme {
 const envDenies = (folders: string[]) => folders.flatMap((d) => [`Read(/${d}/**/.env)`, `Read(/${d}/**/.env.*)`]);
 
 /**
+ * The one `node` command a Taskmaster may run: citadel:briefing and citadel:subagents run kit/model-tiers.ts when
+ * they load, and a refused `!` command fails the whole skill (#1979). Exact rules, each path as Claude Code fills it
+ * in (`..` and all; tried in real runs), so no other script or argument matches. Each part of a chain still needs its own rule.
+ */
+const modelTierRules = (kit: string) => ['briefing', 'subagents'].map((skill) => `Bash(node "${kit}/skills/${skill}/../../model-tiers.ts")`);
+
+/**
  * How the coordinator may look at the project's code: its main checkout and every ticket folder,
  * readable but not writable. Bash runs only read-only commands (READ_ONLY_COMMANDS), on those folders,
  * readDirs and the box-health files: Claude Code still refuses a read command's path outside them.
+ * Given the turn's kit, it also runs the model table's script (modelTierRules).
  * `git -C <dir> <read-only command>` is allowed per folder; each rule pins the exact folder as a prefix,
  * since `*` in a rule would also match `git -C x commit -m "fix log"`. Anything else that would ask
  * for approval is denied (test/coordinator-access.test.ts replays the calls that used to be).
@@ -580,6 +589,7 @@ export function coordinatorAccess(
   readDirs: string[] = [],
   everyScheme: EveryScheme | null = null,
   openTickets: string[] | null = null,
+  kit: string | null = null,
 ): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   const subdirs = (dir: string) => {
     try {
@@ -616,6 +626,7 @@ export function coordinatorAccess(
             .concat(HEALTH_FILES)
             .map((p) => `Read(/${p})`),
           ...READ_ONLY_COMMANDS,
+          ...(kit ? modelTierRules(kit) : []),
           ...readGit.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
           ...(repoDir ? GIT_FETCH.map((c) => `Bash(git -C ${repoDir} ${c})`) : []),
         ],
@@ -845,7 +856,17 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
-    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? (facts.everyScheme ?? null) : null, facts.folders.openTickets ?? null);
+    const access = coordinatorAccess(
+      project.repo_dir,
+      facts.folders.tickets,
+      sharedDir,
+      memoryDir,
+      project.id === GLOBAL_OWNER ? CHECKOUT : null,
+      [facts.folders.data, join(homedir(), '.local/share/mise/installs')],
+      project.id === GLOBAL_OWNER ? (facts.everyScheme ?? null) : null,
+      facts.folders.openTickets ?? null,
+      kit,
+    );
     addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
     const { permissions, ...rest } = access.settings;
     Object.assign(settings, rest);

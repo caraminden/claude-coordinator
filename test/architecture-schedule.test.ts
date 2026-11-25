@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { ScheduledRuns } from '../src/schedules.ts';
+import { ScheduledRuns, type ScheduledRunDeps } from '../src/schedules.ts';
 import { addArchitectureCheck, addArchitectureChecks } from '../src/standard-audits.ts';
+import type { Runner } from '../src/runner.ts';
+import { fake } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'architecture-'));
 after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own temp dir
@@ -44,15 +46,15 @@ test('an inactive scheme skips at no cost; an active one runs', async () => {
     store,
     by: 'Citadel',
     dataDir: '/data',
-    held: undefined as any,
+    held: undefined,
     broadcast: () => {},
     newMinion: async (project, m, by) => {
       made.push(`${project.name}:${m.title}`);
       const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
       return { id: t.id, number: t.number! };
     },
-    runner: { emit() {}, send() {}, limitWait: () => null, netWait: () => null, killWait: () => null } as any,
-  } as any);
+    runner: fake<ScheduledRunDeps['runner']>({ emit: fake<Runner['emit']>(() => {}), send: fake<Runner['send']>(() => {}), limitWait: () => null, netWait: () => null, killWait: () => null }),
+  });
   addArchitectureChecks(store, '/data');
   // The window opens at the row's making: put that a day back so minions made in the same millisecond still count.
   store.db.prepare('UPDATE schedules SET created_at = created_at - 86400000').run();

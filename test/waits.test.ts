@@ -7,6 +7,8 @@ import type { Ship } from '../src/branch.ts';
 import { earlyCi } from '../src/land-news.ts';
 import { flockedInodes, landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
 import { tempRoot } from './helpers.ts';
+import type { CiRuns } from '../src/ci-wait.ts';
+import { fake } from './typed.ts';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
 const tmp = tempRoot('waits-');
@@ -265,7 +267,7 @@ test('every poll hands the land line to the land alarm (#561): each landing by i
   const views = new Map<number, string>();
   const a = minion(),
     b = minion();
-  const ci = { view: (id: number) => (views.has(id) ? { stage: views.get(id), short: 'step 3/8', text: 'test-linux step 3 of 8', since: now, what: '', usual: null } : null), runOf: (id: number) => (views.has(id) ? 4308 : null), landings: () => {} } as any;
+  const ci = fake<CiRuns>({ view: (id: number) => (views.has(id) ? { stage: views.get(id)!, short: 'step 3/8', text: 'test-linux step 3 of 8', since: now, what: '', usual: null } : null), runOf: (id: number) => (views.has(id) ? 4308 : null), landings: () => {} });
   const waits = new Waits({
     store,
     deployState: state,
@@ -423,6 +425,9 @@ test('landPhase names each phase land.sh writes: starting, boot check, rebase, C
     ['testing the train again without its likely causes', 'test', 'bisect', 'Bisect'],
     ['running the red tests alone here: each likely ship by itself on main, 2 left at 14:02', 'test', 'bisect', 'Bisect'],
     ['finding the ship that turned the train red', 'test', 'bisect', 'Bisect'],
+    ['running the red tests alone on main since 14:05', 'test', 'bisect', 'Bisect'],
+    ['running the red tests alone on the train since 14:05, 5 min so far', 'test', 'bisect', 'Bisect'],
+    ['running the guard tests on the train since 14:05, 5 min so far', 'test', 'check', 'Check'],
     ['running the tests since 14:20', 'test', 'tests', 'Tests on perigee'],
     ['rerunning 2 failed test files since 14:25', 'test', 'reruns', 'Reruns'],
     ['deploying', 'deploy', 'deploy', 'Deploy'],

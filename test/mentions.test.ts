@@ -43,7 +43,7 @@ test("a mention is in its person's Needs you and counts, whoever the minion is a
 
   const items = inboxItems(store, approvals, p, 'Josh').filter((i) => i.kind === 'mention');
   assert.deepEqual(
-    items.map((i) => [i.ticketId, i.eventId, (i.card as any).by]),
+    items.map((i) => [i.ticketId, i.eventId, (i.card as { by: string }).by]),
     [[t, e.id, 'Cara']],
     "a dismissed minion's is gone",
   );
@@ -66,7 +66,7 @@ test("a mention is in its person's Needs you and counts, whoever the minion is a
   );
   clearMentions(store, 'Josh', t);
   assert.deepEqual(
-    store.getSetting<unknown[]>('mentions:josh')!.map((m: any) => m.ticketId),
+    store.getSetting<unknown[]>('mentions:josh')!.map((m) => (m as { ticketId: number }).ticketId),
     [gone],
   );
 

@@ -6,10 +6,12 @@ import { generateKeyPairSync } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, request, type IncomingMessage } from 'node:http';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Fcm, fcmMessage, parsePush } from '../src/fcm.ts';
 import { HttpError } from '../src/http.ts';
 import { bootServer, tempRoot, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 
 const tmp = tempRoot('fcm-');
 const root = tmp.dir;
@@ -40,11 +42,25 @@ test('the FCM message is data-only: the app data, then citadel_* keys, all strin
   assert.deepEqual(fcmMessage('mandate', 't', parsePush('mandate', { to: 'cara', data: { sync: '1' } }).send).message.data, { sync: '1', citadel_app: 'mandate' });
 });
 
+test('the open path rule agrees with the shell, case by case (push-open-cases.txt)', () => {
+  const file = new URL('../kit/android-shell/android/src/test/resources/push-open-cases.txt', import.meta.url);
+  const cases = readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((l) => l && !l.startsWith('#'));
+  assert.ok(cases.length > 20, `${cases.length} cases`);
+  for (const line of cases) {
+    const open = line.slice(3).replaceAll('<TAB>', '\t');
+    const send = () => parsePush('voice', { to: 'cara', title: 'x', open });
+    if (line.startsWith('ok ')) assert.equal(send().send.open, open, line);
+    else assert.throws(send, /open must be a path under/, line);
+  }
+});
+
 test('the send body is checked: recipients, lengths, the open path and data keys', () => {
   const bad = (b: unknown, re: RegExp) =>
     assert.throws(
       () => parsePush('mandate', b),
-      (e: any) => e instanceof HttpError && e.status === 400 && re.test(e.message),
+      (e: unknown) => e instanceof HttpError && e.status === 400 && re.test(e.message),
       JSON.stringify(b),
     );
   bad({ title: 'x' }, /to/);
@@ -71,7 +87,7 @@ test('the send body is checked: recipients, lengths, the open path and data keys
 });
 
 test('the access token is cached until a minute before it ends, and a dead token says so', async () => {
-  const calls: { url: string; body: any; auth?: string }[] = [];
+  const calls: { url: string; body: Record<string, string>; auth?: string }[] = [];
   let now = 1_000_000;
   let answer: { status: number; body: unknown } = { status: 200, body: { name: 'projects/proj-1/messages/1' } };
   const fakeFetch = (async (url: string, init: RequestInit) => {
@@ -118,7 +134,7 @@ test('with no key file, Fcm says where it goes', () => {
   const fcm = new Fcm(join(root, 'none', 'fcm-service-account.json'), { fetch: (() => assert.fail('no fetch')) as typeof fetch });
   assert.throws(
     () => fcm.account(),
-    (e: any) => e.status === 503 && e.message.includes(join(root, 'none', 'fcm-service-account.json')),
+    (e: unknown) => (e as HttpError).status === 503 && (e as HttpError).message.includes(join(root, 'none', 'fcm-service-account.json')),
   );
 });
 
@@ -132,7 +148,7 @@ let port = 0;
 let key = '';
 let cara = 0;
 
-const sent: any[] = [];
+const sent: ReturnType<typeof fcmMessage>[] = [];
 let tokenCalls = 0;
 /** What the stub Firebase answers a send to each token, by default 200. */
 const fcmAnswers = new Map<string, { status: number; body: unknown }>();
@@ -154,7 +170,7 @@ const google = createServer((req: IncomingMessage, res) => {
   });
 });
 
-type Got = { status: number; body: any };
+type Got = { status: number; body: unknown };
 function ask(host: string, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<Got> {
   const data = body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
   return new Promise((resolve, reject) => {
@@ -164,7 +180,7 @@ function ask(host: string, method: string, path: string, headers: Record<string,
       let text = '';
       res.on('data', (d) => (text += d));
       res.on('end', () => {
-        let parsed: any = text;
+        let parsed: unknown = text;
         try {
           parsed = JSON.parse(text);
         } catch {}
@@ -236,6 +252,7 @@ test("a phone registers on the app host or on Citadel's, and only for a signed-i
 
   // Forgotten, it gets nothing.
   assert.equal((await ask(APP, 'DELETE', reg, app, { token: 'phone-2' })).status, 204);
+  assert.equal((await ask(APP, 'DELETE', reg, { ...app, Origin: 'http://evil.test' }, { token: 'phone-1' })).status, 403, 'cross-origin');
   sent.length = 0;
   assert.deepEqual((await pushApi({ to: 'cara', data: { s: '1' } })).body, { devices: 1, sent: 1, dropped: 0, skipped: [] });
   assert.deepEqual(
@@ -252,6 +269,30 @@ test('re-registering a token moves it to the person and app now signed in', asyn
   sent.length = 0;
   assert.deepEqual((await pushApi({ to: 'cara', title: 'x' })).body, { devices: 0, sent: 0, dropped: 0, skipped: [] }, 'stub no longer reaches phone-1');
   assert.equal(sent.length, 0);
+});
+
+test("a DELETE forgets the phone by its token, signed out or as another person, so a login change ends the old one's push", async () => {
+  const app = await appCookie();
+  const reg = '/apps/_citadel/push/stub';
+  const devices = async () => ((await pushApi({ to: 'cara', data: { s: '1' } })).body as { devices: number }).devices;
+  assert.equal(await devices(), 0);
+  // Signed out: no session to name the owner, and the token is the proof.
+  assert.equal((await ask(APP, 'POST', reg, app, { token: 'shared', platform: 'android' })).status, 204);
+  assert.equal(await devices(), 1);
+  assert.equal((await ask(APP, 'DELETE', reg, {}, { token: 'someone-elses' })).status, 204, 'an unknown token answers the same');
+  assert.equal(await devices(), 1);
+  assert.equal((await ask(APP, 'DELETE', reg, {}, { token: 'shared' })).status, 204);
+  assert.equal(await devices(), 0);
+  // Registered to Olive, dropped from Cara's login: what the phone sends when someone else signed in on it.
+  assert.equal((await ask(APP, 'POST', reg, app, { token: 'olives', platform: 'android' })).status, 204);
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
+  try {
+    db.prepare("UPDATE contraption_push_devices SET user_id = (SELECT id FROM users WHERE login = 'olive') WHERE token = 'olives'").run();
+    assert.equal((await ask(APP, 'DELETE', reg, app, { token: 'olives' })).status, 204);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM contraption_push_devices WHERE token = 'olives'").get()!.n, 0);
+  } finally {
+    db.close();
+  }
 });
 
 test('the send API: dead tokens are dropped, other failures kept, a bad body is 400, a bad key 401', async () => {
@@ -273,7 +314,7 @@ test('without the key file the send API answers 503 naming where it goes', async
     const k = readFileSync(join(made.data.keys_dir, 'contraption.key'), 'utf8');
     const res = await fetch(`${bare.base}/api/contraptions/push`, { method: 'POST', headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ to: 'cara', title: 'x' }) });
     assert.equal(res.status, 503);
-    assert.ok((await res.json()).error.includes(join(root, 'bare-home', '.config/citadel-android/fcm-service-account.json')));
+    assert.ok((await json<{ error: string }>(res)).error.includes(join(root, 'bare-home', '.config/citadel-android/fcm-service-account.json')));
   } finally {
     await bare.stop();
   }

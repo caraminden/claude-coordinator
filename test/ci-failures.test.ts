@@ -43,6 +43,7 @@ const answers: Record<string, unknown> = {
   'api repos/o/r/actions/runs/2': run(2, 'success'),
   'api repos/o/r/actions/runs/2/jobs?per_page=100': jobs('success'),
   'api repos/o/r/actions/runs?per_page=20': { workflow_runs: [run(2, 'success'), run(1, 'failure')] },
+  ...Object.fromEntries(['', 'land/', 'early/', 'check/'].map((p) => [`api repos/o/r/actions/runs?per_page=5&branch=${encodeURIComponent(`${p}ticket/7-x`)}`, { workflow_runs: p === 'check/' ? [run(2, 'success', 'check/ticket/7-x')] : [] }])),
   'api repos/o/r/actions/runs/1/jobs': jobs('failure'),
   'api repos/o/r/actions/runs/2/jobs': jobs('success'),
 };
@@ -114,6 +115,14 @@ test('a green run is one line', () => {
   const r = ci('2');
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '✔ run 2 success · tests · land/ticket/628-releases-page-feedback a972a3d1 · Nov 12 23:45 PST · queued 2s, ran 1m17s · https://github.com/o/r/actions/runs/2\n');
+});
+
+test("a branch finds its ship's own-check run (SE7)", () => {
+  for (const b of ['ticket/7-x', 'check/ticket/7-x']) {
+    const r = ci(b);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^✔ run 2 success/);
+  }
 });
 
 test('--list: one line a run, with queued and run times', () => {

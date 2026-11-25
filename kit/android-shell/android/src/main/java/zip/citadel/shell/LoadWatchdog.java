@@ -28,6 +28,7 @@ public final class LoadWatchdog {
     private final Runnable giveUp;
     private final Runnable fire = this::fire;
     private boolean armed;
+    private boolean shown;
 
     /** {@code giveUp} runs on the timer's thread when a load showed nothing in time. */
     public LoadWatchdog(Timer timer, Runnable giveUp) {
@@ -44,7 +45,16 @@ public final class LoadWatchdog {
 
     /** The page painted something, finished, or failed (Capacitor then shows the offline page itself). */
     public void settled() {
+        shown = true;
         disarm();
+    }
+
+    /**
+     * The load ended without a page of its own (it was a download, or opened outside the app). The page on screen stays,
+     * so there is nothing to wait for; with none yet (the first load), the offline page is still due.
+     */
+    public void leftAsIs() {
+        if (shown) disarm();
     }
 
     public boolean armed() {

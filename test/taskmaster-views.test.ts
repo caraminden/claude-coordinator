@@ -9,6 +9,7 @@ import { Store } from '../src/db.ts';
 import { mergedPage, mergedAfter } from '../src/history.ts';
 import { inMerged, inMine, mergedView } from '../public/mine.js';
 import { bootServer, PASSWORD, SECRET } from './helpers.ts';
+import { json } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'tm-views-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -114,7 +115,7 @@ test('the front end merges only when the scheme has split: Mine takes your chat 
   assert.equal(mergedView(9, 4, tms, 'mine'), null, "a chat that isn't a Taskmaster of this scheme: plain");
   const mine = mergedView(9, 1, tms, 'mine');
   assert.deepEqual(
-    mine.parts.map((p) => [p.id, p.label, p.mine]),
+    mine!.parts.map((p) => [p.id, p.label, p.mine]),
     [
       [1, undefined, false],
       [3, 'Overlord', true],
@@ -122,16 +123,16 @@ test('the front end merges only when the scheme has split: Mine takes your chat 
   );
   const notYet = mergedView(9, 3, tms, 'mine');
   assert.deepEqual(
-    notYet.parts.map((p) => [p.id, p.mine]),
+    notYet!.parts.map((p) => [p.id, p.mine]),
     [[3, true]],
     "no Taskmaster of your own yet: Mine is the Overlord's for-everyone items, not its whole chat",
   );
   assert.ok(!inMerged(notYet, { ticket_id: 3, kind: 'claude', data: '{}' }) && inMerged(notYet, { ticket_id: 3, kind: 'note', data: '{"everyone":true}' }));
-  assert.ok(!mergedView(9, 3, tms, 'everyone').parts[0].mine);
-  assert.equal(mine.src, 'api/projects/9/taskmaster-events?view=mine');
+  assert.ok(!mergedView(9, 3, tms, 'everyone')!.parts[0].mine);
+  assert.equal(mine!.src, 'api/projects/9/taskmaster-events?view=mine');
   const all = mergedView(9, 1, tms, 'everyone');
   assert.deepEqual(
-    all.parts.map((p) => [p.id, p.label, p.mine]),
+    all!.parts.map((p) => [p.id, p.label, p.mine]),
     [
       [1, undefined, false],
       [2, "Alex's Taskmaster", false],
@@ -167,30 +168,30 @@ test("through the server: each person opens their own Taskmaster, Mine adds the 
   const srv = await bootServer({ root: dir });
   try {
     const cookie = new Auth(PASSWORD, SECRET).issueCookie(Alex, false).split(';')[0];
-    const get = async (path: string) => (await fetch(srv.base + path, { headers: { Cookie: cookie } })).json() as Promise<any>;
-    const scheme = await get(`/api/projects/${p.id}`);
+    const get = async <T>(path: string) => json<T>(await fetch(srv.base + path, { headers: { Cookie: cookie } }));
+    const scheme = await get<{ coordinator: { id: number }; taskmasters: { id: number; person_name: string | null }[] }>(`/api/projects/${p.id}`);
     assert.equal(scheme.coordinator.id, alexTm.id, 'the scheme opens on your own Taskmaster');
     assert.deepEqual(
-      scheme.taskmasters.map((t: any) => [t.id, t.person_name]),
+      scheme.taskmasters.map((t) => [t.id, t.person_name]),
       [
         [first.id, 'Cara'],
         [ovl.id, null],
         [alexTm.id, 'Alex'],
       ],
     );
-    const evs = async (q: string) => (await get(`/api/projects/${p.id}/taskmaster-events?${q}`)).events.map((e: any) => e.id);
+    const evs = async (q: string) => (await get<{ events: { id: number }[] }>(`/api/projects/${p.id}/taskmaster-events?${q}`)).events.map((e) => e.id);
     assert.deepEqual(await evs('view=mine'), [alex, alert], "Mine: yours and the Overlord's alert, not its work nor Cara's chat");
     assert.deepEqual(await evs('view=everyone'), [cara, alex, work, alert]);
     assert.deepEqual(await evs(`view=everyone&before=${work}`), [cara, alex], 'one id cursor pages them all');
     assert.deepEqual(
-      (await get(`/api/projects/${p.id}/taskmaster-events?view=mine&after=${alex}`)).map((e: any) => e.id),
+      (await get<{ id: number }[]>(`/api/projects/${p.id}/taskmaster-events?view=mine&after=${alex}`)).map((e) => e.id),
       [alert],
     );
     // Rachel hasn't written yet, so she has no Taskmaster of her own: the Overlord's work stays out of her Mine.
     const rachel = new Auth(PASSWORD, SECRET).issueCookie(Rachel, false).split(';')[0];
-    const hers = (await (await fetch(`${srv.base}/api/projects/${p.id}/taskmaster-events?view=mine`, { headers: { Cookie: rachel } })).json()) as any;
+    const hers = await json<{ events: { id: number }[] }>(await fetch(`${srv.base}/api/projects/${p.id}/taskmaster-events?view=mine`, { headers: { Cookie: rachel } }));
     assert.deepEqual(
-      hers.events.map((e: any) => e.id),
+      hers.events.map((e) => e.id),
       [alert],
     );
   } finally {

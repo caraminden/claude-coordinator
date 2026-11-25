@@ -20,7 +20,7 @@ on:
 # One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
 # threads) failed in a different file every run. Landings come one at a time anyway. Any other run (the nightly, or one
 # started by hand) has a group of its own: a run waiting in a group cancels the one waiting before it, which would be a
-# landing's. It asks Citadel first and waits off the runner while a ship is in line (below, #1902), and yields the CPU to
+# landing's. It asks Citadel first and waits off the runner while a ship is in line or another Citadel job runs (below, #1902, #1906), and yields the CPU to
 # one that starts while it runs. A ship's own
 # check (check/**) is one at a time in a group of its own: at most one of them beside a land's run (Cara, 2026-11-22,
 # "Gated, after C and B": one extra runner, used only when free). The early next train's run (early/**, #1568) has a group
@@ -52,10 +52,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26 # perigee's
-      # Deploys first (#1902): a run that isn't a ship's (the nightly, one started by hand) waits off the runner. While a ship is in line it is
-      # stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
+      # Deploys first (#1902), one job at a time (#1906): a run that isn't a ship's in line waits off the runner: the nightly, one started by
+      # hand, a ship's own check, the early next train. While a ship or another Citadel job goes first it is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
       - name: ask Citadel whether ships go first
-        if: ${{ !startsWith(github.ref, 'refs/heads/land/') && !startsWith(github.ref, 'refs/heads/check/') && !startsWith(github.ref, 'refs/heads/early/') }}
+        if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}
         run: node tools/ci-hold-ask.ts
       # fast-check, the property tests' library (#1657, ADR 0029): Citadel's one devDependency, from the lockfile, no install scripts.
       - name: devDependencies for the tests

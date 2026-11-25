@@ -8,6 +8,10 @@ import { Store } from '../src/db.ts';
 import type { Embed } from '../src/memory.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { agentToken, bootServer, SECRET, tempRoot, until } from './helpers.ts';
+import { json } from './typed.ts';
+
+/** The parts of a memory search's answer these tests read. */
+type Found = { hits: { ticket_id: number; source_kind: string; status: string }[] };
 import { agentEnv, mcpAgent, mcpOnce } from './mcp-agent.ts';
 
 const tmp = tempRoot('memory-');
@@ -298,7 +302,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
   // No CITADEL_MEMORY_SCHEMES: every scheme is indexed (#488).
   const srv = await bootServer({ root: boot, env: { CITADEL_EMBED_URL: embedUrl, CITADEL_MEMORY_SCHEMES: undefined, CITADEL_MEMORY_EVERY_MS: '100' } });
   try {
-    const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }, more = '') => fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}${more}`, { headers }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }, more = '') => fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}${more}`, { headers }).then(async (r) => ({ status: r.status, data: await json<Found>(r) }));
     let r = await search(A.id, 'dentist reminders');
     await until(
       'the index to hold the minion',
@@ -311,17 +315,17 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     );
     assert.equal(r.status, 200);
     assert.ok(r.data.hits.length > 0);
-    assert.ok(r.data.hits.every((h: any) => h.ticket_id !== b1.id));
+    assert.ok(r.data.hits.every((h) => h.ticket_id !== b1.id));
 
     const bearer = (id: number) => ({ Authorization: `Bearer ${agentToken(data, id)}` });
     assert.equal((await search(A.id, 'dentist', bearer(a1.id))).status, 200, 'a minion searches its own scheme');
     assert.equal((await search(A.id, 'dentist', bearer(b1.id))).status, 403, "but not another scheme's");
-    assert.ok((await search(B.id, 'dentist', bearer(b1.id))).data.hits.every((h: any) => h.ticket_id === b1.id));
+    assert.ok((await search(B.id, 'dentist', bearer(b1.id))).data.hits.every((h) => h.ticket_id === b1.id));
     assert.equal((await search(A.id, 'x')).status, 400, 'too short to search');
 
     // The minion's MCP tool: listed only where memory is on, and answered through the route.
     const mcp = async (memory: boolean, method: string, params: object = {}) => mcpOnce(agentEnv(srv.base, agentToken(data, a1.id), a1, 'thread', { COORDINATOR_MEMORY: memory ? '1' : '' }), method, params, tmp.track);
-    const names = async (memory: boolean) => (await mcp(memory, 'tools/list')).tools.map((t: any) => t.name);
+    const names = async (memory: boolean) => (await mcp(memory, 'tools/list')).tools.map((t: { name: string }) => t.name);
     assert.ok((await names(true)).includes('search_memory'));
     assert.ok(!(await names(false)).includes('search_memory'));
     const text = (await mcp(true, 'tools/call', { name: 'search_memory', arguments: { query: 'dentist reminders' } })).content[0].text;
@@ -335,7 +339,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     // Open minions only, titles and notes only: the duplicate check's scope (#488).
     const minions = (await search(A.id, 'dentist reminders usage bar', undefined, '&scope=minions')).data.hits;
     assert.deepEqual(
-      minions.map((h: any) => [h.source_kind, h.ticket_id, h.status]),
+      minions.map((h) => [h.source_kind, h.ticket_id, h.status]),
       [['ticket', a1.id, 'new']],
       'no turns, and not the dismissed Usage bar',
     );
@@ -359,7 +363,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     // A person's start (#689): never refused, and a quiet note in the new minion's chat names the look-alike with its owner.
     const started = await fetch(`${srv.base}/api/projects/${A.id}/tickets`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: srv.cookie }, body: JSON.stringify({ title: 'Dentist reminders', message: 'Remind people about the dentist' }) });
     assert.equal(started.status, 201);
-    const { id: newId } = await started.json();
+    const { id: newId } = await json<{ id: number }>(started);
     const look = new Store(join(data, 'coordinator.db'));
     const noteOf = (id: number) => (look.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'note' AND data LIKE '%Similar and open%'").get(id) as { data: string } | undefined)?.data;
     let note = noteOf(newId);
@@ -370,7 +374,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
 
     // The embed route (#488): a contraption's own server, with its key, gets the model's vectors.
     const embedCall = (body: unknown, headers: Record<string, string> = { Authorization: `Bearer ${appKey}` }) =>
-      fetch(`${srv.base}/api/contraptions/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
+      fetch(`${srv.base}/api/contraptions/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await json<{ model: string; vectors: number[][] }>(r) }));
     const got = await embedCall({ texts: ['dentist on tuesday', 'usage bar'] });
     assert.equal(got.status, 200);
     assert.equal(got.data.model, 'Qwen3-Embedding-0.6B-Q8_0');
@@ -420,7 +424,7 @@ test('indexing finds new messages through events_asks, not a seek into every min
   turn(store, t.id, 'cara', 'question', 'answer');
   const seen: string[] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => {
+  store.db.prepare = ((sql: string, ...r: []) => {
     seen.push(sql);
     return prepare(sql, ...r);
   }) as typeof store.db.prepare;
@@ -449,7 +453,7 @@ test('indexing sorts message ids, never message text', async () => {
   for (let i = 0; i < 5; i++) turn(store, t.id, 'cara', `question ${i}`, `answer ${i}`);
   const seen: string[] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => {
+  store.db.prepare = ((sql: string, ...r: []) => {
     seen.push(sql);
     return prepare(sql, ...r);
   }) as typeof store.db.prepare;

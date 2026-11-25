@@ -29,6 +29,9 @@ import com.google.firebase.messaging.FirebaseMessaging;
 @CapacitorPlugin(name = Shell.PLUGIN, permissions = @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS }))
 public class ShellPlugin extends Plugin {
 
+    /** Prefs: the ids of the pushes whose taps opened their page. */
+    private static final String OPENED = "push_opened";
+
     private WatchdogListener watchdog;
     private UpdateCheck updates;
     private String origin;
@@ -42,7 +45,9 @@ public class ShellPlugin extends Plugin {
         self = Links.selfPath(page);
         String citadel = Links.citadelHost(Uri.parse(bridge.getAppUrl()).getHost(), getConfig().getString("citadelHost"));
         watchdog = new WatchdogListener(bridge);
-        bridge.setWebViewClient(new ShellWebViewClient(bridge, watchdog, self, citadel));
+        bridge.setWebViewClient(new ShellWebViewClient(bridge, watchdog, self, citadel, url -> checkPushOwner(url, citadel)));
+        // A download is a load that never shows a page: without this it would end on the offline page. It saves nothing.
+        bridge.getWebView().setDownloadListener((url, agent, disposition, type, length) -> watchdog.leftAsIs());
         watchdog.watchFirstLoad();
 
         String feed = feed();
@@ -82,6 +87,11 @@ public class ShellPlugin extends Plugin {
         String open = intent.getStringExtra(ShellMessagingService.EXTRA_OPEN);
         if (open == null) return;
         intent.removeExtra(ShellMessagingService.EXTRA_OPEN);
+        // Android hands this intent back when the app is reopened from Recents or after its process died (removeExtra
+        // changes this copy alone): a push opens its page once.
+        String seen = OpenedPushes.use(Shell.prefs(getContext()).getString(OPENED, null), intent.getStringExtra(ShellMessagingService.EXTRA_ID));
+        if (seen == null) return;
+        Shell.prefs(getContext()).edit().putString(OPENED, seen).apply();
         // The launcher activity is exported, so the extra could come from another app: only a page that passes the
         // push path check (under the app's own path, no dot segments) loads, never one it would have rewritten.
         if (origin == null || self == null || !open.startsWith(origin)) return;
@@ -133,7 +143,19 @@ public class ShellPlugin extends Plugin {
     private void refreshToken() {
         Context context = getContext();
         if (FirebaseApp.getApps(context).isEmpty()) return;
-        FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token -> new Thread(() -> Registration.register(context, token), "citadel-shell-push").start());
+        FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token -> new Thread(() -> Registration.refresh(context, token), "citadel-shell-push").start());
+    }
+
+    /** A page finished loading: if the person signed in has changed, or a turn-off never reached Citadel, tell it now. */
+    private void checkPushOwner(String url, String citadel) {
+        boolean signInPage = Links.isSignIn(url, citadel, self);
+        if (!signInPage && (origin == null || !origin.equals(Links.origin(url)))) return;
+        Context context = getContext();
+        switch (Registration.owed(context, signInPage)) {
+            case REGISTER -> refreshToken();
+            case UNREGISTER -> new Thread(() -> Registration.unregisterIfOwed(context, signInPage), "citadel-shell-push").start();
+            case NONE -> {}
+        }
     }
 
     @PluginMethod

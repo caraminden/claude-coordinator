@@ -131,7 +131,7 @@ test("a ship's own check runs only on the check runner, in its own group, and ke
 
 // The early next train's run (#1568; Cara, 2026-11-22, "Low-priority run on a ship runner"): early/<branch> runs beside the
 // train ahead's, so it has a group per branch (the lands' one-at-a-time group would hold it until that run ends), takes a
-// ship runner before the hosted-runner switch, runs niced, doesn't ask whether ships go first, and keeps no land numbers.
+// ship runner before the hosted-runner switch, runs niced, asks Citadel first (#1906), and keeps no land numbers.
 test("the early next train's run goes beside the lands' run, niced, on a ship runner, never GitHub's", () => {
   const yml = read('.github/workflows/tests.yml');
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/early\/'\) && format\('citadel-early-\{0\}', github\.ref_name\)/);
@@ -141,7 +141,7 @@ test("the early next train's run goes beside the lands' run, niced, on a ship ru
   assert.match(yml, /NICENESS: \$\{\{ !startsWith\(github\.ref, 'refs\/heads\/land\/'\) && '10' \|\| '0' \}\}/);
   assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);
   const ask = stepBody(yml, 'ask Citadel whether ships go first');
-  assert.match(ask, /!startsWith\(github\.ref, 'refs\/heads\/early\/'\)/, "it doesn't ask: a ship's run starts it");
+  assert.doesNotMatch(ask, /early\//, 'it asks: one Citadel job at a time (#1906)');
   assert.match(read('tools/land.sh'), /"\+\$top:refs\/heads\/early\/\$nb" "\+\$tip:refs\/heads\/early-base\/\$nb"/, 'land.sh pushes it there, with its base');
 });
 
@@ -155,6 +155,6 @@ test("main's run and heavy jobs ask Citadel before they start, with their own ru
   }
   const yml = read('.github/workflows/tests.yml');
   const ask = stepBody(yml, 'ask Citadel whether ships go first');
-  for (const p of ['land', 'check', 'early']) assert.ok(ask.includes(`!startsWith(github.ref, 'refs/heads/${p}/')`), p);
+  assert.ok(ask.includes("if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}"), "only a ship's run in line starts unasked: a check and an early run ask (#1906)");
   assert.ok(yml.indexOf(ask) < yml.indexOf('- name: the full suite') && !yml.includes('wait for the lands'), 'nothing waits on the runner');
 });

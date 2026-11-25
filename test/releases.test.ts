@@ -357,12 +357,13 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   const theirs = w.store.createTicket({ project_id: delve.id, title: 'Theirs', permission_mode: 'default', created_by: 'Cara' });
   w.store.setSetting(`preview:${mine.id}`, { at: now });
   w.store.setSetting(`preview:${theirs.id}`, { at: now });
-  const sent: any[] = [];
+  type Sent = { type: string; projectId: number; releases: { testCopies: unknown[] } };
+  const sent: Sent[] = [];
   let builds = [7];
   const releases = new Releases({
     store: w.store,
     readers: [w.server],
-    broadcast: (m) => sent.push(m),
+    broadcast: (m) => sent.push(m as Sent),
     testCopies: () => previewCopies(w.store, { own: () => w.store.getProject(w.citadel.id) ?? null, running: (k) => (k === 'build-7' ? { commit: 'b7' } : null), builds: () => builds }),
   });
   const all = releases.view(() => true);
@@ -392,9 +393,9 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.equal(releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next?.link, `/preview/${mine.id}/`);
 
   releases.poll();
-  assert.deepEqual(sent, [], 'the first poll sends nothing: pages ask when they open');
+  assert.deepEqual<Sent[]>(sent, [], 'the first poll sends nothing: pages ask when they open');
   releases.poll();
-  assert.deepEqual(sent, []);
+  assert.deepEqual<Sent[]>(sent, []);
   builds = [];
   releases.poll();
   assert.deepEqual(
@@ -407,7 +408,7 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.deepEqual(sent.at(-1), { type: 'releases', projectId: delve.id, releases: { projectId: delve.id, targets: [], testCopies: [] } }, 'a scheme left with nothing is sent empty');
   w.store.setSetting(`preview:${theirs.id}`, { at: now });
   releases.poll();
-  assert.equal(sent.at(-1).releases.testCopies.length, 1, 'a scheme that gets something after the first poll is sent too');
+  assert.equal(sent.at(-1)!.releases.testCopies.length, 1, 'a scheme that gets something after the first poll is sent too');
 });
 
 test('Releases: a target the releaseKey dep names carries releaseKey for its Make release key button (#837); others carry none', async () => {

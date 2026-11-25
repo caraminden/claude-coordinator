@@ -61,7 +61,9 @@ export function moveShip(app: Pick<App, 'store' | 'releases' | 'waits'>, project
   };
   let order: number[];
   try {
-    order = own ? waits!.setOrder(seqs, note, movedSeq) : writeOrder(landQueue(repo!), schemeLine(repo!), seqs, note, movedSeq);
+    // The ships people placed, for the land scripts: a holding (Regenerate) ship goes behind them (#1827, "Person's drag wins").
+    const pins = waiting.filter((e) => (e.seq === movedSeq ? !by.taskmaster : state.placed[placedKey(e)]?.taskmaster === false)).map((e) => e.seq);
+    order = own ? waits!.setOrder(seqs, note, movedSeq, pins) : writeOrder(landQueue(repo!), schemeLine(repo!), seqs, note, movedSeq, pins);
   } catch (err) {
     throw new HttpError(409, (err as Error).message);
   }

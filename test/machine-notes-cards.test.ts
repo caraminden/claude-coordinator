@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { bootServer, jsonLines, tempRoot, until, ok, type Booted, fakeClaude, PROMPT_AND_TOKEN } from './helpers.ts';
-import { agentEnv, mcpOnce } from './mcp-agent.ts';
+import { agentEnv, type McpResult, mcpOnce } from './mcp-agent.ts';
 
 // A minion proposes a machine's notes (#617, Josh: "Minion proposes, owner approves"): a plan card that only the
 // machine's owner or an admin can approve, which saves them through the Machines page's PATCH. Through the real
@@ -22,21 +22,24 @@ const ids: Record<string, number> = {};
 let srv: Booted;
 const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 
+/** An event's data as the tests read it: a plan card, or a message a person sent. */
+type Card = { id: string; status: string; machine?: string; plan?: string; by?: string; text?: string };
+
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () =>
   turns()
     .filter((t) => t.token.startsWith(`${ticket.id}.`))
     .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call('Josh', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
-const events = async (kind: string) => (await call('Josh', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
+const events = async (kind: string): Promise<Card[]> => (await call('Josh', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: { kind: string }) => e.kind === kind).map((e: { data: string }) => JSON.parse(e.data) as Card);
 const propose = (machine: string, notes: string) => call('minion', `/api/tickets/${ticket.id}/machine-notes`, { method: 'POST', body: { machine, notes } });
 const verdict = (who: string, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });
-const notesOf = async (name: string) => (await call('Cara', '/api/machines')).find((m: any) => m.name === name).notes;
+const notesOf = async (name: string) => (await call('Cara', '/api/machines')).find((m: { name: string }) => m.name === name).notes;
 /** The text of the newest message a person sent the minion. */
-const lastMessage = async () => (await events('user_message')).at(-1).text;
+const lastMessage = async () => (await events('user_message')).at(-1)!.text;
 
-let ticket: any;
-let box: any;
+let ticket: { id: number; project_id: number; number: number };
+let box: { id: number };
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
@@ -107,17 +110,17 @@ test('a newer proposal for the machine supersedes the open one, and a plan card 
   const notes = await propose('josh-box', 'Third');
   const plan = await call('minion', `/api/tickets/${ticket.id}/plans`, { method: 'POST', body: { summary: 'A plan', plan: 'Steps' } });
   const fourth = await propose('josh-box', 'Fourth');
-  const status = Object.fromEntries((await events('plan')).map((c: any) => [c.id, c.status]));
+  const status = Object.fromEntries((await events('plan')).map((c) => [c.id, c.status]));
   assert.equal(status[notes.id], 'superseded');
   assert.equal(status[plan.id], 'pending', 'a notes card does not supersede a plan');
   assert.equal(status[fourth.id], 'pending');
   await assert.rejects(verdict('Josh', notes.id, 'approve'), /409 A newer proposal for josh-box's notes replaced this one/);
   await call('minion', `/api/tickets/${ticket.id}/plans`, { method: 'POST', body: { summary: 'Another plan', plan: 'Steps' } });
-  assert.equal(Object.fromEntries((await events('plan')).map((c: any) => [c.id, c.status]))[fourth.id], 'pending', 'nor a plan a notes card');
+  assert.equal(Object.fromEntries((await events('plan')).map((c) => [c.id, c.status]))[fourth.id], 'pending', 'nor a plan a notes card');
 });
 
 test('approving writes the notes through the PATCH path, unless they changed since the proposal', async () => {
-  const fourth = (await events('plan')).filter((c: any) => c.machine && c.status === 'pending').at(-1);
+  const fourth = (await events('plan')).filter((c) => c.machine && c.status === 'pending').at(-1)!;
   await call('Josh', `/api/machines/${box.id}`, { method: 'PATCH', body: { notes: 'Edited by hand' } });
   await assert.rejects(verdict('Josh', fourth.id, 'approve'), /409 josh-box's notes changed since this was proposed/);
   assert.equal(await notesOf('josh-box'), 'Edited by hand', 'the hand edit is not overwritten');
@@ -125,7 +128,7 @@ test('approving writes the notes through the PATCH path, unless they changed sin
   const fifth = await propose('josh-box', 'Fifth\r\n');
   await verdict('Josh', fifth.id, 'approve');
   assert.equal(await notesOf('josh-box'), 'Fifth');
-  const card = (await events('plan')).find((c: any) => c.id === fifth.id);
+  const card = (await events('plan')).find((c) => c.id === fifth.id)!;
   assert.equal(card.status, 'approved');
   assert.equal(card.by, 'Josh');
   assert.equal(await lastMessage(), "Approved: josh-box's new notes are saved, and turns read them from their next start.");
@@ -138,7 +141,7 @@ test('approving writes the notes through the PATCH path, unless they changed sin
 });
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as this minion's turn, with the machines it got. */
-async function mcp(method: string, params: object, machines: string): Promise<any> {
+async function mcp(method: string, params: object, machines: string): Promise<McpResult> {
   return mcpOnce(agentEnv(base, live(), ticket, 'thread', { COORDINATOR_MACHINES: machines }), method, params, tmp.track);
 }
 
@@ -148,16 +151,16 @@ test("the tool is listed for every minion with a free machine name (#878), refus
   await call('Josh', `/api/tickets/${ticket.id}/messages`, { method: 'POST', body: { text: 'propose the notes again' } });
   await until("Josh's turn", () => turns().length && live() !== before && live());
   await idle();
-  const offered = async (machines: string) => (await mcp('tools/list', {}, machines)).tools.find((t: any) => t.name === 'propose_machine_notes');
+  const offered = async (machines: string) => (await mcp('tools/list', {}, machines)).tools.find((t) => t.name === 'propose_machine_notes');
   assert.deepEqual(await offered(''), await offered('josh-box'));
-  assert.equal((await offered('')).inputSchema.properties.machine.enum, undefined);
+  assert.equal((await offered(''))!.inputSchema.properties!.machine.enum, undefined);
   const none = await mcp('tools/call', { name: 'propose_machine_notes', arguments: { machine: 'josh-box', notes: 'Seventh' } }, '');
   assert.ok(none.isError);
   assert.match(none.content[0].text, /This turn got no connected machines/);
   const r = await mcp('tools/call', { name: 'propose_machine_notes', arguments: { machine: 'josh-box', notes: 'Seventh' } }, 'josh-box');
   assert.equal(r.isError, undefined, r.content[0].text);
   assert.match(r.content[0].text, /Only Josh \(its owner\) or an admin can approve it/);
-  const card = (await events('plan')).at(-1);
+  const card = (await events('plan')).at(-1)!;
   assert.deepEqual([card.plan, card.status], ['Seventh', 'pending']);
   assert.match(r.content[0].text, new RegExp(`\\[the notes card below\\]\\(#/p/${ticket.project_id}/t/${ticket.number}\\?e=\\d+\\)`));
 });

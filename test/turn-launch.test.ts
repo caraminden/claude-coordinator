@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import type { TurnMachine } from '../src/prompts.ts';
+import { fake } from './typed.ts';
 
 // The snapshot records each file's mode, and the server's umask (077 under its unit) isn't a shell's.
 process.umask(0o022);
@@ -81,7 +83,7 @@ runner.ticketsDir = (project) => join(root, 'projects', String(project.id), 'tic
 // How long a wait below may take before it counts as hung. Each one ends on its condition; none ends on this.
 const SETTLE_MS = 120_000;
 /** Paths, ids and times that differ per run, by name. Longest first, so a folder inside another keeps its own name. */
-function scrub(value: unknown): any {
+function scrub<T>(value: T): T {
   let text = JSON.stringify(value);
   const names: [string, string][] = [
     [join(import.meta.dirname, '..'), '<CHECKOUT>'],
@@ -91,26 +93,33 @@ function scrub(value: unknown): any {
     [PATH, '<PATH>'],
   ];
   for (const [path, name] of names.sort((a, b) => b[0].length - a[0].length)) text = text.replaceAll(JSON.stringify(path).slice(1, -1), name);
-  return JSON.parse(text.replace(/-\d{13}\b/g, '-<TIME>').replace(/citadel-turn-[0-9a-f]{8}-/g, 'citadel-turn-<TAG>-'));
+  return JSON.parse(text.replace(/-\d{13}\b/g, '-<TIME>').replace(/citadel-turn-[0-9a-f]{8}-/g, 'citadel-turn-<TAG>-')) as T;
 }
 
+/** The parts of a launch's record these tests read. */
+type Launched = {
+  launched: boolean;
+  notes: string[];
+  spec: { args: string[]; pool: { script: string; systemdRun: string[] } };
+  mcp: { mcpServers: { thread: { url: string } } };
+};
 interface Case {
   kind?: 'ticket' | 'coordinator';
   project?: number;
   author?: string;
-  set?: Record<string, unknown>;
+  set?: Parameters<typeof store.updateTicket>[1];
   before?: (ticket: number, project: number) => void;
   units?: boolean;
   peek?: (dir: string) => void | Promise<void>;
 }
 /** Start one turn and return everything it was launched with, then end it. */
-async function launch(c: Case) {
+async function launch(c: Case): Promise<Launched> {
   const project = c.project ? store.getProject(c.project)! : store.createProject(`P${store.listProjects().length + 1}`, null);
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind: c.kind ?? 'ticket' });
   const cwd = join(root, `ticket-${t.id}`);
   mkdirSync(cwd, { recursive: true });
   store.setTicketDir(t.id, cwd, null);
-  if (c.set) store.updateTicket(t.id, c.set as any);
+  if (c.set) store.updateTicket(t.id, c.set);
   c.before?.(t.id, project.id);
   spawned = [];
   rmSync(units, { force: true });
@@ -125,7 +134,7 @@ async function launch(c: Case) {
     .filter((e) => e.kind === 'note')
     .map((e) => JSON.parse(e.data).text as string);
   const turn = store.getSetting<{ dir: string }>(`turn:${t.id}`);
-  if (!turn) return scrub({ launched: false, notes });
+  if (!turn) return scrub({ launched: false, notes }) as Launched;
   const dir = turn.dir;
   const read = (f: string) => (existsSync(join(dir, f)) ? JSON.parse(readFileSync(join(dir, f), 'utf8')) : null);
   const files = readdirSync(dir)
@@ -150,10 +159,10 @@ async function launch(c: Case) {
   // Its lane ends with the session save, whose worker thread opens state.db under root: wait for that too.
   const busy = () => runner.isRunning(t.id) || (runner as any).lanes.busy(t.id);
   await until('the turn to end and its session to be saved', () => !busy(), SETTLE_MS);
-  return scrub(got);
+  return scrub(got) as Launched;
 }
 
-const machine = (id: number, name: string, owner: number | null, servers?: string[]) => ({ id, name, owner_id: owner, ...(servers ? { servers } : {}) }) as any;
+const machine = (id: number, name: string, owner: number | null, servers?: string[]) => fake<TurnMachine>({ id, name, owner_id: owner, ...(servers ? { servers } : {}) });
 const cases: Record<string, Case | (() => Promise<unknown>)> = {
   'a minion on the host, as a plain child': {},
   'a minion on the host in a unit, with files and shared folders, lent machines, approval rules, a model, an effort, Workflow, GitHub, deploys and memory': {
@@ -227,8 +236,8 @@ const cases: Record<string, Case | (() => Promise<unknown>)> = {
     before: (ticket) => {
       runner.codexPlaceFor = undefined;
       const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, join(root, `ticket-${ticket}`), 'sess-7');
-      mkdirSync(join(file, '..'), { recursive: true });
-      writeFileSync(file, '');
+      mkdirSync(join(file!, '..'), { recursive: true });
+      writeFileSync(file!, '');
     },
   },
   'a session whose transcript is nowhere starts fresh': { set: { session_id: 'sess-gone' } },
@@ -263,7 +272,7 @@ test("every turn runs on Pacific time, whatever the server's TZ is", () => {
 test("a resumed turn is sent this turn's system prompt, not its session's first one", async () => {
   const turns: Record<string, Case> = { minion: cases['a resumed session whose transcript is on this login'] as Case, Taskmaster: { kind: 'coordinator', set: { session_id: 'sess-7' } } };
   for (const [name, c] of Object.entries(turns)) {
-    const args: string[] = ((await launch(c)) as any).spec.args;
+    const args: string[] = (await launch(c)).spec.args;
     assert.equal(args[args.indexOf('--system-prompt-snapshot') + 1], 'off', name);
     assert.ok(args.includes('--append-system-prompt-file'), name);
     if (name === 'minion') assert.equal(args[args.indexOf('--resume') + 1], 'sess-7');
@@ -274,7 +283,7 @@ test("a resumed turn is sent this turn's system prompt, not its session's first 
 // --advisor; a plain model never does, and a Taskmaster set to it runs without the advisor.
 test("--advisor is passed only when the minion's model carries one, and never to a Taskmaster", async () => {
   const flags = async (c: Case) => {
-    const args: string[] = ((await launch(c)) as any).spec.args;
+    const args: string[] = (await launch(c)).spec.args;
     const at = (f: string) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
     return { model: at('--model'), advisor: at('--advisor') };
   };
@@ -353,9 +362,9 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
     writeFileSync(${JSON.stringify(out)}, JSON.stringify(servers));
     console.log(JSON.stringify({ type: 'result' }));`,
   );
-  let pool: { pid: number } | null = null;
-  let seen: any = null;
-  let exit: { code: number | null } | null = null;
+  let pool = null as { pid: number } | null;
+  let seen = null as { thread: { status: string; error?: string; tools: string[] } } | null;
+  let exit = null as { code: number | null } | null;
   runner.pool = true;
   try {
     await launch({

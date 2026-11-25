@@ -63,7 +63,7 @@ test("a minion's turn message opens with its own lines; its system prompt and ha
   const [a, b] = [minion('A'), minion('B')];
   const ta = await turn(a.id, 'hello');
   const tb = await turn(b.id, 'hi');
-  const texts = ta.input.message.content.map((c: any) => c.text);
+  const texts = ta.input.message.content.map((c: { text: string }) => c.text);
   assert.match(texts[0], new RegExp(`^\\[System\\]: You are a minion working on #${a.number} in scheme "P"\\.\\n`));
   assert.equal(texts.at(-1), '[Cara]: hello');
   assert.equal(ta.system, tb.system, 'the same system-prompt.md for both minions');

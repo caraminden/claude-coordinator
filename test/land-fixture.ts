@@ -65,6 +65,7 @@ flock -n "$lock" true && held=no || held=yes
 echo "locked=$DEPLOY_LOCKED held=$held" >"$DEPLOY_NOTE"
 until [ -z "\${FAKE_DEPLOY_GATE:-}" ] || [ -e "\$FAKE_DEPLOY_GATE" ]; do sleep 0.05; done
 [ -z "\${FAKE_DEPLOY_LOG:-}" ] || git -C "$DEPLOY_SOURCE" rev-parse main >>"\$FAKE_DEPLOY_LOG"
+[ -z "\${FAKE_DEPLOY_LOG:-}" ] || cat "\${DEPLOY_RIDERS:-/dev/null}" >"\$FAKE_DEPLOY_LOG.riders" 2>/dev/null
 if [ -n "\${FAKE_RESTART_GATE:-}" ]; then
   echo "queued \$(date +%s)" >>"\$DEPLOY_TIMES"
   rm -f "\$DEPLOY_QUEUE_TICKET"
@@ -140,13 +141,13 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // per runners check, which comes before each push): id 7 in the state FAKE_CI names, a second one (#769's fresh run),
 // id 8, in FAKE_CI_RERUN's. The newest run stays listed for the commit once the branch is gone, as on GitHub.
 // FAKE_OLD_RUN is an earlier run, "<sha> <status> <conclusion>", which GitHub still answers with for FAKE_LAG polls
-// after the push; FAKE_STEP is the step a red run failed in; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, due: one file left unrerun at CI's deadline, or swap: the first red as mixed, later reds a new real failure with test/real.test.ts not rerun); FAKE_LEAK: it also has the leak guard's line (#1419); FAKE_LOG_RERUN: the log of every run after the first, when set
+// after the push; FAKE_STEP is the step a red run failed in (lost: none, its runner went away; down: GitHub never answers; FAKE_STEP_MISS=N: not for the first N asks); FAKE_LOG=down: nor for its log; FAKE_LOG which run-tests.sh lines a red run's log has (mixed, flakes, many, due: one file left unrerun at CI's deadline, or swap: the first red as mixed, later reds a new real failure with test/real.test.ts not rerun); FAKE_LEAK: it also has the leak guard's line (#1419); FAKE_LOG_RERUN: the log of every run after the first, when set
 // (mixed: a flake and a real failure; flakes: two flakes and nothing else; many: too many files to rerun; after-real: mixed, then a
 // file not rerun because a real failure already made the run red; two-real: mixed, and test/other.test.ts a second real failure, #1478).
 // FAKE_REAL_FILE: the file the mixed log's real failure names (default test/real.test.ts); FAKE_RED_NAMES: a line the red's output adds, naming the file behind a guard's failure (a train's suspects, #1451);
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_RED_TEXT: the same for
 // a commit with that text in any file (#1403); FAKE_FLAKY_PATH:
-// a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
+// a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346), or FAKE_FLAKY_LOGS red runs' logs (#1864);
 // FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
 // FAKE_BURN: the burn-in step as land.sh asks at its CI limit (#1443), "<status><tab><started_at><tab><completed_at>";
 // FAKE_REAL: "<test file>=<path> ...": a run is red when its commit has any of the paths, and its log names each such test file
@@ -156,12 +157,13 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
-// hang run-tests.sh stopped (the same interrupt, but a verdict); FAKE_CUT_KIND: how those runs were cut off, interrupt
+// hang run-tests.sh stopped (the same interrupt, but a verdict); FAKE_CUT_KIND: how those runs were cut off, lost (no step failed and no log: the runner went away, #1864), interrupt
 // (default), killed (#1393: run-tests.sh's line for an outside SIGKILL, exit 137) or bare (the whole step killed, only
 // GitHub's exit 137 line); FAKE_LOG=killed-red: killed from outside, but after a test had failed (a verdict);
 // FAKE_LOG=killed-rerun: as after-real, but test/busy.test.ts's rerun alone was killed from outside (no label, #1393);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask, or GitHub's runners
 // JSON, which the --jq filter is run on.
+// FAKE_CI_SLOW: a run's first ask finds it in progress; FAKE_RUNNERS_ODD: every second check before a push finds no runner online.
 // FAKE_CI_FILE: the run's state (as FAKE_CI) read from that file at each ask; FAKE_CI_DOWN_AT: GitHub doesn't answer for the
 // Nth commit it is asked about and any after it, until the file FAKE_CI_UP exists. The wait's own runner checks (runners?per_page=,
 // #1361) start no run, and answer FAKE_RUNNERS_WAIT when it is set, else as the check before a push.
@@ -215,7 +217,7 @@ case "$*" in
     [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
-    n=$(grep -c -e '/actions/runners ' -e citadel-ci-linux-check "${calls}") id=$((6 + n)) st=\${FAKE_CI:-green}
+    n=$(($(grep -c -e '/actions/runners ' -e citadel-ci-linux-check "${calls}") - $(cat "${calls}.gone" 2>/dev/null | wc -l))) id=$((6 + n)) st=\${FAKE_CI:-green}
     if [ -n "\${FAKE_CI_DOWN_AT:-}" ] && [ ! -e "\$FAKE_CI_UP" ]; then
       grep -qx "$sha" "${calls}.shas" 2>/dev/null || echo "$sha" >>"${calls}.shas"
       [ "$(grep -nx "$sha" "${calls}.shas" | cut -d: -f1)" -lt "\$FAKE_CI_DOWN_AT" ] || exit 1
@@ -227,8 +229,10 @@ case "$*" in
     if [ -n "\${FAKE_RED_BOTH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; st=red; for e in \$FAKE_RED_BOTH; do git -C "${hub}" cat-file -e "$sha:$e" 2>/dev/null || st=green; done; fi
     if [ -n "\${FAKE_RED_TEXT:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" grep -qF "\$FAKE_RED_TEXT" "$sha" 2>/dev/null && st=red || st=green; fi
     if [ -n "\${FAKE_REAL:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; st=green; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && st=red; done; fi
-    if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ ! -e "${calls}.flaky" ] && st=red; fi
+    if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ "$(cat "${calls}.flaky" 2>/dev/null | wc -l)" -lt "\${FAKE_FLAKY_LOGS:-1}" ] && st=red; fi
     [ -z "\${FAKE_CI_GATE:-}" ] || [ -e "\$FAKE_CI_GATE" ] || st=running
+    # FAKE_CI_SLOW: a run's first ask finds it still going
+    if [ -n "\${FAKE_CI_SLOW:-}" ] && [ "$n" -gt 0 ] && ! grep -qx "$id" "${calls}.slow" 2>/dev/null; then echo "$id" >>"${calls}.slow"; st=running; fi
     if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
       if [ -n "\${FAKE_CUT:-}" ] && { [ "$st" = green ] || [ "$st" = red ]; }; then
         grep -qxF "$sha $id" "${calls}.seen" 2>/dev/null || echo "$sha $id" >>"${calls}.seen"
@@ -247,13 +251,23 @@ case "$*" in
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
   *citadel-ci-linux-check*) echo "\$FAKE_CHECK_RUNNERS" ;;
+  *"/actions/runs?status="*) echo "\${FAKE_ACTIVE:-0}" ;;
   *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
-  *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq "$4" "\$FAKE_RUNNERS_FILE"; else cat "\$FAKE_RUNNERS_FILE"; fi; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runners "*) [ -z "\${FAKE_RUNNERS_ODD:-}" ] || [ $(($(grep -c '/actions/runners ' "${calls}") % 2)) = 1 ] || { echo >>"${calls}.gone"; echo 0; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq "$4" "\$FAKE_RUNNERS_FILE"; else cat "\$FAKE_RUNNERS_FILE"; fi; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"burn in new and changed tests"*) printf '%b' "\${FAKE_BURN:-}" ;;
-  *"/actions/runs/"[0-9]*"/jobs "*) echo "\${FAKE_STEP:-the full suite}" ;;
+  *"/actions/runs/"[0-9]*"/jobs"*)
+    [ "\${FAKE_STEP:-}" != down ] || exit 1
+    if [ -n "\${FAKE_STEP_MISS:-}" ]; then echo x >>"${calls}.steps"; [ "$(wc -l <"${calls}.steps")" -gt "\$FAKE_STEP_MISS" ] || exit 1; fi
+    sha=$(grep -o 'head_sha=[0-9a-f]*' "${calls}" | tail -n 1) sha=\${sha#head_sha=} id=\${2#*/actions/runs/} id=\${id%%/*}
+    k=$(grep -nxF "$sha $id" "${calls}.seen" 2>/dev/null | cut -d: -f1)
+    read -r cs cn <<<"\${FAKE_CUT:-0 0}"
+    if [ "\${FAKE_CUT_KIND:-}" = lost ] && [ -n "$k" ] && [ "$k" -gt "$cs" ] && [ "$k" -le "$((cs + cn))" ]; then FAKE_STEP=lost; fi
+    if [ "\${FAKE_STEP:-}" = lost ]; then case "$*" in *'no failed step'*) echo 'no failed step' ;; esac; exit 0; fi
+    echo "\${FAKE_STEP:-the full suite}" ;;
   "run view "*)
-    [ -z "\${FAKE_FLAKY_PATH:-}" ] || : >"${calls}.flaky"
+    if [ "\${FAKE_LOG:-}" = down ]; then exit 1; fi
+    [ -z "\${FAKE_FLAKY_PATH:-}" ] || echo x >>"${calls}.flaky"
     p='test\\tthe full suite\\t2026'
     # Cut off from outside (#1377, run 44859457680's log): Node's interrupt and the files it never ran, no failing test.
     sha=$(grep -o 'head_sha=[0-9a-f]*' "${calls}" | tail -n 1) sha=\${sha#head_sha=}
@@ -262,6 +276,7 @@ case "$*" in
     if [ -n "$k" ] && [ "$k" -gt "$cs" ] && [ "$k" -le "$((cs + cn))" ]; then
       case \${FAKE_CUT_KIND:-interrupt} in
         killed) printf '%b ✔ fine (1.2ms)\\n%b run-tests: the tests were killed (exit 137) after 55s, before the 600s limit: stopped from outside (the out-of-memory killer?), not a hang, so this run says nothing about the change\\n%b ##[error]Process completed with exit code 137.\\n' "$p" "$p" "$p" ;;
+        lost) ;; # no step failed, so gh has no failed step's log
         bare) printf '%b ✔ fine (1.2ms)\\n%b ##[error]Process completed with exit code 137.\\n' "$p" "$p" ;;
         *) printf '%b Interrupted while running:\\n%b ⚠ test/a.test.ts (test/a.test.ts:1:1)\\n%b ##[error]Process completed with exit code 1.\\n' "$p" "$p" "$p" ;;
       esac

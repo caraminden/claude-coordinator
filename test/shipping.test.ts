@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Store } from '../src/db.ts';
+import { Store, type Project } from '../src/db.ts';
+import { fake } from './typed.ts';
 import { shippingLine } from '../src/prompts.ts';
 import { MERGE_RULES, needsGo, SHIP_PATHS, shippingGate, values } from '../public/shipping.js';
 
@@ -69,7 +70,7 @@ test('shippingLine: the path, the go threshold and try-first, with defaults for 
   assert.doesNotMatch(shippingLine({ ship_path: 'citadel', go_from: 'high', try_first: 'never', skills_off: 'self-review' }, true), /proven bug fix/, 'the fix route needs the review, so not with self-review off');
   assert.doesNotMatch(shippingLine({ ship_path: 'citadel', go_from: 'all', try_first: 'never' }, true), /bug fix/);
   assert.match(shippingLine({ ship_path: 'citadel', go_from: 'never', try_first: 'never' }, true), /No change waits for a person's go/);
-  assert.equal(shippingLine({} as any, true), shippingLine({ ship_path: 'citadel', go_from: 'high', try_first: 'never' }, true));
+  assert.equal(shippingLine(fake<Project>({}), true), shippingLine({ ship_path: 'citadel', go_from: 'high', try_first: 'never' }, true));
 });
 
 test('a scheme whose merges already waited for a person starts on pr-person once, and others keep the defaults', () => {

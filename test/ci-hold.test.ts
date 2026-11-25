@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, isNight, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -21,6 +21,7 @@ function world(now = DAY, saved: unknown = null) {
     told: [] as { ticket: number; text: string }[],
     reports: [] as string[],
     closed: new Set<number>(),
+    refs: new Set<string>(),
     resume: true,
     since: undefined as number | undefined,
     answer: null as (() => Promise<{ status: number }>) | null,
@@ -33,6 +34,10 @@ function world(now = DAY, saved: unknown = null) {
     },
     proof: (o = {}) => w.add('flake-proof test/x.test.ts', { file: 'flake-proof.yml', ...o }),
     land: (o = {}) => w.add('land', { file: 'tests.yml', head_branch: 'land/9', ...o }),
+    heavy: (o = {}) => w.add(`heavy h${w.runs.length}-1-x`, { file: 'citadel-heavy.yml', ...o }),
+    check: (o = {}) => w.add('check', { file: 'tests.yml', head_branch: 'check/9', ...o }),
+    early: (o = {}) => w.add('early', { file: 'tests.yml', head_branch: 'early/9', ...o }),
+    ask: async (r: Run) => (await w.hold.ask(OWN, r.id, w.now)).go,
     main: (o = {}) => w.add('tests', { file: 'tests.yml', head_branch: 'main', ...o }),
     hold: null as unknown as CiHold,
     async tick(ms = 15_000) {
@@ -60,6 +65,8 @@ function world(now = DAY, saved: unknown = null) {
     log: () => {},
     get: async (path) => {
       if (w.down) throw new Error('GitHub is down');
+      const ref = /git\/ref\/heads\/(.+)$/.exec(path);
+      if (ref) return { status: w.refs.has(ref[1]) ? 200 : 404, etag: null, body: {} };
       const one = /runs\/(\d+)$/.exec(path);
       if (one) {
         const r = w.runs.find((x) => x.id === Number(one[1]));
@@ -155,13 +162,10 @@ test('a ship whose tests run counts, whatever the line reads: its retry has the 
   assert.deepEqual(w.posts, ['cancel 2', 'rerun 2']);
 });
 
-test("a ship's own runs are never stopped: land, check, an early run, a ship's light check", async () => {
+test("a ship's run in line is never stopped, nor a release build", async () => {
   const w = world();
   w.line = 3;
   w.land();
-  w.add('check', { file: 'tests.yml', head_branch: 'check/9' });
-  w.add('early', { file: 'tests.yml', head_branch: 'early/9' });
-  w.add('heavy shipabc-1-x', { file: 'citadel-heavy.yml' });
   w.add('desktop', { file: 'desktop.yml', head_branch: 'main' });
   await w.for(60 * MIN);
   assert.deepEqual(w.posts, []);
@@ -507,5 +511,316 @@ test("CI health never reads a held run's cancel as a red, and reads everything e
       () => true,
     )('jobs', null, undefined as never),
     jobs,
+  );
+});
+
+// One job at a time (#1906; Josh, 2026-11-24, picked "One Citadel job, one Peek build").
+const end = (r: Run, conclusion = 'success') => Object.assign(r, { status: 'completed', conclusion });
+
+test('two heavy Citadel jobs queued together run one after the other, the second by itself', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  assert.equal(w.told.length, 1);
+  assert.match(w.told[0].text, /is waiting: a heavy job is running \(heavy h0-1-x\), and Citadel runs one job at a time.*starts it again by itself/s);
+  assert.doesNotMatch(w.told[0].text, /ships go first/);
+  await w.for(30 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2'], 'the first is left alone, the second waits for all of it');
+  end(a);
+  await w.for(3 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2', 'rerun 2'], 'no settle time between two jobs');
+  b.status = 'in_progress';
+  assert.equal(await w.ask(b), true);
+  const c = w.heavy();
+  assert.equal(await w.ask(c), false, 'the one that came back holds the desktop');
+});
+
+test('three jobs run one after another, each let in when it asks again', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b, c] = [w.heavy(), w.proof(), w.heavy()];
+  assert.deepEqual([await w.ask(a), await w.ask(b), await w.ask(c)], [true, false, false]);
+  await w.for(2 * MIN);
+  for (const [done, next] of [
+    [a, b],
+    [b, c],
+  ]) {
+    end(done);
+    await w.for(3 * MIN);
+    assert.equal(w.posts.at(-1), `rerun ${next.id}`);
+    next.status = 'in_progress';
+    assert.equal(await w.ask(next), true, 'the one longer held is not in its way');
+    await w.for(5 * MIN);
+  }
+  assert.deepEqual(w.posts, ['cancel 2', 'cancel 3', 'rerun 2', 'rerun 3']);
+});
+
+test('a restart stops none of the jobs that were let in beside one that ran past four hours', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const a = w.heavy();
+  assert.equal(await w.ask(a), true);
+  await w.for(SLOT_HOLD_MS + 5 * MIN);
+  const b = w.proof();
+  assert.equal(await w.ask(b), true);
+  await w.for(20 * MIN);
+  const v = world(w.now, w.settings.get('ci-hold') ?? null);
+  v.runs = w.runs;
+  await v.for(20 * MIN);
+  assert.deepEqual([...w.posts, ...v.posts], []);
+  assert.equal(await v.ask(v.proof()), false, 'the young one holds the desktop');
+});
+
+test('jobs let in while GitHub was unreadable run on when it is back', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  w.down = true;
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, true]);
+  await w.for(5 * MIN);
+  w.down = false;
+  await w.for(20 * MIN);
+  assert.deepEqual(w.posts, []);
+  assert.equal(await w.ask(w.heavy()), false);
+});
+
+test('a job that waited goes before one that only just asks', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  await w.for(5 * MIN);
+  end(a);
+  await w.for(2 * MIN);
+  const c = w.heavy();
+  assert.equal(await w.ask(c), false);
+  assert.equal(b.status, 'queued');
+});
+
+test("another scheme's heavy job neither waits for Citadel's nor holds it up", async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const a = w.heavy();
+  assert.equal(await w.ask(a), true);
+  const peek = w.heavy({ repo: 'o/peek' });
+  assert.equal((await w.hold.ask('o/peek', peek.id, w.now)).go, true);
+  assert.equal(w.hold.why('o/peek', undefined, w.now), null);
+  assert.match(w.hold.why(OWN, undefined, w.now) ?? '', /a heavy job is running/);
+  await w.for(10 * MIN);
+  assert.deepEqual(w.posts, []);
+});
+
+test('two jobs on runners whose workflows ask nothing: all but one are stopped', async () => {
+  const w = world();
+  await w.tick(); // past a restart's first look, which takes what runs as let in
+  w.check({ head_branch: 'check/1' });
+  w.early();
+  await w.for(5 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2']);
+});
+
+test('a run GitHub leaves queued for over an hour holds up no check', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const lost = w.heavy({ status: 'queued' });
+  await w.tick();
+  const early = w.early({ head_branch: 'early/1' });
+  assert.equal(await w.ask(early), false);
+  lost.run_started_at = new Date(w.now - 61 * MIN).toISOString();
+  await w.tick();
+  const next = w.check({ head_branch: 'check/2' });
+  assert.equal(await w.ask(next), true);
+});
+
+test("main's full run that ships held for 30 minutes runs beside a ship's tests", async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  w.land({ id: 50 });
+  await w.tick();
+  const main = w.main();
+  assert.equal(await w.ask(main), false);
+  await w.for(MAIN_WAIT_MS - 2 * MIN);
+  assert.ok(!w.posts.includes(`rerun ${main.id}`));
+  await w.for(4 * MIN);
+  assert.ok(w.posts.includes(`rerun ${main.id}`));
+  main.status = 'in_progress';
+  assert.equal(await w.ask(main), true);
+  await w.for(10 * MIN);
+  assert.equal(main.status, 'in_progress', 'and is not stopped again');
+});
+
+test("a ship's run stops whatever runs within a minute: a check, an early run, main's", async () => {
+  for (const kind of ['check', 'early', 'main'] as const) {
+    const w = world();
+    await w.for(10 * MIN);
+    const low = w[kind]();
+    if (kind !== 'main') w.refs.add(low.head_branch);
+    assert.equal(await w.ask(low), true, kind);
+    await w.tick();
+    const land = w.land({ status: 'queued' });
+    await w.tick();
+    await w.tick();
+    assert.deepEqual(w.posts, ['cancel 1'], kind);
+    assert.equal(w.told.length, 0, 'no mail about a check');
+    await w.for(3 * MIN);
+    end(land);
+    await w.for(3 * MIN);
+    assert.deepEqual(w.posts, ['cancel 1', 'rerun 1'], `${kind} comes back by itself`);
+  }
+});
+
+test('a check or early run whose branch is gone is let go, and a light check never comes back', async () => {
+  for (const add of [(w: ReturnType<typeof world>) => w.check(), (w: ReturnType<typeof world>) => w.early(), (w: ReturnType<typeof world>) => w.add('heavy ship1-1-x', { file: 'citadel-heavy.yml', head_branch: 'main' })]) {
+    const w = world();
+    w.refs.add('main');
+    await w.for(10 * MIN);
+    const low = add(w);
+    assert.equal(await w.ask(low), true);
+    const land = w.land();
+    await w.for(2 * MIN);
+    end(land);
+    await w.for(10 * MIN);
+    assert.deepEqual(w.posts, ['cancel 1']);
+    assert.deepEqual(w.settings.get('ci-hold'), []);
+  }
+});
+
+test('a check or early run starts only on an idle desktop: not beside a run, nor with one queued; ships in line with no run are no bar', async () => {
+  const w = world();
+  w.line = 2;
+  await w.for(10 * MIN);
+  assert.equal(await w.ask(w.check()), true, 'a ship deploying uses no desktop');
+  const v = world();
+  v.land();
+  await v.tick();
+  assert.equal(await v.ask(v.check()), false);
+  const u = world();
+  await u.for(10 * MIN);
+  u.heavy({ status: 'queued' });
+  await u.tick();
+  assert.equal(await u.ask(u.check()), false, 'one is queued');
+  const t = world();
+  await t.for(10 * MIN);
+  const heavy = t.heavy();
+  assert.equal(await t.ask(heavy), true);
+  assert.equal(await t.ask(t.check()), false, 'one is running, and is not stopped for a check');
+  assert.deepEqual(t.posts, ['cancel 2']);
+});
+
+test("main's run waits for a check that runs, and goes before an optional job that waits", async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const check = w.check();
+  assert.equal(await w.ask(check), true);
+  const [proof, main] = [w.proof(), w.main()];
+  assert.equal(await w.ask(proof), false);
+  assert.equal(await w.ask(main), false);
+  await w.for(2 * MIN);
+  end(check);
+  await w.for(2 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2', 'cancel 3', 'rerun 3'], 'main first');
+  Object.assign(main, { status: 'in_progress' });
+  await w.for(5 * MIN);
+  end(main);
+  await w.for(SETTLE_DAY_MS + 2 * MIN);
+  assert.equal(w.posts.at(-1), 'rerun 2');
+});
+
+test('a job behind another that never ends goes after four hours, and is not stopped for it again', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  await w.for(SLOT_HOLD_MS - 5 * MIN);
+  assert.ok(!w.posts.includes('rerun 2'));
+  await w.for(10 * MIN);
+  assert.equal(w.posts.at(-1), 'rerun 2');
+  b.status = 'in_progress';
+  assert.equal(await w.ask(b), true);
+  await w.for(10 * MIN);
+  assert.equal(w.posts.at(-1), 'rerun 2');
+  assert.equal(a.status, 'in_progress', 'the long one is left to end');
+  assert.equal(w.hold.why(OWN, w.now - SLOT_WAIT_MS, w.now), null, 'one not dispatched yet waits a day at most');
+});
+
+test('a job that waited a day behind others goes beside them', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  const saved = (w.settings.get('ci-hold') as Record<string, unknown>[]).map((h) => ({ ...h, behind: w.now - SLOT_WAIT_MS }));
+  const v = world(w.now, saved);
+  v.runs = w.runs;
+  await v.for(SETTLE_DAY_MS + 2 * MIN);
+  assert.equal(v.posts.at(-1), 'rerun 2');
+  b.status = 'in_progress';
+  await v.for(10 * MIN);
+  assert.deepEqual(v.posts, ['rerun 2'], 'and is not stopped again');
+});
+
+test('the one-job wait fails open and turns off: GitHub unread, hold-off', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.equal(await w.ask(a), true);
+  w.down = true;
+  await w.for(3 * MIN);
+  assert.equal(await w.ask(b), true);
+  w.down = false;
+  w.off = true;
+  await w.tick();
+  const c = w.heavy();
+  assert.equal(await w.ask(c), true);
+  assert.equal(w.hold.why(OWN, undefined, w.now), null);
+  assert.deepEqual(w.posts, []);
+});
+
+test('a job started again that no runner takes gives its place up, and one that ended frees it', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  end(a);
+  await w.for(2 * MIN);
+  assert.equal(w.posts.at(-1), 'rerun 2');
+  const c = w.add('heavy other-1-x', { file: 'citadel-heavy.yml' });
+  assert.equal(await w.ask(c), false, 'the one started again has the place');
+  await w.for(12 * MIN);
+  assert.equal(w.posts.at(-1), 'rerun 3', 'ten minutes with no runner');
+});
+
+test('a restart keeps one job at a time, and jobs the old server held come back', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  // As #1902 saved it: no branch, no behind.
+  const saved = (w.settings.get('ci-hold') as Record<string, unknown>[]).map(({ behind: _b, ...h }) => h);
+  const v = world(w.now, saved);
+  v.runs = w.runs;
+  await v.for(5 * MIN);
+  assert.equal(await v.ask(v.add('heavy c-1-x', { file: 'citadel-heavy.yml' })), false, 'the running one is found again');
+  assert.deepEqual(v.posts, ['cancel 3']);
+  end(a);
+  await v.for(SETTLE_DAY_MS + 2 * MIN);
+  assert.equal(v.posts.at(-1), 'rerun 2');
+});
+
+test('the CI page has what runs and what it keeps waiting', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const a = w.heavy();
+  assert.equal(await w.ask(a), true);
+  const rows = (sees = true) => heldRows(w.hold.state(w.now), { getTicket: () => ({ number: 7, project_id: 2 }), getProject: () => undefined } as never, () => sees);
+  await w.tick();
+  assert.match(rows().busy ?? '', /a heavy job is running/);
+  assert.equal(rows(false).busy, 'another Citadel job is running', 'without its name for someone who does not see its scheme');
+  assert.deepEqual(rows(false).running, []);
+  w.land();
+  await w.tick();
+  assert.deepEqual(
+    rows().running.map((r) => r.kind),
+    ['heavy', 'ship'],
   );
 });

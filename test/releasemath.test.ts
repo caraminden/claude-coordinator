@@ -30,7 +30,7 @@ test('columnOf: a wait is Waiting, the land line too, then Checks for the first 
   assert.equal(columnOf(citadel, { stage: 'unknown', waitingOn: null }), 0);
 });
 
-const track = (...names) => [...names, 'live'].map((name) => ({ name, usual: null }));
+const track = (...names: string[]) => [...names, 'live'].map((name) => ({ name, usual: null }));
 
 test("columnOf: a contraption's call is Waiting, its build Checks, the drain and restart Shipping, as before #659", () => {
   const contraption = track('call', 'build', 'drain', 'restart');

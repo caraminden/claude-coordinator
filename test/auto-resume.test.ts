@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { QueueRecord } from '../src/minion-queue.ts';
 import { MAX_RESUMES, Runner } from '../src/runner.ts';
 import { stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
@@ -69,7 +70,7 @@ async function crash(r: Runner, id: number) {
   const dir: string = (r as any).turns.get(id).dir;
   await until("existsSync(join(dir, 'pid.json'))", () => existsSync(join(dir, 'pid.json')));
   // Its first line is in: claude had the prompt, so it resumes (a turn killed before that reruns its batch, #1364).
-  await until('the first line', () => (store.getSetting<any>(`turn:${id}`)?.offset ?? 0) > 0);
+  await until('the first line', () => (store.getSetting<{ offset: number }>(`turn:${id}`)?.offset ?? 0) > 0);
   r.detachAll();
   const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
   for (const pid of [wrapper, -claude]) {
@@ -149,7 +150,7 @@ test('a stopped turn is not resumed, even if the server restarts before it ends'
   // Stopped once its claude has its prompt, and so its SIGTERM handler: a stop while it still starts lands as it starts (#470).
   // And once the runner has read its first line: the stop's SIGINT ends the fake, and crash waiting on that line would
   // let this runner wrap the dead turn up and delete its folder first (#1428).
-  await until("the turn's first line", () => store.getSetting<any>(`turn:${id}`)?.offset > 0);
+  await until("the turn's first line", () => store.getSetting<{ offset: number }>(`turn:${id}`)?.offset! > 0);
   before.stop(id);
   await crash(before, id);
 
@@ -198,7 +199,7 @@ test('a resume still owed when the server restarts again is resumed by the next 
 
   // The second server dies before this minion's slot in its staggered resumes comes up.
   const second = server();
-  (second as any).resume = () => {};
+  Object.assign(second, { resume: () => {} });
   second.recover();
   await settle();
   assert.equal(store.getTicket(id)!.status, 'idle');
@@ -210,7 +211,7 @@ test('a resume still owed when the server restarts again is resumed by the next 
   await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs'));
   assert.match(readFileSync(prompts, 'utf8'), /\[System\]: The \S+ server restarted while you were working/);
   await finish(third, id);
-  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null, 'the debt is paid once the resume starts');
+  assert.equal(store.getSetting<QueueRecord>(`minion-queue:${id}`)?.owed ?? null, null, 'the debt is paid once the resume starts');
 });
 
 test("messages queued behind a cut-off turn that isn't resumed outlive a second restart (#468 S03-8)", async () => {
@@ -223,7 +224,7 @@ test("messages queued behind a cut-off turn that isn't resumed outlive a second 
   await crash(r, id);
   writeFileSync(prompts, '');
   r = server();
-  (r as any).next = () => {};
+  Object.assign(r, { next: () => {} });
   r.recover();
   await settle();
   r.detachAll();
@@ -282,6 +283,6 @@ test('a turn whose reply came in while the server was down is not resumed after 
   assert.ok(!events.some((e) => e.kind === 'note' && /Resumed after a server restart/.test(e.data)), 'no resume');
   assert.equal(after.isRunning(id), false);
   assert.equal(readFileSync(prompts, 'utf8'), '', 'no turn was told to carry on');
-  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null, 'no resume is owed');
+  assert.equal(store.getSetting<QueueRecord>(`minion-queue:${id}`)?.owed ?? null, null, 'no resume is owed');
   after.detachAll();
 });

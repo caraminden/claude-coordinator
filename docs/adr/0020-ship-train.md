@@ -142,7 +142,9 @@ the last one in line waited for every run ahead of it.
   `tools/land.sh` documents each format above `train_verdict`. deploy.sh lets go of the line once a restart is queued,
   while the restart is still judged (#566), so a rider can get the lock with its verdict still `moving`: while the
   front's process lives, the rider hands the line on and waits outside it for the verdict. A train whose restart is
-  rolled back comes off main, and its riders hear `back`, never `landed`.
+  rolled back comes off main, and its riders hear `back`, never `landed`. Before its branch moves, each rider writes
+  who to report to in `<state>/riders-<the front's pid>`, so the restart the front queues reports to every rider's
+  minion too: that it is live, gave up waiting, or was rolled back once the landing was over (#1865).
 
 Who is passed over (each keeps its place, and ships on its own when it reaches the front):
 
@@ -251,6 +253,12 @@ first, the train came out different, or the early run went red (it runs again, a
 - A conflict in the early stack isn't reported there: that ship's own rebase reports it once the train has shipped. A
   fix recorded with conflict prep is replayed in the early stack too.
 - Off: `LAND_EARLY=0`, or `<state>/early-off`.
+
+### One Citadel job at a time (#1906)
+
+Josh, 2026-11-24, picked "One Citadel job, one Peek build". With the CI desktop's hold on (no `<state>/hold-off`) the early
+run goes only at the train's deploy, on an idle desktop, never beside its run; a ship's run stops it. The same holds for a
+ship's own check. Order, slot and caps: `src/ci-hold.ts`, `tools/ci-runner/README.md`. The sections below describe the hold off. With it on, a ship behind a running check gets no light check either (#1620, Cara, 2026-11-22: "Run it, niced"): `ci_busy` sends it into the line unchecked, since a light check is a second job.
 
 ### While the train ahead's CI runs (#1568)
 

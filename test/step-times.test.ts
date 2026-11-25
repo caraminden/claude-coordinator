@@ -56,7 +56,8 @@ function minion(projectId = store.createProject(`P${++n}`, null).id) {
   store.setTicketDir(t.id, cwd, null);
   return store.getTicket(t.id)!;
 }
-const rows = (ticketId: number) => store.db.prepare('SELECT * FROM step_times WHERE ticket_id = ? ORDER BY started_at').all(ticketId) as any[];
+type StepRow = { ticket_id: number; task_id: string; subject: string; estimate: number | null; started_at: number; finished_at: number; work_ms: number; model: string | null; effort: string | null };
+const rows = (ticketId: number) => store.db.prepare('SELECT * FROM step_times WHERE ticket_id = ? ORDER BY started_at').all(ticketId) as StepRow[];
 /** A stored Claude event at a given minute. */
 const at = (min: number) => 1_000_000_000 + min * 60_000;
 const event = (ticketId: number, data: object, min: number) => store.db.prepare("INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, 'claude', ?, ?)").run(ticketId, JSON.stringify(data), at(min));

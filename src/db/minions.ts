@@ -1,7 +1,7 @@
 // Minions and Taskmasters: the tickets table, who owns and touches a minion, Taskmaster splits and digests, and model picks
 // (#1313: src/db.ts by area).
 import type { Store, Ticket, TicketKind, User } from '../db.ts';
-import { askerKey, buildOwnerKey, pagePlanKey, planKey } from '../db-keys.ts';
+import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { copyRow, inScope, scoped, warm } from '../read-scope.ts';
 
@@ -281,6 +281,7 @@ export const minionQueries = {
     this.deleteSetting(askerKey(id));
     this.deleteSetting(planKey(id));
     this.deleteSetting(pagePlanKey(id));
+    this.deleteSetting(ownMemoryKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     // The main file's copy from before the move (#1169) still links to tickets, so its rows go too, or the delete below fails.
     if (this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'events_old'").get()) this.db.prepare('DELETE FROM main.events_old WHERE ticket_id = ?').run(id);
@@ -349,14 +350,16 @@ export const minionQueries = {
    * #1491: the scheme's minions (not its Taskmasters, which hear of every red) whose chat (people's messages and Claude's own
    * words, not tool output) names any of `needles`, among events after `afterId`; and the newest event id read, for the next
    * call to start from. It reads 500 ids back from `afterId`: an id is handed out before its row is written (reserveEventId).
-   * `atMost` caps the newest id read, for a replay of the past (#1503, tools/judge-replays/ci-red.ts).
+   * `atMost` caps the newest id read, for a step of a long read or a replay of the past (#1503, tools/judge-replays/ci-red.ts).
+   * CROSS JOIN keeps the events' id range in the lead: led by tickets it seeked into every minion of the scheme (1,974 of
+   * them for a few hundred new rows), cold off disk, holding the server up to 2 s a poll (#1974).
    */
   minionsNaming(this: Store, projectId: number, needles: string[], afterId: number, atMost = Infinity): { ids: number[]; upTo: number } {
     const upTo = Math.min(atMost, (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0);
     if (!needles.length || upTo <= afterId) return { ids: [], upTo: Math.max(upTo, afterId) };
     const like = needles.map((n) => `%${n.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     const rows = this.db
-      .prepare(`SELECT DISTINCT e.ticket_id AS id FROM events e JOIN tickets t ON t.id = e.ticket_id
+      .prepare(`SELECT DISTINCT e.ticket_id AS id FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
       WHERE e.id > ? AND e.id <= ? AND t.project_id = ? AND t.kind = 'ticket'
         AND (e.kind = 'user_message' OR (e.kind = 'claude' AND e.data LIKE '{"type":"assistant"%'))
         AND (${like.map(() => `e.data LIKE ? ESCAPE '\\'`).join(' OR ')})`)

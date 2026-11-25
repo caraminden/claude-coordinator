@@ -30,6 +30,20 @@ const lane = (paths: string[], rev = map) => {
 test("Citadel's light paths are light, and the path that decided it is named", () => {
   assert.equal(lane(['docs/adr/0001.md']), 'light docs/adr/0001.md');
   assert.equal(lane(['CLAUDE.md', '.claude/rules/x.md', 'README.md', '.github/pull_request_template.md']), 'light CLAUDE.md');
+  assert.equal(lane(['docs/design-system/media/a.svg']), 'full docs/design-system/media/a.svg', "test/media-browser.test.ts serves these in a browser: CI's job");
+});
+
+// A light ship gets no CI: land.sh runs the tests the affected map picks for its paths (#1864, LA2). These tests read the
+// repo's own copies, so each must be picked by the path it reads.
+test('the affected map picks every test that reads a light path', () => {
+  const picked = (path: string) => {
+    const r = spawnSync('node', ['tools/affected.ts', '--paths', path], { cwd: join(import.meta.dirname, '..'), encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return [...r.stdout.matchAll(/^run\t(\S+)/gm)].map((m) => m[1]).sort();
+  };
+  assert.deepEqual(picked('README.md'), ['test/layout-map.test.ts']);
+  assert.deepEqual(picked('CLAUDE.md'), ['test/affected.test.ts', 'test/rule-homes.test.ts']);
+  assert.deepEqual(picked('.claude/rules/x.md'), ['test/frontmatter-strict.test.ts', 'test/rule-homes.test.ts']);
 });
 
 test('kit/ is the kit lane, with light paths beside it, but its land template is full', () => {

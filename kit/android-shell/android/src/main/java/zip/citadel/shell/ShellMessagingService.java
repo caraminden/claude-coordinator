@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
+import java.util.UUID;
 
 /** Receives Citadel's pushes (#1138): shows the notification and hands the app's own data to its {@link PushHandler}. */
 public final class ShellMessagingService extends FirebaseMessagingService {
@@ -23,6 +24,8 @@ public final class ShellMessagingService extends FirebaseMessagingService {
     static final String CHANNEL = "citadel";
     /** The intent extra a notification tap carries: the page to open. */
     static final String EXTRA_OPEN = "zip.citadel.shell.OPEN";
+    /** And this push's own id, so its page opens once however often Android hands the intent back (OpenedPushes). */
+    static final String EXTRA_ID = "zip.citadel.shell.ID";
     static final String HANDLER_META = "zip.citadel.shell.push_handler";
     static final String ICON_META = "zip.citadel.shell.notification_icon";
 
@@ -40,7 +43,7 @@ public final class ShellMessagingService extends FirebaseMessagingService {
     @Override
     public void onNewToken(String token) {
         // Firebase rotated this phone's token: Citadel needs the new one, if the person turned push on.
-        if (Registration.enabled(this)) Registration.register(this, token);
+        Registration.refresh(this, token);
     }
 
     private void handOver(Map<String, String> data) {
@@ -59,7 +62,7 @@ public final class ShellMessagingService extends FirebaseMessagingService {
         Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         if (launch == null) return;
         launch.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        if (push.open != null) launch.putExtra(EXTRA_OPEN, push.open);
+        if (push.open != null) launch.putExtra(EXTRA_OPEN, push.open).putExtra(EXTRA_ID, UUID.randomUUID().toString());
         int id = push.tag != null ? push.tag.hashCode() : (int) System.currentTimeMillis();
         PendingIntent tap = PendingIntent.getActivity(context, id, launch, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder n = new NotificationCompat.Builder(context, CHANNEL)

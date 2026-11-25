@@ -81,7 +81,7 @@ test('replies are checked, shown as a list, and go once someone writes', async (
   const set = await patch([' Merge it ', 'Make it live']);
   assert.equal(set.status, 200);
   assert.deepEqual(set.data.replies, ['Merge it', 'Make it live']);
-  assert.deepEqual((await call(`/api/projects/${p.id}`)).data.tickets.find((x: any) => x.id === t.id).replies, ['Merge it', 'Make it live']);
+  assert.deepEqual((await call(`/api/projects/${p.id}`)).data.tickets.find((x: { id: number }) => x.id === t.id).replies, ['Merge it', 'Make it live']);
   const at = (await patch(['Merge it', 'Make it live'])).data.updated_at;
   await new Promise((r) => setTimeout(r, 5));
   assert.equal((await patch(['Merge it', 'Make it live'])).data.updated_at, at, 'the same replies again change nothing');

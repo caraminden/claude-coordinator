@@ -1,6 +1,7 @@
 // The base every module needs: who is signed in and what is on screen, the API and DOM helpers,
 // file, path and name helpers and the type and state tables. It touches no document at load and
 // imports no view, so node tests can import it; the app shell (router, stream, login) is core.js.
+import { setAvatars } from './avatars.js';
 import { iconSrc } from './schemes.js';
 
 const STATUS_LABEL = { running: 'Running', idle: 'Idle', new: 'Starting', error: 'Error', closed: 'Dismissed' };
@@ -49,6 +50,7 @@ export function setView(next) {
 export function setAccount(who) {
   account = who;
   me = who?.name ?? null;
+  setAvatars(who?.avatars);
   if (!who) forgetKept(), forgetHome(), answers.clear(); // signing out leaves nothing of theirs on the device, or for the next to keep
 }
 // The shell's login page (core.js renderLogin), shown when the server says you're signed out.

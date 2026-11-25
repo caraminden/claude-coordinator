@@ -5,9 +5,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
-import { buildOwnerKey, Store } from '../src/db.ts';
-import { Runner } from '../src/runner.ts';
+import { buildOwnerKey, Store, type Ticket } from '../src/db.ts';
+import { type QueuedMessage, Runner } from '../src/runner.ts';
 import { bootServer, jsonLines, PASSWORD, SECRET, type Booted, stopTurns, testPins, until, fakeClaude } from './helpers.ts';
+import { json } from './typed.ts';
 testPins();
 
 // Per-person Taskmasters (#919, Build 3): a scheme splits the first time a second member writes to its
@@ -110,7 +111,7 @@ test('a database with the old one-per-scheme index gets the per-person one, and 
   raw.close();
   const again = new Store(file);
   assert.deepEqual(again.db.prepare('SELECT * FROM tickets ORDER BY id').all(), rowsBefore, 'the migration changes no row (R3)');
-  assert.match(String((again.db.prepare("SELECT sql FROM sqlite_master WHERE name = 'one_coordinator'").get() as any).sql), /coordinator_of/);
+  assert.match(String((again.db.prepare("SELECT sql FROM sqlite_master WHERE name = 'one_coordinator'").get() as { sql: string }).sql), /coordinator_of/);
   const josh = again.createUser({ name: 'Josh', login: 'josh' });
   again.splitScheme(p.id, josh.id);
   assert.equal(again.listCoordinators(p.id).length, 3);
@@ -230,7 +231,7 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
     '/bin/false',
   );
   runner.personOf = (author) => store.findUser('name', author)?.id ?? null;
-  const turnPerson = (t: any, batch: any[]) => (runner as any).turnPerson(t, store.getProject(p.id), batch);
+  const turnPerson = (t: Ticket, batch: QueuedMessage[]) => (runner as any).turnPerson(t, store.getProject(p.id), batch);
   assert.equal(turnPerson(josh, []), Josh.id);
   // Never one person's request on another's login: Cara's typed words (/backup), plan verdict or file comment run on hers.
   assert.equal(turnPerson(josh, [{ author: 'Cara', text: 'hi', images: [], typed: true, own: true }]), Cara.id, "Cara's typing runs on her login");
@@ -258,7 +259,7 @@ test("the digest rides at the head of a Taskmaster's next turn, once", async () 
     fake,
   );
   store.noteDigest(p.id, josh.id, "Josh's Taskmaster started #4 Lairs");
-  const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: any) => c.text).join('\n'));
+  const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: { text: string }) => c.text).join('\n'));
   runner.send(cara.id, 'Cara', 'hello');
   await until('the first turn', () => texts().length === 1 && !runner.isRunning(cara.id));
   assert.match(texts()[0], /other Taskmasters:\n- Josh's Taskmaster started #4 Lairs[\s\S]*hello/);
@@ -307,7 +308,7 @@ function describeServer() {
       headers: { 'Content-Type': 'application/json', ...(auth.cookie ? { Cookie: auth.cookie } : {}), ...(auth.bearer ? { Authorization: `Bearer ${auth.bearer}` } : {}) },
       body: JSON.stringify(body),
     });
-    return { status: res.status, data: (await res.json().catch(() => null)) as any };
+    return { status: res.status, data: (await res.json().catch(() => null)) as { id: number; number: number } };
   };
   const said = (ticketId: number, text: string) =>
     db
@@ -339,7 +340,7 @@ function describeServer() {
     assert.ok(said(rachel.id, 'Rachel to the Overlord'));
     assert.equal(said(overlord.id, 'Rachel to the Overlord'), undefined);
     // The scheme page opens each person's own Taskmaster, as the scheme list does.
-    const page = async (u: { id: number; name: string }) => (await (await fetch(`${srv.base}/api/projects/${Shared.id}?tickets=open`, { headers: { Cookie: cookies(u) } })).json()).coordinator.id;
+    const page = async (u: { id: number; name: string }) => (await json<{ coordinator: { id: number } }>(await fetch(`${srv.base}/api/projects/${Shared.id}?tickets=open`, { headers: { Cookie: cookies(u) } }))).coordinator.id;
     assert.equal(await page(Josh), josh.id);
     assert.equal(await page(Cara), sharedTm.id);
   });

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins, followed } from './helpers.ts';
+import { runnerInsides, stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -50,7 +50,7 @@ const runner = new Runner(
   fake,
 );
 
-function newTicket(state: any = 'pending-deploy', note: string | null = null) {
+function newTicket(state: Parameters<Store['updateTicket']>[1]['state'] = 'pending-deploy', note: string | null = null) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   store.updateTicket(t.id, { status: 'idle', state, note });
@@ -60,10 +60,10 @@ function newTicket(state: any = 'pending-deploy', note: string | null = null) {
 /** End the running turn: waits for that turn, not for nothing to run, since a queued one may start right after. */
 async function endTurn(id: number, outcome: 'ok' | 'error') {
   await until('the turn to start', () => followed(runner, id)); // its launch writes its files first (#1808)
-  const live = (runner as any).turns.get(id);
+  const live = runnerInsides(runner).turns.get(id);
   rmSync(join(root, 'release'), { force: true });
   writeFileSync(join(root, 'release'), outcome);
-  await until('the turn to change', async () => (runner as any).turns.get(id) !== live);
+  await until('the turn to change', async () => runnerInsides(runner).turns.get(id) !== live);
   rmSync(join(root, 'release'), { force: true });
 }
 
@@ -77,7 +77,7 @@ test('an idle minion in pending-deploy is dismissed when its deploy is live', ()
 });
 
 test('other states are left alone, but the interim "outside / pending deploy" counts', () => {
-  for (const s of ['ready', 'outside', null]) {
+  for (const s of ['ready', 'outside', null] as const) {
     const id = newTicket(s);
     assert.equal(runner.deployLive(id), false);
     assert.equal(status(id), 'idle');

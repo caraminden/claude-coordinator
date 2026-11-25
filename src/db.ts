@@ -32,10 +32,10 @@ import { credentialQueries } from './db/credentials.ts';
 import { turnQueries } from './db/turns.ts';
 import { healthQueries } from './db/health.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
-import { SINCE_KEY, waitRecordQueries } from './db/wait-records.ts';
+import { waitRecordQueries } from './db/wait-records.ts';
 import { viewQueries } from './db/views.ts';
 
-import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from './db-keys.ts';
+import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey, WAITS_SINCE_KEY } from './db-keys.ts';
 import { scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey };
@@ -593,7 +593,7 @@ export class Store {
     if (stored > SCHEMA_VERSION) {
       console.warn(`The database is at schema version ${stored}, newer than this code's ${SCHEMA_VERSION}: a newer release migrated it. If something fails to read, backups/pre-deploy-*.db holds it from before that deploy.`);
     } else if (stored < SCHEMA_VERSION) this.setSetting('schema_version', SCHEMA_VERSION);
-    if (this.getSetting(SINCE_KEY) === null) this.setSetting(SINCE_KEY, Date.now());
+    if (this.getSetting(WAITS_SINCE_KEY) === null) this.setSetting(WAITS_SINCE_KEY, Date.now());
   }
 
   /**

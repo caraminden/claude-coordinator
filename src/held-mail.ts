@@ -2,11 +2,12 @@
 // the cold hold's cap, the loop guard's "continue", and striking a wrong message. The relay that decides to hold one is
 // src/minion-relay.ts; the queue it waits in is src/minion-queue.ts.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `HeldMailDeps`.
+import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import { msgSettings } from './msg-settings.ts';
 import { type Relay, clip, loopKey, MINION_PAIRS, minionPairKey, pairKey, type LoopState } from './minion-relay.ts';
 import type { EventRow, Project, Store, TicketFields } from './db.ts';
-import { unsealedBy } from './db/wait-records.ts';
+import type { ChangeBy } from './db/wait-records.ts';
 import type { Lanes } from './lanes.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 import { startHoldKey, START_HOLD_PREFIX, startNote } from './minion-budget.ts';
@@ -16,6 +17,11 @@ import type { QueuedMessage } from './turn-messages.ts';
 
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
 const STRIKE_SEARCH = 500;
+
+/** Who unsealed it, from unpark's two names: a person's message comes from themselves, anyone else's from the app. */
+export function unsealedBy(by: string, author: string): ChangeBy {
+  return by === APP_NAME ? { kind: 'server' } : { kind: author === by ? 'person' : 'agent', name: by };
+}
 
 /** A stored event's data as `strike` reads it: a Claude event, or a note or message with its `text`. */
 type StruckData = Partial<ClaudeEvent> & { text?: string; strikes?: { text: string; reason: string; at: number }[] };

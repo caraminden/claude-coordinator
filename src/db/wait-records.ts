@@ -1,6 +1,6 @@
 // What a minion's time log can't work out from its events (#1992): when its state changed and who changed it, where its
 // ship stood, and the commands a time limit cut off. One row each, kept as long as the minion's events are: until it is deleted.
-import { APP_NAME } from '../appname.ts';
+import { WAITS_SINCE_KEY } from '../db-keys.ts';
 import type { Store } from '../db.ts';
 import type { TicketState } from '../db-rows.ts';
 
@@ -8,11 +8,6 @@ import type { TicketState } from '../db-rows.ts';
 export interface ChangeBy {
   kind: 'minion' | 'agent' | 'person' | 'server';
   name?: string;
-}
-
-/** Who unsealed it, from unpark's two names: a person's message comes from themselves, anyone else's from the app. */
-export function unsealedBy(by: string, author: string): ChangeBy {
-  return by === APP_NAME ? { kind: 'server' } : { kind: author === by ? 'person' : 'agent', name: by };
 }
 
 export interface StateChange {
@@ -30,9 +25,9 @@ export interface ShipStep {
   stage: string;
   /** The stage in words: "In line", "CI", "Deploy". */
   label: string;
-  /** Its place while it waits in line: 1 is next. */
+  /** Its place while it waits in line, the ship at the front being 1. */
   place?: number;
-  /** Who is ahead of it, "#513". */
+  /** The ship at the front, "#513". */
   behind?: string;
   /** With `ended`. left: it left the line and nothing says how (a ship its own turn ran); cut off: land.sh ended with no exit code. */
   outcome?: 'shipped' | 'unpushed' | 'refused' | 'stopped' | 'no-ci' | 'cut off' | 'left';
@@ -70,8 +65,6 @@ interface Kinds {
   cut: CutOff;
 }
 
-export const SINCE_KEY = 'wait_records_since';
-
 export const waitRecordQueries = {
   addWaitRecord<K extends keyof Kinds>(this: Store, ticketId: number, kind: K, { at, ...data }: Kinds[K]) {
     // From the ticket, so a minion deleted meanwhile gets none.
@@ -82,6 +75,6 @@ export const waitRecordQueries = {
   waitRecords(this: Store, ticketId: number): WaitRecords {
     const rows = this.db.prepare('SELECT kind, at, data FROM wait_records WHERE ticket_id = ? ORDER BY id').all(ticketId) as { kind: keyof Kinds; at: number; data: string }[];
     const of = <T>(kind: keyof Kinds) => rows.filter((r) => r.kind === kind).map((r) => ({ at: r.at, ...JSON.parse(r.data) }) as T);
-    return { since: this.getSetting<number>(SINCE_KEY), states: of('state'), ships: of('ship'), cuts: of('cut') };
+    return { since: this.getSetting<number>(WAITS_SINCE_KEY), states: of('state'), ships: of('ship'), cuts: of('cut') };
   },
 };

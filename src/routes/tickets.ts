@@ -19,7 +19,7 @@ import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
-import { unsealedBy } from '../db/wait-records.ts';
+import { unsealedBy } from '../held-mail.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { factsText, liveFacts } from '../live-facts.ts';

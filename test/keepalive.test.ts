@@ -3,12 +3,32 @@
 // at 55 minutes, hides from the chat, leaves state alone, and is dropped when a real wake comes first).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { changedParts, countGate, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS, tooManyMisses, WEEK_MS, weekReport, type KeepaliveSeries, type KeepaliveRow } from '../src/keepalive.ts';
+import {
+  changedParts,
+  claudeStamp,
+  countGate,
+  fingerprint,
+  inWindow,
+  KEEPALIVE_AFTER_MS,
+  KEEPALIVE_GATES_KEY,
+  KEEPALIVE_OFF_KEY,
+  KEEPALIVE_REPORT_KEY,
+  KEEPALIVE_TEXT,
+  keepaliveKey,
+  missed,
+  prefixParts,
+  SERIES_CAP_MS,
+  tooManyMisses,
+  WEEK_MS,
+  weekReport,
+  type KeepaliveSeries,
+  type KeepaliveRow,
+} from '../src/keepalive.ts';
 import { sleepKey } from '../src/needs.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
@@ -27,6 +47,26 @@ test('the window is 11:00 to midnight Pacific, in winter and summer time', () =>
   // 2026-07-01 is PDT (UTC-7): 11:00 PDT is 18:00 UTC, 10:30 PDT is 17:30 UTC.
   assert.equal(inWindow(Date.UTC(2026, 6, 1, 18, 0)), true);
   assert.equal(inWindow(Date.UTC(2026, 6, 1, 17, 30)), false);
+});
+
+test('the claude stamp skips the claude-pace link and stamps the real CLI', () => {
+  const d = mkdtempSync(join(tmpdir(), 'stamp-'));
+  try {
+    const real = join(d, 'real');
+    mkdirSync(real);
+    writeFileSync(join(real, 'claude'), '#!/bin/sh\n');
+    const turn = (n: string) => {
+      const bin = join(d, n, 'bin', 'heavy');
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(d, n, 'bin', 'claude-pace'), `#!/bin/sh\n# ${n}\n`);
+      symlinkSync('../claude-pace', join(bin, 'claude'));
+      return `${bin}:${real}`;
+    };
+    assert.equal(claudeStamp('claude', turn('t1')), claudeStamp('claude', turn('t2')));
+    assert.match(claudeStamp('claude', turn('t3')), /real\/claude/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test('the fingerprint ignores the per-turn folder and names the part that moved', () => {

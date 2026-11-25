@@ -168,7 +168,8 @@ export function claudeStamp(bin: string, path = process.env.PATH ?? ''): string 
       : path
           .split(delimiter)
           .map((d) => join(d, bin))
-          .find((p) => existsSync(p));
+          // The turn's own claude-pace link (#1748) names its turn folder and the server's start: skip it for the CLI it hands to.
+          .find((p) => existsSync(p) && !realpathSync(p).endsWith('/claude-pace'));
     if (!found) return bin;
     const real = realpathSync(found);
     const s = statSync(real);

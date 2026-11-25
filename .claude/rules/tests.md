@@ -35,6 +35,8 @@ listening TCP ports, and entries left in its `TMPDIR`. Anything left fails the f
 Fix it in the file's teardown (`bootServer`'s stop, `stopTurns(root)` for a server's turn supervisor, `tempRoot`'s
 teardown, a `finally`). `test/leak-baseline.json` lists files that leaked before the guard; like the flake baseline it
 only shrinks: a drop passes with a note to lower it, and a file at zero loses its line.
+A file killed before its exit can't clean up: its server stops its own turns on finding it gone (`src/exit-with-parent.ts`),
+and each CI job clears what is left as it starts and ends (`test/ci-leftovers.ts`, #1900).
 
 Before the first hand-off, run `tools/burn-in.sh` on every test file you touched: it burns in each, and old tests with shared state fail on whoever next edits them. A failure in 10 of 10 copies is a real failure, not a race. Editing a file a judge pins needs `node tools/judge-replay.ts <id> --record`, or `test/judges.test.ts` goes red.
 

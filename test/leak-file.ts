@@ -40,13 +40,13 @@ export interface Leftovers {
 export type Kind = 'procs' | 'units' | 'ports' | 'tmp';
 export const KINDS: Kind[] = ['procs', 'units', 'ports', 'tmp'];
 
-interface Proc {
+export interface Proc {
   pid: number;
   ppid: number;
   args: string[];
 }
 
-function readProcs(): Proc[] {
+export function readProcs(): Proc[] {
   const uid = process.getuid!();
   const out: Proc[] = [];
   for (const name of readdirSync('/proc')) {
@@ -142,13 +142,15 @@ export function leftovers(o: { self: number; id: string; dir: string }): Leftove
   return { procs: procs.map((p) => [p.pid, p.args.join(' ')]), units, ports, tmp };
 }
 
+const nap = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 /** Leftovers, after giving what a teardown has just stopped up to `waitMs` to go. */
 export function settledLeftovers(o: { self: number; id: string; dir: string }, waitMs = 2000): Leftovers {
   const end = Date.now() + waitMs;
   for (;;) {
     const left = leftovers(o);
     if (!left.procs.length || Date.now() >= end) return left;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    nap(50);
   }
 }
 
@@ -202,25 +204,60 @@ export function judge(file: string, left: Leftovers, allowed: Partial<Record<Kin
   return { fail: over.length > 0, text: lines.join('\n') };
 }
 
-/** Stop and remove what was left: citadel's and systemd-run's own units by unit (a supervisor KILLed would restart), the rest by pid, then the folder. */
-export function cleanUp(left: Leftovers, dir: string) {
-  const units = left.units.filter((u) => /^(citadel-|run-)/.test(u));
-  if (units.length) {
-    try {
-      execFileSync('systemctl', ['--user', 'stop', ...units], { stdio: 'ignore', timeout: 15_000 });
-    } catch {}
+/** The user unit a process runs in, if it is one of citadel's or systemd-run's own (never a CI runner's own service). */
+function userUnit(pid: number): string {
+  try {
+    const path = readFileSync(`/proc/${pid}/cgroup`, 'utf8').trim().split('\n').at(-1)!;
+    const unit = path.split('/').at(-1)!;
+    return path.includes(`/user@${process.getuid!()}.service/`) && /^(citadel-|run-).*\.(service|scope)$/.test(unit) ? unit : '';
+  } catch {
+    return '';
   }
-  for (const [pid] of left.procs) {
-    if (units.includes(leaf(pid))) continue;
-    try {
-      process.kill(-pid, 'SIGKILL'); // a process may lead a group with children of its own
-    } catch {
+}
+
+/**
+ * Stop what `find` names, and what that starts meanwhile (a supervisor systemd had still to start, #1900), until it has found
+ * nothing for `quietMs`: its user units by unit (a supervisor KILLed would restart), the rest by pid. Returns what is left
+ * after `waitMs`. `group` also kills each one's process group, for a `find` that only names whole groups.
+ */
+export function stopAll(find: () => number[], { waitMs = 20_000, quietMs = 500, group = false } = {}): number[] {
+  const end = Date.now() + waitMs;
+  const own = userUnit(process.pid);
+  const tried = new Set<string>();
+  for (let seen = 0; ; nap(50)) {
+    const found = find();
+    if (!found.length) {
+      if (Date.now() - seen >= quietMs) return [];
+      continue;
+    }
+    if (Date.now() >= end) return found;
+    const units = [...new Set(found.map(userUnit))].filter((u) => u && u !== own && !tried.has(u));
+    if (units.length) {
+      for (const u of units) tried.add(u);
       try {
-        process.kill(pid, 'SIGKILL');
+        const env = { ...process.env, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid!()}` };
+        execFileSync('systemctl', ['--user', 'stop', ...units], { stdio: 'ignore', timeout: 15_000, env });
       } catch {}
     }
+    for (const pid of found) {
+      if (units.includes(userUnit(pid))) continue; // its unit is still stopping: KILLed on the next look
+      try {
+        process.kill(group ? -pid : pid, 'SIGKILL'); // a process may lead a group with children of its own
+      } catch {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {}
+      }
+    }
+    seen = Date.now();
   }
-  rmSync(dir, { recursive: true, force: true }); // timing-ok: the guard's own last step, after the file's teardown
+}
+
+/** Stop what the file left and remove its folder. */
+export function cleanUp(o: { self: number; id: string; dir: string }) {
+  const own = () => leftovers(o).procs.map(([pid]) => pid);
+  if (own().length) stopAll(own, { group: true });
+  rmSync(o.dir, { recursive: true, force: true, maxRetries: 3 }); // timing-ok: the guard's own last step, after the file's teardown
 }
 
 function install() {
@@ -238,7 +275,8 @@ function install() {
     const r = (emit as (...a: unknown[]) => boolean).call(this, event, ...args);
     if (event === 'exit') {
       try {
-        const left = settledLeftovers({ self: process.pid, id, dir });
+        const own = { self: process.pid, id, dir };
+        const left = settledLeftovers(own);
         const allowed = readBaseline()[file];
         if (allowed || KINDS.some((k) => left[k].length)) {
           // a baselined file that left nothing still hears to lower it
@@ -246,7 +284,7 @@ function install() {
           if (text) process.stderr.write(`\n${text}\n`);
           if (fail && !process.exitCode) process.exitCode = 1;
         }
-        cleanUp(left, dir);
+        cleanUp(own);
       } catch (err) {
         process.stderr.write(`\nleak guard: counting what ${file} left failed: ${(err as Error).stack}\n`);
       }

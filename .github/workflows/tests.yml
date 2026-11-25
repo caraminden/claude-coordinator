@@ -85,6 +85,10 @@ jobs:
           [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
           echo "XDG_RUNTIME_DIR=$dir" >>"$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus" >>"$GITHUB_ENV"
+      # What killed or cancelled jobs left running (#1900), and this job's own temp folder (TMPDIR, kept per runner).
+      - name: clear what earlier jobs left running
+        continue-on-error: true
+        run: node test/ci-leftovers.ts start
       # Two clock keepers skew the WSL clock, which every distro on the PC shares (#542): WSL's own chrony steers it
       # to the Windows clock while a distro's systemd-timesyncd steps it to NTP, and chrony retunes the kernel tick
       # after every step. On 2026-11-11 the clocks ran 7% fast, then 2% slow after a reboot, with the wall clock
@@ -277,3 +281,8 @@ jobs:
       - name: what was still running
         if: cancelled() || failure()
         run: ps -u "$(id -u)" -o pid,ppid,etimes,stat,args --forest | cut -c1-400
+      # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
+      - name: clear what this job left running
+        if: always()
+        continue-on-error: true
+        run: node test/ci-leftovers.ts end

@@ -18,6 +18,8 @@ function line(t: TestContext, size = 1) {
   const forced = new Set<number>();
   const pressers = new Map<number, number>();
   const persons = new Map<number, number>();
+  const quick = new Set<number>();
+  const urgent = new Map<number, number>();
   const steps = new Map<number, (() => void)[]>();
   let fails = 0;
   const store = {
@@ -30,7 +32,7 @@ function line(t: TestContext, size = 1) {
     store,
     exempt: () => false,
     busy: (id) => busy.has(id),
-    asks: (id) => ({ person: persons.get(id) ?? 1, rank: 0 }),
+    asks: (id) => ({ person: persons.get(id) ?? 1, rank: 0, ...(quick.has(id) ? { quick: true as const } : {}), ...(urgent.has(id) ? { urgent: urgent.get(id)! } : {}) }),
     forced: (id) => (forced.has(id) ? { user: pressers.get(id) ?? 7, by: 'Josh' } : null),
     start: (e) => {
       started.push(e.via ? `${e.ticket} ${e.via}` : String(e.ticket));
@@ -61,6 +63,8 @@ function line(t: TestContext, size = 1) {
     forced,
     pressers,
     persons,
+    quick,
+    urgent,
     changes,
     /** A person presses Start now on it. */
     press(id: number) {
@@ -379,4 +383,200 @@ test("let go mid-turn, a worker is its person's until that turn ends: presses in
   assert.deepEqual(x.started, ['2', '3', '5'], "another person's two are their own");
   await x.end(2);
   assert.deepEqual([x.started, x.waits()], [['2', '3', '5', '4'], []], 'it starts by itself');
+});
+
+// The quick lane (#1986; Josh, 2026-11-25: "ok, build the quick lane"): short turns of some kinds start beside a full pool.
+const box = (level: 'ok' | 'easing' | 'tight') => ({ freeGb: null, level });
+const MIN = 60_000;
+/** A pool of one, taken by minion 1, and minions 2 and up whose turns may use the lane. */
+function quickLine(t: TestContext, ids = [2, 3, 4, 5]) {
+  const x = line(t);
+  x.run(1);
+  for (const id of ids) x.quick.add(id);
+  return x;
+}
+const lane = (x: ReturnType<typeof line>) => [x.l.used(), x.l.summary().lane.used, x.l.summary().lane.size];
+
+test('with the pool full, two quick turns start at once and the third waits; any other kind waits for the pool', async (t) => {
+  const x = quickLine(t);
+  assert.equal(x.run(9), false, 'not of its kinds');
+  t.mock.timers.tick(1);
+  assert.deepEqual([x.run(2), x.run(3), x.run(4)], [true, true, false]);
+  assert.deepEqual([...lane(x), x.waits()], [1, 2, 2, [9, 4]]);
+  await x.end(2);
+  assert.deepEqual([x.started, x.waits()], [['4'], [9]], "the lane's freed worker goes to the next quick turn");
+  await x.end(1);
+  assert.deepEqual(x.started, ['4', '9'], "the pool's goes to the line");
+});
+
+test('a quick turn takes a free pool worker, and the lane stays empty', async (t) => {
+  const x = quickLine(t);
+  await x.end(1);
+  assert.equal(x.run(2), true);
+  assert.deepEqual(lane(x), [1, 0, 2]);
+});
+
+test('a turn waiting for the pool starts in the lane once it becomes of its kinds, its own place kept otherwise', async (t) => {
+  const x = quickLine(t, []);
+  x.run(2);
+  assert.deepEqual(x.waits(), [2]);
+  x.quick.add(2);
+  assert.equal(x.run(2), true, 'a person wrote to it');
+  x.run(3, 'restart');
+  x.quick.add(3);
+  x.run(3);
+  await x.turn();
+  assert.deepEqual([x.started, x.waits()], [['3 restart'], []], 'the resume goes, and takes its messages along');
+});
+
+test('two minutes on, a lane turn counts in the pool past its size, nothing is stopped, and the pool waits for room', async (t) => {
+  const x = quickLine(t);
+  x.run(9);
+  x.run(2);
+  const start = Date.now();
+  x.l.tick(CALM, [], start + 2 * MIN - 1, box('ok'));
+  assert.deepEqual(lane(x), [1, 1, 2]);
+  x.l.tick(CALM, [], start + 2 * MIN, box('ok'));
+  assert.deepEqual([...lane(x), x.l.summary().lane.moved, x.stopped], [2, 0, 2, 1, []]);
+  assert.deepEqual([x.run(3), x.run(4)], [true, true], 'the lane has its worker back');
+  await x.end(1);
+  assert.deepEqual([x.started, x.l.used()], [[], 1], 'the moved turn fills the pool of one');
+  await x.end(2);
+  assert.deepEqual([x.started, x.l.summary().lane.moved], [['9'], 0]);
+});
+
+test('the lane has 2 workers in calm, 1 while memory eases and none while it is tight; its running turns go on', async (t) => {
+  const x = quickLine(t);
+  x.run(2);
+  x.run(3);
+  x.l.tick(CALM, [], Date.now(), box('tight'));
+  assert.deepEqual([...lane(x), x.stopped], [1, 2, 0, []]);
+  await x.end(2);
+  assert.equal(x.run(4), false, 'tight: none starts');
+  x.l.tick(CALM, [], Date.now(), box('easing'));
+  await x.turn();
+  assert.deepEqual([...lane(x), x.started], [1, 1, 1, []], 'one still runs, so the one worker is out');
+  await x.end(3);
+  assert.deepEqual([...lane(x), x.started], [1, 1, 1, ['4']]);
+  assert.equal(x.run(5), false);
+  x.l.tick(CALM, [], Date.now(), box('ok'));
+  await x.turn();
+  assert.deepEqual([...lane(x), x.started], [1, 2, 2, ['4', '5']]);
+});
+
+test("Urgent goes first in the lane and in the pool, and a lane turn counts in its person's share", async (t) => {
+  const x = quickLine(t, [2, 3, 4, 5, 6]);
+  x.run(2);
+  x.run(3);
+  x.run(4);
+  x.run(5);
+  x.run(9);
+  x.run(8);
+  x.urgent.set(5, 0);
+  x.urgent.set(8, 1);
+  x.quick.delete(8);
+  await x.end(2);
+  assert.deepEqual(x.started, ['5'], 'ahead of 4 in the lane');
+  await x.end(1);
+  assert.deepEqual(x.started, ['5', '8'], 'and 8 ahead of 4 and 9 in the pool');
+  // Person 1 runs 8 in the pool and 3 and 5 in the lane; person 2 has none and goes first.
+  x.persons.set(6, 2);
+  x.run(6);
+  assert.deepEqual(
+    x.l.people().map((p) => [p.person, p.used, p.lane ?? 0, p.waiting]),
+    [
+      [1, 1, 2, 2],
+      [2, 0, 0, 1],
+    ],
+  );
+  await x.end(3);
+  assert.deepEqual(x.started, ['5', '8', '6']);
+});
+
+test('a Pause, a boot still closed and a full container hold a lane start as any turn', async (t) => {
+  const x = quickLine(t);
+  x.l.setPause(true, 'cara');
+  assert.equal(x.run(2), false);
+  await x.turn();
+  assert.deepEqual(x.started, []);
+  x.l.setPause(false, 'cara');
+  assert.deepEqual(x.started, ['2']);
+  x.l.close();
+  assert.equal(x.run(3), false);
+  await x.turn();
+  assert.deepEqual(x.started, ['2']);
+  x.l.open(0);
+  await x.turn();
+  assert.deepEqual(x.started, ['2', '3']);
+});
+
+test("a person whose container is at its memory limit starts nothing in the lane, others' do", async (t) => {
+  const x = quickLine(t);
+  x.l.setSize(null, 'cara');
+  x.l.setLimits({ min: 1, max: 1 }, 'cara');
+  x.l.tick(CALM, [1]);
+  x.persons.set(3, 6);
+  assert.deepEqual([x.run(2), x.run(3)], [false, true]);
+  await x.turn();
+  assert.deepEqual(x.started, []);
+  x.l.tick(CALM, []);
+  await x.turn();
+  assert.deepEqual(x.started, ['2']);
+});
+
+test('a lane turn that waits on an approval card comes back to the pool, and its lane worker is free meanwhile', async (t) => {
+  const x = quickLine(t);
+  x.run(2);
+  x.l.setLent(2, true);
+  assert.deepEqual([...lane(x), x.l.lent()], [1, 0, 2, 1]);
+  x.l.setLent(2, false);
+  assert.deepEqual(lane(x), [2, 0, 2]);
+});
+
+test("after a restart a lane turn comes back as the pool's, and an entry saved before the lane loads", async (t) => {
+  const x = quickLine(t);
+  x.run(2);
+  x.run(9);
+  x.restart();
+  x.l.close();
+  for (const id of [1, 2]) void x.l.reattach(id, () => new Promise(() => {}));
+  x.quick.add(9);
+  x.l.open(0);
+  await x.turn();
+  assert.deepEqual([...lane(x), x.started], [2, 1, 2, ['9']]);
+});
+
+test('a forced turn and a lane turn each have their own worker', async (t) => {
+  const x = quickLine(t);
+  x.run(2);
+  x.run(9);
+  x.press(9);
+  assert.deepEqual([...lane(x), x.started, x.run(3), x.run(4)], [2, 1, 2, ['9'], true, false]);
+});
+
+test('a lane turn that could not start leaves its worker and the line going', async (t) => {
+  const x = quickLine(t);
+  x.run(2);
+  x.run(3);
+  x.run(4);
+  x.run(5);
+  x.failNext();
+  await x.end(2);
+  await x.turn();
+  assert.deepEqual([x.started, x.l.summary().lane.used], [['4', '5'], 2]);
+});
+
+test('each start takes one lane worker, however many are waiting, and never past its size', async (t) => {
+  const ids = Array.from({ length: 12 }, (_, i) => i + 2);
+  const x = quickLine(t, ids);
+  for (const id of ids) x.run(id);
+  let most = 0;
+  for (let i = 0; i < 12; i++) {
+    x.l.tick(CALM, [], Date.now(), box('ok'));
+    await x.turn();
+    most = Math.max(most, x.l.summary().running);
+    const on = x.l.laneTurns()[0];
+    if (on) await x.end(on.ticket);
+  }
+  assert.equal(most, 3, 'one in the pool, two in the lane');
 });

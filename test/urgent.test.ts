@@ -263,7 +263,7 @@ test('a refused ship and a minion others wait on go first in their share, until 
 
 type Answer = { status: number; body: unknown };
 /** A route's handler, as the router calls it once it has let the caller in. */
-async function call(method: string, path: string, app: unknown, ctx: Record<string, unknown>, body: unknown = {}): Promise<Answer & { data: { urgent: unknown; said: string; line: Record<string, unknown>[]; forced: Record<string, unknown>[] } }> {
+async function call(method: string, path: string, app: unknown, ctx: Record<string, unknown>, body: unknown = {}): Promise<Answer & { data: { urgent: unknown; said: string; line: Record<string, unknown>[]; lane: Record<string, unknown>[]; forced: Record<string, unknown>[] } }> {
   const route = urgentRoutes.find((r) => r.method === method && r.path === path)!;
   const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
   const res = { status: 0, text: '', headersSent: false, setHeader() {}, writeHead: (s: number) => ((res.status = s), res), end: (b?: string) => void (res.text = b ?? '') };
@@ -329,7 +329,7 @@ test("the line shows a person only their schemes' minions, with the rest as plac
   startNow.press(a, josh.id, 'Josh');
   startNow.press(b, cara.id, 'A private person');
   const waiting = [b, a].map((ticket) => ({ ticket, person: cara.id, rank: 1, since: 5, heat: 0 as const, ...(ticket === b ? { urgent: 0 } : {}) }));
-  const app = { store, runner: { urgent, startNow, isRunning: () => false, turnLine: { has: () => true, line: () => waiting, heldBy: () => null } } };
+  const app = { store, runner: { urgent, startNow, isRunning: () => false, turnLine: { has: () => true, line: () => waiting, heldBy: () => null, laneTurns: () => [b, a].map((ticket) => ({ ticket, person: cara.id, since: 5, moved: ticket === a })) } } };
   const { data } = await call('GET', '/api/line', app, { session: { name: 'Josh', uid: josh.id, admin: false } });
   assert.deepEqual(
     data.line.map((w) => [w.ticket, w.urgent, w.warm]),
@@ -338,6 +338,10 @@ test("the line shows a person only their schemes' minions, with the rest as plac
       [a, false, true],
     ],
   );
+  assert.deepEqual(data.lane, [
+    { ticket: null, person: 'Cara', since: 5, moved: false },
+    { ticket: a, project: peek.id, number: store.getTicket(a)!.number, title: store.getTicket(a)!.title, person: 'Cara', since: 5, moved: true },
+  ]);
   assert.deepEqual(
     data.forced.map((h) => [h.ticket, h.by]),
     [

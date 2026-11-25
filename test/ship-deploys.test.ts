@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { Store } from '../src/db.ts';
+import { askerKey, Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { shipDeploys } from '../src/ship-deploys.ts';
 
@@ -32,7 +32,8 @@ function setup(opts: { off?: string; refuse?: Error; running?: boolean; noClone?
   if (!opts.noClone) store.setProjectRepoDir(project.id, dir);
   const t = store.createTicket({ project_id: project.id, title: 'work', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const cara = store.createUser({ name: 'Cara', login: `cara${n}` });
-  store.updateTicket(t.id, { person_id: cara.id });
+  store.updateTicket(t.id, { person_id: store.createUser({ name: 'Owner', login: `owner${n}` }).id });
+  store.setSetting(askerKey(t.id), cara.id); // the asker, not the owner, is who its turn runs for
   const asked: unknown[][] = [];
   const started: unknown[][] = [];
   const last = { state: 'deployed', to: first, said: [], log: '' };

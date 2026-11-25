@@ -25,7 +25,7 @@ const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'];
 const pacific = pacificStamp;
 
 let pageEl = null;
-let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen }
+let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen, kept, behind }
 // The tab ('scheme' or 'all') and the Every scheme rows outlive a scheme switch: the table is the same on every scheme.
 const every = { tab: 'scheme', rows: null, error: null };
 
@@ -43,12 +43,14 @@ function labelGiver() {
 
 export function reviewsPage() {
   const projectId = view.projectId;
-  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: false, newWhen: '' };
+  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: null, newWhen: '', kept: new Map(), behind: false };
   pageEl = h('section', {
     class: 'reviews-main',
     onkeydown: (e) => {
       if (e.key === 'Escape' && state.mode === 'view') closePage();
     },
+    // Not at once: a redraw between a press and its click would swallow the click.
+    onfocusout: () => setTimeout(catchUp, 500),
   });
   draw();
   load();
@@ -62,29 +64,70 @@ function closePage() {
 
 async function load() {
   const at = state;
+  at.behind = false;
   try {
     const { entries, starters, audits, glance } = await api(url());
     if (state !== at) return;
-    Object.assign(state, { entries, starters, audits: audits ?? [], glance: glance ?? null });
+    Object.assign(state, { error: null, entries, starters, audits: audits ?? [], glance: glance ?? null });
     if (state.selected && !entry(state.selected) && !audit(state.selected)) state.selected = null;
     if (!state.selected && entries.length && matchMedia('(min-width: 801px)').matches) state.selected = entries[0].slug;
   } catch (err) {
+    at.behind = true;
     if (state === at && !state.entries) state.error = err.message;
   }
   draw();
 }
 
-/** The server said the set changed: reload it, unless an edit is open (its save would then say it's stale). */
+/** The server said the set changed: reload it, once no form is open and no field has the focus. */
 export function onReviewsChanged(projectId) {
   if (!pageEl?.isConnected || state?.projectId !== projectId) return;
-  if (state.mode === 'edit' || state.mode === 'new') return;
+  state.behind = true;
+  catchUp();
+}
+
+function catchUp() {
+  if (!state?.behind || !pageEl?.isConnected) return;
+  const at = document.activeElement;
+  const typing = pageEl.contains(at) && at.matches('input:not([type=checkbox]), select, textarea');
+  if (state.mode === 'edit' || state.mode === 'new' || typing) return;
   load();
   if (every.tab === 'all') loadEvery();
   if (state.mode === 'history') loadVersions();
 }
 
+/** A part of the page that holds typing: a redraw keeps the same element while it has unsaved changes, a save under way or the focus. */
+function keep(key, make) {
+  const was = state.kept.get(key);
+  if (was?.querySelector('[data-draft], [type=submit]:disabled') || was?.contains(document.activeElement)) return was;
+  const el = make();
+  state.kept.set(key, el);
+  return el;
+}
+
+/** Marks the form's Save while a field differs from how the form opened: keep() keeps it, and a deploy's reload waits (core.js, unsentWork). */
+function markDraft(form, save) {
+  const now = () => JSON.stringify([...form.querySelectorAll('input, select, textarea')].map((f) => (f.type === 'checkbox' ? f.checked : f.value)));
+  const was = now();
+  save.value = 'unsaved';
+  form.addEventListener('input', () => save.toggleAttribute('data-draft', now() !== was));
+  return form;
+}
+
+/** Redraws the page; what it keeps stays where it was: the focus, the cursor and a text's scroll. */
 function draw() {
   if (!pageEl) return;
+  const at = pageEl.contains(document.activeElement) ? document.activeElement : null;
+  const cursor = at && [at.selectionStart, at.selectionEnd];
+  const scrolls = [...pageEl.querySelectorAll('textarea')].map((t) => [t, t.scrollTop]);
+  drawPage();
+  if (at?.isConnected && document.activeElement !== at) {
+    at.focus({ preventScroll: true });
+    if (cursor[0] != null) at.setSelectionRange(...cursor);
+  }
+  for (const [t, top] of scrolls) t.scrollTop = top;
+}
+
+function drawPage() {
   const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
   const head = h(
     'div',
@@ -117,13 +160,6 @@ function setTab(k) {
   every.tab = k;
   draw();
   if (k === 'all') loadEvery();
-}
-
-/** The headline and ghost cards again after a save: the broadcast's reload is skipped while a form is open. */
-async function glanceAgain() {
-  const at = state;
-  const fresh = await api(url()).catch(() => null);
-  if (fresh && state === at) state.glance = fresh.glance ?? null;
 }
 
 async function loadEvery() {
@@ -321,11 +357,14 @@ function everyTable() {
 }
 
 function select(slug, mode = 'view') {
+  // Unsaved hand-offs outlive their own entry's History; an Edit or New form starts again.
+  for (const key of state.kept.keys()) if (slug !== state.selected || !key.startsWith('fail:')) state.kept.delete(key);
   state.selected = slug;
   state.mode = mode;
   state.versions = null;
   draw();
   if (mode === 'history') loadVersions();
+  catchUp();
   // On a phone the detail sits under the columns.
   if (matchMedia('(max-width: 800px)').matches) pageEl.querySelector('.rv-detail')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
@@ -488,7 +527,7 @@ function looseTeacher(t) {
 /** The pre-ship review's lenses as one row that opens to a switch a lens (#1094), so nine of them don't bury the column. */
 function lensesCard(lenses) {
   const on = lenses.filter((e) => e.enabled).length;
-  const open = state.lenses || lenses.some((e) => e.slug === state.selected);
+  const open = state.lenses ?? lenses.some((e) => e.slug === state.selected);
   return h(
     'div',
     { class: `rv-card rv-lenses${open ? ' open' : ''}` },
@@ -500,7 +539,7 @@ function lensesCard(lenses) {
         'aria-expanded': String(open),
         onclick: () => {
           state.lenses = !open;
-          if (!state.lenses && lenses.some((e) => e.slug === state.selected)) state.selected = null;
+          if (!state.lenses && state.mode !== 'edit' && lenses.some((e) => e.slug === state.selected)) state.selected = null;
           draw();
         },
       },
@@ -678,12 +717,16 @@ function setSwitch(slug, patch) {
 }
 
 function detail() {
-  if (state.mode === 'new') return h('aside', { class: 'rv-detail' }, newForm());
+  if (state.mode === 'new') return h('aside', { class: 'rv-detail' }, keep('new', newForm));
   const a = audit(state.selected);
   if (a) return auditDetail(a);
   const e = state.selected && entry(state.selected);
   if (!e) return h('aside', { class: 'rv-detail rv-detail-empty' }, h('p', { class: 'muted' }, state.entries.length ? 'Pick one to see what it reviews.' : ''));
-  if (state.mode === 'edit') return h('aside', { class: 'rv-detail' }, editForm(e));
+  if (state.mode === 'edit') {
+    const form = keep(`edit:${e.slug}`, () => editForm(e));
+    form.querySelector('.rv-recorded').replaceWith(recorded(e));
+    return h('aside', { class: 'rv-detail' }, form);
+  }
   const sw = onSwitch(e);
   const section = (title, ...body) => h('section', { class: 'rv-sec' }, h('h4', {}, title), ...body);
   const ctx = e.context ?? {};
@@ -736,7 +779,16 @@ function detail() {
     e.kit || e.file
       ? section("This scheme's additions", e.body.trim() ? h('pre', { class: 'rv-added' }, e.body) : h('p', { class: 'muted' }, `None: it reads ${e.kit ? "the kit's text" : 'its file'} alone. Edit by hand or describe a change to add to it.`))
       : section('Context', contextItems.length ? h('ul', { class: 'rv-ctx' }, contextItems) : h('p', { class: 'muted' }, 'Only the work itself and its rubric.')),
-    e.kit ? null : e.file ? (e.kind === 'teacher' ? null : section('With the others', onFailEditor(e))) : section('With the others', ...withOthers(e)),
+    e.kit
+      ? null
+      : e.file
+        ? e.kind === 'teacher'
+          ? null
+          : section(
+              'With the others',
+              keep(`fail:${e.slug}`, () => onFailEditor(e)),
+            )
+        : section('With the others', ...withOthers(e)),
     section('Record', e.calibrated ? h('p', {}, `Calibrated ${e.calibrated}`) : null, ...record(e)),
     e.verdicts?.length ? section('Verdicts', verdictList(e, false)) : null,
     e.lessons ? section('Lessons', ...lessonList(e, false)) : null,
@@ -836,12 +888,13 @@ function withOthers(e) {
       ),
       h('span', { class: 'muted rv-hint' }, e.kind === 'referee' ? "As the panel's referee it merges the judges' verdicts into one." : 'Entries with the same panel judge the same work at once, and its referee merges their verdicts.'),
     ),
-    onFailEditor(e),
+    keep(`fail:${e.slug}`, () => onFailEditor(e)),
   ];
 }
 
 function move(e, dir) {
   const s = state;
+  const path = url(e.slug);
   const col = s.entries.filter((x) => x.stage === e.stage);
   const i = col.findIndex((x) => x.slug === e.slug);
   const other = col[dir === 'up' ? i - 1 : i + 1];
@@ -856,7 +909,7 @@ function move(e, dir) {
   optimistic({
     key: `reviews:${s.projectId}:move:${e.slug}`,
     apply: swap,
-    send: () => api(`${url(e.slug)}/move`, { method: 'POST', body: { dir } }),
+    send: () => api(`${path}/move`, { method: 'POST', body: { dir } }),
     undo: swap,
     label: `move ${e.name}`,
   }).then(
@@ -871,9 +924,14 @@ function onFailEditor(e) {
   const steps = (e.on_fail ?? []).map((x) => ({ ...x }));
   const targets = [['professor', 'the professor'], ['person', 'a person'], ...state.entries.filter((x) => x.slug !== e.slug && !x.kit).map((x) => [x.slug, x.name])];
   const box = h('div', { class: 'rv-onfail' });
-  const save = h('button', { type: 'button', class: 'cui-btn cui-small cui-primary', hidden: true, onclick: () => setSwitch(e.slug, { on_fail: steps.length ? steps : null }) }, 'Save hand-offs');
+  const sendSteps = () => {
+    state.kept.delete(`fail:${e.slug}`);
+    setSwitch(e.slug, { on_fail: steps.length ? steps : null });
+  };
+  const save = h('button', { type: 'button', class: 'cui-btn cui-small cui-primary', value: 'unsaved', hidden: true, onclick: sendSteps }, 'Save hand-offs');
   const changed = () => {
     save.hidden = JSON.stringify(steps) === JSON.stringify(e.on_fail ?? []);
+    save.toggleAttribute('data-draft', !save.hidden);
   };
   const rows = () =>
     box.replaceChildren(
@@ -1020,14 +1078,16 @@ function auditDetail(a) {
 }
 
 async function loadVersions() {
-  const slug = state.selected;
+  const s = state;
+  const slug = s.selected;
+  const shown = () => state === s && s.selected === slug && s.mode === 'history';
   try {
     const { versions } = await api(`${url(slug)}/versions`);
-    if (state.selected === slug) state.versions = versions;
+    if (shown()) s.versions = versions;
   } catch (err) {
-    toast(`Couldn't load its history: ${err.message}`);
+    if (shown()) toast(`Couldn't load its history: ${err.message}`);
   }
-  draw();
+  if (shown()) draw();
 }
 
 function history(e) {
@@ -1048,13 +1108,52 @@ function history(e) {
 }
 
 async function restore(e, version) {
+  const s = state;
   try {
     const saved = await api(`${url(e.slug)}/restore`, { method: 'POST', body: { version } });
-    state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
+    put(s, saved);
     toast(`Restored version ${version} as version ${saved.version}`);
-    await loadVersions();
+    if (state !== s) return;
+    if (s.selected === e.slug && s.mode === 'history') await loadVersions();
+    else draw();
   } catch (err) {
     toast(`Couldn't restore: ${err.message}`);
+  }
+}
+
+/** A saved entry into the set it was saved from, which may no longer be the one on screen. */
+function put(s, saved) {
+  const i = s.entries.findIndex((x) => x.slug === saved.slug);
+  if (i >= 0) s.entries[i] = saved;
+}
+
+/** Saves an open Edit form. An answer that comes after the form closed updates its own entry and leaves what is open now alone. */
+async function saveEdit(e, form, save, err, fields) {
+  const s = state;
+  const key = `edit:${e.slug}`;
+  const open = () => state === s && s.mode === 'edit' && s.kept.get(key) === form;
+  save.disabled = true;
+  err.hidden = true;
+  try {
+    const saved = await api(url(e.slug), { method: 'PATCH', body: { ...fields, version: e.version } });
+    put(s, saved);
+    toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
+    if (state !== s) return;
+    if (open()) {
+      s.mode = 'view';
+      s.kept.delete(key);
+    }
+    draw();
+    load();
+  } catch (x) {
+    save.disabled = false;
+    s.behind = true; // it may be refused as stale: Cancel reads the newest
+    if (!open()) {
+      toast(`Couldn't save ${e.name}: ${x.message}`);
+      return catchUp();
+    }
+    err.textContent = x.message;
+    err.hidden = false;
   }
 }
 
@@ -1092,27 +1191,12 @@ function editForm(e) {
   const requester = h('input', { type: 'checkbox', checked: !!e.context?.requester });
   const err = h('p', { class: 'error', hidden: true });
   const save = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Save');
-  const submit = async (ev) => {
+  const submit = (ev) => {
     ev.preventDefault();
-    save.disabled = true;
-    err.hidden = true;
-    try {
-      const context = { ...e.context, verdicts: verdicts.checked, requester: requester.checked };
-      const saved = await api(url(e.slug), { method: 'PATCH', body: { context, name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value, version: e.version } });
-      state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
-      toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
-      state.mode = 'view';
-      draw();
-      glanceAgain().then(() => {
-        if (state.mode === 'view') draw();
-      });
-    } catch (x) {
-      err.textContent = x.message;
-      err.hidden = false;
-      save.disabled = false;
-    }
+    const context = { ...e.context, verdicts: verdicts.checked, requester: requester.checked };
+    saveEdit(e, form, save, err, { context, name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value });
   };
-  return h(
+  const form = h(
     'form',
     { class: 'rv-form', onsubmit: submit },
     h('h3', {}, `Edit ${e.name}`),
@@ -1128,11 +1212,12 @@ function editForm(e) {
       h('label', { class: 'rv-check' }, verdicts, h('span', {}, 'Your verdicts: what people said when they disagreed with it')),
       h('label', { class: 'rv-check' }, requester, h('span', {}, "The requester's words: the minion's first message")),
     ),
-    e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null,
+    recorded(e),
     field('What changed', note),
     err,
     h('div', { class: 'rv-actions' }, save, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(e.slug) }, 'Cancel')),
   );
+  return markDraft(form, save);
 }
 
 /** A kit entry's or an agent file's edit: only this scheme's additions, read with the kit's text or the file's (which stay where they are). */
@@ -1141,37 +1226,27 @@ function kitForm(e) {
   const note = h('input', { class: 'cui-input', placeholder: 'Edited by hand' });
   const err = h('p', { class: 'error', hidden: true });
   const save = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Save');
-  const submit = async (ev) => {
+  const submit = (ev) => {
     ev.preventDefault();
-    save.disabled = true;
-    err.hidden = true;
-    try {
-      const saved = await api(url(e.slug), { method: 'PATCH', body: { body: body.value, note: note.value, version: e.version } });
-      state.entries[state.entries.findIndex((x) => x.slug === e.slug)] = saved;
-      toast(saved.version === e.version ? 'Nothing changed' : `Saved as version ${saved.version}`);
-      state.mode = 'view';
-      draw();
-      glanceAgain().then(() => {
-        if (state.mode === 'view') draw();
-      });
-    } catch (x) {
-      err.textContent = x.message;
-      err.hidden = false;
-      save.disabled = false;
-    }
+    saveEdit(e, form, save, err, { body: body.value, note: note.value });
   };
-  return h(
+  const form = h(
     'form',
     { class: 'rv-form', onsubmit: submit },
     h('h3', {}, `Edit ${e.name}`),
     h('p', { class: 'muted' }, e.what),
     field("This scheme's additions", body, `Read with ${e.kit ? "the kit's own text" : `its file, ${e.file},`} and handed to its Grunt: what to look for here, what to let pass.`),
-    e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null,
-    e.lessons?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Lessons'), ...lessonList(e, true)) : null,
+    recorded(e),
     field('What changed', note),
     err,
     h('div', { class: 'rv-actions' }, save, h('button', { type: 'button', class: 'cui-btn cui-ghost', onclick: () => select(e.slug) }, 'Cancel')),
   );
+  return markDraft(form, save);
+}
+
+/** The Edit form's lists that change by themselves: a redraw puts them in again around what was typed. */
+function recorded(e) {
+  return h('div', { class: 'rv-recorded' }, e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null, e.lessons?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Lessons'), ...lessonList(e, true)) : null);
 }
 
 /**
@@ -1224,8 +1299,8 @@ async function removeLesson(e, l) {
  * entries; each shows as before and after. Apply is an ordinary save (a version History can undo); Dismiss drops it.
  */
 function describeBox() {
-  const ask = state.ask ?? (state.ask = { text: '', busy: false, note: '', proposals: [], applied: [] });
-  const input = h('input', {
+  const ask = state.ask ?? (state.ask = { text: '', busy: false, note: '', proposals: [], applied: [], answered: '' });
+  ask.input ??= h('input', {
     class: 'cui-input',
     placeholder: 'Describe a change, like "make the finding checker stricter on migrations"',
     value: ask.text,
@@ -1233,8 +1308,10 @@ function describeBox() {
     'aria-label': 'Describe a change',
     oninput: (ev) => {
       ask.text = ev.target.value;
+      markAsk(ask);
     },
   });
+  markAsk(ask);
   const go = h('button', { type: 'submit', class: 'cui-btn cui-primary', disabled: ask.busy }, ask.busy ? 'Asking…' : 'Ask');
   return h(
     'section',
@@ -1248,7 +1325,7 @@ function describeBox() {
           describe(ask);
         },
       },
-      input,
+      ask.input,
       go,
     ),
     ask.busy ? h('p', { class: 'muted rv-ask-note' }, 'The agent is reading the set on your Claude plan. This takes about a minute.') : null,
@@ -1258,15 +1335,18 @@ function describeBox() {
   );
 }
 
+/** What is typed but not yet answered holds a deploy's reload. */
+const markAsk = (ask) => ask.input.toggleAttribute('data-draft', ask.text.trim() !== ask.answered);
+
 async function describe(ask) {
   const text = ask.text.trim();
   if (!text || ask.busy) return;
   const s = state;
-  Object.assign(ask, { busy: true, note: '', proposals: [], applied: [] });
+  Object.assign(ask, { busy: true, note: '', proposals: [], applied: [], answered: '' });
   draw();
   try {
     const r = await api(url('describe'), { method: 'POST', body: { text } });
-    Object.assign(ask, { note: r.note || (r.proposals.length ? '' : 'No change proposed.'), proposals: r.proposals.map((p) => ({ ...p, ask: text })) });
+    Object.assign(ask, { note: r.note || (r.proposals.length ? '' : 'No change proposed.'), proposals: r.proposals.map((p) => ({ ...p, ask: text })), answered: text });
   } catch (err) {
     ask.note = `Couldn't ask: ${err.message}`;
   }
@@ -1330,6 +1410,8 @@ function newForm() {
   const when = h('input', { class: 'cui-input', value: state.newWhen, placeholder: 'diff: src/**' });
   const err = h('p', { class: 'error', hidden: true });
   const add = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Add on trial');
+  const s = state;
+  const open = () => state === s && s.mode === 'new' && s.kept.get('new') === form;
   const submit = async (ev) => {
     ev.preventDefault();
     add.disabled = true;
@@ -1337,17 +1419,20 @@ function newForm() {
     try {
       const body = { ...(from.value ? { extends: from.value } : {}), ...(slug.value.trim() ? { slug: slug.value.trim() } : {}), ...(when.value.trim() ? { when: when.value.trim() } : {}) };
       const made = await api(url(), { method: 'POST', body });
-      state.entries.push(made);
-      state.newWhen = '';
-      await glanceAgain();
-      select(made.slug, 'edit');
+      if (!s.entries.some((x) => x.slug === made.slug)) s.entries.push(made);
+      if (open()) {
+        s.newWhen = '';
+        select(made.slug, 'edit');
+      } else toast(`Added ${made.name} on trial`);
+      if (state === s) load();
     } catch (x) {
+      add.disabled = false;
+      if (!open()) return toast(`Couldn't add it: ${x.message}`);
       err.textContent = x.message;
       err.hidden = false;
-      add.disabled = false;
     }
   };
-  return h(
+  const form = h(
     'form',
     { class: 'rv-form', onsubmit: submit },
     h('h3', {}, 'New reviewer or critic'),
@@ -1374,4 +1459,5 @@ function newForm() {
       ),
     ),
   );
+  return markDraft(form, add);
 }

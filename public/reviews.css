@@ -111,6 +111,8 @@
 .rv-dots i.is-pass { background: var(--done); }
 .rv-dots i.is-fail { background: var(--error); }
 .rv-dots i.is-disagreed { background: var(--waiting); }
+/* The Edit form's own column spaces what is in it. */
+.rv-recorded { display: contents; }
 .rv-verdicts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.9em; }
 .rv-verdicts li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.4rem; overflow-wrap: anywhere; }
 .rv-verdicts .cui-btn { margin-left: auto; }

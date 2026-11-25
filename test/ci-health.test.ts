@@ -1856,6 +1856,32 @@ test("a named fix minion that took the hold isn't said to have shipped by anothe
   assert.deepEqual(w.dismissed, [chat.id, named.id]);
 });
 
+test('a named fix minion that ships while the first holder still waits: green frees both, and a closed or moved-on one is left alone (#1954, 2CA2)', async () => {
+  const at = async (after: (w: ReturnType<typeof redWorld>, first: number) => void) => {
+    const w = redWorld();
+    w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+    await w.red.tick(NOW);
+    const chat = w.minion(w.peek.id, 'ticket/900-chat');
+    w.store.addEvent(chat.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'this is run 9101' }] } });
+    w.tips.ship = 'tip-c';
+    await w.red.tick(NOW + 5 * MIN);
+    assert.equal(w.marks()['7'].rerun?.ticket, chat.id);
+    w.store.updateTicket(chat.id, { state: 'outside', note: 'waiting on the desktop.yml re-run on main (aaaaaaa)' });
+    const named = w.fixer();
+    w.gh.mainHead = 'sha-named';
+    w.tips.ship = 'tip-n';
+    await w.red.tick(NOW + 10 * MIN);
+    assert.equal(w.marks()['7'].rerun?.ticket, named.id);
+    after(w, chat.id);
+    w.gh.mainRuns = [w.run(9102, -11 * MIN, 'success', { event: 'workflow_dispatch', head_sha: 'sha-named' }), ...w.gh.mainRuns];
+    await w.red.tick(NOW + 15 * MIN);
+    return w.dismissed.map((id) => (id === chat.id ? 'first' : id === named.id ? 'named' : id)).sort();
+  };
+  assert.deepEqual(await at(() => {}), ['first', 'named']);
+  assert.deepEqual(await at((w, first) => w.store.updateTicket(first, { status: 'closed' })), ['named']);
+  assert.deepEqual(await at((w, first) => w.store.updateTicket(first, { state: 'ready', note: 'a card to answer' })), ['named']);
+});
+
 test("a fix that didn't hold rings an hour after the first red since its minion closed, however often reds follow (#1954, 2CA3)", async () => {
   const w = redWorld();
   w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
@@ -1887,6 +1913,11 @@ test("a fix that didn't hold rings an hour after the first red since its minion 
   early.gh.mainRuns = [early.run(9111, -90 * MIN, 'failure'), ...early.gh.mainRuns];
   await early.red.tick(NOW + 92 * MIN);
   assert.equal(early.problem(early.red)!.held, NOW + 151 * MIN);
+  // And when both fell between two polls.
+  early.store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(NOW + 160 * MIN, e.id);
+  early.gh.mainRuns = [early.run(9112, -170 * MIN, 'failure'), ...early.gh.mainRuns];
+  await early.red.tick(NOW + 172 * MIN);
+  assert.equal(early.problem(early.red)!.held, NOW + 231 * MIN);
 });
 
 test('the still ship line names the ship that holds the lock, not the lowest ticket; its steps are progress (#1954, 2CA4)', () => {
@@ -1920,6 +1951,10 @@ test('a dispatched re-run GitHub never lists is sent once more, then said; a lat
   assert.equal(x.quiet, undefined, 'lost twice: it rings a person');
   assert.match(x.why!, /never listed a run/);
   assert.deepEqual(w.held.at(-1), [a.id, 'waiting on a person to re-run desktop.yml on main']);
+  w.gh.mainHead = 'sha-someone-else';
+  await w.red.tick(NOW + 37 * MIN);
+  assert.equal(w.posts.length, 2, "another ship on top isn't a new fix to re-run");
+  assert.equal(w.problem(w.red)!.quiet, undefined, 'so it still rings');
   w.gh.mainRuns = [w.run(9102, -36 * MIN, null, { event: 'workflow_dispatch', status: 'in_progress' }), ...w.gh.mainRuns];
   await w.red.tick(NOW + 40 * MIN);
   assert.equal(w.marks()['7'].rerun?.error, undefined);

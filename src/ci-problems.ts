@@ -290,6 +290,8 @@ export interface RedMark {
   chat?: { ids: number[]; upTo: number };
   /** When the first red run made after the closed fix minion `fix` (its number) closed ended: its hour counts from here, however many reds follow. */
   after?: { fix: number; at: number };
+  /** Minions whose re-run another minion's replaced (`rerun`): green frees those still waiting on theirs. */
+  waited?: number[];
   /** The red run's name, for a workflow whose run name shows its inputs (flake-proof.yml): only runs of the same name are this red's. */
   title?: string;
 }

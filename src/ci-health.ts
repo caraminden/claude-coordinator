@@ -1354,9 +1354,11 @@ ${text}`,
     if (!head || head === re?.sha) return;
     const tip = await this.deps.shipped(p, t, head);
     // Nothing of its own in the tip, or no new fix since the last re-run: someone else's land, not its fix.
-    if (!tip || (mark.rerun?.ticket === t.id && mark.rerun.tip === tip && !mark.rerun.error)) return;
+    const same = re?.tip === tip;
+    if (!tip || (same && !re?.error)) return;
     const next: NonNullable<RedMark['rerun']> = { ticket: t.id, sha: head, tip, at: now };
     const there = runs.filter((r) => r.head_sha === head).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+    if (same && re?.resent && !there) return; // lost twice: a person starts it, whatever lands on top
     const red = runs.find((r) => r.id === mark.run) ?? ({ id: mark.run, workflow_id: w } as Run);
     // A red that couldn't start has no jobs to read its runners from: the newest run that has some stands in.
     let jobs = there || inputs ? [] : await this.jobs(slug, red, as);
@@ -1367,6 +1369,7 @@ ${text}`,
     else if (inputs) next.inputs = true;
     else if (toGithub || !jobs.length || jobs.some((j) => !j.labels.some((l) => l.toLowerCase() === 'self-hosted'))) next.hosted = true;
     else next.dispatched = true;
+    if (mark.rerun && mark.rerun.ticket !== t.id) mark.waited = [...(mark.waited ?? []), mark.rerun.ticket];
     mark.rerun = next;
     save(); // before dispatching, so a restart can't dispatch twice
     if (next.dispatched) {
@@ -1397,7 +1400,7 @@ ${text}`,
   /** Keep when the first red after a closed fix minion ended (RedMark.after); true when it changed. */
   private afterClose(mark: RedMark, fix: Fix | null, runs: Run[]): boolean {
     if (fix?.closedAt == null) return !!mark.after && delete mark.after;
-    if (mark.after?.fix === fix.number) return false;
+    if (mark.after?.fix === fix.number && mark.after.at >= fix.closedAt) return false; // an older one is from before it was reopened and closed again
     const first = runs.filter((r) => redRun(r) && at(r.created_at) > fix.closedAt!).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
     if (!first) return !!mark.after && delete mark.after;
     mark.after = { fix: fix.number, at: at(first.updated_at ?? first.created_at) };
@@ -1418,15 +1421,20 @@ ${text}`,
     }
   }
 
-  /** Dismiss who was held open on a red that is over: its re-run's minion, and the one its live deploy held. */
+  /** Dismiss who was held open on a red that is over: its re-run's minion, those still waiting from re-runs before it, and the one its live deploy held. */
   private freeFix(p: Project, mark: RedMark, text: string) {
-    for (const id of new Set([mark.rerun?.ticket, this.heldFix(p, mark)])) if (id != null) this.dismissFix(id, text);
+    const waited = (mark.waited ?? []).filter((id) => this.waits(this.store.getTicket(id)));
+    for (const id of new Set([mark.rerun?.ticket, ...waited, this.heldFix(p, mark)])) if (id != null) this.dismissFix(id, text);
   }
 
   /** The fix minion its live deploy held (runner's deployLive note) before any re-run was recorded, or null. */
   private heldFix(p: Project, mark: RedMark): number | null {
     const t = this.fixTicket(p, mark);
-    return t && t.status !== 'closed' && t.state === 'outside' && /waiting on .*re-run/.test(t.note ?? '') ? t.id : null;
+    return this.waits(t) ? t!.id : null;
+  }
+
+  private waits(t: Ticket | null | undefined): boolean {
+    return !!t && t.status !== 'closed' && t.state === 'outside' && /waiting on .*re-run/.test(t.note ?? '');
   }
 
   /** A fix minion's re-run went green: dismiss it (deps.dismiss decides when, as a deploy's dismissal does). */

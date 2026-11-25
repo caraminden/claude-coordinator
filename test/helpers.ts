@@ -190,16 +190,13 @@ export const PROMPT_AND_TOKEN = 'JSON.stringify({ prompt: JSON.parse(line), toke
 /**
  * The plain stand-in for `claude -p`, written to `root/<name>` and returned: it reads the prompt line, appends
  * `log.record` (a JS expression over `line`, the raw prompt; `line` by default) and a newline to `log.path`, waits for
- * `release` to exist when one is given, then prints one success result with `result` as its text and exits 0.
- * `hang` makes it read stdin and never end, for a turn the test kills. A fake with more to it (several events, a
+ * `release` to exist when one is given, then prints one success result, "done", and exits 0. A fake with more to it (several events, a
  * session, an error) is releaseFake or the file's own.
  */
-export function fakeClaude(root: string, { result = 'done', log, release, hang = false, name = 'claude-fake' }: { result?: string; log?: { path: string; record?: string }; release?: string; hang?: boolean; name?: string } = {}) {
+export function fakeClaude(root: string, { log, release, name = 'claude-fake' }: { log?: { path: string; record?: string }; release?: string; name?: string } = {}) {
   const fake = join(root, name);
-  const done = `console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: ${JSON.stringify(result)} }));\n    process.exit(0);`;
-  const body = hang
-    ? 'process.stdin.resume();\nsetInterval(() => {}, 1000);'
-    : `require('node:readline').createInterface({ input: process.stdin }).once('line', (line) => {
+  const done = `console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));\n    process.exit(0);`;
+  const body = `require('node:readline').createInterface({ input: process.stdin }).once('line', (line) => {
   ${log ? `require('node:fs').appendFileSync(${JSON.stringify(log.path)}, ${log.record ?? 'line'} + '\\n');` : ''}
   const end = () => {
     ${done}

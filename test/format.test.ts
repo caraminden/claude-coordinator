@@ -10,8 +10,22 @@ import { join } from 'node:path';
 const root = join(import.meta.dirname, '..');
 const bin = join(root, 'node_modules/.bin/biome');
 
-export const FIX =
-  "Run `tools/fmt --own` (on main itself: `tools/fmt`) and commit the result. When a rebase onto main conflicts over formatting: format your branch first, `git rebase main`, settle each conflict by hand keeping both main's change and yours (never `-X theirs` or `-X ours`: one drops landed work without a word, the other yours), then `tools/fmt --own` again.";
+// The way onto main for a branch cut before the reformat (#2007): the same text in every kit copy. Only what the branch
+// changed from the formatted old code is replayed, so the reformat itself never conflicts.
+const REBASE = `
+R=$(for r in $(git show main:.git-blame-ignore-revs | grep '^[0-9a-f]'); do git merge-base --is-ancestor $r HEAD || { echo $r; break; }; done)   # the reformat
+mine=$(git branch --show-current)
+git rebase "$R~1"                          # your commits, up to just before it
+tools/fmt && git commit -qam format --allow-empty
+git switch --detach "$R~1" && tools/fmt && git commit -qam 'the old code, formatted' --allow-empty
+old=$(git rev-parse HEAD)
+git switch -C "$mine" "$(git commit-tree "$mine^{tree}" -p "$old" -m "$(git log -1 --format=%s "$mine~1")")"   # one commit
+git rebase --onto "$R" "$old"
+git rebase main
+`;
+
+export const FIX = `Run \`tools/fmt --own\` (on main itself: \`tools/fmt\`) and commit the result. A branch cut before the reformat commit that conflicts when it rebases onto main: commit everything, then run these one line at a time, and where a rebase stops, settle each conflict by hand keeping both main's change and yours (never \`-X theirs\` or \`-X ours\`: one drops landed work without a word, the other yours), then \`git rebase --continue\`:
+${REBASE}Then \`tools/fmt --own\` again, and commit.`;
 
 test('every .ts, .js and .mjs file is formatted', { skip: !existsSync(bin) && !process.env.CI ? 'Biome is not installed here (run `npm ci`); CI runs this check' : false }, () => {
   assert.ok(existsSync(bin), 'Biome is missing: run `npm ci`');
@@ -40,4 +54,7 @@ test("the kit's biome.json template carries the same style as Citadel's", () => 
   const kit = read('kit/skills/scheme-setup/templates/biome.config.json');
   assert.deepEqual(kit.formatter, mine.formatter, 'a style change goes into kit/skills/scheme-setup/templates/biome.config.json too (other schemes copy it)');
   assert.deepEqual(kit.javascript, mine.javascript);
+  const rebase = (p: string) => /^const REBASE = `[^`]*`;$/m.exec(readFileSync(join(root, p), 'utf8'))?.[0];
+  assert.ok(rebase('test/format.test.ts'));
+  assert.equal(rebase('kit/skills/scheme-setup/templates/format.test.ts'), rebase('test/format.test.ts'), 'the way onto main reads the same in both copies');
 });

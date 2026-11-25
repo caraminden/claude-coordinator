@@ -1,5 +1,6 @@
 // Side threads (#932): a question asked on the side of a minion ('side' event) and its answer ('side_answer'), in one
 // collapsed blue row. A read-only copy of the minion's session answered it, so nothing here is in the minion's history.
+import { asSpeaker } from './avatars.js';
 import { api, h, me } from './base.js';
 import { markdown } from './core.js';
 
@@ -40,7 +41,7 @@ const drafts = new Map();
 
 function sideRow(id, first, ticket, live) {
   const mine = first.by === me;
-  const who = h('span', { class: 'who' });
+  const who = asSpeaker(h('span', { class: 'who' }), 'person', first.by);
   const preview = h('span', { class: 'preview' }, first.q);
   const list = h('div', { class: 'side-list' });
   const foot = h('div', { class: 'side-foot' });

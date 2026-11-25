@@ -61,15 +61,21 @@ export function avatarsCard() {
       label: on ? 'turn on speaker avatars' : 'turn off speaker avatars',
     });
   };
+  // What the server has: where a refused picture goes back to.
+  let saved = avatars().pic;
   const setPicture = (pic, send, label) => {
-    const before = avatars().pic;
     optimistic({
       key: 'avatar-pic',
       sets: 'avatar-pic',
       apply: () => show({ ...avatars(), pic }),
-      // A newer pick, shown meanwhile, stays.
-      send: () => send().then((v) => avatars().pic === pic && show({ ...avatars(), pic: v.pic })),
-      undo: () => show({ ...avatars(), pic: before }),
+      send: async () => {
+        const v = await send();
+        saved = v.pic;
+        // A newer pick, shown meanwhile, stays.
+        if (avatars().pic === pic) show({ ...avatars(), pic: saved });
+        if (pic) URL.revokeObjectURL(pic);
+      },
+      undo: () => show({ ...avatars(), pic: saved }),
       label,
     });
   };

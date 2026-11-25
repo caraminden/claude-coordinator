@@ -941,7 +941,7 @@ function addGruntText(log, id, text, data, event) {
 
 /** An empty group row for copies of minion-to-minion messages; addMinionCopy fills it. */
 function newMinionCopies() {
-  return h('details', { class: 'msg coord mcopies' }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
+  return h('details', { class: 'msg coord mcopies' }, h('summary', {}, asSpeaker(h('span', { class: 'who' }), 'minion'), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
 }
 
 /** One copy into its group row: a line in the list, and the count and the numbers in the summary, updated in place. */

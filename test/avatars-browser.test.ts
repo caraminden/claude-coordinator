@@ -98,4 +98,17 @@ test('a picture is cropped square and small, shows at once, goes back when refus
   await page.eval(`window.refuse = false; ${remove}.click()`);
   await waitFor(page, 'it gone', `!document.querySelector('#shown .who[data-person=Josh]').classList.contains('has-pic')`);
   assert.equal(await page.eval(`${remove}.hidden`), true);
+
+  // Two picks refused one after the other go back to what the server has, not to a picture it never took.
+  await page.eval('window.refuse = true');
+  await pick('image');
+  await pick('image');
+  await waitFor(page, 'the roll back', `window.sent.length === 6 && document.querySelector('#shown .who[data-person=Josh]') && !document.querySelector('#shown .who.has-pic[data-person=Josh]')`);
+});
+
+test("each author's kind, the Overlord's relays and names like an object's own included", { skip }, async () => {
+  const page = await open();
+  const kinds = (await page.eval(`import('./avatars.js').then(({ authorKind }) => ['Josh', '#12 A minion', 'Taskmaster', 'Taskmaster of Delve', 'Taskmaster of Delve (the Overlord)', "Taskmaster of Delve (Josh's)", 'GitHub', 'Contraption aura, for Josh, a Delve member'].map(authorKind))`)) as string[];
+  assert.deepEqual(kinds, ['person', 'minion', 'taskmaster', 'taskmaster', 'overlord', 'taskmaster', 'github', 'citadel']);
+  assert.equal(await page.eval(`import('./avatars.js').then(({ asSpeaker }) => asSpeaker(document.createElement('div'), 'person', 'toString').className)`), '');
 });

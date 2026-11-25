@@ -1,7 +1,7 @@
 // Per-person logins and who sees what: signing in, invites, scheme owners and members, the live stream
 // and push filtered by membership, and turns only for people allowed on the server's Claude login.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -650,6 +650,7 @@ test('speaker avatars (#1976): off until you turn them on, yours alone, and a pi
   const on = async (who: string) => (await as(who, '/api/me')).data.avatars;
   const { people: all, ...first } = await on('Josh');
   assert.deepEqual(first, { on: false, pic: null });
+  assert.equal(Object.keys(all)[0], 'Josh', 'yours first');
   assert.ok('Cara' in all && Object.values(all).every((p) => p === null));
   assert.equal((await as('Josh', '/api/me/avatars', { on: 'yes' }, 'PUT')).status, 400);
   assert.equal((await as('Josh', '/api/me/avatars', { on: true }, 'PUT')).status, 200);
@@ -674,7 +675,13 @@ test('speaker avatars (#1976): off until you turn them on, yours alone, and a pi
   assert.deepEqual(Buffer.from(await got.arrayBuffer()), png);
   assert.equal((await fetch(`${srv.base}/${mine.pic}`)).status, 401, 'signed-in people only');
 
+  // Replaced: the old address shows the new picture without keeping it as the old one, and the old file is gone.
+  await put('Cara', Buffer.concat([png, Buffer.from('2')]));
+  const late = await fetch(`${srv.base}/${mine.pic}`, { headers: { cookie: people.Josh.cookie } });
+  assert.equal(late.headers.get('cache-control'), 'no-store');
+  assert.equal(readdirSync(join(srv.data, 'avatars')).length, 1);
   assert.equal((await as('Cara', '/api/me/avatar', undefined, 'DELETE')).data.pic, null);
+  assert.deepEqual(readdirSync(join(srv.data, 'avatars')), []);
   assert.equal((await on('Josh')).people.Cara, null);
   assert.equal((await as('Josh', new URL(`${srv.base}/${mine.pic}`).pathname)).status, 404);
   await as('Josh', '/api/me/avatars', { on: false }, 'PUT');
@@ -688,8 +695,11 @@ test('removing a person removes their picture and their switch (#1976)', async (
   await fetch(`${srv.base}/api/me/avatars`, { method: 'PUT', headers: { cookie, 'Content-Type': 'application/json' }, body: '{"on":true}' });
   const jpeg = Buffer.from('\xff\xd8\xff\xe0 sample', 'latin1').toString('base64');
   assert.equal((await fetch(`${srv.base}/api/me/avatar`, { method: 'PUT', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: jpeg }) })).status, 200);
-  const file = join(srv.data, 'avatars', String(id));
+  const file = join(srv.data, 'avatars', readdirSync(join(srv.data, 'avatars')).find((f) => f.startsWith(`${id}-`))!);
   assert.ok(existsSync(file));
+  assert.ok('Paula' in (await as('Josh', '/api/me')).data.avatars.people);
+  await as('Cara', `/api/people/${id}`, { disabled: true }, 'PATCH');
+  assert.ok(!('Paula' in (await as('Josh', '/api/me')).data.avatars.people), 'disabled people are left out');
   assert.equal((await as('Cara', `/api/people/${id}`, undefined, 'DELETE')).status, 200);
   assert.ok(!existsSync(file));
   const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });

@@ -23,7 +23,7 @@ function dress(el) {
   const at = Object.keys(now.people).indexOf(name);
   // Someone removed since still gets a steady hue, from their name.
   el.dataset.personHue = (at >= 0 ? at : [...name].reduce((sum, c) => sum + c.codePointAt(0), 0)) % HUES;
-  const pic = now.people[name];
+  const pic = at >= 0 ? now.people[name] : null;
   el.classList.toggle('has-pic', !!pic);
   if (pic) el.style.setProperty('--avatar', `url("${new URL(pic, document.baseURI)}")`);
   else el.style.removeProperty('--avatar');
@@ -42,6 +42,8 @@ export function asSpeaker(el, kind, name = '') {
 
 /** The kind of speaker a message's author is (src/server authors, as senderTone and machineAuthor read them). */
 export function authorKind(author) {
+  // A split scheme's Overlord signs what it sends another scheme (senderLabel, src/routes/projects.ts).
+  if (/^Taskmaster of .+ \(the Overlord\)$/.test(author ?? '')) return 'overlord';
   const tone = { 'from-tm': 'taskmaster', 'from-minion': 'minion', 'from-app': 'citadel' }[senderTone(author)];
   // What machineAuthor knows and senderTone doesn't: GitHub, and a contraption's ask from before #316.
   return tone ?? (author === GITHUB_NAME ? 'github' : machineAuthor(author) ? 'citadel' : 'person');

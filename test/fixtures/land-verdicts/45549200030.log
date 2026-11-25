@@ -1,0 +1,58 @@
+test	the full suite	2026-11-25T04:48:30.9033539Z ^[[36;1m[ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }^[[0m
+test	the full suite	2026-11-25T04:48:30.9528712Z run-tests: tier product (the 29 pipeline test files left out): this change touches nothing in tools/pipeline-files.txt
+test	the full suite	2026-11-25T04:49:42.9869128Z The event loop was held for 0.6 s (16:48:33 to 16:48:33 GMT-12): the server answered nobody meanwhile. Cause: own work (0.8 s on CPU of 0.7 s; waited 0.0 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 1071 voluntary and 565 involuntary switches; 0 writes queued on the write worker). Main thread waited on: R ×3, S anon_pipe_read ×1. In: 87% (anonymous) (server.ts:0); 2% checkNow (src/wake.ts:958); 2% (garbage collector). Running: 42% writeOffThread (src/db-writer.ts:202) < (anonymous) (server.ts:0); 16% spawn < (anonymous) (src/exec.ts:64) < execResult (src/exec.ts:63) < run (src/app-services.ts:433); 5% waitFor (src/db-writer.ts:249) < beforeRead (src/db-writer.ts:263) < db.prepare.before (src/db-writer.ts:328) < db.prepare.rest.<computed> (src/db-writer.ts:331) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-25T04:49:42.9878586Z The event loop was held for 0.6 s (16:48:36 to 16:48:36 GMT-12): the server answered nobody meanwhile. Cause: own work (0.5 s on CPU of 0.7 s; waited 0.0 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 588 voluntary and 222 involuntary switches; 0 writes queued on the write worker). Main thread waited on: S anon_pipe_read ×2, R ×1. In: 96% (anonymous) (server.ts:0); 2% (anonymous) (src/db-writer.ts:238); 1% Readable.push (node:internal/streams/readable). Running: 31% writeOffThread (src/db-writer.ts:202) < (anonymous) (server.ts:0); 15% exec < Store (src/db.ts:1254) < (anonymous) (server.ts:0); 12% spawn < (anonymous) (src/exec.ts:64) < execResult (src/exec.ts:63) < run (src/app-services.ts:433) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-25T04:49:42.9982845Z The event loop was held for 1.4 s (16:48:52 to 16:48:54 GMT-12): the server answered nobody meanwhile. Cause: unclear (0.2 s on CPU of 1.5 s; waited 0.0 s for CPU, 0.0 s for disk, 0.0 s for memory; 0 major faults, 923 voluntary and 74 involuntary switches; 0 writes queued on the write worker). Main thread waited on: S do_epoll_wait ×17, R ×1, S anon_pipe_read ×1, S do_wait ×1. In: 97% (anonymous) (src/kit-sync.ts:402); 2% (anonymous) (src/runner.ts:4237); 1% (anonymous) (server.ts:2353). Running: 80% spawn < git (src/kit-sync.ts:34) < tryGit (src/kit-sync.ts:51) < templateHistory (src/kit-sync.ts:70); 10% spawn < git (src/kit-sync.ts:34) < tryGit (src/kit-sync.ts:51) < blobAt (src/kit-sync.ts:60); 5% spawn < git (src/kit-sync.ts:34) < (anonymous) (src/kit-sync.ts:402) Disk: the box was fully stalled on I/O for 0.0 s of it.
+test	the full suite	2026-11-25T04:50:12.7577327Z ✖ taking the scheme off ends its minions' open sessions, as the page does (89.081065ms)
+test	the full suite	2026-11-25T04:51:16.0006920Z ﹣ every .ts, .js and .mjs file this branch changed is formatted (0.788836ms) # test/format.test.ts checks every file here
+test	the full suite	2026-11-25T04:51:16.8183416Z ℹ skipped 1
+test	the full suite	2026-11-25T04:51:16.8199964Z ✖ failing tests:
+test	the full suite	2026-11-25T04:51:16.8200334Z 
+test	the full suite	2026-11-25T04:51:16.8200445Z test at test/machine-lend-cards.test.ts:171:1
+test	the full suite	2026-11-25T04:51:16.8200800Z ✖ taking the scheme off ends its minions' open sessions, as the page does (89.081065ms)
+test	the full suite	2026-11-25T04:51:16.8201114Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+test	the full suite	2026-11-25T04:51:16.8201316Z   
+test	the full suite	2026-11-25T04:51:16.8201418Z   401 !== 403
+test	the full suite	2026-11-25T04:51:16.8201517Z   
+test	the full suite	2026-11-25T04:51:16.8201907Z       at TestContext.<anonymous> (file:///opt/actions-runner-claude-coordinator/_work/claude-coordinator/claude-coordinator/test/machine-lend-cards.test.ts:182:10)
+test	the full suite	2026-11-25T04:51:16.8202393Z       at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+test	the full suite	2026-11-25T04:51:16.8202665Z       at async Test.run (node:internal/test_runner/test:1409:7)
+test	the full suite	2026-11-25T04:51:16.8202926Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+test	the full suite	2026-11-25T04:51:16.8203146Z     generatedMessage: true,
+test	the full suite	2026-11-25T04:51:16.8203282Z     code: 'ERR_ASSERTION',
+test	the full suite	2026-11-25T04:51:16.8203407Z     actual: 401,
+test	the full suite	2026-11-25T04:51:16.8203514Z     expected: 403,
+test	the full suite	2026-11-25T04:51:16.8203633Z     operator: 'strictEqual',
+test	the full suite	2026-11-25T04:51:16.8203758Z     diff: 'simple'
+test	the full suite	2026-11-25T04:51:16.8203860Z   }
+test	the full suite	2026-11-25T04:51:16.8422296Z run-tests: 1 test file(s) failed; CI reruns each alone in its next step, with a deadline of its own
+test	the full suite	2026-11-25T04:51:17.8874886Z ##[error]Process completed with exit code 1.
+test	rerun failed files alone	﻿2026-11-25T04:51:17.8920509Z ##[group]Run [ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }
+test	rerun failed files alone	2026-11-25T04:51:17.8920912Z ^[[36;1m[ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8921145Z ^[[36;1mif [ -n "$LAND_REF" ]; then^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8921341Z ^[[36;1m  export DEPLOY_RERUN_DEADLINE=$(($(date +%s) + RERUN_WINDOW - 30))^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8921642Z ^[[36;1m  echo "reruns alone end by $(date -u -d "@$DEPLOY_RERUN_DEADLINE" +%T) UTC, before land.sh stops waiting"^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8921880Z ^[[36;1mfi^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8921980Z ^[[36;1mrc=0^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8922179Z ^[[36;1m# Streamed as the full suite's is: a run cancelled mid-rerun still shows the labels so far.^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8922548Z ^[[36;1m: >"$RUNNER_TEMP/reruns.log"^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8922744Z ^[[36;1mtail -n +1 -f "$RUNNER_TEMP/reruns.log" & tailer=$!^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8923272Z ^[[36;1mnode tools/ci-progress.ts "$RUNNER_TEMP/reruns.progress" & poster=$! # the reruns' counts, as the full suite's^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8923993Z ^[[36;1mDEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_FROM="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/reruns.log" || rc=$?^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8924623Z ^[[36;1mkill "$poster" 2>/dev/null || true # it ends by itself with no run token: bash -e would fail the step on that kill^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8925127Z ^[[36;1mwait "$poster" || true # its last send, the final counts (#1667): 5 s at most^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8925350Z ^[[36;1msleep 1; kill "$tailer"^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8925488Z ^[[36;1mexit "$rc"^[[0m
+test	rerun failed files alone	2026-11-25T04:51:17.8935537Z shell: /usr/bin/bash -e {0}
+test	rerun failed files alone	2026-11-25T04:51:17.8935677Z env:
+test	rerun failed files alone	2026-11-25T04:51:17.8935786Z   XDG_RUNTIME_DIR: /run/user/997
+test	rerun failed files alone	2026-11-25T04:51:17.8935949Z   DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/997/bus
+test	rerun failed files alone	2026-11-25T04:51:17.8936112Z   NICENESS: 0
+test	rerun failed files alone	2026-11-25T04:51:17.8936212Z   LAND_REF: 1
+test	rerun failed files alone	2026-11-25T04:51:17.8936319Z   RERUN_WINDOW: 180
+test	rerun failed files alone	2026-11-25T04:51:17.8936476Z ##[endgroup]
+test	rerun failed files alone	2026-11-25T04:51:17.8985874Z reruns alone end by 04:53:47 UTC, before land.sh stops waiting
+test	rerun failed files alone	2026-11-25T04:51:17.9151290Z run-tests: 1 test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /opt/actions-runner-claude-coordinator/_work/_temp/reruns-rerun.log)
+test	rerun failed files alone	2026-11-25T04:51:22.6928989Z run-tests: test/machine-lend-cards.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 32.08)
+test	rerun failed files alone	2026-11-25T04:51:22.6955835Z run-tests: the run still fails: a rerun alone only labels flakes and never turns a red run green; in CI, land.sh decides whether a red of flakes only gets one fresh run
+test	rerun failed files alone	2026-11-25T04:51:23.8966317Z ##[error]Process completed with exit code 1.

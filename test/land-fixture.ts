@@ -264,6 +264,7 @@ case "$*" in
       exit 0
     fi
     [ "$3" = 7 ] || [ -z "\${FAKE_LOG_RERUN:-}" ] || FAKE_LOG=\$FAKE_LOG_RERUN
+    [ "$3" = 7 ] || [ -z "\${FAKE_SKIP_RERUN:-}" ] || FAKE_SKIP=\$FAKE_SKIP_RERUN
     if [ -n "\${FAKE_REAL:-}" ]; then # each test file whose path the run's commit has failed for real (#1564)
       rl=''; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && rl="$rl \${e%%=*}"; done
       echo "not ok 1 - the red test's output (run $3)"
@@ -285,6 +286,11 @@ case "$*" in
     fi
     echo "not ok 1 - the red test's output (run $3)"
     [ -z "\${FAKE_RED_NAMES:-}" ] || echo "\$FAKE_RED_NAMES"
+    if [ -n "\${FAKE_SKIP:-}" ]; then # how many tests the suite skipped (#1914), with the step's own source, which the log quotes
+      printf '%b grep -q "^ℹ skipped 1$" "$RUNNER_TEMP/tests.log"\n' "$p"
+      [ "$FAKE_SKIP" = 0 ] || printf '%b ﹣ the format check (0.8ms) # not here\n' "$p"
+      printf '%b ℹ skipped %s\n' "$p" "$FAKE_SKIP"
+    fi
     p="$p run-tests:"
     lg=\${FAKE_LOG:-mixed}
     if [ "$lg" = swap ]; then [ -e "${calls}.swap" ] || echo "$3" >"${calls}.swap"; [ "$(cat "${calls}.swap")" = "$3" ] || lg=swapped; fi

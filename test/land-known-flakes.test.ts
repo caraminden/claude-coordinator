@@ -110,6 +110,57 @@ test('a run that also left processes running is no flake run: the leak guard kee
   assert.doesNotMatch(res.stderr, /shipped past/);
 });
 
+// #1914 (Cara: "Never skip, loosen or delete a test to get green"): on Nov 24 two ships whose CI run skipped a test went
+// live, since the run was red on flakes too and the skip was only looked at on a green one.
+test('a skipped test beside known flakes refuses the run: no ship past flakes and no fresh run', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  seen(shared, ['test/busy.test.ts', 'test/slow.test.ts']);
+  const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', FAKE_SKIP: '1', COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /^land: a test was skipped in CI \(https:\/\/ci\/\d+\): the format check\b/m);
+  assert.match(res.stderr, /tests failed on the rebased branch in CI \(https:\/\/ci\/\d+\), so main is untouched/);
+  assert.doesNotMatch(res.stderr, /once more|shipped past|only known flakes/);
+  assert.equal(pushes(c), 1);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
+test("a skipped test beside a flake nobody has seen refuses the run too, and so does one on the fresh run", () => {
+  for (const fresh of [false, true]) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const main = git(r.source, 'rev-parse', 'main');
+    const shared = join(r.dir, 'shared');
+    // A red fresh run of flakes only keeps its place (#1419 part 2); with a skipped test it is refused.
+    const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...(fresh ? { FAKE_SKIP_RERUN: '2' } : { FAKE_SKIP: '2' }), COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 1, res.stderr);
+    assert.match(res.stderr, /^land: 2 tests were skipped in CI /m);
+    assert.doesNotMatch(res.stderr, /keeping its place|shipped past/);
+    assert.equal(pushes(c), fresh ? 2 : 1);
+    assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  }
+});
+
+test('a run of flakes only that skipped no test rides as before: known ones ship, a new one gets the one fresh run (#1419)', () => {
+  for (const known of [true, false]) {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const shared = join(r.dir, 'shared');
+    seen(shared, known ? ['test/busy.test.ts', 'test/slow.test.ts'] : ['test/slow.test.ts']);
+    const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', FAKE_SKIP: '0', COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, known ? /^land: shipped past known flakes /m : /running CI once more/);
+    assert.doesNotMatch(res.stderr, /skipped in CI/);
+    assert.equal(pushes(c), known ? 1 : 2);
+    assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  }
+});
+
 const flaky =
   "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
 

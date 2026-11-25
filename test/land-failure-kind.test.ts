@@ -18,6 +18,14 @@ test('a parse error names itself, so it is never read as infra', () => {
   assert.match(c!.line, /Yours, not infra/);
 });
 
+test('a skipped test beside files that passed alone is the ship to fix, not one to hand off again (#1914)', () => {
+  const flake = 'run-tests: test/a.test.ts: failed in the full run, passed alone: likely load';
+  const end = 'land: tests failed on the rebased branch in CI (https://x/2), so main is untouched';
+  assert.equal(kind(`${flake}\nland: a test was skipped in CI (https://x/2): the format check. CI refuses\n${end}`), 'skipped-test');
+  assert.equal(kind(`${flake}\nland: 2 tests were skipped in CI (https://x/2): a; b. CI refuses\n${end}`), 'skipped-test');
+  assert.equal(kind(`${flake}\n${end}`), 'passed-alone');
+});
+
 test('boot-check copy: a SQLite lock is not the change', () => {
   assert.equal(kind(`deploy: boot check: the new code on a spare port with a copy of the database\nError: database is locked (SQLITE_BUSY)\ndeploy: boot check failed; nothing deployed`), 'boot-copy');
   // a boot check that failed for another reason says nothing about SQLite: unknown, today's text

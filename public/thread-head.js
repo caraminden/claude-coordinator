@@ -376,7 +376,7 @@ const stateFit =
 
 // ---------- people's note (#146) ----------
 
-const PERSON_NOTE_MAX = 200; // the server's limit, PERSON_NOTE_MAX in src/db.ts
+const PERSON_NOTE_MAX = 200; // the server's limit, PERSON_NOTE_MAX in src/db-rows.ts
 // The note being edited, { id, el }: kept across the head's re-renders, which a running turn makes often.
 let noteEdit = null;
 

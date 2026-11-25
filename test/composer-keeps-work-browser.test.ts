@@ -83,13 +83,15 @@ test('"/fresh" with words after it is refused and keeps them; "/fresh" alone ask
       let asked = 0;
       window.confirm = () => (asked++, true);
       window.fetch = () => Promise.reject(new Error('cut off')); // no fresh session starts
+      const notes = () => document.querySelectorAll('#log .note.error').length;
+      const before = notes();
       const box = document.querySelector('.composer textarea');
       box.value = ${JSON.stringify(text)};
       box.form.requestSubmit();
-      const out = { asked, left: box.value, notes: document.querySelectorAll('#log .note.error').length };
+      const out = { asked, left: box.value, notes: notes() - before };
       box.value = '';
       return JSON.stringify(out);
     })()`);
   assert.deepEqual(JSON.parse(await press('/fresh then fix the login page')), { asked: 0, left: '/fresh then fix the login page', notes: 1 });
-  assert.deepEqual(JSON.parse(await press('/fresh')), { asked: 1, left: '', notes: 1 });
+  assert.deepEqual(JSON.parse(await press('/fresh')), { asked: 1, left: '', notes: 0 });
 });

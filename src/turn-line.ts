@@ -47,11 +47,10 @@ export interface PoolSize {
   fixed?: { size: number; by: string };
 }
 
-/** No minion turn starts; `stop`: the running ones stop too. */
+/** No minion turn starts until it is lifted; those running finish. */
 export interface Pause {
   by: string;
   at: number;
-  stop?: true;
 }
 
 /** A waiting turn as `pick` sees it. `rank`: 0 a person's own message or answer, 1 work started for them, 2 automatic. */
@@ -165,8 +164,8 @@ export class TurnLine {
     return this.host.store.getSetting<Pause>(PAUSE) ?? null;
   }
 
-  setPause(pause: { stop?: true } | null, by: string) {
-    if (pause) this.host.store.setSetting(PAUSE, { ...pause, by, at: Date.now() });
+  setPause(on: boolean, by: string) {
+    if (on) this.host.store.setSetting(PAUSE, { by, at: Date.now() });
     else {
       this.host.store.deleteSetting(PAUSE);
       this.pump();

@@ -45,6 +45,8 @@ const josh = store.createUser({ name: 'Josh', login: 'josh' });
 store.addMember(project.id, cara.id);
 store.addMember(project.id, josh.id);
 
+const inside = (r: Runner) => r as unknown as { turns: Map<number, { dir: string }>; launchTurn: () => Promise<unknown> };
+
 function makeRunner() {
   const r = new Runner(
     store,
@@ -86,7 +88,7 @@ const say = (id: number, text = 'hello', by = 'Cara') => runner.send(id, by, tex
 
 /** Everything from the test before ends, and the pool is fixed at `n` and empty. */
 beforeEach(async () => {
-  runner.turnLine.setPause(null, 'Cara');
+  runner.turnLine.setPause(false, 'Cara');
   runner.turnLine.setSize(50, 'Cara');
   for (const id of made) end(id);
   await until('the minions before to finish', () => made.every((id) => !runner.isRunning(id)) && runner.turnLine.waiting().length === 0);
@@ -222,7 +224,7 @@ test('a kill resume waits for a worker, with its queued message', async () => {
   say(a);
   await started(a);
   say(b);
-  const live = (runner as any).turns.get(a);
+  const live = inside(runner).turns.get(a)!;
   await until('its pid', () => existsSync(join(live.dir, 'pid.json')));
   const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
   process.kill(pids.wrapper, 'SIGKILL');
@@ -262,13 +264,13 @@ test('a stop or a dismissal takes it out of the line, and so does taking its onl
 test('a failed launch leaks no worker', async () => {
   runner.turnLine.setSize(1, 'Cara');
   const [a, b, c] = [minion(), minion(), minion()];
-  const launch = (runner as any).launchTurn;
-  (runner as any).launchTurn = async () => {
+  const launch = inside(runner).launchTurn;
+  inside(runner).launchTurn = async () => {
     throw new Error('no folder');
   };
   say(a);
   await until('the failed launch to be over', () => runner.turnLine.used() === 0);
-  (runner as any).launchTurn = launch;
+  inside(runner).launchTurn = launch;
   runner.placeFor = () => ({ refused: 'Link Claude first' });
   say(b);
   await until('the refused start to be over', () => runner.turnLine.used() === 0);
@@ -281,14 +283,14 @@ test('a failed launch leaks no worker', async () => {
 test('paused, no minion turn starts, resumes included; carrying on starts them in order', async () => {
   const [a, b, tm] = [minion(), minion(), taskmaster()];
   const before = turnsOf(tm).length;
-  runner.turnLine.setPause({}, 'Cara');
+  runner.turnLine.setPause(true, 'Cara');
   say(a);
   say(b);
   say(tm);
   await until('the Taskmaster to start', () => turnsOf(tm).length > before);
   await settle();
   assert.deepEqual([turnsOf(a).length, turnsOf(b).length], [0, 0]);
-  runner.turnLine.setPause(null, 'Cara');
+  runner.turnLine.setPause(false, 'Cara');
   await started(a);
   await started(b);
 });
@@ -297,9 +299,9 @@ test('paused, a turn that is cut off by a restart waits for the pause to end', a
   const a = minion();
   say(a);
   await started(a);
-  const live = (runner as any).turns.get(a);
+  const live = inside(runner).turns.get(a)!;
   await until('its pid', () => existsSync(join(live.dir, 'pid.json')));
-  runner.turnLine.setPause({}, 'Cara');
+  runner.turnLine.setPause(true, 'Cara');
   runner.detachAll();
   const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
   process.kill(pids.wrapper, 'SIGKILL');
@@ -310,7 +312,7 @@ test('paused, a turn that is cut off by a restart waits for the pause to end', a
   await settle();
   assert.equal(turnsOf(a).length, 1);
   assert.deepEqual(runner.turnLine.waiting(), [a]);
-  runner.turnLine.setPause(null, 'Cara');
+  runner.turnLine.setPause(false, 'Cara');
   await until('the resume', () => turnsOf(a).length === 2);
 });
 
@@ -328,4 +330,23 @@ test('a second turn of a running minion joins the line when the first ends', asy
   unend(a);
   end(b);
   await until('its second turn', () => turnsOf(a).length === 2);
+});
+
+test("Auto moves the size and lets turns through as it grows; a person's number holds until it is put back on Auto", async () => {
+  runner.turnLine.setSize(null, 'Cara');
+  store.setSetting('turn-pool', { size: 1, at: 0 });
+  const [a, b] = [minion(), minion()];
+  say(a);
+  say(b);
+  await started(a);
+  const calm = { cpu: 5, mem: 0, io: 0, starved: false, why: '' };
+  runner.turnLine.setSize(1, 'Cara');
+  runner.turnLine.tick(calm);
+  await settle();
+  assert.equal(runner.turnLine.size(), 1);
+  assert.equal(turnsOf(b).length, 0);
+  runner.turnLine.setSize(null, 'Cara');
+  runner.turnLine.tick(calm);
+  await started(b);
+  assert.equal(makeRunner().turnLine.size(), 2, 'a restart keeps it');
 });

@@ -575,8 +575,15 @@ thing that pushes there (`check/**` through `tools/own-check.sh`, above): it sen
 while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the
 pipeline's own test files (#581, `tools/pipeline-files.txt`), so the whole suite also runs on main every night at
 13:30 UTC. That run and any started by hand are in a concurrency group of their own (a run waiting in the lands' group
-would cancel the land waiting there): they wait for the lands' runs, up to 30 minutes, then run niced beside any
-that start. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
+would cancel the land waiting there), niced.
+**Deploys first** (#1902; Josh, 2026-11-24: "while a ship is in line, nothing optional runs on the CI desktop"):
+`src/ci-hold.ts` stops flake proofs, heavy jobs and suites started by hand on a branch while a ship is in line or
+testing, or main's full run waits or runs, and starts each again, from its beginning, once the line has been empty for
+5 minutes (1 at night, 23:00 to 06:00 Pacific; longer each time the same run is stopped again). Main's full run waits for
+ships 30 minutes at most. A ship's `land/**` and `check/**` runs are never touched, and another scheme's heavy jobs are
+held 4 hours at most. A job asks before it starts (`tools/ci-hold-ask.ts`, the run's OIDC token, `POST /api/ci-hold`) and
+goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("Held for ships"); one held a day is reported to
+its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets early runs (`early/**`) start again. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
 skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
 own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the
 browser tests, and `libatomic1` and `sqlite3` unpacked from their `.deb`s. Those last two are tidier installed once

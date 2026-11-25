@@ -1653,13 +1653,13 @@ top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p
 # and ci_gate takes the early run as its own. <state>/early: "<top> <its branch> <when pushed> <this branch> <onto>
 # <its riders' tickets, comma-separated, or ->"; that landing builds its train of those riders only (early_look), so
 # ships that joined the line since don't change it, and at its gate counts the run or cancels it (early_gate). Off:
-# LAND_EARLY=0, or for every landing, touch <state>/early-off.
+# LAND_EARLY=0, or <state>/early-off; it goes only with the CI desktop's hold off (<state>/hold-off, #1902).
 early_ahead='' early_top='' early_pid='' train_only=''
 early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || return 1; url=${url#*github.com[:/]}; echo "${url%.git}"; }
 # [<what this train is doing>]: the words for the say line, at its deploy (default: while its CI runs, top_gate).
 early_next() {
   local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n riders st waited=$SECONDS
-  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
+  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ -e "$state/hold-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
   [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()

@@ -47,6 +47,8 @@ import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
+import { CiHold, withoutHeld } from './src/ci-hold.ts';
+import { writeHold } from './src/ci-hold-file.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
@@ -767,6 +769,9 @@ const longJobs = new LongJobs({
     runner.emit(id, 'note', { text });
     runner.broadcastTicket(id);
   },
+  hold: (slug, since) => ciHold.why(slug, since),
+  heldRun: (run) => ciHold.isHeld(run),
+  report: (slug, text) => tellHeld(slug, text),
 });
 if (!BOOT_CHECK && !PREVIEW) every('long heavy jobs', 60_000, () => longJobs.pump(), 30_000);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
@@ -1680,6 +1685,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 const ciHealth = new CiHealth(store, {
   outbox,
   longs: () => readLongJobs(join(DATA_DIR, 'projects', '.heavy')),
+  get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
   green: (p, runs, branch) => {
@@ -2007,24 +2013,56 @@ const ciLoad = new CiLoad(store, {
 if (!BOOT_CHECK) ciLoad.start();
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
 // agent's PC go to the runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
+// The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
+const runnerRepos = () =>
+  [
+    ...ciLoad.runnerRepos(),
+    ...store
+      .listProjects()
+      .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
+      .map((p) => repoSlug(p.repo_url) ?? ''),
+  ].filter(Boolean);
+const schemeOf = (repo: string) => store.listProjects().find((x) => x.repo_dir && repoSlug(x.repo_url)?.toLowerCase() === repo.toLowerCase());
+const asScheme = (repo: string) => {
+  const p = schemeOf(repo);
+  return p ? githubOf(p.repo_dir!) : null;
+};
 const shipWatch = new ShipWatch({
-  // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
-  repos: () =>
-    [
-      ...ciLoad.runnerRepos(),
-      ...store
-        .listProjects()
-        .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
-        .map((p) => repoSlug(p.repo_url) ?? ''),
-    ].filter(Boolean),
-  as: (repo) => {
-    const p = store.listProjects().find((x) => x.repo_dir && repoSlug(x.repo_url)?.toLowerCase() === repo);
-    return p ? githubOf(p.repo_dir!) : null;
-  },
+  repos: runnerRepos,
+  as: asScheme,
   send: (ships) => machines.sendShips(ships),
   first: () => liveSlug,
 });
 if (!BOOT_CHECK) shipWatch.start();
+// Deploys first (#1902, Josh 2026-11-24): while a ship is in Citadel's line, optional work stays off the CI desktop.
+const tellHeld = (repo: string, text: string) => {
+  const p = schemeOf(repo);
+  for (const t of p ? taskmastersFor(store, p.id) : []) runner.send(t.id, APP_NAME, text, [], runner.isOverlord(t) ? { everyone: true } : {});
+};
+const ciHold = new CiHold({
+  own: () => liveSlug?.toLowerCase() ?? null,
+  repos: () => runnerRepos().map((r) => r.toLowerCase()),
+  as: asScheme,
+  line: () => waits.line.filter((l) => l.label !== 'tools/deploy.sh').length,
+  off: async () =>
+    !!deployState &&
+    (await stat(join(deployState, 'hold-off')).then(
+      () => true,
+      () => false,
+    )),
+  ticket: (repo, branch, heavyId) => {
+    if (heavyId) return readLongJobs(join(DATA_DIR, 'projects', '.heavy')).find((j) => j.id === heavyId)?.ticket ?? null;
+    const p = schemeOf(repo);
+    return (p && store.listTickets(p.id).find((t) => t.branch === branch)?.id) ?? null;
+  },
+  closed: (id) => store.getTicket(id)?.status === 'closed',
+  mayResume: (heavyId) => longJobs.mayResume(heavyId),
+  tell: (id, text) => runner.leaveMail(id, APP_NAME, text),
+  report: tellHeld,
+  store,
+  publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
+});
+if (!BOOT_CHECK && !PREVIEW) ciHold.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
@@ -2333,6 +2371,7 @@ const app: App = {
   ciStore,
   ciNumbers,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
+  ciHold,
   chunked,
   claude: claudeLink,
   codex: codexLink,

@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # the run's own token, no secret: the ask below
 
 jobs:
   heavy:
@@ -44,6 +45,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26 # perigee's
+      # Deploys first (#1902): while a ship is in line this run is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
+      - name: ask Citadel whether ships go first
+        run: if [ -f tools/ci-hold-ask.ts ]; then node tools/ci-hold-ask.ts; fi # a snapshot from before #1902 has none
       # As in tests.yml: Node 26's libatomic1 and the sqlite3 CLI from their .debs when the distro lacks them, and the
       # runner user's systemd for the tests that start units.
       - name: libatomic1, sqlite3 and the user's systemd

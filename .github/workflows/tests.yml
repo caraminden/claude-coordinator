@@ -20,7 +20,8 @@ on:
 # One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
 # threads) failed in a different file every run. Landings come one at a time anyway. Any other run (the nightly, or one
 # started by hand) has a group of its own: a run waiting in a group cancels the one waiting before it, which would be a
-# landing's. It waits for the lands instead, and yields the CPU to one that starts while it runs (below). A ship's own
+# landing's. It asks Citadel first and waits off the runner while a ship is in line (below, #1902), and yields the CPU to
+# one that starts while it runs. A ship's own
 # check (check/**) is one at a time in a group of its own: at most one of them beside a land's run (Cara, 2026-11-22,
 # "Gated, after C and B": one extra runner, used only when free). The early next train's run (early/**, #1568) has a group
 # per branch: it goes niced on a second ship runner while the train ahead's run goes, and once its train comes out the
@@ -30,23 +31,19 @@ concurrency:
   group: ${{ startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || (startsWith(github.ref, 'refs/heads/check/') && 'citadel-check' || (startsWith(github.ref, 'refs/heads/early/') && format('citadel-early-{0}', github.ref_name) || 'citadel-off-land')) }}
   cancel-in-progress: false
 
-# actions: read for the wait for the lands' runs (below).
 permissions:
   contents: read
-  actions: read
   id-token: write # the run's own token, no secret: tools/ci-numbers.sh's (the citadel:ci-store skill) and the test steps' counts for the Releases page (tools/ci-progress.ts, #1368)
 
 jobs:
   test:
     # A land's run takes either Linux runner; any other (the nightly, one started by hand) only the one with the side
-    # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). Its wait for the lands
-    # below holds its runner, which on the lands' runner would keep the land it waits for from starting. A ship's own
+    # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). A ship's own
     # check takes only the runner with the check label, never GitHub's own (whatever CI_RUNNER says) nor a land's. An
     # early next train's run (early/, #1568) takes a land's runner beside the lands' run, niced, never GitHub's own.
     runs-on: ${{ startsWith(github.ref, 'refs/heads/check/') && fromJSON('["self-hosted", "citadel-ci-linux-check"]') || (startsWith(github.ref, 'refs/heads/early/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || (vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]')))) }}
     # land.sh gives up on the run 9 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361; 6 until #1606), the clock step's up to 2 min included, or 3 more
-    # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374), plus its burn-in's time (up to 2.5 min, #1443); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
-    # up to 30 more for the lands.
+    # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374), plus its burn-in's time (up to 2.5 min, #1443); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's is niced, and may wait its turn first (the ask below).
     timeout-minutes: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/')) && 16 || 45 }}
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +52,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26 # perigee's
+      # Deploys first (#1902): a run that isn't a ship's (the nightly, one started by hand) waits off the runner. While a ship is in line it is
+      # stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
+      - name: ask Citadel whether ships go first
+        if: ${{ !startsWith(github.ref, 'refs/heads/land/') && !startsWith(github.ref, 'refs/heads/check/') && !startsWith(github.ref, 'refs/heads/early/') }}
+        run: node tools/ci-hold-ask.ts
       # fast-check, the property tests' library (#1657, ADR 0029): Citadel's one devDependency, from the lockfile, no install scripts.
       - name: devDependencies for the tests
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -143,31 +145,6 @@ jobs:
             python3 -m zipfile -e "$RUNNER_TEMP/chs.zip" "$dir"
             chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
           fi
-      # A run that isn't a land's (the nightly) starts once no land's run is queued or running, or after 30 minutes of them.
-      # Only runs from the last 30 minutes count: a ship's run can wait 15 for a busy runner, then land.sh waits up to 9
-      # more (12 with reruns alone, plus the burn-in's up to 3, #1606), and GitHub keeps some abandoned
-      # runs "queued" for good (seven from 2026-11-11 evening, their branches long gone, on 2026-11-12).
-      - name: wait for the lands
-        if: ${{ !startsWith(github.ref, 'refs/heads/land/') && !startsWith(github.ref, 'refs/heads/check/') && !startsWith(github.ref, 'refs/heads/early/') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for _ in $(seq 60); do
-            busy=0
-            since=$(date -u -d '30 minutes ago' +%FT%TZ)
-            for status in queued in_progress; do
-              n=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?event=push&status=$status&created=%3E$since&per_page=1" \
-                | python3 -c 'import json, sys; print(json.load(sys.stdin)["total_count"])') || n=x
-              # A failed read counts as a land running: the wait leans toward the lands, and gives up after 30 minutes.
-              [ "$n" = x ] && echo "could not read the $status land runs from GitHub (the curl line above says why)"
-              [ "$n" = x ] && n=1
-              busy=$((busy + n))
-            done
-            [ "$busy" = 0 ] && { echo "no land's tests are running: starting"; exit 0; }
-            echo "$busy land run(s) queued or running, or unknown; waiting"
-            sleep 30
-          done
-          echo "lands kept running (or GitHub unread) for 30 minutes: starting anyway, niced"
       # The burn-in (#1443): a ship's new and changed test files, and up to 3 tests tools/affected-map.txt maps its changed
       # source files to or that import them (#1456), each run as 10 copies at once before the full suite (tools/burn-in.sh). A failed copy fails the run
       # here, with that copy's output, and land.sh refuses the ship on it as its own red, never a flake. land.sh pushes the

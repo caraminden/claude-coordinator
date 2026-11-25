@@ -1,7 +1,7 @@
 // The ship train's tests share these (#1723): the train's tests are split over land-train.test.ts,
 // land-train-riders.test.ts and land-train-early.test.ts so no one file sets the suite's length.
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ci, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
 import { until } from './wait.ts';
@@ -15,6 +15,8 @@ export async function line(ships: Ship[], extra: Record<string, string> | ((dir:
   const r = setup();
   const c = ci(r);
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, 'hold-off'), ''); // the early next train goes only with the CI desktop's hold off (#1902)
   before?.(r);
   const deploys = join(r.dir, 'deploys');
   const env = {

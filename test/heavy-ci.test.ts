@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -86,7 +86,14 @@ else if (url.includes('/actions/runs?status=')) {
   out({ total_count: mode === 'busy' && url.includes('in_progress') ? 1 : ship.length, workflow_runs: ship });
 }
 else if (url.endsWith('/runs/7/cancel')) fs.writeFileSync(path.join(dir, 'cancelled'), '');
-else if (url.endsWith('/runs/7')) {
+else if (url.endsWith('/runs/7') && mode === 'held') {
+  // mode held: stopped at the 2nd look, queued again at the 5th (Citadel started it again), then done.
+  const n = Number(fs.existsSync(path.join(dir, 'polls')) ? fs.readFileSync(path.join(dir, 'polls'), 'utf8') : 0) + 1;
+  fs.writeFileSync(path.join(dir, 'polls'), String(n));
+  const status = ['in_progress', 'completed', 'completed', 'completed', 'queued', 'in_progress'][n - 1] ?? 'completed';
+  if (n === 7) fs.rmSync(path.join(dir, 'locks', 'long', 'hold.json'));
+  out({ id: 7, status, conclusion: status === 'completed' ? (n > 6 ? 'failure' : 'cancelled') : null, html_url: 'https://github.com/o/r/actions/runs/7' });
+} else if (url.endsWith('/runs/7')) {
   const n = Number(fs.existsSync(path.join(dir, 'polls')) ? fs.readFileSync(path.join(dir, 'polls'), 'utf8') : 0) + 1;
   fs.writeFileSync(path.join(dir, 'polls'), String(n));
   // mode skip: queued, then completed at the next look, never seen in progress.
@@ -308,4 +315,66 @@ test('a dispatched run found only after the fallback is cancelled before it runs
   assert.equal(lost.status, 1, lost.stderr);
   assert.doesNotMatch(lost.stdout, /ran here/);
   assert.match(lost.stderr, /or it couldn't be found yet; nothing runs here: look for "heavy /);
+});
+
+// Deploys first (#1902): the server's word (hold.json) keeps a job off the CI desktop while ships are in line.
+const hold = (r: ReturnType<typeof repo>, o: Record<string, unknown> = {}) => {
+  mkdirSync(join(r.gh, 'locks', 'long'), { recursive: true });
+  writeFileSync(join(r.gh, 'locks', 'long', 'hold.json'), JSON.stringify({ at: Date.now(), off: false, why: '3 ships are in line', repos: ['o/r'], held: [], ...o }));
+};
+const jobs = (r: ReturnType<typeof repo>) =>
+  readdirSync(join(r.gh, 'locks', 'long'))
+    .filter((f) => f.endsWith('.json') && f !== 'hold.json')
+    .map((f) => JSON.parse(readFileSync(join(r.gh, 'locks', 'long', f), 'utf8')));
+
+test('while ships are in line a job is not dispatched: after its wait it is handed to Citadel, its snapshot kept', () => {
+  const r = repo();
+  hold(r);
+  const res = run(r, 'ok', { CITADEL_HEAVY_HOLD_WAIT: '0.2', COORDINATOR_TICKET: '42' });
+  assert.equal(res.status, 75, res.stderr);
+  assert.match(res.stderr, /waiting: 3 ships are in line, and ships go first/);
+  assert.match(res.stderr, /Citadel starts it by itself once the line is empty, and wakes you/);
+  assert.equal(existsSync(join(r.gh, 'dispatch.json')), false, 'nothing was dispatched');
+  assert.doesNotMatch(res.stdout, /ran here/);
+  const [job] = jobs(r);
+  assert.deepEqual([job.ticket, job.slug, job.state, job.quiet, job.command], [42, 'o/r', 'queued', true, `sh -c 'echo ran here; exit 5'`]);
+  assert.equal(git(r.bare, 'rev-parse', `refs/citadel-heavy/${job.id}`), job.sha);
+});
+
+test("a hold that is off, old, not this repo's, unreadable, or asked by a ship's own check holds nothing", () => {
+  const cases: [Record<string, unknown>, NodeJS.ProcessEnv][] = [
+    [{ off: true, why: null }, {}],
+    [{ at: Date.now() - 5 * 60_000 }, {}],
+    [{ repos: ['o/other'] }, {}],
+    [{ held: 'x' }, {}],
+    [{}, { CITADEL_HEAVY_SHIP: '1' }],
+  ];
+  for (const [o, env] of cases) {
+    const r = repo();
+    hold(r, o);
+    const res = run(r, 'ok', { CITADEL_HEAVY_HOLD_WAIT: '0.2', COORDINATOR_TICKET: '42', ...env });
+    assert.equal(res.status, 3, `${JSON.stringify(o)}: ${res.stderr}`);
+    const id = JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8'))['inputs[id]'];
+    assert.equal(id.startsWith('ship'), env.CITADEL_HEAVY_SHIP === '1', "a ship's check is named so the hold leaves it alone");
+  }
+});
+
+test('a running job stopped for a ship is handed to Citadel, which starts the same run again', () => {
+  const r = repo();
+  hold(r, { why: null, held: [{ run: 7 }] });
+  const res = run(r, 'held', { COORDINATOR_TICKET: '42' });
+  assert.equal(res.status, 75, res.stderr);
+  assert.match(res.stderr, /a ship joined the line, so this job was stopped: Citadel starts it again by itself/);
+  const [job] = jobs(r);
+  assert.deepEqual([job.state, job.run_id, job.quiet], ['running', 7, true]);
+  assert.equal(git(r.bare, 'rev-parse', `refs/citadel-heavy/${job.id}`), job.sha, 'the run needs its snapshot again');
+  assert.equal(existsSync(join(r.gh, 'cancelled')), false);
+});
+
+test('with no minion to wake, a stopped job waits here for the same run to come back', () => {
+  const r = repo();
+  hold(r, { why: null, held: [{ run: 7 }] });
+  const res = run(r, 'held', { COORDINATOR_TICKET: undefined });
+  assert.equal(res.status, 3, res.stderr);
+  assert.equal(res.stdout, 'hello from CI\n');
 });

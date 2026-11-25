@@ -36,6 +36,7 @@ import type { CiHealth } from './ci-health.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiNumbers } from './ci-numbers.ts';
+import type { CiHold } from './ci-hold.ts';
 import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
 import type { Reaper } from './reaper.ts';
@@ -356,6 +357,8 @@ export interface App {
   ciStore: CiStore;
   /** A CI job's test counts for its run's wait (CiRuns.testCounts, #1368); absent in tests that don't need it. */
   ciTests?: (repo: string, runId: number, c: TestCounts) => void;
+  /** Optional work kept off the CI desktop while ships go first (src/ci-hold.ts, #1902); absent in tests that don't need it. */
+  ciHold?: Pick<CiHold, 'ask' | 'state'>;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
   /** Jobs for the CI runner agent on a CI PC: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */

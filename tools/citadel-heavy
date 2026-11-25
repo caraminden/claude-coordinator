@@ -51,6 +51,9 @@
 # of the slots, at nice 19 and idle disk priority, so minions never feel them; the other slots are for priority jobs
 # (deploy and APK builds), which take them from the top down.
 #
+# Ships go first (#1902): while a ship is in line on that PC, a CI job waits here up to 5 minutes, then Citadel keeps it
+# (its snapshot and command), starts it when the line is empty and wakes the minion with the result: exit 75, "handed over".
+#
 # Long jobs (#1363): `citadel-heavy --long <command...>` doesn't wait. It snapshots the working copy for the scheme's CI,
 # queues the job and prints its id at once (tools/heavy-ci.ts --long). The server starts it at night, from 2am until the
 # job hours of the PC that runs the repo's runners end, and wakes the minion when it ends.
@@ -203,7 +206,8 @@ if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
   rm -f "$fell"
   [ -z "$cislot" ] || { rm -f "$dir/ci-$key-$cislot.who"; exec 5>&-; }
   if [ "$status" != fallback ]; then
-    { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000))" "$((($(us) - t1) / 1000000))" "$status" >>"$dir/history"; } 2>/dev/null
+    # 75: handed over to Citadel for ships, so it took no time here.
+    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000))" "$((($(us) - t1) / 1000000))" "$status" >>"$dir/history"; } 2>/dev/null
     exit "$status"
   fi
 fi

@@ -106,7 +106,6 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
   assert.ok(step && burn && base, "land.sh's burn-in step, extension and base ref");
   const at = yml.indexOf(`- name: ${step}`);
   assert.ok(at > 0 && at < yml.indexOf('- name: the full suite'), 'the burn-in comes before the full suite');
-  assert.ok(at > yml.indexOf('- name: wait for the lands'), 'and after the wait for the lands, on the runner the suite gets');
   const body = yml.slice(at, yml.indexOf('- name:', at + 1));
   assert.match(body, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/, "lands, ships' own checks and early runs only");
   // land/<branch> compares with land-base/<branch>, check/<branch> with check-base/<branch> (tools/own-check.sh).
@@ -132,7 +131,7 @@ test("a ship's own check runs only on the check runner, in its own group, and ke
 
 // The early next train's run (#1568; Cara, 2026-11-22, "Low-priority run on a ship runner"): early/<branch> runs beside the
 // train ahead's, so it has a group per branch (the lands' one-at-a-time group would hold it until that run ends), takes a
-// ship runner before the hosted-runner switch, runs niced, skips the wait for the lands, and keeps no land numbers.
+// ship runner before the hosted-runner switch, runs niced, doesn't ask whether ships go first, and keeps no land numbers.
 test("the early next train's run goes beside the lands' run, niced, on a ship runner, never GitHub's", () => {
   const yml = read('.github/workflows/tests.yml');
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/early\/'\) && format\('citadel-early-\{0\}', github\.ref_name\)/);
@@ -141,7 +140,21 @@ test("the early next train's run goes beside the lands' run, niced, on a ship ru
   assert.ok(early >= 0 && early < r.indexOf('vars.CI_RUNNER'), 'on a ship runner, before the hosted-runner switch, so it never goes to GitHub');
   assert.match(yml, /NICENESS: \$\{\{ !startsWith\(github\.ref, 'refs\/heads\/land\/'\) && '10' \|\| '0' \}\}/);
   assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);
-  const wait = yml.slice(yml.indexOf('- name: wait for the lands'), yml.indexOf('- name:', yml.indexOf('- name: wait for the lands') + 1));
-  assert.match(wait, /!startsWith\(github\.ref, 'refs\/heads\/early\/'\)/, "it doesn't wait for the lands' run it goes beside");
+  const ask = stepBody(yml, 'ask Citadel whether ships go first');
+  assert.match(ask, /!startsWith\(github\.ref, 'refs\/heads\/early\/'\)/, "it doesn't ask: a ship's run starts it");
   assert.match(read('tools/land.sh'), /"\+\$top:refs\/heads\/early\/\$nb" "\+\$tip:refs\/heads\/early-base\/\$nb"/, 'land.sh pushes it there, with its base');
+});
+
+// Deploys first (#1902): what isn't a ship's asks Citadel first, and a held run gives its runner back. A ship's run never asks.
+const stepBody = (yml: string, name: string) => yml.slice(yml.indexOf(`- name: ${name}`), yml.indexOf('- name:', yml.indexOf(`- name: ${name}`) + 1));
+test("main's run and heavy jobs ask Citadel before they start, with their own run's token; a ship's run never asks", () => {
+  for (const f of ['tests.yml', 'citadel-heavy.yml']) {
+    const yml = read(`.github/workflows/${f}`);
+    assert.match(stepBody(yml, 'ask Citadel whether ships go first'), /node tools\/ci-hold-ask\.ts/, f);
+    assert.match(yml, /^  id-token: write/m, f);
+  }
+  const yml = read('.github/workflows/tests.yml');
+  const ask = stepBody(yml, 'ask Citadel whether ships go first');
+  for (const p of ['land', 'check', 'early']) assert.ok(ask.includes(`!startsWith(github.ref, 'refs/heads/${p}/')`), p);
+  assert.ok(yml.indexOf(ask) < yml.indexOf('- name: the full suite') && !yml.includes('wait for the lands'), 'nothing waits on the runner');
 });

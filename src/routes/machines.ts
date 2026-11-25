@@ -7,6 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
+import { heldRows } from '../ci-hold.ts';
 import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
@@ -198,6 +199,17 @@ export const agentRoutes: Route[] = [
       if (!c) throw new HttpError(400, 'Send {done, total, file, failed?, phase?}: whole numbers, done at most total, total over 0; failed a list of file names; phase suite or rerun');
       app.ciTests?.(claims.repository, claims.runId, c);
       return json(res, 202, {});
+    },
+  },
+  // An optional job asks before it starts (tools/ci-hold-ask.ts, #1902): told to wait, Citadel stops the run and starts it
+  // again later, so it never waits long holding a runner.
+  {
+    method: 'POST',
+    path: '/api/ci-hold',
+    who: 'machine',
+    async handler({ req, res, app }) {
+      const { claims } = await app.ciStore.caller(req);
+      return json(res, 200, (await app.ciHold?.ask(claims.repository, claims.runId)) ?? { go: true, why: null });
     },
   },
 ];
@@ -418,7 +430,7 @@ export const machineRoutes: Route[] = [
       // What runs from which minion, and what closed minions left that was stopped this week (#1365, src/reaper.ts).
       const minions = app.reaper ? byMinion(await app.reaper.running(), app.store, canSee) : [];
       const reaped = reapedRows(app.store.healthEventsSince([REAPED], Date.now() - 7 * 24 * 3600_000), app.store, canSee);
-      json(res, 200, { ...hostLoad(app.heavyDir, Date.now(), undefined, owners, await readHeavyA(app.heavyDir)), minions, reaped });
+      json(res, 200, { ...hostLoad(app.heavyDir, Date.now(), undefined, owners, await readHeavyA(app.heavyDir)), minions, reaped, hold: app.ciHold ? heldRows(app.ciHold.state(), app.store, canSee) : null });
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.

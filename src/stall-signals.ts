@@ -16,7 +16,7 @@ export const SHIP_FAILS = 2;
 // A tool name only counts as the command a segment runs (at the start, or after ;, &, |, a bracket or a newline), past any
 // VAR=value, cd, timeout or wrapper (citadel-heavy, npx), and as a whole word: `cat $TMPDIR/citadel-test.log` and
 // `grep -rn pytest pyproject.toml` are no test runs.
-const PREFIX = String.raw`(?:(?:\w+=\S*|citadel-heavy(?:\s+--(?:here|heavy))*|npx|env|time|nice|timeout\s+\S+|(?:pnpm|yarn)\s+exec)\s+)*`;
+const PREFIX = String.raw`(?:(?:\w+=\S*|citadel-heavy(?:\s+--(?:here|heavy))*|citadel-job(?:\s+--minutes\s+\S+)?|npx|env|time|nice|timeout\s+\S+|(?:pnpm|yarn)\s+exec)\s+)*`;
 const words = (alts: string) => new RegExp(`(?:^|[;&|(\`\n]|\\$\\()\\s*${PREFIX}(?:${alts})(?=$|[\\s;&|)\`])`, 'i');
 const TESTS = words(String.raw`citadel-test|node\s+--test|(?:npm|pnpm|yarn)\s+(?:run\s+)?test|cargo\s+(?:test|nextest)|pytest|vitest|jest|go\s+test|\S*run-tests(?:\.sh)?|\S*gradlew\s+\S*[tT]est\w*|deno\s+test|bun\s+test|dotnet\s+test`);
 const CHECKS = words(String.raw`cargo\s+(?:build|check|clippy)|tsc|(?:npm|pnpm|yarn)\s+run\s+(?:build|lint|check|typecheck)|eslint|\S*gradlew\s+\S*(?:build|assemble)\w*|dotnet\s+build|go\s+(?:build|vet)`);

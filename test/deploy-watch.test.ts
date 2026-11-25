@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import vm from 'node:vm';
-import { HEALTH_MAX_ROWS, Store } from '../src/db.ts';
+import { HEALTH_MAX_ROWS, Store, type TurnResult } from '../src/db.ts';
 import { attachEventsIfThere } from '../src/events-db.ts';
 import { HttpError } from '../src/http.ts';
 import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, BOOT_STALL, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
 import { git } from './git.ts';
+import { fake } from './typed.ts';
 
 // The post-deploy watch (#724): readings before and after each deploy, a wake for whoever shipped a regression.
 const root = mkdtempSync(join(tmpdir(), 'deploy-watch-'));
@@ -269,7 +270,7 @@ test('event-loop stalls in the first minutes after boot are kept as their own ki
 
 test("a stall in the watch's own query is not recorded, at any time", () => {
   const { store, watch } = setup();
-  const w = watch() as any;
+  const w = watch();
   w.record('loop-lag', 'Running: 92% get < eventIdAt (src/db.ts:2557) < turnOutcomes (src/db.ts:2575) < compare (src/deploy-watch.ts:185)');
   assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 0);
   w.record('loop-lag', 'Running: 90% all < listEvents (src/db.ts:2153) < handler (src/routes/tickets.ts:553)');
@@ -278,7 +279,7 @@ test("a stall in the watch's own query is not recorded, at any time", () => {
 
 test('eventIdAt finds the first event at or after a time', () => {
   const { store } = setup();
-  const db = (store as any).db;
+  const db = store.db;
   db.exec('DELETE FROM events');
   assert.equal(store.eventIdAt(5), 1, 'no events');
   // Five events at known times, two sharing one, so the halving has to land on the first of a tie.
@@ -321,18 +322,18 @@ test('beacon reports are de-duplicated and rate-limited per person, origin and q
 });
 
 test('the beacon never throws, sends each error once, skips network noise and stops at ten', () => {
-  const listeners: Record<string, (e: any) => void> = {};
-  const sent: any[] = [];
+  const listeners: Record<string, (e: unknown) => void> = {};
+  const sent: Record<string, unknown>[] = [];
   let failing = false;
   class ErrorEvent {
-    constructor(o: any) {
+    constructor(o: object) {
       Object.assign(this, o);
     }
   }
   const ctx = vm.createContext({
     ErrorEvent,
-    addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
-    fetch: (url: string, init: any) => {
+    addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
+    fetch: (url: string, init: { body: string; headers: Record<string, string> }) => {
       if (failing) throw new Error('fetch is broken');
       sent.push({ url, ...JSON.parse(init.body), type: init.headers['Content-Type'] });
       return Promise.reject(new Error('offline'));
@@ -487,7 +488,7 @@ test('turnOutcomes reads error events through their own index, not every event o
   assert.ok(errs, 'turnOutcomes reads error events');
   const plan = prepare(`EXPLAIN QUERY PLAN ${errs}`)
     .all(...Array(errs.split('?').length - 1).fill(0))
-    .map((r: any) => r.detail)
+    .map((r) => r.detail)
     .join(' | ');
   assert.match(plan, /USING (COVERING )?INDEX events_errors/);
 });
@@ -497,7 +498,7 @@ test('turns that ended "Not logged in" are not failed turns, and turnOutcomes na
   const at = 1_000 * MIN;
   const turn = (ended: number, bad: boolean, account: number, result?: string) => {
     const e = store.addEvent(a.id, 'result', { type: 'result', is_error: bad, result, total_cost_usd: 0 });
-    store.recordTurn(a.id, { event_id: e.id, ended_at: ended, session_cost_usd: 0, account } as any);
+    store.recordTurn(a.id, fake<TurnResult>({ event_id: e.id, ended_at: ended, session_cost_usd: 0, account }));
   };
   for (let i = 0; i < 3; i++) turn(at + MIN + i, true, 2, 'Not logged in · Please run /login');
   turn(at + 2 * MIN, false, 1);

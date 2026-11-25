@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ciPublisher, DesktopError, DesktopFeeds, desktopTargetOf, KEEP } from '../src/desktop-feed.ts';
+import { ciPublisher, DesktopError, DesktopFeeds, desktopTargetOf, KEEP, NO_FILE, NO_FILE_MS } from '../src/desktop-feed.ts';
 import { LAUNCHER_SOURCES, Launchers } from '../src/desktop-launcher.ts';
 import { desktopRoutes } from '../src/routes/desktop.ts';
 
@@ -203,6 +203,78 @@ test("CI's publisher publishes a run's build once and tells the Taskmaster, wait
   assert.equal(told.length, 3, 'run 13 was news once; following it again, and the restart, were not');
 });
 
+test("a run CI's publisher couldn't publish stays failed through a restart, is tried again and told once (2RE4)", async () => {
+  const feeds = new DesktopFeeds(join(root, 'd8'));
+  const told: string[] = [];
+  let file = await build('b.zip', { 'A.exe': 'x', 'B.exe': 'y' });
+  const boot = () => ciPublisher({ feeds, tell: (_p, t) => told.push(t), file: async () => file });
+  const t = { projectId: 3, name: 'Windows', desktop: { app: 'app' } };
+  const first = boot();
+  await first(t, { id: 12, sha: 'f' });
+  assert.equal(told.length, 1);
+  assert.match(first.failed(3, 'app', 12)!, /2 \.exe files/);
+  assert.deepEqual([(await feeds.apps(3)).length, DesktopFeeds.feed((await feeds.index(3, 'app'))!, null)], [0, null], 'a first publish that failed makes no app and no feed');
+  const again = boot();
+  await again(t, { id: 12, sha: 'f' });
+  assert.equal(told.length, 1, 'the same failure after a restart is not news');
+  assert.match(again.failed(3, 'app', 12)!, /2 \.exe files/);
+  // Mended: the next restart's try goes out, and nothing says failed any more.
+  file = await build('b.zip', { 'A.exe': 'x' });
+  const mended = boot();
+  await mended(t, { id: 12, sha: 'f' });
+  assert.equal(mended.failed(3, 'app', 12), null);
+  assert.equal((await feeds.index(3, 'app'))!.failed, undefined);
+  assert.match(told[1], /published desktop build 1/);
+  // A by-hand publish of a failed run's build settles it too.
+  file = await build('b.zip', { 'A.exe': 'x', 'B.exe': 'y' });
+  await mended(t, { id: 13, sha: 'g' });
+  assert.ok((await feeds.index(3, 'app'))!.failed!['13']);
+  await feeds.publish({ projectId: 3, app: 'app', file, exe: 'A.exe', source: 'ci:13' });
+  assert.equal((await feeds.index(3, 'app'))!.failed, undefined);
+});
+
+test('a run whose build never reaches the CI store is told once after 30 minutes, and still goes out if it comes (2RE4)', async () => {
+  const feeds = new DesktopFeeds(join(root, 'd9'));
+  const told: string[] = [];
+  let clock = 1000;
+  let file: string | null = null;
+  const boot = () => ciPublisher({ feeds, tell: (_p, t) => told.push(t), file: async () => file, now: () => clock });
+  const t = { projectId: 3, name: 'Windows', desktop: { app: 'app' } };
+  const first = boot();
+  await first(t, { id: 12, sha: 'f' });
+  clock += NO_FILE_MS - 1;
+  await first(t, { id: 12, sha: 'f' });
+  assert.deepEqual([first.failed(3, 'app', 12), told], [null, []], 'the copy into the store can take a while');
+  clock += 1;
+  await first(t, { id: 12, sha: 'f' });
+  await first(t, { id: 12, sha: 'f' });
+  assert.equal(first.failed(3, 'app', 12), NO_FILE);
+  assert.equal(told.length, 1);
+  assert.match(told[0], /run 12's build isn't in the CI store/);
+  const again = boot();
+  await again(t, { id: 12, sha: 'f' });
+  assert.equal(again.failed(3, 'app', 12), NO_FILE, 'a restart still says it');
+  clock += NO_FILE_MS;
+  await again(t, { id: 12, sha: 'f' });
+  assert.equal(told.length, 1, 'and is not news again');
+  file = await build('b.zip', { 'A.exe': 'x' });
+  await again(t, { id: 12, sha: 'f' });
+  assert.deepEqual([again.failed(3, 'app', 12), (await feeds.index(3, 'app'))!.current], [null, 1]);
+});
+
+test('a publish sweeps the folders an interrupted one left, and nothing else (2RE7)', async () => {
+  const feeds = new DesktopFeeds(join(root, 'd10'));
+  await feeds.publish({ projectId: 1, app: 'app', file: await build('b.zip', { 'A.exe': 'v1' }) });
+  const dir = feeds.dir(1, 'app');
+  for (const d of ['.in-5Yn62W', '.install-abc123']) {
+    await mkdir(join(dir, d, 'x'), { recursive: true });
+    await writeFile(join(dir, d, 'x', 'big'), 'left');
+  }
+  await writeFile(join(dir, 'install-1-abc.zip'), 'kept');
+  await feeds.publish({ projectId: 1, app: 'app', file: await build('b.zip', { 'A.exe': 'v2' }) });
+  assert.deepEqual((await readdir(dir)).sort(), ['app-1.zip', 'app-2.zip', 'feed.json', 'install-1-abc.zip']);
+});
+
 test("a ci target's desktop settings are kept only when well formed", () => {
   assert.deepEqual(desktopTargetOf({ app: 'peek', exe: 'Peek.exe', started: 'alive', title: ' Peek ' }), { app: 'peek', exe: 'Peek.exe', started: 'alive', title: 'Peek' });
   assert.deepEqual(desktopTargetOf({ app: 'peek', exe: '../x.exe', started: 'soon' }), { app: 'peek' });
@@ -247,7 +319,9 @@ test('the open routes serve the feed, a kept build and the install zip, and 404 
     const index = JSON.parse(await readFile(join(dir, 'feed.json'), 'utf8'));
     index.builds.push({ ...index.builds[0], build: 9, zip: 'app-9.zip' });
     await writeFile(join(dir, 'feed.json'), JSON.stringify(index));
-    for (const path of ['5/app/app-9.zip', '5/app/feed.json.tmp', '5/app/app-2.zip', '5/app/..%2Ffeed.json', '6/app/feed.json', '5/other/feed.json', '5/BAD/feed.json', 'x/app/feed.json']) {
+    // An app whose only publish failed has an index and no build (2RE4).
+    await feeds.noteFailed(5, 'none', 12, 'disk full');
+    for (const path of ['5/none/launcher.exe', '5/none/install.zip', '5/none/feed.json', '5/app/app-9.zip', '5/app/feed.json.tmp', '5/app/app-2.zip', '5/app/..%2Ffeed.json', '6/app/feed.json', '5/other/feed.json', '5/BAD/feed.json', 'x/app/feed.json']) {
       assert.equal((await fetch(`${base}/${path}`)).status, 404, path);
     }
   } finally {

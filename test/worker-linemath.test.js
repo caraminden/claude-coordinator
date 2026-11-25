@@ -1,12 +1,13 @@
 // What the worker line's drawer shows and what a move in it asks for (public/worker-linemath.js).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyMove, dropped, lineGroups, lineWhy, nextUrgent } from '../public/worker-linemath.js';
+import { applyMove, applyStart, dropped, lineGroups, lineWhy, nextUrgent, ownSaid } from '../public/worker-linemath.js';
 
 const wait = (ticket, more = {}) => ({ ticket, project: 2, number: ticket, title: `m${ticket}`, person: 'Josh', since: 1, urgent: false, ...more });
 const tag = (ticket, more = {}) => ({ ticket, project: 2, number: ticket, title: `m${ticket}`, waiting: true, kind: 'person', by: 'Josh', at: 1, ...more });
 const server = () => ({
   urgent: [tag(1), tag(null, { by: undefined, title: undefined }), tag(2, { kind: 'server', by: 'Citadel', reason: 'a fix for shipping' }), tag(3, { waiting: false })],
+  forced: [],
   line: [wait(1, { urgent: true }), wait(null, { urgent: true }), wait(2, { urgent: true }), wait(4), wait(5)],
 });
 const ids = (g) => [g.urgent.map((r) => r.ticket), g.rest.map((r) => r.ticket)];
@@ -117,4 +118,26 @@ test('why it stands there', () => {
   assert.equal(lineWhy(wait(4, { warm: true })), 'warm, about to go cold');
   assert.equal(lineWhy(wait(4, { first: true, warm: true })), 'ship refused, or others wait on it · warm, about to go cold');
   assert.equal(lineWhy(wait(4)), '');
+});
+
+test('Start now takes a row out of the order and names who; Release puts it back; twice changes nothing more', () => {
+  const start = (id, on) => ({ row: { ticket: id, project: 2, number: id, title: `m${id}` }, on, by: 'Josh', at: 9 });
+  const on = applyStart(server(), start(4, true));
+  assert.deepEqual(on.forced, [{ ticket: 4, project: 2, number: 4, title: 'm4', waiting: true, since: 9, by: 'Josh' }]);
+  assert.deepEqual(ids(lineGroups(on))[1], [5]);
+  assert.deepEqual(applyStart(on, start(4, true)), on);
+  // The server's own word on who holds it stays over a later press.
+  assert.equal(applyStart(on, { ...start(4, true), by: 'Cara', at: 20 }).forced[0].by, 'Josh');
+  const off = applyStart(on, start(4, false));
+  assert.deepEqual([off.forced, ids(lineGroups(off))[1]], [[], [4, 5]]);
+  assert.deepEqual(applyStart(off, start(4, false)), off);
+  // Urgent as well: it stays in that group, waiting or not.
+  assert.deepEqual(ids(lineGroups(applyStart(server(), start(1, true))))[0], [1, null, 2, 3]);
+});
+
+test('what one with its own worker is doing', () => {
+  assert.equal(ownSaid({ waiting: true }, 'Josh paused all minions'), 'waiting: Josh paused all minions');
+  assert.equal(ownSaid({ waiting: true }, null), 'starting');
+  assert.equal(ownSaid({ waiting: false, working: true }, null), 'working');
+  assert.equal(ownSaid({ waiting: false }, null), 'idle');
 });

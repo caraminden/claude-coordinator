@@ -27,7 +27,8 @@ notes are that PC's, not settings yours must copy.
    it, you are in that scheme and you lent it. Un-lending stops new runners; ask `ci_runners remove` from the scheme
    first to take its old ones off.
    An admin's new host is shared, with no owner: any admin lends it, and it runs CI for no scheme until one does.
-4. Someone in the scheme asks for runners (`ci_runners`, below). Set the [caps](#your-own-caps) first if 75% of the
+4. Someone in the scheme asks for runners (`ci_runners`, below). On a scheme's second PC, the first runner is a
+   **side** runner by default; say a [role](#runner-roles-1934) to get another. Set the [caps](#your-own-caps) first if 75% of the
    PC is too much.
 
 CI jobs run code from the repos you lend to, as accounts of their own without administrator rights. Don't lend a PC
@@ -52,7 +53,7 @@ out to Citadel like a machine agent. It does three things, and only when a membe
 
 | Ask | What runs on a Windows PC |
 |---|---|
-| `add`, with a count of 1 to 4 | `add-runner.ps1 -Scheme <id> -Count <n>`: installs the missing instances, then Citadel waits until GitHub shows them Idle |
+| `add`, with a count of 1 to 4 | `add-runner.ps1 -Scheme <id> -Count <n>`: installs the missing instances, then Citadel waits until GitHub shows them Idle. With a `role`, Citadel gives the new ones its labels ([Runner roles](#runner-roles-1934)) and waits until they are online |
 | `list` | `list-runners.ps1`: every `actions.runner.*` service, its state and folder, and whether Citadel made it |
 | `remove` | `remove-runner.ps1 -Scheme <id>`: only folders whose `.citadel-runner` marker names the scheme's repo. Citadel takes each runner off GitHub; the script then deletes its service and folder |
 
@@ -101,6 +102,32 @@ What keeps the agent narrow:
 Session runners (below) are added by hand, not by the agent: their logon task is for the person
 who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` shows them and its
 `remove` removes them.
+
+## Runner roles (#1934)
+
+What a runner is for is its labels, which workflows' `runs-on` picks. `ci_runners add` takes a `role`, and Citadel sets that
+role's labels on the runners the add makes, through GitHub's API with the scheme owner's login, as soon as GitHub lists each:
+
+| Role | Labels (`L` is `<scheme-slug>-ci`, or `<scheme-slug>-ci-linux` with `os: linux`) | For |
+|---|---|---|
+| `land` | `L` | ships, and any job that asks for `L` alone |
+| `side` | `L`, `L-side` | work that can wait: proofs, heavy jobs, suites started by hand |
+| `long` | `L`, `L-side`, `L-long` | long jobs (`citadel-heavy --long`); it takes side work while there is none |
+| `check` | `L-check` | a ship's own check, nothing else |
+
+- **No role:** on a PC with no land runner for the scheme, while another PC has one, the new runners are **side** ones: that is
+  what a second PC's first runner becomes. Anywhere else they keep the labels the PC's script gives by position (the
+  first `L`; on Linux, the ones after it `L-side` too).
+- **Only new runners.** One already on GitHub keeps its labels, whoever gave them; an add that makes no new runner says so, and
+  fails if a role was asked for. To change one, `ci_runners remove` and add again, or by hand as the repo's admin:
+  `gh api -X PUT repos/<owner>/<repo>/actions/runners/<id>/labels -f 'labels[]=…'` (it replaces the custom labels).
+- **Every add asks GitHub first** for the runners already there, so one is refused while GitHub can't answer, or while the
+  scheme's owner has no GitHub login.
+- **Limits.** The hold on side work while a ship runs (`src/ci-hold.ts`, #1902) is by repo, not by PC: a second PC's side runner
+  waits too. A `side` or `long` runner carries `L`, since side jobs ask for both, so a ship's job can still start on one: for
+  Citadel, keep land runners on one PC, and expect a ship on a second PC's side runner when the first PC's are busy or off.
+  For a few seconds after it registers, a new runner has its script's labels. If Citadel restarts during an add, the
+  runners keep those; look on GitHub, and use the line above.
 
 ## Install the runner agent (the PC's owner, once)
 
@@ -467,17 +494,20 @@ with a fake PowerShell. The job itself has only run where `-Prove` runs: on the 
 Cara, 2026-11-20, "Plan approved: build it this way. ("Ships go first on the CI desktop: while any scheme's ship run
 is going, every other runner there drops to about a third of the PC")". On Nov 19, 23:13-23:35 PST, Peek's Windows
 builds and the test box took the whole PC and Citadel's ship suite in WSL outran `land.sh`'s 6-minute wait. So while
-any scheme's ship run (a `land/…` branch: Peek's, Mandate's, ToC's, Citadel's) has a job on a runner here, every other
-runner on the PC is squeezed; Delve's PR checks are not ships (Cara, "No, ship branches only"). Nothing changes when
+any scheme's ship run (a `land/…` branch: Peek's, Mandate's, ToC's, Citadel's) has a job on a runner of a PC, every other
+runner on that PC is squeezed, and no other PC's (#1934); Delve's PR checks are not ships (Cara, "No, ship branches only"). Nothing changes when
 no ship is running: the 75% cap above is all there is. Citadel's own ships go first (Cara, 2026-11-21, picked
-"Citadel's ship goes first" on #1268's card): while one runs, another scheme's ship is left off the list and squeezed
+"Citadel's ship goes first" on #1268's card): while one runs, another scheme's ship on the same PC is left off its list and squeezed
 like any other runner; on its own, that ship still counts. Before Windows held the squeeze, a Peek ship and a Citadel
 ship running together had the PC over 20 cores in 46% of samples (#1477's
 keeper log, `shared/project/reports/ships-first-windows-squeeze-2026-11-21.md`).
 
 - **Who knows a ship is running.** Citadel (`src/ci-ships.ts`) asks GitHub every 15 seconds which `land/…` runs are
-  in progress in each repo with runners here, and which self-hosted runner each running job is on, and sends that list
-  (repo and runner name) to both runner agents. Same-named runners in two repos are told apart by repo.
+  in progress in each repo with runners on a CI PC, and which self-hosted runner each running job is on, and sends each PC's
+  agents that list (repo and runner name) of its own ships (#1934). Same-named runners in two repos are told apart by repo.
+- **Whose PC a runner is on.** Its agent's newest load sample lists it; before one does, its name starts with the PC's
+  hostname. The Windows and WSL agents of one PC count as one PC because they report one hostname, WSL's default: give
+  `citadel-ci` a hostname of its own and neither squeezes for the other's ships. A ship on no known PC squeezes none.
 - **Windows.** The agent writes the list to `C:\ProgramData\citadel-runner-agent\ships.json` with an expiry 2 minutes
   out. `keep-runners.ps1` gives each runner its own slot, a job named `Global\CitadelCiRunner-<folder>` nested in the
   shared 75% job, names it from the runner's `.runner` file, and re-reads `ships.json` every 2 seconds. While a ship
@@ -513,8 +543,8 @@ u='http://perigee.tail59477f.ts.net:8574'; f=$(mktemp) && curl -fsSL "$u/ci-runn
 
 Neither restarts a runner or the PC; running jobs keep going and are squeezed from the next sweep.
 
-**What has been tested** (#1268): the watcher against a fake GitHub (`test/ci-ships.test.ts`), the hub sending the
-list to both agents (`test/machine-relay.test.ts`), the Linux quotas and the ships file (`test/runner-agent.test.ts`),
+**What has been tested** (#1268): the watcher against a fake GitHub and each PC's own list (`test/ci-ships.test.ts`), the hub
+sending two agents on two PCs each its own (`test/machine-relay.test.ts`), the Linux quotas and the ships file (`test/runner-agent.test.ts`),
 and `keep-runners.ps1`'s share maths, `ships.json` reading and runner naming in pwsh on perigee with the job calls
 faked (`test/keep-runners.test.ts`). Nested job objects themselves only run where `-Prove` runs: on the desktop, at
 the install above, and on the test box, where `-Prove` passed on Nov 21 and its Git Bash check failed with breakaway
@@ -547,8 +577,7 @@ Citadel's suite runs on its Linux runners (`citadel-ci-linux`; two of them, but 
 run at a time: two at once on that PC failed in a different file every run, 2026-11-11). Only the lands' runs may take
 the first runner: flake proofs (`flake-proof.yml`), heavy jobs (`citadel-heavy.yml`, #1347), the desktop build (`desktop.yml`), the nightly and runs started by hand ask for the side label
 `citadel-ci-linux-side`, which `-linux-2` and the long runner `-linux-3` carry (#1240: on 2026-11-20 proofs held both runners for three hours and
-every land fell back to perigee). Runners added before #1240 got the side label by hand, as the repo's admin:
-`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-side'`.
+every land fell back to perigee). A new runner gets its labels from the add's role ([Runner roles](#runner-roles-1934)).
 Without a runner carrying it, those wait in GitHub's queue (up to a day) while lands go on; `test/ci-runner-choice.test.ts` fails on a workflow job that could take the first runner.
 Long jobs (`citadel-heavy --long`, `src/long-jobs.ts`) have a third runner, `-linux-3`, the only one carrying
 `citadel-ci-linux-long` (#1592: on 2026-11-22 a long job held the side runner from 02:04 to 07:30 and five flake proofs
@@ -556,19 +585,13 @@ queued behind it). It carries the side label too, so it takes side work while no
 "Long runner helps out": with `-linux-2` alone, proofs and heavy jobs queued about 45 minutes an hour while `-linux-3`
 sat idle: `shared/project/reports/side-runner-queue-2026-11-22.md`). A long job can
 wait behind one side job there; `-linux-2` never takes a long job. `citadel-heavy.yml` takes a `long` input, and the pump sends it when the
-workflow declares one, so a scheme whose workflow lacks it keeps its long jobs on the side runner. `add-runner.sh` gives
-every runner after the first the side label, so a long runner is relabelled by hand, as the repo's admin:
-`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-long'`
-(it keeps the side label `add-runner.sh` gave it; to stop it taking side work, as before #1646:
+workflow declares one, so a scheme whose workflow lacks it keeps its long jobs on the side runner. A long runner is added
+with `role: long` (to stop it taking side work, as before #1646, as the repo's admin:
 `gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side`). Without a runner
 carrying the long label, a long job waits in GitHub's queue for a day and is then lost.
 A ship's own check (#1567, `tools/own-check.sh`) has a runner of its own too, which carries only
 `citadel-ci-linux-check`: `tests.yml` sends every `check/**` run there, one at a time (group `citadel-check`), niced, so
-Cara's desktop runs at most one check beside a land's run. `add-runner.sh` gives it `citadel-ci-linux` and the side
-label, so it is relabelled by hand, as the repo's admin:
-`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-check'`, then
-`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side` and
-`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux`. With no runner
+Cara's desktop runs at most one check beside a land's run. It is added with `role: check`. With no runner
 online carrying the check label, `land.sh` runs no check and ships go to the line as before.
 `.github/workflows/tests.yml` runs on every push to a `land/**` or `check/**` branch, and `tools/land.sh` is the only
 thing that pushes there (`check/**` through `tools/own-check.sh`, above): it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit

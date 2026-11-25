@@ -147,7 +147,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
   // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), who-touches, which other worktrees change a path (#1159), who-uses, who imports or calls a file or symbol and which tests reach it (#1781), and stale-docs, which finds dead paths in instruction files and stale shared-folder files (#1164), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it; citadel-build-cache shows and clears the shared build caches (#1153); heavy-ci.ts sits beside citadel-heavy, which sends heavy jobs to the scheme's CI through it (#1160); citadel-callgrind counts a program's instructions despite perigee's AVX-512 glibc (#1397).
-  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'who-uses', 'stale-docs', 'citadel-android-mic.ts', 'citadel-build-cache', 'heavy-ci.ts', 'citadel-callgrind']) {
+  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-job', 'citadel-job.ts', 'citadel-job-run.sh', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'who-uses', 'stale-docs', 'citadel-android-mic.ts', 'citadel-build-cache', 'heavy-ci.ts', 'citadel-callgrind']) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
@@ -804,7 +804,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (pooled) {
     const pool = (path: string, extra: object = {}) => ({ type: 'http', url: `http://127.0.0.1:\${CITADEL_POOL_PORT}${path}`, headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, ...extra });
     const http: Record<string, object> = { [role]: pool('/mcp', role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) };
-    for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}`);
+    for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}${s.server === 'mcp' && m.lent ? `&lent=${encodeURIComponent(m.lent)}` : ''}`);
     files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: http }) });
     files.push({ name: 'mcp-stdio.json', text: JSON.stringify({ mcpServers: servers }) });
   } else {

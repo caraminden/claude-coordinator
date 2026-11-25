@@ -17,7 +17,7 @@ function fakeGithub(tokens: Record<string, string>, admins: Record<string, strin
     const path = url.replace('https://api.github.com', '');
     calls.push(`${init?.method ?? 'GET'} ${path}`);
     if (opts.down) throw new Error('fetch failed');
-    const me = tokens[String((init?.headers as any)?.Authorization ?? '').replace('Bearer ', '')];
+    const me = tokens[String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '').replace('Bearer ', '')];
     const headers = { 'X-OAuth-Scopes': opts.scopes };
     if (!me) return Response.json({ message: 'Bad credentials' }, { status: 401, headers });
     const m = /^\/repos\/([^/]+\/[^/]+)\/actions\/runners(?:\/(registration-token|\d+)|\?per_page=(\d+)&page=(\d+))$/.exec(path);
@@ -250,6 +250,14 @@ test('taking a runner off GitHub meets the same checks as a token, and says why 
 });
 
 // The name can come from a file a job wrote (a session runner's .runner): it must not reach a runner of another kind.
+test('a check runner (#1934), which carries only its role label, is removed by the label its role comes from', async () => {
+  const w = world();
+  w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci-check'), runner(8, 'wsl', 'peek-auras-ci-linux-check'));
+  const pc = w.machine('josh-pc', w.josh.id);
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'wsl', 'peek-auras-ci'), { status: 403 });
+  assert.equal((await w.tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci')).removed, true);
+});
+
 test("a named runner carrying another of the scheme's labels than the one expected is refused", async () => {
   const w = world();
   w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'), runner(9, 'DESK-desktop', 'peek-auras-desktop'), runner(10, 'wsl', 'peek-auras-ci-linux'));

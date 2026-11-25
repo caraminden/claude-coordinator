@@ -17,7 +17,7 @@ interface Rpc {
   result?: Record<string, unknown>;
   error?: unknown;
 }
-type Link = { session: string; stream: AbortController; pending: Map<unknown, (msg: Rpc) => void>; queue: Promise<unknown> };
+type Link = { session: string /** Where its tools are remembered: the server the session says it opened. */; key: string; stream: AbortController; pending: Map<unknown, (msg: Rpc) => void>; queue: Promise<unknown> };
 type Turn = { handshake: Rpc[]; link: Promise<Link> | null };
 
 // Claude's MCP handshake replayed to a session it never saw (or a new one): the machine's reply to it is dropped.
@@ -36,7 +36,11 @@ export function dropLinks(token: string) {
   turns.delete(token);
 }
 
-const cachePath = (dir: string, machine: number, server: string) => join(dir, `${machine}-${server}.json`);
+/** One per server lent (2MA6): `key` is `mcp` with the ticked server's name, so another one's tools are never read as this one's. */
+const cachePath = (dir: string, machine: number, key: string) => join(dir, `${machine}-${key}.json`);
+/** An MCP server's name as the server lets one be lent: the file's name holds it. */
+const LENT_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$/;
+const cacheKey = (server: 'mcp' | 'ws', lent: unknown) => (server === 'mcp' && typeof lent === 'string' && LENT_NAME.test(lent) ? `mcp-${lent}` : server);
 function readCache(dir: string, machine: number, server: string): { init: Record<string, unknown>; tools: unknown[] } | null {
   try {
     const c = JSON.parse(readFileSync(cachePath(dir, machine, server), 'utf8'));
@@ -60,8 +64,8 @@ function writeCache(dir: string, machine: number, server: string, patch: { init?
 
 const error = (id: unknown, message: string) => ({ jsonrpc: '2.0', id, error: { code: -32000, message } });
 
-/** One MCP message from a turn to a machine: its answer, or null for a notification. */
-export async function machineRequest(token: string, machine: number, server: 'mcp' | 'ws', name: string, msg: Rpc, cacheDir: string): Promise<object | null> {
+/** One MCP message from a turn to a machine: its answer, or null for a notification. `lent` is the MCP server that was ticked when the turn started. */
+export async function machineRequest(token: string, machine: number, server: 'mcp' | 'ws', name: string, msg: Rpc, cacheDir: string, lent: string | null = null): Promise<object | null> {
   const env = callEnv();
   const api = env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
   const route = env.COORDINATOR_MACHINE_ROUTE === 'contraption-session' ? 'contraption-session' : 'session';
@@ -78,7 +82,7 @@ export async function machineRequest(token: string, machine: number, server: 'mc
     const r = await fetch(`${api}/api/machines/${machine}/${route}/${l.session}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: m }) });
     if (!r.ok) throw new Error(r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
   }
-  const cache = readCache(cacheDir, machine, server);
+  const cache = readCache(cacheDir, machine, cacheKey(server, lent));
   if (msg?.id === undefined) {
     // A notification reaches an open session only; the handshake is replayed when one opens. A lost one is dropped:
     // a throw here would end the pool, and every turn's calls with it.
@@ -108,14 +112,14 @@ export async function machineRequest(token: string, machine: number, server: 'mc
   const reply = await answer;
   link.pending.delete(msg.id);
   if (!reply.error) {
-    if (msg.method === 'initialize') writeCache(cacheDir, machine, server, { init: reply.result });
-    if (msg.method === 'tools/list' && Array.isArray(reply.result?.tools)) writeCache(cacheDir, machine, server, { tools: reply.result.tools });
+    if (msg.method === 'initialize') writeCache(cacheDir, machine, link.key, { init: reply.result });
+    if (msg.method === 'tools/list' && Array.isArray(reply.result?.tools)) writeCache(cacheDir, machine, link.key, { tools: reply.result.tools });
   }
   return reply;
 }
 
 /** Open the machine's session stream; a machine that is offline (503) gets about 20 s to come back. */
-async function open(api: string, route: string, machine: number, server: string, name: string, headers: Record<string, string>, replay: Rpc[], cacheDir: string, closed: () => void): Promise<Link> {
+async function open(api: string, route: string, machine: number, server: 'mcp' | 'ws', name: string, headers: Record<string, string>, replay: Rpc[], cacheDir: string, closed: () => void): Promise<Link> {
   const stream = new AbortController();
   const started = Date.now();
   let res: Response;
@@ -137,7 +141,7 @@ async function open(api: string, route: string, machine: number, server: string,
   let markReady!: (l: Link) => void;
   let fail!: (e: Error) => void;
   const ready = new Promise<Link>((ok, no) => ((markReady = ok), (fail = no)));
-  const link: Link = { session: '', stream, pending: new Map(), queue: Promise.resolve() };
+  const link: Link = { session: '', key: server, stream, pending: new Map(), queue: Promise.resolve() };
   const end = (why: string) => {
     closed();
     for (const [id, done] of link.pending) done(error(id, `${name}: ${why}`));
@@ -163,14 +167,15 @@ async function open(api: string, route: string, machine: number, server: string,
           if (m.closed) return end('its MCP server exited');
           if (m.session) {
             link.session = m.session;
+            link.key = cacheKey(server, m.lent);
             // Replay the turn's handshake if the machine hasn't seen it, then refresh the remembered tool list.
             for (const h of replay) await post(h.id === undefined ? h : { ...h, id: REPLAY_ID });
             if (replay.length) await post({ jsonrpc: '2.0', id: REFRESH_ID, method: 'tools/list' });
             markReady(link);
           } else if (m.message?.id === REFRESH_ID) {
-            if (Array.isArray(m.message.result?.tools)) writeCache(cacheDir, machine, server, { tools: m.message.result.tools });
+            if (Array.isArray(m.message.result?.tools)) writeCache(cacheDir, machine, link.key, { tools: m.message.result.tools });
           } else if (m.message?.id === REPLAY_ID) {
-            if (m.message.result) writeCache(cacheDir, machine, server, { init: m.message.result });
+            if (m.message.result) writeCache(cacheDir, machine, link.key, { init: m.message.result });
           } else if (m.message?.id !== undefined && !m.message.method) {
             const done = link.pending.get(m.message.id);
             if (done) done(m.message);

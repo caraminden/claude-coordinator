@@ -9,6 +9,10 @@ import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, SECRET, stopTurns } from './helpers.ts';
+import { json } from './typed.ts';
+
+/** The parts of the minions API's answers these tests read. */
+type MinionsBody = { card_since: number; line: string; status: string; step: unknown; card_waiting: boolean; error: string; minions: { number: number }[] };
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-minions-'));
 const data = join(root, 'data');
@@ -68,7 +72,7 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const get = async (path: string, headers: Record<string, string> = {}, key = KEY) => {
     const res = await fetch(`${srv.base}/api/contraptions/${path}`, { headers: { Authorization: `Bearer ${key}`, ...headers } });
-    return { status: res.status, etag: res.headers.get('etag'), body: res.status === 304 ? null : await res.json() };
+    return { status: res.status, etag: res.headers.get('etag'), body: res.status === 304 ? null : await json<MinionsBody>(res) };
   };
 
   // Home: a member, an admin (who counts as one) and a non-member; Dana hasn't the app enabled.
@@ -83,7 +87,7 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   // One minion: the list's state and step, never last_activity's chat text.
   let r = await get(`minions/1?person=${Rachel.id}`);
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  const card = r.body.card_since;
+  const card = r.body!.card_since;
   assert.equal(typeof card, 'number');
   assert.deepEqual(r.body, {
     number: 1,
@@ -108,26 +112,26 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   r = await get(`minions/1?person=${Rachel.id}`, { 'If-None-Match': tag });
   assert.equal(r.status, 200);
   assert.notEqual(r.etag, tag);
-  assert.equal(r.body.line, 'Showing the rune cost… · 1 of 2 done');
-  assert.equal(r.body.status, 'running');
+  assert.equal(r.body!.line, 'Showing the rune cost… · 1 of 2 done');
+  assert.equal(r.body!.status, 'running');
 
   // A dismissed minion still reads, with no card and no steps.
   r = await get(`minions/2?person=${Cara.id}`);
   assert.equal(r.status, 200);
-  assert.equal(r.body.status, 'closed');
-  assert.equal(r.body.step, null);
-  assert.equal(r.body.card_waiting, false);
+  assert.equal(r.body!.status, 'closed');
+  assert.equal(r.body!.step, null);
+  assert.equal(r.body!.card_waiting, false);
 
   // Errors: a non-member 403 before anything about the minion; not enabled 403; another scheme's number or the Taskmaster 404.
   r = await get(`minions/1?person=${Josh.id}`);
   assert.equal(r.status, 403);
-  assert.match(r.body.error, /isn't a Theory of Crafting member/);
+  assert.match(r.body!.error, /isn't a Theory of Crafting member/);
   assert.equal((await get(`minions/99?person=${Josh.id}`)).status, 403);
   assert.equal((await get(`minions/1?person=${Dana.id}`)).status, 403);
   for (const n of [3, 99]) {
     r = await get(`minions/${n}?person=${Rachel.id}`);
     assert.equal(r.status, 404, String(n));
-    assert.equal(r.body.error, `No minion #${n} in Theory of Crafting`);
+    assert.equal(r.body!.error, `No minion #${n} in Theory of Crafting`);
   }
   for (const bad of ['0', 'x', '1.5']) assert.equal((await get(`minions/${bad}?person=${Rachel.id}`)).status, 400, bad);
 
@@ -135,7 +139,7 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   r = await get(`minions?person=${Rachel.id}&n=2,1,3,1`);
   assert.equal(r.status, 200);
   assert.deepEqual(
-    r.body.minions.map((m: { number: number }) => m.number),
+    r.body!.minions.map((m) => m.number),
     [2, 1],
   );
   assert.equal((await get(`minions?person=${Rachel.id}&n=2,1,3,1`, { 'If-None-Match': r.etag! })).status, 304);

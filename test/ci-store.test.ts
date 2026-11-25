@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, test } from 'node:test';
@@ -11,6 +12,7 @@ import { AUDIENCE, CiStore, ISSUER, RULES, RunTokens, sweepPlan, uploadAsk } fro
 import { Store } from '../src/db.ts';
 import { publish } from '../src/apk-release.ts';
 import { bootServer, freePort, tempRoot, until } from './helpers.ts';
+import { fake, json, type Refused } from './typed.ts';
 
 // The CI store (#658, src/ci-store.ts): who may upload (GitHub's run token), what an upload leaves on disk and in
 // ci_files, what the rules delete and never delete, and how members read it back.
@@ -23,6 +25,12 @@ const other = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwks = [{ ...github.publicKey.export({ format: 'jwk' }), kid: 'k1' }];
 const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
 const SHA = 'a'.repeat(40);
+
+// The parts of the store's answers these tests read.
+type CiFile = { id: number; name: string; kind: string; url: string; path: string };
+type Pin = { target: string; workflow: string; run_id: number; by: string; files: CiFile[] };
+type Series = { name: string; unit: string; points: { sha: string }[]; steps: Step[] };
+type Step = { run_id: number; baseline: number; level: number };
 
 /** A run token as GitHub would sign it for a job in `repo`, with `over` laid over its claims. */
 function runToken(over: Record<string, unknown> = {}, o: { key?: KeyObject; head?: Record<string, unknown> } = {}): string {
@@ -47,7 +55,7 @@ function runToken(over: Record<string, unknown> = {}, o: { key?: KeyObject; head
 test('a run token is taken only when GitHub signed it for this store and it has not run out', async () => {
   const tokens = new RunTokens(async () => jwks);
   assert.deepEqual(await tokens.check(runToken()), { repository: 'caraminden/mandate', workflow: 'android.yml', runId: 4349, runAttempt: 1, sha: SHA, ref: 'refs/heads/main' });
-  const refused = async (token: string, why: RegExp) => assert.rejects(tokens.check(token), (err: any) => err.status === 401 && why.test(err.message), String(why));
+  const refused = async (token: string, why: RegExp) => assert.rejects(tokens.check(token), (err: Error & { status: number }) => err.status === 401 && why.test(err.message), String(why));
   await refused(runToken({}, { key: other.privateKey }), /signature doesn't match/);
   await refused(runToken({ aud: 'https://github.com/caraminden' }), /another audience/);
   await refused(runToken({ iss: 'https://evil.example' }), /not issued by GitHub/);
@@ -68,7 +76,7 @@ test("a run token checked while GitHub's keys can't be read is a retryable 503 t
   // #846: a fresh process whose first read of the keys timed out refused a real token as "a key GitHub doesn't list".
   let t = Date.now(),
     reads = 0;
-  const answers: (() => Promise<any>)[] = [
+  const answers: (() => Promise<typeof jwks>)[] = [
     async () => {
       throw new Error('The operation was aborted due to timeout');
     },
@@ -79,7 +87,7 @@ test("a run token checked while GitHub's keys can't be read is a retryable 503 t
     () => (reads++, answers.shift()!()),
     () => t,
   );
-  const unread = (why: RegExp) => assert.rejects(tokens.check(runToken()), (err: any) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message) && why.test(err.message) && !/Not a GitHub run token/.test(err.message));
+  const unread = (why: RegExp) => assert.rejects(tokens.check(runToken()), (err: Error & { status: number }) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message) && why.test(err.message) && !/Not a GitHub run token/.test(err.message));
   await unread(/aborted due to timeout/);
   t += 10_000;
   // An empty list is no better than none.
@@ -155,8 +163,8 @@ test('the caps take the oldest unprotected first, reports then builds then relea
 });
 
 /** A request as the upload handler reads it. */
-function request(body: Buffer | string, token: string | null, headers: Record<string, string> = {}): any {
-  const req: any = Readable.from([Buffer.from(body)]);
+function request(body: Buffer | string, token: string | null, headers: Record<string, string> = {}): IncomingMessage {
+  const req = Readable.from([Buffer.from(body)]) as IncomingMessage;
   req.headers = { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-length': String(Buffer.byteLength(body)), ...headers };
   return req;
 }
@@ -200,7 +208,7 @@ test('an upload lands under its scheme and run with a row, replaces itself, and 
   assert.equal(readFileSync(ci.path(f), 'utf8'), 'signed apk, rebuilt');
   assert.equal(store.ciFiles(mandate.id).length, 1);
 
-  const refused = async (req: any, status: number, why: RegExp) => assert.rejects(ci.upload(req, { name: 'x.zip', kind: 'build', target: '' }), (err: any) => err.status === status && why.test(err.message), String(why));
+  const refused = async (req: IncomingMessage, status: number, why: RegExp) => assert.rejects(ci.upload(req, { name: 'x.zip', kind: 'build', target: '' }), (err: Error & { status: number }) => err.status === status && why.test(err.message), String(why));
   await refused(request('x', null), 401, /run token/);
   await refused(request('x', runToken({ repository: 'someone/else' })), 403, /No scheme has the repo someone\/else/);
   await refused(request('x'.repeat(101), runToken()), 413, /limited to/);
@@ -276,7 +284,7 @@ test("uploads streaming in together are bounded, and ones that arrive while GitH
   const tokens = new RunTokens(async () => (reads++, await new Promise((r) => setTimeout(r, 30)), jwks));
   const ci = new CiStore(store, join(root, 'busy'), tokens, { ...RULES, fileBytes: 100 });
   const slow = (run: string) => {
-    const req: any = new Readable({ read() {} });
+    const req = new Readable({ read() {} }) as IncomingMessage;
     req.headers = { authorization: `Bearer ${runToken({ run_id: run })}`, 'content-length': '100' };
     return { req, done: ci.upload(req, { name: 'a.zip', kind: 'build', target: '' }) };
   };
@@ -285,7 +293,7 @@ test("uploads streaming in together are bounded, and ones that arrive while GitH
     two = slow('2');
   await new Promise((r) => setTimeout(r, 80));
   assert.equal(reads, 1);
-  await assert.rejects(ci.upload(request('x', runToken({ run_id: '3' })), { name: 'a.zip', kind: 'build', target: '' }), (err: any) => err.status === 503);
+  await assert.rejects(ci.upload(request('x', runToken({ run_id: '3' })), { name: 'a.zip', kind: 'build', target: '' }), (err: Error & { status: number }) => err.status === 503);
   for (const { req } of [one, two]) req.push('y'.repeat(100)), req.push(null);
   assert.deepEqual(
     (await Promise.all([one.done, two.done])).map((f) => f.size),
@@ -300,12 +308,12 @@ test("a job reading the store is told who it is by its run token alone: 401 with
   const store = new Store(join(root, 'reader.db'));
   const mandate = store.createProject('Mandate', 'https://github.com/caraminden/mandate', null);
   const ci = new CiStore(store, join(root, 'reader'), new RunTokens(async () => jwks));
-  const job = (token: string | null) => ({ headers: token ? { authorization: `Bearer ${token}` } : {} }) as any;
+  const job = (token: string | null) => fake<IncomingMessage>({ headers: token ? { authorization: `Bearer ${token}` } : {} });
   const { project, claims } = await ci.caller(job(runToken()));
   assert.deepEqual([project.id, claims.sha, claims.workflow], [mandate.id, SHA, 'android.yml']);
-  await assert.rejects(ci.caller(job(null)), (err: any) => err.status === 401);
-  await assert.rejects(ci.caller(job(runToken({}, { key: other.privateKey }))), (err: any) => err.status === 401);
-  await assert.rejects(ci.caller(job(runToken({ repository: 'someone/else' }))), (err: any) => err.status === 403 && /No scheme has the repo/.test(err.message));
+  await assert.rejects(ci.caller(job(null)), (err: Error & { status: number }) => err.status === 401);
+  await assert.rejects(ci.caller(job(runToken({}, { key: other.privateKey }))), (err: Error & { status: number }) => err.status === 401);
+  await assert.rejects(ci.caller(job(runToken({ repository: 'someone/else' }))), (err: Error & { status: number }) => err.status === 403 && /No scheme has the repo/.test(err.message));
   const unread = new CiStore(
     store,
     join(root, 'reader'),
@@ -313,7 +321,7 @@ test("a job reading the store is told who it is by its run token alone: 401 with
       throw new Error('The operation was aborted due to timeout');
     }),
   );
-  await assert.rejects(unread.caller(job(runToken())), (err: any) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message));
+  await assert.rejects(unread.caller(job(runToken())), (err: Error & { status: number }) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message));
 });
 
 test('publish takes the APK from the store when the run put one there, and never asks GitHub', async () => {
@@ -332,7 +340,7 @@ test('publish takes the APK from the store when the run put one there, and never
 test("over HTTP: a job uploads at the machines address only, and the scheme's members list, find the latest and download", async () => {
   const keys = createServer((_req, res) => res.end(JSON.stringify({ keys: jwks }))).listen(0, '127.0.0.1');
   await new Promise((r) => keys.once('listening', r));
-  const srv = await bootServer({ env: { CITADEL_CI_STORE_KEYS: `http://127.0.0.1:${(keys.address() as any).port}/` } });
+  const srv = await bootServer({ env: { CITADEL_CI_STORE_KEYS: `http://127.0.0.1:${(keys.address() as AddressInfo).port}/` } });
   try {
     const made = await srv.call('/api/projects', { name: 'Mandate', source: 'none' });
     assert.equal(made.status, 201, JSON.stringify(made.data));
@@ -347,16 +355,16 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     assert.equal((await put('mandate-7.apk', 'kind=nope', 'apk')).status, 400);
     const up = await put('mandate-7.apk', 'kind=release', 'apk seven');
     assert.equal(up.status, 201, await up.clone().text());
-    const { file } = await up.json();
+    const { file } = await json<{ file: CiFile }>(up);
     assert.equal(file.url, `/api/projects/${id}/ci-files/${file.id}/mandate-7.apk`);
     await put('reports.tar.gz', 'kind=report', 'reports', runToken({ run_id: '4400' }));
     await put('mandate-8.apk', 'kind=release', 'apk eight', runToken({ run_id: '4400' }));
 
     const list = await srv.call(`/api/projects/${id}/ci-files`);
-    assert.deepEqual(list.data.files.map((f: any) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'reports.tar.gz']);
+    assert.deepEqual(list.data.files.map((f: CiFile) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'reports.tar.gz']);
     assert.equal(list.data.usage.scheme, 9 + 7 + 9);
     assert.deepEqual(
-      (await srv.call(`/api/projects/${id}/ci-files?run=4349`)).data.files.map((f: any) => f.name),
+      (await srv.call(`/api/projects/${id}/ci-files?run=4349`)).data.files.map((f: CiFile) => f.name),
       ['mandate-7.apk'],
     );
     const latest = await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release`, { headers: { Cookie: srv.cookie } });
@@ -381,12 +389,12 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
       new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
         const p = tmp.spawn('bash', [SCRIPT, ...args], {
           cwd: work,
-          env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
+          env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as AddressInfo).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
         });
         let stdout = '',
           stderr = '';
-        p.stdout.on('data', (d) => (stdout += d));
-        p.stderr.on('data', (d) => (stderr += d));
+        p.stdout!.on('data', (d) => (stdout += d));
+        p.stderr!.on('data', (d) => (stderr += d));
         p.on('close', (status) => done({ status, stdout, stderr }));
       });
     const sent = await job(['--kind', 'release', '--name', 'mandate-9.apk', 'app.apk']);
@@ -396,9 +404,9 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     const folder = await job(['--kind', 'report', 'reports']);
     assert.equal(folder.status, 0, folder.stdout + folder.stderr);
     const fromScript = (await srv.call(`/api/projects/${id}/ci-files?run=4500`)).data.files;
-    assert.deepEqual(fromScript.map((f: any) => `${f.kind} ${f.name}`).sort(), ['release mandate-9.apk', 'report reports.tar.gz']);
-    assert.equal(readFileSync(fromScript.find((f: any) => f.kind === 'release').path, 'utf8'), 'apk from the script');
-    assert.match(spawnSync('tar', ['-tzf', fromScript.find((f: any) => f.kind === 'report').path], { encoding: 'utf8' }).stdout, /^reports\/sub\/index\.html$/m);
+    assert.deepEqual(fromScript.map((f: CiFile) => `${f.kind} ${f.name}`).sort(), ['release mandate-9.apk', 'report reports.tar.gz']);
+    assert.equal(readFileSync(fromScript.find((f: CiFile) => f.kind === 'release').path, 'utf8'), 'apk from the script');
+    assert.match(spawnSync('tar', ['-tzf', fromScript.find((f: CiFile) => f.kind === 'report').path], { encoding: 'utf8' }).stdout, /^reports\/sub\/index\.html$/m);
     assert.deepEqual(readdirSync(work).sort(), ['app.apk', 'reports'], "nothing left in the runner's temp folder");
     // A store that can't be reached, or no run token: a report warns and passes, a build fails the step.
     const down = { CITADEL_STORE_URL: 'http://127.0.0.1:1', CI_UPLOAD_WAIT: '0' };
@@ -408,7 +416,7 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     assert.match((await job(['--kind', 'build', 'app.apk'], { ACTIONS_ID_TOKEN_REQUEST_URL: '' })).stdout, /^::error::ci-upload: no run token: the job needs 'permissions: id-token: write'/m);
     // A name the store won't take is refused before anything is sent; the store's own refusal is passed on.
     assert.match((await job(['--kind', 'build', '--name', 'bad name.apk', 'app.apk'])).stdout, /^::error::ci-upload: the name 'bad name\.apk' has more than/m);
-    assert.match((await job(['--kind', 'build', 'app.apk'], { ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(keys.address() as any).port}/?x=1` })).stdout, /^::error::ci-upload: GitHub didn't hand out a run token/m);
+    assert.match((await job(['--kind', 'build', 'app.apk'], { ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(keys.address() as AddressInfo).port}/?x=1` })).stdout, /^::error::ci-upload: GitHub didn't hand out a run token/m);
     const bad = await fetch(`${srv.base}/api/ci-store/%zz?kind=build`, { method: 'PUT', headers: { Authorization: `Bearer ${runToken()}` }, body: 'x' });
     assert.equal(bad.status, 400);
     const hosted = await job(['--kind', 'release', 'app.apk'], { RUNNER_ENVIRONMENT: 'github-hosted' });
@@ -420,9 +428,9 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     const NUMBERS = join(import.meta.dirname, '..', 'kit', 'skills', 'ci-store', 'ci-numbers.sh');
     const numbers = (args: string[]) =>
       new Promise<{ status: number | null; stdout: string }>((done) => {
-        const p = tmp.spawn('bash', [NUMBERS, ...args], { cwd: work, env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret' } });
+        const p = tmp.spawn('bash', [NUMBERS, ...args], { cwd: work, env: { PATH: process.env.PATH!, RUNNER_TEMP: work, CITADEL_STORE_URL: srv.base, ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(githubSays.address() as AddressInfo).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret' } });
         let stdout = '';
-        p.stdout.on('data', (d) => (stdout += d));
+        p.stdout!.on('data', (d) => (stdout += d));
         p.on('close', (status) => done({ status, stdout }));
       });
     const runs = [16.0, 16.1, 15.9, 16.0, 16.2, 15.8, 16.0, 16.1, 15.9, 16.0, 17.6, 17.7, 17.6];
@@ -437,15 +445,15 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     assert.match((await numbers(['--file', 'bench.txt'])).stdout, /sent 2 numbers/);
     const charted = (await srv.call(`/api/projects/${id}/ci-numbers`)).data;
     assert.deepEqual(
-      charted.series.map((s: any) => `${s.name} ${s.points.length} ${s.unit}`),
+      charted.series.map((s: Series) => `${s.name} ${s.points.length} ${s.unit}`),
       ['binary 13 MB', 'frame-p95 13 ms', 'memory 1 MB', 'startup 1 ms'],
     );
-    const frame = charted.series.find((s: any) => s.name === 'frame-p95');
+    const frame = charted.series.find((s: Series) => s.name === 'frame-p95');
     assert.deepEqual(
-      frame.steps.map((s: any) => `${s.run_id} ${s.baseline} ${s.level}`),
+      frame!.steps.map((s: Step) => `${s.run_id} ${s.baseline} ${s.level}`),
       ['5010 16 17.6'],
     );
-    assert.equal(frame.points[10].sha, SHA);
+    assert.equal(frame!.points[10].sha, SHA);
     // Odd input and a missing token warn and never fail the job; the route refuses what the script would never send.
     const odd = await numbers(['frame p95=12']);
     assert.equal(odd.status, 0);
@@ -472,13 +480,13 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     const otherApp = await register('other-app', elsewhere.id ?? elsewhere.project?.id);
     const own = await fetch(`${srv.base}/api/projects/${id}/ci-files?kind=release`, { headers: mandateApp });
     assert.equal(own.status, 200);
-    assert.deepEqual((await own.json()).files.map((f: any) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'mandate-9.apk']);
+    assert.deepEqual((await json<{ files: CiFile[] }>(own)).files.map((f: CiFile) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'mandate-9.apk']);
     const newest = await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release&json=1`, { headers: mandateApp });
-    assert.equal((await newest.json()).file.name, 'mandate-9.apk');
+    assert.equal((await json<{ file: CiFile }>(newest)).file.name, 'mandate-9.apk');
     // The redirect's stable URL takes the key too, so a plain fetch follows it to the bytes.
     assert.equal(await (await fetch(`${srv.base}/api/projects/${id}/ci-files/latest?workflow=android.yml&kind=release`, { headers: mandateApp })).text(), 'apk from the script');
     // The builds a roll back holds its CI packages at (ADR 0012): its app's updater reads them with its key.
-    assert.deepEqual((await (await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp })).json()).pins, []);
+    assert.deepEqual((await json<{ pins: Pin[] }>(await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp }))).pins, []);
     const pinDb = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
     pinDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(
       'last-green:pins',
@@ -489,9 +497,9 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
       }),
     );
     pinDb.close();
-    const pins = (await (await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp })).json()).pins;
+    const pins = (await json<{ pins: Pin[] }>(await fetch(`${srv.base}/api/projects/${id}/ci-files/pins`, { headers: mandateApp }))).pins;
     assert.deepEqual(
-      pins.map((p: any) => [p.target, p.workflow, p.run_id, p.by, p.files.map((f: any) => f.name)]),
+      pins.map((p: Pin) => [p.target, p.workflow, p.run_id, p.by, p.files.map((f: CiFile) => f.name)]),
       [['ci:android:build', 'android.yml', 4500, 'Cara', ['mandate-9.apk']]],
       "only its own scheme's held builds, with their files and no reports",
     );
@@ -499,7 +507,7 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     for (const path of ['ci-files', 'ci-files/latest?kind=release', `ci-files/${file.id}/mandate-7.apk`, 'ci-files/pins']) {
       const theirs = await fetch(`${srv.base}/api/projects/${id}/${path}`, { headers: otherApp });
       assert.equal(theirs.status, 403, `another scheme's contraption: ${path}`);
-      assert.match((await theirs.json()).error, /only read its own home scheme/);
+      assert.match((await json<Refused>(theirs)).error, /only read its own home scheme/);
       assert.equal((await fetch(`${srv.base}/api/projects/${id}/${path}`)).status, 401, `no key: ${path}`);
       assert.equal((await fetch(`${srv.base}/api/projects/${id}/${path}`, { headers: { Authorization: `Bearer ck_${'x'.repeat(43)}` } })).status, 401, `a key no contraption has: ${path}`);
     }
@@ -515,39 +523,39 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     repoDb.close();
     const LATER = 'b'.repeat(40);
     const laterUp = await put('later.zip', 'kind=build&target=windows', 'a later commit', runToken({ run_id: '4600', sha: LATER, workflow_ref: 'caraminden/mandate/.github/workflows/windows.yml@refs/heads/main' }));
-    const later = (await laterUp.json()).file;
-    const peekFile = (await (await put('peek.zip', 'kind=build', 'peek build', runToken({ repository: 'caraminden/peek-auras', run_id: '9000' }))).json()).file;
+    const later = (await json<{ file: CiFile }>(laterUp)).file;
+    const peekFile = (await json<{ file: CiFile }>(await put('peek.zip', 'kind=build', 'peek build', runToken({ repository: 'caraminden/peek-auras', run_id: '9000' })))).file;
     const desktopJob = runToken({ run_id: '4700', workflow_ref: 'caraminden/mandate/.github/workflows/desktop.yml@refs/heads/main' });
     const asJob = (path: string, token: string | null = desktopJob) => fetch(`${srv.base}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     const releases = await asJob(`/api/ci-store?commit=${SHA}&workflow=android.yml&kind=release`);
     assert.equal(releases.status, 200, await releases.clone().text());
-    const ownFiles = (await releases.json()).files;
+    const ownFiles = (await json<{ files: CiFile[] }>(releases)).files;
     assert.deepEqual(
-      ownFiles.map((f: any) => f.name),
+      ownFiles.map((f: CiFile) => f.name),
       ['mandate-9.apk', 'mandate-8.apk', 'mandate-7.apk'],
       "newest first, another workflow's files",
     );
-    const seven = ownFiles.find((f: any) => f.name === 'mandate-7.apk');
+    const seven = ownFiles.find((f: CiFile) => f.name === 'mandate-7.apk')!;
     assert.equal(seven.url, `/api/ci-store/${seven.id}/mandate-7.apk`, 'a URL the job can fetch with its token');
     const got = await asJob(seven.url);
     assert.equal(got.status, 200);
     assert.equal(await got.text(), 'apk seven');
     // No commit asked: the token's own. Never another commit's file, nor another scheme's.
-    assert.deepEqual((await (await asJob('/api/ci-store')).json()).files.map((f: any) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'mandate-9.apk', 'reports.tar.gz', 'reports.tar.gz']);
+    assert.deepEqual((await json<{ files: CiFile[] }>(await asJob('/api/ci-store'))).files.map((f: CiFile) => f.name).sort(), ['mandate-7.apk', 'mandate-8.apk', 'mandate-9.apk', 'reports.tar.gz', 'reports.tar.gz']);
     assert.deepEqual(
-      (await (await asJob(`/api/ci-store?commit=${SHA.slice(0, 7)}&name=mandate-8.apk`)).json()).files.map((f: any) => f.name),
+      (await json<{ files: CiFile[] }>(await asJob(`/api/ci-store?commit=${SHA.slice(0, 7)}&name=mandate-8.apk`))).files.map((f: CiFile) => f.name),
       ['mandate-8.apk'],
       'a short SHA of its own commit',
     );
     const otherCommit = await asJob(`/api/ci-store?commit=${LATER}`);
     assert.equal(otherCommit.status, 403, 'another commit, by query');
-    assert.match((await otherCommit.json()).error, /its own commit/);
+    assert.match((await json<Refused>(otherCommit)).error, /its own commit/);
     assert.equal((await asJob(`/api/ci-store/${later.id}/later.zip`)).status, 403, 'another commit, by file');
     assert.equal(await (await asJob(`/api/ci-store/${later.id}/later.zip`, runToken({ sha: LATER }))).text(), 'a later commit', "that commit's own job reads it");
     assert.equal((await asJob(`/api/ci-store/${peekFile.id}/peek.zip`)).status, 403, "another scheme's file");
     assert.equal((await asJob(seven.url, runToken({ repository: 'caraminden/peek-auras' }))).status, 403, "another scheme's job");
     assert.deepEqual(
-      (await (await asJob('/api/ci-store', runToken({ repository: 'caraminden/peek-auras' }))).json()).files.map((f: any) => f.name),
+      (await json<{ files: CiFile[] }>(await asJob('/api/ci-store', runToken({ repository: 'caraminden/peek-auras' })))).files.map((f: CiFile) => f.name),
       ['peek.zip'],
     );
     assert.equal((await asJob(`/api/ci-store/${seven.id}/other.apk`)).status, 404, "a name that isn't the file's");
@@ -572,12 +580,12 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
       new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
         const p = tmp.spawn('bash', [DOWNLOAD, ...args], {
           cwd: pullDir,
-          env: { PATH: process.env.PATH!, RUNNER_TEMP: pullDir, CITADEL_STORE_URL: srv.base, CI_DOWNLOAD_WAIT: '0', ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(tokens.address() as any).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
+          env: { PATH: process.env.PATH!, RUNNER_TEMP: pullDir, CITADEL_STORE_URL: srv.base, CI_DOWNLOAD_WAIT: '0', ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${(tokens.address() as AddressInfo).port}/token?api-version=2`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-secret', ...env },
         });
         let stdout = '',
           stderr = '';
-        p.stdout.on('data', (d) => (stdout += d));
-        p.stderr.on('data', (d) => (stderr += d));
+        p.stdout!.on('data', (d) => (stdout += d));
+        p.stderr!.on('data', (d) => (stderr += d));
         p.on('close', (status) => done({ status, stdout, stderr }));
       });
     try {
@@ -620,7 +628,7 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
         res.end('x bytes');
       }).listen(0, '127.0.0.1');
       await new Promise((r) => flaky.once('listening', r));
-      const retried = await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: `http://127.0.0.1:${(flaky.address() as any).port}` });
+      const retried = await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: `http://127.0.0.1:${(flaky.address() as AddressInfo).port}` });
       flaky.close();
       assert.equal(retried.status, 0, retried.stdout + retried.stderr);
       assert.equal(busy, 4);

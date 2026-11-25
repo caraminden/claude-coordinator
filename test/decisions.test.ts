@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/db.ts';
-import { loadDecisions } from '../src/decisions-load.ts';
+import { loadDecisions, tellStale } from '../src/decisions-load.ts';
 import assert from 'node:assert/strict';
 import { adrDir, assemble, githubHref, inScope, parseAdr, parseDecisions, replay, searchDecisions, type Doc } from '../src/decisions.ts';
 
@@ -209,4 +209,20 @@ test("loadDecisions reads a repo's rules but never through a symlink", async () 
   const { decisions } = await loadDecisions(app, store.getProject(project.id)!);
   const rules = decisions.filter((d) => d.places.some((p) => p.kind === 'repo')).map((d) => d.rule);
   assert.deepEqual(rules, ['Real rule']);
+});
+
+test('a first look whose git history could not be read records nothing, so the next load does not mail every old reversal (2ME8)', () => {
+  const settings = new Map<string, unknown>();
+  const mail: string[] = [];
+  const app = {
+    store: { getSetting: (k: string) => settings.get(k), setSetting: (k: string, v: unknown) => void settings.set(k, v), getOverlord: () => ({ id: 1 }) },
+    runner: { leaveMail: (_id: number, _from: string, text: string) => void mail.push(text) },
+  } as unknown as Parameters<typeof tellStale>[0];
+  const reversed = { id: 'a', rule: 'r', quote: '', who: 'Cara', date: '2026-11-01', reversed: { by: 'b', byText: 'later', stale: [{ label: 'CLAUDE.md', file: 'CLAUDE.md', line: 3 }] } } as unknown as Parameters<typeof tellStale>[2]['decisions'][number];
+  const list = { decisions: [reversed], counts: [] } as unknown as Parameters<typeof tellStale>[2];
+  tellStale(app, { id: 7 } as Parameters<typeof tellStale>[1], list, true);
+  assert.equal(settings.has('decisions_told:7'), false, 'a failed history read is not recorded as a first look');
+  tellStale(app, { id: 7 } as Parameters<typeof tellStale>[1], list);
+  assert.deepEqual(settings.get('decisions_told:7'), ['a'], 'the next look, with its history read, is the first');
+  assert.equal(mail.length, 0, 'and mails nothing');
 });

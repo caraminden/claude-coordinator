@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
+import { json, type Reply } from './typed.ts';
 
 // Hiding a scheme (#226): each person's own, out of their list's badges, never anyone else's.
 const repo = join(import.meta.dirname, '..');
@@ -13,13 +14,17 @@ after(() => tmp.teardown()); // its children exit and turns (detached, #271) end
 let base = '';
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
+/** The parts of the API's answers these tests read. */
+type Scheme = { id: number; inbox: number; fresh: number; hidden: boolean; running: boolean; working: number };
+type Inbox = { items: { key: string; card?: { id: number } | null }[] };
+
+async function call<T = unknown>(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<Reply<T>> {
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { Cookie: cookies[who], ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  return { status: res.status, data: await res.json() };
+  return { status: res.status, data: await json<T>(res) };
 }
 
 let joshId = 0;
@@ -46,16 +51,16 @@ before(async () => {
     body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
   });
   cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
-  const { data: made } = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
+  const { data: made } = await call<{ person: { id: number }; token: string }>('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
   joshId = made.person.id;
   const invite = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'josh-password-1' }) });
   cookies.Josh = invite.headers.get('set-cookie')!.split(';')[0];
 });
 
-const listed = async (who: string, id: number) => (await call(who, '/api/projects')).data.find((p: any) => p.id === id);
+const listed = async (who: string, id: number) => (await call<Scheme[]>(who, '/api/projects')).data.find((p) => p.id === id)!;
 
 test("a hide is the hider's own: it flags the scheme and zeroes its badge for them only, and Unhide restores it", async () => {
-  const { data: obsidian } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Obsidian' } });
+  const { data: obsidian } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'Obsidian' } });
   assert.equal((await call('Cara', `/api/projects/${obsidian.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   // A minion waiting on people's answer (one-tap replies; ready and try don't count since #1121) gives the scheme a Needs-you count.
   const store = new Store(join(root, 'data', 'coordinator.db'));
@@ -87,7 +92,7 @@ test("a hide is the hider's own: it flags the scheme and zeroes its badge for th
 });
 
 test("nobody hides a scheme they aren't in, and the body must say true or false", async () => {
-  const { data: carasOwn } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Private' } });
+  const { data: carasOwn } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'Private' } });
   // Not in it: answers as if it didn't exist, and nothing is stored for anyone.
   assert.equal((await call('Josh', `/api/projects/${carasOwn.id}/hidden`, { method: 'PUT', body: { hidden: true } })).status, 404);
   assert.equal((await listed('Cara', carasOwn.id)).hidden, false);
@@ -95,7 +100,7 @@ test("nobody hides a scheme they aren't in, and the body must say true or false"
 });
 
 test("running: a scheme with a turn running, its Taskmaster's included, says so for the spinner; a hidden one stays quiet (#248)", async () => {
-  const { data: busy } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Busy' } });
+  const { data: busy } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'Busy' } });
   assert.equal((await listed('Cara', busy.id)).running, false, 'nothing running yet');
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const t = store.createTicket({ project_id: busy.id, kind: 'ticket', title: 'Working one', permission_mode: 'default', created_by: 'Cara' });
@@ -121,7 +126,7 @@ test("running: a scheme with a turn running, its Taskmaster's included, says so 
 });
 
 test("fresh: something waits that wasn't waiting when you last opened the scheme, compared item by item, kept per person; a stranger stores nothing (#498, #539)", async () => {
-  const { data: quartz } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Quartz' } });
+  const { data: quartz } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'Quartz' } });
   assert.equal((await call('Cara', `/api/projects/${quartz.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   const store = new Store(join(root, 'data', 'coordinator.db'));
   // Each waits on an answer through one-tap replies (ready and try don't count since #1121); clearing them is it going away.
@@ -133,8 +138,8 @@ test("fresh: something waits that wasn't waiting when you last opened the scheme
   const pill = (who: string) => listed(who, quartz.id).then((p) => [p.inbox, p.fresh]);
   // What the scheme page sends: the keys of the items it shows waiting.
   const open = async (who: string) => {
-    const { data } = await call(who, `/api/projects/${quartz.id}/inbox`);
-    assert.equal((await call(who, `/api/projects/${quartz.id}/seen-items`, { method: 'PUT', body: { keys: data.items.map((i: any) => i.key) } })).status, 200);
+    const { data } = await call<Inbox>(who, `/api/projects/${quartz.id}/inbox`);
+    assert.equal((await call(who, `/api/projects/${quartz.id}/seen-items`, { method: 'PUT', body: { keys: data.items.map((i) => i.key) } })).status, 200);
   };
   const a = minion('A');
   const b = minion('B');
@@ -161,18 +166,18 @@ test("fresh: something waits that wasn't waiting when you last opened the scheme
   assert.deepEqual(await pill('Cara'), [1, true]);
   for (const keys of [null, 'state:1', [1], ['x'.repeat(201)]]) assert.equal((await call('Cara', `/api/projects/${quartz.id}/seen-items`, { method: 'PUT', body: { keys } })).status, 400, JSON.stringify(keys));
   store.db.close();
-  const { data: carasOwn } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Private two' } });
+  const { data: carasOwn } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'Private two' } });
   assert.equal((await call('Josh', `/api/projects/${carasOwn.id}/seen-items`, { method: 'PUT', body: { keys: [] } })).status, 404);
 });
 
 test("a card another scheme addressed to you isn't in this scheme's Needs you list (Josh, 2026-11-19: keep schemes isolated)", async () => {
-  const { data: here } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Here' } });
-  const { data: there } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'There' } });
+  const { data: here } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'Here' } });
+  const { data: there } = await call<Scheme>('Cara', '/api/projects', { method: 'POST', body: { name: 'There' } });
   for (const p of [here, there]) assert.equal((await call('Cara', `/api/projects/${p.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const tm = store.createTicket({ project_id: there.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
   store.addEvent(tm.id, 'question', { id: 'q-cross', questions: [], to: 'Josh' });
-  const ids = async (id: number) => (await call('Josh', `/api/projects/${id}/inbox`)).data.items.map((i: any) => i.card?.id);
+  const ids = async (id: number) => (await call<Inbox>('Josh', `/api/projects/${id}/inbox`)).data.items.map((i) => i.card?.id);
   assert.deepEqual(await ids(there.id), ['q-cross'], 'its own scheme still lists it');
   assert.deepEqual(await ids(here.id), [], 'another scheme does not');
   store.db.close();

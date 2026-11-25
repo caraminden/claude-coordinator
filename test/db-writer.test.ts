@@ -536,6 +536,7 @@ const STAYS_ON_THREAD: Record<string, string> = {
       'minionIndex.deleteTicket',
       'memoryProposals.create',
       'memoryProposals.decide',
+      'memoryProposals.keepFirst',
       'memoryProposals.restored',
       'memoryProposals.prune',
       'ideas.edit',

@@ -3,7 +3,8 @@
 // test/typecheck-baseline.json fails the ship; lower counts pass, and `node tools/typecheck.ts --update` records them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, tscErrors, upMessage } from '../tools/typecheck.ts';
@@ -94,4 +95,93 @@ test('tsc output with follow-on lines folds them into the error before', () => {
     ],
   );
   assert.match(errors[0]!.text, /Property x is missing/);
+});
+
+test('the word any in a comment or quoted text inside a type does not count; a real any beside it does (HK2)', () => {
+  assert.equal(escapes("interface A {\n  x: string /** A link, if any. */;\n  // any\n  y: 1; // it's any\n}\n"), 0);
+  assert.equal(escapes("type T = \"any\" | 'any' | `any ${string} any`;\nlet u: Exclude<T, 'any'>;\n"), 0);
+  assert.equal(escapes('interface A {\n  // it\'s\n  x: any; /* any */ y: any[]; z: "//" | any;\n}\n'), 3);
+  assert.equal(escapes('type T = `any${any}any${Foo<{ a: `}${any}` }>}any` | any;\n'), 3);
+  assert.equal(escapes('const r = /[`\'"]/;\nlet a: any = 1;\nconst s = /`/;\nlet b = a as any;\n'), 2);
+  assert.equal(escapes('const r = /\\/*/;\nlet a: any = "*/";\n'), 1);
+  assert.equal(escapes('export type U = "any" | any;\nexport const v: "https://any" | any;\n', 'x.d.ts'), 2);
+  assert.equal(escapes('// a comment ends here\u2028export type T = any;\n', 'x.d.ts'), 1, 'U+2028 ends a line too');
+});
+
+/** A scratch repo with its own copy of the check, for what only a run of it shows. */
+function scratch(files: Record<string, string>): { dir: string; check: (...args: string[]) => { code: number | null; out: string }; done: () => void } {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'typecheck-')));
+  mkdirSync(join(dir, 'tools'));
+  copyFileSync(join(ROOT, 'kit', 'skills', 'scheme-setup', 'templates', 'typecheck.ts'), join(dir, 'tools', 'typecheck.ts'));
+  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
+  writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, include: ['*.ts'] }));
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['add', ':(glob)*.ts'], { cwd: dir });
+  const check = (...args: string[]) => {
+    const r = spawnSync(process.execPath, [join(dir, 'tools', 'typecheck.ts'), ...args], { cwd: dir, encoding: 'utf8' });
+    return { code: r.status, out: r.stdout + r.stderr };
+  };
+  return { dir, check, done: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('a syntax error that makes tsc skip every type is refused, not read as errors fixed (HK10)', () => {
+  const { dir, check, done } = scratch({ 'bad.ts': 'export const n: number = "one";\n', 'two.ts': 'export const a: number = "1";\nexport const b: number = "2";\n' });
+  try {
+    assert.equal(check('--init').code, 0);
+    const baseline = readFileSync(join(dir, 'typecheck-baseline.json'), 'utf8');
+    // One syntax error where two errors were allowed: every count is down, so only the skipped pass gives it away.
+    writeFileSync(join(dir, 'two.ts'), 'export const a = ;\n');
+    for (const args of [[], ['--update'], ['--update', '--moved']]) {
+      const { code, out } = check(...args);
+      assert.equal(code, 1, `typecheck ${args.join(' ')}: ${out}`);
+      assert.match(out, /before it checked any types[\s\S]*two\.ts\(1,18\) TS1109/);
+    }
+    assert.equal(readFileSync(join(dir, 'typecheck-baseline.json'), 'utf8'), baseline);
+    // A TS1xxx error the checker itself reports leaves the types checked: it counts like any other.
+    writeFileSync(join(dir, 'two.ts'), 'export abstract abstract class Q {}\n');
+    assert.match(check().out, /2 errors/);
+    // An error in the config skips the types as well.
+    writeFileSync(join(dir, 'two.ts'), 'export {};\n');
+    writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: ['nope'] }, include: ['*.ts'] }));
+    assert.match(check('--update', '--moved').out, /before it checked any types[\s\S]*TS2688/);
+    // So does a config that matches no files, though tsc then prints a check time of 0.
+    for (const [config, code] of [
+      [{ include: ['nothing/*.ts'] }, /TS18003/],
+      [{ files: [] }, /TS18002/],
+    ] as const) {
+      writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, ...config }));
+      const { code: exit, out } = check('--update', '--moved');
+      assert.equal(exit, 1, out);
+      assert.match(out, code);
+    }
+    assert.equal(readFileSync(join(dir, 'typecheck-baseline.json'), 'utf8'), baseline);
+  } finally {
+    done();
+  }
+});
+
+test('a file can be named by its absolute path, and one the check does not cover says so (HK11)', () => {
+  const { dir, check, done } = scratch({ 'bad.ts': 'export const n: number = "one";\n' });
+  try {
+    for (const path of ['bad.ts', join(dir, 'bad.ts')]) assert.match(check(path).out, /^bad\.ts: errors 1 [\s\S]*TS2322/);
+    const typo = check('bda.ts');
+    assert.match(typo.out, /bda\.ts: not a file this check covers/);
+    assert.equal(typo.code, 1);
+    assert.match(check('tools/typecheck.ts').out, /not a file this check covers/);
+    execFileSync('git', ['add', 'tools'], { cwd: dir });
+    assert.match(check('tools/typecheck.ts').out, /its type errors are not checked/);
+    // A .js file that checkJs has tsc check is covered: the gate names this command for it.
+    writeFileSync(join(dir, 'j.js'), '/** @type {number} */\nexport const j = "x";\n');
+    writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [], allowJs: true, checkJs: true }, include: ['*.ts', '*.js'] }));
+    assert.match(check('j.js').out, /errors 1 [\s\S]*TS2322/);
+    writeFileSync(join(dir, 'j.js'), 'export const j = 1;\n');
+    const clean = check('j.js');
+    assert.match(clean.out, /errors 0 [\s\S]*only with checkJs/);
+    assert.equal(clean.code, 0);
+    writeFileSync(join(dir, 'new.ts'), 'export const x: number = "a";\n');
+    assert.match(check('new.ts').out, /errors 1 [\s\S]*its escapes are not counted/);
+  } finally {
+    done();
+  }
 });

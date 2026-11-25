@@ -47,7 +47,7 @@ after(async () => {
 });
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`; `citadel` is the env the runner sets for Citadel's Taskmaster. */
-async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator'): Promise<any> {
+async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator') {
   return mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), ticket, role, { COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined, COORDINATOR_HOME_CONTRAPTIONS: home }), method, params, tmp.track);
 }
 const tool = async (t: { id: number; project_id: number }, name: string, args: object = {}, citadel?: boolean) => {
@@ -67,7 +67,7 @@ const MANDATE = { title: 'Mandate', port: 7341, icon: '/icons/icon.svg', default
 const ALL = ['list_contraptions', 'register_contraption', 'update_contraption', 'set_contraption_person', 'rotate_contraption_keys', 'contraption_service'];
 
 test("Citadel's Taskmaster registers and enables a contraption just as Settings → Contraptions does", async () => {
-  const names = (await mcp(CitadelTM, 'tools/list', {})).tools.map((x: any) => x.name);
+  const names = (await mcp(CitadelTM, 'tools/list', {})).tools.map((x) => x.name);
   for (const n of ALL) assert.ok(names.includes(n), n);
 
   const reg = await tool(CitadelTM, 'register_contraption', { name: 'mandate', ...MANDATE });
@@ -163,7 +163,7 @@ test("a turn someone who isn't an admin asked for is refused, and changes nothin
 });
 
 test("another scheme's Taskmaster isn't offered the tools, and the API refuses it and a minion even if they get them", async () => {
-  const names = (await mcp(DelveTM, 'tools/list', {})).tools.map((x: any) => x.name);
+  const names = (await mcp(DelveTM, 'tools/list', {})).tools.map((x) => x.name);
   for (const n of ALL) assert.ok(!names.includes(n), n);
   assert.match((await tool(DelveTM, 'list_contraptions')).text, /Unknown tool/);
   for (const t of [DelveTM, Minion]) {
@@ -260,7 +260,7 @@ test('restart and stop carry a risk (#1682): shown first, a typed name for "may 
   );
   assert.equal(runs[0].by, 'Taskmaster for cara');
   const viewed = await srv.call('/api/contraptions');
-  assert.equal(viewed.data.find((c: any) => c.name === 'twin').runs.length, 3, 'with the unassessed stop from the test before');
+  assert.equal(viewed.data.find((c: { name: string }) => c.name === 'twin').runs.length, 3, 'with the unassessed stop from the test before');
   assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'start' })).status, 200, 'start has no risk gate');
   assert.equal(store.contraptionRuns(twin().id).length, 3);
 });
@@ -289,14 +289,14 @@ test("deploy_contraption: its home scheme's Taskmaster and minions, and Citadel'
   const DelveMinion = thread(Delve.id, 'ticket');
   turnFor(DelveMinion, olive.id);
   store.updateContraption('twin', { home_scheme: Delve.id, repo: null });
-  const offered = async (t: any, citadel: boolean, home?: string) => (await mcp(t, 'tools/list', {}, citadel, home, t.kind === 'ticket' ? 'thread' : 'coordinator')).tools.some((x: any) => x.name === 'deploy_contraption');
+  const offered = async (t: { id: number; project_id: number; kind: string }, citadel: boolean, home?: string) => (await mcp(t, 'tools/list', {}, citadel, home, t.kind === 'ticket' ? 'thread' : 'coordinator')).tools.some((x) => x.name === 'deploy_contraption');
   assert.equal(await offered(DelveTM, false, 'twin'), true, 'home Taskmaster');
   assert.equal(await offered(DelveMinion, false, 'twin'), true, 'home minion');
   assert.equal(await offered(DelveTM, false), false, 'a scheme home to none');
   assert.equal(await offered(Minion, false), false, 'a minion of a scheme home to none');
   assert.equal(await offered(CitadelTM, true), true, "Citadel's Taskmaster");
 
-  const call = async (t: any, citadel = false) => {
+  const call = async (t: { id: number; project_id: number; kind: string }, citadel = false) => {
     const child = await mcp(t, 'tools/call', { name: 'deploy_contraption', arguments: { name: 'twin' } }, citadel, 'twin', t.kind === 'ticket' ? 'thread' : 'coordinator');
     return child.content[0].text as string;
   };
@@ -334,14 +334,14 @@ test("publish_release: offered to a home scheme's Taskmaster and minions; the se
   const DelveMinion = thread(Delve.id, 'ticket');
   turnFor(DelveMinion, olive.id);
   store.updateContraption('twin', { home_scheme: Delve.id });
-  const role = (t: any) => (t.kind === 'ticket' ? 'thread' : 'coordinator');
-  const offered = async (t: any, home?: string) => (await mcp(t, 'tools/list', {}, false, home, role(t))).tools.some((x: any) => x.name === 'publish_release');
+  const role = (t: { id: number; project_id: number; kind: string }) => (t.kind === 'ticket' ? 'thread' : 'coordinator');
+  const offered = async (t: { id: number; project_id: number; kind: string }, home?: string) => (await mcp(t, 'tools/list', {}, false, home, role(t))).tools.some((x) => x.name === 'publish_release');
   assert.equal(await offered(DelveTM, 'twin'), true, 'home Taskmaster');
   assert.equal(await offered(DelveMinion, 'twin'), true, 'home minion');
   assert.equal(await offered(DelveMinion), false, 'a scheme home to none');
   assert.equal(await offered(CitadelTM), false, "Citadel's Taskmaster is not offered another scheme's");
 
-  const call = async (t: any) => (await mcp(t, 'tools/call', { name: 'publish_release', arguments: { contraption: 'twin' } }, false, 'twin', role(t))).content[0].text as string;
+  const call = async (t: { id: number; project_id: number; kind: string }) => (await mcp(t, 'tools/call', { name: 'publish_release', arguments: { contraption: 'twin' } }, false, 'twin', role(t))).content[0].text as string;
   // Through to the release step: twin has no android/latest.json feed, so nothing Citadel can publish.
   for (const t of [DelveTM, DelveMinion]) assert.match(await call(t), /twin has no Android release Citadel can publish/);
   // Refused: a minion of a scheme twin isn't home to, even naming it.

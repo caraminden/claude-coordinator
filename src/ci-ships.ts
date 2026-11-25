@@ -1,9 +1,9 @@
 // Ships go first on the CI desktop (#1268; Cara, 2026-11-20, "Plan approved: build it this way"): every SHIP_POLL_MS
 // this asks GitHub which ship runs (a `land/…` branch) are going in each repo with runners on a runner agent's PC, and
-// which runner each of their jobs is on, and sends that list to the runner agents. While a list names runners, the
-// agents squeeze every other runner on the PC; a list that stops coming (2 minutes) lifts it (runner-agent.mjs).
-// Citadel's own ships go first (Cara, 2026-11-21, picked "Citadel's ship goes first" on #1268's card): while one runs,
-// other schemes' ships are left off the list, so they are squeezed like any other runner.
+// which runner each of their jobs is on, and sends each PC's agents the ships on that PC's own runners (shipsOn, #1934).
+// While a list names runners, the agents squeeze every other runner on the PC; a list that stops coming (2 minutes) lifts
+// it (runner-agent.mjs). Citadel's own ships go first (Cara, 2026-11-21, picked "Citadel's ship goes first" on #1268's
+// card): while one runs on a PC, other schemes' ships there are left off its list, so they are squeezed like any other runner.
 import { type GhGet, ghGet, RateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { every, type Job } from './every.ts';
@@ -26,11 +26,29 @@ export interface Ship {
   first?: true;
 }
 
+/** Each CI PC by its hostname, with its runners as `owner/name/runner`, all lowercase. Windows' agent and WSL's share a hostname, so they are one PC. */
+export type Pcs = Map<string, Set<string>>;
+
+function pcOf(ship: Ship, pcs: Pcs): string | undefined {
+  const name = ship.runner.toLowerCase();
+  for (const [host, runners] of pcs) if (runners.has(`${ship.repo.toLowerCase()}/${name}`)) return host;
+  // No sample lists it (a server just started, a runner just added): a runner's name starts with its PC's hostname, unless two do (DESK-2 is DESK's second runner, or a PC).
+  const hosts = [...pcs.keys()].filter((h) => name === h || name.startsWith(`${h}-`));
+  return hosts.length === 1 ? hosts[0] : undefined;
+}
+
+/** The ships the PC `host` squeezes for: those on its own runners, or only Citadel's own while one of them is. */
+export function shipsOn(host: string, ships: Ship[], pcs: Pcs): Ship[] {
+  const here = ships.filter((s) => pcOf(s, pcs) === host.toLowerCase());
+  return here.some((s) => s.first) ? here.filter((s) => s.first) : here;
+}
+
 export interface ShipWatchDeps {
   /** owner/name, lowercase, of every repo with runners on a runner agent's PC (repeats are fine). */
   repos: () => string[];
   /** The GitHub login that reads a repo: its scheme's; null when no scheme has it, so it isn't read. */
   as: (repo: string) => GithubEnv | null;
+  /** Every ship running now, whichever PC it is on: shipsOn picks a PC's own. */
   send: (ships: Ship[]) => void;
   /** owner/name, lowercase, of the repo whose ships go first (Citadel's own); null when unknown. */
   first?: () => string | null;
@@ -63,7 +81,7 @@ export class ShipWatch {
     this.timer = null;
   }
 
-  /** One look: the runners on a ship's job now, sent to the agents. Nothing is sent while GitHub says to wait. */
+  /** One look: the runners on a ship's job now, sent on. Nothing is sent while GitHub says to wait. */
   async tick(now = Date.now()): Promise<Ship[] | null> {
     if (this.busy || now < this.pausedUntil) return null;
     this.busy = true;
@@ -85,11 +103,10 @@ export class ShipWatch {
         }
       }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
-      const all = [...this.last.values()].flatMap((l) => l.ships);
       const first = this.deps.first?.()?.toLowerCase();
-      const ships = first && all.some((s) => s.repo === first) ? all.filter((s) => s.repo === first) : all;
-      // Citadel's own ships carry first: true, so a keeper that squeezes harder for them can tell them from another scheme's.
-      this.deps.send(ships.map((s) => (first && s.repo === first ? { ...s, first: true } : s)));
+      // Citadel's own ships carry first: true, so shipsOn, and a keeper that squeezes harder for them, can tell them from another scheme's.
+      const ships = [...this.last.values()].flatMap((l) => l.ships).map((s) => (first && s.repo === first ? { ...s, first: true as const } : s));
+      this.deps.send(ships);
       if (!failed) this.said = '';
       return ships;
     } catch (err) {
@@ -116,7 +133,6 @@ export class ShipWatch {
     const land = on(SHIP_BRANCH);
     for (const r of land.length ? land : early) {
       const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
-      // shortcut: any self-hosted runner counts, as every one is on Cara's desktop today; send each PC only its own ships once another PC has runners.
       for (const j of jobs) if (j?.status === 'in_progress' && typeof j.runner_name === 'string' && j.runner_name && Array.isArray(j.labels) && j.labels.includes('self-hosted')) out.push({ repo, runner: j.runner_name });
     }
     return out;

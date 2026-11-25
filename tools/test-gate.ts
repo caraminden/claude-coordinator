@@ -21,6 +21,7 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isMainThread } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const env = process.env;
@@ -128,4 +129,6 @@ async function gate() {
   }
 }
 
-await gate().catch(() => {});
+// Only a file's own main thread takes a place: node runs the preloads in every worker thread the file starts too, and those
+// are part of the file that already holds one (#1968: a worker's wait made events-move.test.ts take 60 s).
+if (isMainThread) await gate().catch(() => {});

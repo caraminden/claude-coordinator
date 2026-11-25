@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { mask, testRuns } from './retro-log.ts';
 import { redRun } from './test-first.ts';
 import { batchNudgeLine } from './batch-nudge.ts';
-import type { HookInput } from './hook-input.ts';
+import { agentSuffix, type HookInput } from './hook-input.ts';
 
 /** Reds in a row that earn the line: a starting value. */
 export const FLAIL_AT = 3;
@@ -24,7 +24,7 @@ type State = { command: string; count: number; said: boolean };
 
 /** One hook call; returns what to print (the line as context), or null. */
 export function flailBrakeHook(input: HookInput, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
-  const file = join(stateDir, `flail-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);
+  const file = join(stateDir, `flail-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}${agentSuffix(input)}.json`);
   const write = (s: State | null) => {
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(file, JSON.stringify(s));

@@ -87,7 +87,10 @@ export function openMenu(spec, x, y) {
     scrim.addEventListener('click', () => {
       if (Date.now() - born > 350) close(true);
     });
+    // In the top layer too, under the menu (shown after it), or a bar with a z-index would sit above the dim.
+    scrim.setAttribute('popover', 'manual');
     home.append(scrim);
+    scrim.showPopover?.();
   }
   const head = el('div', 'cui-menu-head');
   if (spec.sheet) head.append(el('span', 'cui-menu-grab'));
@@ -222,7 +225,8 @@ export function openMenu(spec, x, y) {
   addEventListener('wheel', onWheel, { capture: true, passive: true });
   addEventListener('resize', onResize);
   addEventListener('blur', onBlur);
-  addEventListener('hashchange', onResize);
+  addEventListener('hashchange', onBlur);
+  addEventListener('popstate', onBlur);
   const close = (refocus) => {
     if (open?.el !== menu) return;
     open = null;
@@ -231,7 +235,8 @@ export function openMenu(spec, x, y) {
     removeEventListener('wheel', onWheel, { capture: true });
     removeEventListener('resize', onResize);
     removeEventListener('blur', onBlur);
-    removeEventListener('hashchange', onResize);
+    removeEventListener('hashchange', onBlur);
+    removeEventListener('popstate', onBlur);
     menu.remove();
     scrim?.remove();
     if (refocus) (returnTo?.isConnected ? returnTo : redrawnCopy(returnTo))?.focus({ preventScroll: true });

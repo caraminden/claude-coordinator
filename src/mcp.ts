@@ -3,148 +3,33 @@
 // Started by claude from the coordinator's --mcp-config; configured by environment.
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
 import { thrown } from './thrown.ts';
-import type { TicketView, StoredEvent, UltraBatch, ArtifactRow, ClaimView, ToolDef, RpcRequest, CiFile, CiJob, QueuedJob, PropertyValue, PropertyKey, RegistryReply, ProjectView, ErrorsDay, Counted, ReviewEntry, AuditTurn, ShipLesson, EventData } from './mcp-types.ts';
 import { instructionCost } from './prompt-cost.ts';
-import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
-import {
-  memoryText,
-  pastMinionsText,
-  ideasText,
-  decisionsText,
-  readText,
-  NO_ICON,
-  deployText,
-  serviceText,
-  contraptionText,
-  contraptionPath,
-  ago,
-  checkLines,
-  machineText,
-  usageSplitText,
-  RISKS,
-  money,
-  scheduleLine,
-  type DeployInfo,
-  type ServiceInfo,
-  type ContraptionInfo,
-  type CheckResult,
-  type MachineInfo,
-  type ScheduleInfo,
-  type MemoryHit,
-  type PastHit,
-  type IdeaRow,
-  type DecisionRow,
-} from './mcp-text.ts';
-export { usageSplitText } from './mcp-text.ts';
-export { NOT_DEFAULT } from './mcp-media.ts';
-
-/**
- * A turn's settings, from its environment: the process's own for a turn's own helper, the calling turn's in the shared
- * tool server (#1259, src/mcp-pool.ts). Read per call through C(), so one process can serve many turns.
- */
-function config(env: NodeJS.ProcessEnv) {
-  return {
-    API: env.COORDINATOR_API ?? 'http://127.0.0.1:8573',
-    TOKEN: env.COORDINATOR_TOKEN ?? '',
-    PROJECT: Number(env.COORDINATOR_PROJECT),
-    // 'coordinator' manages the project's tickets; 'thread' lets a ticket label itself.
-    ROLE: env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator',
-    TICKET: Number(env.COORDINATOR_TICKET),
-    // Set for minions: Claude Code asks the approve tool before tripwire asks and approval-rule calls.
-    APPROVALS: env.COORDINATOR_APPROVALS === '1',
-    // A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
-    DEPLOYS: env.COORDINATOR_DEPLOYS === '1',
-    /** This turn runs in its person's Claude container (#213), where tools/land.sh can't: any scheme's (#574). */
-    IN_CONTAINER: env.COORDINATOR_CONTAINER === '1',
-    // Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions and the contraptions.
-    APP_INSTRUCTIONS: env.COORDINATOR_APP_INSTRUCTIONS === '1',
-    // The contraptions whose home is this scheme (#266): it may deploy them.
-    HOME_CONTRAPTIONS: (env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean),
-    // The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
-    MACHINES: (env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean),
-    JOB_MACHINES: (env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean),
-    /** A minion in the seam trial's fresh group (#1129): offered its own fresh_session. */
-    SEAM_TRIAL: env.COORDINATOR_SEAM_TRIAL === '1',
-    /** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
-    MSG: msgFromEnv(env.COORDINATOR_MSG),
-    // propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.
-    HOST_TOOLS_LIST: env.COORDINATOR_HOST_TOOLS,
-    /** Search by meaning over the scheme's chats (#331): offered only where the server indexes them. */
-    MEMORY: env.COORDINATOR_MEMORY === '1',
-    SHARED_DIR: env.COORDINATOR_SHARED_DIR?.replace(/\/+$/, ''),
-    APP_TURNS_RUN: env.COORDINATOR_APP_TURNS_RUN === '1',
-    /** Images and sound through the person's own OpenRouter key (#717): listed for every minion, refused on a turn whose person hasn't connected one (#878). */
-    MEDIA: env.COORDINATOR_MEDIA === '1',
-    /** generate_image_codex (#733): refused on a turn whose person has no Codex login it can reach (#878). */
-    CODEX_IMAGES: env.COORDINATOR_CODEX_IMAGES === '1',
-  };
-}
-const configs = new WeakMap<object, ReturnType<typeof config>>();
-function C() {
-  const env = callEnv();
-  let c = configs.get(env);
-  if (!c) configs.set(env, (c = config(env)));
-  return c;
-}
-const MAX_TEXT = 4000;
 import { DONE_LINES } from './done-lines.ts';
 import { NEEDS, NEED_LINES, stateWord } from './needs.ts';
-import { heldToolText, msgFromEnv } from './msg-settings.ts';
-import { pacificDay, pacificStamp } from './pacific.ts';
+import { heldToolText } from './msg-settings.ts';
+import { pacificDay } from './pacific.ts';
 import { toolsForTurn } from './tool-hold.ts';
 import { workerWaitText } from './worker-wait.ts';
+import type { TicketView, StoredEvent, ArtifactRow, ClaimView, ToolDef, RpcRequest, QueuedJob, PropertyKey, RegistryReply, ProjectView, ErrorsDay, Counted, ReviewEntry, EventData } from './mcp-types.ts';
+import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
+import { memoryText, pastMinionsText, ideasText, decisionsText, ago, checkLines, machineText, usageSplitText, money, scheduleLine, type CheckResult, type MachineInfo, type ScheduleInfo, type MemoryHit, type PastHit, type IdeaRow } from './mcp-text.ts';
+import { C, TICKET_ID, WHEN_CI_PASSES, call, propertyText, id, needOne, NOT_HERE } from './mcp-call.ts';
+import { APP_TOOLS, CONTRAPTION_TOOLS, PUBLISH_RELEASE, PUBLISH_DESKTOP, MAKE_RELEASE_KEY, DEPLOY_CONTRAPTION, MANDATE_ITEM, CONTRAPTION_READ, CONTRAPTION_TURNS, runAppsTool } from './mcp-apps.ts';
+import { WAKE_AT, PREP_ULTRA_REVIEWS, HOST_CHECK, CI_RUNNERS, CI_FILES, SHIP_RISK, WAKE_WHEN_LIVE, ORDER_SHIP_LINE, MARK_URGENT, SHIP_LESSONS, RELAY_WHEN_LIVE, MINION_WAKE_WHEN_LIVE, WAKE_WHEN_RUNNERS_BACK, REPORT_SPEND, LOG_LEARNED, HAND_OFF_LAND, LAND, START_PREVIEW, runShipTool } from './mcp-ship.ts';
+import { ASK_QUESTION, SETTLE_QUESTION, PROPOSE_PLAN, PROPOSE_MACHINE_LEND, PROPOSE_HOST_TOOL, PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, APPLY_MEMORY, STRIKE_TEXT, MARK_IMAGE, APPROVE, runCardsTool } from './mcp-cards.ts';
+export { usageSplitText } from './mcp-text.ts';
+export { NOT_DEFAULT } from './mcp-media.ts';
+export { handOffResult } from './mcp-ship.ts';
+
+const MAX_TEXT = 4000;
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says.` };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 const HELD = () => heldToolText(C().MSG, 'the minion and the Taskmaster');
-
-const WAKE_DESCRIPTION = `Seal until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
-const WAKE_PROPS = {
-  commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
-  reason: { type: 'string', maxLength: 1000, description: 'What to do once it is live (at most 1,000 characters); it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
-};
-/** wake_at (#722): a timed message to your own chat; with neither `at` nor `cancel` it lists the pending ones. */
-const WAKE_AT = {
-  name: 'wake_at',
-  description: `Set a timer: at \`at\` ${APP_NAME} sends \`note\` into this same chat as a message and you take a turn on it (one waiting on a turn in progress comes after it). For work "on or after a date". Up to 20 pending, at most 90 days out. Without \`at\` or \`cancel\` it lists them. Not for waking another minion.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      at: { type: 'string', description: 'When, e.g. "2026-11-18 09:00": Pacific unless it ends in Z or an offset like -08:00. The reply echoes it in PST/PDT' },
-      note: { type: 'string', maxLength: 1000, description: 'What to do then (at most 1,000 characters); it comes back as the message' },
-      cancel: { type: 'number', description: 'The id of a pending wake to cancel' },
-    },
-  },
-};
-/** A minion preps ultra reviews for its turn's person (#1399, Cara 2026-11-20 "Yes, minions prep too"); only they can Start one. */
-const PREP_ULTRA_REVIEWS = {
-  name: 'prep_ultra_reviews',
-  description: `Prep ultra reviews for the person this turn runs for: each area becomes a draft pull request on their own GitHub login (\`review/*\` branches, [skip ci]), waiting in this chat's Ultra review dialog for them to press Start, which bills their own Claude account. You can never start one, and \`claude ultrareview\` stays blocked. Only on a person's ask. An area over 8,000 lines or 500 files is refused with its size: split it. Unstarted PRs are closed after 7 days. Without \`areas\` it lists this chat's prepped rows.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      areas: {
-        type: 'array',
-        maxItems: 20,
-        description: 'Up to 20 areas, one draft PR each',
-        items: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', maxLength: 80, description: 'A short label, e.g. "Land pipeline"' },
-            paths: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Repo-relative files or folders, e.g. ["tools/land.sh", "src/land.ts"]' },
-            question: { type: 'string', maxLength: 2000, description: 'Optional: what the review should look hardest at' },
-          },
-          required: ['paths'],
-        },
-      },
-    },
-  },
-};
 const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, about 30 characters (at most 120), e.g. "Usage bar in the top bar". No number, type, build or emoji.' };
 /** A minion or ticket state; without `deploys`, pending-deploy is left out. */
 const stateSchema = (deploys: boolean) => ({
@@ -204,16 +89,6 @@ export function closeSelfResult(cleared: boolean): string {
   );
 }
 
-/** hand_off_land's answer: what happens next, the deploy, and what to do on a failure (its description's rules since #1575). */
-export function handOffResult(args: Record<string, unknown>, contraptions: string[], deploys: boolean): string {
-  const deploy = contraptions.length && args.deploy !== false && !args.into ? `, then deploys ${contraptions.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy` : '';
-  const end = args.stay_open === true ? 'leaves this minion open (stay_open)' : `dismisses this minion${deploys ? ' (or sets pending-deploy for a restart)' : ''}`;
-  return (
-    `Handed off: the server runs tools/land.sh now, behind any landings in line${deploy}. End your turn now with a short reply and set no state (the server shows you as shipping until it ends): the server posts the shipped line and ${end} on a clean land; it never seals you. ` +
-    'If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with the end of its output: fix it and hand it off again.'
-  );
-}
-
 export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons', 'glossary-drift', 'architecture', 'area-review'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
@@ -262,210 +137,6 @@ const VALUES = {
 };
 
 const FORCE = { type: 'boolean', description: 'Register even though it looks like a near-duplicate of something that exists (only once you have checked it really is different)' };
-
-const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme, e.g. 12 for #12 (as shown by list_tickets)' };
-
-// A card addressed to one person (#687): the shared parts of ask_question's and propose_plan's schemas.
-const DIRECT_TO = {
-  type: 'string',
-  description:
-    'Leave out: a card goes to everyone in this chat, and any member can answer it. Set it only when one person is asking another, or a decision truly needs one specific person: their login (a member of this scheme; a wrong name is refused with the list). It then counts in only their Needs-you list and pings only their devices, in every scheme they open. Anyone in the scheme can still answer it in the chat, and the answer starts your next turn.',
-};
-
-const WHEN_CI_PASSES = {
-  type: 'boolean',
-  description:
-    'true: hold it until CI passes on the commit you pushed (your HEAD), then the server posts it with no turn for you; the CI line reaches you as held mail. For a step that only relays green CI (a ship card, "ready to ship" to the Taskmaster) in a scheme whose PRs run CI. Leave it out when you must look at CI\'s results yourself first (screenshots, test counts), or the scheme ships with land.sh (no PR CI: refused). Push first. CI failing, a new push or a turn still running drops it, and you\'re woken as usual.',
-};
-
-const ASK_QUESTION = () => ({
-  name: 'ask_question',
-  description:
-    // Always loaded (ALWAYS_LOAD), so only its first sentence is here: each other rule is in the result or refusal that meets it (#1575).
-    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type).',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      questions: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 4,
-        items: {
-          type: 'object',
-          properties: {
-            question: { type: 'string', maxLength: 2000, description: 'The full question, ending in "?". A command can go in it as a tagged fenced block (```powershell-admin, ```wsl, …), drawn like one in a reply, with Copy.' },
-            header: { type: 'string', maxLength: 24, description: 'A very short label for the card, e.g. "Layout"' },
-            multiSelect: { type: 'boolean', description: 'true if several options can be picked (default false)' },
-            options: {
-              type: 'array',
-              minItems: 2,
-              maxItems: 6,
-              items: {
-                type: 'object',
-                properties: {
-                  label: { type: 'string', maxLength: 80, description: 'The choice, 1 to 5 words' },
-                  description: { type: 'string', maxLength: 300, description: 'What picking it means, or its trade-off' },
-                  image: {
-                    type: 'string',
-                    maxLength: 1000,
-                    description: 'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail; pictured options show as a gallery.',
-                  },
-                  recommended: { type: 'boolean', description: 'true on the option you recommend, listed first; the card labels it "(Recommended)". Leave the words out of the label.' },
-                },
-                required: ['label'],
-              },
-            },
-          },
-          required: ['question', 'options'],
-        },
-      },
-      kind: {
-        type: 'string',
-        enum: ['merge', 'ship', 'land'],
-        description:
-          '"merge" (or "ship", the same; an old "land" too) when the card asks people for the go to ship a change (the self-review\'s high-risk card, a build\'s go card): its chip then reads "Ship It", or "Merge" on a feeder\'s card (a minion in a build, which merges into `build/<n>`; header and option "Merge"). Leave out otherwise.',
-      },
-      to: DIRECT_TO,
-      not_duplicate: { type: 'boolean', description: 'true: post though refused as a twin; yours differs' },
-      doc: {
-        type: 'string',
-        maxLength: 1000,
-        description: 'With no questions: the path of a choices page (a mock kit page with pick bars) in your working directory or shared folder. The card names the page and opens it; it lists no options of its own. The picks arrive as a message from the person who pressed Send on the page, which settles the card.',
-      },
-      notice: {
-        type: 'string',
-        maxLength: 500,
-        description: 'With to and no questions: a one-line notice for that person instead of a question (at most 500 characters). They see it with a "Got it" button, and nothing comes back to you.',
-      },
-      secret: {
-        type: 'object',
-        description: 'With no questions: a masked field for a password, API key or token. The value goes to the secret store, never the chat; you get the name it was saved as, and turns read it from $CITADEL_SECRET_<NAME> (CITADEL_SECRET_NAMES lists the ones a turn has).',
-        properties: {
-          name: { type: 'string', maxLength: 64, description: 'What to save it as: letters, digits and underscores, a letter first, e.g. AZURE_SPEECH_KEY (upper-cased)' },
-          scope: { type: 'string', enum: ['person', 'scheme'], description: '"person" (default): the answerer\'s own, for turns that run as them. "scheme": every turn in this scheme, and its members can replace it.' },
-          why: { type: 'string', maxLength: 300, description: 'What it is for, shown on the card, e.g. "To sign in to the TWI site"' },
-        },
-        required: ['name'],
-      },
-      when_ci_passes: WHEN_CI_PASSES,
-    },
-  },
-});
-
-const SETTLE_QUESTION = {
-  name: 'settle_question',
-  description:
-    "Settle a card of yours that someone answered by typing a reply instead of clicking it, or that a newer card replaced, or withdraw one no longer wanted. Use your judgement: settle a question only if their message really answers it. A settled question card greys out as answered and a plan-type card (propose_plan, edit_instructions' held edit) as withdrawn; either leaves the needs-you list, can no longer be answered, and no longer holds the minion open. Without question_id it settles your one open question card, and refuses when more than one is open, listing them; a plan-type card is withdrawn only by its id.",
-  inputSchema: {
-    type: 'object',
-    properties: { question_id: { type: 'string', description: "The card's id (from ask_question, propose_plan or edit_instructions), or its link; needed for a plan-type card; leave out only when one question card is open" } },
-  },
-};
-
-const PROPOSE_PLAN = {
-  name: 'propose_plan',
-  description:
-    'Post a plan in this chat as a card people answer with Approve or Revise, for a run-back before code or any plan that needs a go. Only a person can approve it. Write it for someone who hasn\'t followed the work: plain words, minions named by what they do with #N after, no paths, line numbers or hashes. After calling it, finish your turn with a short reply and write no code: the card shows below your reply, even when you asked early in a long turn (say "the card below", never "above"), and the go (Approve) or the notes to revise it come as the next message. To revise, call propose_plan again with the whole new plan; the old card shows as superseded. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the plan card below](#/p/2/t/12?e=345).',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      summary: { type: 'string', maxLength: 200, description: 'One line on what the plan builds, at most 200 characters, e.g. "Usage bar in the top bar, fed by the turn stats"' },
-      plan: { type: 'string', maxLength: 20000, description: 'The whole plan in markdown: what you will change and how, what you will not do, and how you will test it. At most 20,000 characters' },
-      to: DIRECT_TO,
-    },
-    required: ['summary', 'plan'],
-  },
-};
-
-// propose_machine_lend (#1638; Cara, 2026-11-22): Taskmasters and minions both, as a card a person approves.
-const PROPOSE_MACHINE_LEND = {
-  name: 'propose_machine_lend',
-  description:
-    "Ask for a connected machine's lending to change, as a card in this chat: put this scheme on its list or take it off (here), tick or untick its workspaces (folders) and its MCP server, and set its switches (workspace tools, always on, GPU jobs). Use it instead of describing the Machines page to a person; when you mention the page, link it with the machine's page link list_machines and this tool's reply give. Only who can save that machine on the page approves (an admin, or its owner for someone's own); approving saves it exactly as the page does (its agent is told, and sessions on what is no longer lent end), rejecting changes nothing, and either comes as a message. A scheme's minions use a workspace only if it is ticked AND the scheme is on the machine's list, so ask for both in one card. Ticks are the machine's, shared by every scheme it is lent to. Names come from list_machines; a newer proposal for the same machine replaces an open one. Minion turns get the change from their next start. Link every mention of the card, as with propose_plan.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      machine: { type: 'string', description: 'The machine, as list_machines names it, e.g. citadel-test-box' },
-      here: { type: 'boolean', description: "true: put this scheme on the machine's list; false: take it off. Leave out to keep it as it is" },
-      tick: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Workspaces (folders) to tick, by the names list_machines shows' },
-      untick: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Workspaces to untick: every scheme it is lent to loses them' },
-      server: { type: ['string', 'null'], description: 'The MCP server to lend (it lends one at a time), or null to untick it. Leave out to keep it' },
-      workspace_tools: { type: 'boolean', description: 'Only for an agent from before ticks: all its folders on or off' },
-      always_on: { type: 'boolean', description: 'true: offline over 5 minutes shows as Down (a desktop); false: shows as Asleep (a laptop)' },
-      gpu: { type: 'boolean', description: 'The GPU jobs switch: false refuses GPU tasks (run-gpu) and stops one running; true allows them again' },
-      why: { type: 'string', maxLength: 500, description: 'What it is for, for the person approving: at most 500 characters' },
-    },
-    required: ['machine'],
-  },
-};
-
-const PROPOSE_HOST_TOOL = () => ({
-  name: 'propose_host_tool',
-  description: `Propose installing a command-line tool on the server every turn runs on (yours too, in a container, which can't install one), as a card in this chat showing the exact install command. Only a member of the ${APP_NAME} scheme can approve it: approve installs it with mise (an Arch package is installed by a person, as the server has no root) and ships its line in the server's host tools list, which a rebuild installs from; reject installs nothing. Either comes as a message. Pin one exact version and say in why what it's for.${C().HOST_TOOLS_LIST ? ` What the server has already: ${C().HOST_TOOLS_LIST}.` : ''} A newer proposal for the same package replaces an open one. Link every mention of the card, as with propose_plan.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      source: {
-        type: 'string',
-        enum: ['mise', 'npm', 'pypi', 'cargo', 'github', 'pacman'],
-        description: "Where it comes from: mise (mise's own tools and registry, e.g. jq, go), npm, pypi (a Python CLI), cargo (a Rust crate, built from source: minutes), github (a release binary, package owner/repo), pacman (an Arch package)",
-      },
-      package: { type: 'string', maxLength: 140, description: 'Its name in that source, e.g. "ripgrep", "@biomejs/biome", "BurntSushi/ripgrep"' },
-      version: { type: 'string', maxLength: 64, description: 'One exact version, e.g. "14.1.1": no ranges, no "latest"' },
-      why: { type: 'string', maxLength: 500, description: 'What it is for, for the person approving: at most 500 characters' },
-    },
-    required: ['source', 'package', 'version', 'why'],
-  },
-});
-
-const PROPOSE_MACHINE_NOTES = {
-  name: 'propose_machine_notes',
-  description:
-    'Propose a connected machine\'s whole new notes (its owner\'s instructions that every scheme using it reads as "Notes on <machine> from its owner") as a card in this chat with a diff, when your work changes how the machine should be used. Only its owner or an admin can approve it; approving saves them, rejecting leaves them as they are, and either comes as a message. Send the full text minions should read, not just the change: it replaces the old notes. A newer proposal for the same machine replaces an open one. Link every mention of the card, as with propose_plan.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      // A free string, checked by the server (#878): an enum of this turn's machines would change the tool list with the sender.
-      machine: { type: 'string', description: 'The machine, one this turn got' },
-      notes: { type: 'string', maxLength: 2000, description: 'The whole new notes, at most 2,000 characters' },
-    },
-    required: ['machine', 'notes'],
-  },
-};
-
-const PROPOSE_MEMORY = () => ({
-  name: 'propose_memory',
-  description:
-    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member approves it all on the card (then you apply it with apply_memory) or ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete (the card's Approve all covers it; on the page a member ticks each), index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      changes: {
-        type: 'array',
-        maxItems: 300,
-        items: {
-          type: 'object',
-          properties: {
-            action: { type: 'string', enum: ['edit', 'add', 'delete', 'index', 'flag'] },
-            file: { type: 'string', description: 'The note file name, like some-note.md (never MEMORY.md)' },
-            text: { type: 'string', description: 'edit, add: the whole new note, frontmatter included' },
-            line: { type: 'string', description: 'add, index (optional on edit): its whole MEMORY.md line, "- [Name](file.md) — hook", under about 150 characters' },
-            reason: { type: 'string', maxLength: 500, description: 'Why, in one plain sentence' },
-          },
-          required: ['action', 'file', 'reason'],
-        },
-      },
-    },
-    required: ['changes'],
-  },
-});
-
-const APPLY_MEMORY = {
-  name: 'apply_memory',
-  inputSchema: { type: 'object', properties: {} },
-  description:
-    "For a memory curator run, only after a member approved your memory tidy card (the approval comes as a message): applies the whole approved tidy to the memory folder through the Memory page's own apply, and returns what changed and what was skipped (a note changed since you proposed it is skipped, never overwritten). Refused before an approval, and for a tidy someone already decided on the Memory page. Never edit memory files yourself.",
-};
 
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
@@ -530,20 +201,6 @@ const STOP_JOB = {
   inputSchema: { type: 'object', properties: { id: { type: 'number', description: 'The job number' } }, required: ['id'] },
 };
 
-const STRIKE_TEXT = {
-  name: 'strike_text',
-  description:
-    'Strike through words of yours that turned out wrong, once you are proven wrong in a disagreement (with the Taskmaster, a minion, or anyone; by a test, git, the live state, a person), quoting them exactly: it finds the newest of your replies, or of your messages to another thread, containing the text, shows that text struck through there, and posts a note with your reason. In your reply, also write the wrong words as `~~…~~` with the fix right after.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      text: { type: 'string', maxLength: 10000, description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim (at most 10,000 characters)' },
-      reason: { type: 'string', maxLength: 1000, description: 'One sentence (at most 1,000 characters) on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 has shipped."' },
-    },
-    required: ['text', 'reason'],
-  },
-};
-
 const ARTIFACT_REF = { artifact: { type: 'integer', description: 'The artifact id, from list_artifacts' } };
 const ARTIFACT_TOOLS = [
   {
@@ -573,68 +230,6 @@ const LIST_TICKETS = {
     type: 'object',
     properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
   },
-};
-
-/** The host's read-only checks (#621), for a turn in a container: it has no live database or systemd user bus of its own. */
-const HOST_CHECK = {
-  name: 'host_check',
-  description: `The host's read-only checks, since this turn runs in a container that can't reach them itself: wherever instructions or habits say \`sqlite3 -readonly …/coordinator.db\`, \`journalctl --user\`, \`systemctl --user status\` or \`list-units\`, call this instead. what: "db" runs one SQL statement on ${APP_NAME}'s live database, read-only, with login secrets shown as [hidden] (at most 1,000 rows; it holds every scheme's chat, so only a turn a ${APP_NAME} admin or ${APP_NAME} scheme member asked for may run it); "journal" prints a user unit's journal (unit, lines, since, grep); "status" is \`systemctl --user status <unit>\`; "units" lists user units (unit as a pattern). A turn's chat, tool calls and output are in the events table (ticket_id is the minion's internal id, which read_ticket shows). The live checkout (the code ${APP_NAME} runs) is mounted read-only at its own path, so read it with Read, grep and git as usual.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      what: { type: 'string', enum: ['db', 'journal', 'status', 'units'], description: 'Which check' },
-      sql: { type: 'string', maxLength: 20000, description: 'For db: one SQL statement, e.g. "SELECT id, number, title FROM tickets WHERE project_id = 3 ORDER BY id DESC LIMIT 5"' },
-      unit: { type: 'string', maxLength: 120, description: 'For journal and status: a user unit, like claude-coordinator.service (journal without one reads every user unit); for units, a pattern like "citadel-*"' },
-      lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'For journal: how many of the last lines (default 100)' },
-      since: { type: 'string', maxLength: 40, description: 'For journal: a time journalctl reads, like "1 hour ago" or "2026-11-12 18:00"' },
-      grep: { type: 'string', maxLength: 200, description: 'For journal: only lines matching this pattern (journalctl -g)' },
-    },
-    required: ['what'],
-  },
-};
-
-/** A scheme's CI runners on the PCs that host CI (#328), through the runner agent on each. */
-const CI_RUNNERS = {
-  name: 'ci_runners',
-  description:
-    "Add, list or remove this scheme's self-hosted GitHub Actions runners on a CI PC (more than one can host CI; list shows each), through the CI runner agent there (tools/ci-runner/README.md). `host` names the PC (its machine name from list_machines, or its hostname): add goes there and waits for that PC's own runners to show Idle (left out, it takes the first free PC); list and remove with no host reach every PC. add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo (with os linux, Linux runners labelled <scheme-slug>-ci-linux, in WSL on the same PC, for jobs Windows can't run), skipping ones already there, then waits until GitHub shows them Idle; remove takes this scheme's runners off the PC and GitHub; list shows every runner service on the PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      op: { type: 'string', enum: ['add', 'list', 'remove'] },
-      count: { type: 'number', description: 'add only: how many runners this scheme should have, 1 to 4 (default 1)' },
-      host: { type: 'string', description: 'Which PC: its machine name or hostname. Left out: add takes the first free PC; list and remove reach every PC' },
-      os: { type: 'string', enum: ['windows', 'linux'], description: 'Which runners: windows (the default) or linux, which the Linux runner agent there (in WSL on a Windows PC, or on plain Linux) adds, lists and removes' },
-    },
-    required: ['op'],
-  },
-};
-
-/** The scheme's files in Citadel's CI store (#658, src/ci-store.ts): every minion and Taskmaster. */
-const CI_FILES = {
-  name: 'ci_files',
-  description:
-    "List what this scheme's CI runs uploaded to Citadel's own CI store (builds, reports, release builds), newest first, or with latest: true only the newest match. This replaces `gh run download`: each file comes with its path on this server (read or copy it from there) and its URL under the app's address. Filter by workflow (the file name, like android.yml), kind, target, name, run (a run id) or commit (a prefix). The store deletes by rule: reports after 7 days, builds beyond the newest 5 runs per workflow and target, old releases beyond the newest 10; each target's newest build and release and a published release stay.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      latest: { type: 'boolean', description: 'true for only the newest file that matches' },
-      workflow: { type: 'string', description: "The workflow's file name, like android-release.yml" },
-      kind: { type: 'string', enum: ['build', 'report', 'release'] },
-      target: { type: 'string' },
-      name: { type: 'string', description: "The file's exact name" },
-      run: { type: 'number', description: 'A GitHub Actions run id' },
-      commit: { type: 'string', description: 'A commit hash or its first characters' },
-    },
-  },
-};
-
-/** ship_risk (#1196): ships by risk per scheme and Pacific week, counted from each ship's note. */
-const SHIP_RISK = {
-  name: 'ship_risk',
-  description:
-    'Ships per scheme and per Pacific week (Mon-Sun) by risk (low, medium, high) with the high share, from each ship\'s "Shipped … Risk <r>" note: use it to see whether narrowing a scheme\'s high-risk list cut the changes waiting on a go. "Merged" (a feeder into a build branch) is shown apart from "Shipped" (onto main). The Citadel scheme reads every scheme; another scheme reads its own. Schemes that ship by pull request post no note, so they are named as having none, not shown as 0.',
-  inputSchema: { type: 'object', properties: { weeks: { type: 'integer', description: 'How many Pacific weeks back, this one included (default 4, max 26)' } } },
 };
 
 /** live_facts (#1113): a minion's live facts in one small read, for both roles; the Citadel scheme's Taskmaster also reads other schemes'. */
@@ -786,11 +381,7 @@ const TOOLS = () => [
       required: ['ticket_id'],
     },
   },
-  {
-    name: 'wake_when_live',
-    description: `${WAKE_DESCRIPTION} Use it when you seal a minion that waits on another minion's deploy. The wake message doesn't count toward the loop guard.`,
-    inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, ...WAKE_PROPS }, required: ['ticket_id', 'reason'] },
-  },
+  WAKE_WHEN_LIVE,
   {
     name: 'fresh_session',
     description: `Hand off to a fresh Claude session of yours: when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt and memory) instead of this whole conversation. People's chat history stays as it is. Use it when ${APP_NAME} asks for a handoff, or on your own when your context is long and mostly stale. First save to your memory files anything durable that lives only in this chat. Then pass every open ask and who made it, relays you still owe, cards waiting on people, who is sealed on what, and what you promised next: facts, not history.`,
@@ -1097,221 +688,6 @@ const APP_INSTRUCTION_TOOLS = [
   },
 ];
 
-const CONTRAPTION_FIELDS = {
-  title: { type: 'string', description: 'What people see, at most 60 characters.' },
-  port: { type: 'integer', description: "The port its own service listens on, on Citadel's machine (1024-65535)." },
-  icon: { type: ['string', 'null'], description: "Its rail icon, a path on its service from its base, starting with /, like /icon.svg (the contraption-ui starter's). Every contraption has one: left empty, the rail shows its first letter until a deploy fills it from its web manifest's icons." },
-  default_model: { type: ['string', 'null'], description: 'The model its turns use unless it names one, like haiku.' },
-  open_paths: { type: 'array', items: { type: 'string' }, description: 'Paths on its service anyone may open without signing in (at most 20), like /link.' },
-  relay_paths: {
-    type: 'array',
-    items: { type: 'string' },
-    description: "Path prefixes other contraptions may call on it for a person, through Citadel's relay (at most 20), like /app-api/. Empty: none. List a path only once its code checks the `from` claim, or it takes a relayed call as the person acting in its own UI.",
-  },
-  home_scheme: { type: ['integer', 'null'], description: "The id of the scheme its people's bug reports and feature asks go to." },
-  turn_cap: { type: ['integer', 'null'], description: 'Most turns a day across its people; null for no cap.' },
-  repo: { type: ['string', 'null'], description: 'The GitHub repo deploy_contraption builds it from, as owner/name, like caraminden/mandate. Only a repo set here is ever built.' },
-  branch: { type: ['string', 'null'], description: 'The branch it deploys; null for main.' },
-  folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
-  restart_risk: { type: 'string', enum: RISKS, description: 'What its Stop and Restart risk: safe, interrupts (users in the middle of something), loses_data (a person types its name to run them), or unassessed (the default).' },
-  restart_note: { type: 'string', description: 'A line for whoever is about to Stop or Restart it, at most 300 characters; "" clears it.' },
-};
-
-/** Wait up to an hour for the deploy at `path` (builds take minutes), then hand back so the turn can follow again. */
-async function followDeploy(path: string): Promise<string> {
-  const until = Date.now() + 60 * 60_000;
-  let d = await call<DeployInfo | null>('GET', path);
-  while (d?.state === 'running' && Date.now() < until) {
-    await sleep(5000);
-    d = await call<DeployInfo | null>('GET', path);
-  }
-  return d?.state === 'running' ? `${deployText(d)}\nStill running after an hour: call deploy_contraption again with follow: true to keep waiting.` : deployText(d);
-}
-
-/** make_app and its member switch (#1136): every scheme's Taskmaster, for its own scheme, on a member's turn. */
-const APP_TOOLS = [
-  {
-    name: 'make_app',
-    description: `Make a new ${APP_NAME} app (a contraption at /apps/<name>/) for this scheme, when a member asks for one. One call does it all: it starts a minion whose branch already holds a working app in apps/<name>/ of this scheme's repo (a server that checks who is signed in, migrations, a nightly backup, a health path, a first page on ${APP_NAME} UI, tests, and CI when the scheme has a runner), registers the app to deploy from that folder, switches it on for every member of this scheme, and briefs the minion to ship it and then build the idea. Returns the minion's number and the app's port. Refused for a name that's taken, on a turn no member of this scheme asked for, or when the scheme has no GitHub repo. Switch it on or off for other people with set_app_person.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Its name, kept for good: in its address and folder. Lowercase letters, digits and dashes, like trip-notes.' },
-        title: { type: 'string', maxLength: 60, description: 'What people see, like Trip Notes: letters, digits, spaces and simple punctuation, at most 60.' },
-        idea: { type: 'string', maxLength: 4000, description: "What it's for, in the asker's own words (at most 4,000 characters): it goes into the app's CLAUDE.md and the minion's brief." },
-      },
-      required: ['name', 'title', 'idea'],
-    },
-  },
-  {
-    name: 'adopt_app',
-    description: `Register and deploy an app whose code is already in this scheme's own repo (not make_app, which writes a new one): a citadel-app.json on main at the repo root or in a folder. It registers the app (port, icon, this scheme as home), switches it on for every member, deploys it and returns the deploy's outcome. Refused for a name that's taken, on a turn no member of this scheme asked for, with no citadel-app.json at that path on main, or for another repo. Switch it on or off for other people with set_app_person.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Its name, kept for good: in its address. Lowercase letters, digits and dashes, like trip-notes.' },
-        title: { type: 'string', maxLength: 60, description: 'What people see, like Trip Notes: letters, digits, spaces and simple punctuation, at most 60.' },
-        folder: { type: 'string', description: 'The folder of its citadel-app.json in the repo, like apps/trip-notes; "" or "." for the repo root.' },
-        repo: { type: 'string', description: "Optional owner/name; refused unless it is this scheme's own repo." },
-      },
-      required: ['name', 'title', 'folder'],
-    },
-  },
-  {
-    name: 'set_app_person',
-    description: `Switch one of this scheme's apps on or off for a person, by login: on shows it in their rail and lets them open it, off takes at their next request. On a turn a member of this scheme asked for.`,
-    inputSchema: {
-      type: 'object',
-      properties: { name: { type: 'string', description: 'The app, like trip-notes.' }, login: { type: 'string' }, enabled: { type: 'boolean' } },
-      required: ['name', 'login', 'enabled'],
-    },
-  },
-];
-
-// Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn an admin asked for (#255).
-const CONTRAPTION_TOOLS = [
-  {
-    name: 'list_contraptions',
-    description: `List the registered contraptions (personal apps reached through ${APP_NAME}, each with its own service): their settings, who they are enabled for, and their key folder. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'register_contraption',
-    description: `Register a contraption, as an admin does in Settings → Contraptions: it writes fresh keys (identity.pub and contraption.key) into its key folder for its own service to read, and returns where. Enable it for people with set_contraption_person. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: {
-      type: 'object',
-      properties: { name: { type: 'string', description: 'A short slug, kept for good: lowercase letters, digits and dashes, like mandate.' }, ...CONTRAPTION_FIELDS },
-      required: ['name', 'title', 'port'],
-    },
-  },
-  {
-    name: 'update_contraption',
-    description: `Change a contraption's settings; only the fields given change, and null or "" clears an optional one. Its name stays. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { name: { type: 'string' }, ...CONTRAPTION_FIELDS }, required: ['name'] },
-  },
-  {
-    name: 'set_contraption_person',
-    description: `Enable or disable a contraption for one person, by login. Disabling takes at their next request. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: {
-      type: 'object',
-      properties: { name: { type: 'string' }, login: { type: 'string' }, enabled: { type: 'boolean' } },
-      required: ['name', 'login', 'enabled'],
-    },
-  },
-  {
-    name: 'rotate_contraption_keys',
-    description: `Replace a contraption's identity key pair and contraption key: both files in its key folder are rewritten and the old keys stop working at once, so its service must restart to read the new ones. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
-  },
-  {
-    name: 'contraption_service',
-    description: `A contraption's systemd user service, which ${APP_NAME} writes and runs itself as citadel-app-<name> (plus citadel-app-<name>-<job> for timers its citadel-app.json names). status: its state, its manifest's problems and any hand-installed unit for it. install: write its units from the manifest in its folder, reload, enable and (re)start them; refused while a hand-installed unit for it runs or is enabled, unless replace is true, which stops and disables those first (their files stay). start, stop, restart: its service (status shows its restart and stop risk first; read it before stopping or restarting; install, stop and restart first wait up to 3 minutes for its running agent turns, holding new ones). logs: the last lines of its journal. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        action: { type: 'string', enum: ['status', 'install', 'start', 'stop', 'restart', 'logs'] },
-        replace: { type: 'boolean', description: 'install only: stop and disable hand-installed units for it first.' },
-        lines: { type: 'integer', description: 'logs only: how many lines, default 100, at most 1000.' },
-        confirm: { type: 'string', description: 'stop and restart only: the contraption\'s name, required when its risk is "may lose data". Ask the person to type the name first; never fill it in yourself.' },
-      },
-      required: ['name', 'action'],
-    },
-  },
-];
-
-/** Publishing a home contraption's Android release into its feed (#663): a scheme that has home contraptions. */
-const PUBLISH_RELEASE = () => ({
-  name: 'publish_release',
-  description: `Publish a contraption's Android release, as the Deploy button on its card on the Releases page does, on the ${APP_NAME} server (so it works from a container turn too). It takes the newest signed release APK newer than the published build (from the CI store, or the run's GitHub artifact), checks it is signed with the same key as the published APK (refused if not: phones won't update across keys), copies it into the contraption's android/ feed and points latest.json at it, so installed phones see the update. With no such APK yet but a version bumped on main, it starts the release workflow instead; call it again once that run has signed. Who published which build from which run is kept and told to the scheme's Taskmaster.${C().HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${C().HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      contraption: { type: 'string', ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
-    },
-    required: ['contraption'],
-  },
-});
-
-/** A Taskmaster's reorder of its scheme's ship line (#1358; src/ship-line.ts): the Releases page's drag, with a reason. */
-const ORDER_SHIP_LINE = {
-  name: 'order_ship_line',
-  description: `Move one waiting ship in this scheme's ship line (the changes waiting to ship, as the Releases page shows them), to the front or ahead of another waiting ship, as dragging it on the Releases page does. Your reason shows on that page and in the line's history, so give one. It is refused for a ship a person placed (it stays where they put it until it ships), for a move that would pass such a ship, for one whose land script is too old to be moved, and for any ship not waiting in this scheme's line. The ship holding the lock keeps it. Only a Taskmaster calls it.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      ship: { type: 'integer', description: 'The minion number of the waiting ship to move.' },
-      before: { type: 'integer', description: 'The minion number of the waiting ship it should go just ahead of; leave out to put it first among the waiting ships.' },
-      reason: { type: 'string', description: `One line on why it goes there, at most 200 characters.` },
-    },
-    required: ['ship', 'reason'],
-  },
-};
-
-/** A Taskmaster marks a minion of its scheme Urgent (#1888, src/urgent.ts), with a reason. */
-const MARK_URGENT = {
-  name: 'mark_urgent',
-  description:
-    "Mark one minion of this scheme Urgent: when it wants a worker it goes ahead of everyone's share, after the minions already Urgent (or, with before or first, where you place it), until it ships or closes or someone takes it off. on: false takes off your own or the server's mark. Your reason shows beside it. It never overrides a person: a minion a person marked, or took Urgent off, stays as they left it. It never goes ahead of a minion a person marked or placed, and a move is refused saying so. It doesn't move the minion's ship (order_ship_line does).",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      minion: { type: 'integer', description: 'The minion number.' },
-      on: { type: 'boolean', description: 'false takes Urgent off; default true.' },
-      reason: { type: 'string', description: 'One line on why, at most 200 characters; needed to mark one.' },
-      before: { type: 'integer', description: 'The number of a minion of this scheme in the Urgent group to go just ahead of; leave out to go at the end (a minion already Urgent stays where it is).' },
-      first: { type: 'boolean', description: "true: go first among the ones you may pass, right behind the last minion a person marked or placed. The way to jump ahead of other schemes' minions. Not with before." },
-    },
-    required: ['minion'],
-  },
-};
-
-/** A desktop app's build, published to its update feed on Citadel (#1148, src/desktop-feed.ts). */
-const PUBLISH_DESKTOP = {
-  name: 'publish_desktop',
-  description: `Publish a Windows desktop app's build to its update feed on the ${APP_NAME} server, for apps run by the kit's desktop launcher (the citadel:desktop-app skill). Give the build as path (a .zip, .tar.gz or .tgz of the app's folder that you made) or ci_file (a file id in this scheme's CI store; ci_files lists them). It gets the next build number; PCs running the app download it in the background, check its SHA-256 and switch on the start after next, keeping the old build if the new one doesn't start. A ci target with "desktop" in citadel-app.json publishes its green runs by itself; this is for builds made elsewhere and for a first build. The reply has the feed's URL and the first-install zip's.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      app: { type: 'string', description: 'The app\'s name: lower case letters, digits and dashes ("peek"). Its install folder and launcher are named after it.' },
-      path: { type: 'string', description: 'The build you made, as you would link it.' },
-      ci_file: { type: 'integer', description: 'Or a file in the CI store, by id.' },
-      exe: { type: 'string', description: 'The exe to start, inside the build ("App.exe", "bin/App.exe"); found when the build has one .exe at its top.' },
-      started: { type: 'string', enum: ['file', 'alive'], description: 'How the launcher knows the build started: "file" (default) when the app writes the file named by CITADEL_STARTED_FILE once its window is up; "alive" when it is still running 30 seconds later.' },
-      title: { type: 'string', description: "Its name on the PC, for the launcher's messages." },
-      version: { type: 'string', description: 'What the scheme calls this build ("1.4.2").' },
-    },
-    required: ['app'],
-  },
-};
-
-/** A home contraption's Android release key, made on the server once a member approves (#837). */
-const MAKE_RELEASE_KEY = () => ({
-  name: 'make_release_key',
-  description: `Ask for a contraption's Android release key: posts a card in this chat that any member of this scheme approves, which makes the key on the ${APP_NAME} server (a keystore and a random password in ~/.config/citadel-android, readable only by ${APP_NAME}) and starts its first APK build. Call it when you're told a Capacitor app has no release key yet. Neither the key nor its password ever comes back to you or goes in a chat or a repo. A key is never replaced, so it is refused for an app that has one. Members can also press Make release key on the app's card on the Releases page. Link every mention of the card, as with propose_plan.${C().HOME_CONTRAPTIONS.length ? ` This scheme's contraptions: ${C().HOME_CONTRAPTIONS.join(', ')}.` : ''}`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      contraption: { type: 'string', ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
-    },
-    required: ['contraption'],
-  },
-});
-
-/** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
-const DEPLOY_CONTRAPTION = () => ({
-  name: 'deploy_contraption',
-  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: its folder is a link to one of two checkouts beside it, and a deploy fetches the branch into the other one (refused if either has local changes, or the live one has commits the branch doesn't), runs the build steps in its citadel-app.json there (niced, with a time limit) while the old build keeps running, then points the folder at it, rewrites its units and restarts it, and checks its health. A failed build changes nothing and restarts nothing. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If the new build doesn't come up healthy, it points back at the old checkout and restarts that, with no rebuild. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Once deployed it checks the app has a rail icon (filling an empty one from its web manifest) and installs as its own app, and lists what's missing first as To do: a deploy never fails on those, but they are work to finish. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${C().HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${C().HOME_CONTRAPTIONS.join(', ')}. A land handed off with hand_off_land deploys them already: call this only to redeploy outside a land.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', ...(C().HOME_CONTRAPTIONS.length && !C().APP_INSTRUCTIONS ? { enum: C().HOME_CONTRAPTIONS } : {}) },
-      follow: { type: 'boolean', description: 'true: start nothing, just wait for the deploy already running (after this tool said it was still running).' },
-    },
-    required: ['name'],
-  },
-});
-
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
 /** The fields of a review entry the Taskmaster sets besides its text: only those passed, so a save never blanks the rest (the store checks them). */
@@ -1388,61 +764,6 @@ const RECORD_VERDICT = {
   },
 };
 
-const MANDATE_ITEM = {
-  name: 'mandate_item',
-  description: `Put an item in Mandate (the to-do app) for the person whose own message this turn answers, or clear one. Only that person: a put is refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for someone not on this scheme or without Mandate. It shows on their Today with this scheme's name and links back to this chat. Put the same key again to update it. Clear it as soon as its cause is gone (done, landed, fixed, no longer needed), on whichever turn finds that out: clearing an item this chat put works on any turn, and one left open keeps nagging them. alert: true rings like an alarm on their phone, so use it only for a real problem that needs them now, never for good news or an FYI (a green build, a land, a deploy). When they tick, untick, delete or restore it, a "[Mandate]: …" message arrives in this chat. Returns Mandate's answer: 200 { key, state, mine } (state open, ticked, deleted, cleared or none; mine lists fields they edited, which your puts no longer change), or 400 bad_request, 403 off (they switched this scheme's items off) or 429 limit.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      key: { type: 'string', description: 'Your name for the item, unique in this chat: letters, digits and . _ : - (e.g. pr-13). The same key updates the same item.' },
-      title: { type: 'string', description: 'What to do, 1 to 500 characters. Required unless clear.' },
-      day: { type: ['string', 'null'], description: 'YYYY-MM-DD in their time zone; leave out for Anytime.' },
-      time: { type: ['string', 'null'], description: 'HH:MM, only with day; they get a push an hour before.' },
-      at: { type: ['string', 'null'], description: 'Instead of day and time: an ISO 8601 instant with offset.' },
-      alert: { type: 'boolean', description: 'true: it matters now. Shows first on Today and pushes to their phone at once. No day, time or at.' },
-      clear: { type: 'boolean', description: 'true: remove the item from Mandate (the key is freed). Everything but key is ignored.' },
-    },
-    required: ['key'],
-  },
-};
-
-/** Reading the asking person's data in a contraption (#295): every minion and Taskmaster; the server checks whom for. */
-const CONTRAPTION_READ = {
-  name: 'contraption_read',
-  description: `Read the data of the person whose own message this turn answers in one of their ${APP_NAME} apps (contraptions such as mandate), as them, read-only. Use it when they ask about their own data in an app. Without command it lists the app's read commands (name, description, input schema); with command it runs one with args and returns its JSON. Refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for an app they haven't enabled. Answers past 64 KB are cut.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      app: { type: 'string', description: "The contraption's name, like mandate." },
-      command: { type: 'string', description: 'A read command the app lists. Leave out to list them.' },
-      args: { type: 'object', description: "The command's input, matching its input schema." },
-    },
-    required: ['app'],
-  },
-};
-
-/** The scheme's contraption turn audit (#844), for its Taskmaster: what each app's model calls were sent and answered. */
-const CONTRAPTION_TURNS = () => ({
-  name: 'contraption_turns',
-  description: `Read this scheme's contraption turn audit: every model call its apps (${C().HOME_CONTRAPTIONS.join(', ')}) made in the last 14 days, newest first, with whom it was for, the model, whether it ran blind, the system text, prompt and output, and the app's verdict (passed, or fell back to its rule text, with its reason). Use it to check an app's prompts and replies, or why it fell back. Without turn it lists up to 30 turns with each text cut short; with turn it returns that one whole. The payloads hold players' own words: read them here, and never copy them into a file, a commit, a handoff or another scheme.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      app: { type: 'string', description: "Only this app's turns.", ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
-      before: { type: 'integer', description: 'Turns older than this turn id: the next page.' },
-      turn: { type: 'integer', description: 'One turn by id, with its texts whole.' },
-    },
-  },
-});
-const AUDIT_CUT = 400;
-function turnText(t: AuditTurn, whole: boolean): string {
-  const at = pacificStamp(t.at);
-  const verdict = t.verdict === 'pass' ? 'passed' : t.verdict === 'fallback' ? 'fell back' : 'no verdict';
-  const head = [`Turn ${t.id}`, t.contraption, `for ${t.person ?? 'someone removed'}`, at, t.model, t.blind && 'blind', t.outcome && t.outcome !== 'end' && t.outcome, verdict + (t.verdict_reason ? `: ${t.verdict_reason}` : '')];
-  const text = (label: string, v: string) => `${label}: ${whole || v.length <= AUDIT_CUT ? v : `${v.slice(0, AUDIT_CUT)}… (${v.length} characters: turn ${t.id} for all)`}`;
-  return [head.filter(Boolean).join(' · '), ...(whole ? [text('System', t.system)] : []), text('Prompt', t.prompt), text('Output', t.output), ...(t.images ? [`${t.images} image(s) sent, not kept`] : [])].join('\n');
-}
-
 const SEARCH_MEMORY = {
   name: 'search_memory',
   description:
@@ -1515,44 +836,8 @@ async function openTwins(title: string, message: string): Promise<{ number: numb
   return (hits ?? []).filter((h) => h.twin);
 }
 
-/** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
-const RETRY_MS = 120_000;
-
-async function call<T = Record<string, unknown>>(method: string, path: string, body?: object): Promise<T> {
-  const started = Date.now();
-  let res!: Response;
-  for (let wait = 500; ; wait = Math.min(wait * 2, 5000)) {
-    // A refused connection never reached the app, so any call is safe to send again; one cut off
-    // mid-way, or answered by the proxy, may have run, so only reads are.
-    let retry = false;
-    try {
-      res = await fetch(C().API + path, {
-        method,
-        headers: { Authorization: `Bearer ${C().TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      retry = method === 'GET' && (res.status === 502 || res.status === 503);
-    } catch (err) {
-      if (!((thrown(err).cause as { code?: string } | undefined)?.code === 'ECONNREFUSED' || method === 'GET') || Date.now() - started > RETRY_MS) throw err;
-      retry = true;
-    }
-    if (!retry || Date.now() - started > RETRY_MS) break;
-    await sleep(wait);
-  }
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data as T;
-}
-
 function clip(s: string): string {
   return s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)} … [${s.length - MAX_TEXT} more chars]` : s;
-}
-
-/** Properties as people read them: always `key: value`, since one word can be a value of two keys. */
-function propertyText(props: Record<string, unknown> | undefined): string {
-  return Object.entries(props ?? {})
-    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
-    .join('; ');
 }
 
 function registryText(keys: PropertyKey[]): string {
@@ -1583,7 +868,7 @@ function ticketLine(t: TicketView): string {
     t.effort ? `effort: ${t.effort}` : '',
     t.workflow ? 'workflow: on' : '',
     t.plugin_dirs ? `plugins: ${t.plugin_dirs.split('\n').join(', ')}` : '',
-    `status: ${t.worker_wait ? workerWaitText(t.worker_wait) : t.status}${t.state ? `, ${stateWord(t.state)}` : ''}${t.asleep ? `, asleep (${t.asleep.by} put it to sleep; any message wakes it)` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
+    `status: ${t.worker_wait ? workerWaitText(t.worker_wait) : t.status}${t.server_work?.kind === 'job' ? ` (${t.server_work.text}; its end wakes it)` : ''}${t.state ? `, ${stateWord(t.state)}` : ''}${t.asleep ? `, asleep (${t.asleep.by} put it to sleep; any message wakes it)` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     t.worktree ? `worktree: ${t.worktree}` : '',
@@ -1634,16 +919,6 @@ function transcript(events: StoredEvent[]): string[] {
   return out;
 }
 
-/** Tickets are numbered per project; the API addresses them by their global id. */
-async function id(args: Record<string, unknown>, scheme = C().PROJECT): Promise<number> {
-  const n = Number(args.ticket_id);
-  if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-  const { tickets } = await call<{ tickets: TicketView[] }>('GET', `/api/projects/${scheme}?number=${n}`); // one minion's view, not the whole scheme's (#609)
-  const ticket = tickets.find((t) => t.number === n);
-  if (!ticket) throw new Error(`There is no minion #${n} in ${scheme === C().PROJECT ? 'this' : 'that'} scheme`);
-  return ticket.id;
-}
-
 /** The scheme list_tickets or read_ticket reads: this one, or for the Citadel scheme's Taskmaster another (#656). */
 function schemeOf(args: Record<string, unknown>): number {
   if (args.scheme == null) return C().PROJECT;
@@ -1661,63 +936,6 @@ function labelFields(args: Record<string, unknown>) {
   for (const k of ['title', 'state', 'note', 'replies', 'build', 'start_after']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
-
-/** land.sh's forms, for the land and hand_off_land tools (landArgs in src/land.ts checks them). */
-const LAND_PROPS = {
-  into: { type: 'string', pattern: '^build/[1-9][0-9]{0,5}$', description: "A feeder's or the build minion's merge into build/<n>, with files or full" },
-  files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files to run (none: docs only)' },
-  full: { type: 'boolean', description: 'With into: the build minion takes main in; the whole suite runs' },
-  build: { type: 'boolean', description: 'The build minion shipping its build to main, alone' },
-  fix: { type: 'boolean', description: 'Only for the fix or revert of a rolled-back deploy that land.sh refused for' },
-  outage: { type: 'boolean', description: 'A fix for shipping or an outage that is broken right now: its restart skips the wait for a starved box (nothing else)' },
-};
-
-const MARK_IMAGE = {
-  name: 'mark_image',
-  description:
-    'Point at parts of a picture (#960): boxes, arrows, numbered pins and short labels drawn over it in the chat, which people can hide, and edit or add to before replying. Returns a markdown image line: put it in your reply as it is. Use it when someone asks where something is on a screenshot or your answer points at part of one, instead of describing where.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      image: { type: 'string', description: "The picture: a pasted one's path from the turn's picture line, or a PNG, JPEG, GIF or WebP in your working directory, files folder or shared folder" },
-      alt: { type: 'string', description: 'Optional: a few words on what it shows' },
-      marks: {
-        type: 'array',
-        maxItems: 20,
-        description: 'Coordinates are percent of the picture from its top left: [0, 0] top left, [100, 100] bottom right',
-        items: {
-          type: 'object',
-          properties: {
-            kind: { type: 'string', enum: ['box', 'arrow', 'pin', 'label'] },
-            at: { type: 'array', items: { type: 'number' }, description: "[x, y]: a box's corner, an arrow's tail, a pin's or label's centre" },
-            to: { type: 'array', items: { type: 'number' }, description: "Box and arrow: [x, y] of the box's opposite corner or the arrow's tip" },
-            n: { type: 'integer', description: 'Pin: its number, by default 1, 2, 3 in order' },
-            text: { type: 'string', maxLength: 40, description: 'Label: its words' },
-            colour: { type: 'string', enum: ['red', 'yellow'], description: 'Optional, default red' },
-          },
-          required: ['kind', 'at'],
-        },
-      },
-    },
-    required: ['image', 'marks'],
-  },
-};
-
-/** The scheme's ship lessons queue (#1119): both roles read it, the weekly Ship lessons run and a Taskmaster mark lines taken. */
-const SHIP_LESSONS = {
-  name: 'ship_lessons',
-  description:
-    "Read this scheme's ship lessons queue: the up-to-three lines each minion wrote at ship about what its brief or the docs didn't tell it, with its #N and the files it touched, newest first, plus how many ships wrote lines this week. Lines a proposal already took are left out unless taken is true. To mark lines handled (turned into a proposed edit, or dropped), pass take with their ids and note saying what became of them: taken lines stop coming back. The weekly Ship lessons schedule reads it; so can a Taskmaster or the memory curator.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      days: { type: 'integer', minimum: 1, maximum: 365, description: 'How far back to read, in days (default 60)' },
-      taken: { type: 'boolean', description: 'true: include lines already taken, with what became of them' },
-      take: { type: 'array', items: { type: 'integer' }, maxItems: 200, description: 'Lesson ids to mark taken' },
-      note: { type: 'string', maxLength: 300, description: 'With take: what became of them, e.g. "proposed: handoffs/handoff-x.md" or "dropped: one-off"' },
-    },
-  },
-};
 
 /** A minion's fresh_session (the seam trial's fresh group, #1129): the same route as a Taskmaster's, and it carries on by itself. */
 const SEAM_FRESH = {
@@ -1869,93 +1087,14 @@ const THREAD_TOOLS = () => [
       required: ['ticket_id'],
     },
   },
-  {
-    name: 'relay_when_live',
-    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: landed). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster sees it now: it gets the full text as held mail at once, and a one-line note when it goes out. To send one note to several, pass \`to\` as a list rather than calling once each. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        to: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' }, maxItems: 20 }], description: "Another scheme's name, or #N for a minion of this scheme; a list (at most 20) sends the same note to each in one call, and your Taskmaster gets one note for all of them" },
-        text: { type: 'string', maxLength: 10000, description: 'The note, self-contained (at most 10,000 characters)' },
-        commit: { type: 'string', description: "Optional: the commit to wait for (a hash); your branch's head if left out" },
-        cancel: { type: 'number', description: 'Drop your pending relay with this id instead' },
-      },
-    },
-  },
-  {
-    name: 'wake_when_live',
-    description: `Waiting on another minion's change to be deployed? Call this with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. ${WAKE_DESCRIPTION.replace('the minion', 'this minion')}`,
-    inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
-  },
-  {
-    name: 'wake_when_runners_back',
-    description: `Seal until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state sealed and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci, <scheme-slug>-ci-linux or <scheme-slug>-desktop is online, so you can run land again. If it can't read the runners with the scheme's GitHub login, it says so at its next check instead. Woken once, then forgotten; a second call replaces the first.`,
-    inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
-  },
-  {
-    name: 'report_spend',
-    description:
-      "Book what you spent on an outside API (Azure Speech, ElevenLabs, a paid data feed: not OpenRouter media or Claude, which Citadel already counts) to this scheme's month (#839). Call it right after the paid call, with the cost you worked out from the service's price list. The scheme's monthly bill shows it per service beside Claude usage, and the scheme's cap, if it has one, warns its members when crossed; nothing stops.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        service: { type: 'string', maxLength: 64, description: 'The service, lowercase and stable, like azure-speech' },
-        usd: { type: 'number', exclusiveMinimum: 0, description: 'What it cost, in US dollars' },
-        units: { type: 'number', minimum: 0, description: 'Optional: how much you used (characters, requests), for the record' },
-        note: { type: 'string', maxLength: 500, description: 'Optional: what it was for' },
-      },
-      required: ['service', 'usd'],
-    },
-  },
-  {
-    name: 'log_learned',
-    description:
-      'For a ship that does not go through hand_off_land (a pull request): right before you open it, log in at most three lines what you had to find out that your brief or the docs did not tell you, and which tool, rule or skill got in your way (a refusal, a wrong instruction, a slow or broken step), one per line; "nothing" is a fine answer. It goes in the scheme\'s ship lessons queue with your #N and the files your branch touched, for the weekly pass that turns repeats into proposed doc, skill or brief edits. A second call within a few hours replaces the first. hand_off_land takes the same lines as learned, so never call this as well.',
-    inputSchema: { type: 'object', properties: { learned: { type: 'string', maxLength: 1000, description: 'Up to three lines, or "nothing"' } }, required: ['learned'] },
-  },
-  {
-    name: 'hand_off_land',
-    // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
-    description:
-      // Its other rules are in its refusals (uncommitted work, a conflict, a missing go) and its result (#1575).
-      'Ship: the server runs tools/land.sh in your worktree (a public/ diff needs the ui-screenshots critic run first, self-review 3).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        summary: { type: 'string', maxLength: 300, description: 'What ships, in one line' },
-        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or docs missed or fought you; "nothing" is fine. Never holds the ship' },
-        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out (no review gives one), it ships as high and needs go" },
-        risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus what you chose not to fix' },
-        go: { type: 'string', maxLength: 200, description: 'At or above your go threshold, or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
-        fix_proof: { type: 'object', description: "A proven bug fix's proof, instead of go: {test, red_on, red_output, review} (self-review)" },
-        stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for you: it ships, you stay open in state ready' },
-        waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing on her phone"); woken once live, do them and set your state' },
-        probe: { type: 'object', description: 'Live check, for 600+ line ships (self-review)' },
-        ...LAND_PROPS,
-        ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
-      },
-      required: ['summary'],
-    },
-  },
-  ...(C().IN_CONTAINER
-    ? [
-        {
-          name: 'land',
-          description: `Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't. To land and end your turn, use hand_off_land; this one is for when you need land.sh's output in this turn. Commit everything first. ${C().DEPLOYS ? 'It rebases onto main, runs the tests, fast-forwards main and deploys' : "It lands the branch as the scheme's land.sh does"}, and returns land.sh's output once it ends, which can take several minutes, and longer when other landings are in line ahead of it (its output says the place). With no arguments it is a plain \`tools/land.sh\`. A build's minions pass its forms: \`tools/land.sh --into build/<n> <test files>\` is { into: "build/<n>", files: [...] }, \`tools/land.sh --into build/<n> --full\` is { into: "build/<n>", full: true }, and \`tools/land.sh --build\` is { build: true }. A call made while your last landing still runs waits on that one, whatever its arguments.`,
-          inputSchema: { type: 'object', properties: LAND_PROPS },
-        },
-      ]
-    : []),
-  ...(C().DEPLOYS
-    ? [
-        {
-          name: 'start_preview',
-          description:
-            "Start (or restart) a preview of this minion's worktree for people to try before it ships: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
-          inputSchema: { type: 'object', properties: {} },
-        },
-      ]
-    : []),
+  RELAY_WHEN_LIVE,
+  MINION_WAKE_WHEN_LIVE,
+  WAKE_WHEN_RUNNERS_BACK,
+  REPORT_SPEND,
+  LOG_LEARNED,
+  HAND_OFF_LAND(),
+  ...(C().IN_CONTAINER ? [LAND()] : []),
+  ...(C().DEPLOYS ? [START_PREVIEW] : []),
   {
     name: 'close_self',
     description:
@@ -1968,48 +1107,6 @@ const THREAD_TOOLS = () => [
   },
   ...ARTIFACT_TOOLS,
 ];
-
-// Claude Code's permission-prompt tool (--permission-prompt-tool): not one for Claude to call itself.
-const APPROVE = {
-  name: 'approve',
-  description: 'Used by Claude Code itself to ask people in the chat to approve a tool call. Do not call it yourself.',
-  inputSchema: {
-    type: 'object',
-    properties: { tool_name: { type: 'string' }, input: { type: 'object' }, tool_use_id: { type: 'string' } },
-    required: ['tool_name', 'input'],
-  },
-};
-
-/**
- * Post an Approve / Deny card for a tool call and wait, however long it takes, for a person to
- * click. Answers in the shape Claude Code expects from a permission-prompt tool. Anything other
- * than a person's Approve, including errors and expired cards, denies.
- */
-async function approve(args: Record<string, unknown>): Promise<string> {
-  let decision: { state: string; by?: string; reason?: string } | undefined;
-  try {
-    const { id, refused } = await call<{ id: string; refused?: string }>('POST', `/api/tickets/${C().TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {}, tool_use_id: args.tool_use_id });
-    if (refused) return JSON.stringify({ behavior: 'deny', message: refused });
-    // Each request waits up to half a minute on the server; keep asking until the card is settled.
-    for (let failures = 0; !decision || decision.state === 'pending'; ) {
-      try {
-        decision = await call<{ state: string; by?: string; reason?: string }>('GET', `/api/tickets/${C().TICKET}/approvals?id=${encodeURIComponent(id)}`);
-        failures = 0;
-      } catch (err) {
-        if (++failures >= 5) throw err;
-        await sleep(2000);
-      }
-    }
-  } catch (err) {
-    decision = { state: 'expired', reason: `The approval card failed: ${thrown(err).message}` };
-  }
-  if (decision!.state === 'allowed') return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} });
-  const message =
-    decision!.state === 'denied'
-      ? `${decision!.by} denied this in the chat. It was not run. Do not retry it or work around it; say what you needed it for, carry on with anything that does not need it, and hand the commands it needed to a person in your reply.`
-      : `Nobody approved this, so it was not run (${decision!.reason ?? 'the card expired'}).`;
-  return JSON.stringify({ behavior: 'deny', message });
-}
 
 /**
  * The overlap check a person's Settings save gets (#1162), before the Taskmaster saves rule text (#1211): refused with
@@ -2063,10 +1160,8 @@ function sharedFilesExist(text: unknown, then: string): void {
   }
 }
 
-/** A set/update tool that was given nothing to set did nothing; say so rather than "Updated". */
-function needOne(args: Record<string, unknown>, fields: string[], tool: string): void {
-  if (!fields.some((k) => args[k] !== undefined)) throw new Error(`${tool}: pass at least one of ${fields.join(', ')}. Nothing was changed.`);
-}
+/** Each family's handlers; a family answers NOT_HERE for another family's tool. */
+const FAMILIES = [runAppsTool, runShipTool, runCardsTool];
 
 async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
   // Each role may only call its own tools.
@@ -2220,8 +1315,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       const n = (text: string) => (text ? text.split('\n').length : 0);
       return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, shipping ${project.ship_path} with a go from ${project.go_from} and try first ${project.try_first}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
-    case 'approve':
-      return approve(args);
     case 'get_app_instructions': {
       const app = await call<{ text: string; by?: string }>('GET', '/api/app/instructions');
       if (!app.text) return `The ${APP_NAME}-wide instructions are empty.`;
@@ -2231,38 +1324,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       const unchecked = await repeatsFirst('citadel', args);
       const app = await call<{ text: string }>('PUT', '/api/app/instructions', { text: wholeText(args) });
       return (app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`) + unchecked;
-    }
-    case 'list_contraptions': {
-      const all = await call<ContraptionInfo[]>('GET', '/api/contraptions');
-      return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
-    }
-    case 'make_app': {
-      const m = await call('POST', `/api/projects/${C().PROJECT}/apps`, { name: args.name, title: args.title, idea: args.idea });
-      return `Made ${m.name}: #${m.minion} ships it and builds the idea (its branch already holds the app, ${m.files} files${m.workflow ? ', its CI workflow included' : ', no CI workflow: this scheme has no runner'}). It is registered on port ${m.port}, deploys from apps/${m.name}/, and is on for this scheme's members. Name the minion as #${m.minion} in your reply.`;
-    }
-    case 'adopt_app': {
-      const a = await call<{ name: string; port: number; subdir?: string; icon?: string; deployError?: string }>('POST', `/api/projects/${C().PROJECT}/apps/adopt`, { name: args.name, title: args.title, folder: args.folder ?? '', repo: args.repo });
-      const head = `Adopted ${a.name}: registered on port ${a.port}, deployed from ${a.subdir ?? 'the repo root'}, icon ${a.icon || 'left empty for the deploy to fill'}, on for this scheme's members.`;
-      if (a.deployError) return `${head}\nIt did not deploy: ${a.deployError}\nIt stays registered: call deploy_contraption for ${a.name} to try again.`;
-      return `${head}\n${await followDeploy(`/api/contraptions/${encodeURIComponent(a.name)}/deploy`)}`;
-    }
-    case 'set_app_person': {
-      if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
-      const r = await call<{ name: string; people: string[] }>('PUT', `/api/projects/${C().PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
-      return `${args.enabled ? 'On' : 'Off'} for ${args.login}. ${r.name} is on for: ${r.people.join(', ') || 'no one'}.`;
-    }
-    case 'register_contraption': {
-      const c = await call<ContraptionInfo>('POST', '/api/contraptions', args);
-      return `Registered. Its service reads its keys from the key folder.${c.icon ? '' : `\n${NO_ICON}`}\n${contraptionText(c)}`;
-    }
-    case 'update_contraption': {
-      const { name, ...fields } = args;
-      return `Saved.\n${contraptionText(await call<ContraptionInfo>('PATCH', contraptionPath(args), fields))}`;
-    }
-    case 'set_contraption_person': {
-      if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
-      const c = await call<ContraptionInfo>('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
-      return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
     }
     case 'review_set': {
       if (args.add) {
@@ -2312,18 +1373,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       const v = await call('POST', `/api/projects/${C().PROJECT}/reviews/${encodeURIComponent(String(args.slug))}/verdicts`, { person: args.person, words: args.words });
       return `Recorded on ${args.slug}: ${v.person}, "${v.words}". Its later runs read it.`;
     }
-    case 'mandate_item': {
-      if (typeof args.key !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(args.key)) throw new Error('key is required: letters, digits and . _ : - only, like pr-13');
-      const path = `/api/mandate/items/${args.key}`;
-      if (args.clear !== true && (typeof args.title !== 'string' || !args.title.trim())) throw new Error('title is required (or clear: true)');
-      const { key, clear, ...fields } = args;
-      const r = await call(clear === true ? 'DELETE' : 'PUT', path, clear === true ? undefined : fields);
-      return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
-    }
-    case 'mark_image': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/mark-image`, args);
-      return `Put this line in your reply as it is; the chat draws the marks over the picture (${r.w}x${r.h}):\n${r.markdown}`;
-    }
     case 'generate_image':
     case 'edit_image':
     case 'generate_audio':
@@ -2338,36 +1387,8 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
     case 'generate_image_codex':
       if (!C().CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
       return codexImage(args, callEnv(), callCwd());
-    case 'ship_risk':
-      return (await call<{ text: string }>('GET', `/api/tickets/${C().TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
     case 'usage_split':
       return usageSplitText(await call<Parameters<typeof usageSplitText>[0]>('GET', '/api/costs/mine'));
-    case 'log_learned': {
-      const r = await call<{ lines?: string; id: number; files: number }>('POST', `/api/tickets/${C().TICKET}/learned`, { learned: args.learned });
-      return r.lines ? `Logged ${r.lines.split('\n').length} line${r.lines.includes('\n') ? 's' : ''} (lesson #${r.id}, ${r.files} file${r.files === 1 ? '' : 's'} touched) in the scheme's ship lessons queue.` : `Logged "nothing" (lesson #${r.id}): it still counts as this ship's answer.`;
-    }
-    case 'ship_lessons': {
-      if (args.take !== undefined) {
-        if (typeof args.note !== 'string' || !args.note.trim()) throw new Error('take goes with note: what became of these lines');
-        const { taken } = await call<{ taken: number[] }>('POST', `/api/projects/${C().PROJECT}/ship-lessons/take`, { ids: args.take, note: args.note });
-        return `Marked ${taken.length} taken${taken.length ? `: #${taken.join(', #')}` : ''}${taken.length < (args.take as unknown[]).length ? " (the rest were already taken or not this scheme's)" : ''}.`;
-      }
-      const q = new URLSearchParams({ ...(args.days ? { days: String(args.days) } : {}), ...(args.taken ? { taken: '1' } : {}) });
-      const r = await call<{ week: { ships: number; withLines: number }; window: { ships: number; withLines: number }; days: number; lessons: ShipLesson[] }>('GET', `/api/projects/${C().PROJECT}/ship-lessons?${q}`);
-      const head = `This week: ${r.week.ships} ship${r.week.ships === 1 ? '' : 's'} answered, ${r.week.withLines} with lines. Last ${r.days} days: ${r.window.ships} answered, ${r.window.withLines} with lines.`;
-      const rows = r.lessons.map(
-        (l) =>
-          `lesson ${l.id} · #${l.number ?? '?'} · ${pacificDay(l.at)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines
-            .split('\n')
-            .map((x: string) => `  - ${x}`)
-            .join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`,
-      );
-      return [head, ...(rows.length ? rows : [`No ${args.taken ? '' : 'open '}lines in that window.`])].join('\n');
-    }
-    case 'report_spend': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/spend`, args);
-      return `Booked $${Number(args.usd).toFixed(4)} on ${args.service}: $${Number(r.month_usd).toFixed(2)} this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? " (over it; the scheme's members were told)" : ''}`}.`;
-    }
     case 'search_memory': {
       if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
@@ -2396,51 +1417,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       const r = await call<Parameters<typeof ideasText>[0]>('GET', `/api/projects/${C().PROJECT}/ideas?${q}`);
       return ideasText(r, Math.min(Math.max(Number(args.limit) || 30, 1), 200));
     }
-    case 'contraption_turns': {
-      const q = new URLSearchParams();
-      if (args.app) q.set('app', String(args.app));
-      // One turn: the page just above it, so its first row is the turn if it is this scheme's.
-      if (args.turn) q.set('before', String(Number(args.turn) + 1));
-      else if (args.before) q.set('before', String(Number(args.before)));
-      const r = await call<{ turns: AuditTurn[]; keep_days: number; more?: boolean }>('GET', `/api/projects/${C().PROJECT}/contraption-turns?${q}`);
-      if (args.turn) {
-        const t = r.turns[0];
-        return t?.id === Number(args.turn) ? turnText(t, true) : `No turn ${args.turn} in this scheme's audit (kept ${r.keep_days} days).`;
-      }
-      if (!r.turns.length) return `No turns in the last ${r.keep_days} days.`;
-      return r.turns.map((t) => turnText(t, false)).join('\n\n') + (r.more ? `\n\nOlder turns: before: ${r.turns.at(-1)!.id}.` : '');
-    }
-    case 'contraption_read': {
-      if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
-      const r = await call<Parameters<typeof readText>[2]>('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
-      return readText(args.app, args.command as string | undefined, r);
-    }
-    case 'make_release_key': {
-      const { href } = await call('POST', `/api/tickets/${C().TICKET}/release-key`, { contraption: args.contraption });
-      return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
-    }
-    case 'publish_desktop':
-      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
-    case 'order_ship_line':
-      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/ship-line`, { ship: args.ship, before: args.before, reason: args.reason })).said;
-    case 'mark_urgent':
-      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/urgent`, { minion: args.minion, on: args.on, reason: args.reason, before: args.before, first: args.first })).said;
-    case 'publish_release':
-      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
-    case 'deploy_contraption': {
-      const path = `${contraptionPath(args)}/deploy`;
-      if (args.follow !== true) await call('POST', path, {});
-      return followDeploy(path);
-    }
-    case 'contraption_service': {
-      const path = `${contraptionPath(args)}/service`;
-      if (args.action === 'status') return serviceText(await call<ServiceInfo>('GET', path));
-      if (args.action === 'logs') return (await call<{ log: string }>('GET', `${path}/logs?lines=${Number(args.lines) || 100}`)).log || 'No journal lines.';
-      const r = await call<{ said: string[]; status: ServiceInfo }>('POST', path, { action: args.action, replace: args.replace === true, ...(args.confirm ? { confirm: args.confirm } : {}) });
-      return `${r.said.join('\n')}\n${serviceText(r.status)}`;
-    }
-    case 'rotate_contraption_keys':
-      return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
       const unchecked = await repeatsFirst('scheme', args);
       const project = await call<{ instructions: string }>('PATCH', `/api/projects/${C().PROJECT}`, { instructions: wholeText(args) });
@@ -2478,69 +1454,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
     case 'update_ticket':
       needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders', 'start_after'], 'update_ticket');
       return `Updated. ${ticketLine(await call<TicketView>('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
-    case 'ask_question': {
-      const direct = args.to ? { to: args.to } : {};
-      if (args.doc != null && args.questions == null) {
-        const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
-        const { id: questionId, href, armed } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { doc: args.doc, ...direct, ...ci });
-        if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
-        return `The choices card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; it opens the page. Its link is ${href}: link every mention of it, in this reply and later ones, e.g. [the card below](${href}), and link the card rather than the page when you point people at the choices. End your turn now with a short reply; the picks will come as a message from whoever presses Send on the page.`;
-      }
-      if (args.secret != null && args.questions == null) {
-        const { id: questionId, href } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { secret: args.secret, ...direct });
-        return `The secret card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; its link is ${href}: link every mention of it, e.g. [the card below](${href}). End your turn now with a short reply. Once someone saves it, you get a message with the name it was saved as (never the value), and your next turn has it in $CITADEL_SECRET_<NAME>: use it in commands without ever printing it.`;
-      }
-      if (args.to && args.questions == null) {
-        const { href, armed } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { ...direct, notice: args.notice, ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
-        if (armed) return `${armed} Nothing comes back from it, so keep working.`;
-        return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
-      }
-      // A choices page or a secret card asks on its own: questions beside it would post a plain card and drop the page or field.
-      if (args.questions != null && args.doc != null) throw new Error('Pass doc or questions, not both: a choices page (citadel:docs-and-mocks) asks on its own page, and its Send settles the card. Call again with doc alone, or questions alone.');
-      if (args.questions != null && args.secret != null) throw new Error('Pass secret or questions, not both: a secret card is one masked field for a password, API key or token. Call again with secret alone; you get only the name it was saved as.');
-      if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice), ask on a choices page (doc) or ask for a secret (secret)');
-      const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
-      const everyone = args.for_everyone === true ? { for_everyone: true } : {};
-      const {
-        id: questionId,
-        href,
-        armed,
-        merged,
-      } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.not_duplicate === true ? { not_duplicate: true } : {}), ...(args.kind ? { kind: args.kind } : {}), ...(args.hand_off !== undefined ? { hand_off: args.hand_off } : {}), ...direct, ...ci, ...everyone });
-      if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
-      if (merged)
-        return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href}), "below" this turn, "above" later). End your turn now with a short reply; the answers will come as the next message.`;
-      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn, while this one is still unanswered, joins it (up to 8 questions in all), so people see one card with one Send.'}`;
-    }
-    case 'settle_question': {
-      const { settled } = await call<{ settled: unknown[] }>('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
-      return settled.length ? `Settled ${settled.join(', ')}: shown as answered (a plan-type card as withdrawn) in the chat.` : 'No card of yours was open.';
-    }
-    case 'strike_text':
-      await call('POST', `/api/tickets/${C().TICKET}/strike`, { text: args.text, reason: args.reason });
-      return 'Struck through in the chat, with your reason in a note.';
-    case 'ci_files': {
-      const q = new URLSearchParams();
-      for (const k of ['workflow', 'kind', 'target', 'name', 'run', 'commit']) if (args[k] !== undefined && args[k] !== '') q.set(k, String(args[k]));
-      const { files, usage } = await call<{ files: CiFile[]; usage: { scheme: number } }>('GET', `/api/projects/${C().PROJECT}/ci-files?${q}`);
-      if (!files.length) return 'No file in the CI store matches.';
-      const line = (f: CiFile) =>
-        `${f.kind} ${f.name} (${f.size.toLocaleString('en')} bytes) from ${f.workflow} run ${f.run_id}${f.run_attempt > 1 ? ` attempt ${f.run_attempt}` : ''}, commit ${f.sha.slice(0, 8)}${f.target ? `, target ${f.target}` : ''}${f.published_to ? `, published to ${f.published_to}` : ''}, uploaded ${new Date(f.created_at).toISOString()}\n  path: ${f.path}\n  url: ${f.url}`;
-      if (args.latest === true) return line(files[0]);
-      return `${files.slice(0, 50).map(line).join('\n')}${files.length > 50 ? `\n… and ${files.length - 50} older` : ''}\n${(usage.scheme / 1024 ** 2).toFixed(1)} MiB in this scheme's store.`;
-    }
-    case 'ci_runners': {
-      const started = await call<CiJob>('POST', `/api/projects/${C().PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}), ...(args.host !== undefined ? { host: args.host } : {}) });
-      let job = started;
-      for (const end = Date.now() + 10 * 60_000; job.ok === null && Date.now() < end; ) {
-        const now = await call<{ job?: CiJob }>('GET', `/api/projects/${C().PROJECT}/ci-runners?wait=50`);
-        if (!now.job) return `${started.op} on ${started.machine}: ${APP_NAME} restarted while it ran, so its outcome is lost; ci_runners list shows what is on the PCs now.`;
-        job = now.job;
-      }
-      const head = `${job.op}${job.count ? ` ${job.count}` : ''}${job.os === 'linux' ? ' Linux' : ''} on ${job.machine}, asked by ${job.by}`;
-      if (job.ok === null) return `${head}: still running after 10 minutes. ${job.op === 'list' ? 'A list notes nothing; ask again later.' : "The outcome will be noted in the Taskmaster's chat; ci_runners list afterwards shows the runners."}`;
-      return `${head}: ${job.ok ? 'done' : 'FAILED'}.\n${job.text}`;
-    }
     case 'list_machines': {
       const { machines, others } = await call<{ machines: MachineInfo[]; others?: { name: string; owner_name?: string | null }[] }>('GET', `/api/projects/${C().PROJECT}/machines`);
       return [...(machines.length ? machines.map(machineText) : ['No machines this scheme can see.']), ...(others?.length ? [`Not lent here (propose_machine_lend asks for one): ${others.map((o) => (o.owner_name ? `${o.name} (${o.owner_name}'s own)` : o.name)).join(', ')}`] : [])].join('\n\n');
@@ -2589,29 +1502,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
         return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). Its id is ${r.id}: if the edit is no longer wanted (you work it in another way, or a later edit replaces it), withdraw the card with settle_question question_id ${r.id}, or a person may still save it. End your turn; the answer comes as a message.`;
       return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
     }
-    case 'propose_machine_notes': {
-      if (!C().MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(C().MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${C().MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
-      const { href, owner } = await call('POST', `/api/tickets/${C().TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
-      return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
-    }
-    case 'propose_machine_lend': {
-      const { href, owner, page } = await call('POST', `/api/tickets/${C().TICKET}/machine-lend`, args);
-      return `The lending card is in the chat; its link is ${href}. Link every mention of it, e.g. [the lending card below](${href}), and the machine itself as [${String(args.machine).toLowerCase()} on the Machines page](${page}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
-    }
-    case 'propose_host_tool': {
-      const { href } = await call('POST', `/api/tickets/${C().TICKET}/host-tool`, { source: args.source, package: args.package, version: args.version, why: args.why });
-      return `The host tool card is in the chat; its link is ${href}. Link every mention of it, e.g. [the host tool card below](${href}). Only a member of the ${APP_NAME} scheme can approve it, and the answer comes as a message, then another once it's installed. Keep working on what doesn't depend on it.`;
-    }
-    case 'propose_memory': {
-      const { href, counts } = await call('POST', `/api/tickets/${C().TICKET}/memory-proposal`, { changes: args.changes });
-      return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member approves it on the card or picks changes on the Memory page, and the answer comes as a message. End your turn now, in state ready. On an approval, call apply_memory; then, or on any other answer, report it and close yourself with close_self.`;
-    }
-    case 'apply_memory':
-      return `${(await call('POST', `/api/tickets/${C().TICKET}/memory-proposal/apply`, {})).line} Report that in a few lines, then close yourself with close_self.`;
-    case 'propose_plan': {
-      const { href } = await call('POST', `/api/tickets/${C().TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
-      return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
-    }
     case 'set_thread_status':
       needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
       {
@@ -2658,42 +1548,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       const r = await call<{ ticket: TicketView; skipped?: number; events: StoredEvent[] }>('GET', `/api/tickets/${C().TICKET}/peer?number=${n}&last=${Number(args.last) || 10}`);
       return [ticketLine(r.ticket), r.skipped ? `(${r.skipped} earlier entries omitted)` : '', ...transcript(r.events)].filter(Boolean).join('\n\n');
     }
-    case 'start_preview': {
-      const { url } = await call('POST', `/api/tickets/${C().TICKET}/preview`, {});
-      return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
-    }
-    case 'host_check': {
-      const body: Record<string, unknown> = {};
-      for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep'] as const) if (args[k] !== undefined) body[k] = args[k];
-      return (await call<{ output: string }>('POST', '/api/host-check', body)).output;
-    }
-    case 'hand_off_land': {
-      const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe'] as const) if (args[k] !== undefined) body[k] = args[k];
-      if (args.fix === true) body.fix = true;
-      if (args.outage === true) body.outage = true;
-      await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
-      return handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
-    }
-    case 'land': {
-      // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).
-      const body: Record<string, unknown> = {};
-      for (const k of ['into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
-      if (args.fix === true) body.fix = true;
-      if (args.outage === true) body.outage = true;
-      let r = await call<{ code: number | null; output?: unknown }>('POST', `/api/tickets/${C().TICKET}/land`, body);
-      while (r.code === null) {
-        await sleep(5000);
-        try {
-          r = await call<{ code: number | null; output?: unknown }>('GET', `/api/tickets/${C().TICKET}/land`);
-        } catch (err) {
-          // A landing's folder outlives restarts (src/land.ts); this is a server from before that, or one whose folder went.
-          if (!/No landing has started|Nothing has started shipping/.test(thrown(err).message!)) throw err;
-          return 'tools/land.sh ended, then Citadel restarted (most likely the deploy it ran) before its result was read, so its exit code and output are lost. Check `git log main` for your commits.';
-        }
-      }
-      return `tools/land.sh exited ${r.code}${r.code === 0 ? '' : ' (read its output: main only moved if it says so)'}.\n\n${String(r.output).slice(-12_000)}`;
-    }
     case 'plan':
       return planResult(args);
     case 'close_self': {
@@ -2708,48 +1562,6 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
         throw err;
       }
       return closeSelfResult(!!closed?.cleared);
-    }
-    case 'wake_when_live': {
-      const target = C().ROLE === 'thread' ? C().TICKET : await id(args);
-      const r = await call<{ commit?: string; waiting?: boolean; merged?: boolean; head?: unknown }>('POST', `/api/tickets/${target}/wake`, { commit: args.commit ?? null, reason: args.reason });
-      const what = r.commit ? `\`${r.commit.slice(0, 7)}\`` : 'the next deploy';
-      if (!r.waiting && r.merged) return `${what} is on the scheme's main already, so there is nothing to wait for.`;
-      if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
-      return `Waiting for ${what}: ${APP_NAME} sends ${C().ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${C().ROLE === 'thread' ? ' Set state sealed and end your turn.' : ''}`;
-    }
-    case 'relay_when_live': {
-      const r = await call<{ relays: { id: number; to: string; commit: string; text: string }[]; cancelled?: number; id?: number; queued?: boolean; ids: number[]; to?: string; commit: string }>('POST', `/api/tickets/${C().TICKET}/relay-when-live`, {
-        to: args.to ?? null,
-        text: args.text,
-        commit: args.commit ?? null,
-        cancel: args.cancel ?? null,
-      });
-      const lines = r.relays.map((o) => `#${o.id} to ${o.to}, once \`${String(o.commit).slice(0, 7)}\` is live: ${o.text.length > 120 ? o.text.slice(0, 120) + '…' : o.text}`);
-      if (r.cancelled) return `Cancelled relay #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
-      if (r.id)
-        return r.queued
-          ? `Queued as #${r.id}${r.ids?.length > 1 ? ` (relays #${r.ids.join(', #')}, one per recipient)` : ''}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.`
-          : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
-      return lines.length ? `Pending relays:\n${lines.join('\n')}` : 'No relays pending.';
-    }
-    case 'prep_ultra_reviews': {
-      const path = `/api/tickets/${C().TICKET}/ultrareview/batch`;
-      const r = Array.isArray(args.areas) && args.areas.length ? await call<UltraBatch>('POST', path, { areas: args.areas }) : await call<UltraBatch>('GET', path);
-      const rows = r.rows.map((x) => `${x.name}: ${x.state}${x.pr?.number ? `, draft PR #${x.pr.number}${x.pr.url ? ` ${x.pr.url}` : ''}` : ''} (${x.size.lines} lines, ${x.size.files} files)${x.error ? `: ${x.error}` : ''}`);
-      const refused = (r.refused ?? []).map((x) => `Refused ${x.name || `area ${x.index + 1}`}: ${x.error}`);
-      const head = r.for ? `Prepped for ${r.for}: the rows wait in this chat's Ultra review dialog for their Start; tell them so in your reply. You cannot start one.` : '';
-      return [head, ...refused, rows.length ? `Rows:\n${rows.join('\n')}` : 'No prepped ultra reviews in this chat.'].filter(Boolean).join('\n');
-    }
-    case 'wake_at': {
-      const r = await call<{ wakes: { id: number; when: string; note: string }[]; set?: { when: string }; cancelled?: number }>('POST', `/api/tickets/${C().TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
-      const lines = r.wakes.map((w) => `#${w.id} ${w.when}: ${w.note}`);
-      if (r.set) return `Wake set for ${r.set.when}: ${APP_NAME} sends you the note then.\n${lines.join('\n')}`;
-      if (r.cancelled) return `Cancelled #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
-      return lines.length ? `Pending wakes:\n${lines.join('\n')}` : 'No wakes pending.';
-    }
-    case 'wake_when_runners_back': {
-      const r = await call<{ labels?: string[]; label: string }>('POST', `/api/tickets/${C().TICKET}/wake-runners`, { reason: args.reason });
-      return `Waiting for a runner labelled ${(r.labels ?? [r.label]).join(', ').replace(/, ([^,]*)$/, ' or $1')} to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state sealed and end your turn.`;
     }
     case 'list_artifacts': {
       const [artifacts, shared] = await Promise.all([call<ArtifactRow[]>('GET', `/api/projects/${C().PROJECT}/artifacts?titles`), call<ArtifactRow[]>('GET', `/api/projects/${C().PROJECT}/shared?titles`)]);
@@ -2810,6 +1622,10 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       return [stopped ? 'Stopped.' : 'That minion was not running.', ship].filter(Boolean).join(' ');
     }
     default:
+      for (const run of FAMILIES) {
+        const answer = await run(name, args);
+        if (answer !== NOT_HERE) return answer;
+      }
       throw new Error(`Unknown tool ${name}`);
   }
 }

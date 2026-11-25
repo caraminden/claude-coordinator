@@ -47,11 +47,15 @@ tmp=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ci-download.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 # Tokens go to curl on stdin, never on a command line another job on this PC could list.
-answer=$(printf 'header = "Authorization: Bearer %s"\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" |
-  curl -sS --config - --max-time 30 --retry 2 "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store") || give_up "GitHub didn't hand out a run token"
-token=$(printf '%s' "$answer" | sed -n 's/.*"value" *: *"\([^"]*\)".*/\1/p')
-[ -n "$token" ] || give_up "GitHub didn't hand out a run token"
-echo "::add-mask::$token"
+get_token() {
+  local answer
+  answer=$(printf 'header = "Authorization: Bearer %s"\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" |
+    curl -sS --config - --max-time 30 --retry 2 "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store") || give_up "GitHub didn't hand out a run token"
+  token=$(printf '%s' "$answer" | sed -n 's/.*"value" *: *"\([^"]*\)".*/\1/p')
+  [ -n "$token" ] || give_up "GitHub didn't hand out a run token"
+  echo "::add-mask::$token"
+}
+get_token
 
 # GET the store's $1 into $2. A 503 means the store couldn't read GitHub's signing keys to check the run
 # token (it tries again within seconds): wait and ask again, as ci-upload.sh does.
@@ -63,7 +67,7 @@ fetch() {
       curl -sS --config - --max-time 1800 --connect-timeout 15 -o "$2" -w '%{http_code}' "$store$1") || rc=$?
     if [ "$rc" != 0 ]; then
       # No answer at all (refused, reset, empty reply, connect timeout) is the store restarting: tried again like a 503.
-      case $rc in 6|7|28|35|52|55|56) [ "$try" != 6 ] || give_up "the store at $store didn't answer"; sleep "${CI_DOWNLOAD_WAIT:-30}"; continue ;; esac
+      case $rc in 6|7|18|28|35|52|55|56) [ "$try" != 6 ] || give_up "the store at $store didn't answer"; sleep "${CI_DOWNLOAD_WAIT:-30}"; get_token; continue ;; esac
       give_up "the store at $store didn't answer"
     fi
     [ "$code" = 503 ] && [ "$try" != 6 ] || break

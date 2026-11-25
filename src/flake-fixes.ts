@@ -57,7 +57,6 @@ export interface FlakeFixDeps {
 
 export class FlakeFixes {
   private busy = false;
-  private fronted = new Set<string>(); // broken(): "<minion> <file> <line time>" already moved, or tried (#1487)
   private d: FlakeFixDeps;
   constructor(d: FlakeFixDeps) {
     this.d = d;
@@ -166,7 +165,7 @@ export class FlakeFixes {
   /**
    * A broken test (#1487: tools/known-flakes.ts's verdict, a `broken test` line in the retro log) reddens a big share of every
    * ship's runs, so its fix minion's ship goes to the front of the line once it waits there, for BROKEN_FRONT_MS after the line:
-   * once per line, so a later move by a Taskmaster stands, and two broken files' fixes don't swap places every pass. How many it moved.
+   * once per line (kept across restarts), so a later move by a Taskmaster stands, and two broken files' fixes don't swap places every pass. How many it moved.
    */
   async broken(project: Project, now: number): Promise<number> {
     const dir = this.d.sharedDir(project.id);
@@ -193,15 +192,29 @@ export class FlakeFixes {
       }
     }
     let moved = 0;
+    // "<minion> <file> <line time>" already moved, or tried, and the line's time.
+    const settingKey = `flake-fronted:${project.id}`;
+    const kept = this.d.store.getSetting<Record<string, number>>(settingKey) ?? {};
+    const fronted = Object.fromEntries(Object.entries(kept).filter(([, at]) => at >= now - BROKEN_FRONT_MS));
+    let dirty = Object.keys(fronted).length !== Object.keys(kept).length;
     for (const [file, [at, red]] of why) {
       const owner = this.owner(project, file, this.d.store.flakeFix(project.id, file));
       const key = `${owner?.id} ${file} ${at}`;
-      if (!owner || this.fronted.has(key)) continue;
+      if (!owner || key in fronted) continue;
       const did = this.d.front(project, owner.id, `it fixes ${file}, a broken test, not a flake: ${red}`);
-      if (did) this.fronted.add(key); // null: not in the line yet, so the next pass tries again
       if (did === 'moved') moved++;
+      if (!did) continue; // not in the line yet, so the next pass tries again
+      fronted[key] = at;
+      dirty = true;
     }
+    if (dirty) this.d.store.setSetting(settingKey, fronted);
     return moved;
+  }
+
+  /** When the fix minion's work reached main; 0 when it isn't there or can't be told. */
+  private async shipped(project: Project, fix: FlakeFix): Promise<number> {
+    const branch = fix.ticket_id == null ? undefined : this.d.store.getTicket(fix.ticket_id)?.branch;
+    return (branch && (await (this.d.shippedAt ?? ((p, b) => (p.repo_dir ? branchShippedAt(p.repo_dir, b) : Promise.resolve(undefined))))(project, branch))) || 0;
   }
 
   /** The Test health tab's and the escalation's rules; the minions it starts. */
@@ -230,17 +243,18 @@ export class FlakeFixes {
         // #1521 (CA1): only its own closed minion lets a held fix get here (an open one owns it, above), and a minion closes once
         // seen, so a sighting between its proof going green and its commit reaching main was of main without the fix. Off main
         // (it never shipped) or unknown: from its proof, as before.
-        const branch = fix.ticket_id == null ? undefined : store.getTicket(fix.ticket_id)?.branch;
-        const shipped = branch ? await (this.d.shippedAt ?? ((p, b) => (p.repo_dir ? branchShippedAt(p.repo_dir, b) : Promise.resolve(undefined))))(project, branch) : undefined;
-        const since = Math.max(fix.held_at ?? 0, shipped ?? 0);
+        const since = Math.max(fix.held_at ?? 0, await this.shipped(project, fix));
         if (!sights.some((t) => t > since)) continue;
         store.updateFlakeFix(fix.id, { state: 'open', reopened: fix.reopened + 1, clean_runs: 0, held_at: null, proof_run: null, started_at: now, ticket_id: null });
         id = fix.id;
       } else {
         const t = fix.ticket_id == null ? undefined : store.getTicket(fix.ticket_id);
         const gone = !t || t.status === 'closed';
-        // An open fix with no live minion starts another only on 3 new sightings since it began, or at once if its minion never started.
-        if (!gone || (fix.ticket_id != null && sights.filter((x) => x > fix.started_at).length < FLAKE_REPEAT)) continue;
+        // An open fix with no live minion starts another only on 3 new sightings since it began, or since it shipped (one that
+        // closed unproven: main had no fix before that), or at once if its minion never started.
+        if (!gone) continue;
+        const since = Math.max(fix.started_at, await this.shipped(project, fix));
+        if (fix.ticket_id != null && sights.filter((x) => x > since).length < FLAKE_REPEAT) continue;
         store.updateFlakeFix(fix.id, { started_at: now, ticket_id: null, clean_runs: 0, proof_run: null });
         id = fix.id;
       }

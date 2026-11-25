@@ -13,15 +13,23 @@ Invoke-WebRequest -UseBasicParsing $Url -OutFile $zip
 Expand-Archive $zip $dir
 $app = Join-Path $dir 'citadel'
 Get-ChildItem -Recurse $app | Where-Object { -not $_.PSIsContainer } | Select-Object -First 12 | ForEach-Object { $_.FullName.Substring($app.Length) }
+$marker = Join-Path $env:APPDATA 'Citadel\desktop-shortcut-made'
+$hadMarker = Test-Path $marker  # the app writes it into the box user's profile: only a marker this run made goes
 $p = Start-Process (Join-Path $app 'citadel.exe') -PassThru
 Start-Sleep 25
 Write-Output '--- launcher.log'
 Get-Content (Join-Path $app 'launcher.log') -ErrorAction SilentlyContinue
-$w = Get-Process Citadel -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }
+$w = Get-Process Citadel -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -and $_.Path -like "$dir*" }
 Write-Output ('--- window: ' + ($w | ForEach-Object { "$($_.MainWindowTitle) (pid $($_.Id))" }))
 if ($Keep) { return }
 Get-Process Citadel, citadel -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir*" } | Stop-Process -Force
 Start-Sleep 2
-Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Citadel.lnk'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Citadel.lnk'), (Join-Path $env:APPDATA 'Citadel\desktop-shortcut-made')
+# Only a shortcut that points into this install's folder is ours (the app's Start menu link replaces the box user's own, so run it
+# on a box whose Citadel is the rig's).
+$shell = New-Object -ComObject WScript.Shell
+foreach ($lnk in @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Citadel.lnk'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Citadel.lnk'))) {
+  if ((Test-Path $lnk) -and $shell.CreateShortcut($lnk).TargetPath -like "$dir*") { Remove-Item -Force $lnk }
+}
+if (-not $hadMarker) { Remove-Item -Force -ErrorAction SilentlyContinue $marker }
 Remove-Item -Recurse -Force $dir
 Write-Output 'cleaned up'

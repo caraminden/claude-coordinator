@@ -7,7 +7,10 @@
 //   minions, relay, push (each enabled person has one phone, and every send reaches it).
 // Citadel's own repo runs it against the real API (test/fake-citadel-contract.test.ts), so the two can't
 // drift. What it leaves out: the audit, caps, containers, jobs, embeddings and secrets; a call to one of
-// those answers 404 `not_faked` so a test never passes by accident.
+// those answers 404 `not_faked` so a test never passes by accident. Also not faked, and so unlike the real
+// stream and asks: the `taken` event for a steered message, an `interrupted` error's `retry`, and an ask's
+// `scheme` (the fake answers the home's id, Citadel its name). Asks hit the 429 and the dismissed-minion 409
+// only when scripted: `askLimit` and a minion's `status: 'closed'`.
 import { generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -43,7 +46,7 @@ export interface TurnRequest {
  * - tool: a tool call. `run` does what the tool would (an app test calls its own MCP server there); a throw
  *   or `ok: false` makes the tool_result fail.
  * - media: a `media` event before the next tool_result, as a media tool's call does.
- * - grunt: an Agent call whose inner steps carry its id as `parent`.
+ * - grunt: an Agent call whose inner tool steps carry its id as `parent`; its text steps are not streamed, as Citadel never streams a Grunt's words.
  * - error: ends the turn with an `error` event of that code.
  * - wait: holds the stream open until the promise settles (to press Stop, say).
  */
@@ -74,6 +77,8 @@ export interface FakeOptions {
   apps?: Record<string, FakeApp>;
   /** Your home scheme, or null for none (asks, spend and home then answer 409). */
   home?: { id: number; name: string } | null;
+  /** Asks one person may send before the next answers 429, as Citadel's loop backstop does. Default: no limit. */
+  askLimit?: number;
   /** Minions of the home scheme, for GET /minions/<n>. */
   minions?: Record<number, Record<string, unknown>>;
   /** The openrouter state for GET /openrouter, by person. */
@@ -94,6 +99,7 @@ export interface FakeCitadel {
   identity(person?: number, extra?: { from?: string; fromTitle?: string; app?: string; ttlSec?: number }): string;
   /** Everything recorded, for assertions. */
   turns: TurnRequest[];
+  /** Turn ids as the URL carried them: strings, though the `start` event's `turn` is a number. */
   canceled: string[];
   messages: { turn: string; person: number; text: string }[];
   verdicts: { turn: string; verdict: string; reason?: string }[];
@@ -198,6 +204,8 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
   const uploads = new Map<string, { person: number; name: string }>();
   const running = new Map<string, () => void>();
   let n = 0;
+  let turnN = 0;
+  const askCount = new Map<string, number>();
 
   const body = async (req: IncomingMessage, res: ServerResponse, max: number): Promise<AppBody | undefined> => {
     if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) return void fail(res, 415, 'Send application/json');
@@ -215,9 +223,11 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     }
   };
   // The person a call acts for: enabled for this app, else 403 not_enabled; bad id, 400.
-  const enabled = (res: ServerResponse, raw: unknown) => {
-    const id = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw;
-    if (!whole(id)) return void fail(res, 400, 'person must be a user id');
+  // A query string's person is a digit string (bad id, 400); an ask's body person is a JSON integer, and
+  // anything else (a string included) is 403 as on Citadel.
+  const enabled = (res: ServerResponse, raw: unknown, inBody = false) => {
+    const id = !inBody && typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw;
+    if (!whole(id)) return void (inBody ? json(res, 403, { error: 'not_enabled' }) : fail(res, 400, 'person must be a user id'));
     const p = people.find((x) => x.id === id);
     if (!p || !p.apps.includes(opts.app)) return void json(res, 403, { error: 'not_enabled' });
     return p;
@@ -258,9 +268,9 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
           return json(res, 200, { steered: true, id: `msg-${f.messages.length}` });
         }
         if (b.verdict !== 'pass' && b.verdict !== 'fallback') return fail(res, 400, 'verdict is pass or fallback');
-        if (b.reason !== undefined && (typeof b.reason !== 'string' || b.reason.length > 2000)) return fail(res, 400, 'reason is too long');
+        if (b.reason != null && (typeof b.reason !== 'string' || b.reason.length > 2000)) return fail(res, 400, 'reason is too long');
         if (!state) return fail(res, 404, 'No such turn');
-        f.verdicts.push({ turn: t[1], verdict: b.verdict, reason: b.reason });
+        f.verdicts.push({ turn: t[1], verdict: b.verdict, reason: b.reason ?? undefined });
         return json(res, 200, { ok: true });
       }
       if (path === '/api/contraptions/sessions' && m === 'GET') {
@@ -332,23 +342,28 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       if (path === '/api/contraptions/asks' && m === 'POST') {
         const b = await body(req, res, 23_000_000);
         if (b === undefined) return;
-        const p = enabled(res, b.person);
+        const p = enabled(res, b.person, true);
         if (!p) return;
         if (!ASK_KINDS.includes(b.kind as string)) return fail(res, 400, 'kind is bug, feature or data');
         if (b.kind !== 'data' && (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 10_000)) return fail(res, 400, 'text is required');
+        if (b.files != null && !Array.isArray(b.files)) return fail(res, 400, 'Files must be a list');
         if (b.kind === 'data' && !((b.files as unknown[] | null | undefined)?.length || b.text || b.summary || b.item)) return fail(res, 400, 'data needs files, text, summary or item');
-        if (b.minion !== undefined && (b.kind === 'data' || !whole(b.minion))) return fail(res, 400, 'minion is a whole number from 1');
+        if (b.minion != null && (b.kind === 'data' || !whole(b.minion))) return fail(res, 400, 'minion is a whole number from 1');
         if (!home) return fail(res, 409, 'No home scheme');
-        if (b.minion !== undefined && !p.member) return fail(res, 403, 'Only members can ask a minion');
-        if (b.minion !== undefined && !opts.minions?.[b.minion]) return fail(res, 404, 'No such minion');
+        const limitKey = `${p.id}${b.kind === 'data' ? ':data' : ''}`;
+        if (opts.askLimit !== undefined && (askCount.get(limitKey) ?? 0) >= opts.askLimit) return fail(res, 429, `At most ${opts.askLimit} asks per person: try again later`);
+        if (b.minion != null && !p.member) return fail(res, 403, 'Only members can ask a minion');
+        if (b.minion != null && !opts.minions?.[b.minion as number]) return fail(res, 404, 'No such minion');
+        if (b.minion != null && opts.minions![b.minion as number].status === 'closed') return fail(res, 409, `#${b.minion} is dismissed: a person reopens it first`);
         const asked = (b.files ?? []) as { name?: string; upload?: string }[];
         const named = asked.map((x) => (x.upload === undefined ? x.name : uploads.get(x.upload)?.person === p.id ? (x.name ?? uploads.get(x.upload)!.name) : null));
         if (named.includes(null)) return fail(res, 404, 'No upload');
         for (const x of asked) if (x.upload !== undefined) uploads.delete(x.upload);
+        askCount.set(limitKey, (askCount.get(limitKey) ?? 0) + 1); // only a filed ask counts, as on Citadel
         f.asks.push(b);
         const files = named.map((name) => `inbox/${opts.app}/${p.login}/${name}`);
         if (b.kind === 'data') return json(res, 202, { scheme: home.id, member: !!p.member, proposal: false, files, sidecar: `inbox/${opts.app}/${p.login}/${Date.now()}-ask.json` });
-        if (b.minion !== undefined) return json(res, 202, { scheme: home.id, minion: b.minion, member: true, proposal: false, files });
+        if (b.minion != null) return json(res, 202, { scheme: home.id, minion: b.minion, member: true, proposal: false, files });
         return json(res, 202, { scheme: home.id, member: !!p.member, proposal: b.kind === 'feature' && !p.member, files });
       }
       if (path === '/api/contraptions/home' && m === 'GET') {
@@ -398,12 +413,13 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     if (sessions.get(key)?.busy) return refuse('busy', 'A turn is already running in that session');
     f.turns.push(b);
     sessions.set(key, { person: p.id, name: b.session, lastUsed: Date.now(), busy: true });
-    const id = `fake-turn-${++n}`;
+    const id = ++turnN;
+    const key2 = String(id);
     const state = { person: p.id, ended: false, replied: false };
-    turnState.set(id, state);
+    turnState.set(key2, state);
     let canceled = false;
     let stopWaiting = () => {};
-    running.set(id, () => {
+    running.set(key2, () => {
       canceled = true;
       stopWaiting();
     });
@@ -425,8 +441,9 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
               stopWaiting = r;
             }),
           ]);
-        else if ('text' in step) send('text', { delta: step.text, parent, message: `${id}-m${message}` });
-        else if ('media' in step) send('media', step.media);
+        else if ('text' in step) {
+          if (!parent) send('text', { delta: step.text, parent, message: `${id}-m${message}` });
+        } else if ('media' in step) send('media', step.media);
         else if ('error' in step) {
           if (!parent) send('error', { code: step.error, message: ('message' in step ? step.message : undefined) ?? `fake ${step.error}` });
           return false;
@@ -467,7 +484,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     } finally {
       void ended;
       state.ended = true;
-      running.delete(id);
+      running.delete(key2);
       const s = sessions.get(key);
       if (s) {
         s.busy = false;
@@ -482,11 +499,11 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     if (!whole(b?.person)) return 'person must be a user id from 1';
     if (typeof b.session !== 'string' || !/^[\w.:@-]{1,100}$/.test(b.session)) return 'session must match ^[\\w.:@-]{1,100}$';
     if (typeof b.prompt !== 'string' || !b.prompt.trim()) return 'prompt must not be blank';
-    if (b.model !== undefined && !(typeof b.model === 'string' && /^[\w.[\]-]{1,60}$/.test(b.model))) return 'model is not valid';
-    if (b.compactWindow !== undefined && !(whole(b.compactWindow) && b.compactWindow >= 10_000 && b.compactWindow <= 1_000_000)) return 'compactWindow must be 10000 to 1000000';
-    if (b.effort !== undefined && !['low', 'medium', 'high'].includes(b.effort as string)) return 'effort must be low, medium or high';
+    if (b.model != null && !(typeof b.model === 'string' && /^[\w.[\]-]{1,60}$/.test(b.model))) return 'model is not valid';
+    if (b.compactWindow != null && !(whole(b.compactWindow) && b.compactWindow >= 10_000 && b.compactWindow <= 1_000_000)) return 'compactWindow must be 10000 to 1000000';
+    if (b.effort != null && !['low', 'medium', 'high'].includes(b.effort as string)) return 'effort must be low, medium or high';
     for (const flag of ['fresh', 'toolSearch', 'webSearch', 'machines', 'blind', 'keep', 'media']) if (b[flag] !== undefined && typeof b[flag] !== 'boolean') return `${flag} must be true or false`;
-    if (b.timeoutSec !== undefined && !(whole(b.timeoutSec) && b.timeoutSec <= 900)) return 'timeoutSec must be 1 to 900';
+    if (b.timeoutSec != null && !(whole(b.timeoutSec) && b.timeoutSec <= 900)) return 'timeoutSec must be 1 to 900';
     if (b.mcp !== undefined) {
       if (!Array.isArray(b.mcp) || b.mcp.length > 10) return 'mcp is at most 10 servers';
       const seen = new Set<string>();

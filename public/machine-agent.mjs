@@ -1330,6 +1330,8 @@ export class JobRunner {
     this.timer.unref();
     this.block = null;
     this.closed = false;
+    // Until it has looked in its jobs folder (a block broken since the start) it can't say what it holds: nothing is lost on that (2MA5).
+    this.restored = false;
     this.ready = this.setBlock(block).catch((err) => this.log(`Jobs: could not read the jobs folder: ${err.message}`));
   }
 
@@ -1337,7 +1339,9 @@ export class JobRunner {
   async setBlock(block) {
     const fresh = block && block.dir !== this.block?.dir;
     this.block = block;
-    if (fresh) await this.restore();
+    if (!fresh) return;
+    await this.restore();
+    this.restored = true;
   }
 
   /** What the app's info gets: folder names only, never their paths. */
@@ -1385,12 +1389,13 @@ export class JobRunner {
   }
 
   /** A podman (or nvidia-smi) call; resolves with its exit code and output, never rejects. Killed after `timeout` ms, if given. */
-  exec(cmd, args, timeout) {
+  exec(cmd, args, timeout, onStart) {
     return new Promise((done) => {
       let stdout = '';
       let out = '';
       const p = spawn(cmd[0], [...cmd.slice(1), ...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], timeout });
       this.children.add(p);
+      onStart?.(p);
       p.stdout.on('data', (d) => ((stdout += d), (out += d)));
       p.stderr.on('data', (d) => (out += d));
       p.on('error', (err) => (this.children.delete(p), done({ code: -1, stdout: '', out: err.message })));
@@ -1498,7 +1503,9 @@ export class JobRunner {
   async start(msg) {
     const block = this.block;
     let why = refuseStart(msg, block);
-    const busy = [...this.jobs.values()].find((j) => ['starting', 'running', 'paused'].includes(j.state));
+    const holders = [...this.jobs.values()].filter((j) => ['starting', 'running', 'paused'].includes(j.state));
+    // One on its way out (the app stopped it and moved on) is waited for; any other is a refusal (2MA2).
+    const busy = holders.find((j) => !j.stopping);
     if (!why && busy) why = `job ${busy.id} holds this machine's GPU slot (${busy.state})`;
     const need = why ? 0 : msg.inputs.reduce((n, f) => n + f.size, 0);
     if (!why && !this.makeRoom(need)) why = `the jobs folder would go over its ${block.max_disk_gb} GB`;
@@ -1526,9 +1533,17 @@ export class JobRunner {
     this.save(job);
     this.log(`Job ${job.id}: ${name}, ${image}, up to ${Math.round(job.limit_s / 60)} min`);
     await this.report(job);
+    for (const other of holders) {
+      while (other.stopping && ['starting', 'running', 'paused'].includes(other.state) && !job.stopping && !this.closed) await sleep(100);
+      if (this.closed) return;
+      if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error);
+      if (['starting', 'running', 'paused'].includes(other.state)) return this.finish(job, 'failed', `Refused by the machine: job ${other.id} holds this machine's GPU slot (${other.state}) and wouldn't stop`);
+    }
+    job._abort = new AbortController();
     try {
       for (const f of job.inputs) await this.fetchInput(job, f, msg.input_token);
     } catch (err) {
+      if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error);
       return this.finish(job, 'failed', `input ${err.message}`);
     }
     await this.launch(job, msg.resume === true);
@@ -1550,7 +1565,13 @@ export class JobRunner {
   async fetchInputOnce(job, f, inputToken) {
     if (job.stopping) return;
     const url = `/api/machines/job-input?job=${job.id}&name=${encodeURIComponent(f.name)}`;
-    const res = await this.call('GET', url, { headers: { 'X-Job-Token': inputToken } });
+    // A stop cuts it short before its answer too (2MA11); an answer after that is dropped.
+    const call = this.call('GET', url, { headers: { 'X-Job-Token': inputToken } });
+    const { signal } = job._abort;
+    const res = await new Promise((ok, fail) => {
+      signal.addEventListener('abort', () => fail(new Error(`${f.name}: stopped`)), { once: true });
+      call.then((r) => (signal.aborted ? r.destroy() : ok(r)), fail);
+    });
     if (res.statusCode !== 200) {
       const err = new Error(`${f.name}: the app answered ${res.statusCode} ${(await readBody(res)).error ?? ''}`.trim());
       err.final = res.statusCode < 500;
@@ -1571,6 +1592,7 @@ export class JobRunner {
           }
         },
         createWriteStream(file, { flags: 'wx' }),
+        { signal: job._abort.signal },
       );
       if (size !== f.size) throw new Error(`${f.name} came to ${size} bytes, not ${f.size}`);
       if (hash.digest('hex') !== f.sha256) throw Object.assign(new Error(`${f.name} doesn't match its sha256`), { final: true });
@@ -1588,7 +1610,10 @@ export class JobRunner {
     if (!block) return this.finish(job, 'failed', "this machine's owner turned jobs off");
     const gone = job.kind.reads.filter((r) => !block.folders.has(r));
     if (gone.length) return this.finish(job, 'failed', `this machine's owner no longer offers ${gone.join(', ')}`);
-    const r = await this.exec(this.podman, podmanRunArgs(job, { ...block, dir: job.home }, resume));
+    const r = await this.exec(this.podman, podmanRunArgs(job, { ...block, dir: job.home }, resume), undefined, (p) => (job._run = p));
+    job._run = null;
+    // Stopped during the pull (2MA11): that run was killed, which is no failure of its own.
+    if (r.code !== 0 && job.stopping) return this.finish(job, job.stopping.state, job.stopping.error);
     if (r.code !== 0) return this.finish(job, 'failed', `podman run failed: ${r.out.slice(-500)}`);
     job.state = 'running';
     job.paused = null;
@@ -1626,8 +1651,8 @@ export class JobRunner {
     job.state = 'paused';
     job.paused = 'stopped';
     this.save(job);
-    await this.report(job);
-    // A resume asked during the pause's grace (MA9) happens now the pause is done.
+    // A resume asked during the pause's grace (MA9) happens now the pause is done, which the app needn't hear of (2MA3).
+    if (job.want !== 'running') await this.report(job);
     if (job.want === 'running') await this.resume(job);
   }
 
@@ -1665,12 +1690,14 @@ export class JobRunner {
     job.paused = 'frozen';
     job._gpu = await this.sampleGpu();
     this.save(job);
-    await this.report(job);
+    // As for a resumable kind: a resume asked meanwhile happens now (2MA3).
+    if (job.want !== 'running') await this.report(job);
+    if (job.want === 'running') await this.resume(job);
   }
 
   async resume(job) {
     job.want = 'running';
-    if (job.state !== 'paused' || job.stopping) return;
+    if (job.state !== 'paused' || job.stopping || job._unpausing) return;
     job.want = null;
     if (job.paused === 'stopped') {
       job.state = 'starting';
@@ -1678,7 +1705,9 @@ export class JobRunner {
       await this.report(job);
       return this.launch(job, true);
     }
+    job._unpausing = true;
     const r = await this.exec(this.podman, ['unpause', this.name(job)]);
+    job._unpausing = false;
     if (r.code !== 0) {
       this.log(`Job ${job.id}: podman unpause failed: ${r.out.slice(-300)}`);
       return this.report(job);
@@ -1688,6 +1717,8 @@ export class JobRunner {
     job.since = Date.now();
     this.save(job);
     await this.report(job);
+    // A pause asked during the unpause happens now.
+    if (job.want === 'paused') await this.pause(job);
   }
 
   /** Ends a job: its container is killed and removed, then what /out holds goes up as for any end. */
@@ -1696,10 +1727,19 @@ export class JobRunner {
     job.stopping = { state, error };
     this.save(job);
     this.log(`Job ${job.id}: stopping${error ? ` (${error})` : ''}`);
-    // Still fetching inputs or pulling its image: start() and launch() look before they go on.
-    if (job.state === 'starting') return;
+    // Still fetching inputs or pulling its image: cut short, and start() and launch() look before they go on (2MA11).
+    if (job.state === 'starting') {
+      job._abort?.abort();
+      job._run?.kill();
+      return;
+    }
     if (job.state === 'paused' && job.paused === 'stopped') return void this.finish(job, state, error).catch((err) => this.log(`Job ${job.id}: ${err.message}`));
     this.closeSegment(job);
+    this.kill(job);
+  }
+
+  /** Removes a stopping job's container; watch() sees it end. One that won't go is no longer stopping. */
+  kill(job) {
     this.exec(this.podman, ['rm', '-f', this.name(job)]).then((r) => {
       if (r.code === 0 || job.final || job._finishing) return;
       job.stopping = null;
@@ -1914,7 +1954,7 @@ export class JobRunner {
         this.save(job);
         this.watch(job);
         // What the agent was doing when it went down, done again.
-        if (job.stopping) this.exec(this.podman, ['rm', '-f', this.name(job)]);
+        if (job.stopping) this.kill(job);
         else if (job.pausing) this.exec(this.podman, ['stop', '-t', String(this.graceS), this.name(job)]);
       } else if (job.stopping) {
         job._end = [job.stopping.state, job.stopping.error, Number.isInteger(exit) ? exit : null];
@@ -2269,7 +2309,7 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), known_jobs: runner.known() }),
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), ...(runner.restored ? { known_jobs: runner.known() } : {}) }),
     })
       .then(async (res) => {
         // fetch doesn't throw on a refusal; a silent one hid #301's 404.
@@ -2282,10 +2322,13 @@ async function main() {
       const folders = JSON.stringify([...(host.jobsBlock?.folders ?? [])]);
       host.reload();
       log('The config changed.');
-      runner.setBlock(host.jobsBlock).catch((err) => log(`Jobs: ${err.message}`));
+      // sendInfo waits for it: a jobs folder found again is listed from what it holds (2MA5).
+      const before = runner.ready;
+      const block = host.jobsBlock;
+      runner.ready = before.then(() => runner.setBlock(block)).catch((err) => log(`Jobs: ${err.message}`));
       if (JSON.stringify([...(host.jobsBlock?.folders ?? [])]) !== folders) log('The jobs folders changed: if they are Windows folders, add them to /etc/fstab and restart this distro (wsl --terminate).');
       describeWorkspaces();
-      sendInfo();
+      sendInfo().then(() => runner.connected());
     });
   }
   // Claude Code rewrites its config all the time, so look now and then and say so only when the names changed.

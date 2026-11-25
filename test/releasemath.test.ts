@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { changeEta, columnOf, releaseName, shortSpan, STUCK_MS, stuckFor } from '../public/releasemath.js';
+import { changeEta, columnOf, pinElsewhere, releaseName, shortSpan, STUCK_MS, stuckFor } from '../public/releasemath.js';
 
 const citadel = [
   { name: 'line', usual: null },
@@ -79,6 +79,15 @@ test('releaseName: only a try that failed is "a failed try"; a next with no numb
   assert.equal(releaseName({ number: null, name: 'Next build' }), 'Next build');
   assert.equal(releaseName({ number: null }), 'Next release');
   assert.equal(releaseName({ number: null, outcome: 'signed' }), 'a signed build');
+});
+
+test("pinElsewhere: a desktop feed that names another build than the roll back's, a by-hand one of the same commit too (2RE2)", () => {
+  const rollback = { pin: { build: { run: 3, sha: 'c' } } };
+  assert.equal(pinElsewhere({ rollback, current: { version: 'c', number: 12 } }), false);
+  assert.equal(pinElsewhere({ rollback, current: { version: 'c', number: null } }), false, 'a held build older than the listed runs has no number');
+  assert.equal(pinElsewhere({ rollback, current: { version: 'b', number: 14 } }), true);
+  assert.equal(pinElsewhere({ rollback, current: { version: 'c', commit: 'c', number: null, name: 'Build 9, by hand' } }), true);
+  assert.equal(pinElsewhere({ rollback: { pin: { code: 7 } }, current: { version: 'b' } }), false, 'only a held build is judged');
 });
 
 test('stuckFor: a wait outside the pipeline past half an hour is stuck; work in progress and a place in the land line are not (#1019)', () => {

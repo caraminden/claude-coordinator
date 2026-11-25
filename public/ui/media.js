@@ -76,7 +76,7 @@ const CSS = `
 :where(.cui-lightbox[open]) { display: flex; flex-direction: column; overflow: hidden; }
 :where(.cui-lightbox > .cui-dialog-head) { margin: 0; padding-inline-start: var(--citadel-space-3); }
 :where(.cui-lb) { display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; }
-:where(.cui-lb-stage) { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; container-type: size; touch-action: pan-y; }
+:where(.cui-lb-stage) { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; container-type: size; touch-action: pan-y pinch-zoom; }
 :where(.cui-lb-stage > img, .cui-lb-stage > video) { display: block; flex: 1; width: 100%; min-height: 0; object-fit: contain; }
 :where(.cui-lb-stage > img.cui-r90, .cui-lb-stage > img.cui-r270) { position: absolute; left: 50%; top: 50%; flex: none; width: 100cqh; height: 100cqw; translate: -50% -50%; rotate: 90deg; }
 :where(.cui-lb-stage > img.cui-r270) { rotate: 270deg; }
@@ -812,15 +812,20 @@ export function lightbox(items, opts = {}) {
   };
   if (opts.keys !== false) addEventListener('keydown', onKey);
 
-  // A swipe across the stage on a touch screen steps; the panner's own swipe looks around instead.
+  // A swipe across the stage on a touch screen steps; the panner's own swipe looks around instead. A second finger
+  // is a pinch, and one finger on a zoomed-in page pans it.
   let swipe = null;
   stage.addEventListener('pointerdown', (e) => {
-    swipe = e.pointerType === 'touch' && !e.target.closest?.('.cui-pan-view, .cui-scrubber') ? { x: e.clientX, y: e.clientY } : null;
+    const zoomed = (window.visualViewport?.scale ?? 1) > 1.01; // a page at rest can report a hair over 1
+    swipe = e.pointerType === 'touch' && e.isPrimary && !zoomed && !e.target.closest?.('.cui-pan-view, .cui-scrubber') ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+  });
+  stage.addEventListener('pointercancel', () => {
+    swipe = null;
   });
   stage.addEventListener('pointerup', (e) => {
     const s = swipe;
+    if (!s || e.pointerId !== s.id) return;
     swipe = null;
-    if (!s) return;
     const dx = e.clientX - s.x;
     if (Math.abs(dx) > 60 && Math.abs(e.clientY - s.y) < Math.abs(dx) / 2) move(at + (dx < 0 ? 1 : -1));
   });

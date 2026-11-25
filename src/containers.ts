@@ -106,12 +106,12 @@ export class Containers {
     return (await this.run('podman', ['--version'])).code === 0;
   }
 
-  /** Running, stopped (exists but not running) or missing; with the spec hash it was started from. */
-  async status(name: string): Promise<{ state: 'running' | 'stopped' | 'missing'; spec: string | null }> {
-    const r = await this.run('podman', ['container', 'inspect', '--format', `{{.State.Running}} {{index .Config.Labels "${SPEC_LABEL}"}}`, name]);
+  /** Running, paused (by hand; its processes are frozen, not gone), stopped (exists but not running) or missing; with the spec hash it was started from. */
+  async status(name: string): Promise<{ state: 'running' | 'paused' | 'stopped' | 'missing'; spec: string | null }> {
+    const r = await this.run('podman', ['container', 'inspect', '--format', `{{if .State.Paused}}paused{{else}}{{.State.Running}}{{end}} {{index .Config.Labels "${SPEC_LABEL}"}}`, name]);
     if (r.code !== 0) return { state: 'missing', spec: null };
     const [running, spec] = r.stdout.trim().split(' ');
-    return { state: running === 'true' ? 'running' : 'stopped', spec: spec && spec !== '<no' ? spec : null };
+    return { state: running === 'true' ? 'running' : running === 'paused' ? 'paused' : 'stopped', spec: spec && spec !== '<no' ? spec : null };
   }
 
   /**

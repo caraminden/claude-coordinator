@@ -18,7 +18,7 @@ In Citadel's viewer, or a tab its Open button opened, the kit saves through the 
 link), the page still runs, picks stay in the tab, and the dock's Send becomes Copy, the only
 clipboard path. `mock.ready` resolves `{ saving, person }`. Picks and notes save as they change and
 survive a Citadel restart: a write made while Citadel is down is sent again until it lands, and the
-dock says "not saved yet" meanwhile (`citadel.saveState()`, `citadel.watchSaves(fn)` for a hand-rolled page).
+dock says "not saved yet" meanwhile; one Citadel refuses shows "not saved" and why (`citadel.saveState()`, `citadel.watchSaves(fn)` for a hand-rolled page).
 
 ## `mock.boards(target, opts)`
 
@@ -82,7 +82,7 @@ Comes with the first picks set: counts picks and notes, and **Send picks** posts
 line per pick straight into your chat as the person who pressed it, which wakes you (`citadel.send`,
 only from a click). A shared-folder page's Send goes to the minion that last linked it, else the
 Taskmaster. Send also settles that minion's choices card for the page (`ask_question` with `doc`:
-the card that opens it). The dock shows Sent at once; a failure takes it back with a toast and Retry. It sticks to In Citadel's viewer a successful Send closes the viewer on the chat (`citadel.send(text, { keepOpen: true })` keeps it open).
+the card that opens it). The dock shows Sent at once; a failure takes it back with a toast and Retry, which sends the picks as they are by then. A Send takes at most 10,000 characters. It sticks to In Citadel's viewer a successful Send closes the viewer on the chat (`citadel.send(text, { keepOpen: true })` keeps it open).
 the bottom once anything is picked.
 
 In Citadel's viewer, a page with a dock also lets people draw on its pictures (#946): a click on any

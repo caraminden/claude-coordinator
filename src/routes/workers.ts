@@ -31,10 +31,18 @@ function limitRows({ runner, store }: Pick<App, 'runner' | 'store'>) {
   }));
 }
 
-function tile(app: Pick<App, 'runner' | 'store'>) {
+/** The waits handed to the server that ended in the last 7 days (#1890): how many, how long the middle one ran, and how many woke a cold minion. */
+function waitsEnded(jobs: ReturnType<App['minionJobs']['stats']>) {
+  if (!jobs.length) return { count: 0, median: null, woken: 0, cold: 0 };
+  const ms = jobs.map((j) => j.ms).sort((a, b) => a - b);
+  const woken = jobs.filter((j) => j.cold !== null);
+  return { count: jobs.length, median: ms[Math.floor(ms.length / 2)], woken: woken.length, cold: woken.filter((j) => j.cold).length };
+}
+
+function tile(app: Pick<App, 'runner' | 'store' | 'minionJobs'>) {
   const { people, ...rest } = app.runner.turnLine.summary();
   const { min, max } = app.runner.turnLine.limits();
-  return { ...rest, min, max, limits: limitRows(app), people: people.map(({ person, ...p }) => ({ name: app.store.getUser(person)?.name ?? 'Automatic', ...p })) };
+  return { ...rest, min, max, limits: limitRows(app), waits: waitsEnded(app.minionJobs.stats()), people: people.map(({ person, ...p }) => ({ name: app.store.getUser(person)?.name ?? 'Automatic', ...p })) };
 }
 
 export const workerRoutes: Route[] = [

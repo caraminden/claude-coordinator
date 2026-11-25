@@ -5,6 +5,9 @@
 #   citadel-wait port <n>       until something listens on that port on this machine
 #   citadel-wait file <path>    until that file exists
 #   citadel-wait cmd '<test>'   until the shell test exits 0
+# A file or cmd wait a minion's turn typed on its own is handed over to the server once it has run two minutes (at once
+# on a starved box), so the turn can end and give its worker back (#1890, citadel-job): it then exits 75 and says so.
+# CITADEL_WAIT_HANDOVER=0, or a limit under 120 s, keeps it here.
 # Exits 0 once it is true, 124 after $CITADEL_WAIT_SECONDS (default 590, under the Bash tool's
 # 10-minute cap), 2 on bad usage. Checks every 2 seconds, or every 20 for a test that asks GitHub (#562: one
 # `gh run view` test at 2 s spent over half of a person's 5,000 GitHub API calls an hour).
@@ -27,7 +30,12 @@ case $kind in
   file) done_yet() { [ -e "$arg" ]; }
     what="$arg to exist" ;;
   # Bounded by what's left, so a test that hangs can't outlast the limit.
-  cmd) done_yet() { [ "$SECONDS" -lt "$limit" ] && timeout "$((limit - SECONDS))" bash -c "$arg" >/dev/null 2>&1; }
+  # While its wait may be handed over, by the next time that is asked too: a test that takes minutes is one to hand over.
+  cmd) done_yet() {
+      local most=$((limit - SECONDS)) ask=$((next - SECONDS))
+      [ -z "$asks" ] || { [ "$ask" -ge 30 ] || ask=30; [ "$ask" -ge "$most" ] || most=$ask; }
+      [ "$most" -gt 0 ] && timeout "$most" bash -c "$arg" >/dev/null 2>&1
+    }
     what="\`$arg\` to succeed"
     if [[ $arg =~ (^|[^[:alnum:]_.-])gh[[:space:]]|api\.github\.com|ci-status ]]; then
       every=20
@@ -38,10 +46,21 @@ esac
 
 SECONDS=0
 every=${every:-2}
+job=$(dirname "$(readlink -f "$0")")/citadel-job
+asks= next=0
+case $kind in file|cmd) [ -z "${CLAUDE_PID:-}" ] || [ -z "${COORDINATOR_TOKEN:-}" ] || [ "${CITADEL_WAIT_HANDOVER:-}" = 0 ] || [ "$limit" -lt 120 ] || [ ! -x "$job" ] || asks=1 ;; esac
 until done_yet; do
   if [ "$SECONDS" -ge "$limit" ]; then
     say "still waiting for $what after ${SECONDS}s; run it again to keep waiting"
     exit 124
+  fi
+  if [ -n "$asks" ] && [ "$SECONDS" -ge "$next" ]; then
+    again=$("$job" --handover "$kind" "$arg" "$SECONDS" $$)
+    case $? in
+      75) exit 75 ;;
+      0) [[ $again =~ ^[0-9]+$ ]] && next=$((SECONDS + again)) || asks= ;;
+      *) asks= ;; # it stays here, as ever
+    esac
   fi
   sleep "$((every < limit - SECONDS ? every : limit - SECONDS))"
 done

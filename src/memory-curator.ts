@@ -9,7 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { HttpError } from './http.ts';
-import { deleteNote, memoryFolders, noteFile, plain, readFolder, writeAtomic, type FolderView, type MemoryFolder, type MemoryLogin } from './memory-files.ts';
+import { deleteNote, memoryFolders, noteFile, plain, readFolder, withoutLink, writeAtomic, type FolderView, type MemoryFolder, type MemoryLogin } from './memory-files.ts';
 import { thrown } from './thrown.ts';
 
 /** How long an applied proposal's old notes are kept for Put back (Josh, 2026-11-19: "30 days"). */
@@ -127,7 +127,12 @@ export function withLine(index: string, file: string, line: string | null): stri
   const links = (l: string) => l.includes(`](${file})`);
   const lines = index ? index.replace(/\n$/, '').split('\n') : [];
   const at = lines.findIndex(links);
-  const out = lines.flatMap((l, i) => (!links(l) ? [l] : i === at && line !== null ? [line] : []));
+  const out = lines.flatMap((l, i) => {
+    if (!links(l)) return [l];
+    if (i === at && line !== null) return [line];
+    const left = withoutLink(l, file); // a line that links another note too keeps it (ME3)
+    return left === null ? [] : [left];
+  });
   if (at < 0 && line !== null) out.push(line);
   return out.length ? `${out.join('\n')}\n` : '';
 }
@@ -135,7 +140,13 @@ export function withLine(index: string, file: string, line: string | null): stri
 function writeIndex(dir: string, next: string) {
   const path = join(dir, 'MEMORY.md');
   if (existsSync(path) && !plain(path)) throw new Error('MEMORY.md is not a plain file');
-  if (next.split('\n').length - 1 > INDEX_LINES || Buffer.byteLength(next) > INDEX_BYTES) throw new Error('MEMORY.md would pass the 200 lines or 25 KB that load');
+  const was = readIndex(dir);
+  if (next === was) return;
+  // Refuse a cap crossed, or one already crossed and grown: an index over the cap can still be shortened, line by line (2ME3).
+  const lines = next.split('\n').length - 1;
+  const bytes = Buffer.byteLength(next);
+  const grew = (over: boolean, now: number, before: number) => over && now > before;
+  if (grew(lines > INDEX_LINES, lines, was.split('\n').length - 1) || grew(bytes > INDEX_BYTES, bytes, Buffer.byteLength(was))) throw new Error('MEMORY.md would pass the 200 lines or 25 KB that load');
   writeAtomic(path, next);
 }
 
@@ -158,22 +169,58 @@ export function applyChanges(dir: string, changes: Change[], approved: Set<numbe
     if (c.action === 'add' ? now !== null : now === null || hashText(now) !== hashText(c.was ?? '')) return { ...c, outcome: 'changed since' };
     // A line moved on too (someone added it to the index by hand): the line part would undo theirs.
     if (c.line !== null && c.action !== 'add' && nowLine !== c.wasLine) return { ...c, outcome: 'changed since' };
+    let wrote = false;
     try {
       if (c.action === 'delete') {
         deleteNote(dir, c.file);
+        wrote = true;
         gone(c.file);
       } else {
         // The line first: a full MEMORY.md refuses the change before its note is touched.
         if (c.line !== null) writeIndex(dir, withLine(index, c.file, c.line));
+        wrote = c.line !== null;
         if (c.text !== null) writeAtomic(join(dir, c.file), c.text);
       }
       backup.push({ file: c.file, text: now, line: nowLine });
       return { ...c, outcome: 'applied' };
     } catch (err) {
+      // A change that failed after its first write (the line went in, the note didn't) still keeps its old copy for Put back (ME6).
+      if (wrote) backup.push({ file: c.file, text: now, line: nowLine });
       return { ...c, outcome: `failed: ${thrown(err).message}` };
     }
   });
   return { changes: out, backup };
+}
+
+/** What each approved change is about to replace, taken before any write so a kill mid-write still leaves Put back its copy (2ME7). */
+export function saveFirst(dir: string, changes: Change[], approved: Set<number>): Saved[] {
+  const index = readIndex(dir);
+  return changes.filter((c) => c.action !== 'flag' && approved.has(c.id)).map((c) => ({ file: c.file, text: readNote(dir, c.file), line: lineFor(index, c.file) }));
+}
+
+/** Whether a change's write is on disk now: how a re-applied tidy tells a note an earlier, killed run wrote from one a person edited since. */
+function landed(dir: string, c: Change): boolean {
+  if (c.action === 'delete') return readNote(dir, c.file) === null;
+  if (c.text !== null && readNote(dir, c.file) !== c.text) return false;
+  return c.line === null || lineFor(readIndex(dir), c.file) === c.line;
+}
+
+/**
+ * The copies a decision keeps: this apply's own, with those a killed earlier apply of the same tidy stored first. Those
+ * hold the real originals (this apply read the notes after the kill's writes), so they win for their file, unless the
+ * note was changed again since (its change reads "changed since" and its write isn't what is on disk).
+ */
+export function mergeBackup(dir: string, changes: Change[], mine: Saved[], earlier: Saved[] | null): Saved[] {
+  const first = new Map((earlier ?? []).map((s) => [s.file, s]));
+  const keep = (s: Saved) => {
+    const e = first.get(s.file);
+    const c = changes.find((x) => x.file === s.file);
+    return e && !(c && c.outcome === 'changed since' && !landed(dir, c)) ? e : s;
+  };
+  const out = mine.map(keep);
+  const have = new Set(out.map((s) => s.file));
+  for (const e of first.values()) if (!have.has(e.file) && changes.some((c) => c.file === e.file && (c.outcome === undefined || landed(dir, c)))) out.push(e);
+  return out;
 }
 
 /**
@@ -264,9 +311,9 @@ export class MemoryProposals {
     return parse(this.db.prepare('SELECT * FROM memory_proposals WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticketId) as Row | undefined);
   }
 
-  /** Decided proposals whose old notes are still kept, newest first. */
+  /** Decided proposals whose old notes are still kept, newest first (a copy stored before an undecided tidy's writes, open or since superseded, is not offered). */
   kept(projectId: number): Proposal[] {
-    return (this.db.prepare('SELECT * FROM memory_proposals WHERE project_id = ? AND backup IS NOT NULL ORDER BY decided_at DESC').all(projectId) as Row[]).map((r) => parse(r)!);
+    return (this.db.prepare("SELECT * FROM memory_proposals WHERE project_id = ? AND backup IS NOT NULL AND status IN ('applied', 'dismissed') ORDER BY decided_at DESC").all(projectId) as Row[]).map((r) => parse(r)!);
   }
 
   /** A new open proposal; the scheme's earlier open ones become superseded, and are returned so their cards can say so. */
@@ -281,6 +328,11 @@ export class MemoryProposals {
   decide(id: number, d: { status: 'applied' | 'dismissed'; changes: Change[]; backup: Saved[]; by: string }, now = Date.now()): boolean {
     const r = this.db.prepare("UPDATE memory_proposals SET status = ?, changes = ?, backup = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'open'").run(d.status, JSON.stringify(d.changes), d.backup.length ? JSON.stringify(d.backup) : null, d.by, now, id);
     return Number(r.changes) === 1;
+  }
+
+  /** The old notes of an open tidy, stored before its files are written: a kill after the writes and before decide() keeps them (2ME7). */
+  keepFirst(id: number, backup: Saved[]) {
+    this.db.prepare("UPDATE memory_proposals SET backup = ? WHERE id = ? AND status = 'open'").run(backup.length ? JSON.stringify(backup) : null, id);
   }
 
   /** The old notes were put back: they are dropped, so Put back can't run twice. */

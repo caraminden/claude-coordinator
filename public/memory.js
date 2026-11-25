@@ -196,7 +196,7 @@ export function memoryPage() {
               body.textContent = text;
               editing(false);
             },
-            send: () => api(url, { method: 'PUT', body: { folder: f.id, file: n.file, text } }),
+            send: () => api(url, { method: 'PUT', body: { folder: f.id, file: n.file, text, was } }),
             undo: () => {
               n.text = was;
               body.textContent = was;

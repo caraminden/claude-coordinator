@@ -1,24 +1,28 @@
 // Urgent minions and the line for a worker (#1888): a person's press, drag or take-off, a Taskmaster's mark with its reason,
-// and the line as its drawer shows it. What Urgent means is src/urgent.ts, the line's order src/turn-line.ts.
+// and the line as its drawer shows it, and Start now (#1957), a worker of its own. What they mean is src/urgent.ts and src/start-now.ts, the line's order src/turn-line.ts.
 import type { Ticket } from '../db.ts';
 import { HttpError, json, readJson, str, type App, type Route } from '../http.ts';
 
 const REASON_MAX = 200;
 
-/** A minion that can be in the group. */
-function markable(t: Ticket | undefined): Ticket {
-  if (!t || t.kind === 'coordinator') throw new HttpError(400, 'Only a minion is Urgent: Taskmasters never wait for a worker');
+/** A minion that can be in the group, or start now. */
+function markable(t: Ticket | undefined, what = 'is Urgent'): Ticket {
+  if (!t || t.kind === 'coordinator') throw new HttpError(400, `Only a minion ${what}: Taskmasters never wait for a worker`);
   if (t.status === 'closed') throw new HttpError(409, 'It is closed');
   return t;
 }
 
-/** The line as `session` may see it: the Urgent group whole, waiting or not, then the waiting in the order they would start. */
+/** The line as `session` may see it: the workers people gave a minion, the Urgent group whole, waiting or not, then the waiting in the order they would start. */
 function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?: number; admin?: boolean }) {
   const minion = (id: number) => {
     const t = store.getTicket(id);
     return t && store.canSee(session, t.project_id) ? { ticket: id, project: t.project_id, number: t.number, title: t.title } : { ticket: null };
   };
   return {
+    forced: runner.startNow.list().map((h) => {
+      const t = minion(h.ticket);
+      return { ...t, waiting: runner.turnLine.has(h.ticket), working: runner.isRunning(h.ticket), since: h.since, ...(t.ticket ? { by: h.by, user: h.user } : {}) };
+    }),
     urgent: runner.urgent.list().map((m) => {
       const t = minion(m.ticket);
       // Who and why only to those who see it: a Taskmaster's mark names its scheme.
@@ -29,6 +33,8 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       person: store.getUser(w.person)?.name ?? null,
       since: w.since,
       urgent: w.urgent !== undefined,
+      forced: !!runner.startNow.get(w.ticket),
+      held: runner.startNow.get(w.ticket) ? runner.turnLine.heldBy(w) : null,
       // Why it stands where it does in its person's share.
       first: !!w.first,
       warm: w.heat === 0,
@@ -63,6 +69,37 @@ export const urgentRoutes: Route[] = [
         urgent.set(ticket.id, { kind: 'person', by: session.name }, before as number | null | undefined);
       } else urgent.unset(ticket.id, { kind: 'person', by: session.name });
       return json(res, 200, { urgent: urgent.view(ticket.id) });
+    },
+  },
+  {
+    // { on }: true gives a waiting minion a worker of its own, past the pool's size; false is Release, anyone's to press.
+    method: 'PUT',
+    path: '/api/tickets/:ticket/start-now',
+    who: ['person'],
+    refuse: 'Only people start a minion now; a Taskmaster has mark_urgent',
+    async handler({ req, res, app, session, ticket }) {
+      const { on } = ((await readJson(req)) ?? {}) as { on?: unknown };
+      if (typeof on !== 'boolean') throw new HttpError(400, 'on is true or false');
+      if (session.uid == null) throw new HttpError(403, 'Sign in as yourself to start a minion now');
+      const { store, runner } = app;
+      const { startNow, turnLine } = runner;
+      if (on) {
+        const t = markable(store.getTicket(ticket.id), 'starts now');
+        if (!turnLine.has(t.id) && startNow.get(t.id)?.user !== session.uid) throw new HttpError(409, "It isn't waiting for a worker");
+        // In a scheme they can't see any more: theirs to neither use nor release, so it doesn't count.
+        for (const h of startNow.list()) if (h.user === session.uid && !store.canSee(session, store.getTicket(h.ticket)!.project_id)) startNow.end(h.ticket);
+        const refused = startNow.press(t.id, session.uid, session.name);
+        if (refused && 'theirs' in refused) throw new HttpError(409, `${refused.theirs.by} gave it a worker of its own already`);
+        if (refused) {
+          const holds = refused.full.map((h) => {
+            const m = store.getTicket(h.ticket)!;
+            return { ticket: m.id, project: m.project_id, number: m.number, title: m.title, since: h.since };
+          });
+          return json(res, 409, { error: `You hold a worker for ${holds.map((m) => `#${m.number}`).join(' and ')} already, and ${holds.length} is the most`, holds });
+        }
+        turnLine.force(t.id);
+      } else startNow.end(ticket.id);
+      return json(res, 200, { start_now: startNow.view(ticket.id) });
     },
   },
   {

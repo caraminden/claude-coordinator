@@ -12,6 +12,7 @@ import { Store } from '../src/db.ts';
 import type { HttpError } from '../src/http.ts';
 import { heatOf, LinePlaces, sameAccount, waitedOn } from '../src/line-place.ts';
 import { urgentRoutes } from '../src/routes/urgent.ts';
+import { StartNow } from '../src/start-now.ts';
 import { Urgent, type UrgentBy } from '../src/urgent.ts';
 import { redFixes, UrgentFixes, type RedFix } from '../src/urgent-fixes.ts';
 import type { Chain } from '../src/wake.ts';
@@ -262,7 +263,7 @@ test('a refused ship and a minion others wait on go first in their share, until 
 
 type Answer = { status: number; body: unknown };
 /** A route's handler, as the router calls it once it has let the caller in. */
-async function call(method: string, path: string, app: unknown, ctx: Record<string, unknown>, body: unknown = {}): Promise<Answer & { data: { urgent: unknown; said: string; line: Record<string, unknown>[] } }> {
+async function call(method: string, path: string, app: unknown, ctx: Record<string, unknown>, body: unknown = {}): Promise<Answer & { data: { urgent: unknown; said: string; line: Record<string, unknown>[]; forced: Record<string, unknown>[] } }> {
   const route = urgentRoutes.find((r) => r.method === method && r.path === path)!;
   const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
   const res = { status: 0, text: '', headersSent: false, setHeader() {}, writeHead: (s: number) => ((res.status = s), res), end: (b?: string) => void (res.text = b ?? '') };
@@ -272,7 +273,7 @@ async function call(method: string, path: string, app: unknown, ctx: Record<stri
   } catch (err) {
     const e = err as HttpError;
     if (!e.status) throw err;
-    return { status: e.status, body: e.message, data: { urgent: null, said: '', line: [] } };
+    return { status: e.status, body: e.message, data: { urgent: null, said: '', line: [], forced: [] } };
   }
 }
 
@@ -324,14 +325,24 @@ test("the line shows a person only their schemes' minions, with the rest as plac
   store.addMember(hers.id, cara.id);
   const [a, b] = [minion(), minion(hers.id)];
   urgent.set(b, { ...TM, reason: 'private' });
+  const startNow = new StartNow({ store, over: () => false, changed: () => {}, now: () => 5 });
+  startNow.press(a, josh.id, 'Josh');
+  startNow.press(b, cara.id, 'A private person');
   const waiting = [b, a].map((ticket) => ({ ticket, person: cara.id, rank: 1, since: 5, heat: 0 as const, ...(ticket === b ? { urgent: 0 } : {}) }));
-  const app = { store, runner: { urgent, turnLine: { has: () => true, line: () => waiting } } };
+  const app = { store, runner: { urgent, startNow, isRunning: () => false, turnLine: { has: () => true, line: () => waiting, heldBy: () => null } } };
   const { data } = await call('GET', '/api/line', app, { session: { name: 'Josh', uid: josh.id, admin: false } });
   assert.deepEqual(
     data.line.map((w) => [w.ticket, w.urgent, w.warm]),
     [
       [null, true, true],
       [a, false, true],
+    ],
+  );
+  assert.deepEqual(
+    data.forced.map((h) => [h.ticket, h.by]),
+    [
+      [a, 'Josh'],
+      [null, undefined],
     ],
   );
   assert.ok(!/private|Peek Auras Taskmaster/.test(JSON.stringify(data)), 'neither the reason nor whose Taskmaster');

@@ -6,7 +6,7 @@ import { cardHref } from '../card-links.ts';
 import { memoryLogins } from '../decisions-load.ts';
 import { lineDiff } from '../instructions.ts';
 import { memoryFolders, readFolder } from '../memory-files.ts';
-import { applyChanges, checkChanges, curatorTarget, countLine, KEEP_MS, restoreSaved, withDrift, type Change, type Proposal } from '../memory-curator.ts';
+import { applyChanges, checkChanges, curatorTarget, countLine, KEEP_MS, mergeBackup, restoreSaved, saveFirst, withDrift, type Change, type Proposal } from '../memory-curator.ts';
 import { HttpError, json, readJson, type App, type Route } from '../http.ts';
 import type { Project } from '../db.ts';
 import { deliverAnswer, postPlan } from './tickets.ts';
@@ -21,7 +21,7 @@ export function tidyCard(app: App, p: Proposal): { id: number; card: { id?: stri
 }
 
 /** Settle the proposal's card in the run's chat and tell the run, which then closes itself. */
-function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'superseded', by: string, text: string) {
+function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'superseded', by: string, text: string | null) {
   if (p.ticket_id === null) return;
   const found = tidyCard(app, p);
   // A card approved but not yet applied is settled again when the page turns it down or a newer tidy replaces it.
@@ -30,7 +30,7 @@ function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'su
     app.store.setEventData(found.id, { ...found.card, ...result });
     app.runner.emit(p.ticket_id, 'plan_result', { id: found.card.id, ...result });
   }
-  if (app.store.getTicket(p.ticket_id)?.status !== 'closed') deliverAnswer(app, p.ticket_id, by, text, { memoryProposal: { id: p.id, status } });
+  if (text !== null && app.store.getTicket(p.ticket_id)?.status !== 'closed') deliverAnswer(app, p.ticket_id, by, text, { memoryProposal: { id: p.id, status } });
 }
 
 /** What the card's Approve all covers: every change but the flags, which change nothing. Deletes too (Cara, 2026-11-24, on #1803's card: "Include deletes",
@@ -46,7 +46,11 @@ export function decideTidy(app: App, project: Project, p: Proposal, apply: numbe
   if (p.status !== 'open') throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced this one' : `${p.decided_by} already decided this tidy`);
   const folder = folderOf(app, project, p.folder);
   if (!folder && apply.length) throw new HttpError(409, 'The memory folder this tidy was for is gone');
-  const { changes, backup } = folder ? applyChanges(folder.dir, p.changes, new Set(apply), (file) => app.store.deleteClaudeState(join(folder.rel, file))) : { changes: p.changes.map((c) => ({ ...c, outcome: c.action === 'flag' ? 'noted' : 'turned down' })), backup: [] };
+  // The old notes are stored before the first write: a kill between the writes and decide() still leaves Put back its copy (2ME7).
+  if (folder && apply.length) app.store.memoryProposals.keepFirst(p.id, mergeBackup(folder.dir, p.changes, saveFirst(folder.dir, p.changes, new Set(apply)), p.backup));
+  const done = folder ? applyChanges(folder.dir, p.changes, new Set(apply), (file) => app.store.deleteClaudeState(join(folder.rel, file))) : { changes: p.changes.map((c) => ({ ...c, outcome: c.action === 'flag' ? 'noted' : 'turned down' })), backup: [] };
+  const { changes } = done;
+  const backup = folder ? mergeBackup(folder.dir, changes, done.backup, p.backup) : done.backup;
   const status = apply.length ? ('applied' as const) : ('dismissed' as const);
   if (!app.store.memoryProposals.decide(p.id, { status, changes, backup, by })) throw new HttpError(409, 'Someone decided this tidy just now');
   const applied = changes.filter((c) => c.outcome === 'applied');
@@ -105,7 +109,8 @@ export const memoryCuratorRoutes: Route[] = [
         body.changes,
       );
       const { proposal, superseded } = app.store.memoryProposals.create({ project_id: project.id, ticket_id: ticket.id, folder: t.folder.id, changes });
-      for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);
+      // The run's own earlier proposal is settled but not told: "close yourself" would withdraw the card it just made (2ME2).
+      for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', old.ticket_id === ticket.id ? null : `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);
       const counts = countLine(changes);
       const event = postPlan(app, ticket.id, {
         summary: `Memory tidy: ${counts}`,

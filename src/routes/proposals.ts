@@ -259,6 +259,12 @@ export const proposalRoutes: Route[] = [
         // decideTidy; Reject turns it down here. Either way only while the tidy is open: one ticked on the page is decided.
         if (card.memory) {
           const p = store.memoryProposals.get(card.memory.proposal);
+          if (p && p.status !== 'open') {
+            // The tidy was decided but its card never was (a kill between the two, 2ME7): settle the card now, so its buttons go.
+            const settled = { status: p.status === 'applied' ? 'approved' : p.status === 'superseded' ? 'superseded' : 'rejected', by: p.decided_by ?? 'Citadel', at: Date.now() };
+            store.setEventData(event.id, { ...card, ...settled });
+            runner.emit(id, 'plan_result', { id: card.id, ...settled });
+          }
           if (!p || p.status !== 'open') throw new HttpError(409, !p ? 'That memory tidy is gone' : p.status === 'superseded' ? 'A newer tidy replaced this one' : `${p.decided_by} already ${p.status === 'applied' ? 'applied' : 'turned down'} this tidy on the Memory page`);
           if (notes !== null) decideTidy(app, store.getProject(p.project_id)!, p, [], session.name);
         }
@@ -394,6 +400,7 @@ export const proposalRoutes: Route[] = [
       if (before.state === 'expired') throw new HttpError(409, 'This request expired; the turn that asked has ended');
       if (before.state !== 'pending') throw new HttpError(409, `${before.by} already ${before.state === 'allowed' ? 'approved' : 'denied'} this`);
       if (body.allow && runner.approvals.isTripwire(approvalId) && !session.admin) throw new HttpError(403, 'Only an admin can approve a tripwire card');
+      runner.startNow.touch(id, session.uid);
       return json(res, 200, runner.approvals.decide(id, approvalId, body.allow, session.name));
     },
   },

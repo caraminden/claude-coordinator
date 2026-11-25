@@ -6,6 +6,7 @@
 // The line holds no messages: those stay in each minion's queue (src/minion-queue.ts), and a resume's wait or debt stays
 // where it was (src/resumes.ts, the queue's `owed`). An entry says only "this minion has a turn to start", so one whose
 // turn needs no starting any more is simply dropped when it comes up.
+import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
 import { limitsOf, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
@@ -59,6 +60,8 @@ export interface LinePlace {
   person: number;
   /** 0 a person's own message or answer, 1 work started for them, 2 automatic. */
   rank: number;
+  /** A person gave it a worker of its own (src/start-now.ts): ahead of everything, past the size. */
+  forced?: true;
   /** Its spot in the Urgent group (src/urgent.ts), ahead of every share. */
   urgent?: number;
   /** Its ship was refused, or other minions wait on it. */
@@ -99,7 +102,7 @@ export function nextSize(s: { size: number; at: number; used: number; waiting: n
 const less = (a: number[], b: number[]) => a.map((n, i) => n - b[i]).find((d) => d) ?? 0;
 
 /**
- * Whose turn a free worker takes: the Urgent in their order, then the person furthest below their share, then the first in
+ * Whose turn a free worker takes: the ones started now by a person, the Urgent in their order, then the person furthest below their share, then the first in
  * that person's own order. Everyone's first two workers come before anyone's third; past that a share is in proportion to
  * what a person has running and waiting.
  */
@@ -116,7 +119,7 @@ export function pick(waiting: Waiting[], running: Map<number, number>, now: numb
   const long = (w: Waiting) => (now - w.since >= POOL.longMs ? 0 : 1);
   // Josh, 2026-11-24: "About to go cold first", after what is refused or holds others up; what came before (#1868) settles the rest.
   const own = (w: Waiting) => [long(w), long(w) && w.first ? 0 : 1, long(w) && (w.heat ?? 1), rank(w), w.since, w.ticket];
-  const urgent = (w: Waiting) => w.urgent ?? Number.MAX_SAFE_INTEGER;
+  const urgent = (w: Waiting) => (w.forced ? -1 : (w.urgent ?? Number.MAX_SAFE_INTEGER));
   let best: Waiting | null = null;
   for (const w of waiting) {
     const by = best && (urgent(w) - urgent(best) || share(w.person) - share(best.person) || oldest.get(w.person)! - oldest.get(best.person)! || w.person - best.person || less(own(w), own(best)));
@@ -134,6 +137,8 @@ export interface LineHost {
   busy(ticketId: number): boolean;
   /** Whose share its turn counts in, and its place there. */
   asks(ticketId: number, via?: RetryKind): LinePlace;
+  /** A person holds a worker of its own for it (#1957, src/start-now.ts): its turns start past the size. */
+  forced(ticketId: number): { user: number; by: string } | null;
   /** Start its turn, now that a worker is free: it calls enter() again, which grants it. */
   start(entry: LineEntry): void;
   /** Stop its running turn to carry on later; one already ending or not yet launched is left. */
@@ -151,16 +156,21 @@ export class TurnLine {
   private entries: LineEntry[];
   /**
    * Turns that run: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose
-   * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916).
+   * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916); a `forced` one
+   * started on a worker of its own (#1957), that person's.
    */
-  private granted = new Map<number, { steps: number; person: number; lent?: true }>();
+  private granted = new Map<number, { steps: number; person: number; lent?: true; forced?: number }>();
   private admitting: number | null = null;
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
   /** People whose container stalls at its own memory limit, which the box's readings barely show (#1874). */
+  /** Whether the pool's last reading was starved. */
+  starved = false;
   private stalled = new Set<number>();
   private ordered: { at: number; line: Waiting[] } | null = null;
+  /** The waiting turns a full container holds, as pages last heard. */
+  private heldFull = '';
 
   constructor(host: LineHost) {
     this.host = host;
@@ -221,7 +231,32 @@ export class TurnLine {
   wait(ticketId: number): WorkerWait | null {
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return null;
-    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null };
+    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry) };
+  }
+
+  /** Why a waiting turn wouldn't start even on a worker of its own, in words; it starts by itself once that clears. */
+  heldBy(entry: LineEntry): string | null {
+    const paused = this.paused();
+    if (paused) return `${paused.by} paused all minions`;
+    if (this.closed || this.host.detached) return 'Citadel is restarting';
+    if (this.stalled.size && this.full(this.host.asks(entry.ticket, entry.via).person)) return 'the container it runs in is at its memory limit';
+    const hold = this.host.forced(entry.ticket);
+    return hold && this.forcedFor(entry.ticket) === null ? `${HOLD.each} turns ${hold.by} started now are still running` : null;
+  }
+
+  /** Who gave it a worker of its own, while they have one left: a hold let go mid-turn keeps its worker until that turn ends, or presses in a row would pass "Two per person". */
+  // shortcut: a restart forgets who started a let-go turn, so its person may start one more; save it with the turn if that's ever used.
+  private forcedFor(ticketId: number): number | null {
+    const user = this.host.forced(ticketId)?.user;
+    if (user === undefined) return null;
+    return [...this.granted].filter(([id, g]) => g.forced === user && id !== ticketId).length < HOLD.each ? user : null;
+  }
+
+  /** A person pressed Start now: its waiting turn starts at once, past the size and the gap between starts. A busy lane's starts once idle. */
+  force(ticketId: number) {
+    this.reordered();
+    const entry = this.entries.find((e) => e.ticket === ticketId);
+    if (entry && this.admitting === null && !this.host.busy(ticketId) && !this.heldBy(entry)) this.admit(entry);
   }
 
   /** Those whose process has ended too; one still ending counts as its turn. */
@@ -295,7 +330,7 @@ export class TurnLine {
 
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
-    return { used: this.used(), lent: this.lent(), running: this.granted.size, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
+    return { used: this.used(), lent: this.lent(), running: this.granted.size, forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
   }
 
   /** A person's number, or null for Auto. */
@@ -310,7 +345,13 @@ export class TurnLine {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
     const p = this.pool();
+    this.starved = starvedBy(reading, box, this.limits());
     this.stalled = new Set(p.fixed ? [] : stalled);
+    const full = this.stalled.size ? this.entries.filter((e) => this.full(this.host.asks(e.ticket, e.via).person)).map((e) => e.ticket) : [];
+    if (full.join() !== this.heldFull) {
+      this.heldFull = full.join();
+      this.host.changed(this.waiting());
+    }
     this.pumpIn(0);
     if (p.fixed) return;
     const size = nextSize({ ...p, used: this.used(), waiting: this.entries.length }, reading, box, this.limits(), now);
@@ -348,8 +389,10 @@ export class TurnLine {
     if (this.admitting === ticketId) return this.grant(ticketId, via);
     const own = this.entries.find((e) => e.ticket === ticketId);
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
-    const first = !paused && !this.closed && !this.host.busy(ticketId) && this.used() < this.size() && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
+    const forced = this.forcedFor(ticketId) !== null;
+    const first = !paused && !this.closed && !this.host.busy(ticketId) && (forced || this.used() < this.size()) && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
     if (first) {
+      if (forced) return this.grant(ticketId, via);
       const me = own ?? { ticket: ticketId, since: Date.now(), via };
       const rest = this.ready().filter((e) => e.ticket !== ticketId);
       if (!rest.length || this.best([me, ...rest])?.ticket === ticketId) return this.grant(ticketId, via);
@@ -370,7 +413,7 @@ export class TurnLine {
     const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
-    if (this.used() < this.size()) this.pumpIn(0);
+    if (this.used() < this.size() || this.forcedFor(ticketId) !== null) this.pumpIn(0);
   }
 
   /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
@@ -416,12 +459,16 @@ export class TurnLine {
     this.pumpIn(wait);
   }
 
-  /** Start who is next, while workers are free; a burst goes gapMs apart. */
+  /** Start who is next, while workers are free, or past the size one a person starts now; a burst goes gapMs apart. */
   pump() {
     if (this.timer || this.closed || this.host.detached || this.admitting !== null) return;
-    if (!this.entries.length || this.used() >= this.size() || this.paused()) return;
-    const entry = this.best(this.ready());
-    if (!entry) return;
+    if (!this.entries.length || this.paused()) return;
+    const ready = this.ready();
+    const entry = this.best(this.used() < this.size() ? ready : ready.filter((e) => this.forcedFor(e.ticket) !== null));
+    if (entry) this.admit(entry);
+  }
+
+  private admit(entry: LineEntry) {
     this.save(this.entries.filter((e) => e.ticket !== entry.ticket));
     this.admitting = entry.ticket;
     try {
@@ -452,7 +499,7 @@ export class TurnLine {
     if (held) {
       held.steps++;
       delete held.lent;
-    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person });
+    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, forced: this.forcedFor(ticketId) ?? undefined });
     this.leave(ticketId);
     return true;
   }
@@ -480,7 +527,7 @@ export class TurnLine {
   }
 
   private asked(entries: LineEntry[]): Waiting[] {
-    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via) }));
+    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), ...(this.forcedFor(e.ticket) !== null ? { forced: true } : {}) }));
   }
 
   private byPerson(): Map<number, number> {

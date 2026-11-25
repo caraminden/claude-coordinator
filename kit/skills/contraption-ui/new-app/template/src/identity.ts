@@ -28,6 +28,7 @@ export function checkerFor(app: string, pub: KeyObject): (header: string | undef
       // A call relayed from another app carries `from`. This app opens no relay paths yet: refuse it, so
       // another app can't act as the person here. Allow it only on routes built for it (api.md "The relay").
       if (c.from) return null;
+      // sub stays a string (the column is TEXT); send Number(person.sub) as `person` to Citadel.
       return { sub: String(c.sub), login: String(c.login ?? ''), name: String(c.name ?? '') };
     } catch {
       return null;

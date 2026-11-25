@@ -202,7 +202,8 @@ export function toast(text, opts = {}) {
     pop = document.createElement('div');
     pop.className = 'cui-toast';
     pop.setAttribute('popover', 'manual');
-    pop.addEventListener('click', hideToast);
+    // Its action's button hides its own toast, not the one the action may have shown.
+    pop.addEventListener('click', (e) => e.target.closest('.cui-toast-action') || hideToast());
     say = document.createElement('div');
     say.className = 'cui-toast-say';
     say.setAttribute('role', 'status');
@@ -224,6 +225,9 @@ export function toast(text, opts = {}) {
       { once: true, capture: true },
     );
   }
+  const mine = ++shown;
+  // Hides this toast if it's still the one showing; a newer one is left alone.
+  const hide = () => up && shown === mine && hideToast();
   if (TONES.has(opts.tone)) pop.dataset.tone = opts.tone;
   else delete pop.dataset.tone;
   pop.textContent = text;
@@ -237,7 +241,13 @@ export function toast(text, opts = {}) {
     act.type = 'button';
     act.className = 'cui-btn cui-small cui-toast-action';
     act.textContent = action.label;
-    act.addEventListener('click', () => action.run());
+    act.addEventListener('click', () => {
+      try {
+        action.run();
+      } finally {
+        hide();
+      }
+    });
     if (opts.undo) {
       const mac = /Mac|iPhone|iPad/.test(navigator.platform);
       act.setAttribute('aria-keyshortcuts', mac ? 'Meta+Z' : 'Control+Z');
@@ -248,10 +258,8 @@ export function toast(text, opts = {}) {
   pop.showPopover();
   up = true;
   onHide = opts.onHide ?? null;
-  const mine = ++shown;
   // A frame later, so a live region made just now is in place before it changes and is heard.
   requestAnimationFrame(() => pop.matches(':popover-open') && (say.textContent = text));
   timer = setTimeout(hideToast, opts.ms ?? 4000);
-  // Hides this toast if it's still the one showing; a newer one is left alone.
-  return { hide: () => up && shown === mine && hideToast() };
+  return { hide };
 }

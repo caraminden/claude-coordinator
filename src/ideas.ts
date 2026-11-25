@@ -67,7 +67,8 @@ export function derive(i: Pick<Idea, 'pick' | 'ticket_id'>, shipped: boolean): I
   if (i.ticket_id) return shipped ? 'built' : 'started';
   if (!i.pick) return 'proposed';
   if (i.pick === 'later') return 'later';
-  if (/^(skip|cut|no|drop|not.now)/i.test(i.pick)) return 'skipped';
+  // skip, cut and drop with any ending (skipped, dropped); no and not-now only as a word of their own, so `now` and `Notes first` are picks (ME4).
+  if (/^(skip|cut|drop)|^(no|not.now)(?![a-z])/i.test(i.pick)) return 'skipped';
   return 'picked';
 }
 

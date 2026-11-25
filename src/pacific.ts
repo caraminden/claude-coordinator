@@ -37,9 +37,12 @@ export function parseResetTime(text: string, now = Date.now()): number | null {
   };
   try {
     const wall = new Date(now + offset(now));
-    let at = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate(), hour, minute) - offset(now);
-    if (at <= now) at += 24 * 60 * 60 * 1000;
-    return at;
+    const day = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate(), hour, minute);
+    // The offset at the time itself, not at `now`: a clock change between them moves it an hour (ME5).
+    const at = (d: number) => d - offset(d - offset(now));
+    let t = at(day);
+    if (t <= now) t = at(day + 24 * 60 * 60 * 1000);
+    return t;
   } catch {
     return null; // a time zone Intl doesn't know
   }

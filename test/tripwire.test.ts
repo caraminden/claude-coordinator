@@ -1384,6 +1384,8 @@ test('citadel-heavy and setsid are wrappers: the command they run is checked (#1
     'setsid node server.ts',
     'citadel-heavy --here node server.ts',
     'heavy-unit --what dev node server.ts',
+    `citadel-job --minutes 30 rm -f ${db}`,
+    'citadel-job node server.ts',
     `tools/heavy-unit --exec rm -f ${db}`,
     'ss -ltnp | grep 8080 | grep -o "pid=[0-9]*" | cut -d= -f2 | setsid xargs kill',
   ])

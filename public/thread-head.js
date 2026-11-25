@@ -7,7 +7,7 @@ import { composerPlaceholder, renderModelPicker } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
 import { asleepChat, composerHint, heldLine } from './heldmsg.js';
-import { SHIP, workingBy } from './threadstate.js';
+import { jobOf, SHIP, workingBy } from './threadstate.js';
 import { propertyChip } from './properties.js';
 import { chainLink } from './chains.js';
 import { onboardingStrip } from './settings.js';
@@ -155,13 +155,19 @@ export function renderTicketHead() {
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: "Open this minion's preview in a new tab", onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
-  // An approval card outlives its turn (#1916): Stop expires it.
-  const stoppable = t.status === 'running' || t.limit_resume_at || t.approvals;
+  // An approval card outlives its turn (#1916): Stop expires it. With a job of its own running on (#1890), Stop stops that, and it isn't woken.
+  const stoppable = t.status === 'running' || t.limit_resume_at || t.approvals || jobOf(t);
   if (!stoppable) stoppingIds.delete(t.id); // it has stopped
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (stoppable) {
     const stopping = stoppingIds.has(t.id);
-    actions.push(h('button', { class: 'secondary act-stop', disabled: stopping, title: t.limit_resume_at ? "Don't resume after the usage limit resets" : undefined, onclick: () => stopChat(t, renderTicketHead) }, stopping ? 'Stopping…' : 'Stop'));
+    actions.push(
+      h(
+        'button',
+        { class: 'secondary act-stop', disabled: stopping, title: t.status === 'running' ? undefined : t.limit_resume_at ? "Don't resume after the usage limit resets" : jobOf(t) ? "Stop what it waits for; it won't be woken" : undefined, onclick: () => stopChat(t, renderTicketHead) },
+        stopping ? 'Stopping…' : 'Stop',
+      ),
+    );
   } else if (coord) {
     // The coordinator stays open for the life of the project; its Claude session can start fresh (#406).
     if (t.session_id && !t.fresh_pending) {

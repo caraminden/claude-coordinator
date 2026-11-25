@@ -58,7 +58,7 @@
  "src/mcp-pool.ts": 10,
  "src/mcp.ts": 1,
  "src/memory-curator.ts": 6,
- "src/memory-files.ts": 18,
+ "src/memory-files.ts": 20,
  "src/openrouter.ts": 7,
  "src/pin-spares.ts": 5,
  "src/png-matte.ts": 2,

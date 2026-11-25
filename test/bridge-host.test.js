@@ -17,11 +17,11 @@ function viewer(t, api) {
     for (const f of opened) f.close();
     onArtifactData('none');
   });
-  return (page, tab = false) => {
+  return (page, tab = false, more = {}) => {
     const posted = [];
     const win = { closed: false, postMessage: (m) => posted.push(m) };
     const iframe = { isConnected: true, contentWindow: win };
-    attachBridge(tab ? null : iframe, { open: { artifact: 1 }, name: `${page}.html`, owner: 'Cara', api, ...(tab ? { tab: win } : {}) });
+    attachBridge(tab ? null : iframe, { open: { artifact: 1 }, name: `${page}.html`, owner: 'Cara', api, ...(tab ? { tab: win } : {}), ...more });
     const f = {
       posted,
       ask: (id, body) => onMessage({ source: win, origin: 'null', data: { bridge: TAG, id, page, ...body } }),
@@ -159,4 +159,63 @@ test("an older look at a store that answers late never puts a page's old values 
     p.posted.map((m) => m.entries[0].value),
     ['new'],
   );
+});
+
+test('a Send too long for Citadel hears so, and posts nothing; a page the viewer may not answer still hears nothing (#1940 HK1)', async (t) => {
+  let calls = 0;
+  const open = viewer(t, async () => (calls++, { to: { label: '#4' } }));
+  const p = open('pl');
+  p.ask(1, { op: 'send', text: 'x'.repeat(12_345) });
+  await settled();
+  assert.deepEqual(
+    p.posted.filter((m) => m.re),
+    [{ bridge: TAG, re: 1, ok: false, error: '12,345 characters is too long (10,000 at most). Shorten your notes and send again' }],
+  );
+  assert.equal(calls, 0);
+  p.posted.length = 0;
+  p.ask(2, { op: 'send', text: 'x'.repeat(12_345), bridge: 'other' });
+  await settled();
+  assert.deepEqual(p.posted, []);
+});
+
+test('the viewer closes on a Send only once the page has stored what it wrote on the answer, or after 5 s (#1940 HK3)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const closed = [];
+  const open = viewer(t, async (path) => (path === 'api/artifact-send' ? { to: { label: '#4' } } : { store: 's', entries: [], person: 'Cara' }));
+  const answered = (p, id) => p.posted.some((m) => m.re === id && m.ok);
+  const p = open('pc', false, { afterSend: () => closed.push('pc') });
+  p.ask(1, { op: 'send', text: 'Picks: 3' });
+  await settled();
+  assert.ok(answered(p, 1));
+  assert.deepEqual(closed, [], 'the page still has to store that it sent');
+  p.ask(2, { op: 'write', entries: [{ key: 'localStorage/sent', value: 'Picks: 3' }] });
+  await settled();
+  assert.ok(answered(p, 2), 'the write lands in the open viewer');
+  p.ask(3, { op: 'kept' });
+  await settled();
+  assert.deepEqual(closed, ['pc']);
+  // Something it wrote was refused for good: closing would lose it without a word.
+  const full = open('pf', false, { afterSend: () => closed.push('pf') });
+  full.ask(1, { op: 'send', text: 'a' });
+  await settled();
+  full.ask(2, { op: 'kept', all: false });
+  await settled();
+  t.mock.timers.tick(5000);
+  await settled();
+  assert.deepEqual(closed, ['pc']);
+  // A page that never says (it was served before this, or its write waits for a restart) holds it 5 s; one closed meanwhile, or kept open, isn't closed.
+  const old = open('po', false, { afterSend: () => closed.push('po') });
+  const left = open('pl', false, { afterSend: () => closed.push('pl') });
+  const stays = open('pk', false, { afterSend: () => closed.push('pk') });
+  old.ask(1, { op: 'send', text: 'a' });
+  left.ask(1, { op: 'send', text: 'a' });
+  stays.ask(1, { op: 'send', text: 'a', keepOpen: true });
+  await settled();
+  left.close();
+  t.mock.timers.tick(4999);
+  await settled();
+  assert.deepEqual(closed, ['pc']);
+  t.mock.timers.tick(1);
+  await settled();
+  assert.deepEqual(closed, ['pc', 'po']);
 });

@@ -1,12 +1,12 @@
 {
   "any-nudge": {
-    "hash": "8eb86add1fd71daf",
-    "at": "2026-11-24",
+    "hash": "5d13782b51c1a101",
+    "at": "2026-11-25",
     "days": 3,
-    "inputs": "1645 TypeScript file changes in 597 commits",
-    "hits": 112,
+    "inputs": "3276 TypeScript file changes in 717 commits",
+    "hits": 78,
     "real": 0,
-    "summary": "0 as before, 112 new, 0 gone"
+    "summary": "0 as before, 78 new, 0 gone"
   },
   "app-shots": {
     "hash": "06b527913fbf81dd",
@@ -27,13 +27,13 @@
     "summary": "0 as before, 214 new, 0 gone"
   },
   "ci-red": {
-    "hash": "c49c1598cb3647d2",
-    "at": "2026-11-23",
+    "hash": "0567173957833657",
+    "at": "2026-11-25",
     "days": 3,
-    "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",
-    "hits": 28,
-    "real": 30,
-    "summary": "26 as before, 2 new, 4 gone"
+    "inputs": "1 schemes' runs on main (gh, read-only) and their minions' chats",
+    "hits": 1,
+    "real": 2,
+    "summary": "1 as before, 0 new, 1 gone"
   },
   "compactions": {
     "hash": "e28af654e204f3a9",
@@ -72,13 +72,13 @@
     "summary": "0 as before, 0 new, 0 gone"
   },
   "flake-counter": {
-    "hash": "c168d99f5cc1b2a5",
-    "at": "2026-11-24",
+    "hash": "7722e626f28f0e55",
+    "at": "2026-11-25",
     "days": 3,
-    "inputs": "288 passes over 15 schemes: their retro logs, land-recorded flakes and minions",
-    "hits": 16,
-    "real": 19,
-    "summary": "16 as before, 0 new, 2 gone"
+    "inputs": "288 passes over 1 schemes: their retro logs, land-recorded flakes and minions",
+    "hits": 22,
+    "real": 23,
+    "summary": "22 as before, 0 new, 0 gone"
   },
   "seen-guard": {
     "hash": "cab90620e70a296f",

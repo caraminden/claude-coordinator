@@ -3,7 +3,7 @@
 // as the MCP tool does.
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
@@ -61,8 +61,8 @@ const mandate = createServer((req, res) => {
 const peek: Server = createServer((req, res) => res.writeHead(404).end('Not found'));
 
 let srv: Booted;
-let project: any;
-let minion: any;
+let project: { id: number };
+let minion: { id: number; number: number };
 let mandatePub = '';
 let mandateKey = '';
 let cara = 0;
@@ -73,8 +73,10 @@ const idle = () =>
     const { ticket } = (await srv.call(`/api/tickets/${minion.id}`)).data;
     return ticket.status !== 'running' && ticket.queued === 0;
   });
+/** One read command's answer as the fake Claude logged it. */
+type ReadOut = { status: number; data: { error: string; truncated: number; answer: string } };
 /** Runs `plan` in the turn `start` begins; returns what the calls answered. */
-async function turn(plan: object[], start: () => Promise<unknown> = () => srv.call(`/api/tickets/${minion.id}/messages`, { text: 'what is on my list?' })) {
+async function turn(plan: object[], start: () => Promise<unknown> = () => srv.call(`/api/tickets/${minion.id}/messages`, { text: 'what is on my list?' })): Promise<ReadOut[]> {
   writeFileSync(join(root, 'plan.json'), JSON.stringify(plan));
   const n = turns().length;
   await start();
@@ -137,7 +139,7 @@ test("Citadel refuses before calling: a bad command or args, an app she hasn't e
   const n = seen.length;
   const out = await turn([{ app: 'mandate', body: { command: '../items' } }, { app: 'mandate', body: { command: 'today', args: ['x'] } }, { app: 'mandate', body: { args: { day: 'x' } } }, { app: 'shut' }, { app: 'nothing-here' }, { app: 'Bad%20Name' }]);
   assert.deepEqual(
-    out.map((o: any) => o.status),
+    out.map((o) => o.status),
     [400, 400, 400, 403, 404, 400],
   );
   assert.equal(out[3].data.error, "Cara doesn't have Shut enabled");

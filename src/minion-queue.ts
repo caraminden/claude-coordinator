@@ -127,13 +127,21 @@ export class MinionQueue {
     return batch;
   }
 
-  /** A turn that never started gives its batch back, ahead of whatever came since; `held` makes it held mail, which starts no turn. */
-  giveBack(id: number, held = false): QueuedMessage[] {
+  /** Whether a message waits that wakes the minion, which unseals it: not held mail, nor a cut-off turn's batch to run again. */
+  wakes(id: number): boolean {
+    return this.msgs(id).some((m) => !m.rerun);
+  }
+
+  /**
+   * A turn that never started gives its batch back, ahead of whatever came since; `held` makes it held mail, which starts
+   * no turn, and `rerun` marks a batch whose turn did start, but was cut off before claude had it.
+   */
+  giveBack(id: number, held = false, rerun = false): QueuedMessage[] {
     const taken = this.get(id).taken ?? [];
     if (!taken.length) return [];
     this.edit(id, (r) => {
       if (held) r.held = [...taken, ...(r.held ?? [])];
-      else r.msgs = [...taken, ...(r.msgs ?? [])];
+      else r.msgs = [...(rerun ? taken.map((m) => ({ ...m, rerun: true as const })) : taken), ...(r.msgs ?? [])];
       delete r.taken;
     });
     return taken;

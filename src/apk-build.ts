@@ -61,6 +61,17 @@ export function apkPaths(webDir: string | null, root = '', android = join(root, 
   return [android, join(root, 'capacitor.config.json'), join(root, 'capacitor.config.ts'), ...own, ...(root && !android.startsWith(`${root}/`) ? [root] : [])].filter((x, i, l) => l.indexOf(x) === i);
 }
 
+/** The packages whose native code the Android project builds (named in its capacitor.settings.gradle), as the lockfiles `show` reads resolve them. */
+export async function nativePackages(show: (path: string) => Promise<string>, root: string, android: string): Promise<string> {
+  const names = [...(await show(join(android, 'capacitor.settings.gradle'))).matchAll(/node_modules\/((?:@[^/'"]+\/)?[^/'"]+)/g)].map((m) => m[1]);
+  const out: unknown[] = [];
+  for (const lock of new Set([join(root, 'package-lock.json'), 'package-lock.json'])) {
+    const packages = (JSON.parse((await show(lock)) || '{}') as { packages?: Record<string, { version?: string; integrity?: string }> }).packages ?? {};
+    for (const n of names) out.push([lock, n, packages[`node_modules/${n}`]?.version, packages[`node_modules/${n}`]?.integrity]);
+  }
+  return JSON.stringify(out);
+}
+
 /** Lines naming a release manifest's risky flags (citadel:android-app, "Before signing a Capacitor shell"): told, not refused. */
 export function manifestWarnings(xml: string): string[] {
   return ['allowBackup', 'usesCleartextTraffic', 'debuggable'].filter((a) => new RegExp(`android:${a}="true"`).test(xml)).map((a) => `its release manifest sets android:${a}="true"`);
@@ -200,7 +211,10 @@ export class ApkBuilds {
     const built = web && !(await git(live, 'ls-files', '--', web)).out ? web : null;
     if (typeof feed?.commit === 'string' && /^[0-9a-f]{40}$/.test(feed.commit)) {
       // 0: nothing that goes into the APK changed; 1: something did; anything else (a commit it doesn't have): build.
-      if ((await git(live, 'diff', '--quiet', feed.commit, commit, '--', ...(built ? [] : apkPaths(cap.webDir, cap.root, cap.android)))).code === 0) return { skipped: 'nothing in its APK changed' };
+      const same = (await git(live, 'diff', '--quiet', feed.commit, commit, '--', ...(built ? [] : apkPaths(cap.webDir, cap.root, cap.android)))).code === 0;
+      // A bump of a native package may change only the lockfile (2RE6), where most changes are the server's: only those packages count.
+      const native = (at: unknown) => nativePackages(async (path) => (await execResult('git', ['show', `${at}:${path}`], { cwd: live, timeout: 120_000, maxBuffer: 64 * 1024 ** 2 })).out, cap.root, cap.android).catch(() => '');
+      if (same && (await native(feed.commit)) === (await native(commit))) return { skipped: 'nothing in its APK changed' };
     }
     const dir = join(this.d.cacheDir, row.name);
     // The commit its build last failed or was refused at, kept on disk so a restart doesn't tell it again.

@@ -2,10 +2,18 @@
 // what each side is told when the other goes away.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
-import { afterEach, mock, test } from 'node:test';
+import { join } from 'node:path';
+import { after, afterEach, mock, test } from 'node:test';
+import { cleanShips, LinuxSqueeze } from '../public/runner-agent.mjs';
+import { shipsOn } from '../src/ci-ships.ts';
 import { Store } from '../src/db.ts';
 import { cleanLend, MachineRelay } from '../src/machines.ts';
+import { tempRoot } from './helpers.ts';
+
+const scratch = tempRoot('machine-relay-');
+after(() => scratch.teardown());
 
 /** An event stream: what the app writes to it, parsed, and whether it was ended. */
 function stream() {
@@ -64,6 +72,33 @@ test("when the agent goes away, its proxies' streams just end: they reconnect on
     proxy.sent.map((m) => Object.keys(m)),
     [['session']],
   );
+});
+
+test('a managed machine names the MCP server it lends, to a starting turn and on the session it opens (2MA6)', () => {
+  const { relay, store, box } = world();
+  relay.connectAgent(box, stream(), { host: 'h', command: '', managed: true });
+  relay.setInfo(store.getMachine(box.id)!, { v: 2, found: [{ name: 'blender' }, { name: 'godot-ai' }] });
+  const opened = () => {
+    const proxy = stream();
+    assert.equal(relay.openSession(box.id, { ticketId: 1, projectId: 1 }, 'mcp', '#1', proxy), true);
+    return [relay.online()[0].lent, proxy.sent[0].lent];
+  };
+  relay.setLend(box.id, { server: 'blender', workspaces: [] });
+  assert.deepEqual(opened(), ['blender', 'blender']);
+  relay.setLend(box.id, { server: 'godot-ai', workspaces: [] });
+  assert.deepEqual(opened(), ['godot-ai', 'godot-ai']);
+});
+
+test('with its jobs block broken, a machine still hears of a job it lists, and of no other (2MA10)', () => {
+  const { relay, store, box } = world();
+  const agent = stream();
+  relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+  relay.setInfo(store.getMachine(box.id)!, { v: 2, known_jobs: [{ id: 5, state: 'running' }] });
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 5 }), true);
+  assert.deepEqual(agent.sent.at(-1), { job: { type: 'job.stop', id: 5 } });
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 6 }), false);
+  relay.setInfo(store.getMachine(box.id)!, { v: 2 });
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 5 }), false, 'it named none: Citadel ends the job itself');
 });
 
 test('an agent that beats and then goes quiet (a laptop asleep) is dropped within a couple of minutes; one that never beats is kept', () => {
@@ -201,10 +236,10 @@ test('ships (#1268) go to every runner agent at each look, and to one that conne
   relay.connectAgent(box, lent, { host: 'h', command: 'fake-mcp' });
   relay.connectAgent(win, windows, { host: 'pc', command: 'citadel runner agent', runners: true, os: 'windows' });
   const ships = [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8' }];
-  relay.sendShips(ships);
+  relay.sendShips(() => ships);
   const linux = stream();
   relay.connectAgent(wsl, linux, { host: 'wsl', command: 'citadel runner agent', runners: true, os: 'linux' });
-  relay.sendShips([]);
+  relay.sendShips(() => []);
   assert.deepEqual(
     windows.sent.filter((m) => m.ships),
     [{ ships }, { ships: [] }],
@@ -214,6 +249,50 @@ test('ships (#1268) go to every runner agent at each look, and to one that conne
     [{ ships }, { ships: [] }],
   );
   assert.ok(!lent.sent.some((m) => m.ships));
+});
+
+test('a ship squeezes only the PC it runs on (#1934): two agents on two PCs, each told of its own ships, the other lifted', async () => {
+  const { store, relay } = world();
+  const ship = { repo: 'caraminden/claude-coordinator', runner: 'DESK-linux' };
+  const quotas: Record<string, string[]> = {};
+  /** A fake Linux agent: one runner on a ship's job name, one other; what Citadel's list makes it set. */
+  const agent = (host: string) => {
+    const units = mkdtempSync(join(scratch.dir, 'ships-'));
+    for (const n of ['a', 'b']) writeFileSync(join(units, `citadel-runner-${n}.service`), `ExecStart=/bin/bash /opt/${n}/bin/runsvc.sh\n`);
+    const runner = { a: { repo: 'caraminden/claude-coordinator', name: `${host}-linux` }, b: { repo: 'caraminden/peek-auras', name: `${host}-linux` } } as Record<string, { repo: string; name: string }>;
+    const squeeze = new LinuxSqueeze({
+      units,
+      cores: 10,
+      identity: (dir: string) => runner[dir.slice(-1)],
+      procs: () => [],
+      run: async ({ args }: { args: string[] }) => ((quotas[host] ??= []).push(`${args[2]} ${args[3]}`), { code: 0, output: '' }),
+    });
+    const out = stream();
+    relay.connectAgent(store.createMachine(`${host}-runners`, host, 'Cara'), out, { host, command: 'citadel runner agent', runners: true, os: 'linux' });
+    return { out, act: () => squeeze.update(cleanShips(out.sent.filter((m) => m.ships).at(-1)!.ships)) };
+  };
+  const desk = agent('DESK');
+  const second = agent('LAPTOP');
+  const pcs = new Map([
+    ['desk', new Set<string>()],
+    ['laptop', new Set<string>()],
+  ]);
+  relay.sendShips((host) => shipsOn(host, [ship], pcs));
+  await desk.act();
+  await second.act();
+  assert.deepEqual(quotas.DESK.sort(), ['citadel-runner-a.service CPUQuota=', 'citadel-runner-b.service CPUQuota=300%']);
+  assert.deepEqual(quotas.LAPTOP.sort(), ['citadel-runner-a.service CPUQuota=', 'citadel-runner-b.service CPUQuota='], "the second PC's runners keep full speed");
+  // One that connects while the ship runs gets only its own PC's list too.
+  const wsl = stream();
+  relay.connectAgent(store.createMachine('desk-wsl', 'w', 'Cara'), wsl, { host: 'Desk', command: 'citadel runner agent', runners: true, os: 'linux' });
+  const third = stream();
+  relay.connectAgent(store.createMachine('third', 't', 'Cara'), third, { host: 'THIRD', command: 'citadel runner agent', runners: true, os: 'linux' });
+  assert.deepEqual(
+    wsl.sent.filter((m) => m.ships),
+    [{ ships: [ship] }],
+    "the same PC's other agent (WSL beside Windows) squeezes too",
+  );
+  assert.ok(!third.sent.some((m) => m.ships));
 });
 
 /** A test box lending workspace w to a minion's turn, with Citadel following its jobs (#1425): what each side was told. */

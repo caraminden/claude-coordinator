@@ -201,7 +201,7 @@ export async function api(path, opts = {}) {
   // Caddy's answer while nothing serves: a restart that outlasted systemd's socket, or a failed one (#493).
   // The status rides on the error, so a caller can tell a restart from a refusal (bridge-host.js, #821).
   if (!res.ok && !data.error && [502, 503, 504].includes(res.status)) throw Object.assign(new Error('%APP_NAME% is restarting, try again in a moment'), { status: res.status });
-  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, data });
   return data;
 }
 

@@ -91,4 +91,11 @@ test('the git-history cache is capped', async () => {
   assert.equal(reads, total, 'the newest key is still cached');
   await gitEdits(repo, ['f0.md'], href);
   assert.equal(reads, total + 1, 'the first key was evicted, so it is read again');
+  // 2ME6: a refresh of a key that is already cached (its HEAD moved) evicts no other scheme's entry.
+  const full = historyCacheSize();
+  run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'moves HEAD');
+  const before = reads;
+  await gitEdits(repo, [`f${total - 1}.md`], href);
+  assert.equal(reads, before + 1, 'refreshed after HEAD moved');
+  assert.equal(historyCacheSize(), full, 'the refreshed key replaced its own entry; no other repo lost one');
 });

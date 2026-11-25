@@ -32,7 +32,7 @@ const SHELL_KINDS = {
 const SHELLS = Object.fromEntries(Object.entries(SHELL_KINDS).flatMap(([tone, [label, tags]]) => tags.map((t) => [t, [tone, tone === 'bash' && t !== 'bash' ? t : label]])));
 /** A fence's opening line; a backtick one with a backtick later on its line is inline code, not a fence (CommonMark). */
 const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
-const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
+const HEADING = /^(#{1,6})\s+(.*?)(?:\s*(?<=\s)#+)?\s*$/;
 const HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>/;
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*)|$)/;
@@ -51,6 +51,9 @@ const startsBlock = (lines, i, breaks) => {
   const item = ITEM.exec(l);
   return HEADING.test(l) || FENCE.test(l) || QUOTE.test(l) || HR.test(l) || isTableStart(lines, i) || (!!item && item[3] != null && (breaks || !/\d/.test(item[2]) || /^0*1\D/.test(item[2])));
 };
+
+/** A table cell's code spans show an escaped pipe as the pipe (GFM); outside one, inline() drops the backslash. */
+const unpipe = (cell) => cell.replace(/(?<!\\)(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g, (code) => code.replaceAll('\\|', '|'));
 
 /** A code span (not across a blank line) or an HTML comment, for stripComments. */
 const CODE_OR_COMMENT = /(?<!\\)(`+)(?!`)(?:(?!\n[ \t>]*\n)[\s\S])*?[^`]\1(?!`)|<!--[\s\S]*?-->/g;
@@ -323,7 +326,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
         .trim()
         .replace(/^\||(?<!\\)\|$/g, '')
         .split(/(?<!\\)\|/)
-        .map((c) => c.trim());
+        .map((c) => unpipe(c.trim()));
     const hasHead = rows.length > 1 && DELIM.test(rows[1]) && rows[1].includes('-');
     const align = hasHead ? cells(rows[1]).map((c) => (/^:-+:$/.test(c) ? ' class="cui-al-c"' : /-:$/.test(c) ? ' class="cui-al-r"' : '')) : [];
     const row = (r, tag) => {
@@ -467,7 +470,7 @@ export function markdownLine(src, { streaming = false } = {}) {
       l = l
         .slice(1, -1)
         .split(/(?<!\\)\|/)
-        .map((c) => c.trim())
+        .map((c) => unpipe(c.trim()))
         .join(' · ');
     // One paragraph of one line: its HTML is the line's, inside a single <p>.
     const html = renderMarkdown(l, plain).replace(/^<p>([\s\S]*)<\/p>$/, '$1');

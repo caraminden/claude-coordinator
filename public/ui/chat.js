@@ -241,7 +241,7 @@ const CSS = `
 :where(.cui-steps .cui-grunt) { margin: 3px 0; }
 :where(.cui-grunt .cui-steps) { padding: 0 0 0 22px; }
 :where(.cui-stopped) { color: var(--citadel-muted); font-size: var(--citadel-size-small); }
-:where(.cui-empty) { margin: auto; padding: var(--citadel-space-3) var(--citadel-space-5); color: var(--citadel-muted); text-align: center; }
+:where(.cui-empty.cui-chat-empty) { margin: auto; padding: var(--citadel-space-3) var(--citadel-space-5); color: var(--citadel-muted); text-align: center; }
 :where(.cui-live) { padding: 0 var(--citadel-space-3); }
 :where(.cui-live > .cui-working) { margin-bottom: var(--citadel-space-2); }
 :where(.cui-latest) { position: sticky; bottom: var(--citadel-space-3); align-self: center; margin-top: auto; }
@@ -287,7 +287,7 @@ export function mountChat(el, opts = {}) {
   adoptStyles();
   const div = (cls) => Object.assign(document.createElement('div'), { className: cls });
   el.classList.add('cui-chat');
-  const empty = div('cui-empty');
+  const empty = div('cui-empty cui-chat-empty');
   empty.textContent = opts.empty ?? '';
   const log = div('cui-log');
   // The only live region: what the agent is doing when nothing else in the log shows it.
@@ -299,7 +299,7 @@ export function mountChat(el, opts = {}) {
   let turns = [];
   let nodes = []; // per turn: { el, reply, blocks: Map(block id → node), choices }
   const open = new Set();
-  const cardEls = new Map(); // tool id → { el, done }
+  const cardEls = new Map(); // tool id → { isCard, el, done }
   let follow = true;
   let frame = 0;
   let tick = 0;
@@ -307,8 +307,12 @@ export function mountChat(el, opts = {}) {
 
   const card = (name, input, id) => {
     if (!opts.block) return false;
-    if (!cardEls.has(id)) cardEls.set(id, { el: opts.block(name, input, undefined) ?? null, done: false });
-    return !!cardEls.get(id).el;
+    if (!cardEls.has(id)) {
+      const el = opts.block(name, input, undefined) ?? null;
+      // Settled by this first call: a result drawn as null empties the card, and the blocks after it keep their ids.
+      cardEls.set(id, { isCard: !!el, el, done: false });
+    }
+    return cardEls.get(id).isCard;
   };
 
   function drawTurn(k, t) {

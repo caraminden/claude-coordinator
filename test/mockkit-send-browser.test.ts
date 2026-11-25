@@ -50,6 +50,12 @@ before(async () => {
       return void res
         .writeHead(200, { 'content-type': 'text/html' })
         .end(PAGE.replace('</main>', '<p><img alt="Header shot" src="/shot.png" width="40" height="40"> <a href="/shot.png"><img alt="Linked shot" src="/shot.png" width="40" height="40"></a> <a href="/other.html"><img alt="Page link" src="/shot.png" width="40" height="40"></a></p></main>'));
+    if (path === '/board') {
+      const shot = (alt: string) => `<img alt="${alt}" src="/shot.png" width="40" height="40">`;
+      const html = `<div data-on="click:choose">${shot('Chosen shot')} <a href="/shot.png">${shot('Linked choice')}</a></div><div data-on="pointerover:peek">${shot('Hovered shot')}</div>`;
+      const boards = `<script>window.chosen = 0; mock.boards('#takes', { boards: [{ id: 'a', title: 'A' }], state: { n: 0 }, render: (b, s) => ${JSON.stringify(html)} + s.n, on: { choose: (s) => ({ n: (window.chosen += 1) }), peek: () => {} } });</script>`;
+      return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE.replace('</main>', '<div id="takes"></div></main>') + boards);
+    }
     if (path === '/') return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
     if (path === '/mockkit.js' || path === '/mockkit.css') {
       return void res.writeHead(200, { 'content-type': path.endsWith('js') ? 'text/javascript' : 'text/css' }).end(readFileSync(join(starter, path)));
@@ -142,6 +148,62 @@ test('a failed send rolls back to ready, with a toast whose Retry posts it', { s
   assert.equal(await disabled(page), true);
 });
 
+test('Retry sends the picks as they are now, not as they were when Send failed, and nothing when none are left (#1940 HK9)', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  const fail = async () => {
+    await page.eval('window.fail = true');
+    await send(page);
+    await waitFor(page, 'the toast', '!!document.querySelector(".mk-toast")');
+  };
+  await fail();
+  await click(page, '[data-pick="b"] [data-v="pick"]');
+  await click(page, '.mk-toast .primary');
+  await waitFor(page, 'the retried post', 'window.posts.length > 0');
+  assert.match((await posts(page))[0], /Take A: Picked\n- Take B: Picked/);
+  assert.equal(await disabled(page), true, 'what went is what is picked');
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await fail();
+  await click(page, '[data-pick="b"] [data-v="pick"]');
+  await page.eval('window.labelAtSend = undefined');
+  await click(page, '.mk-toast .primary');
+  await waitFor(page, 'the empty answer', 'document.querySelector(".mk-sent").textContent === "Nothing picked yet"');
+  assert.equal(await page.eval('window.labelAtSend === undefined'), true, 'no post left');
+  assert.equal((await posts(page)).length, 1);
+});
+
+test('a pick Citadel refused shows as not saved, and why; unpicking one it refused does too (#1940 HK8)', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await page.eval(`window.setSave('failed', 'Log in <again>')`);
+  const dock = () => page.eval<string>('document.querySelector(".mk-dock-text").textContent');
+  assert.equal(await dock(), '1 picked · not saved: Log in <again>');
+  assert.equal(await page.eval('document.querySelector(".mk-dock").classList.contains("mk-unsaved")'), true);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  assert.equal(await dock(), 'Nothing picked yet · not saved: Log in <again>');
+  assert.equal(await page.eval('document.querySelector(".mk-toast > span").textContent'), 'Not saved: Log in <again>');
+  await page.eval(`window.setSave('saved')`);
+  assert.equal(await page.eval('!!document.querySelector(".mk-toast")'), false, 'nothing left unsaved');
+  assert.equal(await dock(), 'Nothing picked yet · picks save as you make them');
+});
+
+test('picks sent with a marked picture are still Sent after a reload, where the marks are gone (#1940 HK3)', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="b"] [data-v="pick"]');
+  await page.eval(`window.drawResult = { marked: true, mediaType: 'image/png', data: 'iVBORw0KGgo=' }`);
+  await click(page, 'img[alt="Header shot"]');
+  await click(page, '.mk-viewer-draw');
+  await waitFor(page, 'the mark', '!!document.querySelector("img.mk-marked")');
+  await send(page);
+  await waitFor(page, 'the post', 'window.posts.length > 0');
+  assert.match((await posts(page))[0], /Marked pictures/);
+  await page.eval(`(() => { location.reload(); })()`).catch(() => {});
+  await waitFor(page, 'the reloaded page', 'window.ready && window.posts.length === 0');
+  await click(page, '[data-pick="b"] [data-v="pick"]');
+  await waitFor(page, 'Sent', '/Sent/.test(document.querySelector(".mk-dock > button").textContent)');
+  assert.equal(await disabled(page), true);
+});
+
 // #914: the button must not move while the status text, the Sent line and the label change.
 for (const width of [1200, 700, 390]) {
   test(`the dock's button keeps its box through picks, notes, save states and Sent at ${width}px`, { skip }, async () => {
@@ -161,6 +223,8 @@ for (const width of [1200, 700, 390]) {
     await snap('saving');
     await page.eval(`window.setSave('retrying')`);
     await snap('retrying');
+    await page.eval(`window.setSave('failed', 'This page holds at most 2 MB, and what it saved is already that much; take something out of it first')`);
+    await snap('refused');
     await page.eval(`window.setSave('saved')`);
     await snap('saved');
     await page.eval(`document.querySelector('.mk-dock .mk-sent').textContent = 'Sent to #419 ✓ and a long line that goes on and on to prove it cannot push anything around'`);
@@ -225,4 +289,21 @@ test('a click on a picture, linked to its file or not, opens a modal that closes
   await click(page, 'img[alt="Page link"]');
   await waitFor(page, 'the link to open its page', 'location.pathname === "/other.html"');
   assert.equal(await open(), false, 'a link to a page stays a link and opens no modal');
+});
+
+test("a picture in a board's click action runs the action only; a board with other handlers keeps the modal (#1940 HK6)", { skip }, async () => {
+  const page = await browser.page(new URL('/board', base).href);
+  await waitFor(page, 'the page', 'window.ready');
+  const open = () => page.eval<boolean>('!!document.querySelector("dialog.mk-viewer[open]")');
+  for (const [alt, n] of [
+    ['Chosen shot', 1],
+    ['Linked choice', 2],
+  ] as const) {
+    await click(page, `img[alt="${alt}"]`);
+    assert.equal(await page.eval('window.chosen'), n, `${alt} runs the action once`);
+    assert.equal(await open(), false, `${alt} opens no picture`);
+    assert.equal(await page.eval('location.pathname'), '/board');
+  }
+  await click(page, 'img[alt="Hovered shot"]');
+  assert.equal(await open(), true, 'a hover handler takes no zoom away');
 });

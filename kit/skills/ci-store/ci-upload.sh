@@ -64,23 +64,27 @@ plain='^[A-Za-z0-9][A-Za-z0-9._+-]*$'
 [[ -z $target || $target =~ $plain ]] || give_up "the target '$target' has more than letters, digits and . _ + - in it"
 
 # Tokens go to curl on stdin, never on a command line another job on this PC could list.
-answer=$(printf 'header = "Authorization: Bearer %s"\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" |
-  curl -sS --config - --max-time 30 --retry 2 "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store") || give_up "GitHub didn't hand out a run token"
-token=$(printf '%s' "$answer" | sed -n 's/.*"value" *: *"\([^"]*\)".*/\1/p')
-[ -n "$token" ] || give_up "GitHub didn't hand out a run token"
-echo "::add-mask::$token"
+get_token() {
+  local answer
+  answer=$(printf 'header = "Authorization: Bearer %s"\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" |
+    curl -sS --config - --max-time 30 --retry 2 "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store") || give_up "GitHub didn't hand out a run token"
+  token=$(printf '%s' "$answer" | sed -n 's/.*"value" *: *"\([^"]*\)".*/\1/p')
+  [ -n "$token" ] || give_up "GitHub didn't hand out a run token"
+  echo "::add-mask::$token"
+}
+get_token
 
 url="$store/api/ci-store/$name?kind=$kind${target:+&target=$target}"
 # 503: the store is taking other jobs' uploads and has no room to take this one beside them yet, or it
 # couldn't read GitHub's signing keys to check the run token (it tries again within seconds).
-# A curl that fails before an answer (refused, reset, empty reply, connect timeout: curl exits 6 7 28 35 52 55 56) is
+# A curl that fails before an answer (refused, reset, empty reply, connect timeout, a cut transfer: curl exits 6 7 18 28 35 52 55 56) is
 # the store restarting, which takes a few seconds: it is tried again like a 503, 6 tries 30 s apart (about 2.5 minutes).
 for try in 1 2 3 4 5 6; do
   rc=0
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl -sS --config - --max-time 1800 --connect-timeout 15 -T "$file" -o "$tmp/answer" -w '%{http_code}' "$url") || rc=$?
   if [ "$rc" != 0 ]; then
-    case $rc in 6|7|28|35|52|55|56) [ "$try" != 6 ] || give_up "the store at $store didn't answer"; sleep "${CI_UPLOAD_WAIT:-30}"; continue ;; esac
+    case $rc in 6|7|18|28|35|52|55|56) [ "$try" != 6 ] || give_up "the store at $store didn't answer"; sleep "${CI_UPLOAD_WAIT:-30}"; get_token; continue ;; esac
     give_up "the store at $store didn't answer"
   fi
   [ "$code" = 503 ] && [ "$try" != 6 ] || break

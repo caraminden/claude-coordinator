@@ -698,7 +698,7 @@ export interface ScheduledRunDeps {
   store: Store;
   /** server.ts's newMinion: a minion with its worktree, not started yet. */
   newMinion: (project: Project, m: ReturnType<typeof runMinion>, by: string) => Promise<{ id: number; number: number }>;
-  runner: Pick<Runner, 'emit' | 'send' | 'limitWait' | 'netWait' | 'killWait'>;
+  runner: Pick<Runner, 'emit' | 'send' | 'limitWait' | 'netWait' | 'killWait'> & Partial<Pick<Runner, 'jobs'>>;
   broadcast: (msg: object) => void;
   /** Who a run's minion says started it. */
   by: string;
@@ -752,10 +752,10 @@ export class ScheduledRuns {
     const cut = triggered ? null : store.schedules.cutOff(s, by);
     if (cut?.status === 'closed') return store.schedules.ran(s.id, { ticketId: cut.id }, now);
     if (cut) return this.begin(s, project, cut, last, store.schedules.minionsSince(s, by), now, false);
-    // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works,
+    // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works (its own job running on past its turn, #1890, included),
     // or waits to resume after a usage limit, an outage or a kill. Not state 'limited': a run that gave up keeps it for good.
     // A trigger just waits for the next hourly check, quietly: no slot of the calendar's was missed.
-    if (last && (last.status === 'running' || inLine(store, last.id) || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id) || cardHeld(store, last.id)))
+    if (last && (last.status === 'running' || inLine(store, last.id) || runner.jobs?.running(last.id).length || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id) || cardHeld(store, last.id)))
       return triggered ? undefined : store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
     // The activity gate (#745): a quiet stretch costs nothing, no minion and no note, and the window keeps growing. It
     // gates calendar slots; a trigger's own count was just met.

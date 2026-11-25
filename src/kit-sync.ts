@@ -410,7 +410,7 @@ export class KitSync {
       const shipping = s?.round?.schemes.some((x) => x.state === 'checking' || x.state === 'queued' || x.state === 'shipping');
       if (JSON.stringify(blobs) !== JSON.stringify(s?.blobs) && !shipping) {
         if (s?.round) await this.supersede(s.round);
-        s = { blobs, round: await this.start(head, blobs) };
+        s = { blobs, round: await this.start(head, blobs, s?.blobs ?? {}) };
         this.d.save(s);
       }
       if (s?.round) await this.advance(s);
@@ -430,7 +430,7 @@ export class KitSync {
   }
 
   /** Sync every scheme that is behind: merge, commit on its branch in its worktree, start its check. */
-  private async start(kit: string, blobs: Record<string, string | null>): Promise<Round> {
+  private async start(kit: string, blobs: Record<string, string | null>, prevBlobs: Record<string, string | null>): Promise<Round> {
     const histories = Object.fromEntries(KIT_FILES.map((f) => [f.template, templateHistory(this.d.kitDir, kit, f.template)]));
     const names = new Map(this.d.projects().map((p) => [p.id, p.name]));
     const round: Round = { kit, blobs, at: Date.now(), schemes: [] };
@@ -486,6 +486,9 @@ export class KitSync {
         description: `Kit sync check for ${name}`,
         ticketId: 0,
       });
+      // Saved the moment its check runs, still with the old blobs (the round isn't whole yet): a restart now finds this check in
+      // its round and waits for it, instead of starting every check again over the first (ME2).
+      this.d.save({ blobs: prevBlobs, round });
     }
     return round;
   }

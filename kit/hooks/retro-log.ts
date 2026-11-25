@@ -7,7 +7,7 @@
  * The log is a convenience: every failure here is swallowed, never breaking the call it describes.
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,15 +28,15 @@ export function note(input: { session_id?: string; cwd?: string }, kind: string,
     const session = input.session_id ?? 'unknown';
     const path = logPath(shared, session, now);
     mkdirSync(join(path, '..'), { recursive: true });
-    let fd: number | null = null;
-    try {
-      fd = openSync(path, 'wx');
-    } catch {
-      // Already started.
-    }
-    if (fd !== null) {
-      writeFileSync(fd, header(session, input.cwd));
-      closeSync(fd);
+    // Append mode: a header written through a 'wx' fd sits at position 0 and overwrites a line another hook
+    // appended while header() ran git. The header is built first, so the gap is only the open.
+    if (!existsSync(path)) {
+      const head = header(session, input.cwd);
+      try {
+        writeFileSync(path, head, { flag: 'ax' }); // exclusive: a file made meanwhile keeps its lines
+      } catch {
+        // Already started.
+      }
     }
     const line = detail.replace(/\s+/g, ' ').trim().slice(0, 400);
     appendFileSync(path, `- ${now.toISOString().slice(11, 19)}Z · ${kind} · ${line}\n`);

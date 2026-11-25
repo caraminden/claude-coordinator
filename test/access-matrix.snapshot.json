@@ -3322,6 +3322,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/minion-jobs": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can start its jobs",
+  "member": "403 Only the minion itself can start its jobs",
+  "outsider": "403 Only the minion itself can start its jobs",
+  "tmA": "403 Only the minion itself can start its jobs",
+  "tmB": "403 Only the minion itself can start its jobs",
+  "m1": "400 what is missing",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/minion-message": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion messages another minion this way",
@@ -3539,6 +3549,16 @@
   "outsider": "404 No such minion",
   "tmA": "409 #1 isn't sealed waiting on another minion's work",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/tickets/:minion1/start-now": {
+  "anon": "401 Not logged in",
+  "person": "400 on is true or false",
+  "member": "400 on is true or false",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people start a minion now; a Taskmaster has mark_urgent",
+  "tmB": "403 Only people start a minion now; a Taskmaster has mark_urgent",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -4192,6 +4212,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:taskmasterA/minion-jobs": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself can start its jobs",
+  "member": "403 Only the minion itself can start its jobs",
+  "outsider": "403 Only the minion itself can start its jobs",
+  "tmA": "403 Only the minion itself can start its jobs",
+  "tmB": "403 Only the minion itself can start its jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:taskmasterA/minion-message": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion messages another minion this way",
@@ -4409,6 +4439,16 @@
   "outsider": "404 No such minion",
   "tmA": "403 The Taskmaster cannot act on itself",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/tickets/:taskmasterA/start-now": {
+  "anon": "401 Not logged in",
+  "person": "400 on is true or false",
+  "member": "400 on is true or false",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people start a minion now; a Taskmaster has mark_urgent",
+  "tmB": "403 Only people start a minion now; a Taskmaster has mark_urgent",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

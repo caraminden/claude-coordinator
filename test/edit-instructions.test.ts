@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { bootServer, jsonLines, stopProcs, stopTurns, until } from './helpers.ts';
+import { json } from './typed.ts';
 
 // edit_instructions (#961): a minion edits Settings text through the same setters and history as a person.
 const root = mkdtempSync(join(tmpdir(), 'edit-instr-'));
@@ -34,8 +35,11 @@ chmodSync(fakeClaude, 0o755);
 let base = '';
 let cookie = '';
 let store: Store;
-let ticket: any;
-let project: any;
+// The parts of the API's answers these tests read.
+type Api = { id: number; number: number; token: string; person: { id: number }; found: { why: string }[] };
+type Edited = { id: string; held: number; found: string[]; href: string; error: string };
+let ticket: Api;
+let project: Api;
 let josh = 0;
 let joshCookie = '';
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
@@ -50,13 +54,13 @@ async function edit(scope: string, edits: unknown, overlaps?: string[]) {
     headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ scope, edits, overlaps }),
   });
-  const data = await res.json();
+  const data = await json<Edited>(res);
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
   return data;
 }
-const api = async (path: string, method = 'GET', body?: unknown, as = cookie) => {
+const api = async <T = Api>(path: string, method = 'GET', body?: unknown, as = cookie): Promise<T> => {
   const res = await fetch(base + path, { method, headers: { Cookie: as, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  return res.json();
+  return json<T>(res);
 };
 
 before(async () => {
@@ -124,7 +128,7 @@ const verdict = async (verdict: string, as = cookie, notes?: string) => {
   const res = await fetch(`${base}/api/tickets/${ticket.id}/verdict`, { method: 'POST', headers: { Cookie: as, 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: lastCard().id, verdict, notes }) });
   // and for it to end, so the test's own writes don't race the server's.
   if (res.status === 202) await until("the answer's turn", () => turns().length > n && store.getTicket(ticket.id)!.status !== 'running');
-  return { status: res.status, body: await res.json() };
+  return { status: res.status, body: await json<unknown>(res) };
 };
 
 test('an edit repeating the card rule is held on a card, and Save anyway saves what it showed', async () => {
@@ -172,15 +176,15 @@ test('Save anyway refuses when the text changed under the card, and a Citadel-wi
 // #1488: a stale held edit couldn't be withdrawn (settle_question said "No open question card"), so a person later
 // saved it from the card and a duplicate rule went in.
 test('the minion withdraws its held edit with settle_question, by the id it was given or by the link; then nobody can save it', async () => {
-  const settle = async (questionId: string) => {
+  const settle = async (questionId: string | undefined) => {
     const res = await fetch(`${base}/api/tickets/${ticket.id}/settle`, { method: 'POST', headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId }) });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await json<{ error: string }>(res) };
   };
   const was = store.getProject(project.id)!.instructions;
   const r = await edit('scheme', [{ find: 'Alpha 1.', replace: 'Alpha 1. A held line to withdraw by its id.' }], ['CLAUDE.md says it']);
   assert.equal(typeof r.id, 'string');
   assert.equal(r.id, lastCard().id, 'the held reply names the card by its id');
-  assert.deepEqual(await settle(undefined as any), { status: 200, body: { settled: [] } }, 'without an id a plan waiting on a person stays');
+  assert.deepEqual(await settle(undefined), { status: 200, body: { settled: [] } }, 'without an id a plan waiting on a person stays');
   assert.equal(lastCard().status, 'pending');
   assert.deepEqual(await settle(r.id), { status: 200, body: { settled: [r.id] } });
   assert.equal(lastCard().status, 'withdrawn');

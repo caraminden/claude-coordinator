@@ -114,9 +114,14 @@ test("#1487: a broken-test line moves its open fix minion's ship to the front, o
   assert.equal(moved.length, 2);
   writeFileSync(log, `- 06:12:00Z · broken test · ${F} · red in 16 of 44 runs in the last 6 h · ticket/1062-x\n`, { flag: 'a' });
   assert.equal(await fixes.broken(project, at('06:15:00')), 1, 'a newer line moves it again');
-  // A day on (a server that restarted, so nothing remembered), the newest line still moves it; a minute past the day, not.
-  const later = new FlakeFixes({ store, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 1 }), runs: async () => [], jobs: async () => [], front: () => 'moved' });
-  assert.equal(await later.broken(project, Date.parse('2026-11-21T06:13:00Z')), 0, 'past a day the line no longer moves it');
-  assert.equal(await later.broken(project, Date.parse('2026-11-21T06:11:00Z')), 1);
+  // A server that restarted remembers what it moved (#1954, 2CA8): this used to expect the move again, which undid a
+  // Taskmaster's order after every deploy, against the rule above.
+  const restarted = () => new FlakeFixes({ store, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 1 }), runs: async () => [], jobs: async () => [], front: () => 'moved' });
+  assert.equal(await restarted().broken(project, at('06:16:00')), 0, 'the same line after a restart: the order stands');
+  // A day on, a line nobody moved yet still moves it; a minute past the day, not.
+  writeFileSync(log, `- 06:20:00Z · broken test · ${F} · red in 17 of 45 runs in the last 6 h · ticket/1063-y\n`, { flag: 'a' });
+  assert.equal(await restarted().broken(project, Date.parse('2026-11-21T06:21:00Z')), 0, 'past a day the line no longer moves it');
+  assert.equal(await restarted().broken(project, Date.parse('2026-11-21T06:19:00Z')), 1);
+  assert.deepEqual(Object.values(store.getSetting<Record<string, number>>(`flake-fronted:${project.id}`)!), [at('06:20:00')], 'lines over a day old are dropped');
   assert.equal(moved.length, 3);
 });

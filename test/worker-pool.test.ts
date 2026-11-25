@@ -206,6 +206,7 @@ function line(saved: Record<string, unknown> = {}) {
     exempt: () => false,
     busy: (id) => busy.has(id),
     asks: () => ({ person: 1, rank: 1 }),
+    forced: () => null,
     start: (e) => {
       started.push(e.ticket);
       turns.enter(e.ticket, e.via);
@@ -285,7 +286,7 @@ test("a boot check's copy forgets the line and the pause", () => {
 // #1892: the limits are settings.
 const mem = (extra = {}) => ({ ...full, ...extra });
 test("a changed CPU line moves where Auto shrinks, and defaults are today's numbers", () => {
-  assert.deepEqual(L, { min: 4, max: 30, growCpu: 35, growMem: 8, shrinkCpu: 50, shrinkMem: 20, shrinkFreeGb: 6, growSec: 20, shrinkSec: 30 });
+  assert.deepEqual(L, { min: 4, max: 30, growCpu: 35, growMem: 8, shrinkCpu: 50, shrinkMem: 20, shrinkFreeGb: 6, growSec: 20, shrinkSec: 30, waitHold: 120 });
   const r = { cpu: 55, mem: 0 };
   assert.equal(nextSize(full, r, LATER), 9);
   assert.equal(nextSize(full, r, LATER, ok, { ...L, shrinkCpu: 60 }), 10, 'a higher line leaves it');
@@ -317,7 +318,7 @@ const dir = mkdtempSync(join(tmpdir(), 'pool-limits-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 test('saved limits steer at once, record who and when, a health event each, and reset puts the default back', () => {
   const store = new Store(join(dir, 'x.db'));
-  const turns = new TurnLine({ store, exempt: () => false, busy: () => false, asks: () => null, start: () => {}, pauseTurn: () => {}, changed: () => {}, carded: () => [], gapMs: 0, detached: false } as never);
+  const turns = new TurnLine({ store, exempt: () => false, busy: () => false, asks: () => null, forced: () => null, start: () => {}, pauseTurn: () => {}, changed: () => {}, carded: () => [], gapMs: 0, detached: false } as never);
   assert.deepEqual(turns.limits(), L);
   turns.setLimits({ shrinkCpu: 60 }, 'Josh', 5_000);
   assert.equal(turns.limits().shrinkCpu, 60);

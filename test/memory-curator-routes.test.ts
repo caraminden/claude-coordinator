@@ -125,7 +125,10 @@ test('applying the ticked changes leaves the unticked delete, tells the run, and
 
 test('a newer proposal supersedes the open one, and turning it all down changes nothing', async () => {
   const first = await propose([{ action: 'flag', file: 'b.md', reason: 'live state: make it a pointer' }]);
-  const second = (await answered(() => propose([{ action: 'delete', file: 'b.md', reason: 'stale' }]))) as any; // its supersede wakes the run
+  const sent = (await events('user_message')).length;
+  const second = (await propose([{ action: 'delete', file: 'b.md', reason: 'stale' }])) as any;
+  // 2ME2: the run's own earlier proposal is settled but the run isn't told to close itself (that would withdraw its new card).
+  assert.equal((await events('user_message')).length, sent, 'no "close yourself" message to the run that superseded its own tidy');
   const cards = await events('plan');
   assert.equal(cards.find((c: any) => c.memory?.proposal === first.proposal).status, 'superseded');
   await assert.rejects(call('Cara', `/api/projects/${project.id}/memory-proposals/${first.proposal}/decide`, { method: 'POST', body: { apply: [] } }), /409 A newer tidy replaced this one/);
@@ -133,6 +136,17 @@ test('a newer proposal supersedes the open one, and turning it all down changes 
   assert.equal(read('b.md'), B);
   assert.equal((await events('plan')).find((c: any) => c.memory?.proposal === second.proposal).status, 'rejected');
   assert.match((await events('user_message')).at(-1).text, /^Cara turned the memory tidy down; nothing changed/);
+  await idle();
+});
+
+test('a tidy decided but whose card was never settled (a kill between) settles the card on the next press, instead of leaving buttons that 409 for good (2ME7)', async () => {
+  const r = await propose([{ action: 'flag', file: 'b.md', reason: 'check it' }]);
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  assert.equal(store.memoryProposals.decide(r.proposal, { status: 'dismissed', changes: [], backup: [], by: 'Josh' }), true);
+  const card = await cardOf(r.proposal);
+  assert.equal(card.status, 'pending');
+  await assert.rejects(verdict('Cara', card.id, 'approve'), /409 Josh already turned down this tidy/);
+  assert.equal((await cardOf(r.proposal)).status, 'rejected', 'the card is settled, so its buttons are gone');
   await idle();
 });
 

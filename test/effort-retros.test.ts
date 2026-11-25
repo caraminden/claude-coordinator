@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildOwnerKey, Store, type Ticket } from '../src/db.ts';
+import { buildOwnerKey, Store, type Project, type Ticket } from '../src/db.ts';
 import { CHAIN_FLOOR, doneKey, EFFORT_KEY, effortFor, EffortRetros, effortsDue, NAMED_FLOOR, QUIET_MS, TRIES } from '../src/effort-retros.ts';
 
 const H = 3_600_000;
@@ -130,7 +130,7 @@ test('log-only notes the retro it would start, and acting later starts it after 
     store,
     by: 'Citadel',
     now: () => Date.now() + QUIET_MS + H,
-    newMinion: async (project: any, m: { title: string }) => {
+    newMinion: async (project: Project, m: { title: string }) => {
       made.push(m.title);
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
       return { id: x.id, number: x.number! };

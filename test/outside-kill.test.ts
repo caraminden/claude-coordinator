@@ -161,6 +161,33 @@ test('a turn killed together with its wrapper (no exit record) is resumed, and k
   }
 });
 
+test('turns killed together say so, each one, with how many (#1938)', async () => {
+  const start = () => {
+    const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, root, null);
+    runner.send(t.id, 'Cara', 'wait');
+    return t.id;
+  };
+  const ids = [start(), start(), start()];
+  const live = (id: number) => (runner as unknown as { turns: Map<number, { dir: string }> }).turns.get(id);
+  for (const id of ids) await until('it to be up', async () => store.listEvents(id).some((e) => e.kind === 'claude') && existsSync(join(live(id)?.dir ?? root, 'pid.json')));
+  const turns = ids.map((id) => live(id)!);
+  for (const l of turns) {
+    const pids = JSON.parse(readFileSync(join(l.dir, 'pid.json'), 'utf8'));
+    process.kill(pids.wrapper, 'SIGKILL');
+    process.kill(-pids.claude, 'SIGKILL');
+  }
+  await until('every note to say the same count', async () => {
+    const counts = ids.map((id) =>
+      notes(id)
+        .map((n) => /(\d+) turns were killed together, within \d+ s: each in a unit or process group of its own/.exec(n)?.[1])
+        .find(Boolean),
+    );
+    return counts.every((c) => c === counts[0] && Number(c) >= 3);
+  });
+  for (const id of ids) runner.stop(id);
+});
+
 test('a stop before claude has started signals it as soon as it starts, not at the 15 s retry (#468 S03-2)', async () => {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);

@@ -69,3 +69,8 @@ export interface TranscriptEntry {
   operation?: string;
   content?: unknown;
 }
+
+/** A file-name suffix for per-Grunt hook state: a Grunt (`agent_id`) keeps its own, apart from its minion's; the minion's is unchanged. */
+export function agentSuffix(input: HookInput | null | undefined): string {
+  return input?.agent_id ? `-a-${String(input.agent_id).replace(/[^\w.-]/g, '_')}` : '';
+}

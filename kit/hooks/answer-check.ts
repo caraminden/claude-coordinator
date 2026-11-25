@@ -37,7 +37,9 @@ export const MIN_TOOL_CALLS = 5;
 export const MIN_ANSWER_CHARS = 200;
 
 /** Tools that turn a proposal into something people answer, or hand it on (MCP names end in `__<tool>`). */
-const ACTIONS = ['ask_question', 'propose_plan', 'message_coordinator', 'message_taskmaster', 'message_ticket', 'create_ticket'];
+const ACTIONS = ['ask_question', 'message_coordinator', 'message_taskmaster', 'message_ticket', 'create_ticket'];
+/** Every `propose_*` tool posts a card (propose_plan, propose_memory, propose_machine_lend ...); MCP names put `__` before it. */
+const isAction = (name: string) => /(^|__)propose_/.test(name) || ACTIONS.some((a) => name === a || name.endsWith(`__${a}`));
 
 /** What one turn did, read from its transcript. */
 export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; cardText?: string; commands?: string[]; prompt?: string; titled?: boolean };
@@ -65,7 +67,10 @@ export function readTurn(transcript: string, promptId?: string): Turn {
     }
   }
   const isPrompt = (e: TranscriptEntry | null): e is TranscriptEntry => e?.type === 'user' && !e.isMeta && !e.isSidechain && !e.isCompactSummary && !(Array.isArray(e.message?.content) && e.message.content.some((b) => b?.type === 'tool_result'));
-  let start = promptId ? entries.findIndex((e) => e?.promptId === promptId) : -1;
+  // A turn resuming a killed one opens with Claude Code's own entries under its prompt id (an interrupted call's
+  // result, a synthetic "No response requested."), so the turn starts at the prompt itself.
+  let start = promptId ? entries.findIndex((e) => e?.promptId === promptId && isPrompt(e)) : -1;
+  if (start < 0 && promptId) start = entries.findIndex((e) => e?.promptId === promptId);
   if (start < 0) start = entries.findLastIndex(isPrompt);
   const turn: Turn = { toolCalls: [], finalText: '', steered: false };
   if (start >= 0) turn.prompt = textOf(entries[start]?.message?.content);
@@ -116,6 +121,8 @@ export function proposalLine(text: string): string | null {
     const leadIn = line.match(/^(?:[-*]\s+)?([^:]{1,80}):(?:\s|$)/)?.[1] ?? null;
     // A link to a proposal doc ([Proposal: X](path)) shares it rather than proposing work in prose.
     if (line.startsWith('[')) continue;
+    // "Follow-ups: none." reports there is nothing to propose: only a bare none, nothing or no after the colon is excused.
+    if (/^(?:[-*]\s+)?[^:]{1,80}:\s*\**\s*(?:none|nothing|no)\s*[.!]?\s*\**$/i.test(line)) continue;
     if ((heading && word.test(line)) || (leadIn !== null && word.test(leadIn))) return line;
   }
   return null;
@@ -131,8 +138,10 @@ export function answerCheck(turn: Turn): string[] {
     hits.push(`thin last message · ${turn.toolCalls.length} tool calls · ${quote}`);
   }
   // A link to a card (#/p/2/t/475?e=399793) means the proposal already has one, maybe from an earlier turn.
-  const acted = /\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)/.test(text) || turn.toolCalls.some((name) => ACTIONS.some((a) => name === a || name.endsWith(`__${a}`)));
-  if (!acted && proposalLine(text)) hits.push(`proposal without a card · ${quote}`);
+  const acted = /\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)/.test(text) || turn.toolCalls.some(isAction);
+  const proposed = acted ? null : proposalLine(text);
+  // The matched line comes first: the opening alone (120 characters) hides which line fired.
+  if (proposed) hits.push(`proposal without a card · matched "${proposed.slice(0, 120)}" · ${quote}`);
   const placeholder = placeholderInCommand(text) ?? (turn.cardText ? placeholderInCommand(turn.cardText) : null);
   if (placeholder) hits.push(`placeholder in a command · "${placeholder.slice(0, 120)}"`);
   return hits;

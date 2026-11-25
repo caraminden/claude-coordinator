@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -9,6 +10,11 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { landArgs } from '../src/land.ts';
 import { agentToken, bootServer, REPO, until } from './helpers.ts';
+import { json } from './typed.ts';
+
+// The parts of the API's and the tool's answers these tests read.
+type Landing = { code: number | null; output: string };
+type ToolReply = { result: { isError?: boolean; tools: { name: string }[]; content: { text: string }[] } };
 
 // The land tool (src/land.ts) for a container turn: the server runs the minion's tools/land.sh on the
 // host. A stand-in land.sh prints the token it was given.
@@ -32,7 +38,7 @@ test("landing keeps the calling turn's token: land.sh gets it, and the turn's to
   const run = await until('land.sh ends', async () => {
     const res = await call('GET');
     assert.equal(res.status, 200, 'the turn is still logged in');
-    const body = await res.json();
+    const body = await json<Landing>(res);
     return body.code === null ? null : body;
   });
   assert.equal(run.code, 0, run.output);
@@ -54,11 +60,11 @@ test("any scheme's minion lands through the tool when its worktree has tools/lan
 
   const none = await call('POST');
   assert.equal(none.status, 404);
-  assert.match((await none.json()).error, /no tools\/land\.sh/);
+  assert.match((await json<{ error: string }>(none)).error, /no tools\/land\.sh/);
   writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo landed-other\n');
   assert.equal((await call('POST')).status, 202);
   const run = await until('land.sh ends', async () => {
-    const body = await (await call('GET')).json();
+    const body = await json<Landing>(await call('GET'));
     return body.code === null ? null : body;
   });
   assert.equal(run.output.trim(), 'landed-other');
@@ -82,7 +88,7 @@ test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAN
     assert.equal(post.status, 202);
     return (
       await until('land.sh ends', async () => {
-        const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json();
+        const b = await json<Landing>(await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth }));
         return b.code === null ? null : b;
       })
     ).output.trim();
@@ -104,7 +110,7 @@ test('a container turn of any scheme is offered the land tool; a host turn is no
       child.once('exit', (code) => reject(new Error(`mcp.ts ended (${code}) before it listed its tools`)));
       createInterface({ input: child.stdout! }).once('line', (l) => {
         child.kill();
-        resolve(JSON.parse(l).result.tools.map((t: any) => t.name));
+        resolve((JSON.parse(l) as ToolReply).result.tools.map((t) => t.name));
       });
       child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
     });
@@ -124,7 +130,7 @@ test('the land tool says the server restarted when the landing it started is no 
     env: {
       ...process.env,
       MACHINES_URL: undefined,
-      COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+      COORDINATOR_API: `http://127.0.0.1:${(api.address() as AddressInfo).port}`,
       COORDINATOR_TOKEN: '7.sig',
       COORDINATOR_PROJECT: '1',
       COORDINATOR_TICKET: '7',
@@ -135,7 +141,7 @@ test('the land tool says the server restarted when the landing it started is no 
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+    const reply = new Promise<ToolReply>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
     child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'land', arguments: {} } }) + '\n');
     const { result } = await reply;
     assert.equal(result.isError, undefined, result.content[0].text);
@@ -180,18 +186,18 @@ curl -sS -o /dev/null -w 'report: %{http_code}\\n' -X POST "$COORDINATOR_API/api
     const call = (base: string, method: string) => fetch(`${base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
 
     assert.equal((await call(first.base, 'POST')).status, 202);
-    await until('land.sh starts', async () => ((await (await call(first.base, 'GET')).json()).output as string).includes('started'));
-    assert.equal((await (await fetch(`${first.base}/api/health`)).json()).interruptible, 0, "a restart doesn't wait for the landing");
+    await until('land.sh starts', async () => (await json<Landing>(await call(first!.base, 'GET'))).output.includes('started'));
+    assert.equal((await json<{ interruptible: number }>(await fetch(`${first.base}/api/health`))).interruptible, 0, "a restart doesn't wait for the landing");
     // The restart: a new server on the same port and data.
     const port = first.port;
     await first.stop({ keepTurns: true });
     first = null;
     next = await bootServer({ root, env: { ...env, PORT: String(port) } });
-    const running = await (await call(next.base, 'GET')).json();
+    const running = await json<Landing>(await call(next.base, 'GET'));
     assert.equal(running.code, null, 'the new server finds it still running');
     writeFileSync(go, '');
     const done = await until('land.sh ends', async () => {
-      const r = await (await call(next!.base, 'GET')).json();
+      const r = await json<Landing>(await call(next!.base, 'GET'));
       return r.code === null ? null : r;
     });
     assert.equal(done.code, 0, done.output);
@@ -221,7 +227,7 @@ test('landArgs gives land.sh only the shapes it accepts, files as paths inside t
   symlinkSync(join(root, 'outside.test.ts'), join(cwd, 'test', 'link.test.ts'));
   try {
     assert.deepEqual(landArgs({}, cwd), [], 'no arguments: a plain land, as before');
-    assert.deepEqual(landArgs({ fix: true } as any, cwd), []);
+    assert.deepEqual(landArgs({ fix: true } as { fix: boolean; into?: unknown }, cwd), []);
     assert.deepEqual(landArgs({ build: false, full: false, files: [], into: null }, cwd), []);
     assert.deepEqual(landArgs({ build: true }, cwd), ['--build']);
     assert.deepEqual(landArgs({ into: 'build/7', full: true }, cwd), ['--into', 'build/7', '--full']);
@@ -229,7 +235,7 @@ test('landArgs gives land.sh only the shapes it accepts, files as paths inside t
     assert.deepEqual(landArgs({ into: 'build/7' }, cwd), ['--into', 'build/7'], 'no files: land.sh lets only a docs-only change through');
     assert.deepEqual(landArgs({ into: 'build/7', files: ['-x.test.ts'] }, cwd), ['--into', 'build/7', './-x.test.ts'], 'never read as an option');
 
-    const refused = (body: object, re: RegExp) => assert.throws(() => landArgs(body as any, cwd), re, JSON.stringify(body));
+    const refused = (body: { into?: unknown; files?: unknown; full?: unknown; build?: unknown }, re: RegExp) => assert.throws(() => landArgs(body, cwd), re, JSON.stringify(body));
     for (const into of ['build/0', 'build/07', 'build/1234567', 'build/7; rm -rf ~', 'main', '--full', 'build/x', ' build/7', 'build/7\n']) refused({ into }, /into must be a build branch/);
     refused({ into: 7 }, /into must be/);
     refused({ into: '' }, /into must be a build branch/);
@@ -274,7 +280,7 @@ test('the land route hands land.sh those arguments, and refuses a bad call witho
     assert.equal(res.status, 202);
     return (
       await until('land.sh ends', async () => {
-        const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json();
+        const b = await json<Landing>(await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth }));
         return b.code === null ? null : b;
       })
     ).output.trim();
@@ -289,12 +295,12 @@ test('the land route hands land.sh those arguments, and refuses a bad call witho
     const res = await post(body);
     assert.equal(res.status, 400, JSON.stringify(body));
   }
-  const last = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json();
+  const last = await json<Landing>(await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth }));
   assert.equal(last.output.trim(), 'n=1\n[--build]', 'a refused call started nothing');
 });
 
 test('the land tool sends into, files, full and build on to the server, and nothing for a plain call', async () => {
-  const bodies: any[] = [];
+  const bodies: object[] = [];
   const api = createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => {
@@ -310,7 +316,7 @@ test('the land tool sends into, files, full and build on to the server, and noth
     env: {
       ...process.env,
       MACHINES_URL: undefined,
-      COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+      COORDINATOR_API: `http://127.0.0.1:${(api.address() as AddressInfo).port}`,
       COORDINATOR_TOKEN: '7.sig',
       COORDINATOR_PROJECT: '1',
       COORDINATOR_TICKET: '7',
@@ -325,7 +331,7 @@ test('the land tool sends into, files, full and build on to the server, and noth
     let id = 0;
     const land = async (args: object) => {
       child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name: 'land', arguments: args } }) + '\n');
-      const { result } = JSON.parse((await replies.next()).value);
+      const { result } = JSON.parse((await replies.next()).value!) as ToolReply;
       assert.match(result.content[0].text, /exited 0/);
     };
     await land({});

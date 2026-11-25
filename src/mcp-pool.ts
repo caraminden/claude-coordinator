@@ -132,7 +132,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/mcp') return await serve(req, res, turn, handle);
     const [, id, srv] = machine!;
     const name = url.searchParams.get('name') || `machine ${id}`;
-    return await serve(req, res, turn, (msg) => machineRequest(token, Number(id), srv as 'mcp' | 'ws', name, msg, join(dirname(dir), 'machine-tools')));
+    return await serve(req, res, turn, (msg) => machineRequest(token, Number(id), srv as 'mcp' | 'ws', name, msg, join(dirname(dir), 'machine-tools'), url.searchParams.get('lent')));
   } catch (err) {
     if (!res.headersSent) send(res, 500, { error: thrown(err).message });
     else res.end();

@@ -4,6 +4,7 @@ import { ago, api, h, view } from './base.js';
 import { hueRow, toneChip } from './look.js';
 import { renderProgress } from './progress-ui.js';
 import { renderTyping } from './thread.js';
+import { tooCold, waitsLine } from './threadstate.js';
 import { optimistic } from './ui/optimistic.js';
 import { lineMoved, openLine } from './worker-line.js';
 
@@ -96,7 +97,7 @@ export function workersPanel(page) {
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
     const changed = w.limits.filter((l) => l.by).length;
-    const value = `${w.used} of ${w.size} working${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
+    const value = `${w.used} of ${w.size} working${w.forced ? `, ${w.forced} forced` : ''}${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
     const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} ${ago(pool.at)}, ${pool.why}` : ''}`;
     const sizes = [...new Set([...SIZES, ...(pool.fixed ? [pool.fixed.size] : [])])].sort((a, b) => a - b);
     const pick = h(
@@ -122,6 +123,7 @@ export function workersPanel(page) {
       h('b', { class: 'st-value' }, value),
       w.paused ? h('div', {}, toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`)) : '',
       h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : `${size} · Taskmasters always run`),
+      h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       h(
         'div',
         { class: 'st-workers-act' },

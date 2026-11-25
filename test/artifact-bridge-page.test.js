@@ -181,15 +181,80 @@ test('a write Citadel could not take while it restarts stays on the page, on top
   assert.deepEqual(states, ['saved', 'saving', 'retrying', 'saved'], 'told now, then on each change');
 });
 
-test('a write the viewer refuses for good still fails at once, and the save state says saved again (#821)', async () => {
+test('a write the viewer refuses for good fails at once, stays on the page and says it is not saved, until it lands (#821, #1940 HK8)', async () => {
   const p = page();
   p.answer('hello', { person: 'Cara', entries: [] });
   await p.ctx.citadel.ready;
+  const states = [];
+  p.ctx.citadel.watchSaves((s, why) => states.push(why ? [s, why] : s));
   const set = p.ctx.citadel.storage.set('k', 'x');
   await wait(10);
-  p.answer('write', 'Too many writes; slow down', false);
-  await assert.rejects(set, /Too many writes/);
+  p.answer('write', 'This page holds at most 2 MB', false);
+  await assert.rejects(set, /at most 2 MB/);
+  assert.equal(p.ctx.citadel.saveState(), 'failed');
+  assert.deepEqual(states, ['saved', 'saving', ['failed', 'This page holds at most 2 MB']]);
+  // Someone else's change keeps what this person sees, still not saved; another key landing doesn't hide it either.
+  p.deliver({ op: 'changed', entries: [{ key: 'other', value: 1 }] });
+  assert.equal(await p.ctx.citadel.storage.get('k'), 'x');
+  const other = p.ctx.citadel.storage.set('other', 2);
+  await wait(10);
+  p.answer('write', { entries: [] });
+  await other;
+  assert.equal(p.ctx.citadel.saveState(), 'failed');
+  // Two refused for two reasons: with one put right, the other's reason shows.
+  const long = p.ctx.citadel.storage.set('long', 'x');
+  await wait(10);
+  p.answer('write', 'Each key is 1 to 300 characters', false);
+  await assert.rejects(long, /Each key/);
+  assert.equal(states.at(-1)[1], 'Each key is 1 to 300 characters');
+  const fixed = p.ctx.citadel.storage.set('long', 'y');
+  await wait(10);
+  p.answer('write', { entries: [] });
+  await fixed;
+  assert.deepEqual(states.at(-1), ['failed', 'This page holds at most 2 MB']);
+  const again = p.ctx.citadel.storage.set('k', 'y');
+  await wait(10);
+  p.answer('write', { entries: [] });
+  await again;
   assert.equal(p.ctx.citadel.saveState(), 'saved');
+});
+
+test('a write whose answer was lost reads as saved once a refresh shows the server has it (#1940 HK8)', async () => {
+  const p = page();
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  await assert.rejects(p.ctx.citadel.storage.set('k', { v: 1 }), /did not answer/);
+  assert.equal(p.ctx.citadel.saveState(), 'failed');
+  p.deliver({ op: 'changed', entries: [{ key: 'k', value: { v: 1 } }] });
+  assert.equal(p.ctx.citadel.saveState(), 'saved');
+});
+
+test('after a Send the page says once everything it wrote on the answer is stored, so the viewer can close (#1940 HK3)', async () => {
+  const p = page();
+  p.ctx.document.createTreeWalker = () => ({ nextNode: () => null });
+  p.ctx.NodeFilter = {};
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  const sent = p.ctx.citadel.send('Picks: 3').then(() => p.ctx.citadel.storage.set('sent', 'Picks: 3'));
+  await until('the send', () => p.waiting('send').length);
+  p.answer('send', { sent: true, to: '#4' });
+  await until('the write', () => p.waiting('write').length);
+  await wait(20);
+  assert.equal(p.waiting('kept').length, 0, 'the write is still on its way');
+  p.answer('write', { entries: [] });
+  await sent;
+  await until('the page to say so', () => p.waiting('kept').length);
+  assert.equal(p.waiting('kept')[0].all, true);
+  // What it wrote on the answer was refused: it says so, so the viewer stays.
+  p.answer('kept');
+  const full = p.ctx.citadel.send('Picks: 4').then(() => p.ctx.citadel.storage.set('sent', 'Picks: 4').catch(() => {}));
+  await until('the send', () => p.waiting('send').length);
+  p.answer('send', { sent: true, to: '#4' });
+  await until('the write', () => p.waiting('write').length);
+  p.answer('write', 'A page keeps at most 2 MB', false);
+  await full;
+  await until('the page to say so', () => p.waiting('kept').length);
+  assert.equal(p.waiting('kept')[0].all, false);
 });
 
 /** Say once that each request is here, and again only when the page asks (`alive`), as a live viewer does, until stopped. */

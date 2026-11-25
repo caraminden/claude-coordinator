@@ -166,7 +166,11 @@
       retry?.();
     });
     close.addEventListener('click', () => node.remove());
+    // Above the dock, not over it.
+    const top = document.querySelector('.mk-dock')?.getBoundingClientRect().top;
+    if (top < innerHeight) node.style.bottom = `${innerHeight - top + 8}px`;
     document.body.append(node);
+    return node;
   }
 
   // The dock: counts and Send (Copy only in a tab Citadel can't reach). One per page, under the content.
@@ -176,12 +180,15 @@
     let sent = null;
     let saving = false;
     let btn = null;
-    // Whether what's picked has reached Citadel (#821): saved, saving, or retrying while Citadel restarts.
+    // Whether what's picked has reached Citadel (#821): saved, saving, retrying while Citadel restarts, or failed (refused, and why).
     // Pages under an older bridge (no watchSaves) just say they save.
     let saveState = 'saved';
+    let saveWhy = '';
+    let refusedToast = null;
     // The text last sent, kept across reloads (the bridge scopes localStorage to this page; the title keeps a
     // plain tab apart): the same picks are never posted twice from one page. `pending` is the post in flight,
-    // kept in memory only, so a reload mid-send doesn't leave picks marked Sent that never went.
+    // kept in memory only, so a reload mid-send doesn't leave picks marked Sent that never went. Marks on pictures
+    // are gone after a reload, so what is kept leaves their line out.
     const KEY = `mockkit-sent:${document.title}`;
     let lastSent = null;
     let pending = null;
@@ -195,28 +202,36 @@
     const marked = new Map();
     const MAX_MARKED = 6;
     const images = () => [...marked.values()].map(({ mediaType, data }) => ({ mediaType, data }));
-    const remember = (v) => {
+    const remember = (v, kept) => {
       lastSent = v;
       try {
-        localStorage.setItem(KEY, v);
+        localStorage.setItem(KEY, kept);
       } catch {
         /* as above */
       }
+    };
+
+    // Sends the picks as they are now, a Retry too.
+    const sendPicks = () => {
+      const body = summary();
+      if (body) return send(body);
+      sent.textContent = 'Nothing picked yet';
     };
 
     // Shows Sent at once and stays Sent until a pick or note changes; a failure takes it back and says why, with Retry.
     async function send(body) {
       if (pending === body || lastSent === body) return;
       pending = body;
+      const kept = summary(false);
       toastNode?.remove();
       dock.paint();
       try {
         const r = await window.citadel.send(body, { items: sets.flatMap((s) => s.items()), ...(marked.size ? { images: images() } : {}) });
-        remember(body);
+        remember(body, kept);
         if (pending === body) sent.textContent = `Sent to ${r?.to ?? 'the minion'} ✓`;
       } catch (e) {
         sent.textContent = '';
-        if (pending === body) toast(`Couldn't send your picks: ${e.message}`, () => send(body));
+        if (pending === body) toast(`Couldn't send your picks: ${e.message}`, sendPicks);
       } finally {
         if (pending === body) pending = null;
         dock.paint();
@@ -232,12 +247,12 @@
         sent = el('span', { class: 'mk-sent', 'aria-live': 'polite' });
         node = el('div', { class: 'mk-dock' }, el('div', { class: 'mk-dock-msg' }, text, sent), btn);
         btn.addEventListener('click', async () => {
-          const body = summary();
-          if (!body) return void (sent.textContent = 'Nothing picked yet');
           try {
             if (saving) {
-              await send(body);
+              await sendPicks();
             } else {
+              const body = summary();
+              if (!body) return void (sent.textContent = 'Nothing picked yet');
               // Last resort: this tab has no way back to Citadel, so it can't send as anyone.
               const ta = el('textarea', { style: 'position:fixed;opacity:0' });
               ta.value = body;
@@ -253,8 +268,12 @@
         });
         ($('.mk-page') ?? document.body).append(node);
         if (saving)
-          window.citadel?.watchSaves?.((st) => {
+          window.citadel?.watchSaves?.((st, why) => {
             saveState = st;
+            saveWhy = why ?? '';
+            // The whole reason, where the dock's line may be cut short (a phone's).
+            refusedToast?.remove();
+            refusedToast = st === 'failed' ? toast(`Not saved: ${saveWhy || 'Citadel refused it'}`) : null;
             dock.paint();
           });
         if (saving) store.then((s) => s.draw && drawing());
@@ -272,15 +291,24 @@
             if (d.note) notes++;
           }
         const drawn = marked.size ? `, <b>${marked.size}</b> picture${marked.size > 1 ? 's' : ''} marked` : '';
-        const where = !saving ? 'not saved or sent: open this page from Citadel to send' : saveState === 'retrying' ? 'not saved yet: Citadel is restarting, so it keeps trying' : saveState === 'saving' ? 'saving…' : 'saved for the minion to read';
-        node.classList.toggle('mk-unsaved', saving && saveState === 'retrying');
+        const where = !saving
+          ? 'not saved or sent: open this page from Citadel to send'
+          : saveState === 'retrying'
+            ? 'not saved yet: Citadel is restarting, so it keeps trying'
+            : saveState === 'failed'
+              ? `not saved: ${esc(saveWhy || 'Citadel refused it')}`
+              : saveState === 'saving'
+                ? 'saving…'
+                : 'saved for the minion to read';
+        node.classList.toggle('mk-unsaved', saving && ['retrying', 'failed'].includes(saveState));
+        text.title = saving && saveState === 'failed' ? saveWhy : '';
         node.classList.toggle('stuck', picked + notes + marked.size > 0);
         const now = summary();
         const done = saving && now !== '' && (now === lastSent || now === pending);
         btn.disabled = done;
         btn.textContent = done ? 'Sent ✓' : saving ? 'Send picks' : 'Copy picks';
         if (!done && /^Sent/.test(sent.textContent)) sent.textContent = '';
-        text.innerHTML = picked || notes || marked.size ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''}${drawn} · ${where}` : `Nothing picked yet · ${saving ? 'picks save as you make them' : where}`;
+        text.innerHTML = picked || notes || marked.size ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''}${drawn} · ${where}` : `Nothing picked yet · ${saving && saveState !== 'failed' ? 'picks save as you make them' : where}`;
       },
     };
 
@@ -358,12 +386,13 @@
     if (!img || e.defaultPrevented || e.button !== 0 || img.closest('button, .mk-dock, .mk-pickbar, .mk-viewer')) return;
     const a = img.closest('a[href]');
     if (a && !/\.(png|jpe?g|gif|webp|avif|svg)([?#].*)?$/i.test(a.pathname) && a.href !== img.src) return;
-    e.preventDefault();
-    viewer(img);
+    const acts = e.mkActed; // a board's click action on it is the click
+    if (a || !acts) e.preventDefault();
+    if (!acts) viewer(img);
   });
 
-  function summary() {
-    const parts = [...sets.map((s) => s.lines()), dock.markedLine()].filter((l) => l.length);
+  function summary(marks = true) {
+    const parts = [...sets.map((s) => s.lines()), marks ? dock.markedLine() : []].filter((l) => l.length);
     if (!parts.length) return '';
     return [`Picks on "${document.title}":`, ...parts.flat()].join('\n');
   }
@@ -416,6 +445,7 @@
             .map((p) => p.split(':'))
             .find(([t]) => t === type)?.[1];
           if (!name || !on[name]) return;
+          ev.mkActed = true;
           const before = JSON.stringify(s);
           const patch = on[name](s, { arg: hit.dataset.arg, value: hit.value, checked: hit.checked, el: hit, ev, board: b });
           if (patch) Object.assign(s, patch);

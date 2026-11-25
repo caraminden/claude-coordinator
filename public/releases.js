@@ -8,7 +8,7 @@
 import { ago, api, fileUrl, h, heldWhilePressed, pacificClock, pacificStamp, schemeIcon, view } from './base.js';
 import { iconSrc } from './schemes.js';
 import { optimistic } from './ui/optimistic.js';
-import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
+import { changeEta, COLUMNS, columnOf, pinElsewhere, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
 import { claimsBlock, loadClaims, loadWatch, onHolderTicket, watchBlock } from './release-extras.js';
 import { segTrack, TRACK } from './wait.js';
 import { progressWhy } from './threadstate.js';
@@ -574,23 +574,31 @@ function rollbackBar(projectId, tv) {
     });
   const busy = rb.running || (rollingBack.has(key) && rb.can);
   const pin = rb.pin;
+  // A desktop app's feed names another build (2RE2): the roll back's is on its way, was refused, or a by-hand one went out over it.
+  const elsewhere =
+    pinElsewhere(tv) &&
+    (tv.next?.stage === 'publish' && !tv.next.waitingOn
+      ? h('span', { class: 'muted' }, `Rolling back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: PCs get the current release above until the desktop feed names its build.`)
+      : h('span', { class: 'waits' }, `Set back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}, but the desktop feed names another build: PCs get the current release above.`));
   const line = busy
     ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
-    : pin
-      ? h(
-          'span',
-          { class: 'muted' },
-          `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
-          // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
-          tv.deploy
-            ? 'it stays there until main has a newer commit that passes the full suite. Deploy takes main live now.'
-            : tv.target.kind === 'citadel-server'
-              ? `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`
-              : `${pin.code ? `signed as build ${pin.code}, ` : ''}it stays there until main has a newer commit that passes the full suite.`,
-        )
-      : rb.failed
-        ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`)
-        : '';
+    : elsewhere
+      ? elsewhere
+      : pin
+        ? h(
+            'span',
+            { class: 'muted' },
+            `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
+            // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
+            tv.deploy
+              ? 'it stays there until main has a newer commit that passes the full suite. Deploy takes main live now.'
+              : tv.target.kind === 'citadel-server'
+                ? `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`
+                : `${pin.code ? `signed as build ${pin.code}, ` : ''}it stays there until main has a newer commit that passes the full suite.`,
+          )
+        : rb.failed
+          ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`)
+          : '';
   const button = !busy && rb.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: rollbackTitle(tv.target.kind, to) }, `Roll back to last green ${to}`) : '';
   if (!line && !button) return '';
   return h('div', { class: 'rel-deploy rel-rollback' }, button, line);

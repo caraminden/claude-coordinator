@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { CODEX_TOOL, listMedia, mcpMessage, MEDIA_KEEP_MS, MEDIA_TOOL_LIST, mediaDir, mediaFile, mediaTools, runMediaTool, sweepMedia, type CodexAt } from '../src/contraption-media.ts';
 import { HttpError } from '../src/http.ts';
+import type { OpenRouter, ToolContext } from '../src/openrouter.ts';
+import { fake } from './typed.ts';
+
+/** The parts of an MCP answer these tests read. */
+type Rpc = { result: { tools: { name: string }[] }; error: { code: number } };
 
 // The media folder and the `citadel` MCP server on contraption turns (#732). The OpenRouter side is
 // test/openrouter.test.ts; the turn and its routes are test/contraption-turns.test.ts.
@@ -61,36 +66,36 @@ test('the sweep takes files older than the keep, notes too, and leaves the rest'
 });
 
 test("a tool call writes to the turn person's folder on their account, tells the app with a media event, and the agent with text", async () => {
-  const events: [string, any][] = [];
+  const events: [string, object][] = [];
   const turn = { person: 3, name: 'peek', home: 9, emit: (e: string, d: object) => events.push([e, d]), codex: null };
-  let ctx: any;
-  const ok = {
-    tool: async (_: string, args: any, c: any) => {
+  let ctx: ToolContext | undefined;
+  const ok = fake<OpenRouter>({
+    tool: async (_, args, c) => {
       ctx = c;
-      const p = join(c.roots[0], args.out);
+      const p = join(c.roots[0], args.out as string);
       writeFileSync(p, 'png!');
       return { paths: [p], cost_usd: 0.0091, left_usd: 9.4, model: 'm/klein', warnings: ['frost.png kept black'] };
     },
-  };
-  const r = await runMediaTool(ok as any, root, turn, 'generate_image', { prompt: 'x', out: 'frost.png' });
-  assert.deepEqual({ ...ctx, roots: ctx.roots }, { userId: 3, ticketId: null, projectId: 9, roots: [mediaDir(root, 'peek', 3)], place: 'your media folder' });
+  });
+  const r = await runMediaTool(ok, root, turn, 'generate_image', { prompt: 'x', out: 'frost.png' });
+  assert.deepEqual({ ...ctx, roots: ctx!.roots }, { userId: 3, ticketId: null, projectId: 9, roots: [mediaDir(root, 'peek', 3)], place: 'your media folder' });
   assert.deepEqual(events, [['media', { tool: 'generate_image', ok: true, files: [{ path: 'frost.png', bytes: 4, type: 'image/png' }], model: 'm/klein', cost_usd: 0.0091, left_usd: 9.4, warnings: ['frost.png kept black'] }]]);
   assert.deepEqual(r, { text: 'Wrote frost.png with m/klein for $0.0091; $9.40 left this month.\nfrost.png kept black', isError: false });
 
   events.length = 0;
-  const capped = {
+  const capped = fake<OpenRouter>({
     tool: async () => {
       throw Object.assign(new HttpError(402, 'That would pass your cap.'), { code: 'over_cap' });
     },
-  };
-  assert.deepEqual(await runMediaTool(capped as any, root, turn, 'generate_audio', {}), { text: 'over_cap: That would pass your cap.', isError: true });
+  });
+  assert.deepEqual(await runMediaTool(capped, root, turn, 'generate_audio', {}), { text: 'over_cap: That would pass your cap.', isError: true });
   assert.deepEqual(events, [['media', { tool: 'generate_audio', ok: false, code: 'over_cap', message: 'That would pass your cap.' }]]);
-  const broke = {
+  const broke = fake<OpenRouter>({
     tool: async () => {
       throw new Error('socket hang up');
     },
-  };
-  assert.match((await runMediaTool(broke as any, root, turn, 'edit_image', {})).text, /^failed: The call didn't finish: socket hang up/);
+  });
+  assert.match((await runMediaTool(broke, root, turn, 'edit_image', {})).text, /^failed: The call didn't finish: socket hang up/);
 });
 
 test('the MCP server answers the handshake, lists its tools, ignores notifications and refuses what it lacks', async () => {
@@ -99,12 +104,12 @@ test('the MCP server answers the handshake, lists its tools, ignores notificatio
     calls.push([tool, args]);
     return { text: 'done', isError: false };
   };
-  const rpc = (m: object) => mcpMessage({ jsonrpc: '2.0', ...m }, MEDIA_TOOL_LIST, call as any) as Promise<any>;
+  const rpc = (m: object) => mcpMessage({ jsonrpc: '2.0', ...m }, MEDIA_TOOL_LIST, call) as Promise<Rpc>;
   const init = await rpc({ id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
   assert.deepEqual(init.result, { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'citadel', version: '1' } });
   assert.equal(await rpc({ method: 'notifications/initialized' }), null);
   assert.deepEqual(
-    (await rpc({ id: 2, method: 'tools/list' })).result.tools.map((t: any) => t.name),
+    (await rpc({ id: 2, method: 'tools/list' })).result.tools.map((t) => t.name),
     ['generate_image', 'edit_image', 'generate_audio', 'generate_speech'],
   );
   assert.ok(MEDIA_TOOL_LIST.every((t) => t.description.includes('openrouter_not_connected')));
@@ -112,7 +117,7 @@ test('the MCP server answers the handshake, lists its tools, ignores notificatio
   assert.deepEqual(calls, [['generate_image', { out: 'a.png' }]]);
   assert.equal((await rpc({ id: 4, method: 'tools/call', params: { name: 'rm_rf' } })).error.code, -32602);
   assert.equal((await rpc({ id: 5, method: 'resources/list' })).error.code, -32601);
-  assert.equal(((await mcpMessage([{ jsonrpc: '2.0', id: 6, method: 'ping' }], MEDIA_TOOL_LIST, call as any)) as any).error.code, -32600, 'no batches');
+  assert.equal(((await mcpMessage([{ jsonrpc: '2.0', id: 6, method: 'ping' }], MEDIA_TOOL_LIST, call)) as Rpc).error.code, -32600, 'no batches');
   assert.equal((await rpc({ id: 7, method: 'tools/call', params: { name: CODEX_TOOL, arguments: {} } })).error.code, -32602, 'not offered, not callable');
   assert.equal(calls.length, 1);
 });
@@ -148,7 +153,7 @@ test("generate_image_codex runs the driver in the person's container and copies 
   const turnsDir = join(root, 'turns', '3');
   let woke = 0;
   const codex: CodexAt = { container: 'citadel-claude-3', turnsDir, env: { HOME: '/home/x', PATH: '/bin' }, tripwire: { project: 0 }, ensure: async () => void woke++, podman: join(bin, 'podman') };
-  const events: [string, any][] = [];
+  const events: [string, { code?: string }][] = [];
   const turn = { person: 3, name: 'codexy', home: 9, emit: (e: string, d: object) => events.push([e, d]), codex };
   assert.deepEqual(
     mediaTools(turn).map((t) => t.name),

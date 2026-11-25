@@ -35,7 +35,7 @@ export function runningJobs(input: HookInput): string[] {
 
 /** The one action that ends the wait for this Bash job. */
 function wayOut(t: ReturnType<typeof runningTasks>[number]): string {
-  return `${t.id} (${t.what}), a Bash job: wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it); without the pid, \`citadel-wait cmd '<test>'\` / \`port <n>\` / \`file <path>\`, or stop it with TaskStop ${t.id}`;
+  return `${t.id} (${t.what}), a Bash job: a test run, build or other heavy job can outlive the turn: next time start it with \`citadel-job <command>\`; now wait with \`citadel-wait pid ${t.pid ?? '<pid>'}\` and a Bash timeout of 600000, repeated until it ends (the pid is the \`$!\` you noted when you started it); without the pid, \`citadel-wait cmd '<test>'\` / \`port <n>\` / \`file <path>\`, or stop it with TaskStop ${t.id}`;
 }
 
 /** Why the turn may not end yet, or null. `blocks` is how many stops this prompt already refused. */

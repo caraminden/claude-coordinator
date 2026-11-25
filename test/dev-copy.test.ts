@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { tempRoot } from './helpers.ts';
+import { json as jsonOf } from './typed.ts';
 
 // citadel-dev-copy (#482): a dev copy of this checkout, started, replaced and stopped by its own pid.
 const repo = join(import.meta.dirname, '..');
@@ -43,7 +44,7 @@ test('start, status, a second start that replaces the first, then stop leaves no
   assert.ok(a.port >= 1024 && a.port <= 32767 && (a.port < 8000 || a.port > 8999), `port ${a.port}`);
   assert.ok(alive(a.pid) && alive(a.holder));
   // Preview mode, signed in with the cookie it printed.
-  assert.equal((await (await fetch(`${a.url}api/health`)).json()).preview, true);
+  assert.equal((await jsonOf<{ preview: boolean }>(await fetch(`${a.url}api/health`))).preview, true);
   assert.equal((await fetch(`${a.url}api/me`, { headers: { cookie: a.cookie } })).status, 200);
 
   const status = run(['status']);
@@ -95,10 +96,10 @@ test("env hands a script the copy's URL, cookie and pid; seed adds a state to an
   const { id } = db.prepare("SELECT t.id FROM tickets t JOIN projects p ON p.id = t.project_id WHERE p.name = 'Seeded' AND t.number = ?").get(Number(number)) as { id: number };
   db.close();
   // The running server sees the seeded minion at once, signed in with the cookie env printed.
-  const view = await (await fetch(`${s.url}api/tickets/${id}`, { headers: { cookie: s.cookie } })).json();
+  const view = await jsonOf<{ ticket: { title: string; open_cards: { kind: string }[] } }>(await fetch(`${s.url}api/tickets/${id}`, { headers: { cookie: s.cookie } }));
   assert.equal(view.ticket.title, 'Sidebar badge colours');
   assert.deepEqual(
-    view.ticket.open_cards.map((c: any) => c.kind),
+    view.ticket.open_cards.map((c) => c.kind),
     ['question', 'question'],
   );
 
@@ -136,10 +137,10 @@ test('every seed scenario applies to a fresh store, twice over', async () => {
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }), head, 'no seed commits into the repo the tests run in');
   assert.equal(tree(), before, 'no seed writes into the repo the tests run in');
   // Seeded is reused, and so are the schemes scenario's own (#649): seeding twice makes no second of any.
-  const names = s.listProjects().map((p: any) => p.name);
+  const names = s.listProjects().map((p) => p.name);
   assert.equal(names.filter((n: string) => n === 'Seeded').length, 1, 'one Seeded scheme, reused');
   assert.equal(new Set(names).size, names.length, 'no scheme made twice');
-  assert.ok(s.listMembers(s.listProjects().find((p: any) => p.name === 'Seeded')!.id).some((m: any) => m.id === robin.id || m.login === 'robin'));
+  assert.ok(s.listMembers(s.listProjects().find((p) => p.name === 'Seeded')!.id).some((m) => m.id === robin.id || m.login === 'robin'));
   s.db.close();
 });
 

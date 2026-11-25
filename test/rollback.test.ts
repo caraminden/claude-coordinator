@@ -41,6 +41,7 @@ function world(kind = 'contraption', follows?: (t: Omit<TargetView, 'testCopies'
       },
     },
     running: () => false,
+    published: () => null,
     tell: (_p, text) => told.push(text),
     changed: () => changed++,
     get: (k) => store.getSetting(k) ?? undefined,
@@ -150,6 +151,7 @@ test("a CI package's roll back holds it at last green's existing build: the pin 
     contains,
     starters: { ci: () => ({ build }) },
     running: () => false,
+    published: () => null,
     tell: (_p, text) => told.push(text),
     changed: () => {},
     get: (k) => store.getSetting(k) ?? undefined,
@@ -167,6 +169,9 @@ test("a CI package's roll back holds it at last green's existing build: the pin 
   assert.deepEqual(lastGreen.pinned(3, 'ci:windows:release')?.build, build);
   assert.match(told[0], /ci-files\/pins/);
   assert.equal(rb.info(tv(X))?.pin?.build?.run, 41, 'its card shows the held build: the pin stays');
+  // A desktop app's card shows what its feed names (2RE2): a by-hand build, or a newer run whose publish ended after the press.
+  assert.equal(rb.info(tv('c'.repeat(40)))?.pin?.build?.run, 41, "another build on the feed isn't judged: the pin stays");
+  assert.ok(lastGreen.pinned(3, 'ci:windows:release'));
 });
 
 test("a CI-signed APK's roll back compares the commit its build was made from, and pins the versionCode it signs", async () => {
@@ -174,12 +179,14 @@ test("a CI-signed APK's roll back compares the commit its build was made from, a
   const lastGreen = new LastGreen(store, contains);
   const told: string[] = [];
   let signing = true;
+  let published: number | null = null;
   const rb = new Rollback({
     lastGreen,
     repoDir: () => '/repo',
     contains,
     starters: { apk: (t) => ({ code: t.current!.number! + 1 }) },
     running: () => signing,
+    published: () => published,
     tell: (_p, text) => told.push(text),
     changed: () => {},
     get: (k) => store.getSetting(k) ?? undefined,
@@ -204,6 +211,10 @@ test("a CI-signed APK's roll back compares the commit its build was made from, a
   signing = true;
   assert.ok(rb.info(tv(B, 5))?.pin, 'held while it signs');
   signing = false;
+  published = 6;
   assert.ok(rb.info(tv(A, 6))?.pin, 'published: last green is current, the pin stays');
+  published = null;
+  assert.ok(rb.info(tv(X, 7))?.pin, 'nothing read yet (a restart): no verdict on the pin');
+  published = 7;
   assert.equal(rb.info(tv(X, 7))?.pin, null, 'another build went out over it: the pin is over');
 });

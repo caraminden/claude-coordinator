@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { MinionJob } from '../src/minion-jobs.ts';
 import {
   changedParts,
   claudeStamp,
@@ -549,6 +550,23 @@ test('a ship that ends while a keepalive is still launching dismisses the minion
   assert.equal(asked, true, 'the dismissal waits for the launch');
   await until('the minion to be dismissed', () => store.getTicket(id)!.status === 'closed');
   assert.equal(turnsOf(id).filter((t) => t.keepalive).length, 0, 'no keepalive ran');
+});
+
+test('a minion waiting on a job the server runs is idle to keepalives, whatever its state (#1890)', async () => {
+  const id = minion();
+  const end = pst(14, 5);
+  await realTurn(id, end);
+  store.updateTicket(id, { state: 'blocked', note: 'waiting for the suite' });
+  const before = callCount();
+  runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+  await idle(id);
+  assert.equal(callCount(), before, 'blocked alone turns it away');
+  runner.jobs = { running: () => [{}] as MinionJob[], turnLine: () => null, stop: () => false };
+  runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS + 60_000);
+  await until('the keepalive to run', () => callCount() > before);
+  await idle(id);
+  runner.jobs = null;
+  assert.equal(turnsOf(id).at(-1)!.keepalive, 1);
 });
 
 test("a deploy that goes live during a keepalive dismisses its pending-deploy minion at the keepalive's end (#1274)", async () => {

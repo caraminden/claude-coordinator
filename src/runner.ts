@@ -31,6 +31,7 @@ import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
+import { KillWaves } from './kill-wave.ts';
 import { killedSpend, turnOf } from './turn-row.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
@@ -101,9 +102,11 @@ import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
+import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
 import { runningTurn, START_GRACE_MS, wrapperAlive, type TurnAt } from './running-turn.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { sleepKey, stateWord, type Sleep } from './needs.ts';
@@ -212,6 +215,7 @@ export interface QueuedMessage {
   parked?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
   card?: string; // the kept card it answers (#1916): only the turn that gets this may have its pass
+  rerun?: true; // a cut-off turn's, given back to run again (#1958): it wakes nobody, so a seal set since stays
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
 
@@ -650,6 +654,7 @@ export class Runner {
   /** The worker pool and the line of turns waiting for one (src/turn-line.ts, #1868). */
   readonly turnLine: TurnLine;
   readonly urgent: Urgent;
+  readonly startNow: StartNow;
   readonly places: LinePlaces;
   /** The waits' timers and probe delay, read by tests. */
   private get limitTimer() {
@@ -724,7 +729,9 @@ export class Runner {
   /** What it waits on now: the land line, a heavy slot, the restart (src/waits.ts), for its row's badge and bar. */
   wait: (ticketId: number) => Wait | null = () => null;
   /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
-  serverWork: (ticketId: number, fresh?: boolean) => { kind: string } | null = () => null;
+  serverWork: (ticketId: number, fresh?: boolean) => { kind: string; text?: string; since?: number } | null = () => null;
+  /** The jobs it runs on the server past its turns (#1890, src/minion-jobs.ts), set by the server. */
+  jobs: Pick<MinionJobs, 'stop' | 'running' | 'turnLine'> | null = null;
   /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
   onStreamEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
@@ -868,6 +875,7 @@ export class Runner {
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
   /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
   private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
+  private killWaves: KillWaves;
   /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
   onBudgetWake: (ticketId: number, text: string) => void = () => {};
   /** A minion past 10x its budget (#1672): the server posts this card to its owner. */
@@ -879,6 +887,7 @@ export class Runner {
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
+    this.killWaves = new KillWaves(store);
     const self = this;
     this.resumes = new Resumes({
       store,
@@ -928,12 +937,14 @@ export class Runner {
       this.turnLine.reordered();
       this.lineChanged(ids);
     });
+    this.startNow = new StartNow({ store, over: (id) => holdOver(store.getTicket(id), (t) => this.parked(t) && !this.turnLine.has(id) && !this.lanes.busy(id)), changed: (ids) => this.lineChanged(ids), now: () => this.now() });
     this.places = new LinePlaces({ store, urgent: this.urgent, chains: () => this.chains(), now: () => this.now() });
     this.turnLine = new TurnLine({
       store,
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
+      forced: (id) => this.startNow.get(id),
       start: (entry) => this.startLined(entry),
       pauseTurn: (id) => this.pauseTurn(id),
       changed: (ids) => this.lineChanged(ids),
@@ -1205,6 +1216,7 @@ export class Runner {
       worker_wait: closed ? null : this.turnLine.wait(ticket.id),
       // Who marked it Urgent, when and why (#1888).
       urgent: closed ? null : this.urgent.view(ticket.id),
+      start_now: closed ? null : this.startNow.view(ticket.id),
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -1442,6 +1454,7 @@ export class Runner {
   private dropQueue(ticketId: number, keepHeld = false) {
     this.turnLine.leave(ticketId);
     this.urgent.done(ticketId);
+    this.startNow.end(ticketId);
     this.places.refused(ticketId, false);
     // A no-action notice (its own PR merged, #619) was never meant to be read before a close: it isn't named.
     const left = this.queue.clear(ticketId, keepHeld).filter((m) => !m.fyi);
@@ -1966,7 +1979,7 @@ export class Runner {
           }
           const back = !turn?.stopped && !saving && !wrote;
           const rerun = back && !!this.queue.get(t.id).taken?.length;
-          if (back) this.queue.giveBack(t.id);
+          if (back) this.queue.giveBack(t.id, false, true);
           // The same rows as a watched turn's end (src/turn-outcome.ts), under the restart's own cap.
           const out = outcome({ turn, exit: null, stderr: [], closing: false, ran: { unit: false, container: false }, cut: { rerun } });
           const resumed = out.kind !== 'stopped' && !out.followUps.includes('rerun') ? out.retry : undefined;
@@ -2184,6 +2197,7 @@ export class Runner {
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
             if (via !== 'switch' && !killLine)
               this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
+            const carriesOn = !this.queue.wakes(ticketId);
             // It carries on the interrupted turn, so it runs for that turn's person.
             return this.ranTurn(
               this.startTurn(
@@ -2192,6 +2206,7 @@ export class Runner {
                 [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : paused ? RESUME_PAUSE_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
                 person,
                 retries,
+                carriesOn,
               ),
             );
           },
@@ -2903,7 +2918,17 @@ export class Runner {
     return this.turns.get(ticketId)?.startedAt ?? null;
   }
 
+  /** Where its running turn is and whose, for a job it starts (#1890), or why that turn can't start one. */
+  jobTurn(ticketId: number): { container: string | null; person: number | null } | { refuse: string } {
+    const live = this.turns.get(ticketId);
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!live || !turn) return { refuse: 'No turn of this minion is running' };
+    if (this.store.getTicket(ticketId)?.kind !== 'ticket' || turn.codex || turn.keepalive) return { refuse: "This turn's jobs end with it" };
+    return { container: live.container, person: turn.person ?? null };
+  }
+
   stop(ticketId: number): boolean {
+    const jobs = this.jobs?.stop(ticketId) ?? false;
     const queued = this.queue.msgs(ticketId).filter((m) => m.id != null);
     const stopped = this.stopTurn(ticketId);
     // The stop dropped these from the queue: the outbox must not read that as a send that failed, and send them again.
@@ -2917,7 +2942,8 @@ export class Runner {
       );
       for (const m of queued) if (keep.has(m.id!)) this.queue.hold(ticketId, m);
     }
-    return stopped;
+    if (jobs && !stopped) this.emit(ticketId, 'note', { text: "Stopped by user, with the job it waited for: it won't be woken." });
+    return stopped || jobs;
   }
 
   private stopTurn(ticketId: number): boolean {
@@ -3226,7 +3252,8 @@ export class Runner {
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
     // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
     // and about 30 a day of them were woken cold by their ship's result an hour or more later.
-    if (!(lined || t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
+    // Waiting on a job the server runs (#1890) is idle too.
+    if (!(lined || this.jobs?.running(t.id).length || t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
     if (!inWindow(now)) return 'hours';
     const person = this.turnPerson(t, p, lined ? this.waiting(t.id) : []);
     if (this.codexTurn(t, p, person)) return 'codex';
@@ -3378,7 +3405,8 @@ export class Runner {
               this.broadcastTicket(ticketId);
               return;
             }
-            return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person));
+            const carriesOn = !this.queue.wakes(ticketId);
+            return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person, {}, carriesOn));
           };
           const fresh = this.freshStep(ticketId);
           if (!fresh) return rest();
@@ -3414,7 +3442,7 @@ export class Runner {
 
   /** A turn a pause stopped waits in the line to carry on; one stopped before claude had its prompt runs its batch again. */
   private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }) {
-    const rerun = !turn.offset && this.queue.giveBack(ticketId).length > 0;
+    const rerun = !turn.offset && this.queue.giveBack(ticketId, false, true).length > 0;
     if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), paused: true });
     // Never takes a worker here: the turn ending still holds its own, and a Resume may have come already.
     this.turnLine.join(ticketId, rerun ? undefined : retry.via);
@@ -3611,7 +3639,7 @@ export class Runner {
    * then, with nothing more to await, the minion's changes and follow() in one go. Until then it isn't running: a message
    * waits for the next turn, as behind afterRestore's restore.
    */
-  private async launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}): Promise<{ ended: Promise<void> } | undefined> {
+  private async launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}, carriesOn = false): Promise<{ ended: Promise<void> } | undefined> {
     // An account switch alone isn't a resume here: it carries on its person's own turn on another account.
     const resumed = !!(retries.restart || retries.limit || retries.net || retries.kill);
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
@@ -3906,8 +3934,10 @@ export class Runner {
       // A trailer is its own turn's: a resume that never started leaves its carried one for nobody.
       if (!resumed) this.statuses.delete(ticket.id);
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
+      // A turn that only carries on a cut-off one wakes nobody: a seal set during that one stays (#1958), as it would at its end.
       // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
-      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
+      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'parked' && carriesOn) && !(ticket.state === 'outside' && this.serverWork(ticket.id, true)))
+        this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
       if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });
@@ -4132,6 +4162,8 @@ export class Runner {
       const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
       const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
       if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
+      const jobs = this.jobs?.turnLine(ticket.id);
+      if (jobs) parts.turn.jobs = [jobs];
       // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.
       if (hold?.note) parts.turn.rulesChanged = [hold.note];
       const context = promptText(parts.turn);
@@ -4551,7 +4583,11 @@ export class Runner {
     const cleared = out.followUps.includes('cleared');
     const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'card' ? 'idle' : 'error';
     if (out.kind === 'paused') this.waitOutPause(ticketId, turn!, out.retry!);
-    if (status === 'error') out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
+    if (status === 'error') {
+      out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
+      const said = out.killed && !exit ? this.store.eventsOfKinds(ticketId, ['note', 'error']).findLast((e) => JSON.parse(e.data).text?.startsWith(out.killed)) : undefined;
+      if (said) this.killWaves.add(live.container, Date.now(), said);
+    }
     // Claude has the Codex turns now.
     else if (cleared && turn?.handBack) this.store.deleteSetting(codexThreadKey(ticketId));
     // A hand-back turn that failed or was stopped may still have done work Codex's thread never saw: the next Codex turn starts a new one from the hand-over.

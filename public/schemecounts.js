@@ -26,8 +26,8 @@ export const countMoved = (before, after) =>
  */
 export const isWorking = (t) => !!t && !t.approvals && t.status === 'running';
 
-/** The server works for a minion with no turn running: its ship waits in the line, lands or deploys (#727, #1294). */
-export const isShipping = (t) => !!t && !t.approvals && t.status !== 'running' && t.status !== 'closed' && !!t.server_work;
+/** The server works for a minion with no turn running: its ship waits in the line, lands or deploys (#727, #1294). A job it waits for (#1890) is no ship. */
+export const isShipping = (t) => !!t && !t.approvals && t.status !== 'running' && t.status !== 'closed' && !!t.server_work && t.server_work.kind !== 'job';
 
 /** A minion started or ended work, or began or stopped waiting on the server: the spinner and the waiting dots (#248, #1294). */
 export const turnMoved = (before, after) => isWorking(before) !== isWorking(after) || isShipping(before) !== isShipping(after);

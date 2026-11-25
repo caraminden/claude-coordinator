@@ -174,7 +174,7 @@ test('a lent machine is an MCP server of the turn, allowed by name, and never in
 });
 
 test("a pooled turn reaches its place's shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)", () => {
-  const machines = [{ id: 3, name: 'perigee godot', owner_id: null, servers: ['mcp', 'ws'] } as TurnFacts['machines'][number]];
+  const machines = [{ id: 3, name: 'perigee godot', owner_id: null, servers: ['mcp', 'ws'], lent: 'godot-ai' } as TurnFacts['machines'][number]];
   const own = plan({ machines });
   const p = plan({ machines, pool: true });
   const http = file(p, 'mcp.json').mcpServers;
@@ -184,6 +184,8 @@ test("a pooled turn reaches its place's shared tool server by HTTP, with its own
   assert.deepEqual(file(p, 'settings.json'), file(own, 'settings.json'));
   assert.deepEqual(http.thread, { type: 'http', url: 'http://127.0.0.1:${CITADEL_POOL_PORT}/mcp', headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, timeout: own.files.length && file(own, 'mcp.json').mcpServers.thread.timeout });
   assert.equal(http['perigee godot-ws'].url, 'http://127.0.0.1:${CITADEL_POOL_PORT}/machine/3/ws?name=perigee%20godot-ws');
+  // The MCP server ticked now travels with it, so the pool never answers from another one's remembered tools (2MA6).
+  assert.equal(http['perigee godot'].url, 'http://127.0.0.1:${CITADEL_POOL_PORT}/machine/3/mcp?name=perigee%20godot&lent=godot-ai');
   // The token only travels in the env, never in a file.
   assert.equal(
     p.files.some((f) => f.text.includes('tok')),

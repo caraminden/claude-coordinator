@@ -17,6 +17,10 @@ test('no builds: grouped by type only, a missing or unknown type under Other', (
   ]);
 });
 
+test('a minion waiting on a job it handed over stays in its group: nothing of its deploys (#1890)', () => {
+  assert.deepEqual(shape([m(1, 'bug', { status: 'idle', server_work: { kind: 'job' } })]), [['bug', false, [1]]]);
+});
+
 test('lowest build on top as current, later builds at the bottom ascending, any type', () => {
   assert.deepEqual(shape([m(1, 'ideation', { build: 9 }), m(2, 'chore', { build: 8 }), m(3, 'feature', { build: 8 }), m(4, 'bug'), m(5, 'ideation'), m(6, 'feature', { build: 10 }), m(7, 'chore')]), [
     ['build-8', true, [2, 3]],

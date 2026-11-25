@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# A heavy job the server runs, so it outlives the turn (#1890): citadel-job <command>. See citadel-job.ts beside this.
+here=$(dirname "$(readlink -f "$0")")
+exec node "$here/citadel-job.ts" "$@"

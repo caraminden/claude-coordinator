@@ -64,7 +64,7 @@ test('a sign-in started again while the container starts leaves no orphan sign-i
   const first = link.link(uid);
   await new Promise((r) => setImmediate(r));
   const second = await link.link(uid).finally(release);
-  assert.equal(second.state, 'waiting for code', second.error);
+  assert.equal(second.state, 'waiting for code', second.error!);
   await first;
   assert.equal(execCount() - before, 1, 'only the newer start ran claude auth login');
 });

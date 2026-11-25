@@ -88,7 +88,7 @@ export interface ChatOptions extends RenderOptions {
    * Your own card for a top-level tool call (Theory of Crafting's viability card). Called when the call
    * starts (`result` undefined) and once more when its result comes. Return an element to draw the call
    * as that card where it fell in the reply (an empty one holds the place until the result), or null on
-   * the first call to leave it a step.
+   * the first call to leave it a step. Null for the result leaves nothing in its place.
    */
   block?: (name: string, input: Record<string, unknown>, result: BlockResult | undefined) => HTMLElement | null;
   /** What an empty chat says ("Ask the Acolyte to do anything in Mandate."). */

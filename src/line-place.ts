@@ -1,7 +1,8 @@
 // What puts a waiting minion where it stands in its person's share of the line for a worker (#1888, src/turn-line.ts):
-// its ship was refused, other minions wait on it, or its session is about to go cold on the account its turn would use.
+// its ship was refused, the job it waited for ended (#1890), other minions wait on it, or its session is about to go cold on the account its turn would use.
 import { keptCards } from './card-wait.ts';
 import type { Store, Ticket } from './db.ts';
+import { wokenWaits } from './minion-jobs.ts';
 import type { LinePlace } from './turn-line.ts';
 import type { Urgent } from './urgent.ts';
 import { otherId } from './waits-readout.ts';
@@ -71,7 +72,7 @@ export class LinePlaces {
     // Whose account it would run on is looked up only for one about to go cold.
     const on = last && heatOf(true, last, at) === 0 ? next() : null;
     const spot = urgent.place(ticket.id);
-    return { ...(spot === undefined ? {} : { urgent: spot }), first: !!store.getSetting(refusedKey(ticket.id)) || !!keptCards(store).get(ticket.id)?.answer || this.others(ticket.id), heat: heatOf(!!ticket.session_id, last && on && sameAccount(last, on) ? last : null, at) };
+    return { ...(spot === undefined ? {} : { urgent: spot }), first: !!store.getSetting(refusedKey(ticket.id)) || !!keptCards(store).get(ticket.id)?.answer || wokenWaits(store, ticket.id) || this.others(ticket.id), heat: heatOf(!!ticket.session_id, last && on && sameAccount(last, on) ? last : null, at) };
   }
 
   private others(ticketId: number): boolean {

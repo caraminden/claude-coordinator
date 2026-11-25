@@ -326,7 +326,7 @@ test('samples wait in memory and are written together, with nothing lost to a re
   const desk = store.createMachine('desk', '', 'Cara');
   const lab = store.createMachine('lab', '', 'Cara');
   const saved = () => store.runnerLoadSince(0).map((r) => [r.machine_id, r.at]);
-  const changes = () => Number((store.db.prepare('SELECT total_changes() AS n').get() as any).n);
+  const changes = () => Number((store.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
   const before = changes();
   load.add(desk.id, sample(0, { host: 'DESK' }), NOW);
   load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 1);
@@ -369,4 +369,23 @@ test('samples wait in memory and are written together, with nothing lost to a re
     ['DESK'],
   );
   store.db.close();
+});
+
+test("each PC's own runners come from its agents' newest samples; a PC connected with none yet is there, and a stale sample isn't (#1934)", () => {
+  const store = new Store(join(root, 'pcs.db'));
+  const load = new CiLoad(store, { jobs: () => [], hosts: () => ['LAPTOP', 'Desk'], mandate: async () => true });
+  const win = store.createMachine('win', '', 'Cara');
+  const wsl = store.createMachine('wsl', '', 'Cara');
+  const use = (name: string, repo: string) => ({ name, repo, dir: '', cpu: 0, mem: 0 });
+  load.add(win.id, sample(0, { host: 'DESK', runners: [use('DESK', 'c/Peek'), use('who', '')] }), NOW);
+  load.add(wsl.id, sample(0, { host: 'desk', os: 'linux', runners: [use('DESK-linux', 'c/citadel')] }), NOW);
+  assert.deepEqual(
+    load.runnersByPc(NOW + MIN),
+    new Map([
+      ['laptop', new Set()],
+      ['desk', new Set(['c/peek/desk', 'c/citadel/desk-linux'])],
+    ]),
+    'the Windows and WSL agents of one PC are one PC',
+  );
+  assert.deepEqual(load.runnersByPc(NOW + 11 * MIN).get('desk'), new Set());
 });

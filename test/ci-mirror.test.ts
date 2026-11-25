@@ -159,7 +159,7 @@ test("a build mirror past its fifth run takes the place of the oldest, which the
     .map((f) => f.run_id)
     .sort((a, b) => a - b);
   assert.deepEqual(runs, [3, 4, 5, 6, 7], `each newer run is kept and the oldest past five goes: ${warned.join('; ')}`);
-  assert.deepEqual(warned, []);
+  assert.deepEqual(warned, [] as string[]);
 
   // Over the scheme's cap, where only pushing out another file would fit it: refused, and the log says that, not "full".
   store.putCiFile({ project_id: p.id, workflow: 'big.yml', run_id: 1, run_attempt: 1, name: 'big.zip', sha: 'b'.repeat(40), ref: '', kind: 'report', target: '', size: 2100, sha256: '', created_at: clock });

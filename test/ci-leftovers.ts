@@ -5,7 +5,7 @@
 //                                     what earlier jobs left (tests.yml, flake-proof.yml, citadel-heavy.yml)
 //   node test/ci-leftovers.ts end     its last step, however the job went: stops what this job left
 // Two to four jobs run at once as this one user, and a live job's processes are never touched. Only these count:
-//   1. this runner's own: naming (or with TMPDIR in) its temp folder, or naming its RUNNER_TEMP. A runner runs one job at a
+//   1. this runner's own: naming (or with TMPDIR in) its temp folder, its RUNNER_TEMP or its checkout. A runner runs one job at a
 //      time, so at the start they are a finished job's, and at the end this one's.
 //   2. any runner's: an orphan (its parent is init or the user's systemd) naming a scratch folder (/tmp/<name>-XXXXXX) and
 //      started before every live job (Runner.Worker), so no live job started it.
@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { readProcs, stopAll, type Proc } from './leak-file.ts';
 
 export interface Job {
-  /** The runner's temp folder for its jobs, and the runner's own RUNNER_TEMP. */
+  /** The folders that are this runner's alone (ownDirs). */
   own: string[];
   /** Where rule 2's scratch folders are. */
   tmp?: string;
@@ -90,11 +90,17 @@ export function sweep(job: Job, say = console.log): number[] {
 /** Short, as a test's sockets have 108 characters for their whole path. */
 export const jobTmp = (runnerTemp: string) => `/tmp/j-${createHash('sha256').update(runnerTemp).digest('hex').slice(0, 6)}`;
 
+/** This runner's temp folder for its jobs, its RUNNER_TEMP and its checkout; none outside a job. */
+export function ownDirs({ RUNNER_TEMP, GITHUB_WORKSPACE }: NodeJS.ProcessEnv): string[] {
+  if (!RUNNER_TEMP) return [];
+  return [jobTmp(RUNNER_TEMP), RUNNER_TEMP, ...(GITHUB_WORKSPACE && GITHUB_WORKSPACE !== '/' ? [GITHUB_WORKSPACE] : [])];
+}
+
 function main(mode: string) {
   const { RUNNER_TEMP, GITHUB_ENV } = process.env;
   if (!RUNNER_TEMP || !GITHUB_ENV) return console.log('not in a CI job: nothing to do');
   const dir = jobTmp(RUNNER_TEMP);
-  sweep({ own: [dir, RUNNER_TEMP] });
+  sweep({ own: ownDirs(process.env) });
   // Emptied, not removed: the job's last steps still have it as TMPDIR.
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const e of readdirSync(dir)) {

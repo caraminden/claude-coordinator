@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import type { TurnPlace } from '../src/claude-link.ts';
+import type { ClaudePlaces } from '../src/contraption-turns.ts';
 import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
@@ -15,6 +16,7 @@ import { realClock } from '../src/clock.ts';
 import { KILL_AFTER_MS } from '../src/contraption-turns.ts';
 import { FakeClock } from './fake-clock.ts';
 import { bootServer, jsonLines, lines, until, holds, tempRoot, testPins } from './helpers.ts';
+import { json } from './typed.ts';
 
 const tmp = tempRoot('contraption-turns-');
 const root = tmp.dir;
@@ -207,8 +209,8 @@ let caraCodex: TurnPlace | null = null;
 let caraOn = 1;
 let caraLimits: { n: number; until: number }[] = [];
 let caraSpare = false;
-const places = {
-  place(uid: number | null) {
+const places: ClaudePlaces = {
+  place(uid): TurnPlace | null {
     if (uid === cara.id && caraOn === 2) return { host: true as const, account: 2, configDir: join(root, 'claude2'), env: { CLAUDE_CONFIG_DIR: join(root, 'claude2') } };
     if (uid === cara.id) return { host: true as const };
     if (uid === josh.id) {
@@ -217,10 +219,10 @@ const places = {
     return null;
   },
   // Cara's Codex-only container (#341), once a test gives her one.
-  codexPlace: (uid: number) => (uid === cara.id ? caraCodex : null),
-  expire: (uid: number) => expired.push(uid),
-  configDirs: (uid: number) => (uid === cara.id ? [claudeDir, join(root, 'claude2')] : []),
-  limitedView(_uid: number, n: number, until: number) {
+  codexPlace: (uid) => (uid === cara.id ? caraCodex : null),
+  expire: (uid) => expired.push(uid),
+  configDirs: (uid) => (uid === cara.id ? [claudeDir, join(root, 'claude2')] : []),
+  limitedView(_uid, n, until) {
     caraLimits.push({ n, until });
     const next = n === 1 && caraSpare ? { n: 2, label: 'account 2' } : null;
     if (next) caraOn = 2;
@@ -240,7 +242,7 @@ const serverEnv = {
 };
 const turns = new ContraptionTurns(store, contraptions, places, { dataDir: data, claudeBin: fake, podman, env: serverEnv });
 
-type Ev = { event: string; data: any };
+type Ev = { event: string; data: { turn?: number; claudeSession?: string; message?: string; delta?: string; provider?: string; model?: string; retry?: number; code?: string; session?: string; ok?: boolean; error?: string } };
 async function turn(c: typeof mandate, body: object): Promise<Ev[]> {
   const evs: Ev[] = [];
   try {
@@ -291,7 +293,7 @@ test("a turn has only the contraption's MCP and no built-in tools, settings, CLA
   const start = evs[0];
   assert.equal(start.event, 'start');
   assert.equal(start.data.session, 'acolyte');
-  assert.match(start.data.claudeSession, /^[0-9a-f-]{36}$/);
+  assert.match(start.data.claudeSession!, /^[0-9a-f-]{36}$/);
   assert.equal(start.data.provider, 'claude');
   assert.equal(start.data.model, 'haiku', "what it runs, as asked: here the registry's default");
   assert.equal(
@@ -322,7 +324,7 @@ test("a turn has only the contraption's MCP and no built-in tools, settings, CLA
   // The turn's folder (prompt, system prompt, MCP token) is gone once it ends.
   assert.deepEqual(readdirSync(join(data, 'run', 'contraption-turns')), []);
   // The meter: who, which session, tokens and time.
-  const row = store.getContraptionTurn(start.data.turn)!;
+  const row = store.getContraptionTurn(start.data.turn!)!;
   assert.deepEqual(
     { ...row, started_at: 0, ended_at: 0 },
     {
@@ -406,8 +408,8 @@ test("a failed tool call's result carries the error the agent saw, cut to TOOL_E
   const results = evs.filter((e) => e.event === 'tool_result').map((e) => e.data);
   assert.equal(results.length, 2);
   assert.deepEqual({ ...results[0], error: undefined }, { id: 'r1', ok: false, parent: null, error: undefined });
-  assert.equal(results[0].error.length, TOOL_ERROR_MAX);
-  assert.ok(results[0].error.startsWith('MCP error -32001: Request timed out'));
+  assert.equal(results[0].error!.length, TOOL_ERROR_MAX);
+  assert.ok(results[0].error!.startsWith('MCP error -32001: Request timed out'));
   assert.deepEqual(results[1], { id: 'r2', ok: false, parent: null, error: 'No such tool available: mcp__mandate__list' });
 });
 
@@ -505,7 +507,7 @@ test('a turn names its session to the account pick when it resumes one, and says
   const ran: [number, string, number][] = [];
   const place = places.place;
   places.place = (uid: number | null, warm?: string) => (asked.push(warm), place(uid));
-  (places as any).ran = (uid: number, key: string, n: number) => void ran.push([uid, key, n]);
+  places.ran = (uid: number, key: string, n: number) => void ran.push([uid, key, n]);
   try {
     await turn(mandate, { session: 'warm-793' });
     await turn(mandate, { session: 'warm-793' });
@@ -514,7 +516,7 @@ test('a turn names its session to the account pick when it resumes one, and says
     assert.deepEqual(ran, Array(3).fill([cara.id, `app:${mandate.id}:warm-793`, 1]));
   } finally {
     places.place = place;
-    delete (places as any).ran;
+    delete places.ran;
   }
 });
 
@@ -538,13 +540,13 @@ test('two names run at once, a second turn on a busy name gets busy, and cancel 
     ],
   );
   assert.equal(turns.deleteSession(mandate, cara.id, 'aura-1'), 'busy');
-  assert.equal(turns.cancel(peek.id, started.data.turn), false, "another contraption can't cancel it");
+  assert.equal(turns.cancel(peek.id, started.data.turn!), false, "another contraption can't cancel it");
   assert.equal(turns.running(), 1);
-  assert.equal(turns.cancel(mandate.id, started.data.turn), true);
+  assert.equal(turns.cancel(mandate.id, started.data.turn!), true);
   await slow;
   assert.equal(errorOf(evs), 'canceled');
   assert.equal(turns.running(), 0);
-  assert.equal(store.getContraptionTurn(started.data.turn)!.outcome, 'canceled');
+  assert.equal(store.getContraptionTurn(started.data.turn!)!.outcome, 'canceled');
   assert.equal(turns.sessions(mandate.id, cara.id).find((s) => s.name === 'aura-1')!.busy, false);
 });
 
@@ -556,7 +558,7 @@ test('a stopped turn that ignores SIGTERM is killed and frees its session within
   const clock = new FakeClock();
   turns.clock = clock;
   try {
-    turns.cancel(mandate.id, started.data.turn);
+    turns.cancel(mandate.id, started.data.turn!);
     // SIGTERM is ignored, so only the SIGKILL timer can free it: armed within a few seconds, and nothing frees it before it fires.
     assert.deepEqual(
       clock.pending().map((x) => x.ms),
@@ -586,7 +588,7 @@ test("a drain waits for the contraption's running turns, holds its new ones unti
   assert.match(said!, /^Waited \d+ s for 1 running turn to end\.$/);
   assert.equal(lingering.at(-1)!.event, 'end', 'the running turn finished, not cut');
   await holds('the new turn waits for the restart', () => held.length === 0, { ms: 100 });
-  assert.deepEqual(held, [], 'the new turn waits for the restart');
+  assert.deepEqual<Ev[]>(held, [], 'the new turn waits for the restart');
   assert.equal(turns.running(), 0);
   release();
   await second;
@@ -617,7 +619,7 @@ test("a drain stops waiting at its cap and names the turns it will cut; with non
   const dropped: Ev[] = [];
   const asked = turns.run(mandate, parseTurn({ person: cara.id, session: 'cap-2', prompt: 'hi' }, mandate), (event, data) => dropped.push({ event, data }), gone.signal);
   gone.abort();
-  turns.cancel(mandate.id, started.data.turn);
+  turns.cancel(mandate.id, started.data.turn!);
   await slow;
   capped.release();
   await asked;
@@ -631,7 +633,7 @@ test("a drain stops waiting at its cap and names the turns it will cut; with non
 test('a running turn takes a message from its own person, says when claude took it in, and counts what it cost', async () => {
   const evs: Ev[] = [];
   const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'steered', prompt: 'steer me' }, mandate), (event, data) => evs.push({ event, data }));
-  const id = (await until('the turn to start', () => evs.find((e) => e.event === 'start'))).data.turn;
+  const id = (await until('the turn to start', () => evs.find((e) => e.event === 'start'))).data.turn!;
   assert.equal(turns.steer(peek.id, id, cara.id, 'Hi.'), null, 'another contraption has no such turn');
   assert.equal(turns.steer(mandate.id, id, josh.id, 'Hi.'), 'other_person');
   const out = turns.steer(mandate.id, id, cara.id, 'Make it Friday.');
@@ -649,7 +651,7 @@ test('a running turn takes a message from its own person, says when claude took 
 
 test('every turn leaves an audit row (#844): the system text and prompt as claude got them, steers, the reply, model and blind; no tool calls', async () => {
   const evs = await turn(mandate, { session: 'audited', system: 'You are the Acolyte.', mcp: [{ name: 'mandate', path: '/mcp' }] });
-  const id = evs[0].data.turn;
+  const id = evs[0].data.turn!;
   const row = store.turnAudit(id)!;
   assert.equal(row.system, lastRun().system, 'the whole system text Citadel sent, its tool-names line included');
   assert.match(row.system, /^You are the Acolyte\.\n\n.*mcp__mandate__/s);
@@ -662,19 +664,19 @@ test('every turn leaves an audit row (#844): the system text and prompt as claud
   // A steer is part of what the model got.
   const steered: Ev[] = [];
   const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'steered-audit', prompt: 'steer me' }, mandate), (event, data) => steered.push({ event, data }));
-  const sid = (await until('the turn to start', () => steered.find((e) => e.event === 'start'))).data.turn;
+  const sid = (await until('the turn to start', () => steered.find((e) => e.event === 'start'))).data.turn!;
   turns.steer(mandate.id, sid, cara.id, 'Make it Friday.');
   await running;
   assert.match(store.turnAudit(sid)!.prompt, /^steer me\n\n.*Make it Friday\.$/s);
   assert.match(store.turnAudit(sid)!.output, /Heard: Make it Friday\./);
   // A blind turn says so.
   const blind = await turn(mandate, { session: 'audit-blind', blind: true, system: 'Neutral.' });
-  assert.deepEqual([store.turnAudit(blind[0].data.turn)!.blind, store.turnAudit(blind[0].data.turn)!.system], [1, 'Neutral.']);
+  assert.deepEqual([store.turnAudit(blind[0].data.turn!)!.blind, store.turnAudit(blind[0].data.turn!)!.system], [1, 'Neutral.']);
 });
 
 test('an audit row goes with its session, and every row goes once its days are up (#844)', async () => {
-  const id = (await turn(mandate, { session: 'audit-gone' }))[0].data.turn;
-  const keep = (await turn(mandate, { session: 'audit-stays' }))[0].data.turn;
+  const id = (await turn(mandate, { session: 'audit-gone' }))[0].data.turn!;
+  const keep = (await turn(mandate, { session: 'audit-stays' }))[0].data.turn!;
   assert.ok(store.turnAudit(id));
   assert.equal(turns.deleteSession(mandate, cara.id, 'audit-gone'), 'deleted');
   assert.equal(store.turnAudit(id), undefined);
@@ -687,7 +689,7 @@ test('an audit row goes with its session, and every row goes once its days are u
 test('a turn whose reply is out takes no message', async () => {
   const evs: Ev[] = [];
   const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'lingering', prompt: 'linger' }, mandate), (event, data) => evs.push({ event, data }));
-  const id = (await until('the turn to start', () => evs.find((e) => e.event === 'start'))).data.turn;
+  const id = (await until('the turn to start', () => evs.find((e) => e.event === 'start'))).data.turn!;
   await until('its reply', () => evs.some((e) => e.event === 'text'));
   assert.equal(turns.running(), 1, 'claude is still running');
   assert.deepEqual(turns.steer(mandate.id, id, cara.id, 'One more thing.'), { steered: false, reason: 'replied' });
@@ -711,7 +713,7 @@ test("the turn_cap and the plan's own limit both answer limit; a crash says fail
   assert.equal(errorOf(lim), 'limit', JSON.stringify(lim.at(-1)));
   const crash = await turn(mandate, { session: 'crash', prompt: 'crash' });
   assert.equal(errorOf(crash), 'failed');
-  assert.match(crash.at(-1)!.data.message, /exit 3.*boom/);
+  assert.match(crash.at(-1)!.data.message!, /exit 3.*boom/);
 });
 
 test("a container turn runs in the person's own container, on their own sign-in, at its own scratch folder", async () => {
@@ -791,7 +793,7 @@ test("a stream's session id that isn't one is never stored, and one stored befor
   mkdirSync(victim, { recursive: true });
   writeFileSync(join(victim, 'keep'), 'x');
   store.putContraptionSession(mandate.id, cara.id, 'odd', '../../victim');
-  const next = (await turn(mandate, { session: 'odd' }))[0].data.claudeSession;
+  const next = (await turn(mandate, { session: 'odd' }))[0].data.claudeSession!;
   assert.match(next, /^[0-9a-f-]{36}$/, 'the name starts a new session');
   assert.ok(existsSync(join(victim, 'keep')));
   assert.equal(turns.deleteSession(mandate, cara.id, 'odd'), 'deleted');
@@ -929,7 +931,7 @@ test('requests are checked before anything runs', () => {
   const bad = (body: object) =>
     assert.throws(
       () => parseTurn({ person: 1, session: 's', prompt: 'p', ...body }, mandate),
-      (e: any) => e.code === 'bad_request',
+      (e: Error & { code: string }) => e.code === 'bad_request',
     );
   bad({ person: 'one' });
   bad({ session: 'has spaces' });
@@ -1015,9 +1017,9 @@ test("the API is only for a contraption's own server on this machine, with its k
     events.filter((e) => e !== 'text'),
     ['start', 'tool', 'tool_result', 'compacted', 'end'],
   );
-  const sessions = await (await api(`/api/contraptions/sessions?person=${me.id}`)).json();
+  const sessions = await json<{ name: string; busy: boolean }[]>(await api(`/api/contraptions/sessions?person=${me.id}`));
   assert.deepEqual(
-    sessions.map((s: any) => [s.name, s.busy]),
+    sessions.map((s) => [s.name, s.busy]),
     [['acolyte', false]],
   );
   assert.equal((await api('/api/contraptions/sessions?person=999')).status, 403);
@@ -1057,7 +1059,7 @@ test("the API is only for a contraption's own server on this machine, with its k
   writeFileSync(join(folder, 'glow.png'), 'GLOW');
   writeFileSync(join(folder, 'glow.png.json'), '{"model":"m"}');
   assert.deepEqual(
-    (await (await api(`/api/contraptions/media?person=${me.id}`)).json()).files.map((f: any) => f.path),
+    (await json<{ files: { path: string }[] }>(await api(`/api/contraptions/media?person=${me.id}`))).files.map((f) => f.path),
     ['auras/glow.png'],
   );
   const got = await api(`/api/contraptions/media/auras/glow.png?person=${me.id}`);
@@ -1078,7 +1080,7 @@ test("the API is only for a contraption's own server on this machine, with its k
   assert.equal((await mcp({ Authorization: 'Bearer cmt_nope' })).status, 401);
   assert.equal((await mcp({ Authorization: `Bearer ${key}` })).status, 401, 'nor the contraption key');
   // Turns run in the server's own process: the health check counts them for a restart to wait on.
-  assert.equal((await (await fetch(`${srv.base}/api/health`)).json()).interruptible, 0);
+  assert.equal((await json<{ interruptible: number }>(await fetch(`${srv.base}/api/health`))).interruptible, 0);
 });
 
 // A fake codex app-server, for Codex turns (#337): it logs the hook config it got and its requests.
@@ -1128,7 +1130,7 @@ test("on Codex (#337) a contraption turn runs the shim in its own mode with only
     // The override turned the app's haiku into Codex, and start and end say so (#409).
     assert.deepEqual([evs[0].data.provider, evs[0].data.model], ['codex', 'gpt-6-luna']);
     assert.deepEqual([evs.at(-1)!.data.provider, evs.at(-1)!.data.model], ['codex', 'gpt-6-luna']);
-    assert.ok(evs.some((e) => e.event === 'text' && e.data.delta.includes('CODEX MOVED IT')));
+    assert.ok(evs.some((e) => e.event === 'text' && e.data.delta!.includes('CODEX MOVED IT')));
     const calls = jsonLines(codexLog);
     assert.equal(calls[0].tripwire.mode, 'contraption');
     assert.deepEqual(calls[0].tripwire.mcp, ['mandate']);
@@ -1189,7 +1191,7 @@ test("the server login's Codex app turns run in its own Codex-only container, ha
     assert.equal(calls[0].tripwire.mode, 'contraption');
     const said = calls
       .find((c) => c.method === 'turn/start')
-      .params.input.map((i: any) => i.text)
+      .params.input.map((i: { text: string }) => i.text)
       .join('\n');
     assert.match(said, /HOST CLAUDE ASK/, 'the hand-over is her Claude conversation on the host');
 
@@ -1267,7 +1269,7 @@ test('every Claude account limited: the turn fails with limit and says which res
   caraSpare = false;
   const evs = await turn(mandate, { session: 'all-limited', prompt: 'first account limited' });
   assert.equal(errorOf(evs), 'limit');
-  assert.match(evs.at(-1)!.data.message, /Another of this person's Claude accounts resets first/);
+  assert.match(evs.at(-1)!.data.message!, /Another of this person's Claude accounts resets first/);
   assert.equal(caraLimits.length, 1);
 });
 
@@ -1292,7 +1294,7 @@ test('a limit after output is marked but not retried: the app never sees a reply
 });
 
 test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a second cut in a row offers none (#1382)', async () => {
-  const outcome = (evs: Ev[]) => store.getContraptionTurn(evs.find((e) => e.event === 'start')!.data.turn)!.outcome;
+  const outcome = (evs: Ev[]) => store.getContraptionTurn(evs.find((e) => e.event === 'start')!.data.turn!)!.outcome;
   const cut = await turn(peek, { session: 'cut', prompt: 'cut off' });
   assert.deepEqual(
     cut.map((e) => e.event),
@@ -1300,7 +1302,7 @@ test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a s
   );
   assert.equal(errorOf(cut), 'interrupted');
   assert.equal(cut.at(-1)!.data.retry, true, 'the first cut offers a retry');
-  assert.match(cut.at(-1)!.data.message, /cut off/);
+  assert.match(cut.at(-1)!.data.message!, /cut off/);
   assert.equal(outcome(cut), 'interrupted', 'the meter says interrupted, not failed');
   // Cut again in the same session: one resume per kill, so no retry is offered and nothing loops.
   const again = await turn(peek, { session: 'cut', prompt: 'cut off' });
@@ -1314,7 +1316,7 @@ test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a s
   const fresh = await turn(peek, { session: 'cut-fresh', fresh: true, prompt: 'cut off' });
   assert.equal(errorOf(fresh), 'interrupted');
   assert.equal(fresh.at(-1)!.data.retry, false);
-  assert.match(fresh.at(-1)!.data.message, /start over/);
+  assert.match(fresh.at(-1)!.data.message!, /start over/);
   // Ended by the signal itself, with no exit code.
   const sig = await turn(peek, { session: 'cut-sig', prompt: 'killed outright' });
   assert.equal(errorOf(sig), 'interrupted');
@@ -1323,7 +1325,7 @@ test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a s
   try {
     const restart = await turn(peek, { session: 'cut-restart', prompt: 'cut off' });
     assert.equal(errorOf(restart), 'interrupted');
-    assert.match(restart.at(-1)!.data.message, /Citadel restarted/);
+    assert.match(restart.at(-1)!.data.message!, /Citadel restarted/);
   } finally {
     turns.stopping = false;
   }
@@ -1333,5 +1335,5 @@ test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a s
 
 test('the audit reply keeps each message and each side of a tool call as its own paragraph (#1726)', async () => {
   const evs = await turn(mandate, { session: 'audit-glue', prompt: 'grunts please' });
-  assert.equal(store.turnAudit(evs[0].data.turn)!.output, 'Asking. \n\nDone.', 'narration before the tool call, a blank line, then the answer');
+  assert.equal(store.turnAudit(evs[0].data.turn!)!.output, 'Asking. \n\nDone.', 'narration before the tool call, a blank line, then the answer');
 });

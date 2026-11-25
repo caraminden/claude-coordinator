@@ -50,7 +50,7 @@ export const desktopRoutes: Route[] = [
         if (err instanceof DesktopError) throw new HttpError(404, 'Not found');
         throw err;
       }
-      if (!index) throw new HttpError(404, `No builds of ${params.app} yet`);
+      if (!index?.builds.length) throw new HttpError(404, `No builds of ${params.app} yet`);
       if (params.file === 'feed.json') {
         const feed = DesktopFeeds.feed(index, await d.launchers.get());
         if (!feed) throw new HttpError(404, `No builds of ${params.app} yet`);

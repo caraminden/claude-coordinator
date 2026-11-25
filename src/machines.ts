@@ -16,6 +16,7 @@ import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { lendsMachine } from './access.ts';
+import type { Ship } from './ci-ships.ts';
 import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
@@ -81,7 +82,7 @@ function storedLend(m: Machine): Lend | null {
 
 /** The servers an agent can offer: the MCP server it lends, and its built-in workspace tools. */
 export type MachineServer = 'mcp' | 'ws';
-export type OnlineMachine = Machine & { servers: MachineServer[] };
+export type OnlineMachine = Machine & { servers: MachineServer[] /** The MCP server ticked now; null from an agent that lends what its command line says. */; lent: string | null };
 
 // An agent that stops reading (asleep mid-stream) is dropped rather than buffered for forever.
 const MAX_BACKLOG = 64 * 1024 * 1024;
@@ -200,6 +201,8 @@ interface Agent {
   found: FoundServer[];
   workspaces: { name: string }[];
   problems: string[];
+  /** The jobs (#857) it last said it holds; null when it named none at all, or hasn't said. */
+  jobs?: Set<number> | null;
   /** Its hourly check, and the connect check for an agent that never posts its info (#437). */
   timers: NodeJS.Timeout[];
   /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
@@ -338,6 +341,9 @@ function lentServers(m: Machine, agent: Agent): MachineServer[] {
   if (!lend) return [];
   return [...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []), ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : [])];
 }
+
+/** The MCP server a turn gets by name, as its tools are remembered (src/pool-machine.ts): null without one, or when the agent alone knows. */
+const lentName = (m: Machine, agent: Agent, servers: MachineServer[]) => (agent.managed && servers.includes('mcp') ? (storedLend(m)?.server ?? null) : null);
 
 const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'contraptionTurn' in h ? `c${h.contraptionTurn}` : `k${h.check}`);
 
@@ -481,7 +487,9 @@ export class MachineRelay {
   sendJob(machineId: number, msg: AgentJobMessage): boolean {
     const agent = this.agents.get(machineId);
     const machine = this.store.getMachine(machineId);
-    if (!agent || agent.runners || !machine || !storedOffer(machine)) return false;
+    if (!agent || agent.runners || !machine) return false;
+    // With no jobs block (a typo broke it) it hears only of a job it said it holds (2MA10), never of a new one.
+    if (!storedOffer(machine) && (msg.type === 'job.start' || !agent.jobs?.has(msg.id))) return false;
     agent.res.write(`data: ${JSON.stringify({ job: msg })}\n\n`);
     return true;
   }
@@ -495,7 +503,7 @@ export class MachineRelay {
     return this.store.listMachines().flatMap((m) => {
       const agent = this.agents.get(m.id);
       const servers = agent ? lentServers(m, agent) : [];
-      return servers.length ? [{ ...m, servers }] : [];
+      return servers.length ? [{ ...m, servers, lent: lentName(m, agent!, servers) }] : [];
     });
   }
 
@@ -528,7 +536,8 @@ export class MachineRelay {
     if (mcp) this.store.updateMachine(machine.id, mcp);
     const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners || info.managed ? [] : ['mcp'], managed: !info.runners && !!info.managed, found: [], workspaces: [], problems: [], timers: [], runners: !!info.runners, os: info.os ?? 'windows' };
     this.agents.set(machine.id, agent);
-    if (agent.runners && this.shipList.length) res.write(`data: ${JSON.stringify({ ships: this.shipList })}\n\n`);
+    const ships = agent.runners ? this.shipsFor(agent.host) : [];
+    if (ships.length) res.write(`data: ${JSON.stringify({ ships })}\n\n`);
     // A runner host's check is its agent connecting: an hourly runner list could collide with a person's add, which the agent would refuse as busy.
     this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(info.runners ? { last_check: JSON.stringify({ at: agent.since, results: [], runners: true }) } : {}) });
     this.onChange();
@@ -596,6 +605,7 @@ export class MachineRelay {
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
     const known = Array.isArray(body.known_jobs) ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
+    agent.jobs = known && new Set(known.map((k) => k.id));
     if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
@@ -669,11 +679,11 @@ export class MachineRelay {
     return this.agents.get(machineId)?.host;
   }
 
-  /** The runners on a ship run's job now (#1268), sent to every runner agent at each look and to one as it connects. */
-  private shipList: { repo: string; runner: string }[] = [];
-  sendShips(ships: { repo: string; runner: string }[]) {
-    this.shipList = ships;
-    for (const agent of this.agents.values()) if (agent.runners) agent.res.write(`data: ${JSON.stringify({ ships })}\n\n`);
+  /** The runners on a ship run's job now (#1268) on one PC (by hostname, #1934), sent to each runner agent at each look and as it connects. */
+  private shipsFor: (host: string) => Ship[] = () => [];
+  sendShips(shipsFor: (host: string) => Ship[]) {
+    this.shipsFor = shipsFor;
+    for (const agent of this.agents.values()) if (agent.runners) agent.res.write(`data: ${JSON.stringify({ ships: shipsFor(agent.host) })}\n\n`);
   }
 
   /** Send a runner agent one job and wait for its answer; a refusal, an offline agent or no answer in time comes back as ok: false. */
@@ -1032,13 +1042,14 @@ export class MachineRelay {
   /** A turn's proxy started: give it a session whose stream carries the machine's replies. */
   openSession(machineId: number, holder: SessionHolder, server: MachineServer, who: string, res: ServerResponse): boolean {
     const agent = this.agents.get(machineId);
-    if (!agent || !this.online().some((m) => m.id === machineId && m.servers.includes(server))) return false;
+    const machine = this.online().find((m) => m.id === machineId && m.servers.includes(server));
+    if (!agent || !machine) return false;
     const id = randomBytes(12).toString('hex');
     const minion = 'ticketId' in holder ? holder : null;
     this.sessions.set(id, { machineId, holder: holderKey(holder), ticketId: minion?.ticketId ?? null, projectId: minion?.projectId ?? null, server, who, res });
     agent.sessions.add(id);
     res.writeHead(200, SSE_HEADERS);
-    res.write(`data: ${JSON.stringify({ session: id })}\n\n`);
+    res.write(`data: ${JSON.stringify({ session: id, ...(server === 'mcp' && machine.lent ? { lent: machine.lent } : {}) })}\n\n`);
     const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
     res.on('close', () => {
       clearInterval(ping);

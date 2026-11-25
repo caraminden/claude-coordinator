@@ -572,7 +572,8 @@ export function adrDir(claudeMd: string): string {
 export const HISTORY_CACHE_MAX = 8;
 /** Each commit that changed a dated line in these paths, as before/after pairs per file (oldest first). Cached by HEAD. */
 const historyCache = new Map<string, { head: string; edits: Map<string, Edit[]> }>();
-export async function gitEdits(repo: string, paths: string[], href: (file: string, sha: string) => string | null): Promise<Map<string, Edit[]>> {
+export type GitEdits = Map<string, Edit[]> & { failed?: boolean };
+export async function gitEdits(repo: string, paths: string[], href: (file: string, sha: string) => string | null): Promise<GitEdits> {
   const head = await gitOut(['rev-parse', 'HEAD'], repo);
   if (!head) return new Map();
   const key = `${repo}|${paths.join(',')}`;
@@ -580,7 +581,8 @@ export async function gitEdits(repo: string, paths: string[], href: (file: strin
   if (hit?.head === head) return hit.edits;
   const log = await gitOut(['log', '--format=%x00%H %ct %an', '-G', '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]', '--name-only', '--no-renames', '--', ...paths], repo, { timeout: 30_000 });
   // A failed or timed-out log is not cached as "no history": the next load tries again.
-  if (log == null) return new Map();
+  // `failed` tells a caller this empty map is no history read, not a repo with none (2ME8).
+  if (log == null) return Object.assign(new Map<string, Edit[]>(), { failed: true });
   const pairs: { sha: string; at: number; by: string; file: string }[] = [];
   for (const block of log.split('\0').filter(Boolean)) {
     const [first, ...files] = block.trim().split('\n').filter(Boolean);
@@ -599,6 +601,8 @@ export async function gitEdits(repo: string, paths: string[], href: (file: strin
     list.push({ before, after, at: p.at, by: p.by, href: href(p.file, p.sha) ?? undefined });
     edits.set(p.file, list);
   }
+  // Replacing a key moves it to the back and evicts no one: only a new key into a full cache drops the oldest (2ME6).
+  historyCache.delete(key);
   if (historyCache.size >= HISTORY_CACHE_MAX) historyCache.delete(historyCache.keys().next().value!);
   historyCache.set(key, { head, edits });
   return edits;

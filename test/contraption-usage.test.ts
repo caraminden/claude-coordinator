@@ -43,8 +43,8 @@ const places = { place: () => ({ host: true as const }), codexPlace: () => null,
 const turns = new ContraptionTurns(store, contraptions, places, { dataDir: data, claudeBin: fake, podman: '/bin/false', env: { PATH: process.env.PATH, HOME: root } });
 
 test('a turn whose last result has no usage still reports the usage an earlier reply carried', async () => {
-  const evs: { event: string; data: any }[] = [];
-  await turns.run(app, parseTurn({ person: cara.id, session: 'u', prompt: 'hello' }, app), (event, data) => evs.push({ event, data }));
+  const evs: { event: string; data: { turn: number; usage: unknown } }[] = [];
+  await turns.run(app, parseTurn({ person: cara.id, session: 'u', prompt: 'hello' }, app), (event, data) => evs.push({ event, data: data as { turn: number; usage: unknown } }));
   const end = evs.find((e) => e.event === 'end');
   assert.ok(end, 'the turn ended');
   assert.deepEqual(end.data.usage, { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 }, 'end event usage');

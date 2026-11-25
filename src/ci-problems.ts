@@ -1,6 +1,7 @@
 // The CI problems: what is wrong now, in words. Pure: no GitHub, no store.
 import { lines } from './approvals.ts';
 import type { Project } from './db.ts';
+import { ciState } from './ci-verdict.ts';
 import { pacific } from './pacific.ts';
 import { quietUntil } from './alert-wakes.ts';
 import type { Job, Run, Runner } from './ci-health.ts';
@@ -17,7 +18,9 @@ export const HUNG_MS = 2 * 3600_000;
 export const RED_FIX_MS = 3600_000;
 // A land/** run still queued this long has no landing waiting on it (a gate gives up after minutes): GitHub lost it.
 export const ORPHAN_MS = 3600_000;
-export const VERDICTS = new Set(['success', 'failure']);
+/** The conclusions that say something of main: a run that couldn't start (startup_failure: a broken `uses:` or permissions) is red too; a cancelled one says nothing. */
+export const VERDICTS = new Set(['success', 'failure', 'startup_failure', 'timed_out']);
+export const redRun = (r: Pick<Run, 'status' | 'conclusion'>) => VERDICTS.has(r.conclusion ?? '') && ciState(r.status, r.conclusion) === 'fail';
 const RAN = new Set(['success', 'failure']);
 
 export interface Problem {
@@ -285,12 +288,19 @@ export interface RedMark {
   file?: string;
   /** #1491 ("names the run anywhere in its chat"): minions whose chat names a run of the streak, and the newest event id read for them. */
   chat?: { ids: number[]; upTo: number };
+  /** When the first red run made after the closed fix minion `fix` (its number) closed ended: its hour counts from here, however many reds follow. */
+  after?: { fix: number; at: number };
+  /** Minions whose re-run another minion's replaced (`rerun`): green frees those still waiting on theirs. */
+  waited?: number[];
+  /** The red run's name, for a workflow whose run name shows its inputs (flake-proof.yml): only runs of the same name are this red's. */
+  title?: string;
 }
 /**
  * The run that tests a red's fix (#1074): `sha`, the default branch's tip holding the fix minion's work (its branch at
  * `tip`), seen at `at`; `run` once GitHub lists it. `dispatched`: Citadel started it (else a run already there, a push's).
  * `hosted`: the workflow runs on GitHub's own runners, so Citadel left it for a person (Actions minutes). `error`: the
- * dispatch GitHub refused. `failed`: it went red and the fix minion was woken.
+ * dispatch GitHub refused, or lost twice. `failed`: it went red and the fix minion was woken. `inputs`: each run of the
+ * workflow takes an input, so a person starts it. `resent`: when a dispatch GitHub never listed was sent again.
  */
 export interface Rerun {
   ticket: number;
@@ -300,8 +310,10 @@ export interface Rerun {
   run?: number;
   dispatched?: boolean;
   hosted?: boolean;
+  inputs?: boolean;
   error?: string;
   failed?: boolean;
+  resent?: number;
 }
 /** The minion fixing a red, and when it closed (null while open). */
 export interface Fix {
@@ -326,11 +338,11 @@ export function redProblem(file: string, branch: string, mark: RedMark, newest: 
     return { ...x, noFix: { ringsAt, late: now >= ringsAt } };
   }
   const re = mark.rerun;
-  const rerun = fix.closedAt == null && re?.ticket != null ? { sha: short(re.sha), url: re.run && slug ? runUrl(slug, { id: re.run } as Run) : undefined, state: re.failed ? ('failed' as const) : re.hosted || re.error ? ('manual' as const) : ('running' as const) } : undefined;
+  const rerun = fix.closedAt == null && re?.ticket != null ? { sha: short(re.sha), url: re.run && slug ? runUrl(slug, { id: re.run } as Run) : undefined, state: re.failed ? ('failed' as const) : re.hosted || re.inputs || re.error ? ('manual' as const) : ('running' as const) } : undefined;
   return { ...x, fixMinion: { number: fix.number, closed: fix.closedAt != null }, ...(rerun && { rerun }) };
 }
 export function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
-  if (newest.conclusion !== 'failure') return null;
+  if (!redRun(newest)) return null;
   const told = mark.told ?? now;
   const key = `red:${newest.workflow_id}`;
   const what = `CI: ${file} failed on ${branch} (run ${mark.run}${mark.where ? `, at ${mark.where}` : ''})`;
@@ -353,12 +365,12 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
       };
     }
     // #1662 (Cara's pick: "At once"): only a person can start it, so it rings.
-    if (re.hosted || re.error) {
+    if (re.hosted || re.inputs || re.error) {
       return {
         key,
         plain: { what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`, next: `${re.hosted ? "They run on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start them. " : ''}Re-run them on ${branch} from the CI page; this clears when they pass` },
         title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
-        why: re.hosted ? `${file} runs on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start it` : `GitHub refused Citadel's re-run: ${re.error}`,
+        why: re.hosted ? `${file} runs on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start it` : re.inputs ? `each ${file} run takes an input, so Citadel doesn't start it` : `Citadel's re-run didn't start: ${re.error}`,
         fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it costs Actions minutes)' : ''}; this clears when it's green, and ${n} closes then`,
       };
     }
@@ -381,7 +393,8 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
         why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,
         fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows`,
       },
-      at(newest.updated_at ?? newest.created_at),
+      // The first red after it closed, not the newest: reds that come more often than hourly would put the ring off for good.
+      mark.after?.fix === fix.number ? mark.after.at : at(newest.updated_at ?? newest.created_at),
       now,
     );
   }
@@ -424,7 +437,7 @@ export function startedRed(x: Problem, n: number): Problem {
 
 /** The newest two verdict runs of a workflow's runs on the default branch (newest first): the one to check, and the one before. */
 export function verdictPair(runs: Run[]): [Run, Run] | null {
-  const v = runs.filter((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
+  const v = runs.filter((r) => r.status === 'completed' && RAN.has(r.conclusion ?? '')); // a run that couldn't start has no jobs to compare
   return v.length >= 2 && v[0].conclusion === 'success' ? [v[0], v[1]] : null;
 }
 

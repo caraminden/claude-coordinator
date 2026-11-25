@@ -116,7 +116,7 @@ async function emulator(status: number) {
     got.type = String(req.headers['content-type']);
     const parts: Buffer[] = [];
     req
-      .on('data', (c) => parts.push(c))
+      .on('data', (c: Buffer) => parts.push(c))
       .on('end', () => {
         got.body = Buffer.concat(parts);
         res.writeHead(200, { 'content-type': 'application/grpc' });
@@ -217,9 +217,10 @@ test('play never feeds the mic before an app records, and stops when adb fails',
 
 /** Runs the check page's AudioWorklet on 128-sample blocks, as Web Audio would, and returns what it posted. */
 function worklet(blocks: Float32Array[], o: { settle: number; giveUp: number; keep: number }) {
-  let Processor: any;
+  type Processor = new (o: { processorOptions: object }) => { process(input: Float32Array[][]): boolean };
+  let Processor!: Processor;
   new Function('registerProcessor', 'AudioWorkletProcessor', WORKLET)(
-    (_: string, c: unknown) => (Processor = c),
+    (_: string, c: Processor) => (Processor = c),
     class {
       port = { postMessage: (m: Float32Array) => posted.push(m) };
     },

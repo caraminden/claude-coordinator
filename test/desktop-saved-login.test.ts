@@ -13,10 +13,7 @@ const { savedLogin, fromCitadel } = createRequire(import.meta.url)('../desktop/s
 const box = (available = true) => ({
   isEncryptionAvailable: () => available,
   encryptString: (s: string) => Buffer.from(s, 'utf8').map((b) => b ^ 0x5a),
-  decryptString: (b: Buffer) =>
-    Buffer.from(b)
-      .map((x) => x ^ 0x5a)
-      .toString('utf8'),
+  decryptString: (b: Buffer) => (Buffer.from(b).map((x) => x ^ 0x5a) as Buffer).toString('utf8'),
 });
 const made: string[] = [];
 const dir = () => {

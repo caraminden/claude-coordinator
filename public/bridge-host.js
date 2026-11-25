@@ -11,6 +11,8 @@ export const TAG = 'citadel-bridge-1';
 const MAX_TEXT = 10_000;
 const MAX_ENTRIES = 100;
 const MAX_IMAGES = 6;
+// How long the viewer waits, after a Send, for the page to store what it wrote on the answer before it closes.
+const KEPT_MS = 5000;
 // Writes per frame: a burst of 40, then 20 a second.
 const BURST = 40;
 const PER_SECOND = 20;
@@ -34,8 +36,11 @@ export function readRequest(e, from = frames) {
   if (!frame || e.origin !== 'null' || !m || typeof m !== 'object' || m.bridge !== TAG) return null;
   if (!Number.isSafeInteger(m.id) || typeof m.page !== 'string' || m.page.length > 4000) return null;
   if (m.op === 'hello' || m.op === 'list' || m.op === 'typing' || m.op === 'alive') return { frame, req: { id: m.id, op: m.op, page: m.page } };
+  if (m.op === 'kept') return { frame, req: { id: m.id, op: 'kept', page: m.page, all: m.all !== false } };
   if (m.op === 'write' && Array.isArray(m.entries) && m.entries.length && m.entries.length <= MAX_ENTRIES) return { frame, req: { id: m.id, op: 'write', page: m.page, entries: m.entries } };
-  if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && m.text.length <= MAX_TEXT && validImages(m.images)) {
+  // The server takes no more either (api/artifact-send), so the page is told, not left without an answer (#1940).
+  if (m.op === 'send' && typeof m.text === 'string' && m.text.length > MAX_TEXT) return { frame, req: { id: m.id, op: 'refuse', page: m.page, error: `${m.text.length.toLocaleString('en')} characters is too long (${MAX_TEXT.toLocaleString('en')} at most). Shorten your notes and send again` } };
+  if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && validImages(m.images)) {
     const items = Array.isArray(m.items) && m.items.length <= 500 ? m.items.filter((i) => i && typeof i === 'object').map(({ collection, id, title, label }) => ({ collection, id, title, label })) : null;
     return { frame, req: { id: m.id, op: 'send', page: m.page, text: m.text, ...(m.keepOpen === true ? { keepOpen: true } : {}), ...(m.images?.length ? { images: m.images.map(({ mediaType, data }) => ({ mediaType, data })) } : {}), ...(items?.length ? { items } : {}) } };
   }
@@ -115,6 +120,8 @@ async function onMessage(e) {
   // opaque, so '*' is the only target that reaches it.
   const reply = (body) => e.source.postMessage({ bridge: TAG, re: req.id, ...body }, '*');
   if (req.op === 'typing') return void (typedAt = Date.now());
+  if (req.op === 'kept') return frame.kept?.(req.all);
+  if (req.op === 'refuse') return reply({ ok: false, error: req.error });
   // The page hears at once that its request is here, and again whenever it asks (`alive`) while it is worked on, so it
   // can tell Citadel being slow from a viewer that is gone (#1862). A page from before that drops both unread. A hello
   // is told what this viewer knows by itself, for a page opened while Citadel is down.
@@ -157,7 +164,15 @@ async function onMessage(e) {
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
       reply({ ok: true, result: { sent: true, to: r.to.label } });
       // Sent: the viewer goes away and the chat shows the message, unless the page keeps it open (send's keepOpen).
-      if (!req.keepOpen) frame.afterSend?.();
+      // Closed only once the page has stored what it wrote on the answer (that it sent, #1940), or 5 s on; left open on
+      // something refused, which closing would lose without a word.
+      if (!req.keepOpen && frame.afterSend) {
+        const all = await new Promise((r) => {
+          frame.kept = r;
+          setTimeout(() => r(), KEPT_MS);
+        });
+        if (all !== false && alive(frame)) frame.afterSend();
+      }
       return;
     }
     if (req.op === 'write') {

@@ -61,6 +61,15 @@ test("a turn a person steered mid-turn is not a hit; a Grunt's finish notice is 
   assert.deepEqual(answerCheck(stopped), []);
 });
 
+test("a turn resuming a killed one starts at its prompt, past the interrupted call's result and Claude Code's own filler", () => {
+  const filler = { type: 'assistant', isApiErrorMessage: false, message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } };
+  const cut = { type: 'user', promptId: 'p2', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't0', is_error: true, content: "[Tool call interrupted: the session ended before this call's result was recorded]" }] } };
+  const turn = readTurn(jsonl(prompt('first'), call('Edit', 0)[0], cut, filler, prompt('[System]: your last turn was killed', 'p2'), call('mcp__thread__hand_off_land', 1), say(ANSWER)), 'p2');
+  assert.equal(turn.steered, false);
+  assert.equal(turn.prompt, '[System]: your last turn was killed');
+  assert.equal(shipReviewCheck(turn, '').length, 1, 'its unreviewed ship is logged');
+});
+
 test("only this prompt's turn counts: earlier turns' tool calls and a compaction summary don't", () => {
   const t = jsonl(prompt('first'), calls(FIVE), say(ANSWER), prompt('[Cara]: and the colour?', 'p2'), call('Bash', 9), { type: 'user', promptId: 'p2', isCompactSummary: true, message: { content: 'This session is being continued…' } }, say('Done: it is teal now.'));
   assert.deepEqual(readTurn(t, 'p2').toolCalls, ['Bash']);
@@ -70,7 +79,11 @@ test("only this prompt's turn counts: earlier turns' tool calls and a compaction
 
 test('proposal without a card: a proposing heading or lead-in with no card or message is a hit', () => {
   const bare = readTurn(jsonl(prompt('audit the hooks'), calls(FIVE), say(PROPOSAL)), 'p1');
-  assert.deepEqual(answerCheck(bare), [`proposal without a card · "${PROPOSAL.replace(/\s+/g, ' ').slice(0, 120)}"`]);
+  assert.deepEqual(answerCheck(bare), [
+    `proposal without a card · matched "${PROPOSAL.split('\n')
+      .map((l) => l.trim())
+      .find((l) => proposalLine(l))}" · "${PROPOSAL.replace(/\s+/g, ' ').slice(0, 120)}"`,
+  ]);
   for (const action of ['mcp__thread__ask_question', 'mcp__thread__propose_plan', 'mcp__thread__message_coordinator', 'mcp__thread__create_ticket']) {
     assert.deepEqual(answerCheck(readTurn(jsonl(prompt('audit'), calls([...FIVE, action]), say(PROPOSAL)), 'p1')), [], action);
   }
@@ -91,6 +104,18 @@ test('proposalLine reads headings, bold lines and lead-ins, not the words in pas
   assert.equal(proposalLine('Note: see https://example.com/next-steps'), null);
   assert.equal(proposalLine('[Proposal: account linking](/shared/specs/linking.md): the spec you asked for.'), null);
   assert.equal(proposalLine("Worth a follow-up minion (I didn't do it here): the old run-back text."), "Worth a follow-up minion (I didn't do it here): the old run-back text.");
+});
+
+test('proposalLine skips only an anchored none, nothing or no after the colon', () => {
+  for (const t of ['Follow-ups: none.', 'Follow-ups: none', '- Next steps: nothing', '**Follow-ups:** none', 'Recommendation: no.']) assert.equal(proposalLine(t), null, t);
+  for (const t of ['No objections, proposal: ship it', 'Follow-ups: nothing blocks the rest, but do X', 'Next steps: none of these are done', 'Proposal: no more than three']) assert.notEqual(proposalLine(t), null, t);
+});
+
+test('every propose_ tool counts as a card', () => {
+  for (const tool of ['propose_machine_lend', 'mcp__thread__propose_host_tool', 'mcp__thread__propose_memory', 'mcp__thread__propose_machine_notes']) {
+    assert.deepEqual(answerCheck(readTurn(jsonl(prompt('audit'), calls([...FIVE, tool]), say(PROPOSAL)), 'p1')), [], tool);
+  }
+  assert.notDeepEqual(answerCheck(readTurn(jsonl(prompt('audit'), calls([...FIVE, 'mcp__thread__reproposed_x']), say(PROPOSAL)), 'p1')), []);
 });
 
 test('answer hook: logs each hit as a would-refuse line and refuses nothing; the job check runs it only on a stop it lets through', () => {

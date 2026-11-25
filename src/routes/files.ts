@@ -727,6 +727,7 @@ export const fileRoutes: Route[] = [
         }
         if (answered) app.runner.broadcastTicket(to.id);
         app.runner.personWrote(to.id);
+        app.runner.startNow.touch(to.id, session.uid);
         // The ideas ledger (#1150): a Later-style pick bar's items become rows now, with the titles the page sent.
         try {
           app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));

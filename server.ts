@@ -50,16 +50,20 @@ import { MachineRelay } from './src/machines.ts';
 import { machineLink, sameClaude, workerInfo } from './src/machine-turn.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
-import { ShipWatch } from './src/ci-ships.ts';
+import { shipsOn, ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
+import { gruntAtWork } from './src/live-state.ts';
+import { MinionJobs } from './src/minion-jobs.ts';
+import { CACHE_TTL_MS } from './src/keepalive.ts';
+import { tmpDirFor } from './src/turn-tmp.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { describesIn } from './src/review-describe.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { probeThp } from './src/unit-thp.ts';
 import { fillPinSpares } from './src/pin-spares.ts';
-import { exitWithParent } from './src/exit-with-parent.ts';
+import { exitWithParent, killNaming } from './src/exit-with-parent.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
@@ -82,7 +86,7 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { handOver, standby } from './src/handover.ts';
-import { keepServing, safely } from './src/safely.ts';
+import { guardPipes, keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
@@ -276,6 +280,10 @@ const PARENT = process.ppid;
 if (PREVIEW) every('preview parent check', 2000, () => process.ppid !== PARENT && process.exit(0));
 // A server a test started goes with the test too, and takes its turns and supervisors along (#1546); never the live data folder's.
 const leaveWithTest = DATA_DIR !== DEFAULT_DATA_DIR ? exitWithParent(DATA_DIR, every, PARENT) : undefined;
+// A dead stdout/stderr (#1965): a test server goes the same way it goes when its parent does; the live server, dev copies, previews and containers keep serving, silently.
+guardPipes(() => {
+  if (DATA_DIR !== DEFAULT_DATA_DIR && config.exitsWithTest) void killNaming(DATA_DIR).finally(() => process.exit(0));
+});
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
 // The post-deploy watch (#724), made once the store and waiters are: stalls before then are the boot's own.
@@ -411,6 +419,8 @@ runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
 // The line of kill resumes (#1364) holds while the box is starved; nothing else in the runner waits on it.
 runner.killStarved = () => pressure.read();
+/** Whether the box is short of CPU or memory: a wait (#1890) or an approval card (#1916) then gives back what it holds at once. */
+const boxShort = (r: { starved: boolean }) => r.starved || memoryEase.get().level !== 'ok';
 // The worker pool sizes itself to the box (#1868), unless a person set a number.
 setInterval(
   () =>
@@ -419,8 +429,9 @@ setInterval(
       .then((r) => {
         const free = memoryEase.free();
         const { level } = memoryEase.get();
+        runner.startNow.sweep();
         runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level });
-        runner.endCardWaits(r.starved || level !== 'ok');
+        runner.endCardWaits(boxShort(r));
       })
       .catch((e) => console.error('worker pool:', e)),
   POOL.everyMs,
@@ -446,7 +457,10 @@ if (previews) {
   // Builds' previews are of this server's own code, so only its own scheme has them.
   previews.buildScheme = ownScheme;
 }
-if (BOOT_CHECK) runner.turnLine.clear();
+if (BOOT_CHECK) {
+  runner.turnLine.clear();
+  runner.startNow.clear();
+}
 if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
@@ -485,6 +499,29 @@ registerRunnersBack(store, outbox);
 registerCiArmed(() => app, store, outbox); // armed for CI (#715, ADR 0021 step 5)
 // News of a minion's test-box job (#1425, machines.watchBoxes below): its start, its end with the exit code and last lines.
 outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.payload.text).slice(0, 120)}`, deliver: (rows, ctx) => rows.map((r) => ctx.send(r, String(r.payload.text))) });
+// Jobs that outlive a minion's turn (#1890): citadel-job starts them here, and their end wakes the minion.
+const minionJobs = new MinionJobs({
+  store,
+  tmp: (id) => {
+    const t = store.getTicket(id);
+    return t && t.status !== 'closed' ? tmpDirFor(runner.tmpRoot(t.project_id), id) : null;
+  },
+  turn: (id) => runner.jobTurn(id),
+  live: (id) => runner.turnStartedAt(id) !== null,
+  hold: async (id) => {
+    const turn = runner.jobTurn(id);
+    if (!('refuse' in turn) && turn.person !== null && runner.turnLine.stalledFor(turn.person)) return 0;
+    return runner.turnLine.starved || boxShort(await pressure.read()) ? 0 : runner.turnLine.limits().waitHold * 1000;
+  },
+  grunts: (id) => gruntAtWork(store.listEvents(id, store.eventIdAt(runner.turnStartedAt(id) ?? Date.now()) - 1)),
+  units: () => runner.units,
+  wake: (id, text) => void runner.send(id, APP_NAME, text),
+  changed: (id) => runner.broadcastTicket(id),
+  lastTurnEnd: (id) => store.lastTurnEnd(id),
+  cacheMs: CACHE_TTL_MS,
+});
+runner.jobs = minionJobs;
+if (!BOOT_CHECK && !PREVIEW) every('minion jobs', 3_000, () => minionJobs.pump());
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
@@ -493,6 +530,7 @@ runner.onStop = (ticketId, eventIds) => outbox.stoppedMessages(ticketId, eventId
 runner.onTurnStart = (ticketId, eventIds) => {
   const held = store.listDeliveries({ to: ticketId, states: ['held'] }).some((r) => r.kind === 'wake_when_live' || r.kind === 'chain');
   outbox.turnStarted(ticketId, eventIds);
+  minionJobs.turnStarted(ticketId);
   if (held)
     void outbox
       .poke({ type: 'reopened', ticket: ticketId })
@@ -729,7 +767,7 @@ if (!BOOT_CHECK && !PREVIEW) {
   every('usage ledger flush', 60_000, () => store.usage.flush());
   every('usage ledger prune', 24 * 3600_000, () => store.usage.prune());
 }
-claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
+claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + minionJobs.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
 runner.onMessage = (id) => landings.talked(id);
@@ -956,6 +994,7 @@ if (!BOOT_CHECK) {
   const stopPreview = runner.onClose;
   runner.onClose = (ticketId) => {
     const stopped = stopPreview(ticketId);
+    minionJobs.stop(ticketId);
     void outbox.poke({ type: 'closed', ticket: ticketId });
     // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
     waiters.prs.forget?.();
@@ -1421,6 +1460,7 @@ const rollback = new Rollback({
     const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
     return t?.contraption && !t.workflow ? `app:${t.contraption}` : null;
   },
+  published: (tv) => (tv.target.kind === 'apk' ? apkReader.published(tv.target.projectId, tv.target.id) : null),
   running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : tv.target.kind === 'apk' ? apkReader.rollingBack(tv.target.projectId, tv.target.id) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
   starters: {
     contraption: (tv, to, by, uid) => {
@@ -1880,6 +1920,7 @@ const landHandoffs = new LandHandoffs({
   },
   landed: (id, commit) => {
     runner.urgent.done(id);
+    runner.startNow.end(id);
     runner.holderShipped(id);
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
@@ -1949,7 +1990,7 @@ const serverWork = serverWorkWatch(
   (id) => runner.broadcastTicket(id),
 );
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
-runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : serverWork.of(id));
+runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : (serverWork.of(id) ?? minionJobs.work(id)));
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
 // Was a blocking scan at each start, before the listen (#1463).
 if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);
@@ -2027,7 +2068,7 @@ const ciLoad = new CiLoad(store, {
 });
 if (!BOOT_CHECK) ciLoad.start();
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
-// agent's PC go to the runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
+// agent's PC go to that PC's runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
 // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
 const runnerRepos = () =>
   [
@@ -2045,7 +2086,7 @@ const asScheme = (repo: string) => {
 const shipWatch = new ShipWatch({
   repos: runnerRepos,
   as: asScheme,
-  send: (ships) => machines.sendShips(ships),
+  send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
 });
 if (!BOOT_CHECK) shipWatch.start();
@@ -2186,7 +2227,10 @@ runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 // A merged PR catches its scheme's main up, and chains and commit waiters look again.
 github.onMerged = (repoDir, ticket, base) => {
   // Into a build branch isn't shipped yet.
-  if (!base?.startsWith('build/')) runner.urgent.done(ticket.id);
+  if (!base?.startsWith('build/')) {
+    runner.urgent.done(ticket.id);
+    runner.startNow.end(ticket.id);
+  }
   runner.places.refused(ticket.id, false);
   catchUp(repoDir);
 };
@@ -2399,6 +2443,7 @@ const app: App = {
   contraptionTurns,
   errorDigest,
   landings,
+  minionJobs,
   status,
   kitSync,
   services,

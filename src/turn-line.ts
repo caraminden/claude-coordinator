@@ -66,9 +66,9 @@ export interface Waiting {
   rank: number;
 }
 
-/** Auto's next size. */
+/** Auto's next size. A shrink counts from what runs: a size above that would let a burst (a Resume) start on a starved box. */
 export function nextSize(s: { size: number; at: number; used: number; waiting: number }, r: Pick<PressureReading, 'cpu' | 'mem' | 'starved'>, now: number): number {
-  if (r.starved) return now - s.at < POOL.shrinkMs ? s.size : Math.max(POOL.min, s.size - 1);
+  if (r.starved) return now - s.at < POOL.shrinkMs ? s.size : Math.max(POOL.min, Math.min(s.size, s.used) - 1);
   const calm = r.cpu !== null && r.cpu < POOL.calmCpu && (r.mem ?? 0) < POOL.calmMem;
   if (!calm || !s.waiting || s.used < s.size || now - s.at < POOL.growMs) return s.size;
   return Math.max(s.size, Math.min(POOL.max, s.size + 1));

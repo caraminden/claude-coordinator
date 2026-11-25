@@ -27,7 +27,7 @@ test('it holds between calm and starved, and with no reading', () => {
 
 test('starved, it shrinks by one, from what runs if fewer run, to the floor and no lower', () => {
   assert.equal(nextSize(full, starved, LATER), 9);
-  assert.equal(nextSize({ ...full, used: 6 }, starved, LATER), 9, 'one step, however few run');
+  assert.equal(nextSize({ ...full, used: 6 }, starved, LATER), 5);
   assert.equal(nextSize({ ...full, used: 14 }, starved, LATER), 9, 'turns over the size do not raise it');
   assert.equal(nextSize({ ...full, size: POOL.min }, starved, LATER), POOL.min);
   assert.equal(nextSize(full, starved, POOL.shrinkMs - 1), 10);

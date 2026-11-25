@@ -57,9 +57,17 @@ for (const [script, args, ok] of [
   });
 
   test(`${script} tries again while nothing listens (a restart), then succeeds`, async () => {
-    const probe = createServer();
-    const port = await listen(probe);
-    await new Promise((r) => probe.close(r));
+    // A port below the ephemeral range (32768+), so no other copy's listen(0) can be handed it while it is free.
+    let port = 0;
+    for (;;) {
+      const probe = createServer();
+      port = 20000 + Math.floor(Math.random() * 10000);
+      const got = await listen(probe, port).catch(() => 0);
+      if (got) {
+        await new Promise((r) => probe.close(r));
+        break;
+      }
+    }
     const { s, seen } = store(0, ok);
     setTimeout(() => void listen(s, port), 1500);
     const r = await run(script, args, `http://127.0.0.1:${port}`);

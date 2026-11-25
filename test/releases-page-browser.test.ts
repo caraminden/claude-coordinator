@@ -52,7 +52,7 @@ test('opened from a scheme, the page shows that scheme with every tab, Releases 
   const page = await browser.page(`${app.base}#/p/1/releases`, { width: 1280, height: 800 });
   await page.eval('window.open()');
   await waitFor(page, 'the releases to draw', `!!document.querySelector('.releases-main .ci-li.on[data-scheme="1"]')`);
-  assert.deepEqual(await page.eval(`[...document.querySelectorAll('.releases-main .ci-detail [role=tab]')].map((t) => t.textContent)`), ['Releases', 'Overview', 'History', 'Test health', 'Numbers', 'Code', 'Status']);
+  assert.deepEqual(await page.eval(`[...document.querySelectorAll('.releases-main .ci-detail [role=tab]')].map((t) => t.textContent)`), ['Releases', 'Overview', 'History', 'Test health', 'Numbers', 'Code', 'Flow', 'Status']);
   assert.equal(await page.eval(`document.querySelector('.releases-main .ci-detail [role=tab][aria-selected=true]')?.textContent`), 'Releases');
 });
 

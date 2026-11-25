@@ -6,6 +6,7 @@ import { LIMITS } from '../ci-numbers.ts';
 import { KINDS, uploadAsk } from '../ci-store.ts';
 import type { CiFile } from '../db.ts';
 import { LastGreen } from '../last-green.ts';
+import { MAX_DAYS, rangeOf } from '../work-flow.ts';
 import { HttpError, json, readJson, sendFile, type App, type Ctx, type Route } from '../http.ts';
 
 /**
@@ -145,6 +146,17 @@ export const ciStoreRoutes: Route[] = [
     ...readers,
     async handler({ app, res, project }) {
       return json(res, 200, await app.codeCounts.view(project.id));
+    },
+  },
+  {
+    // The scheme's Flow tab (#1989): the minions started between two Pacific days, how each got to main and how it ended.
+    method: 'GET',
+    path: '/api/projects/:project/flow',
+    ...readers,
+    async handler({ app, res, url, project }) {
+      const range = rangeOf(url.searchParams.get('from'), url.searchParams.get('to'));
+      if (!range) throw new HttpError(400, `from and to are days like 2026-11-25, at most ${MAX_DAYS} apart`);
+      return json(res, 200, await app.workFlow.view(project.id, range.from, range.to));
     },
   },
   {

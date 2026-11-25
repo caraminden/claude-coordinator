@@ -14,6 +14,7 @@ import { ciNumberQueries } from './db/ci-numbers.ts';
 import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
 import { flakeQueries } from './db/flakes.ts';
+import { flowQueries } from './db/flow.ts';
 import { machineQueries } from './db/machines.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
@@ -808,6 +809,7 @@ const AREAS = [
   contraptionRunQueries,
   deliveryQueries,
   flakeQueries,
+  flowQueries,
   machineQueries,
   minionQueries,
   pushQueries,
@@ -834,6 +836,7 @@ type Areas = typeof healthQueries &
   typeof contraptionRunQueries &
   typeof deliveryQueries &
   typeof flakeQueries &
+  typeof flowQueries &
   typeof machineQueries &
   typeof minionQueries &
   typeof pushQueries &

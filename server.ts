@@ -94,6 +94,7 @@ import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime,
 import { agentRoutes } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
 import { CodeCounts, countApart } from './src/code-counts.ts';
+import { readApart, WorkFlow } from './src/work-flow.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
 import { Launchers } from './src/desktop-launcher.ts';
 import { CiStore } from './src/ci-store.ts';
@@ -715,6 +716,7 @@ if (!BOOT_CHECK)
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
+const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: readApart, db: store.path });
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
@@ -2374,6 +2376,7 @@ const app: App = {
   ciStore,
   ciNumbers,
   codeCounts,
+  workFlow,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
   runnerCap,

@@ -1803,6 +1803,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/flow": {
+  "anon": "401 Not logged in",
+  "person": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "member": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "outsider": "404 No such scheme",
+  "tmA": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "m2": "400 from and to are days like 2026-11-25, at most 400 apart"
+ },
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",
   "person": "409 This scheme has no GitHub repo waiting to be made",

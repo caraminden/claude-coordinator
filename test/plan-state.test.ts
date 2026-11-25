@@ -209,9 +209,9 @@ test("a tagged plan moves from the minion's calls, the same after a restart at a
   for (const [i, line] of lines.entries()) {
     feed(live, t.id, [line]);
     live = restart();
-    const got = (live as any).progressFor(t.id);
+    const got = (live as unknown as { progressFor(id: number): { tasks: { status: string }[] } }).progressFor(t.id);
     assert.deepEqual(plain(got), plain(fullReplay(t.id)), `after event ${i + 1}`);
-    bars.push(got.tasks.map((s: any) => s.status[0]).join(''));
+    bars.push(got.tasks.map((s) => s.status[0]).join(''));
   }
   assert.deepEqual(bars, ['', 'ipppp', 'ciipp', 'ciiip', 'ciipp', 'ciiip', 'cccci', 'ccccc', 'ccccc']);
   assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 5, total: 5 });

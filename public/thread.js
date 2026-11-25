@@ -280,7 +280,7 @@ export async function jumpToEvent(target) {
 }
 
 /** Load the page before what's shown (or back to event `from`) and redraw, keeping your place. */
-export async function showEarlier(button, from) {
+export async function showEarlier(button, from, { reachBack = false } = {}) {
   const { id, page } = view;
   const src = view.merged?.src ?? id;
   const label = button?.textContent;
@@ -317,7 +317,8 @@ export async function showEarlier(button, from) {
   if (anchor && !from) holdInPlace(anchor, top);
   // The redraw dropped find's highlights; find again over the longer history.
   const find = view.findEl?.querySelector('input');
-  if (find?.value.trim()) find.dispatchEvent(new Event('input'));
+  // Only Find's own reach back goes on to the newest match; any other load keeps the one you are on.
+  if (find?.value.trim()) find.dispatchEvent(new Event(reachBack ? 'input' : 'refind'));
 }
 
 // Unread chat items (messages, cards, notes) past which a Taskmaster opens at the bottom.
@@ -361,7 +362,7 @@ function chatFindBox() {
   const input = h('input', { type: 'search', class: 'chat-find', placeholder: matchMedia('(max-width: 800px)').matches ? '🔍 Find' : 'Find in chat', 'aria-label': 'Find in chat', ...noAutofill('chat-find') });
   const count = h('span', { class: 'find-count muted' });
   const state = { marks: [], at: -1 };
-  const show = (i) => {
+  const show = (i, scroll = true) => {
     if (!state.marks.length) return;
     state.marks[state.at]?.classList.remove('current');
     state.at = (i + state.marks.length) % state.marks.length;
@@ -371,20 +372,25 @@ function chatFindBox() {
     for (let d = mark.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
     const clamped = mark.closest('.clamped');
     if (clamped) unclamp(clamped);
-    mark.scrollIntoView({ block: 'center' });
+    if (scroll) mark.scrollIntoView({ block: 'center' });
     count.textContent = `${state.at + 1}/${state.marks.length}`;
   };
-  const run = () => {
+  const run = (keep = false) => {
     const log = document.getElementById('log');
     if (!log) return;
     timer = null;
+    // Older history loaded under you: the match you are on counts the same from the end.
+    const fromEnd = keep && state.at >= 0 ? state.marks.length - state.at : 0;
     if (state.marks.length) clearHighlights(log);
     const q = input.value.trim();
     state.marks = q.length >= 2 ? [...log.querySelectorAll('.msg, .note')].flatMap((m) => highlight(m, q)) : [];
     state.at = -1;
     count.textContent = q.length >= 2 ? (state.marks.length ? `0/${state.marks.length}` : 'none') : '';
     // Start from the newest match, nearest where you usually are.
-    if (state.marks.length) show(state.marks.length - 1);
+    if (state.marks.length) {
+      if (fromEnd && fromEnd <= state.marks.length) show(state.marks.length - fromEnd, false);
+      else show(state.marks.length - 1);
+    }
     if (q.length >= 2 && view.page?.more) reachBack(q);
   };
   // Matches older than the loaded history: load back to the oldest of them (showEarlier finds again).
@@ -392,13 +398,17 @@ function chatFindBox() {
     const { id, projectId, page } = view;
     const hits = await api(`api/projects/${projectId}/search?q=${encodeURIComponent(q)}&ticket=${id}`).catch(() => []);
     const oldest = hits[0]?.oldestId;
-    if (oldest && view.page === page && input.value.trim() === q && oldest < page.events[0].id) await showEarlier(null, oldest);
+    if (oldest && view.page === page && input.value.trim() === q && oldest < page.events[0].id) await showEarlier(null, oldest, { reachBack: true });
   };
   // Highlighting a long chat on every key is wasted work; wait for a pause, and for 2+ characters.
   let timer = null;
   input.addEventListener('input', () => {
     clearTimeout(timer);
     timer = setTimeout(run, 150);
+  });
+  input.addEventListener('refind', () => {
+    clearTimeout(timer);
+    run(true);
   });
   input.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') && timer) {

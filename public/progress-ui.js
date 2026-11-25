@@ -23,8 +23,9 @@ function resultString(result) {
  * One tool call as a plain sentence ("Edited runner.ts", "Run the tests — failed: …"). The raw
  * command and output sit one click deeper and are only built when opened.
  */
-function actionEl(action) {
+function actionEl(action, key) {
   const { block, result } = action;
+  const okey = key && block.id ? `${key}|${block.id}` : null;
   const state = !result ? 'pending' : result.is_error ? 'err' : 'ok';
   const why =
     state === 'err'
@@ -36,16 +37,22 @@ function actionEl(action) {
       : '';
   const el = h(
     'details',
-    { class: `act ${state}` },
+    { class: `act ${state}`, open: (okey && view.ui.actsOpen.has(okey)) || null },
     h('summary', {}, stepMark({ pending: 'running', err: 'failed', ok: 'done' }[state]), h('span', { class: 'what' }, threadRefs(actionLabel(block))), why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '', ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''),
   );
-  el.addEventListener('toggle', () => {
+  const build = () => {
     if (!el.open || el.querySelector('.body')) return;
     const body = h('div', { class: 'body' });
     el.append(body);
     if (actionCut(action)) fullAction(body, action);
     else actionBody(body, action);
+  };
+  el.addEventListener('toggle', () => {
+    // Kept per action, so a redraw on the next event leaves it open (T2).
+    if (okey) el.open ? view.ui.actsOpen.add(okey) : view.ui.actsOpen.delete(okey);
+    build();
   });
+  build();
   return el;
 }
 
@@ -99,24 +106,30 @@ function stepNote(text) {
   return h('p', { class: 'step-note' }, short.replace(/[*`#]/g, ''));
 }
 
-function actionList(actions) {
-  return h('div', { class: 'actions' }, actions.map(actionEl));
+function actionList(actions, key) {
+  return h('div', { class: 'actions' }, actions.map((a) => actionEl(a, key)));
 }
 
 /** Which parts of a ticket's readout are expanded; kept per ticket so re-renders and reconnects don't collapse it. */
 const progressUiState = new Map();
 export function progressUi(ticketId) {
-  if (!progressUiState.has(ticketId)) progressUiState.set(ticketId, { open: false, openSteps: new Set() });
+  if (!progressUiState.has(ticketId)) progressUiState.set(ticketId, { open: false, openSteps: new Set(), cmdsOpen: new Set(), actsOpen: new Set() });
   return progressUiState.get(ticketId);
 }
 
 /** The phases of some work as rows ("✓ Looked through the code · 4 actions"), plus its commands behind a toggle. */
-export function phaseRows(acts, running) {
+export function phaseRows(acts, running, key = null) {
   const phases = workPhases(acts, running);
-  const cmds = h('details', { class: 'cmds' }, h('summary', {}, `Show the ${acts.length} individual action${acts.length === 1 ? '' : 's'}`));
+  const cmds = h('details', { class: 'cmds', open: (key && view.ui.cmdsOpen.has(key)) || null }, h('summary', {}, `Show the ${acts.length} individual action${acts.length === 1 ? '' : 's'}`));
+  const fill = () => {
+    if (cmds.open && !cmds.querySelector('.actions')) cmds.append(actionList(acts, key));
+  };
+  // Only the readout's own rows pass a key; the turn-end rows share this and are rebuilt closed.
   cmds.addEventListener('toggle', () => {
-    if (cmds.open && !cmds.querySelector('.actions')) cmds.append(actionList(acts));
+    if (key) cmds.open ? view.ui.cmdsOpen.add(key) : view.ui.cmdsOpen.delete(key);
+    fill();
   });
+  fill();
   return [
     h(
       'ul',
@@ -144,7 +157,7 @@ function planStep(t, acts, running) {
     h('summary', {}, h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'), h('span', { class: 'subject' }, t.subject), h('span', { class: 'recap' }, firstSentence(line, 220))),
     t.description && line !== t.description ? h('p', { class: 'step-desc' }, h('span', { class: 'muted' }, 'Plan: '), t.description) : '',
     t.note && !t.outcome ? stepNote(t.note) : '',
-    acts.length ? phaseRows(acts, live) : '',
+    acts.length ? phaseRows(acts, live, `step${t.id}`) : '',
   );
   el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
   return el;
@@ -158,7 +171,7 @@ function looseWork(acts, running, onlyWork) {
     { class: 'step loose', open: (view.ui.looseOpen ?? onlyWork) || null },
     h('summary', {}, h('span', { class: 'icon' }, '⋯'), h('span', { class: 'subject' }, !onlyWork ? 'Other work this turn' : running ? 'Work so far' : 'Work last turn'), h('span', { class: 'recap' }, phases.map((ph) => ph.text).join(' → '))),
     view.turnNote ? stepNote(view.turnNote) : '',
-    phaseRows(acts, running),
+    phaseRows(acts, running, onlyWork ? 'loose-work' : 'loose-other'),
   );
   el.addEventListener('toggle', () => (view.ui.looseOpen = el.open));
   return el;

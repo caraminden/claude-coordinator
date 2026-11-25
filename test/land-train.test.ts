@@ -215,6 +215,20 @@ test('a bisect step red in its burn-in on a case the front adds refuses the fron
   l.done();
 });
 
+test('a bisect step red in its burn-in on a case a rider adds refuses that rider, which passes alone (#2019)', async () => {
+  const rider = { change: ['test/p3.test.ts', racyCase] as [string, string] };
+  const l = await line([{}, {}, rider, {}, {}, {}], { FAKE_REAL: realOf(3), FAKE_LOG_WHOLE: 'f6.txt', ...burnCase });
+  const done = await l.go();
+  assert.equal(done[2].status, 1, done[2].stderr);
+  assert.match(done[2].stderr, /ticket\/3-x adds the test case that failed/);
+  assert.deepEqual(
+    [...done[1].stderr.matchAll(/^land: bisect: testing the first (\d+) of (\d+) ships$/gm)].map((m) => `${m[1]}/${m[2]}`),
+    ['2/5'],
+  );
+  for (const i of [2, 4, 5, 6]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  l.done();
+});
+
 test('a train red in its burn-in on three racy tests refuses the three ships that changed them after that one red run, and the rest ship (#1564)', async () => {
   const l = await line([{}, {}, bad(3), bad(4), {}, bad(6), {}], { FAKE_REAL: realOf(3, 4, 6), FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn' });
   const done = await l.go();

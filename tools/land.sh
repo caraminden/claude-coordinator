@@ -2796,9 +2796,13 @@ train_bisect() {
     busy_gate "$(train_at "$lo")"
     if [ "$rc" = 2 ]; then return; fi
     if [ "$rc" = 1 ]; then
+      if [ -n "$(burn_new)" ]; then # the step's red names its ship (#2019): judged as a red train of its own, no more steps
+        split_over
+        train_drop "$lo"
+        train_suspects || [ ${#train_n[@]} = 0 ] || train_bisect
+        return
+      fi
       hi=$lo
-      g=$(burn_new | sort -n | head -n 1) # the ship that adds the failing case (#2019): no step below it could clear it
-      [ -z "$g" ] || { hi=${g%% *} && say "bisect: ${g#* } failed its burn-in on a case that $([ "$hi" = 0 ] && echo "$branch" || echo "${train_br[$((hi - 1))]}") adds, so that is the first red ship"; }
       continue
     fi
     back=${train_br[*]:$lo}

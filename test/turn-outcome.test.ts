@@ -55,6 +55,7 @@ const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
   ['a restart cut it off', end({ turn: { resumes: 1, killTries: 1 }, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 2, kill: 1 } } }],
   ['a restart cut off a turn people started', end({ turn: null, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 1 } } }],
   ['a restart cut it off, twice in a row already', end({ turn: { retries: { restart: 2 } }, cut: { rerun: false } }), { kind: 'killed', spent: { via: 'restart', tries: 2 } }],
+  ['a restart cut off a turn a pause stopped, at the cap', end({ turn: { paused: true, retries: { restart: 2 } }, cut: { rerun: false } }), { kind: 'paused', retry: { via: 'restart', retries: { restart: 2 } } }],
   ['a restart cut it off before claude had its prompt', end({ cut: { rerun: true } }), { kind: 'killed', followUps: ['rerun'], retry: undefined }],
   ['a restart cut off a stopped turn', end({ turn: { stopped: true }, cut: { rerun: true } }), { kind: 'stopped' }],
   ['a restart cut off a turn set to close', end({ turn: { closing: 'done' }, cut: { rerun: false } }), { kind: 'killed', retry: undefined, spent: undefined }],

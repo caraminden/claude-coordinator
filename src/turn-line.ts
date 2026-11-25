@@ -68,7 +68,7 @@ export interface Waiting {
 
 /** Auto's next size. */
 export function nextSize(s: { size: number; at: number; used: number; waiting: number }, r: Pick<PressureReading, 'cpu' | 'mem' | 'starved'>, now: number): number {
-  if (r.starved) return now - s.at < POOL.shrinkMs ? s.size : Math.max(POOL.min, Math.min(s.size, s.used) - 1);
+  if (r.starved) return now - s.at < POOL.shrinkMs ? s.size : Math.max(POOL.min, s.size - 1);
   const calm = r.cpu !== null && r.cpu < POOL.calmCpu && (r.mem ?? 0) < POOL.calmMem;
   if (!calm || !s.waiting || s.used < s.size || now - s.at < POOL.growMs) return s.size;
   return Math.max(s.size, Math.min(POOL.max, s.size + 1));
@@ -244,10 +244,24 @@ export class TurnLine {
       const rest = this.ready().filter((e) => e.ticket !== ticketId);
       if (!rest.length || this.best([me, ...rest])?.ticket === ticketId) return this.grant(ticketId, via);
     }
+    this.join(ticketId, via);
+    return false;
+  }
+
+  /** Into the line (keeping a place it has), taking no worker even when one is free. */
+  join(ticketId: number, via?: RetryKind) {
+    if (this.host.exempt(ticketId)) return;
+    const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
     if (this.granted.size < this.size()) this.pumpIn(0);
-    return false;
+  }
+
+  /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
+  clear() {
+    this.entries = [];
+    this.ordered = null;
+    for (const key of [LINE, SIZE, PAUSE]) this.host.store.deleteSetting(key);
   }
 
   /** Run a lane step whose turn entered, giving its worker back when the step is over, however it ends. */

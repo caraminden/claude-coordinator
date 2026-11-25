@@ -87,8 +87,21 @@ const unend = (id: number) => rmSync(join(root, `end-${id}`), { force: true });
 const turnsOf = (id: number) => lines(prompts).filter((l) => l.startsWith(`${id} `));
 const started = (id: number) => until(`minion ${id} to start`, () => turnsOf(id).length > 0);
 const idle = (id: number) => until(`minion ${id} to finish`, () => !runner.isRunning(id) && store.getTicket(id)!.status !== 'running');
-/** A moment in which nothing more should start. */
-const settle = () => new Promise((r) => setTimeout(r, 150));
+/** The line has nothing left to start: no pump due, no turn launching, and each worker's turn has its prompt. */
+const settle = () =>
+  until('the line to settle', () => {
+    const r = runner as unknown as { launching: Map<number, unknown>; turnLine: { timer?: unknown } };
+    const running = made.filter((id) => runner.isRunning(id));
+    return !r.turnLine.timer && !r.launching.size && running.every((id) => turnsOf(id).length > 0) && runner.turnLine.used() === running.filter((id) => id !== tm).length;
+  });
+const gone = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+};
 const say = (id: number, text = 'hello', by = 'Cara') => runner.send(id, by, text, [], { typed: true });
 
 /** Everything from the test before ends, and the pool is fixed at `n` and empty. */
@@ -247,6 +260,39 @@ test('a kill resume waits for a worker, with its queued message', async () => {
   assert.match(turnsOf(a)[1], /and this/);
 });
 
+test('killed while paused, it waits for the pause to end', async () => {
+  const a = minion();
+  say(a);
+  await started(a);
+  runner.turnLine.setPause(true, 'Josh');
+  const live = inside(runner).turns.get(a)!;
+  await until('its pid', () => existsSync(join(live.dir, 'pid.json')));
+  const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
+  process.kill(pids.wrapper, 'SIGKILL');
+  process.kill(-pids.claude, 'SIGKILL');
+  await until('the kill resume to join the line', () => runner.turnLine.waiting().includes(a));
+  await until('its worker to be free', () => runner.turnLine.used() === 0);
+  assert.equal(turnsOf(a).length, 1);
+  runner.turnLine.setPause(false, 'Josh');
+  await until('the resume', () => turnsOf(a).length === 2);
+});
+
+test("a card's answer to a waiting minion goes ahead of what others were told; a schedule's run goes last", async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, scheduled, asked, answered] = [minion(), minion(), minion(), minion()];
+  say(a);
+  await started(a);
+  for (const id of [scheduled, asked, answered]) store.updateTicket(id, { person_id: cara.id });
+  runner.send(scheduled, 'Citadel', 'the brief', []);
+  runner.send(asked, 'Taskmaster', 'the brief', [], { asker: cara.id });
+  runner.send(answered, 'Cara', 'Pick A', [], { answer: {} });
+  assert.deepEqual(runner.turnLine.order(), [answered, asked, scheduled]);
+  assert.equal(runner.shownStatus(store.getTicket(answered)!), 'running');
+  assert.match(runner.keptOpen(answered, true)!, /waits for a worker/, 'a ship that lands meanwhile leaves it open');
+  end(a);
+  await started(answered);
+});
+
 test('a stop or a dismissal takes it out of the line, and so does taking its only message back', async () => {
   runner.turnLine.setSize(1, 'Cara');
   const [a, stopped, closed, unsent] = [minion(), minion(), minion(), minion()];
@@ -311,7 +357,7 @@ test('paused, a turn that is cut off by a restart waits for the pause to end', a
   const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
   process.kill(pids.wrapper, 'SIGKILL');
   process.kill(-pids.claude, 'SIGKILL');
-  await settle();
+  await until('it to die', () => gone(pids.claude));
   runner = makeRunner();
   runner.recover();
   await settle();

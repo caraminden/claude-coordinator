@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nextSize, pick, POOL, type Waiting } from '../src/turn-line.ts';
+import { until } from './wait.ts';
+import { nextSize, pick, POOL, TurnLine, type Waiting } from '../src/turn-line.ts';
 
 // #1868, the pool's two rules. Josh, 2026-11-24: "Lets make the pool dynamic and performance of perigee based, not a static
 // number", and "you should scale based on how many minions the user has waiting as well".
@@ -26,9 +27,9 @@ test('it holds between calm and starved, and with no reading', () => {
 
 test('starved, it shrinks by one, from what runs if fewer run, to the floor and no lower', () => {
   assert.equal(nextSize(full, starved, LATER), 9);
-  assert.equal(nextSize({ ...full, used: 6 }, starved, LATER), 5);
+  assert.equal(nextSize({ ...full, used: 6 }, starved, LATER), 9, 'one step, however few run');
   assert.equal(nextSize({ ...full, used: 14 }, starved, LATER), 9, 'turns over the size do not raise it');
-  assert.equal(nextSize({ ...full, used: 0 }, starved, LATER), POOL.min);
+  assert.equal(nextSize({ ...full, size: POOL.min }, starved, LATER), POOL.min);
   assert.equal(nextSize(full, starved, POOL.shrinkMs - 1), 10);
 });
 
@@ -87,3 +88,50 @@ test('past that, a share is in proportion to what a person has running and waiti
 });
 
 test('an empty line picks nothing', () => assert.equal(pick([], new Map(), 0), null));
+
+/** A line with no Runner: `started` is who it started, `saved` its settings. */
+function line(saved: Record<string, unknown> = {}) {
+  const busy = new Set<number>();
+  const started: number[] = [];
+  const turns: TurnLine = new TurnLine({
+    store: { getSetting: <T>(k: string) => saved[k] as T, setSetting: (k: string, v: unknown) => void (saved[k] = v), deleteSetting: (k: string) => void delete saved[k] },
+    exempt: () => false,
+    busy: (id) => busy.has(id),
+    asks: () => ({ person: 1, rank: 1 }),
+    start: (e) => {
+      started.push(e.ticket);
+      turns.enter(e.ticket, e.via);
+    },
+    pauseTurn: () => {},
+    changed: () => {},
+    gapMs: 0,
+    detached: false,
+  });
+  return { turns, busy, started, saved };
+}
+
+test('a paused turn resumed before it ended joins the line and leaks no worker', async () => {
+  const { turns, busy, started } = line();
+  let ended = () => {};
+  assert.equal(turns.enter(7), true);
+  busy.add(7);
+  const held = turns.hold(7, () => new Promise<void>((done) => (ended = done)));
+  turns.setPause('stop', 'Josh');
+  turns.setPause(false, 'Josh');
+  turns.join(7);
+  assert.deepEqual([turns.used(), turns.waiting()], [1, [7]]);
+  busy.delete(7);
+  ended();
+  await held;
+  assert.equal(turns.used(), 0, 'its worker is free');
+  await until('it to start', () => started.length > 0);
+  assert.deepEqual(started, [7]);
+  turns.stop();
+});
+
+test("a boot check's copy forgets the line and the pause", () => {
+  const { turns, saved } = line({ 'turn-line': [{ ticket: 7, since: 1 }], 'turns-paused': { by: 'Josh', at: 1 }, 'turn-pool': { size: 4, at: 1 } });
+  turns.clear();
+  assert.deepEqual([turns.waiting(), turns.paused(), turns.size(), saved], [[], null, POOL.start, {}]);
+  assert.equal(turns.enter(8), true, 'its own turn starts');
+});

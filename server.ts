@@ -281,7 +281,7 @@ if (PREVIEW) every('preview parent check', 2000, () => process.ppid !== PARENT &
 const leaveWithTest = DATA_DIR !== DEFAULT_DATA_DIR ? exitWithParent(DATA_DIR, every, PARENT) : undefined;
 // A dead stdout/stderr (#1965): a test server goes the same way it goes when its parent does; the live server, dev copies, previews and containers keep serving, silently.
 guardPipes(() => {
-  if (DATA_DIR !== DEFAULT_DATA_DIR && Number(process.env.CITADEL_EXIT_WITH_PARENT) > 0) void killNaming(DATA_DIR).finally(() => process.exit(0));
+  if (DATA_DIR !== DEFAULT_DATA_DIR && config.exitsWithTest) void killNaming(DATA_DIR).finally(() => process.exit(0));
 });
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).

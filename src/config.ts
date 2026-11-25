@@ -30,6 +30,8 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     preview,
     /** A boot check, or a preview: no probes, schedules or listeners of the live server's. */
     bootCheck: env.BOOT_CHECK === '1' || preview,
+    /** A test's server (CITADEL_EXIT_WITH_PARENT: the test's pid, or 1): it goes when the test does, and when its output pipe dies (#1965). */
+    exitsWithTest: Number(env.CITADEL_EXIT_WITH_PARENT) > 0,
     /** A preview stops after this long unused; 0 never. */
     idleExitMs: preview ? Number(env.IDLE_EXIT_MS) || 0 : 0,
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One SVG feeds every icon (#840). Dependency-free; needs rsvg-convert for the PNGs.
-//   node gen-icons.mjs [repo-dir]          write the icons (web PNGs, and Android res when android/ exists)
+//   node gen-icons.mjs [repo-dir]          write the icons (web PNGs, and the res folder of the repo's Android app)
 //   node gen-icons.mjs --check [repo-dir]  exit 1 when the committed icons don't match their inputs (for an app's tests or build)
 // Started from TWIReader's scripts/gen-android-icons.mjs. Config: the `icon` key of citadel-app.json:
 //   "icon": { "source": "web/public/icon.svg", "background": "#0a6b6b", "webDir": "web/public", "androidRes": "android/app/src/main/res",
@@ -15,7 +15,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export const ROLES = ['scheme', 'small', 'foreground', 'monochrome', 'legacy', 'round', 'splash'];
 export const DEFAULT_SOURCES = ['web/public/icon.svg', 'assets/icon/icon.svg', 'public/icon.svg', 'icon.svg'];
-const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i; // not #rrggbbaa: Android reads eight digits as #aarrggbb
 const LOCK = '.citadel-icons.sha256';
 
 const inside = (root, p) => {
@@ -26,10 +26,13 @@ const inside = (root, p) => {
 /** Which file feeds each role: { source, background, webDir, androidRes, roles: {role: repo-relative path} }. Throws with a reason for a bad config. */
 export function resolveIcons(dir) {
   const root = realpathSync(dir);
-  let cfg = {};
+  let cfg = {},
+    capacitor = {};
   if (existsSync(join(root, 'citadel-app.json'))) {
     try {
-      cfg = JSON.parse(readFileSync(join(root, 'citadel-app.json'), 'utf8')).icon ?? {};
+      const app = JSON.parse(readFileSync(join(root, 'citadel-app.json'), 'utf8'));
+      cfg = app.icon ?? {};
+      capacitor = app.capacitor ?? {};
     } catch (e) {
       throw new Error(`citadel-app.json: ${e.message}`);
     }
@@ -60,33 +63,53 @@ export function resolveIcons(dir) {
     if (!(realpathSync(up) + '/').startsWith(root + '/')) throw new Error(`icon ${what} ${v} points outside the repo`);
     return v;
   };
-  return { source, roles, background: cfg.background, webDir: dirOf(cfg.webDir, dirname(source) === '.' ? '.' : dirname(source), 'webDir'), androidRes: dirOf(cfg.androidRes, 'android/app/src/main/res', 'androidRes') };
+  return { source, roles, background: cfg.background, webDir: dirOf(cfg.webDir, dirname(source) === '.' ? '.' : dirname(source), 'webDir'), androidRes: androidRes(root, cfg.androidRes, capacitor, dirOf) };
 }
+
+/**
+ * The Android project's res folder, or null in a repo with no Android app: icon.androidRes, else the project
+ * citadel-app.json's "capacitor" names, else android/. Throws when it isn't the folder of a module that builds (no
+ * AndroidManifest.xml beside it), where the icons would reach no APK.
+ */
+function androidRes(root, configured, capacitor, dirOf) {
+  const project = capacitor.android ?? (capacitor.root !== undefined ? join(capacitor.root, 'android') : 'android');
+  if (configured === undefined && capacitor.android === undefined && capacitor.root === undefined && !existsSync(join(root, project))) return null;
+  const res = dirOf(configured ?? join(project, 'app/src/main/res'), '', 'androidRes');
+  if (!existsSync(join(root, dirname(res), 'AndroidManifest.xml'))) throw new Error(`${res} isn't an Android app's res folder (no AndroidManifest.xml beside it): name the project in citadel-app.json's capacitor.android, or its res folder in icon.androidRes`);
+  return res;
+}
+
+/** An element's attributes: { name: value }. */
+const attrs = (tag) => Object.fromEntries([...tag.matchAll(/([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)].map((m) => [m[1], m[2] ?? m[3]]));
 
 /** Marks and background of an SVG: its viewBox, the first full-size <rect>'s fill, and the rest of its content. */
 function parseSvg(text) {
-  const vb = (text.match(/viewBox="([^"]+)"/)?.[1] ?? '0 0 512 512')
+  const svg = attrs(text.match(/<svg\b([^>]*)>/)?.[1] ?? '');
+  const [x, y, w, h] = (svg.viewBox ?? '0 0 512 512')
     .trim()
     .split(/[\s,]+/)
     .map(Number);
-  const [, , w, h] = vb;
   let inner = text.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
   let bg;
   // The background is the first <rect> that covers the whole viewBox (100%, or the viewBox's own width and height).
   inner = inner.replace(/<rect\b([^>]*)\/>/g, (m, a) => {
-    const f = a.match(/fill="(#[0-9a-fA-F]{3,8})"/),
-      at = (n) => a.match(new RegExp(`\\b${n}="([^"]*)"`))?.[1];
-    const covers = (v, full) => v === '100%' || Number(v) === full,
-      zero = (v) => v === undefined || Number(v) === 0;
-    if (f && !bg && covers(at('width'), w) && covers(at('height'), h) && zero(at('x')) && zero(at('y'))) {
-      bg = f[1];
+    const at = attrs(a);
+    const covers = (v, full) => v === '100%' || Number(v) === full;
+    if (/^#[0-9a-f]{3,8}$/i.test(at.fill ?? '') && !bg && covers(at.width, w) && covers(at.height, h) && Number(at.x ?? 0) === x && Number(at.y ?? 0) === y) {
+      bg = at.fill;
       return '';
     }
     return m;
   });
-  const paths = [...inner.matchAll(/<path\s+([^>]*?)\/?>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map((x) => [x[1], x[2]])));
-  return { w, h, inner, bg, paths, other: [...new Set([...inner.matchAll(/<(circle|rect|ellipse|line|polygon|polyline|g|use|text|image)\b/g)].map((m) => m[1]))] };
+  const paths = [...inner.matchAll(/<path\b([^>]*?)\/?>/g)].map((m) => attrs(m[1]));
+  return { x, y, w, h, svg, inner, bg, paths, other: [...new Set([...inner.matchAll(/<(circle|rect|ellipse|line|polygon|polyline|g|use|text|image|style|clipPath|mask|symbol|marker|pattern)\b/g)].map((m) => m[1]))] };
 }
+
+// What an Android vector layer carries over from a <path>, and what changes nothing on one or on the <svg>.
+const DRAWN = new Set(['d', 'fill', 'stroke', 'stroke-width', 'stroke-linecap']);
+const HARMLESS = /^(id|class|role|focusable|(aria|data)-.*|.*:.*)$/;
+const SVG_OK = new Set(['xmlns', 'version', 'viewBox', 'width', 'height']);
+const unknown = (at, ok) => Object.keys(at).filter((n) => !ok.has(n) && !HARMLESS.test(n));
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 /** The files to write, as { relative path: string | Buffer }; PNGs are rendered with rsvg-convert. */
@@ -100,7 +123,7 @@ export function buildIcons(dir) {
   const rsvg = (svg, w, h) => execFileSync('rsvg-convert', ['-w', String(w), '-h', String(h)], { input: svg, maxBuffer: 64 << 20 });
   const wrap = (w, h, body) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
   // The art centred in a w×h canvas so its half-width (80% of the viewBox's short half-side) is `frac` of the canvas's.
-  const place = (s, w, h, frac) => `<g transform="translate(${w / 2} ${h / 2}) scale(${((Math.min(w, h) / 2) * frac) / ((Math.min(s.w, s.h) / 2) * 0.8)}) translate(${-s.w / 2} ${-s.h / 2})">${s.inner}</g>`;
+  const place = (s, w, h, frac) => `<g transform="translate(${w / 2} ${h / 2}) scale(${((Math.min(w, h) / 2) * frac) / ((Math.min(s.w, s.h) / 2) * 0.8)}) translate(${-(s.x + s.w / 2)} ${-(s.y + s.h / 2)})">${s.inner}</g>`;
   // A whole icon (its own background) at w×h, for the web set.
   const full = (role, px) => {
     const s = svgOf(role);
@@ -111,22 +134,26 @@ export function buildIcons(dir) {
   out[`${webDir}/icon-192.png`] = full('scheme', 192);
   out[`${webDir}/icon-512.png`] = full('scheme', 512);
 
-  if (existsSync(join(root, 'android'))) {
+  if (cfg.androidRes) {
     const res = cfg.androidRes;
+    if (!HEX.test(BG)) throw new Error(`${cfg.roles.scheme}: background "${BG}" must be #rgb or #rrggbb for Android`);
     const vector = (role, colorOf) => {
       const s = svgOf(role);
       if (!s.paths.length || s.other.length) throw new Error(`${cfg.roles[role]}: Android's ${role} layer is built from <path> elements only (after the background <rect>); found ${s.other.length ? '<' + s.other.join('>, <') + '>' : 'no paths'}. Convert shapes to paths.`);
+      // Anything else would draw differently on Android than in the web icons, without a word.
+      const lost = [...unknown(s.svg, SVG_OK).map((n) => `${n} on <svg>`), ...s.paths.flatMap((p) => unknown(p, DRAWN).map((n) => `${n} on <path>`))];
+      if (lost.length) throw new Error(`${cfg.roles[role]}: Android's ${role} layer can't draw ${[...new Set(lost)].join(', ')}. Apply it to the path itself, or name a plain SVG in icon.overrides.${role}.`);
       const k = 30 / ((Math.min(s.w, s.h) / 2) * 0.8); // adaptive layers are 108dp; content stays in a 30dp radius
       const body = s.paths
         .map((p) => {
           for (const c of [p.fill, p.stroke]) if (c && c !== 'none' && !HEX.test(c)) throw new Error(`${cfg.roles[role]}: colour "${c}" must be #rgb or #rrggbb for Android`);
           const f = p.fill ?? (p.stroke ? 'none' : '#000000'); // SVG's default fill is black
           const fill = f !== 'none' ? `\n        android:fillColor="${colorOf(f)}"` : '';
-          const stroke = p.stroke ? `\n        android:strokeColor="${colorOf(p.stroke)}"\n        android:strokeWidth="${p['stroke-width'] ?? 1}"\n        android:strokeLineCap="round"` : '';
+          const stroke = p.stroke && p.stroke !== 'none' ? `\n        android:strokeColor="${colorOf(p.stroke)}"\n        android:strokeWidth="${p['stroke-width'] ?? 1}"\n        android:strokeLineCap="${p['stroke-linecap'] ?? 'butt'}"` : '';
           return `    <path${fill}${stroke}\n        android:pathData="${esc(p.d ?? '')}"/>`;
         })
         .join('\n');
-      return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by citadel:android-app's gen-icons.mjs from ${cfg.roles[role]} -->\n<vector xmlns:android="http://schemas.android.com/apk/res/android"\n    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n  <group android:translateX="${(54 - (s.w / 2) * k).toFixed(3)}" android:translateY="${(54 - (s.h / 2) * k).toFixed(3)}"\n      android:scaleX="${k.toFixed(5)}" android:scaleY="${k.toFixed(5)}">\n${body}\n  </group>\n</vector>\n`;
+      return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by citadel:android-app's gen-icons.mjs from ${cfg.roles[role]} -->\n<vector xmlns:android="http://schemas.android.com/apk/res/android"\n    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n  <group android:translateX="${(54 - (s.x + s.w / 2) * k).toFixed(3)}" android:translateY="${(54 - (s.y + s.h / 2) * k).toFixed(3)}"\n      android:scaleX="${k.toFixed(5)}" android:scaleY="${k.toFixed(5)}">\n${body}\n  </group>\n</vector>\n`;
     };
     out[`${res}/drawable/ic_launcher_foreground.xml`] = vector('foreground', (c) => c);
     out[`${res}/drawable/ic_launcher_monochrome.xml`] = vector('monochrome', () => '#000000');
@@ -156,17 +183,16 @@ export function buildIcons(dir) {
   return out;
 }
 
-/** A hash of every input: the source and overrides, the config and this generator, so the check doesn't depend on rsvg's exact bytes. */
+/** A hash of every input: the source and overrides, and the config. Not this generator, which a reformat changes, nor the icons, which are rsvg's exact bytes. */
 function inputsHash(root) {
   const cfg = resolveIcons(root);
   const h = createHash('sha256');
   for (const f of [...new Set(Object.values(cfg.roles))].sort()) h.update(f).update(readFileSync(join(root, f)));
-  h.update(JSON.stringify([cfg.background, cfg.webDir, cfg.androidRes, existsSync(join(root, 'android'))]));
-  h.update(readFileSync(new URL(import.meta.url)));
+  h.update(JSON.stringify([cfg.background, cfg.webDir, cfg.androidRes]));
   return h.digest('hex');
 }
 
-/** Write the icons; returns the paths written. Old Capacitor foreground PNGs and drawable-v24 go when Android's set is written. */
+/** Write the icons; returns the paths written. Old Capacitor foreground PNGs and drawable-v24's foreground go when Android's set is written. */
 export function generateIcons(dir) {
   const root = realpathSync(dir);
   const files = buildIcons(root);
@@ -175,21 +201,28 @@ export function generateIcons(dir) {
     writeFileSync(join(root, p), data);
   }
   const cfg = resolveIcons(root);
-  if (existsSync(join(root, 'android'))) {
+  if (cfg.androidRes) {
     for (const d of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) rmSync(join(root, cfg.androidRes, `mipmap-${d}/ic_launcher_foreground.png`), { force: true });
-    rmSync(join(root, cfg.androidRes, 'drawable-v24'), { recursive: true, force: true });
+    rmSync(join(root, cfg.androidRes, 'drawable-v24/ic_launcher_foreground.xml'), { force: true });
   }
-  writeFileSync(join(root, LOCK), inputsHash(root) + '\n');
+  writeFileSync(join(root, LOCK), [inputsHash(root), ...Object.keys(files).sort()].join('\n') + '\n');
   return Object.keys(files);
 }
 
-/** Problems with the committed icons: none when they match their inputs. Needs no rsvg-convert. */
+/** Problems with the committed icons: none when they match their inputs and are all there. Needs no rsvg-convert. */
 export function checkIcons(dir) {
   const root = realpathSync(dir);
   const lock = join(root, LOCK);
   if (!existsSync(lock)) return [`${LOCK} is missing: run gen-icons.mjs and commit its output`];
-  if (readFileSync(lock, 'utf8').trim() !== inputsHash(root)) return ['the icons are out of date with their SVG sources: run gen-icons.mjs and commit its output'];
-  return [];
+  const [hash, ...files] = readFileSync(lock, 'utf8').trim().split('\n');
+  let now;
+  try {
+    now = inputsHash(root);
+  } catch (e) {
+    return [e.message];
+  }
+  if (hash !== now) return ['the icons are out of date with their SVG sources: run gen-icons.mjs and commit its output'];
+  return files.filter((f) => !existsSync(join(root, f))).map((f) => `${f} is missing: run gen-icons.mjs and commit its output`);
 }
 
 if (import.meta.main) {

@@ -96,8 +96,9 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
      then `apksigner verify <app>.apk`.
 - Before signing a Capacitor shell, check the merged release manifest
   (`AndroidManifest.xml` under `app/build/intermediates/merged_manifests/release/`) with
-  `grep -rE 'allowBackup|usesCleartextTraffic|debuggable'`: none may be `true`. `capacitor.config`
-  has no `server.url` or `server.cleartext`, and `allowNavigation` lists only hosts we control
+  `grep -rE 'allowBackup|usesCleartextTraffic|debuggable'`: none may be `true`. `capacitor.config`'s
+  `server.url` is the app's own https address (`https://<name>.citadel.zip/apps/<name>/`, what the shell loads), never a dev machine;
+  it has no `server.cleartext`, and `allowNavigation` lists only hosts we control
   (each one can call the app's native plugins). Checklist after Cap-go/capgo-skills @e82217b (MIT),
   in our words.
 - A lost keystore means every friend uninstalls (losing local data) and reinstalls, so never
@@ -171,9 +172,11 @@ install and launch only through `citadel-android`, take a lease before a session
 
 Don't hand-make icons. Keep one SVG (`web/public/icon.svg`, or the path in `citadel-app.json`'s `icon.source`) and run
 `node <kit>/skills/android-app/scripts/gen-icons.mjs` in the app's repo. It writes the web icons
-(`favicon-32.png`, `icon-192.png`, `icon-512.png`, next to the SVG) and, when `android/` exists, the adaptive
-foreground and monochrome layers, round and legacy PNGs and the splash. Citadel shows the same SVG as the scheme's icon.
-Needs `rsvg-convert`; its art is paths on a full-size background `<rect>` (other shapes reach the PNGs but not Android's vector layers).
+(`favicon-32.png`, `icon-192.png`, `icon-512.png`, next to the SVG) and, in a repo with an Android app (`citadel-app.json`'s
+`capacitor.android`, else `android/`; `icon.androidRes` overrides), the adaptive foreground and monochrome layers, round and
+legacy PNGs and the splash. It refuses a res folder with no `AndroidManifest.xml` beside it. Citadel shows the same SVG as the scheme's icon.
+Needs `rsvg-convert`; its art is paths on a full-size background `<rect>` (other shapes reach the PNGs but not Android's vector layers), with only
+`fill`, `stroke`, `stroke-width` and `stroke-linecap`: Android's layers refuse a `transform`, `opacity` or other attribute.
 
 A scheme overrides any use by naming its own SVG; whatever isn't named is made from the source:
 
@@ -184,4 +187,4 @@ A scheme overrides any use by naming its own SVG; whatever isn't named is made f
 
 Roles: `scheme` (what Citadel shows), `small` (the 32 px favicon), `foreground`, `monochrome`, `legacy`, `round`, `splash`.
 The run writes `.citadel-icons.sha256`; `gen-icons.mjs --check` exits 1 when the committed icons no longer match their
-SVGs, so put it in the app's test or build and they can't drift (it needs no rsvg-convert). Commit the output.
+SVGs or one is missing, so put it in the app's test or build and they can't drift (it needs no rsvg-convert). Commit the output.

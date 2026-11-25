@@ -228,3 +228,26 @@ test('@imports picks only the test files that import the changed file directly',
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// #1928: citadel-test's default pick is the tests you touched and the same-named ones; the wide pick keeps the rest.
+test('--narrow picks only touched and same-name tests, however many import the file; the wide pick still adds them', () => {
+  const changed = ['src/runner.ts', 'src/db.ts', 'src/inbox.ts', 'test/affected.test.ts', 'NOTES.txt'];
+  const narrow = affected(map, changed, tracked, repo, true);
+  const wide = affected(map, changed, tracked, repo);
+  const only = (a: typeof narrow) => a.run.map((r) => r.test);
+  assert.ok(only(wide).length > only(narrow).length + 10, 'a change to runner.ts and db.ts has many dependants');
+  assert.ok(only(narrow).every((t) => narrow.run.find((r) => r.test === t)!.why.every((w) => w === 'touched' || w.startsWith('name '))));
+  assert.ok(only(narrow).includes('test/affected.test.ts') && only(narrow).includes('test/inbox.test.ts'));
+  assert.ok(only(wide).includes('test/db-setup.test.ts') && !only(narrow).includes('test/db-setup.test.ts'));
+  assert.deepEqual([narrow.unmapped, narrow.full], [[], false], 'an unmapped path is not an error in the narrow pick');
+  const full = parseMap('@tests test/*.test.ts\n@fallback full\n');
+  assert.equal(affected(full, ['NOTES.txt'], tracked, repo, true).full, false);
+  assert.equal(affected(full, ['NOTES.txt'], tracked, repo).full, true);
+});
+
+test('the command with --narrow says how many more tests the wide pick would run', () => {
+  const r = spawnSync('node', ['tools/affected.ts', '--narrow', '--paths', 'src/db.ts', 'NOTES.txt'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /^unmapped/m);
+  assert.match(r.stdout, /^wide\t[1-9]\d*$/m);
+});

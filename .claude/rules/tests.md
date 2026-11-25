@@ -37,3 +37,5 @@ teardown, a `finally`). `test/leak-baseline.json` lists files that leaked before
 only shrinks: a drop passes with a note to lower it, and a file at zero loses its line.
 
 Before the first hand-off, run `tools/burn-in.sh` on every test file you touched: it burns in each, and old tests with shared state fail on whoever next edits them. A failure in 10 of 10 copies is a real failure, not a race. Editing a file a judge pins needs `node tools/judge-replay.ts <id> --record`, or `test/judges.test.ts` goes red.
+
+Locally a minion runs only the tests it changed, the ones named after the files it changed and the repo-wide list (`citadel-test`, or `--affected`); the tests that merely use a changed file are CI's (#1928). `citadel-test --wide` runs them too.

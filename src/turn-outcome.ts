@@ -25,7 +25,7 @@ export type Kind = 'ok' | 'stopped' | 'closing' | 'limit' | 'net' | 'switch-acco
 /**
  * What an ending sets off besides its kind. A turn that ended well: `cleared` (its failure note, the limits it proved
  * gone, a Codex hand-back's thread, its fresh step's end as done), and unless it closes: `fresh` (a Taskmaster past its
- * context mark starts fresh), `seam` (the seam trial's enrolment), `keepalive` (a series from its cached prefix) and
+ * context mark starts fresh), `keepalive` (a series from its cached prefix) and
  * `deploy-note` (a deploy that went live mid-turn). `close` dismisses the minion; `rerun` runs the batch of a turn a
  * restart cut off before claude had it as a plain turn.
  */

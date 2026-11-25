@@ -24,6 +24,7 @@ import { request } from 'node:http';
 import { projectSharedDir } from '../workspace.ts';
 import { readsDisk, stateCall, syncScript, type StateDeps } from '../machine-sync.ts';
 import { askCheckpoint, owned, placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
+import { BLOB_BYTES } from '../worker-join.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -66,6 +67,12 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
     }
     projects = body.projects;
   }
+  if (body.worker !== undefined && typeof body.worker !== 'boolean') throw new HttpError(400, 'worker must be true or false');
+  const worker = body.worker as boolean | undefined;
+  // A machine runs only its owner's turns, on a sign-in they make there themselves: nobody else offers it, though an admin may switch it off.
+  if ((worker ?? lend?.worker) && !app.machines.lendsWorker(machine) && machine.owner_id !== session.uid) {
+    throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
+  }
   const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number } = {};
   for (const k of ['workspace_tools', 'always_on'] as const) {
     if (body[k] === undefined) continue;
@@ -82,7 +89,8 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   }
   if (typeof fields.name === 'string') app.runner.runsOn.renamed(machine.id, machine.name, fields.name);
   if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
-  if (lend) app.machines.setLend(machine.id, lend);
+  if (lend || worker !== undefined) app.machines.setLend(machine.id, lend ?? null, worker);
+  if (worker !== undefined) app.runner.turnLine.pump();
   await ownWrites(); // what follows re-reads the grants and the machine (#1244)
   // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
   if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
@@ -136,6 +144,11 @@ const stateDeps = (app: App): StateDeps => ({
   landing: (id) => app.landings.get(id)?.code === null,
   note: (id, text) => app.runner.emit(id, 'note', { text }),
 });
+
+function workersOf(app: Ctx['app']) {
+  if (!app.machines.workers) throw new HttpError(503, 'No worker machines here');
+  return app.machines.workers;
+}
 
 /** A route a machine's agent calls with its token, which reaches nothing else. */
 const agent = (method: string | readonly string[], path: string, handler: (ctx: Ctx, machine: Machine) => unknown): Route => ({
@@ -216,6 +229,27 @@ export const agentRoutes: Route[] = [
     const at = (await owned(machine.id, dir)) ? placedAt(dir) : null;
     if (!at) throw new HttpError(410, 'Not a turn placed on this machine');
     return stateCall(stateDeps(app), params.rest, dir, at, req, res);
+  // A worker's own program (Build 7 T5, src/worker-join.ts): how it stands, every 2 s, and what its self-test measures.
+  agent('POST', '/api/machines/worker', async ({ req, res, app }, machine) => json(res, 200, await workersOf(app).report(machine, await readJson(req, 50_000)))),
+  agent('GET', '/api/machines/worker/scratch', async ({ res, app }, machine) => {
+    const scratch = await workersOf(app).sendScratch(machine.id);
+    if (!scratch) throw new HttpError(409, 'No self-test is running');
+    return json(res, 200, scratch);
+  }),
+  agent('POST', '/api/machines/worker/scratch', async ({ req, res, app }, machine) => {
+    const why = await workersOf(app).takeScratch(machine.id, str((await readJson(req, 5_000_000)).bundle, 'bundle', 4_000_000));
+    return json(res, 200, { ok: why === null, why });
+  }),
+  agent('GET', '/api/machines/worker/blob', ({ res, url, app }, machine) => {
+    if (!workersOf(app).testing(machine.id)) throw new HttpError(409, 'No self-test is running');
+    const body = Buffer.alloc(Math.min(BLOB_BYTES, Math.max(0, Math.floor(Number(url.searchParams.get('bytes'))) || 0)));
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': body.length, 'Cache-Control': 'no-store' }).end(body);
+  }),
+  agent('POST', '/api/machines/worker/blob', async ({ req, res, app }, machine) => {
+    if (!workersOf(app).testing(machine.id)) throw new HttpError(409, 'No self-test is running');
+    let bytes = 0;
+    for await (const chunk of req) if ((bytes += chunk.length) > BLOB_BYTES) throw new HttpError(413, 'Too much');
+    return json(res, 200, { bytes });
   }),
   // Jobs (#857, shared/project/specs/desktop-gpu-jobs.md "Wire contract"): one input file with the job's token, the
   // job's state every 10 s and on every change, and one result file, streamed to disk under the job's caps.
@@ -576,6 +610,20 @@ export const machineRoutes: Route[] = [
     handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await patchMachine(app, session, machine, await readJson(req)))),
   },
   {
+    // Its worker's self-test (Build 7 T5); its lines come over the machines broadcast.
+    method: 'POST',
+    path: '/api/machines/:machine/self-test',
+    ...people,
+    handler: managed(({ res, app, machine }) => {
+      const workers = workersOf(app);
+      if (!app.machines.lendsWorker(machine)) throw new HttpError(409, `Minion turns are off for ${machine.name}`);
+      if (!workers.here(machine.id)) throw new HttpError(409, `${machine.name}'s worker isn't running`);
+      if (workers.testing(machine.id)) throw new HttpError(409, 'Its self-test is already running');
+      workers.startTest(machine);
+      return json(res, 202, { machine: app.machines.view(machine) });
+    }),
+  },
+  {
     // Check now (#437): what the hourly check does, asked for; it answers once the check ends.
     method: 'POST',
     path: '/api/machines/:machine/check',
@@ -596,6 +644,7 @@ export const machineRoutes: Route[] = [
       app.store.deleteMachine(machine.id);
       app.runner.turnLine.forget(machine.id);
       app.ciLoad.forget(machine.id);
+      app.machines.workers?.forget(machine.id);
       app.machines.disconnect(machine.id);
       await ownWrites(); // the broadcast re-reads the list (#1244)
       app.broadcast({ type: 'machines', machines: app.machines.list() });

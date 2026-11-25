@@ -65,7 +65,7 @@ export function lendPatch(change: LendChange, now: MachineNow, schemeId: number)
   const gpuFlip = change.gpu !== undefined && change.gpu === !!now.lend?.gpu_off;
   if (now.managed === false) {
     // An agent from before ticks: the page's GPU switch saves only that (public/settings-machines.js).
-    if (gpuFlip) patch.lend = { server: null, workspaces: [], before_ticks: true, ...(change.gpu ? {} : { gpu_off: true as const }) };
+    if (gpuFlip) patch.lend = { server: null, workspaces: [], before_ticks: true, ...(now.lend?.worker ? { worker: true as const } : {}), ...(change.gpu ? {} : { gpu_off: true as const }) };
   } else if (change.tick || change.untick || change.server !== undefined || gpuFlip) {
     // As a tick on the page does: the stored lend with this change, keeping its GPU switch unless the change sets it.
     const { before_ticks: _, gpu_off: off, ...base } = now.lend ?? { server: null, workspaces: [] };

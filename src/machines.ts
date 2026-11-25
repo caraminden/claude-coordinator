@@ -23,6 +23,7 @@ import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from '.
 import { every } from './every.ts';
 import { thrown } from './thrown.ts';
 import { asData } from './quote.ts';
+import type { WorkerJoin } from './worker-join.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -124,6 +125,8 @@ export type StatusFacts = {
   /** When this server started: an agent can't have been seen offline before then. */
   startedAt: number;
   online: boolean;
+  /** Its minion-turn worker is running there (Build 7), with or without the machine's agent beside it. */
+  workerHere?: boolean;
   /** A CI runner host: its agent is the runner agent, or was at its last connection. */
   runners: boolean;
   alwaysOn: boolean;
@@ -144,6 +147,8 @@ export type StatusFacts = {
 /** The one place a machine's status is decided (#437); test/machine-status.test.ts holds its table. */
 export function machineStatus(f: StatusFacts): MachineStatus {
   const s = (status: MachineStatus['status'], reason: string, fix: MachineStatus['fix'] = null, when: MachineStatus['when'] = null): MachineStatus => ({ status, reason, fix, when });
+  // A worker alone is a whole machine: there may be no agent, or nothing else to lend, on that computer.
+  if (f.workerHere && !f.runners && !f.offers.length) return f.lent ? s('ready', 'Runs minion turns') : s('fix', 'Lent to no scheme', 'lend');
   if (!f.online) {
     const added = { label: 'added', at: f.createdAt } as const;
     if (f.lastSeenAt === null) return f.now - f.createdAt >= NEVER_CONNECTED_MS ? s('down', 'Never connected', 'remove', added) : s('asleep', 'Not connected yet', null, added);
@@ -423,14 +428,16 @@ export class MachineRelay {
       .filter((p) => lendsMachine(this.store, machine, p, owner))
       .map((p) => p.id);
     const offers = this.online().find((m) => m.id === machine.id)?.servers ?? [];
+    const worker = this.workers?.view(machine) ?? null;
     const st = machineStatus({
+      workerHere: worker?.on && worker.here,
       now: Date.now(),
       startedAt: this.startedAt,
       online: !!agent,
       runners: agent ? agent.runners : !!check?.runners,
       alwaysOn: !!machine.always_on,
       createdAt: machine.created_at,
-      lastSeenAt: machine.last_seen_at,
+      lastSeenAt: worker?.seen ? Math.max(worker.seen, machine.last_seen_at ?? 0) : machine.last_seen_at,
       offers,
       wsOff: !machine.workspace_tools && !!agent?.servers.includes('ws'),
       check,
@@ -480,6 +487,8 @@ export class MachineRelay {
       job_settings: storedSettings(machine),
       /** A test box's screen (#1422): who has it and who waits; null for other machines and while offline. */
       screen: agent?.screen ?? null,
+      /** Its minion-turn worker as its row shows it (Build 7 T5). */
+      worker,
     };
   }
 
@@ -506,6 +515,9 @@ export class MachineRelay {
       return servers.length ? [{ ...m, servers, lent: lentName(m, agent!, servers) }] : [];
     });
   }
+
+  /** Workers' own programs and self-tests (src/worker-join.ts); absent in a test that builds none. */
+  workers: WorkerJoin | null = null;
 
   isOnline(machineId: number): boolean {
     return this.agents.has(machineId);
@@ -612,7 +624,12 @@ export class MachineRelay {
       const prev = storedLend(machine);
       if (!prev || prev.before_ticks) {
         const was = machine.mcp_kind === 'claude' ? machine.mcp_command || DEFAULT_CLAUDE_MCP : null;
-        const lend: Lend = { server: was && agent.found.some((f) => f.name === was) ? was : null, workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [], ...(prev?.gpu_off ? { gpu_off: true as const } : {}) };
+        const lend: Lend = {
+          server: was && agent.found.some((f) => f.name === was) ? was : null,
+          workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [],
+          ...(prev?.gpu_off ? { gpu_off: true as const } : {}),
+          ...(prev?.worker ? { worker: true as const } : {}),
+        };
         this.store.updateMachine(machine.id, { lend: JSON.stringify(lend) });
       }
       this.sendLend(machine.id);
@@ -634,13 +651,18 @@ export class MachineRelay {
 
   /**
    * A person changed a machine's ticks (#439): keep them, tell its agent, end the sessions on what is no longer
-   * lent, and check what is new. Another MCP server ticked is a new server to check.
+   * lent, and check what is new. Another MCP server ticked is a new server to check. `worker` sets the Minion turns
+   * switch, with the ticks (`to` null: as they are).
    */
-  setLend(machineId: number, lend: Lend) {
+  setLend(machineId: number, to: Lend | null, worker?: boolean) {
     const machine = this.store.getMachine(machineId);
     if (!machine) return;
+    const was = storedLend(machine);
+    // The Minion turns switch is its own: ticks saved by a page that doesn't send it leave it as it is.
+    const { worker: sent, ...ticks } = to ?? was ?? { server: null, workspaces: [], before_ticks: true as const };
+    const lend: Lend = { ...ticks, ...((worker ?? sent ?? was?.worker) ? { worker: true as const } : {}) };
     // An agent from before #439 lends what its command line says: only its GPU switch is saved here.
-    const swapped = !lend.before_ticks && storedLend(machine)?.server !== lend.server;
+    const swapped = !lend.before_ticks && was?.server !== lend.server;
     const check = swapped && storedCheck(machine);
     this.store.updateMachine(machineId, { lend: JSON.stringify(lend), ...(check ? { last_check: JSON.stringify({ ...check, results: check.results.filter((r) => r.server !== 'mcp') }) } : {}) });
     this.sendLend(machineId);

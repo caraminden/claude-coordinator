@@ -1,0 +1,329 @@
+// Joining a machine as a worker and its self-test (Build 7 T5). The worker's own program on that computer
+// (public/worker-agent.mjs) says here every couple of seconds how it stands: its owner's caps, its image, its sign-ins
+// (that they are there, never what is in them) and the lines of a self-test its owner asked for on the Machines page.
+// It is a program apart from the machine's agent, with the same token, because a Windows PC's agent and the Linux distro
+// its worker lives in are two processes, and a machine's newest connection replaces its last one (src/machines.ts).
+import { createHash, randomBytes } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { imageHashAsync } from './claude-link.ts';
+import type { Machine, Store } from './db.ts';
+import { gitOut } from './git.ts';
+import { sameClaude, type WorkerInfo } from './machine-turn.ts';
+
+/** A worker that hasn't synced for this long is away: it syncs about twice a second. */
+const HERE_MS = 10_000;
+/** A self-test that has said nothing new for this long has failed: an image build is its longest step. */
+const QUIET_TEST_MS = 20 * 60_000;
+const CLAUDE_MS = 60_000;
+/** The most bytes of one link test, each way. */
+export const BLOB_BYTES = 16 * 1024 * 1024;
+const REPO = join(import.meta.dirname, '..');
+/** The build files of the worker's image: people's container image (deploy/claude-container), with claude on top there. */
+const IMAGE_DIR = join(REPO, 'deploy', 'claude-container');
+/** What the worker's own program is made of: it restarts itself, between turns, when this hash changes from the one it first heard. */
+const AGENT_FILES = ['worker-agent.mjs', 'machine-worker.mjs'].map((f) => join(REPO, 'public', f));
+/** The scratch repo's files beside its nonce: what `node tools/host-tools.ts check` needs, so it runs in the checkout it came in. */
+const SCRATCH_FILES = ['tools/host-tools.ts', 'src/host-tools.ts', 'deploy/host-tools.json'];
+
+/** What the self-test checks, in the order the row shows. */
+export const CHECKS = {
+  image: 'Image built and starts',
+  folders: 'Folders reach the container',
+  sync: 'Scratch repo there and back',
+  process: 'Process started and stopped',
+  link: 'Link to Citadel',
+  tools: 'Host tools',
+  disk: 'Your disk is out of reach',
+  programs: "Windows programs can't start",
+} as const;
+export type CheckKey = keyof typeof CHECKS;
+const KEYS = Object.keys(CHECKS) as CheckKey[];
+
+export type CheckLine = { key: CheckKey; name: string; state: 'waiting' | 'running' | 'ok' | 'fail'; text: string };
+export type SelfTest = { id: string; at: number; done: number | null; ok: boolean; why: string | null; lines: CheckLine[] };
+export type WorkerCaps = { workers: number; threads: number; memory_gb: number; disk_gb: number };
+type ImageState = { state: 'ready' | 'building' | 'failed' | 'own'; text: string };
+type Facts = { boot: string; started: number; at: number; host: string; wsl: boolean; caps: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean };
+/** Kept over a restart: how the worker was last set up and what its tests said. */
+type Kept = { host: string; wsl: boolean; caps: WorkerCaps | null; seen: number; test: SelfTest | null; passed: number | null };
+/** A machine's worker as its row shows it. */
+export type WorkerView = {
+  on: boolean;
+  here: boolean;
+  /** Last heard from while away; null while here, or never. */
+  seen: number | null;
+  host: string | null;
+  wsl: boolean;
+  caps: WorkerCaps | null;
+  image: ImageState | null;
+  claude: string | null;
+  /** This server's claude when the worker's differs: no turn starts there until they match. */
+  claude_wanted: string | null;
+  signed_in: boolean | null;
+  github: boolean | null;
+  disk_gb: number | null;
+  full: boolean;
+  test: SelfTest | null;
+  /** The last self-test that passed whole. */
+  passed: number | null;
+};
+
+const text = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
+const yes = (v: unknown) => (typeof v === 'boolean' ? v : null);
+const count = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? Math.round(v * 10) / 10 : null);
+
+/** A worker's caps as its owner's config has them, or null when they aren't that. */
+export function cleanCaps(input: unknown): WorkerCaps | null {
+  const v = (input ?? {}) as Record<string, unknown>;
+  const [workers, threads, memory_gb, disk_gb] = [count(v.workers, 64), count(v.threads, 1024), count(v.memory_gb, 4096), count(v.disk_gb, 100_000)];
+  return workers === null || threads === null || memory_gb === null || disk_gb === null ? null : { workers, threads, memory_gb, disk_gb };
+}
+
+const IMAGE_STATES = ['ready', 'building', 'failed', 'own'] as const;
+function cleanImage(input: unknown): ImageState | null {
+  const v = (input ?? {}) as Record<string, unknown>;
+  const state = IMAGE_STATES.find((s) => s === v.state);
+  return state ? { state, text: text(v.text, 400) } : null;
+}
+
+export interface WorkerJoinDeps {
+  store: Pick<Store, 'getSetting' | 'setSetting' | 'listMachines'>;
+  lends: (m: Machine) => boolean;
+  info: (machineId: number) => WorkerInfo | null;
+  /** `claude --version` here. */
+  claude: () => Promise<string | null>;
+  /** A worker's row differs from what people were last sent. */
+  changed: () => void;
+  now: () => number;
+}
+
+export class WorkerJoin {
+  private d: WorkerJoinDeps;
+  private facts = new Map<number, Facts>();
+  private tests = new Map<number, SelfTest & { heard: number }>();
+  /** Each running test's scratch repo: the commit it was sent and the answer its worker must send back. */
+  private scratch = new Map<number, { id: string; sha: string; nonce: string }>();
+  private claudeHere: { version: string | null; at: number } = { version: null, at: -Infinity };
+  private offer: { image: { hash: string; files: string[] }; agent: string } | null = null;
+  private sent = '';
+
+  constructor(d: WorkerJoinDeps) {
+    this.d = d;
+  }
+
+  /** Its worker is running and reaches this server: turns there go on, and can start. */
+  here(machineId: number): boolean {
+    const at = this.d.info(machineId)?.at;
+    return at !== undefined && this.d.now() - at < HERE_MS;
+  }
+
+  private kept(machineId: number): Kept | null {
+    return this.d.store.getSetting<Kept>(`worker-join:${machineId}`) ?? null;
+  }
+
+  private keep(machineId: number, change: Partial<Kept>) {
+    const was: Kept = this.kept(machineId) ?? { host: '', wsl: false, caps: null, seen: 0, test: null, passed: null };
+    const now = { ...was, ...change };
+    if (JSON.stringify(now) !== JSON.stringify(was)) this.d.store.setSetting(`worker-join:${machineId}`, now);
+  }
+
+  /** A machine taken off Citadel: its worker's setup and test go with it. */
+  forget(machineId: number) {
+    this.facts.delete(machineId);
+    this.tests.delete(machineId);
+    this.scratch.delete(machineId);
+    if (this.kept(machineId)) this.d.store.setSetting(`worker-join:${machineId}`, null);
+  }
+
+  view(machine: Machine): WorkerView {
+    const id = machine.id;
+    const info = this.d.info(id);
+    const here = this.here(id);
+    const facts = here ? (this.facts.get(id) ?? null) : null;
+    const kept = this.kept(id);
+    const home = this.claudeHere.version;
+    const seen = Math.max(info?.at ?? 0, kept?.seen ?? 0);
+    const { heard: _, ...running } = this.tests.get(id) ?? { heard: 0, id: '' };
+    return {
+      on: this.d.lends(machine),
+      here,
+      seen: here || !seen ? null : seen,
+      host: facts?.host || kept?.host || null,
+      wsl: facts?.wsl ?? kept?.wsl ?? false,
+      caps: facts?.caps ?? kept?.caps ?? null,
+      image: facts?.image ?? null,
+      claude: here ? (info?.claude ?? null) : null,
+      claude_wanted: here && home && info?.claude && !sameClaude(home, info.claude) ? home : null,
+      signed_in: here ? (info?.signedIn ?? null) : null,
+      github: facts?.github ?? null,
+      disk_gb: facts?.disk_gb ?? null,
+      full: facts?.full ?? false,
+      test: running.id ? (running as SelfTest) : (kept?.test ?? null),
+      passed: kept?.passed ?? null,
+    };
+  }
+
+  /** The app's own side of a worker: its claude's version, the image's build files and the agent's code. */
+  private async wanted() {
+    const now = this.d.now();
+    if (now - this.claudeHere.at >= CLAUDE_MS) {
+      this.claudeHere.at = now;
+      const version = await this.d.claude();
+      if (version) this.claudeHere.version = version;
+    }
+    // Read once: a deploy that changes them restarts this server, and a front-end-only one is picked up at the next.
+    this.offer ??= { image: { hash: await imageHashAsync(IMAGE_DIR), files: await filesUnder(IMAGE_DIR) }, agent: await agentHash() };
+    return { claude: this.claudeHere.version, ...this.offer };
+  }
+
+  /** A worker program's word (POST /api/machines/worker), and what it should have and do. */
+  async report(machine: Machine, body: Record<string, unknown>) {
+    const boot = text(body.boot, 40);
+    const started = count(body.started, 1e14) ?? 0;
+    const now = this.d.now();
+    const was = this.facts.get(machine.id);
+    // Two of them on one token (an install over an older one): the newer stays, and the older is told.
+    if (was && was.boot !== boot && was.started > started && now - was.at < HERE_MS) return { replaced: true };
+    const facts: Facts = {
+      boot,
+      started,
+      at: now,
+      host: text(body.host, 80),
+      wsl: body.wsl === true,
+      caps: cleanCaps(body.caps),
+      image: cleanImage(body.image),
+      github: yes(body.github),
+      disk_gb: count(body.disk_gb, 100_000),
+      full: body.full === true,
+    };
+    this.facts.set(machine.id, facts);
+    // seen is saved now and then: it only dates "away since" after a restart of this server.
+    const seen = this.kept(machine.id)?.seen ?? 0;
+    this.keep(machine.id, { host: facts.host, wsl: facts.wsl, caps: facts.caps, seen: now - seen > 5 * 60_000 ? now : seen });
+    this.heardTest(machine.id, body.test);
+    const test = this.tests.get(machine.id);
+    return { ...(await this.wanted()), on: this.d.lends(machine), test: test ? test.id : null };
+  }
+
+  /** Start a self-test; its worker takes it at its next word. */
+  startTest(machine: Machine): SelfTest {
+    const now = this.d.now();
+    const lines: CheckLine[] = KEYS.map((key) => ({ key, name: CHECKS[key], state: 'waiting', text: '' }));
+    const test = { id: randomBytes(6).toString('hex'), at: now, done: null, ok: false, why: null, lines, heard: now };
+    this.tests.set(machine.id, test);
+    this.scratch.delete(machine.id);
+    this.tick();
+    return test;
+  }
+
+  testing(machineId: number): boolean {
+    return this.tests.has(machineId);
+  }
+
+  private heardTest(machineId: number, input: unknown) {
+    const test = this.tests.get(machineId);
+    const said = (input ?? {}) as { id?: unknown; done?: unknown; lines?: unknown };
+    if (!test || said.id !== test.id || !Array.isArray(said.lines)) return;
+    for (const l of said.lines.slice(0, 20) as { key?: unknown; state?: unknown; text?: unknown }[]) {
+      const line = test.lines.find((t) => t.key === l?.key);
+      const state = (['running', 'ok', 'fail'] as const).find((s) => s === l?.state);
+      if (!line || !state) continue;
+      if (line.state !== state || line.text !== text(l.text, 400)) test.heard = this.d.now();
+      line.state = state;
+      line.text = text(l.text, 400);
+    }
+    if (said.done === true) this.endTest(machineId, null);
+  }
+
+  private endTest(machineId: number, why: string | null) {
+    const test = this.tests.get(machineId);
+    if (!test) return;
+    this.tests.delete(machineId);
+    this.scratch.delete(machineId);
+    const { heard: _, ...rest } = test;
+    const ok = why === null && test.lines.every((l) => l.state === 'ok');
+    const at = this.d.now();
+    this.keep(machineId, { test: { ...rest, done: at, ok, why }, ...(ok ? { passed: at } : {}) });
+  }
+
+  /** The scratch repo of this machine's running test, as a git bundle: a nonce to answer and the host tools check. */
+  async sendScratch(machineId: number): Promise<{ bundle: string; nonce: string } | null> {
+    const test = this.tests.get(machineId);
+    if (!test) return null;
+    const dir = await mkdtemp(join(tmpdir(), 'citadel-worker-scratch-'));
+    try {
+      const nonce = randomBytes(16).toString('hex');
+      for (const f of SCRATCH_FILES) {
+        await mkdir(dirname(join(dir, f)), { recursive: true });
+        await cp(join(REPO, f), join(dir, f));
+      }
+      await writeFile(join(dir, 'nonce'), nonce);
+      const git = (...args: string[]) => gitOut(['-c', 'user.name=Citadel', '-c', 'user.email=citadel@localhost', '-c', 'core.hooksPath=/dev/null', ...args], dir);
+      await git('init', '-q', '-b', 'scratch');
+      await git('add', '-A');
+      await git('commit', '-q', '-m', 'self-test');
+      const sha = await git('rev-parse', 'HEAD');
+      await git('bundle', 'create', '.git/out.bundle', 'scratch');
+      if (!sha) throw new Error('git could not make the scratch repo');
+      this.scratch.set(machineId, { id: test.id, sha, nonce });
+      return { bundle: (await readFile(join(dir, '.git', 'out.bundle'))).toString('base64'), nonce };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  /** The scratch repo back from the worker: null when it holds the commit sent with the answer on top, else what's wrong. */
+  async takeScratch(machineId: number, bundle: string): Promise<string | null> {
+    const sent = this.scratch.get(machineId);
+    if (!sent || this.tests.get(machineId)?.id !== sent.id) return 'no self-test is running';
+    const dir = await mkdtemp(join(tmpdir(), 'citadel-worker-scratch-'));
+    try {
+      await writeFile(join(dir, 'in.bundle'), Buffer.from(bundle, 'base64'));
+      if ((await gitOut(['clone', '-q', '--bare', '--branch', 'scratch', 'in.bundle', 'back.git'], dir)) === null) return 'what came back is not a git bundle';
+      const git = (...args: string[]) => gitOut(args, join(dir, 'back.git'));
+      if ((await git('rev-parse', 'scratch^')) !== sent.sha) return 'what came back is not built on what was sent';
+      return (await git('show', 'scratch:answer')) === `${sent.nonce} back` ? null : 'the file made there did not come back';
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  /** Tell people when a row's worker changed, and end a test whose worker went away or stopped talking. Every second (server.ts). */
+  tick() {
+    const now = this.d.now();
+    for (const [id, test] of this.tests) {
+      const at = this.d.info(id)?.at ?? 0;
+      // A minute's grace: the program restarts itself when its code changes.
+      if (now - Math.max(at, test.at) > 60_000) this.endTest(id, 'The worker went away during the test.');
+      else if (now - test.heard > QUIET_TEST_MS) this.endTest(id, 'The worker stopped reporting on the test.');
+    }
+    const views = JSON.stringify(
+      this.d.store
+        .listMachines()
+        .filter((m) => this.d.lends(m) || this.facts.has(m.id))
+        .map((m) => [m.id, this.view(m)]),
+    );
+    if (views === this.sent) return;
+    this.sent = views;
+    this.d.changed();
+  }
+}
+
+async function filesUnder(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const f of ((await readdir(dir, { recursive: true })) as string[]).sort()) if ((await stat(join(dir, f))).isFile()) out.push(f);
+  return out;
+}
+
+/** One of the image's build files by its name in a worker's offer, as a path in this repo, or null when there is none by that name. */
+export async function imageFile(name: string): Promise<string | null> {
+  return (await filesUnder(IMAGE_DIR)).includes(name) ? join('deploy', 'claude-container', name) : null;
+}
+
+async function agentHash(): Promise<string> {
+  const h = createHash('sha256');
+  for (const f of AGENT_FILES) h.update(await readFile(f));
+  return h.digest('hex').slice(0, 12);
+}

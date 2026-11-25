@@ -3,14 +3,14 @@
 // still rides the next turn, and the sweep still wakes it after COLD_HOLD_MAX_MS.
 // A stand-in `claude -p` writes each turn's prompt to prompts.jsonl and ends.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { jsonLines, withoutTurnNote, lines, stopTurns, until, holds, testPins } from './helpers.ts';
+import { jsonLines, withoutTurnNote, lines, stopTurns, until, holds, testPins, fakeClaude } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
@@ -22,18 +22,7 @@ after(async () => {
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const prompts = join(root, 'prompts.jsonl');
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root, { log: { path: prompts } });
 
 const NOW = Date.UTC(2026, 10, 8, 14, 5);
 const store = new Store(join(root, 'test.db'));

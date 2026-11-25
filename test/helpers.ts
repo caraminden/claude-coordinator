@@ -183,6 +183,34 @@ export function lines(path: string): string[] {
     .split('\n')
     .filter(Boolean);
 }
+
+/** fakeClaude's `log.record` for the many files that read back each turn's prompt and the token it ran with. */
+export const PROMPT_AND_TOKEN = 'JSON.stringify({ prompt: JSON.parse(line), token: process.env.COORDINATOR_TOKEN })';
+
+/**
+ * The plain stand-in for `claude -p`, written to `root/<name>` and returned: it reads the prompt line, appends
+ * `log.record` (a JS expression over `line`, the raw prompt; `line` by default) and a newline to `log.path`, waits for
+ * `release` to exist when one is given, then prints one success result with `result` as its text and exits 0.
+ * `hang` makes it read stdin and never end, for a turn the test kills. A fake with more to it (several events, a
+ * session, an error) is releaseFake or the file's own.
+ */
+export function fakeClaude(root: string, { result = 'done', log, release, hang = false, name = 'claude-fake' }: { result?: string; log?: { path: string; record?: string }; release?: string; hang?: boolean; name?: string } = {}) {
+  const fake = join(root, name);
+  const done = `console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: ${JSON.stringify(result)} }));\n    process.exit(0);`;
+  const body = hang
+    ? 'process.stdin.resume();\nsetInterval(() => {}, 1000);'
+    : `require('node:readline').createInterface({ input: process.stdin }).once('line', (line) => {
+  ${log ? `require('node:fs').appendFileSync(${JSON.stringify(log.path)}, ${log.record ?? 'line'} + '\\n');` : ''}
+  const end = () => {
+    ${done}
+  };
+  ${release ? `const poll = setInterval(() => require('node:fs').existsSync(${JSON.stringify(release)}) && end(), 20);` : 'end();'}
+});`;
+  writeFileSync(fake, `#!${process.execPath}\n${body}\n`);
+  chmodSync(fake, 0o755);
+  return fake;
+}
+
 /**
  * A stand-in for `claude -p` in `root`: it waits for the release file, ends with its words as its result (an error
  * unless they are "ok"; a FAKE_RESULT in its env, a second account's, wins) and appends the prompt it got to `prompts`.

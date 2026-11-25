@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, jsonLines, PASSWORD, SECRET, type Booted, stopTurns, testPins, until } from './helpers.ts';
+import { bootServer, jsonLines, PASSWORD, SECRET, type Booted, stopTurns, testPins, until, fakeClaude } from './helpers.ts';
 testPins();
 
 // Per-person Taskmasters (#919, Build 3): a scheme splits the first time a second member writes to its
@@ -246,18 +246,7 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
 test("the digest rides at the head of a Taskmaster's next turn, once", async () => {
   process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
   const prompts = join(root, 'prompts.jsonl');
-  const fake = join(root, 'claude-fake');
-  writeFileSync(
-    fake,
-    `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-  );
-  chmodSync(fake, 0o755);
+  const fake = fakeClaude(root, { log: { path: prompts } });
   const { store, Cara, Josh } = people('digest-turn.db');
   const p = store.createProject('Shared', null, Cara.id);
   const cara = coordinator(store, p.id);

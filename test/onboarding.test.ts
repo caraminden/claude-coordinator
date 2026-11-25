@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -7,7 +7,7 @@ import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/prompts.ts';
 import { projectSharedDir, surveyReports } from '../src/workspace.ts';
-import { bootServer, jsonLines, REPO, until, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, REPO, until, tempRoot, type Booted, fakeClaude } from './helpers.ts';
 
 // New scheme onboarding (#172): the kickoff from the form, the Taskmaster's onboarding section while
 // setup runs, its plan card and catalogue, and the catalogue never handing out a file's body.
@@ -15,20 +15,7 @@ const tmp = tempRoot('onboarding-');
 const root = tmp.dir;
 after(() => tmp.teardown()); // ends the children and the detached turns (#271) before the folder goes
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync, readFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), system: readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8'), token: process.env.COORDINATOR_TOKEN }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: "JSON.stringify({ prompt: JSON.parse(line), system: require('node:fs').readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8'), token: process.env.COORDINATOR_TOKEN })" } });
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
 let base = '';
@@ -37,7 +24,7 @@ let srv: Booted;
 const call = (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
-  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   base = srv.base;
   cookie = srv.cookie;
   tmp.track(srv.proc);

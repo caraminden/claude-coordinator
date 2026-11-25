@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -10,7 +10,7 @@ import { TASKMASTER_LOOP_LIMIT } from '../src/prompts.ts';
 import { RELAY_FILE_MAX, relayFile } from '../src/taskmaster-files.ts';
 import { HttpError } from '../src/http.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { agentToken, bootServer, jsonLines, withoutTurnNote, stopProcs, stopTurns, until, testPins, ok, type Booted } from './helpers.ts';
+import { agentToken, bootServer, jsonLines, withoutTurnNote, stopProcs, stopTurns, until, testPins, ok, type Booted, fakeClaude } from './helpers.ts';
 testPins();
 
 // Taskmaster mail and relay files (#405): message_taskmaster's wake: false leaves held mail for the other
@@ -26,18 +26,7 @@ after(async () => {
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const prompts = join(root, 'prompts.jsonl');
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root, { log: { path: prompts } });
 
 const userMessages = (store: Store, id: number) =>
   store

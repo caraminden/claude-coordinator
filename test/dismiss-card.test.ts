@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, tempRoot, ok, type Booted, fakeClaude, PROMPT_AND_TOKEN } from './helpers.ts';
 
 // Dismiss (#1593): a person takes an open question or plan card that is no longer relevant out of the waiting list; its
 // minion is told, as it is told an answer. Only people can; a ship go keeps its own buttons.
@@ -15,20 +15,7 @@ after(async () => {
   await tmp.teardown(); // ends the detached turns before deleting their folders (#271)
 });
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), token: process.env.COORDINATOR_TOKEN }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: PROMPT_AND_TOKEN } });
 
 let srv: Booted;
 const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
@@ -46,7 +33,7 @@ const ask = (question: string, extra: object = {}) => call(`/api/tickets/${ticke
 const lastPrompt = async (before: number) => withoutTurnNote((await until('the dismissal turn', () => turns().length > before && turns())).at(-1).prompt.message.content)[0].text;
 
 before(async () => {
-  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   procs.push(srv.proc);
   const project = await call('/api/projects', { method: 'POST', body: { name: 'P' } });
   ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'hi' } });

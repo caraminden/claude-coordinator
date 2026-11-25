@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins, followed } from './helpers.ts';
+import { stopTurns, testPins, followed, fakeClaude } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -18,20 +18,7 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 // A `claude -p` that runs until the test lets it go, so the checks below have a turn that is certainly live.
 const go = join(root, 'go');
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-const { existsSync } = require('node:fs');
-const t = setInterval(() => {
-  if (!existsSync(${JSON.stringify(go)})) return;
-  clearInterval(t);
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-}, 20);
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root, { release: go });
 
 // #1618: the row a read is served can be behind the write queue (src/db-writer.ts gives up after READ_WAIT_MS and
 // serves what it has), and on a loaded box that row still said 'new' or 'idle' for a minion whose turn had launched.

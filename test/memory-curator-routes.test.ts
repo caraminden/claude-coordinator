@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { agentToken, bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
+import { agentToken, bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted, fakeClaude, PROMPT_AND_TOKEN } from './helpers.ts';
 
 // The memory curator (#1111) through the real server: a run proposes with propose_memory's route, the card waits in its
 // chat, a member applies the ticked changes on the Memory page's routes, the run is told, and Put back undoes it.
@@ -17,20 +17,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), token: process.env.COORDINATOR_TOKEN }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: PROMPT_AND_TOKEN } });
 
 let base = '';
 const cookies: Record<string, string> = {};
@@ -60,7 +47,7 @@ const read = (f: string) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f
 const B = '---\nname: B\ndescription: second\n---\nbeta\n';
 
 before(async () => {
-  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

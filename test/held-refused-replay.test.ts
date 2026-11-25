@@ -1,14 +1,14 @@
 // #1059 (8e163a06): Deliver now (Runner.releaseMail) for a cold minion whose person's Claude login is refused delivers
 // nothing and keeps the mail and its cold time, so the hold cap still fires later.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { stopTurns, testPins, until } from './helpers.ts';
+import { stopTurns, testPins, until, fakeClaude } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'held-refused-'));
@@ -18,17 +18,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root);
 
 const NOW = Date.UTC(2026, 10, 8, 14, 5);
 const store = new Store(join(root, 'test.db'));

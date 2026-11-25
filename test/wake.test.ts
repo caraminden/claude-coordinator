@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Outbox } from '../src/outbox.ts';
 import { pacificTime, parseWakeTime, TimedWakes } from '../src/wake.ts';
 import { FakeClock } from './fake-clock.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { stopTurns, testPins, fakeClaude } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -43,23 +43,8 @@ test('Pacific times: PST in winter, PDT in summer, an offset or Z is taken as gi
 // The rest of wake_at (fires once, restarts, limits, cancel, the 3-day rule) is in test/outbox.test.ts since #1385.
 test('on a real runner the timer delivers, a wake due mid-turn waits behind the turn, and its turn starting marks it sent', async () => {
   const { Runner } = await import('../src/runner.ts');
-  const { chmodSync, writeFileSync } = await import('node:fs');
-  const fake = join(root, 'claude-fake');
-  writeFileSync(
-    fake,
-    `#!${process.execPath}
-const release = ${JSON.stringify(join(root, 'release'))};
-require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
-  // The turn runs until the test releases it, so "mid-turn" doesn't depend on how long anything takes.
-  const poll = setInterval(() => {
-    if (!require('node:fs').existsSync(release)) return;
-    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-    process.exit(0);
-  }, 20);
-});
-`,
-  );
-  chmodSync(fake, 0o755);
+  const { writeFileSync } = await import('node:fs');
+  const fake = fakeClaude(root, { release: join(root, 'release') });
   const runner = new Runner(
     store,
     () => {},

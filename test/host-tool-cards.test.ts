@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, stopProcs, stopTurns, until, ok, type Booted, fakeClaude } from './helpers.ts';
 
 // Host tools (#1147, Josh: "Minion proposes, owner approves"): a minion in any scheme proposes a tool, a member of the
 // Citadel scheme approves it on a card, the server installs it with mise and a chore minion in the Citadel scheme ships
@@ -19,20 +19,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ token: process.env.COORDINATOR_TOKEN }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: 'JSON.stringify({ token: process.env.COORDINATOR_TOKEN })' } });
 // mise: records each call; a package called "broken" fails as a missing one would.
 const miseLog = join(root, 'mise.log');
 const fakeMise = join(root, 'mise');
@@ -81,7 +68,7 @@ const miseCalls = () => (existsSync(miseLog) ? readFileSync(miseLog, 'utf8').tri
 const pyright = { source: 'npm', package: 'pyright', version: '1.1.414', why: 'type-check the Python tools' };
 
 before(async () => {
-  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, CITADEL_MISE: fakeMise } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake, CITADEL_MISE: fakeMise } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);

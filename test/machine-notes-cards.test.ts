@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { chmodSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, jsonLines, tempRoot, until, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, tempRoot, until, ok, type Booted, fakeClaude, PROMPT_AND_TOKEN } from './helpers.ts';
 import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // A minion proposes a machine's notes (#617, Josh: "Minion proposes, owner approves"): a plan card that only the
@@ -13,20 +13,7 @@ const tmp = tempRoot('machine-notes-');
 const root = tmp.dir;
 after(() => tmp.teardown());
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), token: process.env.COORDINATOR_TOKEN }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: PROMPT_AND_TOKEN } });
 
 let base = '';
 const cookies: Record<string, string> = {};
@@ -52,7 +39,7 @@ let ticket: any;
 let box: any;
 
 before(async () => {
-  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   base = srv.base;
   cookies.Cara = srv.cookie;
   tmp.track(srv.proc);

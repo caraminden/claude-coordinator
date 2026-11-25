@@ -1,6 +1,6 @@
 // The stuck list (#1506): which minions and cards a Taskmaster's person-started turn hears about, and when again.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -8,7 +8,7 @@ import { cardHref } from '../src/card-links.ts';
 import { Store, type Ticket } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { STUCK_GAP_MS, stuckItems, stuckList } from '../src/stuck-list.ts';
-import { jsonLines, stopTurns, testPins, until } from './helpers.ts';
+import { jsonLines, stopTurns, testPins, until, fakeClaude } from './helpers.ts';
 testPins();
 
 const H = 3_600_000;
@@ -145,18 +145,7 @@ test("the block rides on a Taskmaster turn a person started, not on one a minion
   });
   process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
   const prompts = join(root, 'prompts.jsonl');
-  const fake = join(root, 'claude-fake');
-  writeFileSync(
-    fake,
-    `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-  );
-  chmodSync(fake, 0o755);
+  const fake = fakeClaude(root, { log: { path: prompts } });
   const store = new Store(join(root, 'stuck.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const p = store.createProject('Delve', null, cara.id).id;

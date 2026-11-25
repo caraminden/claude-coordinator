@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, until, stopProcs, stopTurns, ok, type Booted, fakeClaude } from './helpers.ts';
 
 // Question cards a minion settles (settle_question): it judged a typed reply answered the card, so the
 // card stops waiting on people. A stand-in `claude -p` records each turn's prompt and thread token,
@@ -18,20 +18,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), cwd: process.cwd(), token: process.env.COORDINATOR_TOKEN, shared: process.env.COORDINATOR_SHARED_DIR, files: process.env.COORDINATOR_FILES_DIR }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: 'JSON.stringify({ prompt: JSON.parse(line), cwd: process.cwd(), token: process.env.COORDINATOR_TOKEN, shared: process.env.COORDINATOR_SHARED_DIR, files: process.env.COORDINATOR_FILES_DIR })' } });
 
 let base = '';
 let cookie = '';
@@ -51,7 +38,7 @@ let ticket: any;
 let turn: any;
 
 before(async () => {
-  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

@@ -195,4 +195,6 @@ test('a string continued onto the next line with a backslash does not hide an an
       assert.equal(escapes(code, 'x.tsx'), 1, `pattern: ${JSON.stringify(code)}`);
     }
   }
+  // An unclosed template full of continued lines must not send the pattern into endless backtracking: this hangs if so.
+  escapes(`const s = \`${'\\\r\n'.repeat(40)}`, 'x.tsx');
 });

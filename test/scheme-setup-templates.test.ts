@@ -88,7 +88,9 @@ test("the format template's way onto main replays a branch cut before the reform
   const steps = /^const REBASE = `([^`]*)`;$/m.exec(readFileSync(join(templates, 'format.test.ts'), 'utf8'))?.[1];
   assert.ok(steps);
   const lines = ['const a = {x:1}', 'const k1 = 1;', 'const k2 = 2;', 'const b = "two"', 'const k3 = 3;', 'const k4 = 4;', 'const c = [ 3 ]', ''];
-  const s = scheme({ 'package.json': '{"devDependencies":{"@biomejs/biome":"2.6.9"}}', 'biome.json': readFileSync(join(templates, 'biome.config.json'), 'utf8'), '.gitignore': 'node_modules\n', 'f.js': lines.join('\n'), 'hand.txt': 'as it was\n' });
+  // The branch is cut before the formatter arrives. The list also holds a hash main lacks (a reformat noted before it
+  // was rebased) and a later cleanup with no formatter yet: the steps must pass over both.
+  const s = scheme({ '.gitignore': 'node_modules\n', 'f.js': lines.join('\n'), 'hand.txt': 'as it was\n' });
   const sh = (script: string) => {
     const r = spawnSync('bash', ['-euo', 'pipefail', '-c', script], { cwd: s.dir, encoding: 'utf8', env: { ...env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' } });
     assert.equal(r.status, 0, `${script}\n${r.stdout}${r.stderr}`);
@@ -96,19 +98,23 @@ test("the format template's way onto main replays a branch cut before the reform
   };
   const edit = (from: string, to: string) => writeFileSync(join(s.dir, 'f.js'), readFileSync(join(s.dir, 'f.js'), 'utf8').replace(from, to));
   try {
+    sh('git init -q -b main && git add -A && git commit -qm base && git branch work && echo x > cleanup.txt && git add -A && git commit -qm cleanup');
     mkdirSync(join(s.dir, 'tools'));
     copyFileSync(join(templates, 'fmt'), join(s.dir, 'tools/fmt'));
+    copyFileSync(join(templates, 'biome.config.json'), join(s.dir, 'biome.json'));
+    writeFileSync(join(s.dir, 'package.json'), '{"devDependencies":{"@biomejs/biome":"2.6.9"}}\n');
     mkdirSync(join(s.dir, 'node_modules/.bin'), { recursive: true });
     symlinkSync(join(repo, 'node_modules/.bin/biome'), join(s.dir, 'node_modules/.bin/biome'));
-    sh('chmod +x tools/fmt && git init -q -b main && git add -A && git commit -qm setup && git branch work');
-    sh("tools/fmt && echo 'fixed by hand' > hand.txt && git commit -qam reformat && (echo '# older'; git rev-parse work; git rev-parse HEAD) > .git-blame-ignore-revs && git add -A && git commit -qm ignore-revs");
+    sh('chmod +x tools/fmt && git add -A && git commit -qm setup');
+    sh("tools/fmt && echo 'fixed by hand' > hand.txt && git commit -qam reformat");
+    sh("(echo '# list'; git commit-tree 'HEAD^{tree}' -p HEAD~1 -m 'before its rebase'; git rev-parse HEAD~2 HEAD) > .git-blame-ignore-revs && git add -A && git commit -qm ignore-revs");
     edit('const c = [3];', 'const c = [33];');
     sh("git commit -qam 'main edits c' && git switch -q work");
     edit('{x:1}', '{x:100}');
     sh("git commit -qam '#1: a'");
     edit('const k3 = 3;', 'const k3 = 33;');
     sh("git commit -qam '#1: k3'");
-    sh(steps);
+    for (const line of steps.trim().split('\n')) sh(line); // one shell each: nothing carries over
     assert.equal(readFileSync(join(s.dir, 'f.js'), 'utf8'), "const a = { x: 100 };\nconst k1 = 1;\nconst k2 = 2;\nconst b = 'two';\nconst k3 = 33;\nconst k4 = 4;\nconst c = [33];\n");
     assert.equal(readFileSync(join(s.dir, 'hand.txt'), 'utf8'), 'fixed by hand\n');
     assert.equal(sh('git branch --show-current && git log --format=%s main..HEAD && git status --porcelain'), 'work\n#1: k3\n');

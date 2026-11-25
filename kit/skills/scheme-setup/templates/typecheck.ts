@@ -123,7 +123,7 @@ const WORD = /(?<![\w$])any(?![\w$])/g;
 
 /** Code with comments and string literals blanked to spaces, so positions stay put. Template `${}` holes are kept. */
 function blankText(code: string): string {
-  return code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\(?:\r\n|[\s\S])|[^'\\\n])*'|"(?:\\(?:\r\n|[\s\S])|[^"\\\n])*"|`(?:\\(?:\r\n|[\s\S])|\$\{[^}]*\}|[^`\\])*`/g, (m) => {
+  return code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\(?:\r\n|[\s\S])|[^'\\\n])*'|"(?:\\(?:\r\n|[\s\S])|[^"\\\n])*"|`(?:\\[\s\S]|\$\{[^}]*\}|[^`\\])*`/g, (m) => {
     if (m[0] !== '`') return m.replace(/[^\n]/g, ' ');
     return m.replace(/\$\{([^}]*)\}|[^\n]/g, (part, hole: string | undefined) => (hole === undefined ? ' ' : `  ${hole} `));
   });

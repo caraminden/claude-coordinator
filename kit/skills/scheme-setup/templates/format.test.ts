@@ -13,18 +13,16 @@ const bin = join(root, 'node_modules/.bin/biome');
 // The way onto main for a branch cut before the reformat (#2007): the same text in every kit copy. Only what the branch
 // changed from the formatted old code is replayed, so the reformat itself never conflicts.
 const REBASE = `
-R=$(for r in $(git show main:.git-blame-ignore-revs | grep '^[0-9a-f]'); do git merge-base --is-ancestor $r HEAD || { echo $r; break; }; done)   # the reformat
-mine=$(git branch --show-current)
-git rebase "$R~1"                          # your commits, up to just before it
+git update-ref refs/worktree/reformat "$(for r in $(git show main:.git-blame-ignore-revs | grep '^[0-9a-f]'); do git merge-base --is-ancestor $r main && ! git merge-base --is-ancestor $r HEAD && git cat-file -e $r~1:tools/fmt && { echo $r; break; }; done 2>/dev/null)"
+git rebase refs/worktree/reformat~1        # your commits, up to just before the reformat
 tools/fmt && git commit -qam format --allow-empty
-git switch --detach "$R~1" && tools/fmt && git commit -qam 'the old code, formatted' --allow-empty
-old=$(git rev-parse HEAD)
-git switch -C "$mine" "$(git commit-tree "$mine^{tree}" -p "$old" -m "$(git log -1 --format=%s "$mine~1")")"   # one commit
-git rebase --onto "$R" "$old"
+git switch --detach refs/worktree/reformat~1 && tools/fmt && git commit -qam 'the old code, formatted' --allow-empty && git update-ref refs/worktree/old HEAD && git switch -
+git switch -C "$(git branch --show-current)" "$(git commit-tree 'HEAD^{tree}' -p refs/worktree/old -m "$(git log -1 --format=%s HEAD~1)")"   # one commit
+git rebase --onto refs/worktree/reformat refs/worktree/old
 git rebase main
 `;
 
-export const FIX = `Run \`tools/fmt\` and commit the result. A branch cut before the reformat commit that conflicts when it rebases onto main: commit everything, then run these one line at a time, and where a rebase stops, settle each conflict by hand keeping both main's change and yours (never \`-X theirs\` or \`-X ours\`: one drops landed work without a word, the other yours), then \`git rebase --continue\`:
+export const FIX = `Run \`tools/fmt\` and commit the result. A branch cut before the reformat commit that conflicts when it rebases onto main: commit everything, then run these one at a time (each line stands alone; if the second says it knows no such revision, no listed reformat is on main: stop and fix the list), and where a rebase stops, settle each conflict by hand keeping both main's change and yours (never \`-X theirs\` or \`-X ours\`: one drops landed work without a word, the other yours), then \`git rebase --continue\`:
 ${REBASE}Then \`tools/fmt\` again, and commit.`;
 
 test('every .ts, .js and .mjs file is formatted', { skip: !existsSync(bin) && !process.env.CI ? 'Biome is not installed here (run `npm ci`); CI runs this check' : false }, () => {

@@ -27,10 +27,8 @@ function watchPipes() {
   if (watching) return;
   watching = true;
   for (const s of [process.stdout, process.stderr]) {
-    s.on('error', (err: NodeJS.ErrnoException) => {
+    s.on('error', () => {
       if (pipeDead) return;
-      // Only a gone reader ends logging; any other stream error is still said once, loudly.
-      if (!['EPIPE', 'ECONNRESET', 'ERR_STREAM_DESTROYED'].includes(err.code ?? '')) return say('stdout/stderr error, still serving:', err);
       pipeDead = true;
       onDead?.();
     });

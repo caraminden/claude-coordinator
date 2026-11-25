@@ -832,24 +832,28 @@ export class Waits {
   /** Read the land line and heavy folder with no blocking file call (#1807), then apply them. */
   async poll() {
     const gen = ++this.reads;
-    const [land, heavy, early] = await Promise.all([this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null, readHeavyA(this.d.heavyDir, this.now(), this.d.held), this.d.deployState ? readEarlyA(this.d.deployState) : null]);
-    if (gen === this.reads) this.apply(land, heavy, early); // a newer poll or setOrder read since: this snapshot is old
+    const [land, heavy, early, offStat] = await Promise.all([
+      this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null,
+      readHeavyA(this.d.heavyDir, this.now(), this.d.held),
+      this.d.deployState ? readEarlyA(this.d.deployState) : null,
+      this.d.deployState ? statA(join(this.d.deployState, 'early-off')) : null,
+    ]);
+    if (gen === this.reads) this.apply(land, heavy, early, !!offStat); // a newer poll or setOrder read since: this snapshot is old
   }
   private reads = 0;
 
   /** poll for a person's own action (setOrder), which must have the line before it returns: it reads in the thread. */
   private pollNow() {
     this.reads++;
-    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held), this.d.deployState ? readEarly(this.d.deployState) : null);
+    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held), this.d.deployState ? readEarly(this.d.deployState) : null, !!(this.d.deployState && stat(join(this.d.deployState, 'early-off'))));
   }
 
   /** Which waiting ships have an early run, and which just lost theirs (#1905): the file goes when land.sh throws the run away. */
-  private trackEarly(line: LandTicket[], file: EarlyFile | null): Map<number, { branch: string; top: string; since: number }> {
+  private trackEarly(line: LandTicket[], file: EarlyFile | null, off: boolean): Map<number, { branch: string; top: string; since: number }> {
     const waiting = new Set(line.filter((t) => t.got === 0 && !ridingOf(t.phase)).map((t) => t.label));
     const nextId = file && waiting.has(file.next) ? this.ticketFor(file.next) : null;
     const was = this.earlyNow;
     this.earlyNow = new Map();
-    const off = !!this.d.deployState && !!stat(join(this.d.deployState, 'early-off'));
     if (off) this.earlyDropped.clear();
     const watch = new Map<number, { branch: string; top: string; since: number }>();
     if (file && nextId != null) {
@@ -874,7 +878,7 @@ export class Waits {
     return watch;
   }
 
-  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>, early: EarlyFile | null = null) {
+  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>, early: EarlyFile | null = null, off = false) {
     const now = this.now();
     const next = new Map<number, Wait & { key?: string }>();
     if (land) {
@@ -921,7 +925,7 @@ export class Waits {
       if (t?.branch) gates.set(id, { branch: t.branch, cwd: t.cwd, since: w.since });
     }
     this.d.ci?.landings(this.d.ciSlug?.() ?? null, gates);
-    const stacked = land ? this.trackEarly(land.line, early) : new Map();
+    const stacked = land ? this.trackEarly(land.line, early, off) : new Map();
     this.d.ci?.early?.(this.d.ciSlug?.() ?? null, stacked);
     for (const id of ids) this.check(id);
   }

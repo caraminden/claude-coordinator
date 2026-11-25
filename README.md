@@ -189,6 +189,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/mcp-cards.ts` | MCP tools that put a card in front of a person: definitions and handlers (questions, plans, proposals, approvals) |
 | `src/mcp-scheme.ts` | MCP tools for a scheme's settings, instructions, properties, schedules and review set: definitions and handlers |
 | `src/mcp-minions.ts` | MCP tools for minions and messages: definitions and handlers (create, read, message, close, claims, plan) |
+| `src/mcp-lookup.ts` | MCP tools that look things up: definitions and handlers (searches, artifacts, machines and their jobs, usage) |
 | `src/mcp-types.ts` | Types only: the API answers and requests `src/mcp.ts`'s tools read (#1799) |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip at the top of the minions list |

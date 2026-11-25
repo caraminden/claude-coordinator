@@ -213,7 +213,7 @@ const fileSources = (root: string, files: string[], href: (f: string) => string 
   });
 
 /** Citadel's own files whose words reach every scheme's agents: the prompt, the tool descriptions, the tripwire line, the model table and the kit. */
-const CITADEL_FILES = ['src/prompts.ts', 'src/mcp.ts', 'src/mcp-apps.ts', 'src/mcp-ship.ts', 'src/mcp-cards.ts', 'src/mcp-scheme.ts', 'src/mcp-call.ts', 'src/mcp-minions.ts', 'src/tripwire-blocks.ts', 'public/model-table.js'];
+const CITADEL_FILES = ['src/prompts.ts', 'src/mcp.ts', 'src/mcp-apps.ts', 'src/mcp-ship.ts', 'src/mcp-cards.ts', 'src/mcp-scheme.ts', 'src/mcp-call.ts', 'src/mcp-minions.ts', 'src/mcp-lookup.ts', 'src/tripwire-blocks.ts', 'public/model-table.js'];
 
 /** The repo files whose words reach agents: Citadel's own (above), CLAUDE.md, AGENTS.md and the rule files. */
 export function repoSources(root: string): Source[] {

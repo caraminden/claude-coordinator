@@ -626,8 +626,9 @@ test("a Taskmaster answers while its person's minions hold their container at it
   try {
     r.send(minion, 'room', 'build it');
     await until('the minion waits on its full container', () => jsonLines(calls).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === link.name(uid)));
+    const before = store.listEvents(tm.id).at(-1)?.id ?? 0;
     r.send(tm.id, 'room', 'is CI choking?');
-    await until('the Taskmaster answers', () => status(tm.id) === 'idle' && store.listEvents(tm.id).some((e) => e.kind === 'claude' && JSON.parse(e.data).is_error === false));
+    await until('the Taskmaster answers', () => status(tm.id) === 'idle' && store.listEvents(tm.id).some((e) => e.id > before && e.kind === 'claude' && JSON.parse(e.data).is_error === false));
     assert.equal(status(minion), 'running', 'the full container answers nobody');
     assert.deepEqual(errors(tm.id), []);
     // Its own person's login, in the same folder as ever.
@@ -639,6 +640,26 @@ test("a Taskmaster answers while its person's minions hold their container at it
     r.stop(minion);
     process.kill(Number(readFileSync(hungPid, 'utf8')), 'SIGKILL');
   }
+});
+
+test("a Taskmaster's container waits out a sign-in's start, which chowns the volume they share (#1882)", async () => {
+  const { link, starts, uid } = linkedPerson('signin');
+  (link as unknown as { logins: Map<number, object> }).logins.set(uid, {});
+  const name = link.name(uid);
+  let ended = false;
+  const main = link.ensure(uid).then(() => (ended = true));
+  const tm = link.ensure(uid, true, true);
+  // As it starts: whether the sign-in's start was over.
+  const inner = link as unknown as { containers: Containers };
+  const start = inner.containers.start.bind(inner.containers);
+  const at: [string, boolean][] = [];
+  inner.containers.start = (spec) => (at.push([spec.name, ended]), start(spec));
+  await Promise.all([main, tm]);
+  assert.deepEqual(at, [
+    [name, false],
+    [`${name}-tm`, true],
+  ]);
+  assert.ok(starts()[0].includes(`${name}:${process.env.HOME}:U`), 'the sign-in mends the volume');
 });
 
 test("a Taskmaster's container is its person's other one: same volume and mounts, its own limit and slice, apart from a minions' container that fills, restarts or dies (#1882)", async () => {

@@ -43,12 +43,23 @@ done
 echo "full container: $((${held:-0} >> 20))M of 256M, throttled ${high:-0} times"
 [ "${high:-0}" -gt 0 ] || { echo "FAIL: the container never reached its limit, so this proves nothing"; exit 1; }
 
+# Still full, and still being throttled: a hog that died would make both timings mean nothing.
+still() {
+  local was=${high:-0}
+  high=$(awk '$1 == "high" { print $2 }' "$cg/memory.events" 2>/dev/null)
+  [ "${high:-0}" -gt "$was" ] && [ "$(cat "$cg/memory.current" 2>/dev/null || echo 0)" -gt $((230 << 20)) ] || { echo "FAIL: the full container didn't stay at its limit $1, so this proves nothing"; exit 1; }
+}
+
 t=$(now)
-old=$(timeout -k 5 "$limit" podman exec "$full" node -e "$turn" 2>/dev/null); oldms=$(ms "$t")
+old=$(timeout -k 5 "$limit" podman exec "$full" node -e "$turn" 2>/dev/null); oldrc=$?; oldms=$(ms "$t")
+still 'while the old way ran'
+# 124 and 137 are timeout's own: it was stuck. Any other failure with no answer isn't the stall this looks for.
+[ "$old" = ANSWERED ] || [ "$oldrc" = 124 ] || [ "$oldrc" = 137 ] || { echo "FAIL: the old way broke (exit $oldrc) rather than stalled"; exit 1; }
 [ "$old" = ANSWERED ] && echo "old (in the full container): answered in $oldms ms" || echo "old (in the full container): no answer in $oldms ms"
 t=$(now)
 start "$own" citadel-taskmasters.slice MemoryHigh=3G MemoryMax=4G MemorySwapMax=2G ManagedOOMPreference=omit -- sleep infinity && running "$own" || { echo "FAIL: the Taskmaster's container didn't start"; exit 1; }
 new=$(timeout -k 5 "$limit" podman exec "$own" node -e "$turn" 2>/dev/null); newms=$(ms "$t")
+still 'while the new way ran'
 [ "$new" = ANSWERED ] && echo "new (its own container, started from cold): answered in $newms ms" || echo "new (its own container): no answer in $newms ms"
 # What it costs to keep it up with no turn in it.
 echo "its own container, idle: $(($(cat "/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value "$own")/memory.current") >> 20))M"

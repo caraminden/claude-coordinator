@@ -544,7 +544,9 @@ export class ClaudeLink {
     const name = taskmaster ? this.taskmasterName(uid) : this.name(uid);
     const now = this.starting.get(name);
     if (now) return now;
-    const run = this.start(uid, forTurn, taskmaster).finally(() => this.starting.delete(name));
+    // A sign-in's start chowns the volume: no Taskmaster turn starts writing in it meanwhile (spec()).
+    const chowning = taskmaster && this.logins.has(uid) ? this.starting.get(this.name(uid)) : undefined;
+    const run = (chowning ? chowning.catch(() => {}).then(() => this.start(uid, forTurn, taskmaster)) : this.start(uid, forTurn, taskmaster)).finally(() => this.starting.delete(name));
     this.starting.set(name, run);
     return run;
   }

@@ -1,10 +1,10 @@
 // The person's Codex lock (src/codex-lock.ts): a short login check that refreshes early, then lets runs go side by side (#636).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { codexLock, LOCK_ENV, MARGIN_S, SERIAL_FILE, startTime, tokenLife } from '../src/codex-lock.ts';
+import { codexLock, LOCK_ENV, lockHolder, MARGIN_S, SERIAL_FILE, startTime, tokenLife } from '../src/codex-lock.ts';
 import { holds } from './helpers.ts';
 import { until } from './wait.ts';
 
@@ -137,7 +137,7 @@ test('the switch brings back one at a time: the file in CODEX_HOME or CITADEL_CO
   const a = await codexLock(dir, () => {}, opts(dir));
   assert.deepEqual([a.serial, locked(dir)], [true, true]);
   // A review from that turn's own shell goes ahead and leaves the lock to the turn (#468 S04-6); a turn never does.
-  const own = { [LOCK_ENV]: `${process.pid} ${startTime(process.pid)}` };
+  const own = { [LOCK_ENV]: await lockHolder() };
   const review = await codexLock(dir, () => assert.fail('waited on its own turn'), { ...opts(dir, own), inTurn: true });
   review.unlock();
   assert.ok(locked(dir), "its turn's lock stays");
@@ -186,4 +186,18 @@ test("a holder that died while refreshing keeps its lock until its codex is done
   await run;
   assert.deepEqual(refreshes(dir), ['start', 'end']);
   assert.equal(locked(dir), false);
+});
+
+test("a holder in the person's other container counts pids apart: its lock holds while it is kept fresh, and goes once it isn't (#1882)", async () => {
+  const dir = home(5 * DAY);
+  const lock = join(dir, 'citadel-turn.lock');
+  mkdirSync(lock);
+  // A pid nothing has here, in another pid namespace.
+  writeFileSync(join(lock, 'pid'), '4194999 1 pid:[1]');
+  let next: unknown;
+  const run = codexLock(dir, () => {}, opts(dir)).then((l) => (next = l));
+  await holds('the other container holds it', () => !next && locked(dir), { ms: 600 });
+  const old = new Date(Date.now() - 121_000);
+  utimesSync(lock, old, old);
+  await run;
 });

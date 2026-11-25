@@ -512,12 +512,13 @@ smoke() {
       fi
     fi
   fi
-  rm -f "$state/pulled/${branch//\//-}"
+  [ "$rc" != 0 ] || rm -f "$state/pulled/${branch//\//-}" # past its time limit, they haven't passed
   say "smoke: passed in $((SECONDS - t0)) s"
 }
 # <test file>...: what CI refused this ship for; its next hand-off's smoke check runs them too (#1899).
 pulled_out() {
   [ $# -gt 0 ] && mkdir -p "$state/pulled" || return 0
+  find "$state/pulled" -type f -mtime +14 -delete 2>/dev/null || true # a branch that never came back
   printf '%s\n' "$@" >"$state/pulled/${branch//\//-}"
 }
 formatted=''; [ -n "$resumed" ] || [ "$mode" = build ] || [ ! -x tools/fmt ] || [ ! -f "$tools/ship-format.sh" ] || { . "$tools/ship-format.sh"; format_ship; } # the ship's own files, in a commit of their own (#1885)
@@ -2316,7 +2317,7 @@ train_suspects() {
   return 1
 }
 # A red train (#1899; Josh, 2026-11-24: "keep splitting and any green section gets shipped, until the bad change is found
-# and then pulled out to be fixed and full train starts over"). The half at its front is tested; green, it ships at once
+# and then pulled out to be fixed and full train starts over"). The part at its front (split_cut) is tested; green, it ships at once
 # (that commit is tested and main hasn't moved, so it needs no further run) and the ships behind it go back in line,
 # nobody refused; red, its own first half is next. <state>/split holds the ships the red may be (split_say), so the next
 # front among them tests half of what is left (split_look, train_build), down to one ship tested by itself: only a red
@@ -2466,6 +2467,7 @@ elif [ "$rc" = 1 ]; then
     [ "$main_red_riders" = 0 ] || retry_in_place "red on main too: $main_red" # alone, a retry would only run CI on it again
     refuse "tests failed in CI ($ci_url) in $main_red, which fails on main's own tip too (run alone here): main is red, not this change, so $untouched${main_red_other:+. The run was also red on $main_red_other, which may be yours}. Run this again once main is green (a fix for $main_red has shipped)"
   fi
+  [ -z "$reran" ] || [ -n "$suspect_tests$suspect_pinned$burn_said" ] || flake_keep # kept in line, it is no bad ship
   [ -z "$split_of" ] || retro_log "ship train red · $split_of · $branch · $ci_url"
   split_over
   # shellcheck disable=SC2046 # file names
@@ -2474,7 +2476,6 @@ elif [ "$rc" = 1 ]; then
   [ -z "$suspect_pinned" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, and run alone on perigee it passed on main and failed with $branch on it, so it is the cause: the ships behind it went back in line, so $untouched. Fix it, re-test, commit, then run this again"
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"
   [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI ($ci_url): $burn_said, so it never reached the full suite and $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again. This is the ship's own red, never a known flake"
-  [ -z "$reran" ] || flake_keep
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red whose files all passed alone ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else

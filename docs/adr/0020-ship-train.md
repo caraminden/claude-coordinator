@@ -23,8 +23,12 @@ the last one in line waited for every run ahead of it.
   pair the earlier one ships and the later one goes back. Once the bad ship is found, the next front builds a full train
   again from everything waiting. No early run is stacked on a train being split. Suspects still come first: a confirmed
   cause (below) leaves at once and the rest get one run, no halves. Names that nothing confirms only pick where to cut:
-  just before the first of them, or the middle when they name nobody or more than half the ships. One bad ship of six
-  takes 3 to 5 CI runs to find, the red one included.
+  just before the first of them, or the middle when they name nobody or more than half the ships. One ship alone named
+  by a guess still waits off the train (#1403, below) and goes back only once the train without it passes its files.
+  A refused front's branch keeps its rebase, as a ship tested alone always did. One bad ship of six takes 3 to 5 CI
+  runs to find, the red one included, and 6 after a wrong guess.
+  Picks, open to change: the part behind a red front part is not tested while the search runs (it boards the next full
+  train), the later of two ships red only together goes back, and the ships waiting behind a split wait it out.
 - **What a pulled-out ship needs to board again** (#1899): the test files it failed run in its next smoke check, before
   it gets in line (`<state>/pulled/`).
 - **Suspects before the bisect** (#1346; Cara, 2026-11-20: "we pull out the minions that touched the failing tests

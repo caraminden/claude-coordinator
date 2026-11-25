@@ -1,5 +1,5 @@
 // The ship train (#1166, tools/land.sh): the landing at the front of the line takes the plain lands waiting behind it,
-// tests them in one CI run and ships them in one deploy; a red train is bisected, and its first red ship refused.
+// tests them in one CI run and ships them in one deploy; a red train keeps splitting until the bad ship is found (land-train-split.test.ts).
 // This file: guard runs, flakes, cut-off runs, CI with no answer, restarts and retried fronts (split from land-train.test.ts, #1723).
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

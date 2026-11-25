@@ -118,3 +118,17 @@ test('a merged card redrawn after it grew can still be sent (C1)', { skip }, asy
   assert.equal(await page.eval(`document.querySelector('.qcard .progress').textContent`), 'All answered');
   assert.equal(await page.eval(`${sendBtn}.disabled`), false);
 });
+
+// C4: picks on a card nobody has sent hold an automatic reload, even once the chat that drew them is gone.
+test('picks not yet sent hold a reload, drawn or not (C4)', { skip }, async () => {
+  const page = await open();
+  const held = () => page.eval<boolean>(`import('/cards.js').then((m) => m.unsentCardWork())`);
+  assert.equal(await held(), false, 'nothing picked');
+  await page.eval(`document.querySelector('.qcard [data-q="0"] .opt[data-label="B1"]').click()`);
+  assert.equal(await held(), true);
+  for (let n = 20; n < 36; n++) {
+    await page.eval(`location.hash = '#/p/1/t/${n}'`);
+    await waitFor(page, 'the other chat', `document.getElementById('ticket-head')?.textContent.includes('Minion ${n}')`);
+  }
+  assert.equal(await held(), true, 'the card is no longer on the page');
+});

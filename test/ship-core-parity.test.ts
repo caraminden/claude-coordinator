@@ -258,7 +258,7 @@ test('tests.yml fails a run that skipped a test, red runs included, and says not
   assert.deepEqual(end(1, ''), [1, false], 'cut short: no summary');
 });
 
-// #1864 (DR1, LB6): GitHub's own JSON through each script's own jq. A lost runner leaves a failed job with no failed
+// #1864 (DR1, LB6): GitHub's answers as each script reads them. A lost runner leaves a failed job with no failed
 // step, an unanswered call is no answer, and the PC's port check runs after a green suite: none is a red.
 const JOBS = {
   suite: { jobs: [{ steps: [{ name: 'the full suite', conclusion: 'failure' }] }] },
@@ -286,6 +286,9 @@ const JOBS = {
   setup: { jobs: [{ steps: [{ name: "the runner user's systemd", conclusion: 'failure' }] }] },
   none: { jobs: [] },
 };
+// What both scripts' jq says of each, worked out here: CI's runners have no jq. A change to the expression changes both.
+const STEP_JQ = '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // (if (.jobs | length) == 0 then "no jobs" else "no failed step" end)';
+const stepOf = (j: { jobs: { steps: { name: string; conclusion: string | null }[] | null }[] }) => j.jobs.flatMap((job) => job.steps ?? []).find((s) => s.conclusion === 'failure')?.name ?? (j.jobs.length === 0 ? 'no jobs' : 'no failed step');
 test('what a failed run means is the same in land.sh and land.local.sh: 1 only when a step that runs the tests failed', () => {
   const land = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
   const cut = (a: string, b: string) => land.slice(land.indexOf(a), land.indexOf(b, land.indexOf(a)));
@@ -295,13 +298,13 @@ test('what a failed run means is the same in land.sh and land.local.sh: 1 only w
   const fns = ['citadel_ci_status', 'citadel_ci_rerun_said', 'citadel_cut_off', 'citadel_flake_only', 'citadel_ci_digest', 'citadel_ci_log'].map((n) => fn(local, n)).join('\n');
   const localConsts = [...readFileSync(local, 'utf8').matchAll(/^CITADEL_CI_[A-Z_]*(?:STEP|WORKFLOW|LABEL)=.*$/gm)].map((m) => m[0]).join('\n');
   const dir = mkdtempSync(join(root, 'verdict-'));
-  // `gh api … --jq <expr>` answers from $JSON through jq; `down` answers nothing.
+  // `gh api … --jq <expr>` answers $STEP, what that expression says of the run; `down` answers nothing.
   const gh = `fake() { case "$*" in
     *head_sha*) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
-    *"/jobs"*) [ "$JSON" != down ] || return 1; local e; while [ $# -gt 0 ]; do [ "$1" != --jq ] || e=$2; shift; done; jq -r "$e" <<<"$JSON" ;;
+    *"/jobs"*) [ "$STEP" != down ] || return 1; local e; while [ $# -gt 0 ]; do [ "$1" != --jq ] || e=$2; shift; done; [ "$e" = "$STEP_JQ" ] && echo "$STEP" ;;
     *"run view"*) [ "$LOG" != down ] || return 1; printf 'job\\tstep\\t2026-11-24T00:00:00Z %s\\n' "$LOG" ;;
   esac; }`;
-  const landRc = (json: string) => {
+  const landRc = (step: string) => {
     const script = `${gh}
 say() { :; }; retro_log() { :; }; ci_said() { :; }; ci_down() { :; }; hub() { fake "$@"; }; state=${dir} CI_POLL=0 ci_slug=o/r ci_id=7 ci_url=u short=s branch=b ci_lost='' burn_red='' CI_BURN_STEP='burn in new and changed tests'
 ${consts}
@@ -310,17 +313,19 @@ v() { case failure in
 ${verdict}
 esac; }
 rc=0; v || rc=$?; echo "$rc\${ci_lost:+ lost}"`;
-    return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, JSON: json } });
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, STEP_JQ, STEP: step } });
   };
-  const localRc = (json: string, log = 'run-tests: broken') => {
+  const localRc = (step: string, log = 'run-tests: broken') => {
     const d = mkdtempSync(join(dir, 'd-'));
     const script = `${gh}
 ${localConsts}
 citadel_hub() { fake "$@"; }; citadel_ci_dir() { echo ${d}; }; citadel_slug() { echo o/r; }; citadel_retro_log() { :; }; citadel_ci_known() { return 1; }; citadel_ci_burn_lines() { :; }
 ${fns}
 citadel_ci_status abcdef0123456789; echo "rc $?"`;
-    return spawnSync('bash', ['-c', script], { encoding: 'utf8', cwd: d, env: { ...env, JSON: json, LOG: log } });
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8', cwd: d, env: { ...env, STEP_JQ, STEP: step, LOG: log } });
   };
+  // Where there is a jq, its own answer is held to the one worked out here.
+  if (spawnSync('jq', ['--version']).status === 0) for (const [k, j] of Object.entries(JOBS)) assert.equal(spawnSync('jq', ['-r', STEP_JQ], { encoding: 'utf8', input: JSON.stringify(j) }).stdout.trim(), stepOf(j), k);
   const want: [string, string, string][] = [
     ['suite', '1', '1'],
     ['lost', '1 lost', '4'],
@@ -331,13 +336,13 @@ citadel_ci_status abcdef0123456789; echo "rc $?"`;
     ['down', '2', '5'],
   ];
   for (const [k, a, b] of want) {
-    const json = k === 'down' ? 'down' : JSON.stringify(JOBS[k as keyof typeof JOBS]);
-    const l = landRc(json);
+    const step = k === 'down' ? 'down' : stepOf(JOBS[k as keyof typeof JOBS]);
+    const l = landRc(step);
     assert.equal(l.stdout.trim(), a, `land.sh, ${k}: ${l.stdout}${l.stderr}`);
-    const c = localRc(json);
+    const c = localRc(step);
     assert.equal(c.stdout.trim().split('\n').at(-1), `rc ${b}`, `land.local.sh, ${k}: ${c.stdout}${c.stderr}`);
   }
-  const noLog = localRc(JSON.stringify(JOBS.suite), 'down');
+  const noLog = localRc(stepOf(JOBS.suite), 'down');
   assert.equal(noLog.stdout.trim().split('\n').at(-1), 'rc 5', noLog.stdout + noLog.stderr);
   assert.match(noLog.stdout, /GitHub didn't send the red CI run's log/);
 });

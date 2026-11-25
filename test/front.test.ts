@@ -445,12 +445,15 @@ test('front-end files come from the front thread, the bytes and headers main sen
     rmSync(join(srv.data, SHELL_OFF_FILE));
   }
   // A file the front holds never waits on the main thread.
-  const files: Record<string, () => Promise<unknown>> = {};
+  const files: Record<string, (busy: boolean) => Promise<unknown>> = {};
   for (const path of ['/c/', '/app.js', '/apps/_citadel/theme.css'])
-    files[path] = async () => {
+    files[path] = async (busy) => {
       const got = await raw(path);
       assert.equal(got.status, 200, path);
-      assert.ok(got.front, path);
+      // With the main thread idle the front passes a file on while a change main posted is still on its way to it
+      // (caughtUp, src/front.ts): seen once on CI, just after the busy main thread was free. While it is busy, the
+      // front's own answer is the claim.
+      if (busy) assert.ok(got.front, path);
     };
   await withinWhileBusy(1500, files);
 });

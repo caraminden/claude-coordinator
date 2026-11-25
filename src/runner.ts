@@ -2027,12 +2027,12 @@ export class Runner {
     author: string,
     text: string,
     images: MessageImage[] = [],
-    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
+    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; fix?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
     steer = false,
     files: MessageFile[] = [],
   ): { event: EventRow; parked?: true } {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
-    const { asker: askedBy, fyi, light, hold, ...shown } = extra;
+    const { asker: askedBy, fyi, light, fix, hold, ...shown } = extra;
     extra = shown;
     if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
@@ -2090,6 +2090,7 @@ export class Runner {
       ...(extra.typed || 'answer' in extra ? { own: true } : {}),
       ...(fyi ? { fyi: true } : {}),
       ...(light ? { light: true as const } : {}),
+      ...(fix ? { fix: true as const } : {}),
       asker,
     };
     if (parked) {
@@ -2661,7 +2662,7 @@ export class Runner {
       const waiting = this.waiting(ticketId);
       const payer = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via);
       const person = payer ?? 0;
-      const place = this.places.place(ticket, () => (this.codexTurn(ticket, project, payer) ? null : this.accountOf(ticket, payer)));
+      const place = this.places.place(ticket, () => (this.codexTurn(ticket, project, payer) ? null : this.accountOf(ticket, payer)), waiting.msgs);
       if (waiting.msgs.some((m) => m.own)) return { person, rank: 0, ...place };
       // A first turn a person or a minion asked for; a schedule's or Citadel's own has no asker.
       const asked = !ticket.session_id && waiting.msgs.some((m) => m.from || m.asker != null);

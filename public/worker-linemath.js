@@ -61,5 +61,11 @@ export function nextUrgent(groups, id) {
 /** Why it stands where it does, in a few words. */
 export function lineWhy(r) {
   if (r.kind) return r.by ? `by ${r.by}${r.reason ? `: ${r.reason}` : ''}` : '';
-  return [r.first ? 'ship refused, or others wait on it' : '', r.warm ? 'warm, about to go cold' : !r.first && r.fresh ? 'brand new' : ''].filter(Boolean).join(' · ');
+  return [r.first ? 'ship refused, or others wait on it' : '', r.warm ? 'warm, about to go cold' : !r.first && r.fresh ? 'brand new' : '', r.quick ? 'may use the quick lane' : ''].filter(Boolean).join(' · ');
+}
+
+/** The quick lane in words (#1986): its workers out, why it is smaller than 2, and the turns that moved to the pool. */
+export function laneSaid({ used, size, moved }) {
+  const now = size === 0 ? `${used ? `${used} working, ` : ''}closed while memory is tight` : `${used} of ${size} working${size === 1 ? ', 1 while memory is under strain' : ''}`;
+  return `${now}${moved ? ` · ${moved} moved to the pool` : ''}`;
 }

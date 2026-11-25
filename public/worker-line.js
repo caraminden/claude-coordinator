@@ -10,7 +10,7 @@ import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { emptyCard, toneChip } from './look.js';
 import { dragReorder } from './reorder.js';
-import { applyMove, applyStart, dropped, lineGroups, lineWhy, nextUrgent, ownSaid } from './worker-linemath.js';
+import { applyMove, applyStart, dropped, laneSaid, lineGroups, lineWhy, nextUrgent, ownSaid } from './worker-linemath.js';
 
 const READ_MS = 10_000;
 const HOW = 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose. Start now: a worker of its own, two each.';
@@ -306,24 +306,26 @@ const hueOf = (name) =>
       1,
   );
 
-/** Whose workers are out: a bar in people's colours, and each person's working and waiting beside it. */
+const LANE_HOW = "Beside the pool, for what people say and answer and the server's wake-ups, while every worker is taken. One still running after 2 minutes counts in the pool.";
+
+/** The quick lane's state, for the tile and the drawer. */
+export const quickLane = (lane) => h('span', { title: LANE_HOW }, toneChip(lane.used ? 'info' : lane.size ? 'neutral' : 'warn', 'Quick lane'), ` ${laneSaid(lane)}`);
+
+/** Whose workers are out, the quick lane's under them: a bar in people's colours, and each person's working and waiting beside it. */
 function pool() {
   const w = open.workers;
   if (!w) return [];
   const bar = h('div', { class: 'line-bar', 'aria-hidden': 'true' });
-  for (const p of w.people.filter((x) => x.used)) {
-    const part = h('i', { 'data-cat': hueOf(p.name) });
-    part.style.setProperty('flex-grow', String(p.used));
-    bar.append(part);
-  }
+  const part = (attrs, n) => {
+    const i = h('i', attrs);
+    i.style.setProperty('flex-grow', String(n));
+    bar.append(i);
+  };
+  for (const p of w.people.filter((x) => x.used)) part({ 'data-cat': hueOf(p.name) }, p.used);
   const free = Math.max(0, w.size - w.used);
-  if (free) {
-    const rest = h('i', { class: 'free' });
-    rest.style.setProperty('flex-grow', String(free));
-    bar.append(rest);
-  }
-  const keys = w.people.map((p) => h('span', { class: 'line-key', 'data-cat': hueOf(p.name) }, h('i'), `${p.name} ${p.used}`, p.waiting ? h('span', { class: 'muted' }, ` · ${p.waiting} waiting`) : ''));
-  return [h('b', {}, `${w.used} of ${w.size}`), ` working${w.forced ? `, ${w.forced} forced` : ''}`, w.paused ? h('span', { class: 'line-paused' }, ` · paused by ${w.paused.by}`) : '', bar, h('div', { class: 'line-keys' }, keys)];
+  if (free) part({ class: 'free' }, free);
+  const keys = w.people.map((p) => h('span', { class: 'line-key', 'data-cat': hueOf(p.name) }, h('i'), `${p.name} ${p.used}`, p.lane ? h('span', { class: 'muted' }, ` · ${p.lane} quick`) : '', p.waiting ? h('span', { class: 'muted' }, ` · ${p.waiting} waiting`) : ''));
+  return [h('b', {}, `${w.used} of ${w.size}`), ` working${w.forced ? `, ${w.forced} forced` : ''}`, w.paused ? h('span', { class: 'line-paused' }, ` · paused by ${w.paused.by}`) : '', bar, h('div', { class: 'line-keys' }, keys), h('div', { class: 'line-quick small' }, quickLane(w.lane))];
 }
 
 function button(key, label, text, onclick, cls = 'ar', pressed) {
@@ -368,6 +370,19 @@ function rowOf(r, g, i, inUrgent) {
   );
 }
 
+/** A turn that started in the quick lane, and whether it counts in the pool by now. */
+function laneRow(t) {
+  const name = t.ticket == null ? h('span', { class: 'muted' }, 'A minion in another scheme') : h('a', { class: 'line-name', 'data-key': `name-${t.ticket}`, href: `#/p/${t.project}/t/${t.number}`, title: `#${t.number} ${t.title}` }, h('span', { class: 'num' }, `#${t.number}`), ` ${t.title}`);
+  const meta = [t.person, `since ${pacificClock(t.since)}`, t.moved ? 'in the pool now' : ''].filter(Boolean).join(' · ');
+  return h(
+    'li',
+    { class: `line-row lane${t.ticket != null && t.ticket === open.from ? ' here' : ''}${t.ticket == null ? ' other' : ''}`, 'data-cat': t.person ? hueOf(t.person) : null },
+    h('span', { class: 'line-who', 'aria-hidden': 'true' }),
+    h('span', { class: 'line-t' }, name, h('span', { class: 'line-meta' }, meta)),
+    t.moved ? toneChip('neutral', 'Moved') : toneChip('info', 'Quick'),
+  );
+}
+
 /** A minion on a worker of its own: whose, since when, and Release. */
 function ownRow(f, held) {
   const id = f.ticket;
@@ -405,6 +420,7 @@ function draw() {
   const num = (r) => (r.waiting === false ? null : ++n);
   list.replaceChildren(
     ...(forced.length ? [h('li', { class: 'line-head' }, 'Started now'), ...forced.map((f) => ownRow(f, f.ticket != null && line.find((w) => w.ticket === f.ticket)?.held))] : []),
+    ...(open.line.lane?.length ? [h('li', { class: 'line-head' }, 'Started in the quick lane'), ...open.line.lane.map(laneRow)] : []),
     h('li', { class: 'line-head urgent' }, 'Urgent'),
     ...(g.urgent.length ? [] : [h('li', { class: 'line-lane' }, 'Nobody is Urgent. Drop a minion here, or press ! on it.')]),
     ...g.urgent.map((r) => rowOf(r, g, num(r), true)),

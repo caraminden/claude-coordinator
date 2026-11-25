@@ -1,9 +1,12 @@
 // What puts a waiting minion where it stands in its person's share of the line for a worker (#1888, src/turn-line.ts):
 // its ship was refused, the job it waited for ended (#1890), other minions wait on it, or its session is about to go cold on the account its turn would use.
+import { APP_NAME } from './appname.ts';
 import { keptCards } from './card-wait.ts';
 import type { Store, Ticket } from './db.ts';
+import { GITHUB_NAME } from './github.ts';
 import { wokenWaits } from './minion-jobs.ts';
 import type { LinePlace } from './turn-line.ts';
+import type { QueuedMessage } from './turn-messages.ts';
 import type { Urgent } from './urgent.ts';
 import { otherId } from './waits-readout.ts';
 import type { Chain } from './wake.ts';
@@ -27,6 +30,12 @@ export function heatOf(session: boolean, last: { ended_at: number } | null, now:
   const age = last ? now - last.ended_at : 0;
   return age >= GOING_COLD_MS && age < CACHE_MS ? 0 : 1;
 }
+
+/**
+ * Whether a message starts its minion in the quick lane (#1986, src/turn-line.ts): a person's own words (a comment on a file
+ * too), an answer to a card, a plan or an approval, or the server waking it. Another minion's message doesn't, nor a refused ship to fix.
+ */
+export const quickMessage = (m: QueuedMessage) => !m.from && !m.fix && !!(m.own || m.card || m.about || m.author === APP_NAME || m.author === GITHUB_NAME);
 
 /** The open minions that other open minions wait on: a chained start, a wait on its work, a claim it holds with a queue behind it. */
 export function waitedOn(store: Store, chains: Chain[]): Set<number> {
@@ -64,15 +73,23 @@ export class LinePlaces {
     this.d = d;
   }
 
-  /** A waiting minion's place, `next` the account its turn would run on (null: a model that keeps no Claude cache). */
-  place(ticket: Ticket, next: () => OnAccount | null): Pick<LinePlace, 'urgent' | 'first' | 'heat'> {
+  /** A waiting minion's place, `msgs` what its turn would answer, `next` the account its turn would run on (null: a model that keeps no Claude cache). */
+  place(ticket: Ticket, next: () => OnAccount | null, msgs: QueuedMessage[] = []): Pick<LinePlace, 'urgent' | 'first' | 'heat' | 'quick'> {
     const { store, urgent, now } = this.d;
-    const last = ticket.session_id ? store.lastTurnOn(ticket.id) : null;
+    const ran = store.lastTurnOn(ticket.id);
+    const last = ticket.session_id ? ran : null;
     const at = now();
     // Whose account it would run on is looked up only for one about to go cold.
     const on = last && heatOf(true, last, at) === 0 ? next() : null;
     const spot = urgent.place(ticket.id);
-    return { ...(spot === undefined ? {} : { urgent: spot }), first: !!store.getSetting(refusedKey(ticket.id)) || !!keptCards(store).get(ticket.id)?.answer || wokenWaits(store, ticket.id) || this.others(ticket.id), heat: heatOf(!!ticket.session_id, last && on && sameAccount(last, on) ? last : null, at) };
+    // A new minion waits for the pool, whatever is said to it. One on Codex, or whose session was lost, has no session but has had turns.
+    const quick = !!(ticket.session_id || ran) && msgs.some(quickMessage);
+    return {
+      ...(spot === undefined ? {} : { urgent: spot }),
+      ...(quick ? { quick } : {}),
+      first: !!store.getSetting(refusedKey(ticket.id)) || !!keptCards(store).get(ticket.id)?.answer || wokenWaits(store, ticket.id) || this.others(ticket.id),
+      heat: heatOf(!!ticket.session_id, last && on && sameAccount(last, on) ? last : null, at),
+    };
   }
 
   private others(ticketId: number): boolean {

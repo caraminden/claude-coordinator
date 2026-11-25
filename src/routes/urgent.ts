@@ -12,7 +12,7 @@ function markable(t: Ticket | undefined, what = 'is Urgent'): Ticket {
   return t;
 }
 
-/** The line as `session` may see it: the workers people gave a minion, the Urgent group whole, waiting or not, then the waiting in the order they would start. */
+/** The line as `session` may see it: the workers people gave a minion, what started in the quick lane, the Urgent group whole, waiting or not, then the waiting in the order they would start. */
 function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?: number; admin?: boolean }) {
   const minion = (id: number) => {
     const t = store.getTicket(id);
@@ -28,6 +28,7 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       // Who and why only to those who see it: a Taskmaster's mark names its scheme.
       return { ...t, waiting: runner.turnLine.has(m.ticket), kind: m.kind, at: m.at, ...(t.ticket ? { by: m.by, reason: m.reason } : {}) };
     }),
+    lane: runner.turnLine.laneTurns().map((t) => ({ ...minion(t.ticket), person: store.getUser(t.person)?.name ?? null, since: t.since, moved: t.moved })),
     line: runner.turnLine.line().map((w) => ({
       ...minion(w.ticket),
       person: store.getUser(w.person)?.name ?? null,
@@ -39,6 +40,7 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       first: !!w.first,
       warm: w.heat === 0,
       fresh: w.heat === 2,
+      quick: !!w.quick,
     })),
   };
 }

@@ -719,6 +719,8 @@ html:has(> body > .line-drawer:modal) { scrollbar-gutter: auto; padding-right: v
 .line-btn { display: inline-grid; place-items: center; width: 1.9rem; height: 1.9rem; box-sizing: border-box; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); font-size: 0.95em; line-height: 1; }
 .line-btn.now { width: auto; padding: 0 0.5rem; border-color: var(--line); font-size: 0.8em; white-space: nowrap; color: var(--ink); }
 .line-row.own .line-meta { white-space: normal; }
+.line-quick { margin-top: 0.35rem; color: var(--muted); }
+.line-row.lane { cursor: default; }
 .line-row.own { cursor: default; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
 button.line-btn:is(:hover, :focus-visible) { border-color: var(--line); background: var(--line); color: var(--ink); }
 .line-btn.bang { border-color: var(--line); font-weight: 800; }

@@ -91,14 +91,16 @@ async function stop(p: ChildProcess): Promise<boolean> {
   return clean;
 }
 
-let manifest: Manifest;
-try {
-  manifest = JSON.parse(readFileSync(join(app, 'citadel-app.json'), 'utf8')) as Manifest;
-} catch (err) {
-  fail(`can't read ${join(app, 'citadel-app.json')}: ${err instanceof Error ? err.message : String(err)}`);
+function readManifest(): Manifest {
+  try {
+    return JSON.parse(readFileSync(join(app, 'citadel-app.json'), 'utf8')) as Manifest;
+  } catch (err) {
+    return fail(`can't read ${join(app, 'citadel-app.json')}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
-const command = manifest.start?.[0];
-if (!command) fail('citadel-app.json has no start command');
+
+const manifest = readManifest();
+const command = manifest.start?.[0] ?? fail('citadel-app.json has no start command');
 const health = manifest.health ?? null;
 // Citadel serves the app under /apps/<name>; the health path carries that name when it has the prefix.
 const name = /^\/apps\/([^/]+)/.exec(health ?? '')?.[1] ?? basename(app);
@@ -120,61 +122,66 @@ for (const d of [keys, home, data]) mkdirSync(d);
 writeFileSync(join(keys, 'identity.pub'), generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }));
 writeFileSync(join(keys, 'contraption.key'), 'boot-check\n');
 
-const port = await freePort();
-const own = Object.entries(manifest.env ?? {}).map(([k, v]) => [k, v.replace(/^~(?=\/|$)/, home)]);
-// Only these: nothing else of the runner's environment (its tokens) reaches the app.
-const env: NodeJS.ProcessEnv = {
-  PATH: process.env.PATH,
-  LANG: process.env.LANG ?? 'C.UTF-8',
-  // Where a toolchain the app starts through lives, now that HOME is an empty folder.
-  ...Object.fromEntries(['LD_LIBRARY_PATH', 'MISE_DATA_DIR', 'RUSTUP_HOME', 'CARGO_HOME'].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : []))),
-  ...Object.fromEntries(own),
-  HOME: home,
-  TMPDIR: scratch,
-  PORT: String(port),
-  DATA_DIR: data,
-  CITADEL_KEYS: keys,
-  CITADEL_URL: 'http://127.0.0.1:9',
-  BASE_PATH: `/apps/${name}`,
-};
-// "node" and "/usr/bin/node" both mean the Node this job set up.
-const program = basename(command) === 'node' ? process.execPath : command;
+// A function, not top-level await: a repo whose root has no "type": "module" type-checks this file as CommonJS.
+async function main(): Promise<void> {
+  const port = await freePort();
+  const own = Object.entries(manifest.env ?? {}).map(([k, v]) => [k, v.replace(/^~(?=\/|$)/, home)]);
+  // Only these: nothing else of the runner's environment (its tokens) reaches the app.
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    // Where a toolchain the app starts through lives, now that HOME is an empty folder.
+    ...Object.fromEntries(['LD_LIBRARY_PATH', 'MISE_DATA_DIR', 'RUSTUP_HOME', 'CARGO_HOME'].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : []))),
+    ...Object.fromEntries(own),
+    HOME: home,
+    TMPDIR: scratch,
+    PORT: String(port),
+    DATA_DIR: data,
+    CITADEL_KEYS: keys,
+    CITADEL_URL: 'http://127.0.0.1:9',
+    BASE_PATH: `/apps/${name}`,
+  };
+  // "node" and "/usr/bin/node" both mean the Node this job set up.
+  const program = basename(command) === 'node' ? process.execPath : command;
 
-let out = '';
-const child = spawn(program, manifest.start.slice(1), { cwd: join(app, manifest.workdir ?? '.'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-const keep = (b: Buffer) => {
-  out = (out + b.toString()).slice(-20_000);
-};
-child.stdout.on('data', keep);
-child.stderr.on('data', keep);
-let startError = '';
-child.once('error', (err) => {
-  startError = err.message;
-});
-// A cancelled job (or Ctrl-C) takes the app with it.
-for (const s of ['SIGINT', 'SIGTERM'] as const) process.once(s, () => void stop(child).then(() => process.exit(1)));
+  let out = '';
+  const child = spawn(program, manifest.start.slice(1), { cwd: join(app, manifest.workdir ?? '.'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const keep = (b: Buffer) => {
+    out = (out + b.toString()).slice(-20_000);
+  };
+  child.stdout.on('data', keep);
+  child.stderr.on('data', keep);
+  let startError = '';
+  child.once('error', (err) => {
+    startError = err.message;
+  });
+  // A cancelled job (or Ctrl-C) takes the app with it.
+  for (const s of ['SIGINT', 'SIGTERM'] as const) process.once(s, () => void stop(child).then(() => process.exit(1)));
 
-console.log(`boot check: starting ${name} on port ${port}`);
-const started = Date.now();
-let answers = 0;
-let saw = 'nothing yet';
-while (answers < 2 && !gone(child) && !startError && Date.now() - started < HEALTH_MS) {
-  const seen = await look(port, health);
-  saw = seen.saw;
-  answers = seen.up ? answers + 1 : 0;
-  // Twice, a moment apart, as Citadel's deploy asks: one answer can come just before a crash.
-  if (answers < 2) await sleep(seen.up ? 2000 : 250);
+  console.log(`boot check: starting ${name} on port ${port}`);
+  const started = Date.now();
+  let answers = 0;
+  let saw = 'nothing yet';
+  while (answers < 2 && !gone(child) && !startError && Date.now() - started < HEALTH_MS) {
+    const seen = await look(port, health);
+    saw = seen.saw;
+    answers = seen.up ? answers + 1 : 0;
+    // Twice, a moment apart, as Citadel's deploy asks: one answer can come just before a crash.
+    if (answers < 2) await sleep(seen.up ? 2000 : 250);
+  }
+  const secs = ((Date.now() - started) / 1000).toFixed(1);
+  const died = gone(child);
+  const how = child.signalCode ?? child.exitCode;
+  const clean = died || startError ? true : await stop(child);
+
+  if (answers < 2) {
+    const tail = out.trimEnd().split('\n').slice(-60).join('\n');
+    console.error(tail ? `--- the app's last output ---\n${tail}\n---` : '(the app printed nothing)');
+    fail(startError ? `it didn't start: ${startError}` : died ? `it exited (${how}) after ${secs}s; last seen: ${saw}` : `not up after ${secs}s: ${saw}`);
+  }
+  if (!clean) console.log('boot check: note: it ignored SIGTERM for 10s and was killed');
+  console.log(`boot check: passed: ${saw}, twice, ${secs}s after the start`);
+  process.exit(0);
 }
-const secs = ((Date.now() - started) / 1000).toFixed(1);
-const died = gone(child);
-const how = child.signalCode ?? child.exitCode;
-const clean = died || startError ? true : await stop(child);
 
-if (answers < 2) {
-  const tail = out.trimEnd().split('\n').slice(-60).join('\n');
-  console.error(tail ? `--- the app's last output ---\n${tail}\n---` : '(the app printed nothing)');
-  fail(startError ? `it didn't start: ${startError}` : died ? `it exited (${how}) after ${secs}s; last seen: ${saw}` : `not up after ${secs}s: ${saw}`);
-}
-if (!clean) console.log('boot check: note: it ignored SIGTERM for 10s and was killed');
-console.log(`boot check: passed: ${saw}, twice, ${secs}s after the start`);
-process.exit(0);
+void main();

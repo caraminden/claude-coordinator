@@ -191,6 +191,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |
+| `src/running-turn.ts` | A running turn behind one interface (#1937, ADR 0024): signal, stop before its claude starts, alive, re-attach and what a restart would do to it, for each kind (the server's child, a unit or supervisor scope, a container); the runner never asks the kind |
 | `src/turn-supervisor.mjs`, `src/supervisor-client.ts`, `src/turn-run.mjs` | The shared turn supervisor (#1343) that starts host turns' claude, each in a scope of its own; the runner's side of it; and what it and the per-turn wrapper (`src/turn-wrapper.mjs`) both run |
 | `src/mcp-pool.ts`, `src/pool-client.mjs`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |

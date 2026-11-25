@@ -108,3 +108,25 @@ Decision: Cara, 2026-11-20, on #1310's card, picked "One queue per minion; One t
   hitting the limit could hand a turn back and forth forever. It now stops after 3 switches in a row, says so in the
   chat, and waits out the limit as if no account were ready.
 - Left as they were: the queue's interface, the turn-folder protocol, spawning, and every other cap and message.
+
+## Seam 3, the running part, as built (#1937)
+
+Picked: Josh, 2026-11-25, "Fork 5: build the running-turn part first", on #1926's choices page (worker machines, Build 7);
+"Plan approved: build it this way" on the build plan the same day. The whole turn-process adapter stays not picked:
+#1845 planned it the day before and recommended against it for three kinds (it read as about five places, and one bug in
+a month it would clearly have prevented).
+
+Why now: a turn on a connected machine is a fourth kind, and nothing the runner did by hand reaches it: no `process.kill`,
+no `podman exec`, no `/proc`. Five places asking "which kind" would become five places each with a network case.
+
+- `src/running-turn.ts` holds `RunningTurn`: `signal`, `endStart` (a stop before claude started), `alive`, `reattachable`,
+  `outlivesServer`, `where`, `keepUp` (its supervisor) and `look` ("Is this still going?"). Behind it: `ChildTurn`,
+  `UnitTurn` (a wrapper's service, or the supervisor's scope of the same name: one kind from here) and `ContainerTurn`.
+- `runningTurn(at)` makes one from where the turn runs (`dir`, `unit`, `container`), the fields its saved record and
+  `LiveTurn` already have. It holds nothing, so a unit that won't start and falls back to a child needs no switch, and the
+  `turn:` record keeps its shape: a rollback mid-turn reads it as before.
+- No change in behaviour. `test/running-turn.test.ts` pins nine behaviours for each of child, unit, supervisor and
+  container through the Runner, written against the code before the move and passing unchanged after it.
+- Left in the runner, by choice: starting a turn (the spawns, and `rescue`, which restarts one the supervisor gave back),
+  the stream readers, the order and timing of a stop's signals (`stopSignals`, `armKill`), and what an end means (`ran`,
+  for `outcome()`, and the killed row's unit name). A fourth kind will need words of its own there.

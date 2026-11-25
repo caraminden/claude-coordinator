@@ -13,6 +13,7 @@
 //   LAND_URGENT                   a person -> land.sh -> deploy.sh: "this fixes shipping or an outage now": its restart skips the starved-box hold (#1417).
 //   CITADEL_TEST_PROGRESS(_TO)    citadel-heavy and run-tests.sh -> citadel-node -> its reporter: where a run's counts go.
 //   CITADEL_TEST_ALWAYS           land.sh's smoke check -> citadel-test: rerun a failed file without the always-tests (#1012).
+//   FMT_TRACKED                   land.sh -> its tests -> tools/fmt: an untracked file isn't the ship's (#1885).
 //   CITADEL_HEAVY_WHAT            land.sh's CI fallback -> citadel-heavy: how its slot and history name the suite (#1254).
 //   CITADEL_TEST_CONCURRENCY      land.sh's CI fallback -> run-tests.sh: half the usual files at once, on a quiet perigee (#1254).
 //   LAND_MERGE_DIFF3              the kit core (tools/land-core.sh) -> land_merge -> ship-numbers.ts: git's diff3 merge first (#1323).
@@ -36,6 +37,7 @@ export const SCRIPT_ENV = [
   'CITADEL_TEST_PROGRESS',
   'CITADEL_TEST_PROGRESS_TO',
   'CITADEL_TEST_ALWAYS',
+  'FMT_TRACKED',
   'CITADEL_HEAVY_WHAT',
   'CITADEL_TEST_CONCURRENCY',
   'LAND_MERGE_DIFF3',

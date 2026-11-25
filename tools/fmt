@@ -2,6 +2,9 @@
 # Formats Citadel's TypeScript and JavaScript with Biome (biome.json), or only checks it: `tools/fmt --check`.
 # Uses the repo's own install (npm ci) and otherwise the same pinned version through npx. Files named after the
 # flags are formatted instead of the whole repo, e.g. `tools/fmt src/runner.ts`.
+# `tools/fmt --own` (and `--check --own`, test/format-own.test.ts) takes only the files this branch changed: against
+# main, or the build/<n> it was rebased onto, so never another minion's. Uncommitted and new files count too, and
+# with FMT_TRACKED=1 (a ship) only tracked ones. Exit 3: Biome couldn't run, so nothing was checked.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=node_modules/.bin/biome
@@ -9,5 +12,25 @@ if [ -x "$bin" ]; then run=("$bin"); else
   version=$(node -p "require('./package.json').devDependencies['@biomejs/biome']")
   run=(npx --yes "@biomejs/biome@$version")
 fi
-if [ "${1:-}" = "--check" ]; then shift; exec "${run[@]}" format "${@:-.}"; fi
-exec "${run[@]}" format --write "${@:-.}"
+check='' own=''
+while :; do case ${1:-} in --check) check=1 ;; --own) own=1 ;; *) break ;; esac; shift; done
+how=(format --write); [ -z "$check" ] || how=(format)
+[ -n "$own" ] || exec "${run[@]}" "${how[@]}" "${@:-.}"
+
+base=$(git merge-base main HEAD) || { echo "fmt: there is no main to compare with, so nothing was checked" >&2; exit 3; }
+while read -r b; do # a build branch under this one: its feeders' files are theirs
+  b=$(git merge-base "$b" HEAD) && git merge-base --is-ancestor "$base" "$b" && base=$b
+done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/*')
+files=()
+while IFS= read -r -d '' f; do
+  case $f in *.ts | *.js | *.mjs) [ ! -f "$f" ] || [ -L "$f" ] || files+=("$f") ;; esac
+done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" --; [ -n "${FMT_TRACKED:-}" ] || git ls-files -z --others --exclude-standard)
+[ ${#files[@]} -gt 0 ] || { echo "fmt: this branch changes no .ts, .js or .mjs file"; exit 0; }
+"${run[@]}" --version >/dev/null 2>&1 || {
+  echo "fmt: Biome could not run here (no node_modules/.bin/biome, and npx could not fetch it), so the format of ${#files[@]} changed files was NOT checked. Run npm ci in $PWD, then this again" >&2
+  exit 3
+}
+rc=0
+"${run[@]}" "${how[@]}" --no-errors-on-unmatched --max-diagnostics=10 "${files[@]}" || rc=$?
+[ $rc = 0 ] || [ -z "$check" ] || echo "fmt: files this branch changed are not formatted. The fix, in $PWD: tools/fmt --own && git add -u && git commit -m 'format'" >&2
+exit $rc

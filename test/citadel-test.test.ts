@@ -133,7 +133,7 @@ test('no files runs --affected, the same as asking for it', async (t) => {
 // #1621: the guards that read every file are picked by no map, so they ride on every run.
 test('the repo-wide list holds the guards that read every file', () => {
   const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n');
-  for (const t of ['sync-calls', 'judges', 'one-until', 'script-env', 'host-signals-guards']) assert.ok(always.includes(`test/${t}.test.ts`), `${t} runs on every citadel-test run`);
+  for (const t of ['sync-calls', 'judges', 'one-until', 'script-env', 'host-signals-guards', 'format-own']) assert.ok(always.includes(`test/${t}.test.ts`), `${t} runs on every citadel-test run`);
 });
 
 // #768: the repo-wide tests ride along, so their failures show before the land.

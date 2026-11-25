@@ -1,0 +1,12 @@
+---
+paths:
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.mjs"
+---
+
+# Formatting
+
+The standard is Biome with `biome.json`. Run `tools/fmt <files>` (or `tools/fmt --own`: every file your branch changed) before
+each commit, and format only files you changed. `test/format-own.test.ts` refuses a ship with an unformatted file of its own
+before it joins the line, and shows the same on every `citadel-test` run.

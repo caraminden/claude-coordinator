@@ -14,6 +14,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 
 const TO = 'a'.repeat(40);
 const BAD = 'b'.repeat(40);
+const DEPLOY = { DEPLOY_LIVE: 'l', DEPLOY_SOURCE: 's', DEPLOY_URL: 'u', DEPLOY_DB: 'd', DEPLOY_SERVICE: 'v', DEPLOY_UNIT: 'n' };
 const KEY = { GH_TOKEN: 'x' };
 
 type Job = ReturnType<RollbackStarterDeps['jobs']['state']>;
@@ -48,7 +49,7 @@ function world(over: Record<string, unknown> = {}) {
     dir,
     copy: false,
     deployLive: false,
-    env: { PATH: '/bin', DEPLOY_LIVE: '/scratch', DEPLOY_SOURCE: '', DEPLOY_OTHER: 'no', DEPLOY_UNITS: 'no', MY_DEPLOY_DB: 'no' },
+    env: { PATH: '/bin', ...DEPLOY, DEPLOY_OTHER: 'no', DEPLOY_UNITS: 'no', MY_DEPLOY_DB: 'no' },
     ownScheme: () => (s.own === 3 ? s.project : { id: s.own }),
     githubOf: (d: string) => ({ ...KEY, dir: d }),
     startDeploy: call('deploy'),
@@ -139,8 +140,7 @@ test("Citadel's server goes back in a job of its own, with only deploy.sh's own 
   assert.equal(j.cwd, '/repo');
   assert.deepEqual(j.argv, ['bash', 'tools/deploy.sh', '--to', TO]);
   assert.equal(env.PATH, '/bin');
-  assert.equal(env.DEPLOY_LIVE, '/scratch');
-  for (const k of ['DEPLOY_SOURCE', 'DEPLOY_OTHER', 'DEPLOY_UNITS', 'MY_DEPLOY_DB']) assert.ok(!(k in env), k);
+  assert.deepEqual(Object.fromEntries(Object.entries(env).filter(([k]) => k.includes('DEPLOY'))), DEPLOY);
   assert.match(String(j.unit), /^citadel-rollback-\d+$/);
   assert.match(String(j.description), /aaaaaaaaa /);
   assert.equal(j.ticketId, 0);

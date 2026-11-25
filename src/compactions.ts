@@ -30,7 +30,10 @@ interface TurnCount extends Compactions {
 const READERS = /^\s*(?:cat|sed|head|tail|nl|awk|less)\s/;
 const PATH = /[\w@%+=:,./~-]*\w\.[A-Za-z]\w{0,9}(?=$|['"\s;|&)>])/g;
 
-/** The files a tool call reads, by name: Read's, or the paths on a printing command's line. Close enough to name them. */
+/**
+ * The files a tool call reads, by name: Read's, or the paths on a printing command's line.
+ * shortcut: by base name, since a path after a cd has no folder to compare, so two index.ts count as one; resolve against the cwd if that misleads.
+ */
 export function filesRead(name: string, input: Record<string, unknown> | undefined): string[] {
   if (name === 'Read') return typeof input?.file_path === 'string' ? [basename(input.file_path)] : [];
   if (name !== 'Bash' || typeof input?.command !== 'string') return [];
@@ -38,7 +41,8 @@ export function filesRead(name: string, input: Record<string, unknown> | undefin
   return [...new Set(found.map((p) => basename(p)))];
 }
 
-const minutes = (ms: number) => `${Math.max(1, Math.round(ms / 60_000))} min`;
+/** "; about 3 min of this turn stopped for it so far", or nothing when the stream gave no times. */
+const stopped = (ms: number) => (ms ? `; ${Math.max(1, Math.round(ms / 60_000))} min of this turn stopped for it so far` : '');
 
 export interface CompactDeps {
   ticket: (id: number) => Ticket | undefined;
@@ -105,8 +109,8 @@ export class CompactWatch {
     if (!ticket || ticket.kind !== 'ticket' || ticket.status === 'closed') return;
     const again = [...t.reads].filter(([, s]) => s.size > 1).sort((a, b) => b[1].size - a[1].size);
     const files = again.slice(0, 5).map(([f, s]) => `${f} (in ${s.size} of ${t.n} stretches)`);
-    const what = `Its memory filled up and was summarised ${t.burst} times in a row, each within 15 minutes of the last; ${minutes(t.ms)} of this turn stopped for it so far.`;
-    const reads = files.length ? ` It reads these again after each one: ${files.join(', ')}.` : ' It is not reading the same files again; the size of what it prints is filling it.';
+    const what = `Its memory filled up and was summarised ${t.burst} times in a row, each within 15 minutes of the last${stopped(t.ms)}.`;
+    const reads = files.length ? ` It reads these again after each one: ${files.join(', ')}.` : ' No file was read again after one; something else it prints or writes is filling it.';
     const large = t.escapes ? ` It went past the big-read checks ${t.escapes === 1 ? 'once' : `${t.escapes} times`} (allow_large).` : '';
     this.d.note(ticketId, what + reads + large);
     this.d.tell(ticket, `Stall signal on #${ticket.number} ${ticket.title}: compacting over and over.\n${what}${reads}${large}\nIf it goes on, split the work or hand it on with a handoff file. Nothing was changed.`, t.burst >= 4);

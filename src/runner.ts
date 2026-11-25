@@ -2091,6 +2091,7 @@ export class Runner {
       clearInterval(live.timer);
       this.unfollow(live);
       this.turns.delete(ticketId);
+      this.compactWatch.ended(ticketId);
       return false;
     }
     if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);

@@ -82,8 +82,8 @@ function compactionChip(t) {
   const c = t.compactions;
   if (!c?.n) return '';
   const min = Math.round(c.ms / 60_000);
-  const lost = min ? `${min} min` : 'under a minute';
-  return h('span', { class: `ctx-compacts${c.n > 1 ? ' hot' : ''}`, title: `Its memory filled up and was summarised ${c.n === 1 ? 'once' : `${c.n} times`} this turn; the turn was stopped ${lost} for it` }, `compacted ${c.n}×`, min ? h('span', { class: 'wide-only' }, ` · ${min} min`) : '');
+  const lost = min ? `, the turn stopped ${min} min for it` : '';
+  return h('span', { class: `ctx-compacts${c.n > 1 ? ' hot' : ''}`, title: `Its memory filled up and was summarised ${c.n === 1 ? 'once' : `${c.n} times`} this turn${lost}` }, `compacted ${c.n}×`, min ? h('span', { class: 'wide-only' }, ` · ${min} min`) : '');
 }
 
 export function renderTicketHead() {

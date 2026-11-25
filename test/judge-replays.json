@@ -17,6 +17,15 @@
     "real": 30,
     "summary": "26 as before, 2 new, 4 gone"
   },
+  "compactions": {
+    "hash": "e28af654e204f3a9",
+    "at": "2026-11-25",
+    "days": 3,
+    "inputs": "114 minion sessions, 192 compactions",
+    "hits": 51,
+    "real": 0,
+    "summary": "0 as before, 51 new, 0 gone"
+  },
   "container-relief": {
     "hash": "eab8521d09c5e684",
     "at": "2026-11-25",

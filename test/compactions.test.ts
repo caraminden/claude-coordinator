@@ -66,7 +66,7 @@ test("a Grunt's compactions, a Taskmaster's and a dismissed minion's are not cal
   w.watch.observe(7, read('Read', { file_path: 'big.ts', allow_large: true }));
   w.watch.observe(7, boundary());
   w.watch.observe(7, boundary());
-  assert.match(w.notes[0], /not reading the same files again.*past the big-read checks 2 times/);
+  assert.match(w.notes[0], /No file was read again after one.*past the big-read checks 2 times/);
 });
 
 test('filesRead names the files a printing command shows, not those it writes or runs', () => {
@@ -75,4 +75,11 @@ test('filesRead names the files a printing command shows, not those it writes or
   assert.deepEqual(bash("cat > out.txt <<'E'"), []);
   assert.deepEqual(bash('node tools/typecheck.ts; tail -n 5 "$TMPDIR/citadel-test.log"'), ['citadel-test.log']);
   assert.deepEqual(filesRead('Edit', { file_path: 'x.ts' }), []);
+});
+
+test('a boundary with no duration is counted, with no minutes made up', () => {
+  const w = world();
+  for (let i = 0; i < 2; i++) w.watch.observe(7, { type: 'system', subtype: 'compact_boundary' });
+  assert.equal(w.notes.length, 1);
+  assert.doesNotMatch(w.notes[0], / min of this turn/);
 });

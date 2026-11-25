@@ -112,15 +112,20 @@ export const JUDGES: Judge[] = [
     callers: ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'app-turn-ended', 'closed-processes', 'db-integrity'].map((c) => `standing-check:${c}`),
   },
   {
+    id: 'compactions',
+    name: 'Compacting over and over (#1920)',
+    mode: 'act', // Josh, 2026-11-24: "we cant have that kind of thing just silently going on"; replayed over 3 days first
+    replay: true,
+    acts: "says it in the minion's chat and mails its Taskmaster at a turn's second compaction within 15 minutes, and wakes the Taskmaster from the fourth",
+    pins: [{ path: 'src/compactions.ts', symbols: ['BURST_MS', 'filesRead', 'CompactWatch.observe', 'CompactWatch.compacted'] }],
+  },
+  {
     id: 'stall-signals',
-    name: 'Stall signals (#1139), and compacting over and over (#1920)',
+    name: 'Stall signals (#1139)',
     mode: 'act',
     replay: { notYet: 'a replay would read turn transcripts; their tool calls are kept, so this is next after the three' },
-    acts: "messages the minion's Taskmaster with a model step-up, or that it keeps compacting",
-    pins: [
-      { path: 'src/stall-signals.ts', symbols: ['RED_TIMES', 'CHURN_ROUNDS', 'SHIP_FAILS', 'failingTests'] },
-      { path: 'src/compactions.ts', symbols: ['BURST_MS'] },
-    ],
+    acts: "messages the minion's Taskmaster with a model step-up",
+    pins: [{ path: 'src/stall-signals.ts', symbols: ['RED_TIMES', 'CHURN_ROUNDS', 'SHIP_FAILS', 'failingTests'] }],
     callers: ['src/stall-signals.ts'],
   },
   {

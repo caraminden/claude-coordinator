@@ -2,7 +2,8 @@
 import { account, api, baseName, noAutofill, clearHighlights, h, highlight, isCoordinator, jumpHref, me, uploadUrl, view } from './base.js';
 import { mergedView, TM_VIEW } from './mine.js';
 import { toast } from './ui/status.js';
-import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
+import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
+import { markSeen } from './seen.js';
 import { alertNote, composer, outbox } from './composer.js';
 import { TRACKING } from './heldmsg.js';
 import { rowState, workerWaitLabel, workingBy, workingLabel } from './threadstate.js';

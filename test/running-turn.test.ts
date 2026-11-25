@@ -100,6 +100,7 @@ function server() {
     join(root, 'no-claude'),
   );
   r.pollMs = 10;
+  r.stopKillMs = 600_000; // a stop's SIGKILL retry stops the unit too: never in a test's time
   r.recover();
   servers.push(r);
   return r;
@@ -179,14 +180,8 @@ for (const kind of KINDS) {
     const other = run([claudeJs, t.log]);
     writeFileSync(join(t.dir, 'pid.json'), JSON.stringify({ wrapper: other.pid, claude: t.claude.pid }));
     if (kind === 'container') {
-      // Its heartbeat and its wrapper process say so, whatever its pid: a fresh beat, or a stale one with the wrapper there, is alive.
-      const ticks = () => (r as unknown as { turns: Map<number, { ticks: number }> }).turns.get(t.id)!.ticks;
-      for (const beat of [Date.now(), Date.now() - 60_000]) {
-        utimesSync(join(t.dir, 'beat'), new Date(beat), new Date(beat));
-        const at = ticks();
-        await until('two looks at whether it is gone', () => ticks() > at + 45);
-        assert.ok(r.isRunning(t.id));
-      }
+      // Its pids are the container's, so it goes by its beat, then by whether its wrapper is there (claude-container.test.ts).
+      utimesSync(join(t.dir, 'beat'), new Date(0), new Date(0));
       t.wrapper.kill('SIGKILL');
     }
     await until('the turn to end', () => !r.isRunning(t.id));
@@ -239,3 +234,13 @@ for (const kind of KINDS) {
     await end(r, t);
   });
 }
+
+test('container: a turn whose wrapper has started but not yet written its pids is re-attached, its beat fresh or not', async () => {
+  const t = await left('container');
+  rmSync(join(t.dir, 'pid.json'));
+  utimesSync(join(t.dir, 'beat'), new Date(0), new Date(0));
+  const r = server();
+  assert.ok(r.isRunning(t.id), 'a live process still uses its folder');
+  assert.ok(existsSync(t.dir));
+  await end(r, t);
+});

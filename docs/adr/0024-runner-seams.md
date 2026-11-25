@@ -130,3 +130,10 @@ no `podman exec`, no `/proc`. Five places asking "which kind" would become five 
 - Left in the runner, by choice: starting a turn (the spawns, and `rescue`, which restarts one the supervisor gave back),
   the stream readers, the order and timing of a stop's signals (`stopSignals`, `armKill`), and what an end means (`ran`,
   for `outcome()`, and the killed row's unit name). A fourth kind will need words of its own there.
+- Past the four named ("signal, stop, alive, reattach"): `outlivesServer`, `where`, `keepUp` and `look` replace kind checks the
+  runner already made about a running turn, two of them inside what moved (the re-attach log line, the supervisor check).
+  They add no behaviour.
+- A folder with no record (a stray's, the boot sweep's) has its kind read from its `container` file, by `wrapperAlive(dir)`
+  beside `runningTurn`. A new kind needs its case in both.
+- Stop stays the runner's three timed signals, with `endStart` the one step that differs by kind. A kind whose far side
+  keeps that clock itself (a machine's supervisor) is T2's call.

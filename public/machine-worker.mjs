@@ -338,7 +338,8 @@ export class Worker {
   /** `claude --version` there, by `podman <how…>`. @param {string[]} how */
   async version(how) {
     const v = await this.exec(this.cfg.podman, [...how, this.cfg.claude ?? 'claude', '--version'], 15 * 60_000);
-    if (!v.code) this.claude = v.out.trim().split('\n')[0].slice(0, 80) || null;
+    // Unknown when it can't say: the server then places nothing here, rather than trust an old answer.
+    this.claude = v.code ? null : v.out.trim().split('\n')[0].slice(0, 80) || null;
   }
 
   /**

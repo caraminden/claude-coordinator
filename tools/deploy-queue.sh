@@ -408,3 +408,16 @@ restart_lock() {
     fi
   done
 }
+
+# <hub function> <slug>: 0 when Citadel's hold is on and a run of its own (ship, check, proof, heavy job, suite) is on the CI
+# desktop or queued: a check or early run starts on an idle one only (#1906, src/ci-hold.ts, which stops one that slips through).
+# Fails open: off, or GitHub not read, it isn't busy. A run left queued over an hour is one GitHub abandoned.
+ci_busy() {
+  local st n
+  [ ! -e "$state/hold-off" ] || return 1
+  for st in in_progress queued; do
+    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|flake-proof|citadel-heavy)\\.yml")) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
+    [[ ! $n =~ ^[1-9][0-9]*$ ]] || return 0
+  done
+  return 1
+}

@@ -7,7 +7,7 @@
 # never runs more than one check at a time, beside at most one land's run:
 #   - only while someone else is in the line: with nobody ahead, its run in line starts as soon as a check would;
 #   - only with a runner labelled citadel-ci-linux-check online (tools/ci-runner/README.md); none, no check;
-#   - only on an idle CI desktop (ci_busy, land.sh) while the CI hold is on: one Citadel job at a time (#1906);
+#   - only on an idle CI desktop (ci_busy, deploy-queue.sh) while the CI hold is on: one Citadel job at a time (#1906);
 #   - one check at a time (<state>/own-check.lock): a ship that would wait more than LAND_OWN_CHECK_WAIT (120 s) for the
 #     check running, going by the last check's time, gets the light check instead (tools/light-check.sh, #1620): its
 #     own and affected test files on CI's side runner. With the CI hold on a running check is a busy desktop (above), so

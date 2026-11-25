@@ -72,6 +72,9 @@ test('a file that also failed alone is kept off the list and marked, with where 
       ['test/c.test.ts', at('24T10:20'), 'main'],
     ],
   );
+  // It is listed again three days after it last failed alone, if it is still sighted.
+  const later = lateTests([...lines, ...log(flake('26', '20:00', 'test/a.test.ts', 'ticket/3-z'))], [], at('27T11:00'));
+  assert.deepEqual([names(later.listed), names(later.alone)], [['test/a.test.ts'], []]);
   // A fix that held after it settles both.
   assert.deepEqual(names(lateTests(lines, [fix('held', { held_at: at('24T11:00') })], NOW).alone), ['test/b.test.ts', 'test/c.test.ts']);
 });

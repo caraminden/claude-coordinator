@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { expand, filesAtOnce, lateWait, mergeTimes, order, otherMainWaves, otherSuites, readTimes } from '../tools/suite-runner.ts';
@@ -206,7 +206,7 @@ async function lateRun(name: string, files: string[], late: string[], env: Recor
     writeFileSync(
       join(cwd, 'test', `${f}.test.mjs`),
       // timing-ok: each file holds its place long enough to overlap the others
-      `import test from 'node:test';\nimport { appendFileSync } from 'node:fs';\nappendFileSync('log', '+${f}\\n');\ntest('${f}', async () => { await new Promise((r) => setTimeout(r, 600)); appendFileSync('log', '-${f}\\n'); if ('${f}' === '${red}') throw new Error('no'); });\n`,
+      `import test from 'node:test';\nimport { appendFileSync, existsSync } from 'node:fs';\nappendFileSync('log', '+${f}\\n');\nif (existsSync('windows/me.late')) appendFileSync('marked', '${f}\\n');\ntest('${f}', async () => { await new Promise((r) => setTimeout(r, 600)); appendFileSync('log', '-${f}\\n'); if ('${f}' === '${red}') throw new Error('no'); });\n`,
     );
   writeFileSync(join(cwd, 'late'), [...late.map((f) => `test/${f}.test.mjs`), 'test/gone.test.mjs', ''].join('\n'));
   const all: Record<string, string | undefined> = { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: undefined, CITADEL_SUITE_WINDOW: undefined, RUNNER_TEMP: cwd, CITADEL_LATE_TESTS: join(cwd, 'late'), ...env };
@@ -216,7 +216,7 @@ async function lateRun(name: string, files: string[], late: string[], env: Recor
   let n = 0;
   let most = 0;
   for (const l of log.filter((l) => late.includes(l.slice(1)))) most = Math.max(most, (n += l[0] === '+' ? 1 : -1));
-  return { ...r, log, most, win, failed: () => readFileSync(join(cwd, 'failed'), 'utf8') };
+  return { ...r, log, most, win, cwd, failed: () => readFileSync(join(cwd, 'failed'), 'utf8') };
 }
 
 test('listed files start once every other file has ended, two at once, and a run with none listed there is as before', async () => {
@@ -229,6 +229,15 @@ test('listed files start once every other file has ended, two at once, and a run
   assert.equal(r.most, 2, `two at once: ${r.log}`);
   assert.match(r.out, /suite-runner: the main wave has ended; 5 load-sensitive test files run now, 2 at once/);
   assert.match(r.out, /^ℹ pass 8$/m, 'one report for both waves');
+});
+
+test('a main file that is slow to start still runs before the late files', async () => {
+  const slow = join(scratch.dir, 'slow.cjs');
+  // timing-ok: m1's process reaches the gate well after a1's
+  writeFileSync(slow, "if (/m1\\.test/.test(process.argv[1] ?? '')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);\n");
+  const r = await lateRun('late-slow', ['a1', 'm1'], ['a1'], { NODE_OPTIONS: `--require=${slow}` });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.log, ['+m1', '-m1', '+a1', '-a1']);
 });
 
 test('a failure among the late files fails the run and is named for the rerun', async () => {
@@ -249,7 +258,10 @@ test('a suite of only listed files runs them, and a list that cannot be read cha
 test("the late files wait for another suite's main wave, and for no longer than the cap", async () => {
   const r = await lateRun('late-cap', ['a1', 'm1'], ['a1'], { CITADEL_SUITE_WINDOW: 'me', CITADEL_LATE_WAIT: '1500' }, '', ['other']);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /suite-runner: 1 other suite\(s\) in their main wave after \d+\.\d s: the load-sensitive test files run now/);
+  const waited = r.out.match(/suite-runner: 1 other suite\(s\) in their main wave after (\d+\.\d) s: the load-sensitive test files run now/);
+  assert.ok(Number(waited?.[1]) >= 1.5, `it waited its cap out: ${r.out}`);
+  assert.equal(readFileSync(join(r.cwd, 'marked'), 'utf8'), 'a1\n', 'and said meanwhile that its own main wave is over');
+  assert.equal(existsSync(join(r.win, 'me.late')), false, 'until it ended');
 });
 
 test("a suite in its own late wave holds nobody's late files back, so two suites never wait for each other", async () => {

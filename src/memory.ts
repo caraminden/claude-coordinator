@@ -86,6 +86,9 @@ const USER_MAX = 1000;
 const REPLY_MAX = 1500;
 /** A turn with no result and no later message counts as over after this (LIVE_MS while its minion still runs): its reply so far is what it said. */
 const STUCK_MS = 60 * 60_000;
+/** A message indexed with no reply is looked at again every this long, for this many days (2ME5). */
+const LATE_SCAN_MS = 10 * 60_000;
+const LATE_DAYS = 14;
 /** A turn whose minion still runs holds the scheme's mark this long at most: past it, later turns past the window of 200 wait no more. */
 const LIVE_MS = 24 * 60 * 60_000;
 /** Texts per embed request. */
@@ -167,6 +170,7 @@ export class Memory {
           .slice(0, max - todo.length),
       );
     if (todo.length < max) todo.push(...this.staleRows(projectId, model, max - todo.length));
+    if (todo.length < max) todo.push(...this.lateReplies(projectId, max - todo.length, now));
     // Two texts a request: 8 full chunks took ~85 s of a whole core (#525), too near llamaEmbed's 120 s timeout on a busy box.
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       const part = todo.slice(i, i + PER_REQUEST);
@@ -321,6 +325,27 @@ export class Memory {
       WHERE project_id = ? AND kind = 'ticket' ORDER BY id`)
       .all(projectId) as { id: number; number: number; title: string; note: string | null; person_id: number | null; updated_at: number }[];
     return rows.map((t) => ({ project_id: projectId, ticket_id: t.id, person_id: t.person_id, source_kind: 'ticket' as const, source_id: t.id, ts: t.updated_at, text: `#${t.number} ${t.title}${t.note ? `\n${t.note}` : ''}` })).filter((t) => t.text !== indexed.get(t.ticket_id));
+  }
+
+  private lateScanAt = new Map<number, number>();
+
+  /**
+   * Messages indexed without a reply (held over STUCK_MS before their turn ran: a brief chained on start_after, a message to a sealed
+   * minion) whose turn has a reply now: indexed again with it (2ME5). A scan every LATE_SCAN_MS at most, over the last LATE_DAYS.
+   */
+  private lateReplies(projectId: number, max: number, now: number): Pending[] {
+    if (now - (this.lateScanAt.get(projectId) ?? 0) < LATE_SCAN_MS) return [];
+    this.lateScanAt.set(projectId, now);
+    const rows = this.db.prepare("SELECT source_id, text FROM memory_chunks WHERE project_id = ? AND source_kind = 'turn' AND ts > ? AND instr(text, char(10) || char(10) || 'Reply: ') = 0 ORDER BY ts DESC LIMIT 200").all(projectId, now - LATE_DAYS * 86_400_000) as { source_id: number; text: string }[];
+    const get = this.db.prepare("SELECT id, ticket_id, data, created_at FROM events WHERE id = ? AND kind = 'user_message'");
+    const out: Pending[] = [];
+    for (const r of rows) {
+      const m = get.get(r.source_id) as { id: number; ticket_id: number; data: string; created_at: number } | undefined;
+      const turn = m && this.turnOf(m, now);
+      if (turn && typeof turn === 'object' && turn.text !== r.text) out.push({ project_id: projectId, ...turn });
+      if (out.length >= max) break;
+    }
+    return out;
   }
 
   /** Rows embedded by another model, to embed again with this one. */

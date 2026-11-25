@@ -117,6 +117,23 @@ test('a turn still running after an hour waits for its result, and is indexed wi
   store.db.close();
 });
 
+test('a message held over an hour is indexed again with its reply once its turn has run (2ME5)', async () => {
+  const { store, A, a1 } = world(join(root, 'held.db'));
+  const held = store.addEvent(a1.id, 'user_message', { author: 'Cara', text: 'A brief about quinces, chained on another minion' });
+  const t1 = Date.now() + 61 * 60_000;
+  await store.memory.index(A.id, embed, 'fake', 32, t1);
+  const text = () => (store.db.prepare("SELECT text FROM memory_chunks WHERE source_kind = 'turn' AND source_id = ?").get(held.id) as { text: string }).text;
+  assert.doesNotMatch(text(), /Reply:/, 'nothing ran yet, so it is indexed without one');
+  store.addEvent(a1.id, 'claude', assistant('Quinces are sorted.'));
+  const result = store.addEvent(a1.id, 'claude', { type: 'result', result: 'x' });
+  store.recordTurn(a1.id, { event_id: result.id, ended_at: t1 + 5000, session_cost_usd: 0 });
+  await store.memory.index(A.id, embed, 'fake', 32, t1 + 60_000);
+  assert.doesNotMatch(text(), /Reply:/, 'the late-reply scan waits its interval');
+  await store.memory.index(A.id, embed, 'fake', 32, t1 + 11 * 60_000);
+  assert.match(text(), /Reply: Quinces are sorted\./);
+  store.db.close();
+});
+
 test('a turn still running after a day holds the mark no longer: its reply so far is indexed (#468 S05-2 review)', async () => {
   const { store, A, a1 } = world(join(root, 'day.db'));
   store.updateTicket(a1.id, { status: 'running' });

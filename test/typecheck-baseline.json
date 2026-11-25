@@ -77,7 +77,6 @@
   "test/overlord.test.ts": [0, 1],
   "test/page-holders-browser.test.ts": [0, 2],
   "test/parked-hold.test.ts": [20, 8],
-  "test/pending-deploy.test.ts": [0, 3],
   "test/people.test.ts": [0, 6],
   "test/perigee-godot.test.ts": [3, 0],
   "test/person-switch-session.test.ts": [0, 3],

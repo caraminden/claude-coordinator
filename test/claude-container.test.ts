@@ -609,7 +609,7 @@ test("a Taskmaster answers while its person's minions hold their container at it
     r.send(minion, 'room', 'build it');
     await until('the minion waits on its full container', () => jsonLines(calls).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === link.name(uid)));
     r.send(tm.id, 'room', 'is CI choking?');
-    await until('the Taskmaster answers', () => lines(seen).length > 0 && status(tm.id) === 'idle' && store.listEvents(tm.id).some((e) => e.kind === 'claude' && e.data.includes('"result":"done"')));
+    await until('the Taskmaster answers', () => status(tm.id) === 'idle' && store.listEvents(tm.id).some((e) => e.kind === 'claude' && JSON.parse(e.data).is_error === false));
     assert.equal(status(minion), 'running', 'the full container answers nobody');
     assert.deepEqual(errors(tm.id), []);
     // Its own person's login, in the same folder as ever.

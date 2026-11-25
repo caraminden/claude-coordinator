@@ -260,7 +260,7 @@ test("a bar with a z-index is under the sheet's dim: a tap there closes the shee
     await waitFor(page, 'the sheet at the bottom', 'Math.abs(document.querySelector(".cui-menu").getBoundingClientRect().bottom - innerHeight) < 1');
     const row = await page.centre('.cui-menu-item');
     assert.equal(await page.eval(`!!document.elementFromPoint(${row.x}, ${row.y}).closest('.cui-menu')`), true, 'the sheet is above the dim');
-    await hold(400); // the dim ignores taps for its first 350 ms
+    await page.eval('(() => { const now = Date.now; Date.now = () => now() + 400; })()'); // the dim ignores taps for its first 350 ms
     await page.tap(x, y);
     await waitFor(page, 'the sheet to close', `!${menuOpen}`);
     assert.equal(await page.eval('window.taps'), 0);
@@ -274,9 +274,8 @@ test('Back closes the sheet, with a hash route or pushState', { skip }, async ()
   const app = await serveUi(SHEET_PAGE);
   try {
     const page = await browser.page(app.base, { width: 390, height: 800, touch: true });
-    for (const go of [`location.hash = '#two'`, `history.pushState({}, '', '?two')`]) {
+    for (const go of [`new Promise((r) => { addEventListener('hashchange', r, { once: true }); location.hash = '#two'; }).then(() => {})`, `history.pushState({}, '', '?two')`]) {
       await page.eval(go);
-      await hold(100); // its own hashchange is over before the sheet opens
       await page.eval('sheet()');
       assert.equal(await page.eval(menuOpen), true);
       await page.eval('history.back()');

@@ -107,7 +107,6 @@ test('a recommended option nobody picked is not styled as picked', { skip }, asy
 // The chat redrawn (leave it and come back): the kept picks cover all 8 questions, and the replayed question_more must not add blanks.
 test('a merged card redrawn after it grew can still be sent (C1)', { skip }, async () => {
   const page = await open();
-  await page.eval(`document.querySelector('.qcard [data-q="0"] .opt[data-label="B1"]').click()`);
   // Past the kept chats (12), the next visit draws it again from its events.
   for (let n = 20; n < 36; n++) {
     await page.eval(`location.hash = '#/p/1/t/${n}'`);

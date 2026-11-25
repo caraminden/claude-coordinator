@@ -109,18 +109,9 @@ export function servicePanel(c, summary = () => {}) {
     deployLog.hidden = d.state === 'running' || d.state === 'deployed' || !d.tail;
     if (d.state === 'running') {
       // One failed poll (Citadel restarting, a phone losing signal) must not end the line: try again.
-      const poll = () =>
-        setTimeout(
-          () =>
-            deployLine.isConnected &&
-            api(`api/contraptions/${c.name}/deploy`)
-              .then(showDeploy)
-              .catch(poll),
-          3000,
-        );
+      const poll = () => setTimeout(() => deployLine.isConnected && api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(poll), 3000);
       poll();
-    }
-    else
+    } else
       api(base)
         .then(show)
         .catch(() => {});

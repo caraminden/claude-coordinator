@@ -325,7 +325,7 @@ function renderStage() {
   const el = document.getElementById('files-stage');
   if (!el) return;
   const s = state();
-  if (!s.staged) return el.replaceChildren(), void (el.__staged = null);
+  if (!s.staged) return (el.replaceChildren(), void (el.__staged = null));
   // Already drawn for this very pick: a rebuild would take the folder box's focus and caret.
   if (el.firstChild && el.__staged === s.staged) return;
   el.__staged = s.staged;

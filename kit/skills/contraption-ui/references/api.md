@@ -557,9 +557,10 @@ you don't need a Firebase project or key of your own.
 then registers this phone's token for the signed-in person and your app. Make the call from a button
 the person taps, not on load. `disablePush()` forgets the phone, and `pushStatus()` answers
 `{ enabled, available, permission }`. The shell calls `/apps/_citadel/push/<app>` itself, on your host
-(`POST {token, platform: "android"}` registers the phone and `DELETE {token}` forgets it, 204 either way;
-401 when the person is signed out, 403 when your app isn't enabled for them). A token belongs to one
-person and one app: when a phone registers it again, the token moves to whoever is signed in now.
+(`POST {token, platform: "android"}` registers the phone, 204; 401 when the person is signed out, 403
+when your app isn't enabled for them. `DELETE {token}` forgets the phone, signed in or not, 204). A token
+belongs to one person and one app: when a phone registers it again, the token moves to whoever is signed in
+now, and a login change on the phone ends the old person's push.
 
 **The send.**
 

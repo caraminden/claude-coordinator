@@ -3,7 +3,7 @@
 // Citadel's real front end in headless Chromium (test/browser.ts), with fetch and the stream answered in the page.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -59,7 +59,7 @@ after(async () => {
   await app?.close();
 });
 
-const frame = (page: any) => page.eval(`new Promise((r) => requestAnimationFrame(() => setTimeout(r, 80)))`);
+const frame = (page: Page) => page.eval(`new Promise((r) => requestAnimationFrame(() => setTimeout(r, 80)))`);
 
 test('Find keeps the match you are on when older history loads, and goes to the newest on typing', { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1/t/7`, { width: 1280, height: 800 });

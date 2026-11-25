@@ -648,7 +648,21 @@ function machineLending(m) {
   const now = () => (view.machines?.find((x) => x.id === m.id) ?? m).projects ?? [];
   const save = (projects) => patchMachine(m, { projects }, `change which schemes get ${m.name}`, renderMachineList);
   const chips = now().map((id) =>
-    h('span', { class: 'chip scheme-chip' }, h('span', {}, schemeName(id)), h('button', { type: 'button', title: m.runners ? `Stop ${m.name} taking new runners for ${schemeName(id)}. Remove its runners first: ones already there keep running` : `Take ${m.name} from ${schemeName(id)}: its minions lose it now, mid-turn too`, 'aria-label': `Remove ${schemeName(id)}`, onclick: () => save(now().filter((x) => x !== id)) }, '×')),
+    h(
+      'span',
+      { class: 'chip scheme-chip' },
+      h('span', {}, schemeName(id)),
+      h(
+        'button',
+        {
+          type: 'button',
+          title: m.runners ? `Stop ${m.name} taking new runners for ${schemeName(id)}. Remove its runners first: ones already there keep running` : `Take ${m.name} from ${schemeName(id)}: its minions lose it now, mid-turn too`,
+          'aria-label': `Remove ${schemeName(id)}`,
+          onclick: () => save(now().filter((x) => x !== id)),
+        },
+        '×',
+      ),
+    ),
   );
   const rest = (view.projects ?? []).filter((p) => !now().includes(p.id));
   const add = h(

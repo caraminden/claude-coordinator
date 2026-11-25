@@ -6,9 +6,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /** Every string in a tool call's input, nested ones too. */
-export function toolStrings(input: any): string[] {
+export function toolStrings(input: unknown): string[] {
   const strings: string[] = [];
-  const walk = (v: any) => (typeof v === 'string' ? strings.push(v) : v && typeof v === 'object' && Object.values(v).forEach(walk));
+  const walk = (v: unknown) => (typeof v === 'string' ? strings.push(v) : v && typeof v === 'object' && Object.values(v).forEach(walk));
   walk(input);
   return strings;
 }
@@ -45,7 +45,7 @@ export interface HookResult {
 }
 
 /** Run `check` on the raw stdin call and the config argument, and turn its deny into the hook's answer. */
-export function hookResult(check: (input: any, cfg: any) => unknown, stdin: string, cfgArg: string): HookResult {
+export function hookResult<I, C>(check: (input: I, cfg: C) => unknown, stdin: string, cfgArg: string): HookResult {
   try {
     const verdict = check(JSON.parse(stdin), JSON.parse(cfgArg));
     return verdict ? { stdout: JSON.stringify(verdict) } : {};
@@ -63,7 +63,7 @@ export function emit(r: HookResult): void {
 }
 
 /** The main guard of a hook script: run `check` on the call from stdin and the config in argv[2], print its deny. */
-export function runHook(meta: ImportMeta, check: (input: any, cfg: any) => unknown): void {
+export function runHook<I, C>(meta: ImportMeta, check: (input: I, cfg: C) => unknown): void {
   if (process.argv[1] !== fileURLToPath(meta.url)) return;
   let stdin = '';
   try {

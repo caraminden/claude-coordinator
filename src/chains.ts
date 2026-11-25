@@ -48,7 +48,7 @@ export interface Chain {
 }
 
 export interface ChainInput {
-  /** The scheme's minions (any status: dismissed ones still wait on nothing, but can be waited on). */
+  /** The scheme's minions (whatever their status: dismissed ones still wait on nothing, but can be waited on). */
   tickets: Ticket[];
   /** A minion's waits as the list shows them. */
   waitsOf: (t: Ticket) => WaitLink[];

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { appRoot, MANIFEST, parseManifest, unitName } from './app-services.ts';
 import type { PushMessage } from './push.ts';
+import { thrown } from './thrown.ts';
 
 /** Something to watch: a unit, and how to ask it whether it answers. */
 export interface Target {
@@ -121,7 +122,7 @@ export function recipients(db: DatabaseSync): Recipient[] {
   const admins = db
     .prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
     WHERE endpoint NOT LIKE 'desktop:%' AND name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`)
-    .all() as any[];
+    .all() as unknown as Omit<Recipient, 'only'>[];
   const owners = db
     .prepare(`SELECT s.name, s.endpoint, s.p256dh, s.auth, 'app:' || c.name AS key FROM contraptions c
     JOIN projects p ON p.id = c.home_scheme JOIN users u ON u.id = p.owner_id
@@ -129,7 +130,7 @@ export function recipients(db: DatabaseSync): Recipient[] {
     WHERE s.endpoint NOT LIKE 'desktop:%' AND u.admin = 0 AND u.disabled_at IS NULL AND EXISTS (SELECT 1 FROM contraption_users cu
       JOIN contraptions m ON m.id = cu.contraption_id WHERE m.name = 'mandate' AND cu.user_id = u.id)
     ORDER BY s.id, c.name`)
-    .all() as any[];
+    .all() as unknown as (Omit<Recipient, 'only'> & { key: string })[];
   const out: Recipient[] = admins.map((s) => ({ ...s, only: null }));
   const byDevice = new Map<string, Recipient>();
   for (const { key, ...s } of owners) {
@@ -167,8 +168,8 @@ export async function answer(probe: Target['probe'], ms = 5000): Promise<Finding
       const res = await fetch(probe.url, { signal: AbortSignal.timeout(ms) });
       await res.body?.cancel();
       return res.ok ? null : `${path} answered ${res.status}`;
-    } catch (err: any) {
-      return err?.name === 'TimeoutError' ? `${path} not answering` : `${path} refused`;
+    } catch (err) {
+      return thrown(err).name === 'TimeoutError' ? `${path} not answering` : `${path} refused`;
     }
   }
   return new Promise((ok) => {

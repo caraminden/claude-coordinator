@@ -9,7 +9,7 @@ import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { agentToken, bootServer, tempRoot } from './helpers.ts';
-import { imageEstimate, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt, speechEstimate, speechLimit } from '../src/openrouter.ts';
+import { imageEstimate, INPUT_IMAGE, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt, speechEstimate, speechLimit } from '../src/openrouter.ts';
 import { decodePng, encodePng } from '../src/png-matte.ts';
 
 // OpenRouter (#717): each person's own key and monthly cap. Every call is booked at its worst case
@@ -244,6 +244,11 @@ test('a speech model priced per token is refused; a clip longer than a minute is
   assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
   const fx = await or.tool('generate_audio', { kind: 'effect', prompt: 'a long storm', out: 'storm.mp3' }, ctx);
   assert.ok(Math.abs(fx.cost_usd - 0.225) < 1e-9);
+});
+
+test('a reference image counts by its ending alone, a file named just .png too', () => {
+  for (const p of ['a.png', '/x/B.JPEG', '/x/.png']) assert.equal(INPUT_IMAGE(p)?.kind, 'image', p);
+  for (const p of ['a.gif', 'png', 'a.png.txt']) assert.equal(INPUT_IMAGE(p), null, p);
 });
 
 test("outputs and inputs stay inside the minion's folders", async () => {

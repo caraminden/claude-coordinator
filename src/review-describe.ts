@@ -69,7 +69,7 @@ export function readProposals(reply: string, entries: ReviewEntry[]): { note: st
     .replace(/```$/, '')
     .trim();
   const start = text.indexOf('{');
-  let data: any;
+  let data: Record<string, unknown>;
   try {
     data = JSON.parse(text.slice(start, text.lastIndexOf('}') + 1));
   } catch {
@@ -85,7 +85,7 @@ export function readProposals(reply: string, entries: ReviewEntry[]): { note: st
     const settings: Settings = {};
     const was: Settings = {};
     const set = ed.settings && typeof ed.settings === 'object' && !isKit(e) ? ed.settings : {};
-    if (set.gate !== undefined && (set.gate === null || set.gate === 'block' || set.gate === 'advise') && set.gate !== e.gate) [settings.gate, was.gate] = [set.gate, e.gate];
+    if (set.gate !== undefined && (set.gate === null || set.gate === 'block' || set.gate === 'advise') && set.gate !== e.gate) [settings.gate, was.gate] = [set.gate, e.gate as Settings['gate']];
     if (set.panel !== undefined && (set.panel === null || typeof set.panel === 'string') && (set.panel?.trim() || null) !== e.panel) [settings.panel, was.panel] = [set.panel?.trim() || null, e.panel];
     if (set.on_fail !== undefined && (set.on_fail === null || Array.isArray(set.on_fail)) && JSON.stringify(set.on_fail) !== JSON.stringify(e.on_fail)) [settings.on_fail, was.on_fail] = [set.on_fail, e.on_fail];
     if (Number.isInteger(set.position) && set.position !== e.position) [settings.position, was.position] = [set.position, e.position];
@@ -129,7 +129,7 @@ export async function runDescribe(place: TurnPlace, prompt: string, o: { claudeB
       });
       child.stdin?.end(prompt);
     });
-    let r: any;
+    let r: Record<string, unknown>;
     try {
       r = JSON.parse(out);
     } catch {

@@ -7,6 +7,7 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFil
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import { thrown } from '../../src/thrown.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -456,10 +457,10 @@ function plantProblems(c: Case, ws: string): string[] {
     if (/\.(ts|js)$/.test(p.file)) {
       try {
         execFileSync(process.execPath, ['--check', join(ws, p.file)], { stdio: 'pipe' });
-      } catch (e: any) {
+      } catch (e) {
         bad.push(
           `${p.file} no longer parses: ${
-            String(e.stderr)
+            String(thrown(e).stderr)
               .split('\n')
               .find((l: string) => /Error/.test(l)) ?? ''
           }`,

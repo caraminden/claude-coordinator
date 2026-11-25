@@ -244,7 +244,7 @@ export async function prInfo(call: MergeCall, cwd: string, env: Record<string, s
 }
 
 /** gh's JSON for a PR as the card keeps it; null if it isn't one. */
-export function toInfo(d: any): PrInfo | null {
+export function toInfo(d: Record<string, unknown>): PrInfo | null {
   if (!d || typeof d.number !== 'number' || typeof d.title !== 'string') return null;
   const n = (v: unknown) => (typeof v === 'number' ? v : 0);
   const s = (v: unknown) => (typeof v === 'string' ? v : '');

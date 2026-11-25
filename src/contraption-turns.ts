@@ -20,6 +20,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { ClaudeEvent } from './claude-events.ts';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
@@ -34,6 +35,7 @@ import { args, mcpConfig, settings, toolNamesPrompt, userLine, MEDIA_SERVER } fr
 import { jsonLines } from './json-lines.ts';
 import { keepTurn, keptDir, keptFile, dropKeptSession, optOutKey, sha256, cap, wantsKeep, type KeptCall } from './replay-keep.ts';
 import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
+import { thrown } from './thrown.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
 const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.ts'), 'utf8');
@@ -164,9 +166,10 @@ function int(v: unknown, what: string, min: number, max: number, fallback: numbe
 }
 
 /** Check a start-turn body, filling in the registry's defaults. */
-export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): TurnRequest {
-  if (!body || typeof body !== 'object') bad('Send a JSON object');
-  if (!Number.isInteger(body.person) || body.person < 1) bad("person must be a person's id");
+export function parseTurn(raw: unknown, c: Pick<ContraptionRow, 'default_model'>): TurnRequest {
+  if (!raw || typeof raw !== 'object') bad('Send a JSON object');
+  const body = raw as Record<string, unknown>;
+  if (typeof body.person !== 'number' || !Number.isInteger(body.person) || body.person < 1) bad("person must be a person's id");
   if (typeof body.session !== 'string' || !SESSION_NAME.test(body.session)) bad('session must be a name of letters, digits and . _ : @ -, at most 100');
   if (body.fresh !== undefined && typeof body.fresh !== 'boolean') bad('fresh must be true or false');
   if (typeof body.prompt !== 'string' || !body.prompt.trim()) bad('prompt is required');
@@ -175,7 +178,7 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   if (model !== null && (typeof model !== 'string' || !MODEL.test(model))) bad('model must be a model name like haiku');
   if (body.mcp !== undefined && (!Array.isArray(body.mcp) || body.mcp.length > 10)) bad('mcp must be a list of at most 10 servers');
   const mcp: McpServer[] = [];
-  for (const s of body.mcp ?? []) {
+  for (const s of (body.mcp ?? []) as (Record<string, unknown> | null)[]) {
     if (!s || typeof s !== 'object' || typeof s.name !== 'string' || !SERVER_NAME.test(s.name)) bad('Each mcp server needs a name of letters, digits, _ and -');
     if (mcp.some((m) => m.name === s.name)) bad(`Two mcp servers are called ${s.name}`);
     if (typeof s.path !== 'string' || !/^\/[\x21-\x7e]{0,199}$/.test(s.path)) bad("Each mcp server needs a path on the contraption's port, starting with /");
@@ -189,13 +192,13 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   }
   let agents: TurnRequest['agents'] = false;
   if (body.agents !== undefined && body.agents !== false) {
-    const a = body.agents;
-    if (!a || typeof a !== 'object') bad('agents must be { max, model } or false');
+    const a = body.agents as Record<string, unknown> | null;
+    if (!a || typeof a !== 'object') return bad('agents must be { max, model } or false');
     if (a.model !== undefined && (typeof a.model !== 'string' || !MODEL.test(a.model))) bad('agents.model must be a model name like haiku');
     agents = { max: int(a.max, 'agents.max', 1, 10, 1), model: a.model ?? null };
   }
   if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
-  if (body.effort != null && !TURN_EFFORTS.includes(body.effort)) bad(`effort must be ${TURN_EFFORTS.join(', ')} or left out`);
+  if (body.effort != null && (typeof body.effort !== 'string' || !TURN_EFFORTS.includes(body.effort))) bad(`effort must be ${TURN_EFFORTS.join(', ')} or left out`);
   if (body.toolSearch !== undefined && typeof body.toolSearch !== 'boolean') bad('toolSearch must be true or false');
   if (body.machines !== undefined && typeof body.machines !== 'boolean') bad('machines must be true or false');
   if (body.media !== undefined && typeof body.media !== 'boolean') bad('media must be true or false');
@@ -222,7 +225,7 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
     media: body.media === true,
     blind: body.blind === true,
     keep: body.keep === true,
-    images: body.images ?? [],
+    images: (body.images ?? []) as string[],
     timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
@@ -434,7 +437,7 @@ export class ContraptionTurns {
   /** A blind turn's folder and every transcript it left (its cwd is never used again, so nothing could resume them). */
   private dropBlind(person: number, blind: Blind, at: TurnPlace) {
     if (blind.root) rmSync(blind.root, { recursive: true, force: true });
-    else if (at.container) spawnSync(this.podman, ['exec', at.container, 'rm', '-rf', blind.cwd], { stdio: 'ignore', timeout: 10_000 });
+    else if (!at.host) spawnSync(this.podman, ['exec', at.container, 'rm', '-rf', blind.cwd], { stdio: 'ignore', timeout: 10_000 });
     for (const dir of this.claude.configDirs(person)) rmSync(join(dir, 'projects', projectSlug(blind.cwd)), { recursive: true, force: true });
   }
 
@@ -533,8 +536,8 @@ export class ContraptionTurns {
         else out('error', { code: 'limit', message: 'This person has no Claude account to carry on with' });
       }
       ({ outcome, usage } = r);
-    } catch (err: any) {
-      fail('failed', String(err?.message ?? err).slice(0, 300));
+    } catch (err) {
+      fail('failed', String(thrown(err).message ?? err).slice(0, 300));
     } finally {
       this.live.delete(id);
       this.names.delete(key);
@@ -642,7 +645,7 @@ export class ContraptionTurns {
     if (codex) {
       for (const [f, text] of CODEX_FILES) secret(f, text);
       // The hook reads this (CITADEL_CODEX_TRIPWIRE): only the contraption's own servers and the person's machines.
-      secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, at.host ? place.configDir : at.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
+      secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, at.host ? place.configDir! : at.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
       let claudeJsonl = '';
       try {
         if (resume) claudeJsonl = readFileSync(transcript!, 'utf8');
@@ -713,7 +716,7 @@ export class ContraptionTurns {
     child.stdin!.write(userLine(prompt, undefined, req.imageBlocks));
     const timer = setTimeout(() => this.stop(live, 'timeout'), req.timeoutSec * 1000);
 
-    let result: any = null;
+    let result = null as ClaudeEvent | null;
     // Each steer claude takes after a reply is a query of its own, with its own result and usage.
     const total: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     let metered = false;
@@ -726,7 +729,7 @@ export class ContraptionTurns {
     let initToolNames: string[] = [];
     let message = '';
     let waited = false;
-    const handle = (ev: any) => {
+    const handle = (ev: ClaudeEvent) => {
       // A Grunt's events name the Agent call that started it; the top level's name none.
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
       // The full name of the model it runs (an alias, or none for the account's default, in start), for end.
@@ -734,7 +737,7 @@ export class ContraptionTurns {
         model = ev.model;
         if (live.audit) live.audit.model = model;
       }
-      if (ev.type === 'system' && ev.subtype === 'init' && !parent && Array.isArray(ev.tools)) initToolNames = ev.tools.filter((t: unknown): t is string => typeof t === 'string');
+      if (ev.type === 'system' && ev.subtype === 'init' && !parent && Array.isArray(ev.tools)) initToolNames = ev.tools.filter((t) => typeof t === 'string');
       if (ev.type === 'codex_waiting') {
         waited = true;
       } else if (ev.type === 'codex_rate_limits') {
@@ -774,7 +777,7 @@ export class ContraptionTurns {
             }
           }
         }
-      } else if (ev.type === 'user' && ev.isReplay && !parent && live.steers.delete(ev.uuid)) {
+      } else if (ev.type === 'user' && ev.isReplay && !parent && live.steers.delete(ev.uuid ?? '')) {
         emit('taken', { id: ev.uuid });
       } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
         for (const b of ev.message.content) {
@@ -877,8 +880,8 @@ export class ContraptionTurns {
             text: cap(kept.text),
             stop: String(result.stop_reason ?? result.subtype ?? 'end_turn'),
           });
-        } catch (err: any) {
-          console.warn(`contraption ${c.name}: couldn't keep a turn for replay: ${err?.code ?? 'error'}`); // no content in the log
+        } catch (err) {
+          console.warn(`contraption ${c.name}: couldn't keep a turn for replay: ${thrown(err).code ?? 'error'}`); // no content in the log
         }
       }
       return { outcome: 'end', usage };

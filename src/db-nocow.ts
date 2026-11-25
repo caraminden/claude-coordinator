@@ -8,6 +8,7 @@ import { closeSync, existsSync, fsyncSync, linkSync, openSync, readdirSync, read
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { thrown } from './thrown.ts';
 
 /** The file system calls that differ between machines, for tests to stand in for. */
 export type NoCowOps = {
@@ -103,8 +104,8 @@ export const RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 export function moveToNoCow(db: string, ops: NoCowOps = hostOps, { now = new Date(), budgetMs = COPY_BUDGET_MS } = {}): NoCowResult {
   try {
     return move(db, ops, now, budgetMs);
-  } catch (err: any) {
-    return { moved: false, note: `left as it was: ${String(err?.message ?? err).trim()}` };
+  } catch (err) {
+    return { moved: false, note: `left as it was: ${String(thrown(err).message ?? err).trim()}` };
   }
 }
 
@@ -180,13 +181,13 @@ function move(db: string, ops: NoCowOps, now: Date, budgetMs: number): NoCowResu
     fsyncPath(dir);
     walNoCow(db, ops);
     return { moved: true, note: `moved into a no-COW file in ${Date.now() - started} ms; the old file is ${basename(backup)}` };
-  } catch (err: any) {
+  } catch (err) {
     try {
       dropTmp(tmp);
     } catch {}
     if (mark) {
       try {
-        writeFileSync(failed, `${now.toISOString()} ${String(err?.message ?? err).trim()}\n`);
+        writeFileSync(failed, `${now.toISOString()} ${String(thrown(err).message ?? err).trim()}\n`);
       } catch {}
     }
     throw err;
@@ -226,8 +227,8 @@ function copyInto(db: string, tmp: string): number {
 if (import.meta.main) {
   try {
     process.exit(copyInto(process.argv[2], process.argv[3]));
-  } catch (err: any) {
-    console.error(String(err?.message ?? err).split('\n')[0]);
+  } catch (err) {
+    console.error(String(thrown(err).message ?? err).split('\n')[0]);
     process.exit(1);
   }
 }

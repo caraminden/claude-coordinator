@@ -457,7 +457,7 @@ export interface Route {
    * path's :project must be its home_scheme (#665, so a contraption reads its own scheme's CI files).
    */
   homeContraption?: true;
-  /** A GET the Citadel scheme's Taskmaster may make in any scheme, on a turn a Citadel member or admin asked for (#656). */
+  /** A GET the Citadel scheme's Taskmaster may make in every scheme, on a turn a Citadel member or admin asked for (#656). */
   everyScheme?: true;
   handler(ctx: Ctx): unknown;
 }

@@ -14,6 +14,12 @@ import { shellOff } from './shell.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SchemeReleases } from './releases.ts';
+import { thrown } from './thrown.ts';
+import type { Storm } from './memory-storms.ts';
+import type { EaseNow } from './memory-ease.ts';
+import type { PcView } from './ci-load.ts';
+import type { DiskUse, UnitState } from './app-services.ts';
+import type { JobRow } from './every.ts';
 
 /**
  * The people's GETs readers answer, as their routes' paths: a minion's history pages and single events, memory search
@@ -173,8 +179,23 @@ export const upgrades = (req: IncomingMessage, appsDomain: string | null) => (re
  */
 /** `ships`: the ship lines' inputs main keeps in memory (#1628): the Citadel line's queue folder and every scheme's releases. */
 export type Ships = { queue: string | null; releases: SchemeReleases[] };
-export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: Record<string, any> | null; builds: Record<number, unknown>; ownScheme: number | null; previews: boolean; ships: Ships | null };
-export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: Record<string, unknown>; builds?: Record<number, unknown>; ownScheme?: number | null; previews?: boolean; ships?: Ships };
+/** The Status page's inputs as main posts them (reader-live.ts), for a reader's StatusPage (reader.ts). */
+export interface StatusSnap {
+  bootAt: number;
+  commit: string;
+  cores: number;
+  probing: boolean;
+  lastMs: number | null;
+  readerMs: number | null;
+  storms: Storm[];
+  easing: EaseNow | null;
+  desktops: PcView[];
+  disk: Record<string, DiskUse | null>;
+  units: UnitState[] | null;
+  jobs: JobRow[];
+}
+export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: StatusSnap | null; builds: Record<number, unknown>; ownScheme: number | null; previews: boolean; ships: Ships | null };
+export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: StatusSnap; builds?: Record<number, unknown>; ownScheme?: number | null; previews?: boolean; ships?: Ships };
 export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null, previews: false, ships: null });
 export function applySnap(s: Snapshot, d: SnapDelta) {
   if (d.ready) s.ready = true;
@@ -188,7 +209,7 @@ export function applySnap(s: Snapshot, d: SnapDelta) {
 
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 export type FrontOptions = {
-  /** systemd's socket, fd 3, or else this host and port (0: any free one). */
+  /** systemd's socket, fd 3, or else this host and port (0: a free one). */
   fd?: number;
   host?: string;
   port?: number;
@@ -251,7 +272,7 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
       for (const args of m.usage ?? []) on.usage(args);
       if (m.setting) on.setting(m.setting[0], m.setting[1]);
     });
-    front.on('error', (err) => console.error(`Front thread failed: ${err?.stack ?? err}`));
+    front.on('error', (err) => console.error(`Front thread failed: ${thrown(err).stack ?? err}`));
     // It holds the port: without it nothing answers, so the server exits and systemd starts it again, the socket holding requests meanwhile.
     front.once('exit', (code) => {
       stopped();
@@ -400,7 +421,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
       }
       if (m.usage || m.setting) parentPort!.postMessage({ usage: m.usage, setting: m.setting });
     });
-    r.worker.on('error', (err) => console.error(`Reader thread failed: ${err?.stack ?? err}`));
+    r.worker.on('error', (err) => console.error(`Reader thread failed: ${thrown(err).stack ?? err}`));
     r.worker.once('exit', (code) => {
       readers.delete(r);
       started_up();

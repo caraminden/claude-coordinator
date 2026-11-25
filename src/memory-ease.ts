@@ -27,6 +27,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { every, type Job } from './every.ts';
 import { hostText, MEMINFO } from './host-signals.ts';
+import { thrown } from './thrown.ts';
 
 export type EaseLevel = 'ok' | 'easing' | 'tight';
 
@@ -292,8 +293,8 @@ export class MemoryEase {
     e.until = at;
     try {
       this.d.record?.(e.since, e);
-    } catch (err: any) {
-      console.error(`Recording a memory-easing stretch failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Recording a memory-easing stretch failed: ${thrown(err).message ?? err}`);
     }
   }
 
@@ -323,8 +324,8 @@ export class MemoryEase {
       const level = this.step(raw);
       await this.writeFile().catch((err) => console.error(`Writing the memory level failed: ${err?.message ?? err}`));
       await this.d.after?.(level);
-    } catch (err: any) {
-      console.error(`Memory easing reading failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Memory easing reading failed: ${thrown(err).message ?? err}`);
     } finally {
       this.busy = false;
     }

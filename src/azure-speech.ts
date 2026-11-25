@@ -60,7 +60,7 @@ export interface AzureContext {
   place?: string;
 }
 
-export async function azureSpeech(args: Record<string, any>, ctx: AzureContext, deps: AzureDeps) {
+export async function azureSpeech(args: Record<string, unknown>, ctx: AzureContext, deps: AzureDeps) {
   const { input, voice } = args;
   if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, 'input is required: the SSML (a whole <speak> document, or its inside) to read');
   if (voice !== undefined && (typeof voice !== 'string' || !/^[\w.:-]{1,200}$/.test(voice))) throw new HttpError(400, 'voice is an Azure voice name, like en-US-Ava:DragonHDLatestNeural');

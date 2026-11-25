@@ -243,7 +243,7 @@ const PODMAN_FAILED = new Set([125, 126, 127]);
  * container, in a folder of its own under their turns folder (refs copied in), whose PNG is copied to `out` in
  * the media folder with a note. The driver there checks the hook, the sign-in and the person's Codex pace itself.
  */
-export async function codexImage(at: CodexAt, dir: string, args: Record<string, any>): Promise<{ path: string; usage: string | null }> {
+export async function codexImage(at: CodexAt, dir: string, args: Record<string, unknown>): Promise<{ path: string; usage: string | null }> {
   const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
   if (!prompt || prompt.length > 8000) throw new HttpError(400, 'prompt is required, at most 8000 characters');
   if (args.background !== undefined && args.background !== 'transparent') throw new HttpError(400, 'background is "transparent", or leave it out');
@@ -341,7 +341,8 @@ export async function runMediaTool(openrouter: OpenRouter, dataDir: string, turn
  * One JSON-RPC message to the `citadel` MCP server (streamable HTTP, JSON answers only): the answer to
  * send, or null for a notification (202, no body).
  */
-export async function mcpMessage(msg: any, tools: { name: string }[], call: (tool: MediaTool | typeof CODEX_TOOL, args: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>): Promise<object | null> {
+export async function mcpMessage(message: unknown, tools: { name: string }[], call: (tool: MediaTool | typeof CODEX_TOOL, args: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>): Promise<object | null> {
+  const msg = message as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: { protocolVersion?: unknown; name?: unknown; arguments?: Record<string, unknown> | null } | null } | null;
   if (!msg || typeof msg !== 'object' || Array.isArray(msg) || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
     return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Send one JSON-RPC 2.0 message' } };
   }
@@ -362,7 +363,7 @@ export async function mcpMessage(msg: any, tools: { name: string }[], call: (too
       const name = msg.params?.name;
       if (!tools.some((t) => t.name === name)) return { jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: `No tool ${String(name).slice(0, 60)}` } };
       const args = msg.params?.arguments && typeof msg.params.arguments === 'object' && !Array.isArray(msg.params.arguments) ? msg.params.arguments : {};
-      const r = await call(name, args);
+      const r = await call(name as MediaTool | typeof CODEX_TOOL, args); // one of `tools`, checked just above
       return answer({ content: [{ type: 'text', text: r.text }], isError: r.isError });
     }
     default:

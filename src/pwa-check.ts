@@ -46,7 +46,7 @@ export async function installCheck(name: string, get: (path: string) => Promise<
   if (!res.ok) return found([`Its manifest ${murl.pathname} answered ${res.status}.`]);
   let m: Record<string, unknown>;
   try {
-    m = await res.json();
+    m = (await res.json()) as Record<string, unknown>;
   } catch {
     return found([`Its manifest ${murl.pathname} isn't JSON.`]);
   }

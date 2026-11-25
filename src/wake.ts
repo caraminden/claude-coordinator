@@ -25,6 +25,7 @@ import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
 import { ZONE, pacificWeekday } from './pacific.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 /** A PR lookup's answer: tests' stand-ins answer at once. */
@@ -148,7 +149,7 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined, mis
   const unmerged = new Map<string, number>();
   // Counts forget()s: an answer asked for before one is too old to remember as "not merged".
   let forgets = 0;
-  const ask = async (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): Promise<PrMerge | null> => {
+  const ask = async <T>(repo: string, key: string, args: string[], parse: (json: T) => PrMerge | null): Promise<PrMerge | null> => {
     const hit = merged.get(key);
     if (hit) return hit;
     if ((unmerged.get(key) ?? 0) > Date.now() || missing?.has(key) || !githubRepo((await git(repo, ['remote', 'get-url', 'origin'])) ?? '')) return null;
@@ -156,13 +157,13 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined, mis
     const asked = forgets;
     try {
       pr = parse(JSON.parse((await run('gh', args, { cwd: repo, env: asEnv(as(repo)), encoding: 'utf8', timeout: 8_000 })).stdout));
-    } catch (err: any) {
+    } catch (err) {
       // GitHub doesn't have the commit (a branch commit rebased away and never pushed): asking again can't help, even after a restart (#1454).
-      if (/No commit found/.test(String(err.stderr ?? ''))) {
+      if (/No commit found/.test(String(thrown(err).stderr ?? ''))) {
         missing?.add(key);
         return null;
       }
-      console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
+      console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, String(thrown(err).stderr ?? '').trim() || thrown(err).message);
     }
     if (pr) merged.set(key, pr);
     else if (asked === forgets) unmerged.set(key, Date.now() + UNMERGED_MS);
@@ -757,7 +758,7 @@ export class LiveWaiters {
   async addRelay(r: Omit<Relay, 'id'>): Promise<{ queued: boolean; relay: Relay }> {
     let relay: Relay = { ...r, id: Math.max(0, ...this.relays().map((o) => o.id)) + 1 };
     // Asked again if a deploy went live meanwhile, as add() does: its check has been and gone without this relay.
-    let since: number | string | undefined;
+    let since: string | null;
     do {
       since = this.head;
       if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since })) {

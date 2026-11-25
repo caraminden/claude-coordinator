@@ -10,7 +10,7 @@ import { pickFor } from '../../public/model-table.js';
 export const MODEL_REQUIRED = (tool: string) => `${tool} needs a model and an effort, picked on purpose from the model table in your prompt by the kind of work (e.g. model: "claude-opus-5-5", effort: "medium"); there is no default.`;
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
-export function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false, row: Schedule | null = null) {
+export function scheduleFields(app: App, projectId: number, body: Record<string, unknown>, all: boolean, taskmaster = false, row: Schedule | null = null) {
   const out: {
     name?: string;
     cron?: string;
@@ -39,7 +39,7 @@ export function scheduleFields(app: App, projectId: number, body: any, all: bool
   if (all || body.effort !== undefined) out.effort = oneOf(body.effort ?? table!.effort, EFFORTS, 'Effort');
   // The activity gate and one-offs (#745); left out, a new schedule always runs, in its own scheme, every time.
   if (body.min_minions !== undefined) {
-    if (body.min_minions !== null && !(Number.isInteger(body.min_minions) && body.min_minions >= 1 && body.min_minions <= 10_000)) throw new HttpError(400, 'min_minions must be a whole number from 1 to 10000, or null to always run');
+    if (body.min_minions !== null && !(typeof body.min_minions === 'number' && Number.isInteger(body.min_minions) && body.min_minions >= 1 && body.min_minions <= 10_000)) throw new HttpError(400, 'min_minions must be a whole number from 1 to 10000, or null to always run');
     out.min_minions = body.min_minions;
   }
   if (body.gate_scope !== undefined) out.gate_scope = (oneOf(body.gate_scope, ['scheme', 'all'], 'gate_scope') ?? 'scheme') as 'scheme' | 'all';
@@ -50,11 +50,11 @@ export function scheduleFields(app: App, projectId: number, body: any, all: bool
   // The activity trigger (#1798): run early after N ships or minions; a null count clears it, kind and gap with it.
   if (body.trigger_kind !== undefined) out.trigger_kind = oneOf(body.trigger_kind, ['ships', 'minions'], 'trigger_kind') as TriggerKind | null;
   if (body.trigger_count !== undefined) {
-    if (body.trigger_count !== null && !(Number.isInteger(body.trigger_count) && body.trigger_count >= 1 && body.trigger_count <= 100_000)) throw new HttpError(400, 'trigger_count must be a whole number from 1 to 100000, or null for no trigger');
+    if (body.trigger_count !== null && !(typeof body.trigger_count === 'number' && Number.isInteger(body.trigger_count) && body.trigger_count >= 1 && body.trigger_count <= 100_000)) throw new HttpError(400, 'trigger_count must be a whole number from 1 to 100000, or null for no trigger');
     out.trigger_count = body.trigger_count;
   }
   if (body.trigger_gap_hours !== undefined) {
-    if (body.trigger_gap_hours !== null && !(Number.isInteger(body.trigger_gap_hours) && body.trigger_gap_hours >= 1 && body.trigger_gap_hours <= 720)) throw new HttpError(400, 'trigger_gap_hours must be a whole number of hours from 1 to 720, or null for a day');
+    if (body.trigger_gap_hours !== null && !(typeof body.trigger_gap_hours === 'number' && Number.isInteger(body.trigger_gap_hours) && body.trigger_gap_hours >= 1 && body.trigger_gap_hours <= 720)) throw new HttpError(400, 'trigger_gap_hours must be a whole number of hours from 1 to 720, or null for a day');
     out.trigger_gap_hours = body.trigger_gap_hours;
   }
   const count = out.trigger_count !== undefined ? out.trigger_count : (row?.trigger_count ?? null);
@@ -73,7 +73,7 @@ export function scheduleFields(app: App, projectId: number, body: any, all: bool
  * time, type, model, effort and gate fill whatever the body leaves out, and its brief is the template plus `notes`. Notes
  * alone re-render a templated row's brief. Returns the body to read with scheduleFields, and the template and notes to store.
  */
-export function scheduleTemplate(app: App, project: Pick<Project, 'id' | 'name'>, body: any, row: Schedule | null): { body: any; extra: { template?: string; notes?: string; brief?: string } } {
+export function scheduleTemplate(app: App, project: Pick<Project, 'id' | 'name'>, body: Record<string, unknown>, row: Schedule | null): { body: Record<string, unknown>; extra: { template?: string; notes?: string; brief?: string } } {
   if (body.template === undefined && body.notes === undefined) return { body, extra: {} };
   if (body.template === null) throw new HttpError(400, 'To make a standard audit a custom copy, send its whole brief instead');
   if (body.brief !== undefined) throw new HttpError(400, "A standard audit's brief is its kit template plus the scheme's notes: send notes, or a brief alone to make it a custom copy");

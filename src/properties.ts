@@ -481,14 +481,14 @@ export class Registry {
    * once, and so is one a Taskmaster's approved setup plan lists; any other Taskmaster key waits for a person. Near-duplicates come back as warnings and nothing is
    * registered unless `force` is set.
    */
-  registerKey(projectId: number, input: any, actor: Actor) {
+  registerKey(projectId: number, input: Record<string, unknown>, actor: Actor) {
     const name = typeof input?.key === 'string' ? input.key.trim() : '';
     if (!KEY_NAME.test(name)) throw new PropertyError('key must be camelCase letters and digits, 2 to 40 characters, e.g. playerClass');
     const scope = input.global ? null : projectId;
     if (!this.mayEdit(scope, actor)) {
       throw new PropertyError(actor.kind === 'thread' ? 'Minions ask the Taskmaster to add keys' : scope === null ? "Only the Citadel scheme's Taskmaster or a person can add global keys" : 'Outside this scheme', 403);
     }
-    const kind = input.value_kind ?? 'enum';
+    const kind = (input.value_kind ?? 'enum') as ValueKind;
     if (!VALUE_KINDS.includes(kind)) throw new PropertyError(`value_kind must be one of: ${VALUE_KINDS.join(', ')}`);
     const label = typeof input.label === 'string' && input.label.trim() ? input.label.trim().slice(0, 60) : name;
     const description = typeof input.description === 'string' ? input.description.trim().slice(0, 4000) : '';
@@ -511,7 +511,7 @@ export class Registry {
     const now = Date.now();
     this.db.exec('BEGIN');
     try {
-      const r = this.db.prepare('INSERT INTO property_keys (scope, key, label, description, multi, value_kind, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(scope, name, label, description || input.reason || '', input.multi ? 1 : 0, kind, status, actor.name, now);
+      const r = this.db.prepare('INSERT INTO property_keys (scope, key, label, description, multi, value_kind, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(scope, name, label, description || (input.reason as string | undefined) || '', input.multi ? 1 : 0, kind, status, actor.name, now);
       for (const v of values) this.insertValue(Number(r.lastInsertRowid), v, 'active', actor);
       this.db.exec('COMMIT');
     } catch (err) {
@@ -598,8 +598,8 @@ export class Registry {
    * proposal, archive or restore, or merge a value into another (it becomes an alias, and what
    * carried it moves over).
    */
-  review(projectId: number, input: any, actor: Actor) {
-    const action = input?.action;
+  review(projectId: number, input: Record<string, unknown>, actor: Actor) {
+    const action = input?.action as string;
     if (!['approve', 'reject', 'archive', 'restore', 'merge'].includes(action)) throw new PropertyError('action must be approve, reject, archive, restore or merge');
     const k = this.findKey(projectId, input.key, { archived: true });
     if (!this.mayEdit(k.scope, actor)) throw new PropertyError(`Only ${k.scope === null ? "the Citadel scheme's Taskmaster" : "this scheme's Taskmaster"} or a person can change ${code(k.key)}`, 403);

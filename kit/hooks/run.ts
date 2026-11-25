@@ -8,8 +8,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type { HookInput } from './hook-input.ts';
 
-type Hook = (input: any) => string | null | void;
+type Hook = (input: HookInput) => string | null | void;
 const retroHook = async (): Promise<Hook> => (await import('./retro-log.ts')).retroHook;
 const testFirstHook = async (): Promise<Hook> => (await import('./test-first.ts')).testFirstHook;
 const anyNudgeHook = async (): Promise<Hook> => (await import('./any-nudge.ts')).anyNudgeHook;
@@ -21,8 +22,8 @@ const READS = new Set(['Read', 'Grep', 'Glob']);
 const EDITS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
 /** The hooks a call runs, in order: Bash after it ran or failed; reads and edits only after they ran. */
-function hooksFor(input: any): (() => Promise<Hook>)[] {
-  const tool = input?.tool_name;
+function hooksFor(input: HookInput): (() => Promise<Hook>)[] {
+  const tool = input?.tool_name ?? '';
   if (BASH.has(tool)) return [retroHook, testFirstHook, flailBrakeOutput, seenHook];
   if (input?.hook_event_name !== 'PostToolUse') return [];
   if (READS.has(tool)) return tool === 'Read' ? [flailBrakeOutput, seenHook] : [flailBrakeOutput];
@@ -41,7 +42,7 @@ export function mergeContext(outs: string[], event: string): string | null {
 }
 
 /** What the runner prints for one call, or null. */
-export async function postToolRun(input: any): Promise<string | null> {
+export async function postToolRun(input: HookInput): Promise<string | null> {
   const outs: string[] = [];
   for (const load of hooksFor(input)) {
     try {
@@ -52,7 +53,7 @@ export async function postToolRun(input: any): Promise<string | null> {
     }
   }
   try {
-    return mergeContext(outs, input.hook_event_name);
+    return mergeContext(outs, input.hook_event_name!);
   } catch {
     return outs[0] ?? null;
   }

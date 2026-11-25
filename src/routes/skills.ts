@@ -2,12 +2,13 @@
 // the last two weeks. Turning a kit skill off is the scheme settings' PATCH (skills_off), like the other Minion rules.
 import { KIT_DIR, listSkills, OFF_WARNINGS, offSkills, cachedUsage, refreshUsage, usageDetail, USAGE_DAYS } from '../skills.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
-import { HttpError, json, type Route } from '../http.ts';
+import { HttpError, json, type App, type Route } from '../http.ts';
+import type { Session } from '../auth.ts';
 
 // The list answers at once: usage is whatever report is cached (any age; an old one starts a refresh behind it) or null before
 // the first scan has finished, and the page then asks /skills/usage, which waits for that scan. Nothing here waits on a scan
 // when a report exists.
-function scope(url: URL, app: any, session: any, project: { id: number }) {
+function scope(url: URL, app: App, session: Session, project: { id: number }) {
   const citadel = !!session && app.store.canSee(session, GLOBAL_OWNER);
   const all = url.searchParams.get('all') === '1';
   if (all && !citadel) throw new HttpError(403, "Every scheme's counts are for the Citadel scheme's members");

@@ -48,8 +48,9 @@ const optional = (v: unknown, field: string, max: number, min = 0): string | und
 const reservedKey = (k: string) => k.startsWith('citadel_') || ['from', 'notification', 'message_type'].includes(k) || k.startsWith('google.') || k.startsWith('gcm.');
 
 /** Check a send body from contraption `app`; a broken rule is a 400 naming it. */
-export function parsePush(app: string, b: any): { to: string[]; send: PushSend } {
-  const to = typeof b?.to === 'string' ? [b.to] : b?.to;
+export function parsePush(app: string, raw: unknown): { to: string[]; send: PushSend } {
+  const b = (raw ?? {}) as Record<string, unknown>;
+  const to = typeof b.to === 'string' ? [b.to] : b.to;
   if (!Array.isArray(to) || !to.length || to.length > PUSH_MAX_TO || to.some((l) => typeof l !== 'string' || !l || l.length > 200)) {
     throw new HttpError(400, `to must be a login, or a list of 1 to ${PUSH_MAX_TO} logins`);
   }
@@ -70,7 +71,7 @@ export function parsePush(app: string, b: any): { to: string[]; send: PushSend }
       if (typeof v !== 'string') throw new HttpError(400, `data.${k} must be a string`);
       if (!k || reservedKey(k)) throw new HttpError(400, `data key "${k}" is reserved: citadel_*, from, notification, message_type, google.* and gcm.* are not the app's`);
     }
-    if (Object.keys(b.data).length) send.data = b.data;
+    if (Object.keys(b.data).length) send.data = b.data as Record<string, string>; // each value checked just above
   }
   if (send.title === undefined && !send.data) throw new HttpError(400, 'Send a title or data (or both)');
   // The whole data block, Citadel's keys too, has to fit Firebase's 4 KB.
@@ -93,13 +94,18 @@ export function fcmMessage(app: string, token: string, p: PushSend) {
   return { message: { token, android: { priority: 'HIGH' as const }, data } };
 }
 
+/** Firebase's error answer, the fields read here. */
+interface FcmError {
+  error?: { status?: string; message?: string; details?: ({ errorCode?: string; fieldViolations?: ({ field?: string } | null)[] } | null)[] };
+}
+
 /** Whether Firebase's answer says the token is dead: unregistered (404), or a 400 about the token itself. */
-function deadToken(status: number, body: any): boolean {
+function deadToken(status: number, body: FcmError | null): boolean {
   const e = body?.error ?? {};
-  const details: any[] = Array.isArray(e.details) ? e.details : [];
+  const details = Array.isArray(e.details) ? e.details : [];
   if (status === 404 || details.some((d) => d?.errorCode === 'UNREGISTERED')) return true;
   if (status !== 400 || e.status !== 'INVALID_ARGUMENT') return false;
-  return details.some((d) => d?.fieldViolations?.some?.((f: any) => f?.field === 'message.token')) || /registration token/i.test(String(e.message ?? ''));
+  return details.some((d) => d?.fieldViolations?.some?.((f) => f?.field === 'message.token')) || /registration token/i.test(String(e.message ?? ''));
 }
 
 export class Fcm {
@@ -177,7 +183,7 @@ export class Fcm {
         signal: AbortSignal.timeout(15_000),
       });
       if (res.ok) return (void (await res.body?.cancel()), 'sent');
-      const body = await res.json().catch(() => null);
+      const body = (await res.json().catch(() => null)) as FcmError | null;
       if (res.status === 401) this.access = null;
       if (deadToken(res.status, body)) return 'gone';
       console.error(`FCM send for ${message.message.data.citadel_app} failed: ${res.status} ${body?.error?.status ?? ''}`.trim());

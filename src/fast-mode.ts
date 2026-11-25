@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { moveAside, type HostJobs } from './host-job.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 
@@ -184,8 +185,8 @@ export class FastMode {
         try {
           await this.step(p.id, p.repo);
           if (this.said.delete(p.id)) console.log(`Fast mode for scheme ${p.id} works again.`);
-        } catch (err: any) {
-          const msg = String(err?.stderr || err?.message || err).trim();
+        } catch (err) {
+          const msg = String(thrown(err).stderr || thrown(err).message || err).trim();
           if (this.said.get(p.id) !== msg) console.error(`Fast mode for scheme ${p.id} failed: ${msg}`);
           this.said.set(p.id, msg);
         }

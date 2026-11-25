@@ -142,15 +142,15 @@ export function verdictPrompt(scope: Scope, before: string, text: string, found:
 /** Sonnet's reply as one verdict per place, in order (null where it gave none); throws when the reply isn't JSON. */
 export function readVerdicts(reply: string, count: number): (Verdict | null)[] {
   const t = reply.trim();
-  let data: any;
+  let data: { verdicts?: unknown } | null;
   try {
     data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
   } catch {
     throw new Error("Sonnet's answer wasn't the verdicts it should be");
   }
   const out: (Verdict | null)[] = Array(count).fill(null);
-  for (const v of Array.isArray(data?.verdicts) ? data.verdicts : []) {
-    if (Number.isInteger(v?.n) && v.n >= 1 && v.n <= count && ['repeats', 'conflicts', 'fine'].includes(v.verdict)) out[v.n - 1] = { verdict: v.verdict, why: typeof v.why === 'string' ? v.why.trim().slice(0, 300) : '' };
+  for (const v of Array.isArray(data?.verdicts) ? (data.verdicts as ({ n: number; verdict: Verdict['verdict']; why?: unknown } | null)[]) : []) {
+    if (v && Number.isInteger(v.n) && v.n >= 1 && v.n <= count && ['repeats', 'conflicts', 'fine'].includes(v.verdict)) out[v.n - 1] = { verdict: v.verdict, why: typeof v.why === 'string' ? v.why.trim().slice(0, 300) : '' };
   }
   return out;
 }

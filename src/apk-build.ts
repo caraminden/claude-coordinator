@@ -17,6 +17,7 @@ import type { ContraptionRow } from './db.ts';
 import { hasKey, keyFiles, makeReleaseKey, type Keytool } from './release-key.ts';
 import { gradleVersion } from './release-readers.ts';
 import { CGROUP_ROOT, hostText, SELF_CGROUP } from './host-signals.ts';
+import { thrown } from './thrown.ts';
 
 /** The whole build, the wait for a heavy slot included: past it the build is stopped and told. */
 const BUILD_MS = 90 * 60_000;
@@ -314,18 +315,18 @@ export class ApkBuilds {
       await rm(signed, { force: true });
       await step('apksigner sign', [apksigner(this.d.home, env.ANDROID_HOME), 'sign', '--ks', key, '--ks-pass', `file:${pass}`, '--out', signed, unsigned], dir);
       await step('apksigner verify', [apksigner(this.d.home, env.ANDROID_HOME), 'verify', signed], dir);
-    } catch (err: any) {
+    } catch (err) {
       if (err instanceof Killed) return { failed: err.message };
-      return fail(err.message, await tail());
+      return fail(thrown(err).message ?? String(err), await tail());
     }
     const manifest = join(src, cap.android, 'app/build/intermediates/merged_manifests/release');
     const xml = (await readdir(manifest, { recursive: true }).catch(() => [] as string[])).find((f) => f.endsWith('AndroidManifest.xml'));
     const warnings = xml ? manifestWarnings(await readFile(join(manifest, xml), 'utf8').catch(() => '')) : [];
     try {
       await install({ apk: signed, feedFile, current, versionName: () => gradle?.name ?? null, extra: { commit }, certs: this.d.certs ?? signers });
-    } catch (err: any) {
+    } catch (err) {
       if (err instanceof OtherKey || err instanceof OldApk) return fail(err.message);
-      return fail(`publishing it failed: ${err.message}`);
+      return fail(`publishing it failed: ${thrown(err).message}`);
     } finally {
       await rm(signed, { force: true });
     }

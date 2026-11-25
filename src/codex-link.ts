@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { stripAnsi, type ClaudeLink } from './claude-link.ts';
 import { Containers } from './containers.ts';
 import { jsonLines } from './json-lines.ts';
+import { thrown } from './thrown.ts';
 
 export type CodexState = 'no container' | 'not linked' | 'starting' | 'waiting' | 'linked';
 
@@ -108,8 +109,8 @@ export class CodexLink {
           resolve();
         });
       });
-    } catch (err: any) {
-      login.error = err.message;
+    } catch (err) {
+      login.error = thrown(err).message;
       login.done = true;
     }
     return this.status(uid);
@@ -148,7 +149,7 @@ export function appServerLimits(argv: string[], timeoutMs = 20_000): Promise<unk
   return new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'ignore'] });
     let done = false;
-    const finish = (limits: unknown) => {
+    const finish = (limits?: unknown) => {
       if (done) return;
       done = true;
       clearTimeout(timer);

@@ -3,6 +3,7 @@
 // Run as a child (src/host-check.ts), so a slow query never stalls the server: `node db-view.ts <db file>`, the SQL on stdin.
 import { constants, DatabaseSync } from 'node:sqlite';
 import { attachEventsIfThere } from './events-db.ts';
+import { thrown } from './thrown.ts';
 
 /** Columns no turn reads: password and invite hashes, machine and contraption keys, linked logins, saved secrets, push keys. */
 export const SECRET: Record<string, string[]> = {
@@ -83,8 +84,8 @@ if (import.meta.main) {
       const v = row ? Object.values(row)[0] : 'no rows';
       process.stdout.write(`${JSON.stringify(v instanceof Uint8Array ? 'blob' : (v ?? null))}\n`);
     } else process.stdout.write(query(db, sql) + '\n');
-  } catch (err: any) {
-    process.stderr.write(`${err.message}\n`);
+  } catch (err) {
+    process.stderr.write(`${thrown(err).message}\n`);
     process.exitCode = 1;
   }
 }

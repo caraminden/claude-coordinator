@@ -1518,9 +1518,9 @@ ${text}`,
     if (r.status === 304 && had) return had.body as T;
     if (r.status === 200) {
       this.cache.set(path, { etag: r.etag, body: r.body });
-      return r.body;
+      return r.body as T;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
+    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')))) throw new RateLimited();
     if (quiet && (r.status === 403 || r.status === 404)) return null;
     // Anything else skips this scheme's round: an answer GitHub didn't give mustn't read as "all clear" and clear alerts.
     throw new GhError(r.status, path);

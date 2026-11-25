@@ -202,7 +202,7 @@ test('CI: nothing while pending, a failure at once, a pass once everything finis
 test("a job that never started says so, with GitHub's reason, apart from a red test (#368)", () => {
   const billing = 'The job was not started because recent account payments have failed or your spending limit needs to be increased.';
   const url = 'https://github.com/caraminden/peek-auras/actions/runs/42005206342/job/127170097021';
-  const node = { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: url, steps: { totalCount: 0 }, annotations: { nodes: [{ message: billing }] } };
+  const node = { __typename: 'CheckRun' as const, name: 'build', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: url, steps: { totalCount: 0 }, annotations: { nodes: [{ message: billing }] } };
   assert.deepEqual(checkOf(node), { name: 'build', status: 'failed', url, notStarted: billing });
   assert.equal(checkOf({ ...node, steps: { totalCount: 4 } }).notStarted, undefined, 'a red test ran steps');
   assert.equal(checkOf({ ...node, detailsUrl: 'https://ci.example/build/1' }).notStarted, undefined, "another app's check has no steps to count");
@@ -250,7 +250,7 @@ test('a draft PR with no checks is not nudged, but a draft that conflicts still 
 
 test('checks that all skipped tested nothing: no pass, and they count as no checks yet (#558)', () => {
   // Peek's draft PRs run their workflows with every job skipped; that must not read as green.
-  const node = { __typename: 'CheckRun', name: 'windows', status: 'COMPLETED', detailsUrl: 'https://ci/windows' };
+  const node = { __typename: 'CheckRun' as const, name: 'windows', status: 'COMPLETED', detailsUrl: 'https://ci/windows' };
   for (const conclusion of ['SKIPPED', 'NEUTRAL', 'STALE']) assert.equal(checkOf({ ...node, conclusion }).status, 'skipped', conclusion);
   assert.equal(checkOf({ ...node, conclusion: 'SUCCESS' }).status, 'passed');
   assert.equal(verdict([check('windows', 'skipped'), check('desktop', 'skipped')]), null);

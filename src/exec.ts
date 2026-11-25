@@ -62,5 +62,5 @@ export interface ExecResult {
 /** Runs `bin` and resolves (never rejects) with its exit code (1 when it has none), stdout, stderr and the failure's message. */
 export const execResult = (bin: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number } = {}): Promise<ExecResult> =>
   new Promise((ok) => {
-    execFile(bin, args, opts, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText), fail: err ? String(err.message) : '' }));
+    execFile(bin, args, opts, (err, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText), fail: err ? String(err.message) : '' }));
   });

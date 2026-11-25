@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process';
 import { chmod, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { promisify } from 'node:util';
+import { thrown } from './thrown.ts';
 
 export const IDLE_MS = 10 * 60_000;
 /** The most of a body it passes on, as `gh api`'s maxBuffer in ghGet. */
@@ -83,8 +84,8 @@ async function main() {
         if (body.length > MAX_BODY) return conn.end(`${JSON.stringify({ error: 'too big' })}\n`);
         conn.write(`${JSON.stringify({ status: res.status, etag: res.headers.get('etag') })}\n`);
         conn.end(body);
-      } catch (err: any) {
-        conn.end(`${JSON.stringify({ error: String(err?.message ?? err) })}\n`);
+      } catch (err) {
+        conn.end(`${JSON.stringify({ error: String(thrown(err).message ?? err) })}\n`);
       }
     });
   });

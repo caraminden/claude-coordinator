@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { diskUsage, low } from './build-output.ts';
 import { identity } from './scheme-repo.ts';
+import { thrown } from './thrown.ts';
 
 const DAY = 24 * 60 * 60_000;
 /** Josh, 2026-11-13: "lets do 3 days", one number for every scheme. */
@@ -117,11 +118,11 @@ export async function clearTrash(parent: string): Promise<{ bytes: number; stuck
     try {
       await low(['rm', '-rf', '--one-file-system', '--', dir]);
       out.bytes += before;
-    } catch (err: any) {
+    } catch (err) {
       out.bytes += before - (await diskUsage([dir]));
       out.stuck.push(
         `${dir}: ${
-          String(err.stderr || err.message)
+          String(thrown(err).stderr || thrown(err).message)
             .trim()
             .split('\n')[0]
         }`,

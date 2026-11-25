@@ -15,6 +15,7 @@ import type { Store } from './db.ts';
 import { nextRun } from './schedules.ts';
 import { ZONE } from './pacific.ts';
 import { attachEventsIfThere } from './events-db.ts';
+import { thrown } from './thrown.ts';
 
 /** One broken promise. `key` names it across runs (check, minion, subject), so one stays one health row. */
 export interface Finding {
@@ -35,7 +36,7 @@ export interface Snapshot {
   queued: Record<number, number[]>;
   /** The contraption_turns rows whose process the server holds now. */
   appTurns: number[];
-  /** Processes the reaper's scan put in a minion's folders (any minion's: the check keeps the closed ones). */
+  /** Processes the reaper's scan put in a minion's folders (every minion's: the check keeps the closed ones). */
   procs: { pid: number; ticketId: number; projectId: number; command: string }[];
 }
 
@@ -211,8 +212,8 @@ export const CHECKS: Check[] = [
       let names: string[];
       try {
         names = readdirSync(root).filter((n) => /^\d+$/.test(n));
-      } catch (err: any) {
-        if (err?.code === 'ENOENT') return out; // no ship has run on this box yet
+      } catch (err) {
+        if (thrown(err).code === 'ENOENT') return out; // no ship has run on this box yet
         throw err; // unreadable: an error line, never "All kept"
       }
       for (const n of names) {
@@ -285,8 +286,8 @@ export function runChecks(env: CheckEnv): Finding[] {
   return CHECKS.flatMap((c) => {
     try {
       return c.run(env, name);
-    } catch (err: any) {
-      return [{ check: c.name, key: `${c.name}:error`, ticket: null, text: `The check itself failed: ${String(err?.message ?? err).slice(0, 300)}` }];
+    } catch (err) {
+      return [{ check: c.name, key: `${c.name}:error`, ticket: null, text: `The check itself failed: ${String(thrown(err).message ?? err).slice(0, 300)}` }];
     }
   });
 }
@@ -401,16 +402,16 @@ export class StandingChecks {
     let first: Finding[];
     try {
       first = await this.pass(await this.snapshot(), false);
-    } catch (err: any) {
-      this.keep(kept?.findings ?? [], kept?.integrityAt ?? null, String(err?.message ?? err).slice(0, 300));
+    } catch (err) {
+      this.keep(kept?.findings ?? [], kept?.integrityAt ?? null, String(thrown(err).message ?? err).slice(0, 300));
       throw err;
     }
     const integrity = integrityDue(this.now(), kept?.integrityAt ?? null);
     if (!first.length && !integrity) return this.keep(this.lastIntegrity(kept), kept?.integrityAt ?? null, null);
     this.running = this.confirm(first, integrity, kept)
-      .catch((err: any) => {
+      .catch((err: unknown) => {
         console.error('Standing checks: the confirm pass failed:', err);
-        this.keep(kept?.findings ?? [], kept?.integrityAt ?? null, String(err?.message ?? err).slice(0, 300));
+        this.keep(kept?.findings ?? [], kept?.integrityAt ?? null, String(thrown(err).message ?? err).slice(0, 300));
       })
       .finally(() => (this.running = null));
   }

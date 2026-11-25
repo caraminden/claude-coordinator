@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { ANDROID_SDK, androidEnv } from './claude-link.ts';
 import { HttpError } from './http.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 
@@ -39,13 +40,17 @@ export async function signers(apk: string): Promise<string[]> {
   let tool: string;
   try {
     tool = apksigner(homedir(), env.ANDROID_HOME);
-  } catch (err: any) {
-    throw new Error(`${err.message}, so ${basename(apk)}'s signing key can't be checked`);
+  } catch (err) {
+    throw new Error(`${thrown(err).message}, so ${basename(apk)}'s signing key can't be checked`);
   }
   try {
     return certDigests((await run(tool, ['verify', '--print-certs', apk], { env, timeout: 2 * 60_000 })).stdout);
-  } catch (err: any) {
-    throw new Error(`apksigner couldn't read ${basename(apk)}'s signing certificate: ${(err?.stderr || err?.message || String(err)).trim().slice(0, 300)}`);
+  } catch (err) {
+    throw new Error(
+      `apksigner couldn't read ${basename(apk)}'s signing certificate: ${String(thrown(err).stderr || thrown(err).message || err)
+        .trim()
+        .slice(0, 300)}`,
+    );
   }
 }
 
@@ -60,8 +65,8 @@ export async function pointBranch(slug: string, branch: string, sha: string, as:
   const o = { env: asEnv(as), timeout: 30_000 };
   try {
     await run('gh', ['api', '-X', 'PATCH', `repos/${slug}/git/refs/heads/${branch}`, '-f', `sha=${sha}`, '-F', 'force=true'], o);
-  } catch (err: any) {
-    if (!/Reference does not exist|Not Found|HTTP 404|HTTP 422/.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw err;
+  } catch (err) {
+    if (!/Reference does not exist|Not Found|HTTP 404|HTTP 422/.test(`${thrown(err).stderr ?? ''}${thrown(err).message ?? ''}`)) throw err;
     await run('gh', ['api', '-X', 'POST', `repos/${slug}/git/refs`, '-f', `ref=refs/heads/${branch}`, '-f', `sha=${sha}`], o);
   }
 }
@@ -92,8 +97,8 @@ export async function rollBackApk(o: RollbackApk, sha: string): Promise<number> 
   await (o.point ?? pointBranch)(o.slug, o.branch, sha, o.as);
   try {
     await (o.start ?? dispatch)(o.slug, file, o.branch, o.as, { version_code: String(code) });
-  } catch (err: any) {
-    if (/Unexpected inputs/i.test(`${err?.stderr ?? ''}${err?.message ?? ''}`)) throw new HttpError(409, `Last green's ${file} doesn't take a version_code input yet, so it can't sign last green as build ${code}: its scheme adds the input (ADR 0012), and once that's on last green this button works.`);
+  } catch (err) {
+    if (/Unexpected inputs/i.test(`${thrown(err).stderr ?? ''}${thrown(err).message ?? ''}`)) throw new HttpError(409, `Last green's ${file} doesn't take a version_code input yet, so it can't sign last green as build ${code}: its scheme adds the input (ADR 0012), and once that's on last green this button works.`);
     throw err;
   }
   return code;

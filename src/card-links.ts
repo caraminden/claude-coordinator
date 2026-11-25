@@ -48,8 +48,28 @@ const clip = (s: unknown, n = 80) => {
 /** What a card asks for: a go to ship (a question card asked with kind merge, or an approval for a `gh pr merge`), a tripwire approval, or its plain kind. People read it as the chip (Cara, 2026-11-19, picked "Ship" on #1020's card). */
 export type CardWhat = 'question' | 'plan' | 'ship' | 'merge' | 'approval' | 'tripwire' | 'secret';
 
+/** A card's chat event data, the fields read here; unchecked, as it was stored. */
+export interface CardData {
+  kind?: unknown;
+  into?: unknown;
+  merge?: { repo?: string; pr?: { base?: string } | null } | null;
+  tripwire?: unknown;
+  summary?: unknown;
+  notice?: unknown;
+  doc?: { path?: string; title?: string } | null;
+  secret?: { name?: string } | null;
+  questions?: ({ header?: string; question?: string } | null)[];
+  tool?: unknown;
+  input?: { description?: unknown } | null;
+  status?: string;
+  by?: string;
+  at?: number;
+  settled?: { at: number; by?: string; dismissed?: boolean; sent?: boolean } | null;
+}
+
 /** What card `kind` posted with chat event data `data` asks for (CardWhat). */
-export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
+export function cardWhat(kind: CardLink['kind'], stored: unknown): CardWhat {
+  const data = stored as CardData | null | undefined;
   // A PR into a major build's branch merges into the build; every other go ships.
   if (kind === 'approval' && /^build\//.test(data?.merge?.pr?.base ?? '')) return 'merge';
   // A feeder's own go card (asked with kind merge, stamped with its build) merges into the build too.
@@ -61,7 +81,8 @@ export function cardWhat(kind: CardLink['kind'], data: any): CardWhat {
 }
 
 /** A card's short label from its chat event's data. */
-export function cardLabel(kind: string, data: any): string {
+export function cardLabel(kind: string, stored: unknown): string {
+  const data = stored as CardData | null | undefined;
   if (kind === 'plan') return clip(data?.summary);
   if (kind === 'question' && data?.notice) return clip(data.notice);
   if (kind === 'question' && data?.doc) return clip(`picks on “${data.doc.title}”`);
@@ -69,11 +90,28 @@ export function cardLabel(kind: string, data: any): string {
   if (kind === 'question')
     return clip(
       (data?.questions ?? [])
-        .map((q: any) => q?.header || q?.question)
+        .map((q) => q?.header || q?.question)
         .filter(Boolean)
         .join(', '),
     );
   return clip(typeof data?.input?.description === 'string' ? `${data.tool}: ${data.input.description}` : data?.tool);
+}
+
+/** The first answer to a card, or the message typed for one. */
+export interface CardReply {
+  author?: string;
+  at: number;
+  text?: unknown;
+  answer?: { answers?: ({ selected?: string[]; other?: string } | null)[] } | null;
+}
+
+/** An approval's result event. */
+export interface CardResult {
+  state?: string;
+  by?: string;
+  at: number;
+  reason?: string;
+  via?: { text?: unknown } | null;
 }
 
 /**
@@ -81,8 +119,8 @@ export function cardLabel(kind: string, data: any): string {
  * answer to it (`reply`, Store.recentCards; a typed message from before #812 can still be one), an approval's result, and whether its minion
  * was dismissed. `clock` formats a time.
  */
-export function settledHow(kind: string, data: any, reply: any, result: any, dismissed: number | null, clock: (ms: number) => string): string {
-  const answers = (reply?.answer?.answers ?? []).flatMap((a: any) => [...(a?.selected ?? []), ...(a?.other ? [a.other] : [])]);
+export function settledHow(kind: string, data: CardData | null | undefined, reply: CardReply | null | undefined, result: CardResult | null | undefined, dismissed: number | null, clock: (ms: number) => string): string {
+  const answers = (reply?.answer?.answers ?? []).flatMap((a) => [...(a?.selected ?? []), ...(a?.other ? [a.other] : [])]);
   if (reply?.answer) return `answered by ${reply.author} at ${clock(reply.at)}${answers.length ? `: ${clip(answers.join('; '))}` : ''}`;
   if (kind === 'plan' && data?.status && data.status !== 'pending') return `${data.status}${data.by ? ` by ${data.by}` : ''}${data.at ? ` at ${clock(data.at)}` : ''}`;
   if (result?.state === 'expired') return `expired at ${clock(result.at)}${result.reason ? ` (${result.reason})` : ''}`;

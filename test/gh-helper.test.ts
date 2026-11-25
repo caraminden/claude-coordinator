@@ -52,7 +52,7 @@ test("a read starts the login's helper without waiting for it; later reads come 
   const a = await helped(h, 'repos/a/b/actions/runs?per_page=5', null, { GH_TOKEN: 'tok-a' });
   assert.equal(a.status, 200);
   assert.equal(a.etag, '"v1"');
-  assert.equal(a.body.path, '/repos/a/b/actions/runs?per_page=5');
+  assert.equal((a.body as { path: string }).path, '/repos/a/b/actions/runs?per_page=5');
   assert.equal(seen.at(-1)!.headers.authorization, 'token tok-a');
   const again = await h.get('repos/a/b', '"v1"', { GH_TOKEN: 'tok-a' });
   assert.deepEqual(again, { status: 304, etag: '"v1"', body: null });

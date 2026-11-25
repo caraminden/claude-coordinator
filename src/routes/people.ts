@@ -7,6 +7,7 @@ import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { dropKeptPerson, keptDirs, optOutKey } from '../replay-keep.ts';
+import { thrown } from '../thrown.ts';
 
 /** A person as Settings → People shows them: never a hash or a token. */
 function personView(app: App, u: User) {
@@ -37,10 +38,10 @@ function uidOf(session: { uid?: number }): number {
 }
 
 /** Whose secret a PUT or DELETE names: your own, or a scheme's you're a member of (an admin counts, as everywhere). */
-function secretOwner(app: App, session: { uid?: number; admin?: boolean }, body: any): [SecretScope, number] {
+function secretOwner(app: App, session: { uid?: number; admin?: boolean }, body: Record<string, unknown>): [SecretScope, number] {
   if (body.scope === 'person' || body.scope == null) return ['person', uidOf(session)];
   if (body.scope !== 'scheme') throw new HttpError(400, 'scope is person or scheme');
-  const project = Number.isInteger(body.project) ? app.store.getProject(body.project) : undefined;
+  const project = typeof body.project === 'number' && Number.isInteger(body.project) ? app.store.getProject(body.project) : undefined;
   if (!project) throw new HttpError(400, "A scheme secret needs project: the scheme's id");
   if (!app.store.canSee(session, project.id)) throw new HttpError(403, `Only ${project.name}'s members change its secrets`);
   return ['scheme', project.id];
@@ -311,8 +312,8 @@ export const peopleRoutes: Route[] = [
       let n: number;
       try {
         n = app.claude.linkSlot(uid, body.account === undefined ? undefined : Number(body.account));
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message ?? String(err));
       }
       // Starting the container can take minutes the first time (it builds the image): Settings polls GET meanwhile.
       void app.claude.link(uid, n).catch((err) => console.warn(`claude-link: linking account ${n} for user ${uid} failed: ${err.message}`));
@@ -330,8 +331,8 @@ export const peopleRoutes: Route[] = [
       if (n !== null && !Number.isInteger(n)) throw new HttpError(400, 'Which account? Send { account: n }.');
       try {
         app.claude.use(uid, n);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message ?? String(err));
       }
       await ownWrites(); // the reply reads the credential back (#1244)
       return json(res, 200, { ...app.claude.status(uid), usage: app.runner.usageOf(uid) });

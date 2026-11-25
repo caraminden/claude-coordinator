@@ -19,6 +19,7 @@ import { explainCards, explainMisplaced, explainStale, explainWaiting, misplaced
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { takeStatus } from './status-trailer.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
+import type { ContentBlock } from './claude-events.ts';
 
 export interface LinkCheckConfig {
   /** The turn's working directory, which relative links resolve against (not the hook's cwd, which follows a `cd`). */
@@ -120,8 +121,8 @@ function postedCard(transcript?: string): boolean | null {
       if (!l) continue;
       const e = JSON.parse(l);
       const content = e.message?.content;
-      if (e.type === 'user' && !e.isMeta && !(Array.isArray(content) && content.some((c: any) => c?.type === 'tool_result'))) posted = false;
-      else if (e.type === 'assistant' && Array.isArray(content) && content.some((c: any) => c?.type === 'tool_use' && CARD_TOOLS.test(c.name))) posted = true;
+      if (e.type === 'user' && !e.isMeta && !(Array.isArray(content) && content.some((c: ContentBlock | null) => c?.type === 'tool_result'))) posted = false;
+      else if (e.type === 'assistant' && Array.isArray(content) && content.some((c: ContentBlock | null) => c?.type === 'tool_use' && CARD_TOOLS.test(String(c.name)))) posted = true;
     }
     return posted;
   } catch {
@@ -163,7 +164,7 @@ function closeSelfOk(transcript?: string): boolean | null | undefined {
         }
         continue;
       }
-      if (e.type === 'user' && !e.isMeta && !content.some((c: any) => c?.type === 'tool_result')) {
+      if (e.type === 'user' && !e.isMeta && !content.some((c: ContentBlock | null) => c?.type === 'tool_result')) {
         called = false;
         ids.clear();
         continue;

@@ -231,7 +231,7 @@ export class MinionIndex {
       WHERE ${match ? 'minion_index MATCH ? AND' : ''} i.project_id = ? AND i.closed_at >= ? ${skip.length ? `AND i.rowid NOT IN (${skip.map(Number).join(',')})` : ''}
       ORDER BY ${match ? 'bm25(minion_index, 5, 1, 2, 2, 3)' : 'i.closed_at DESC'} LIMIT ?`)
         .all(...(match ? [match] : []), projectId, since, n)
-        .map((r: any) => ({ kind: 'minion' as const, ...r }));
+        .map((r) => ({ kind: 'minion' as const, ...(r as unknown as Omit<MinionHit, 'kind'>) }));
     const all = ftsQuery(query);
     if (!all) return minion(null, limit, []);
     const hits: (MinionHit | HandoffHit)[] = minion(all, limit, []);
@@ -248,7 +248,7 @@ export class MinionIndex {
       .prepare(`SELECT name, mtime, snippet(handoff_index, 1, '[', ']', '…', 20) AS snippet FROM handoff_index
       WHERE handoff_index MATCH ? AND project_id = ? ORDER BY bm25(handoff_index, 5, 1) LIMIT 3`)
       .all(all, projectId)
-      .map((r: any) => ({ kind: 'handoff' as const, ...r }));
+      .map((r) => ({ kind: 'handoff' as const, ...(r as unknown as Omit<HandoffHit, 'kind'>) }));
     return [...hits, ...handoffs];
   }
 

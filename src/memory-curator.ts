@@ -10,6 +10,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { HttpError } from './http.ts';
 import { deleteNote, memoryFolders, noteFile, plain, readFolder, writeAtomic, type FolderView, type MemoryFolder, type MemoryLogin } from './memory-files.ts';
+import { thrown } from './thrown.ts';
 
 /** How long an applied proposal's old notes are kept for Put back (Josh, 2026-11-19: "30 days"). */
 export const KEEP_MS = 30 * 86_400_000;
@@ -94,7 +95,7 @@ export function checkChanges(folder: FolderView, raw: unknown): Change[] {
   if (raw.length > 300) throw new HttpError(400, 'At most 300 changes in one proposal');
   const notes = new Map(folder.notes.map((n) => [n.file, n.text]));
   const seen = new Set<string>();
-  return raw.map((c: any, i): Change => {
+  return raw.map((c: Record<string, unknown>, i): Change => {
     const action = c?.action as Action;
     if (!ACTIONS.includes(action)) throw new HttpError(400, `Change ${i + 1}: action must be one of ${ACTIONS.join(', ')}`);
     // MEMORY.md itself can only be flagged (a long or stale line no note owns): its lines change through each note's change.
@@ -168,8 +169,8 @@ export function applyChanges(dir: string, changes: Change[], approved: Set<numbe
       }
       backup.push({ file: c.file, text: now, line: nowLine });
       return { ...c, outcome: 'applied' };
-    } catch (err: any) {
-      return { ...c, outcome: `failed: ${err.message}` };
+    } catch (err) {
+      return { ...c, outcome: `failed: ${thrown(err).message}` };
     }
   });
   return { changes: out, backup };
@@ -195,8 +196,8 @@ export function restoreSaved(dir: string, saved: Saved[], gone: (file: string) =
         }
       } else writeAtomic(path, s.text);
       restored++;
-    } catch (err: any) {
-      failed.push(`${s.file} (${err.message})`);
+    } catch (err) {
+      failed.push(`${s.file} (${thrown(err).message})`);
     }
   }
   return { restored, failed };

@@ -11,6 +11,7 @@ import { existsSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, join, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 const NAMES = new Set(['target', 'node_modules']);
@@ -73,8 +74,8 @@ export async function low(cmd: string[], extra: { cwd?: string; env?: NodeJS.Pro
   const opts = { timeout: 60 * 60_000, maxBuffer: 64 * 1024 * 1024, ...extra };
   try {
     return await run(LOW[0], [...LOW.slice(1), ...cmd], opts);
-  } catch (err: any) {
-    if (err.code !== 'ENOENT' || err.path !== LOW[0]) throw err;
+  } catch (err) {
+    if (thrown(err).code !== 'ENOENT' || thrown(err).path !== LOW[0]) throw err;
     return run(cmd[0], cmd.slice(1), opts); // a box without ionice
   }
 }

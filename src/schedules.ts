@@ -12,6 +12,7 @@ import { pacific } from './pacific.ts';
 import { projectSharedDir } from './workspace.ts';
 import { faultPoint } from './fault-points.ts';
 import { inLine } from './turn-line.ts';
+import { thrown } from './thrown.ts';
 
 /** What an activity trigger counts (#1798): ships to main, or minions made. */
 export type TriggerKind = 'ships' | 'minions';
@@ -455,8 +456,8 @@ export class Schedules {
     let next: number | null;
     try {
       next = nextRun(cron, now);
-    } catch (err: any) {
-      throw new ScheduleError(err.message);
+    } catch (err) {
+      throw new ScheduleError(thrown(err).message ?? String(err));
     }
     if (next === null) throw new ScheduleError(`"${cron}" never runs`);
     return next;
@@ -558,7 +559,7 @@ export class Schedules {
     try {
       next = nextRun(s.cron, now);
       // The calendar is a trigger's fallback (Cara, 2026-11-24): a triggered run takes the coming slot's place.
-      if ('ticketId' in outcome && outcome.triggered) next = nextRun(s.cron, next);
+      if ('ticketId' in outcome && outcome.triggered) next = nextRun(s.cron, next!);
     } catch {}
     if ('ticketId' in outcome || 'skip' in outcome) {
       this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
@@ -805,9 +806,9 @@ export class ScheduledRuns {
       const maker = store.findUser('name', s.created_by);
       const made = await this.d.newMinion(project, runMinion(s, maker), by);
       await this.begin(s, project, made, last, minions, now, triggered);
-    } catch (err: any) {
+    } catch (err) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
-      store.schedules.ran(s.id, { error: err.message }, now);
+      store.schedules.ran(s.id, { error: thrown(err).message ?? String(err) }, now);
     }
   }
 
@@ -834,11 +835,11 @@ export class ScheduledRuns {
       if (this.d.held) await this.d.held.start({ ticket: id, from: by, message, opts, schedule: s.id }, send);
       else send();
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
-    } catch (err: any) {
+    } catch (err) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
       // A trigger's minion exists, so it is the run: unmarked, the next hourly check would make another.
       if (triggered && !marked) store.schedules.ran(s.id, { ticketId: id, triggered }, now);
-      store.schedules.ran(s.id, { error: err.message }, now);
+      store.schedules.ran(s.id, { error: thrown(err).message ?? String(err) }, now);
     }
   }
 

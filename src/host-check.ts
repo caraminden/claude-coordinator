@@ -20,7 +20,7 @@ const SINCE = /^[\w :+.-]{1,40}$/;
 
 const run = (bin: string, args: string[], input: string | null = null, timeout = 30_000) =>
   new Promise<string>((ok) => {
-    const child = execFile(bin, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024 }, (err: any, out, errText) => {
+    const child = execFile(bin, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024 }, (err, out, errText) => {
       const text = `${out}${errText ? `${out ? '\n' : ''}${errText}` : ''}`.trimEnd();
       const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : err && !text ? String(err.message) : '';
       const all = [text, why].filter(Boolean).join('\n') || '(no output)';
@@ -30,7 +30,7 @@ const run = (bin: string, args: string[], input: string | null = null, timeout =
   });
 
 /** Run one check from a tool call's arguments; a bad argument is a 400 that says what to send. */
-export function hostCheck(opts: HostCheckOptions, body: any): Promise<string> {
+export function hostCheck(opts: HostCheckOptions, body: Record<string, unknown>): Promise<string> {
   const unit = body?.unit === undefined ? null : String(body.unit);
   if (unit !== null && !UNIT.test(unit)) throw new HttpError(400, 'unit must be a systemd unit name, like claude-coordinator.service');
   switch (body?.what) {

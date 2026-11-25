@@ -102,7 +102,7 @@ export interface WeekPart {
 /**
  * The server login's weekly limit at API prices, every Claude account together (Cara, 2026-11-17: the Day chip ignored the
  * second account): the sum of each account's weekLimit. An account with no estimate yet counts as the average of the priced
- * ones, `assumed`; null before any is priced. `usage` is runner.usageOf's (an `accounts` list when there are several).
+ * ones, `assumed`; null before one is priced. `usage` is runner.usageOf's (an `accounts` list when there are several).
  */
 export function hostWeek(store: Store, usage: (Meter & { accounts?: { n: number; label: string; usage: Meter | null }[] }) | null | undefined, now = Date.now()): { limit: number | null; parts: WeekPart[] } {
   const list = usage?.accounts ?? [{ n: 1, label: '', usage }];
@@ -243,7 +243,7 @@ export interface FableMeter {
   capPct: number;
   /** Fable dollars at API prices over the last 7 days, every payer together. */
   usd: number;
-  /** The weekly plan limits of every account on the server, at API prices; null before any is priced. */
+  /** The weekly plan limits of every account on the server, at API prices; null before one is priced. */
   weekUsd: number | null;
   /** capPct of weekUsd, the Citadel-wide cap in dollars. */
   capUsd: number | null;

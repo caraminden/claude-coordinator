@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { hostDir, hostText } from './host-signals.ts';
 import { citadelSliceDir } from './memory-storms.ts';
 import type { EaseLevel, Slowed } from './memory-ease.ts';
+import { thrown } from './thrown.ts';
 
 const MB = 1024 ** 2;
 export const STOP = {
@@ -149,8 +150,8 @@ export class GrowthStop {
       // A stop that came while this set ran has already lifted what it saw, so lift this one too.
       if (this.stopped) return await this.lift(pick.unit, 'the server is stopping');
       this.log(`holding ${pick.unit} at ${Math.round(bytes / MB)} MB: it grew ${Math.round(pick.grew / MB)} MB in ${STOP.windowMs / 60_000} min while memory is tight`);
-    } catch (err: any) {
-      console.error(`Growth stop failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Growth stop failed: ${thrown(err).message ?? err}`);
     }
   }
 
@@ -159,8 +160,8 @@ export class GrowthStop {
       await this.set(unit, null);
       this.held.delete(unit);
       this.log(`lifted the hold on ${unit}: ${why}`);
-    } catch (err: any) {
-      console.error(`Lifting the hold on ${unit} failed (tried again next reading): ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Lifting the hold on ${unit} failed (tried again next reading): ${thrown(err).message ?? err}`);
     }
   }
 

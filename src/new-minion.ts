@@ -30,7 +30,7 @@ export async function makeMinion(store: Store, project: Project, m: NewMinionSpe
       // row back can be served the row before it, whose cwd is '' — a relative path, which lands in the server's own
       // checkout (#1618: a test run's chore minion committed into the minion worktree the server was running from).
       return { id, number: number!, notes, cwd: dir.cwd };
-    } catch (err: any) {
+    } catch (err) {
       throw new HttpError(500, `Could not create working directory: ${errorText(err)}`);
     }
   } catch (err) {

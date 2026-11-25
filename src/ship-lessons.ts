@@ -13,6 +13,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { addShipLessons } from './standard-audits.ts';
 import { projectSharedDir } from './workspace.ts';
+import { thrown } from './thrown.ts';
 
 /** At most this many lines a ship, and characters a line. */
 export const MAX_LINES = 3;
@@ -247,8 +248,8 @@ export function queueLesson(store: Store, dataDir: string, t: { id: number; proj
     try {
       const alert = repeatAlert(store, dataDir, t.project_id);
       if (alert) notify?.(alert);
-    } catch (err: any) {
-      console.error(`Ship lessons repeat check failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Ship lessons repeat check failed: ${thrown(err).message ?? err}`);
     }
   }
   return row;

@@ -5,6 +5,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from './db.ts';
 import { inLine } from './turn-line.ts';
+import { thrown } from './thrown.ts';
+import type { ContentBlock } from './claude-events.ts';
 
 // No foreign keys, like person_notes, so an older release's deleteTicket still works after a rollback;
 // reads join tickets and drop rows older than their minion (an id reused after such a delete).
@@ -54,14 +56,28 @@ export const TWIN_SCORE = 0.63;
 /** Texts in, one unit-length vector per text out; `query` marks a search, which the model wants instructed. */
 export type Embed = (texts: string[], query?: boolean) => Promise<Float32Array[]>;
 
+/** What spokenText reads of an event's data: a message's text, or a Claude event. */
+interface Spoken {
+  text?: unknown;
+  type?: unknown;
+  replaced?: unknown;
+  message?: { content?: ContentBlock[] };
+}
+
+/** An embedder answer that names its input as the problem (a 4xx), not the connection. */
+const refused = (err: unknown) => {
+  const { status } = thrown(err);
+  return typeof status === 'number' && status >= 400 && status < 500;
+};
+
 /** What people and Claude said in an event, for searching (not tool calls or their output). */
-export function spokenText(kind: string, data: any): string {
+export function spokenText(kind: string, data: Spoken | null | undefined): string {
   if (kind === 'user_message') return typeof data?.text === 'string' ? data.text : '';
   // A reply the link check sent back that its rewrite replaced (#281) isn't in the chat to jump to.
   if (data?.type !== 'assistant' || data.replaced) return '';
   return (data.message?.content ?? [])
-    .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
-    .map((b: any) => b.text)
+    .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
     .join('\n');
 }
 
@@ -155,20 +171,20 @@ export class Memory {
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       const part = todo.slice(i, i + PER_REQUEST);
       // A 4xx names one bad chunk: retry its pair one by one, skip the refused, go on. A 5xx or a dead connection still throws.
-      let vecs: Float32Array[];
+      let vecs: (Float32Array | null)[];
       try {
         vecs = await embed(part.map((p) => p.text));
-      } catch (err: any) {
-        if (!(err?.status >= 400 && err.status < 500)) throw err;
+      } catch (err) {
+        if (!refused(err)) throw err;
         vecs = [];
         for (const p of part) {
           try {
             vecs.push((await embed([p.text]))[0]);
-          } catch (e: any) {
-            if (!(e?.status >= 400 && e.status < 500)) throw e;
+          } catch (e) {
+            if (!refused(e)) throw e;
             this.skipped.add(key(p));
-            console.error(`Semantic memory: skipped ${key(p)} (ticket ${p.ticket_id}), the embedder refused it:`, e.message);
-            vecs.push(null as any);
+            console.error(`Semantic memory: skipped ${key(p)} (ticket ${p.ticket_id}), the embedder refused it:`, thrown(e).message);
+            vecs.push(null);
           }
         }
       }
@@ -235,14 +251,14 @@ export class Memory {
 
   /** A message's chunk; null when there's nothing to index; 'running' while its turn may still reply. */
   private turnOf(m: { id: number; ticket_id: number; data: string; created_at: number }, now: number): Omit<Pending, 'project_id'> | null | 'running' | 'later' {
-    let msg: any;
+    let msg: { text?: unknown; author?: string | null; steered?: unknown };
     try {
       msg = JSON.parse(m.data);
     } catch {
       return null;
     }
     const asked = spokenText('user_message', msg).trim();
-    if (!asked || NOT_ASKS.has(msg.author)) return null;
+    if (!asked || NOT_ASKS.has(msg.author as string)) return null;
     // Its turn's result: the first after it, or for a message that waited for the turn before it to end,
     // the first of a turn that started after it was sent (a steer joins the running turn instead).
     const result = (
@@ -395,7 +411,7 @@ export class MemoryIndexer {
     try {
       // A batch per scheme in turn, so one scheme's backfill never holds up another's new turns, and
       // one scheme that fails (a chunk the model refuses) sits out this pass without stopping the rest.
-      let failed: any = null;
+      let failed: unknown = null;
       const out = new Set<number>();
       for (let more = true; more; ) {
         more = false;
@@ -414,8 +430,8 @@ export class MemoryIndexer {
       if (failed) throw failed;
       if (this.down) console.log('Semantic memory: the embedding service is back');
       this.down = false;
-    } catch (err: any) {
-      if (!this.down) console.error('Semantic memory indexing stopped:', err?.cause?.code ?? err?.message ?? err);
+    } catch (err) {
+      if (!this.down) console.error('Semantic memory indexing stopped:', thrown(thrown(err).cause).code ?? thrown(err).message ?? err);
       this.down = true;
     } finally {
       this.indexing = false;

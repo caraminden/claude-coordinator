@@ -68,9 +68,9 @@ export class ChunkedUploads {
   private metaPath = (id: string) => join(this.dir, `${id}.json`);
 
   /** Begin an upload of `size` bytes, refused when it would take the disk below the floor. */
-  async start(who: Uploader, target: Target, body: any): Promise<{ id: string; offset: number; size: number; chunk: number }> {
+  async start(who: Uploader, target: Target, body: Record<string, unknown>): Promise<{ id: string; offset: number; size: number; chunk: number }> {
     const size = body?.size;
-    if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, "size must be the file's size in bytes");
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) throw new HttpError(400, "size must be the file's size in bytes");
     if (typeof body?.name !== 'string' || !body.name.trim() || body.name.length > 1000) throw new HttpError(400, "name must be the file's name");
     const folder = uploadFolder(typeof body.folder === 'string' ? body.folder.slice(0, 2000) : '');
     await mkdir(this.dir, { recursive: true, mode: 0o700 });

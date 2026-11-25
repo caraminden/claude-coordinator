@@ -1,3 +1,4 @@
+import { thrown } from './thrown.ts';
 // Every server-wide periodic job, started through one helper so one list says what runs, how often, when it last
 // ran, how long it took and how it last failed (#1311; docs/adr/0002-background-jobs-out-of-server.md).
 
@@ -47,9 +48,9 @@ export function every(name: string, ms: number, fn: () => unknown, first?: numbe
     row.running++;
     try {
       await fn();
-    } catch (err: any) {
+    } catch (err) {
       row.fails++;
-      row.error = String(err?.message ?? err).slice(0, 500);
+      row.error = String(thrown(err).message ?? err).slice(0, 500);
       row.errorAt = Date.now();
       console.error(`Background job "${name}" failed:`, err);
     } finally {

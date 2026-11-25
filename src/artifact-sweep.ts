@@ -13,6 +13,7 @@ import type { Project, Store } from './db.ts';
 import { ghGet, type GhGet } from './ci-health.ts';
 import { repoSlug } from './prlinks.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 
@@ -64,8 +65,9 @@ export async function ghDelete(path: string, as: GithubEnv): Promise<{ status: n
   try {
     const { stdout } = await run('gh', ['api', '-i', '-X', 'DELETE', path], { env: asEnv(as), timeout: 30_000 });
     return { status: Number(/^HTTP\/\S+ (\d+)/.exec(stdout)?.[1] ?? 0) };
-  } catch (err: any) {
-    const out = typeof err?.stdout === 'string' ? err.stdout : '';
+  } catch (err) {
+    const { stdout } = thrown(err);
+    const out = typeof stdout === 'string' ? stdout : '';
     if (!/^HTTP\/\S+ \d+/.test(out)) throw err;
     return { status: Number(/^HTTP\/\S+ (\d+)/.exec(out)![1]) };
   }
@@ -142,13 +144,13 @@ export class ArtifactSweep {
           if (page === 1) return { ...res, error: `GitHub answered ${a.status}` };
           break;
         }
-        const batch: Artifact[] = a.body?.artifacts ?? [];
+        const batch: Artifact[] = (a.body as { artifacts?: Artifact[] } | null)?.artifacts ?? [];
         all.push(...batch);
         if (batch.length < 100) break;
       }
       // A failed look at the default branch falls back to `main`; the cost is only that master repos keep fewer.
       const info = await get(`repos/${slug}`, null, as).catch(() => null);
-      const defaultBranch: string = info?.body?.default_branch ?? 'main';
+      const defaultBranch: string = (info?.body as { default_branch?: string } | null | undefined)?.default_branch ?? 'main';
       for (const a of plan(all, now, defaultBranch).slice(0, MAX_DELETES)) {
         const r = await del(`repos/${slug}/actions/artifacts/${a.id}`, as);
         if (r.status === 204) {
@@ -163,8 +165,8 @@ export class ArtifactSweep {
           break;
         }
       }
-    } catch (err: any) {
-      res.error = String(err?.message ?? err).slice(0, 120);
+    } catch (err) {
+      res.error = String(thrown(err).message ?? err).slice(0, 120);
     }
     return res;
   }

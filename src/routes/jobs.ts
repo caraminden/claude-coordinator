@@ -33,7 +33,7 @@ function jobMachine(app: App, name: unknown, project: Project): Machine {
 }
 
 /** The fields queue_job and a contraption's POST share. */
-async function queueFrom(app: App, body: any, project: Project, roots: string[]) {
+async function queueFrom(app: App, body: Record<string, unknown>, project: Project, roots: string[]) {
   const machine = jobMachine(app, body.machine, project);
   const kind = cleanKind(body.kind);
   const when = body.when ?? 'hours';

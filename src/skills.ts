@@ -39,7 +39,7 @@ export interface SkillItem {
 }
 
 /** The kit skills a scheme turned off, as stored (projects.skills_off). */
-export function offSkills(project: Pick<Project, 'skills_off'>): string[] {
+export function offSkills(project: Partial<Pick<Project, 'skills_off'>>): string[] {
   return (project.skills_off ?? '').split(/\s+/).filter((s) => NAME.test(s));
 }
 

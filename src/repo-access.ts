@@ -6,6 +6,7 @@
 import type { RepoCollaborator, Store, User } from './db.ts';
 import type { GithubLink } from './github-link.ts';
 import { repoSlug } from './prlinks.ts';
+import { thrown } from './thrown.ts';
 
 const API = 'https://api.github.com';
 const GITHUB_WAIT_MS = 10_000;
@@ -102,8 +103,8 @@ export class RepoAccess {
       const accept = await this.api('PATCH', `/user/repository_invitations/${id}`, memberToken.secret);
       if (accept.status === 204) return put('added', { login, invitation_id: id });
       return put('invited', { login, invitation_id: id, error: `Citadel couldn't accept the invite for @${login}: ${await githubSays(accept)}` });
-    } catch (err: any) {
-      return put(invited !== null || prev?.state === 'invited' ? 'invited' : 'failed', { login, invitation_id: invited, error: `Couldn't reach GitHub (${err?.message ?? err}); Citadel tries again at its next restart.` });
+    } catch (err) {
+      return put(invited !== null || prev?.state === 'invited' ? 'invited' : 'failed', { login, invitation_id: invited, error: `Couldn't reach GitHub (${thrown(err).message ?? err}); Citadel tries again at its next restart.` });
     }
   }
 
@@ -151,8 +152,8 @@ export class RepoAccess {
       }
       const del = await this.api('DELETE', `/repos/${r.slug}/collaborators/${r.login}`, ownerToken.secret);
       if (del.status !== 204 && del.status !== 404) return fail(`Couldn't take @${r.login} off ${r.slug}: ${await explain(del, ownerToken.login, r.login!, r.slug, this.link.installHint(ownerToken.limited, r.slug))}`);
-    } catch (err: any) {
-      return fail(`Couldn't reach GitHub to take @${r.login} off ${r.slug} (${err?.message ?? err}); Citadel tries again at its next restart.`);
+    } catch (err) {
+      return fail(`Couldn't reach GitHub to take @${r.login} off ${r.slug} (${thrown(err).message ?? err}); Citadel tries again at its next restart.`);
     }
     this.store.deleteRepoCollaborator(projectId, userId);
     return null;

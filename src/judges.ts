@@ -7,6 +7,7 @@
 // A judge can run log-only: it notes what it would have done in the retro log and does nothing. A new one starts that way.
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { thrown } from './thrown.ts';
 
 export type JudgeMode = 'act' | 'log-only';
 
@@ -297,7 +298,7 @@ export function noteWould(sharedDir: string | null, line: string, now = Date.now
   const dir = join(sharedDir, 'retro-log', new Date(now).toISOString().slice(0, 10));
   return mkdir(dir, { recursive: true })
     .then(() => appendFile(join(dir, 'judges.md'), `${line}\n`))
-    .catch((err: any) => console.error(`Noting a log-only judge's act failed: ${err?.message ?? err}`));
+    .catch((err: unknown) => console.error(`Noting a log-only judge's act failed: ${thrown(err).message ?? err}`));
 }
 
 /**

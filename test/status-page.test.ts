@@ -272,7 +272,7 @@ test("a reader thread's Status page shows easing from main's snapshot (#1748): r
   const { store, josh, citadel } = setup('easing-reader');
   const { readerStatus } = await import('../src/reader.ts');
   const now = sameDayNow();
-  const going = { level: 'easing', since: now - 60_000, why: '5.0 GB free', free: 5e9, reclaim: 0, swapOut: 0, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 0, heavy: 0, nested: 0 }, slowed: [], episodeSince: now - 60_000 };
+  const going = { level: 'easing' as const, at: now, since: now - 60_000, why: '5.0 GB free', free: 5e9, reclaim: 0, swapOut: 0, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 0, heavy: 0, nested: 0 }, slowed: [], episodeSince: now - 60_000 };
   const snap = { ready: true, live: {}, builds: {}, ownScheme: citadel.id, previews: false, ships: null, status: { bootAt: now - DAY, commit: 'c', cores: 4, probing: false, lastMs: null, readerMs: null, storms: [], easing: going, desktops: [], disk: {}, units: [], jobs: [] } };
   const c = (await readerStatus(store, snap, root)()!.build(viewer(store, josh.id, true), now)).citadel;
   assert.equal(c.easing.now?.why, '5.0 GB free');

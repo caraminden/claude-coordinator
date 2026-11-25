@@ -14,8 +14,16 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
+/** One question on a card, as ask_question takes it. */
+export interface CardQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options?: { label: string; description?: string; recommended?: boolean; image?: unknown }[];
+}
+
 export interface Card {
-  questions: unknown[];
+  questions: CardQuestion[];
   kind?: 'merge' /** Set on a feeder's go card: the build it merges into (Merge, not Ship It). */;
   into?: number /** A machine job's go card (#857): only its machine's owner or an admin answers it. */;
   job?: number /** A kit sync's ship card (#1100): the kit commit; the server answers it, with no turn. */;

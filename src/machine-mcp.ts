@@ -36,32 +36,38 @@ async function connect(first: boolean): Promise<Response> {
       // The app answered: on a first try a machine that is offline stays offline, so don't keep claude waiting.
       if (first || res.status !== 503) fail(`${NAME} is not available (${res.status}): ${text}`);
       why = `${NAME} is not available (${res.status}): ${text}`;
-    } catch (err: any) {
-      if (first) fail(`Could not reach the app: ${err.message}`);
-      why = `Could not reach the app: ${err.message}`;
+    } catch (err) {
+      why = `Could not reach the app: ${(err as Error).message}`;
+      if (first) fail(why);
     }
     if (Date.now() - started > 120_000) fail(why);
     await sleep(1000);
   }
 }
 
+/** An MCP message as it crosses, unchecked: only these two are read. */
+interface McpMessage {
+  id?: unknown;
+  method?: unknown;
+}
+
 let session = '';
 let markReady: () => void;
 let ready = new Promise<void>((r) => (markReady = r));
 // Claude's MCP handshake, replayed to the new session after a reconnect; the machine's reply to it is dropped.
-const handshake: any[] = [];
+const handshake: McpMessage[] = [];
 const REPLAY_ID = 'citadel-replayed-initialize';
 
 // Claude's requests posted to the machine and not answered yet, by id: answered with an error if the stream ends first.
-const pending = new Map<unknown, any>();
+const pending = new Map<unknown, McpMessage>();
 
 /** Reply to a request that can't reach the machine, so claude gets an error instead of waiting. */
-function unreachable(message: any, why: string) {
+function unreachable(message: McpMessage | null, why: string) {
   if (message?.id === undefined || !message.method || !pending.delete(message.id)) return;
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: `${NAME}: ${why}` } })}\n`);
 }
 
-async function post(message: any): Promise<Response> {
+async function post(message: McpMessage | null): Promise<Response> {
   return fetch(`${API}/api/machines/${MACHINE}/${ROUTE}/${session}`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
@@ -74,7 +80,7 @@ let chain = Promise.resolve();
 createInterface({ input: process.stdin })
   .on('line', (line) => {
     if (!line.trim()) return;
-    let message: any;
+    let message: McpMessage | null;
     try {
       message = JSON.parse(line);
     } catch {
@@ -87,8 +93,8 @@ createInterface({ input: process.stdin })
       try {
         const r = await post(message);
         if (!r.ok) unreachable(message, r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
-      } catch (err: any) {
-        unreachable(message, `could not reach the app (${err.message})`);
+      } catch (err) {
+        unreachable(message, `could not reach the app (${(err as Error).message})`);
       }
     });
   })

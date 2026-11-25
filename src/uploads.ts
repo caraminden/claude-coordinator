@@ -2,6 +2,7 @@
 import { mkdir, open, rm } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { HttpError } from './http.ts';
+import { thrown } from './thrown.ts';
 
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const MAX_UPLOADS = 20;
@@ -85,8 +86,8 @@ export async function claimName(dir: string, rawName: string) {
     const path = join(dir, n === 1 ? name : `${stem} (${n})${ext}`);
     try {
       return { path, file: await open(path, 'wx') };
-    } catch (err: any) {
-      if (err.code !== 'EEXIST' || n > 999) throw err;
+    } catch (err) {
+      if (thrown(err).code !== 'EEXIST' || n > 999) throw err;
     }
   }
 }

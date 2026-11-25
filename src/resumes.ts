@@ -3,6 +3,7 @@
 // wrappers (netWait, killWait, limitWait, cancelLimitWait) and the tunables tests set on it; this takes what it needs
 // through ResumeHost, not the whole Runner.
 import type { Retries, RetryKind } from './turn-outcome.ts';
+import { thrown } from './thrown.ts';
 
 /** The settings table, as far as a wait list needs it. */
 export interface WaitStore {
@@ -274,8 +275,8 @@ export class Resumes {
     let ran: Promise<void> | undefined;
     try {
       ran = h.resume(w.ticket, 'kill', { kill: w.tries, ...(w.resumes ? { restart: w.resumes } : {}) });
-    } catch (err: any) {
-      console.error(`[kill-resume] minion ${w.ticket}: its resume failed to start: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`[kill-resume] minion ${w.ticket}: its resume failed to start: ${thrown(err).message ?? err}`);
     }
     void Promise.resolve(ran).then(() => this.killResumeEnded(w.ticket));
     return true;

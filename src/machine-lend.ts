@@ -36,7 +36,7 @@ const bool = (v: unknown, what: string): boolean | undefined => {
 };
 
 /** A proposal's change from the tool's arguments; throws a message for the caller on anything malformed. */
-export function parseLendChange(body: any): LendChange {
+export function parseLendChange(body: Record<string, unknown>): LendChange {
   const change: LendChange = {};
   const here = bool(body.here, 'here');
   if (here !== undefined) change.here = here;

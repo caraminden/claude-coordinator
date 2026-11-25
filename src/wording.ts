@@ -211,18 +211,18 @@ export interface WordingConfig {
 }
 
 /** The people-facing text a tool call carries, and whether it's HTML; null for a call the check skips. */
-function outgoing(tool: string, input: any, cfg: WordingConfig): { text: string; html: boolean } | null {
+function outgoing(tool: string, input: Record<string, unknown> | undefined, cfg: WordingConfig): { text: string; html: boolean } | null {
   if (/^mcp__/.test(tool)) {
     return { text: toolStrings(input).join('\n'), html: false };
   }
   const path = typeof input?.file_path === 'string' ? resolve(input.file_path) : '';
   if (!/\.(md|html?)$/i.test(path) || !cfg.shared.some((d) => path.startsWith(resolve(d) + sep))) return null;
-  const text = tool === 'Write' ? input.content : tool === 'Edit' ? input.new_string : tool === 'MultiEdit' ? (input.edits ?? []).map((e: any) => e?.new_string).join('\n') : '';
+  const text = tool === 'Write' ? input?.content : tool === 'Edit' ? input?.new_string : tool === 'MultiEdit' ? ((input?.edits ?? []) as ({ new_string?: unknown } | null)[]).map((e) => e?.new_string).join('\n') : '';
   return typeof text === 'string' ? { text, html: /\.html?$/i.test(path) } : null;
 }
 
 /** The PreToolUse hook's answer: a deny with the reason, or null to let the call through. */
-export function checkCall(input: { tool_name?: string; tool_input?: any }, cfg: WordingConfig) {
+export function checkCall(input: { tool_name?: string; tool_input?: Record<string, unknown> }, cfg: WordingConfig) {
   const out = outgoing(String(input.tool_name ?? ''), input.tool_input, cfg);
   if (!out) return null;
   const sent = readSent<string>(cfg.sent);

@@ -3,7 +3,7 @@
 // Runs inside the pinned MCP server, so it imports only ./ files (turn-launch.ts pinnedCopy).
 import { hideTokens } from './hide-tokens.ts';
 import { stateWord } from './needs.ts';
-import { workerWaitText } from './worker-wait.ts';
+import { type WorkerWait, workerWaitText } from './worker-wait.ts';
 
 interface EventRow {
   kind: string;
@@ -12,7 +12,7 @@ interface EventRow {
 }
 interface Call {
   name: string;
-  input: any;
+  input: unknown;
   at: number;
   grunt: string | null;
   id: string;
@@ -46,7 +46,7 @@ export function ago(ms: number): string {
 
 /** A tool call's input in a few words: a Bash call's description and command, a file, a pattern, or its arguments. */
 function inputText(c: Call): string {
-  const i = c.input ?? {};
+  const i = (c.input ?? {}) as Record<string, unknown>;
   if (typeof i.command === 'string') return oneLine(i.description ? `${i.description}: ${i.command}` : i.command, 160);
   for (const k of ['file_path', 'notebook_path', 'path', 'pattern', 'url', 'query', 'description', 'skill', 'subject']) {
     if (typeof i[k] === 'string' && i[k]) return oneLine(i[k], 160);
@@ -62,12 +62,26 @@ function callLine(c: Call, now: number, running: boolean): string {
   return `${head} → ${c.result.error ? 'error' : 'ok'} after ${ago(c.result.at - c.at)}${out}`;
 }
 
+/** A minion as read_minion's API answer gives it, the fields read here. */
+interface LiveMinion {
+  number: number;
+  status: string;
+  state?: string | null;
+  cwd?: string;
+  turnStartedAt?: number | null;
+  wait?: { kind: string; text: string; since: number } | null;
+  limit_resume_at?: number | string | null;
+  worker_wait?: WorkerWait | null;
+  queued?: number;
+  approvals?: number;
+}
+
 /**
  * The live view's lines for one minion: its worktree, what its turn waits on (a tool, the model, a
  * person's card, the usage limit, the land line), its queued messages and its last few tool calls,
  * input and output trimmed and token-shaped strings hidden. `ticket` is the API's view of the minion.
  */
-export function liveState(ticket: any, events: EventRow[], now = Date.now()): string[] {
+export function liveState(ticket: LiveMinion, events: EventRow[], now = Date.now()): string[] {
   // This turn's (or, between turns, the last turn's) events: from its last init on.
   let from = 0;
   const parsed = events.map((e) => ({ ...e, ev: e.kind === 'claude' ? JSON.parse(e.data) : null }));
@@ -76,8 +90,9 @@ export function liveState(ticket: any, events: EventRow[], now = Date.now()): st
   });
   const running = ticket.status === 'running' && !ticket.worker_wait;
   // A turn that started but hasn't sent its init yet isn't the last one: an old unanswered call isn't running.
-  if (running && ticket.turnStartedAt && (parsed[from]?.created_at ?? 0) < ticket.turnStartedAt) {
-    from = parsed.findIndex((e) => e.created_at >= ticket.turnStartedAt);
+  const turnStart = ticket.turnStartedAt;
+  if (running && turnStart && (parsed[from]?.created_at ?? 0) < turnStart) {
+    from = parsed.findIndex((e) => e.created_at >= turnStart);
     if (from < 0) from = parsed.length;
   }
   const turn = parsed.slice(from);

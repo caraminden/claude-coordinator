@@ -53,12 +53,18 @@ export type LoadError = string | { plugin?: string; name?: string; server?: stri
 export interface ClaudeEvent {
   type: string;
   subtype?: string;
+  /** user: a steer echoed back as the turn takes it */
+  isReplay?: boolean;
+  /** stream_event (--include-partial-messages) */
+  event?: { type?: string; message?: { id?: string }; delta?: { type?: string; text?: string } };
   session_id?: string;
   uuid?: string;
   parent_tool_use_id?: string | null;
   message?: ClaudeMessage;
   /** result */
   result?: string;
+  errors?: unknown[];
+  stop_reason?: string | null;
   is_error?: boolean;
   total_cost_usd?: number;
   duration_ms?: number;

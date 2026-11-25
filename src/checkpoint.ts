@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { Store } from './db.ts';
 import { busySource } from './settled.ts';
+import { thrown } from './thrown.ts';
 
 export const CHECKPOINT_MS = 10_000;
 /** A WAL this long (8 MB of 4 KB pages; live writes 10 to 50 pages a second) is checkpointed, or any WAL after MAX_WAIT_MS. */
@@ -49,7 +50,7 @@ export function checkpointOffThread(store: Store, everyMs = CHECKPOINT_MS, walPa
   worker.unref();
   store.autoCheckpoint(false);
   const unlist = busySource(() => (Atomics.load(busy, 0) ? ['a WAL checkpoint round'] : []));
-  worker.on('error', (err) => console.error(`WAL checkpoint worker failed: ${err?.message ?? err}`));
+  worker.on('error', (err: unknown) => console.error(`WAL checkpoint worker failed: ${thrown(err).message ?? err}`));
   worker.once('exit', (code) => {
     unlist();
     store.autoCheckpoint(true);
@@ -80,9 +81,9 @@ if (!isMainThread && workerData?.checkpoint) {
         }
         db.exec('PRAGMA wal_checkpoint(PASSIVE)');
         last[i] = Date.now();
-      } catch (err: any) {
+      } catch (err) {
         // A busy database just waits for the next round.
-        console.error(`WAL checkpoint of ${paths[i]}: ${err?.message ?? err}`);
+        console.error(`WAL checkpoint of ${paths[i]}: ${thrown(err).message ?? err}`);
       }
     });
     Atomics.store(busy, 0, 0);

@@ -206,7 +206,7 @@ async function queue(code: string): Promise<{ ok: boolean; text: string }> {
   for (let i = 0; i < 40; i++) {
     // 40 long polls of 25 s: a check gets about 16 minutes
     const r = await local(s, `result/${id}`);
-    if (r.status === 200) return r.json();
+    if (r.status === 200) return (await r.json()) as { ok: boolean; text: string };
   }
   die(`no answer to command ${id} from the box in 16 minutes`);
 }

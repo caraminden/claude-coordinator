@@ -179,6 +179,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/claude-events.ts` | Types for the Claude CLI's stream-json events and content blocks |
 | `src/thrown.ts` | `thrown(err)`: a caught value's error fields (message, code, stderr), typed |
+| `src/gh-bodies.ts` | Types for the fields Citadel reads from GitHub's REST answers (runs, jobs, errors) |
 | `src/turn-launch.ts` | What a turn is launched with: pinned copies of the server files, hooks, settings, env and tool lists |
 | `src/prompts.ts` | The agent instructions: the minion and Taskmaster prompts, onboarding, and the messages a turn is sent |
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |

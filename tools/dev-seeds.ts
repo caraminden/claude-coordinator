@@ -598,7 +598,7 @@ mock.boards('#takes', { boards: [
       const t = minion(c, 'Turns ease off as memory fills', { status: 'new', note: startNote(35) }, 'feature');
       c.store.setSetting(startHoldKey(t.id), { usd: 35, card: 'seed-start' });
       c.store.addEvent(t.id, 'user_message', { text: 'Start from the handoff. Expected cost: ~$35.', author: 'Taskmaster', brief: true, mail: true, parked: true, startHold: true });
-      const e = c.store.addEvent(t.id, 'question', { id: 'seed-start', questions: [startCard(t.number, t.title, 35)], startCost: 35 });
+      const e = c.store.addEvent(t.id, 'question', { id: 'seed-start', questions: [startCard(t.number!, t.title, 35)], startCost: 35 });
       return route(c, t, e.id);
     },
   },
@@ -981,7 +981,7 @@ mock.boards('#takes', { boards: [
         w.said([`## Round ${i}`, '', `- #${i} is **ready**: tested, risk low.`, `- #${i + 1} is waiting on a pick.`, '', 'Next: start a minion for the rail settings once #12 is live.'].join('\n'));
         w.done(`Round ${i} summarised.`);
       }
-      const states = [{ state: 'ready', note: 'tested, risk low' }, { state: 'parked', note: 'waiting on another minion' }, { state: 'outside', note: 'CI running' }, {}];
+      const states: Parameters<typeof minion>[2][] = [{ state: 'ready', note: 'tested, risk low' }, { state: 'parked', note: 'waiting on another minion' }, { state: 'outside', note: 'CI running' }, {}];
       for (let i = 1; i <= 20; i++) minion(c, `Busy minion ${i}`, i <= 5 ? { status: 'running', last_activity: 'Running commands' } : states[i % 4], i % 3 ? 'feature' : 'bug');
       for (let i = 1; i <= 1244; i++) minion(c, `Dismissed minion ${i}: a change that shipped a while ago`, { status: 'closed', ...(i % 10 ? {} : { state: 'ready', note: `shipped, note ${i}` }) }, i % 3 ? 'feature' : 'bug');
       return `#/p/${c.project.id}`;

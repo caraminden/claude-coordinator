@@ -7,6 +7,8 @@
 import { type GhGet, ghGet, RateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { every, type Job } from './every.ts';
+import { thrown } from './thrown.ts';
+import type { GhErrorBody, GhJobsBody, GhRunsBody } from './gh-bodies.ts';
 
 export const SHIP_POLL_MS = 15_000;
 const RATE_LIMITED_MS = 5 * 60_000;
@@ -37,7 +39,7 @@ export interface ShipWatchDeps {
 export class ShipWatch {
   private deps: ShipWatchDeps;
   private get: GhGet;
-  private cache = new Map<string, { etag: string | null; body: any }>();
+  private cache = new Map<string, { etag: string | null; body: unknown }>();
   // Each repo's ships at its last good read: a read that fails keeps them, so a GitHub hiccup doesn't lift a squeeze.
   private last = new Map<string, { ships: Ship[]; at: number }>();
   private pausedUntil = 0;
@@ -73,11 +75,11 @@ export class ShipWatch {
         if (as === null) continue;
         try {
           this.last.set(repo, { ships: await this.ships(repo, as, used), at: now });
-        } catch (err: any) {
+        } catch (err) {
           if (err instanceof RateLimited) throw err;
           failed = true;
           if (now - (this.last.get(repo)?.at ?? now) >= KEEP_FAILED_MS) this.last.delete(repo);
-          this.say(`Ship watch: ${repo}: ${err?.message ?? err}`);
+          this.say(`Ship watch: ${repo}: ${thrown(err).message ?? err}`);
         }
       }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
@@ -87,7 +89,7 @@ export class ShipWatch {
       this.deps.send(ships);
       if (!failed) this.said = '';
       return ships;
-    } catch (err: any) {
+    } catch (err) {
       if (!(err instanceof RateLimited)) throw err;
       this.pausedUntil = now + RATE_LIMITED_MS;
       // An empty list now, so the agents lift at once and one connecting meanwhile isn't handed the old list.
@@ -101,7 +103,7 @@ export class ShipWatch {
   }
 
   private async ships(repo: string, as: GithubEnv, used: Set<string>): Promise<Ship[]> {
-    const runs: any[] = (await this.read(`repos/${repo}/actions/runs?status=in_progress&per_page=50`, as, used))?.workflow_runs ?? [];
+    const runs = ((await this.read(`repos/${repo}/actions/runs?status=in_progress&per_page=50`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
     const out: Ship[] = [];
     const on = (re: RegExp) => runs.filter((r) => re.test(String(r?.head_branch ?? '')) && Number.isInteger(r?.id));
     // With no land/ run going, the oldest early one is a train's own CI (its early run counted): the next train's is younger.
@@ -110,14 +112,14 @@ export class ShipWatch {
       .slice(0, 1);
     const land = on(SHIP_BRANCH);
     for (const r of land.length ? land : early) {
-      const jobs: any[] = (await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used))?.jobs ?? [];
+      const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
       // shortcut: any self-hosted runner counts, as every one is on Cara's desktop today; send each PC only its own ships once another PC has runners.
       for (const j of jobs) if (j?.status === 'in_progress' && typeof j.runner_name === 'string' && j.runner_name && Array.isArray(j.labels) && j.labels.includes('self-hosted')) out.push({ repo, runner: j.runner_name });
     }
     return out;
   }
 
-  private async read(path: string, as: GithubEnv, used: Set<string>): Promise<any> {
+  private async read(path: string, as: GithubEnv, used: Set<string>): Promise<unknown> {
     used.add(path);
     const had = this.cache.get(path);
     const r = await this.get(path, had?.etag ?? null, as);
@@ -126,7 +128,7 @@ export class ShipWatch {
       this.cache.set(path, { etag: r.etag, body: r.body });
       return r.body;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
+    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as GhErrorBody | null)?.message ?? '')))) throw new RateLimited();
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

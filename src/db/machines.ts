@@ -55,7 +55,7 @@ export const machineQueries = {
     j: Omit<MachineJob, 'id' | 'go' | 'go_by' | 'paused_by' | 'card' | 'input_token_hash' | 'started_at' | 'ended_at' | 'run_s' | 'server_run_s' | 'gpu_busy_s' | 'live' | 'live_at' | 'exit_code' | 'error' | 'outputs' | 'upload_bytes' | 'swept_at'> & Partial<Pick<MachineJob, 'go' | 'go_by'>>,
   ): MachineJob {
     const keys = Object.keys(j) as (keyof typeof j)[];
-    const { lastInsertRowid } = this.db.prepare(`INSERT INTO machine_jobs (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => (j[k] ?? null) as any));
+    const { lastInsertRowid } = this.db.prepare(`INSERT INTO machine_jobs (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => j[k] ?? null));
     return this.getMachineJob(Number(lastInsertRowid))!;
   },
 
@@ -66,7 +66,7 @@ export const machineQueries = {
   updateMachineJob(this: Store, id: number, fields: Partial<Omit<MachineJob, 'id' | 'machine_id' | 'project_id' | 'kind' | 'kind_hash' | 'created_at'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
-    this.db.prepare(`UPDATE machine_jobs SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => (fields[k] ?? null) as any), id);
+    this.db.prepare(`UPDATE machine_jobs SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   },
 
   /** Jobs matching one of these: a machine's, a minion's, a contraption's, or in some states; newest first, at most `limit`. */
@@ -103,7 +103,7 @@ export const machineQueries = {
 
   /** The standing go for a kind on a machine (#857), or undefined. */
   jobKind(this: Store, machineId: number, hash: string): { machine_id: number; hash: string; name: string; recipe: string; allowed_by: string; at: number } | undefined {
-    return this.db.prepare('SELECT * FROM machine_job_kinds WHERE machine_id = ? AND hash = ?').get(machineId, hash) as any;
+    return this.db.prepare('SELECT * FROM machine_job_kinds WHERE machine_id = ? AND hash = ?').get(machineId, hash) as ReturnType<typeof machineQueries.jobKind>;
   },
 
   allowJobKind(this: Store, machineId: number, hash: string, name: string, recipe: string, by: string) {
@@ -117,7 +117,7 @@ export const machineQueries = {
 
   /** A machine's standing goes, newest first. */
   jobKinds(this: Store, machineId: number): { hash: string; name: string; recipe: string; allowed_by: string; at: number }[] {
-    return this.db.prepare('SELECT hash, name, recipe, allowed_by, at FROM machine_job_kinds WHERE machine_id = ? ORDER BY at DESC').all(machineId) as any;
+    return this.db.prepare('SELECT hash, name, recipe, allowed_by, at FROM machine_job_kinds WHERE machine_id = ? ORDER BY at DESC').all(machineId) as ReturnType<typeof machineQueries.jobKinds>;
   },
 
   /** The schemes a machine is lent to. */

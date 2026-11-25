@@ -24,7 +24,7 @@ export interface PickAccount {
 export interface PickInput {
   /** The person's accounts, in order. */
   accounts: PickAccount[];
-  /** Each account's last meter, or null before any turn ran on it. */
+  /** Each account's last meter, or null before a turn ran on it. */
   meter: (n: number) => Meter | null;
   /** The account new work went to last time (AccountSet.inUse): it keeps new work until another is clearly better. */
   nextUp: number;

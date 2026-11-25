@@ -15,8 +15,10 @@ const PLAN_RULES = createHash('sha256')
 /** A task-list state as saved in settings (planKey, pagePlanKey): it holds every event up to `upTo`. */
 export const packPlan = (p: Progress, upTo: number) => ({ rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates], finished: undefined } });
 
+type SavedPlan = { rules?: unknown; upTo: number; p: Omit<Progress, 'pendingCreates' | 'finished'> & { pendingCreates: [unknown, unknown][] } };
+
 /** A saved state back (packPlan), or null when it's missing, malformed or from other task-list rules. */
-export function unpackPlan(saved: any): { upTo: number; p: Progress } | null {
+export function unpackPlan(saved: SavedPlan | null): { upTo: number; p: Progress } | null {
   const usable = saved?.rules === PLAN_RULES && Number.isInteger(saved.upTo) && Array.isArray(saved.p?.tasks) && Array.isArray(saved.p.pendingCreates);
   return usable ? { upTo: saved.upTo, p: { ...saved.p, pendingCreates: new Map(saved.p.pendingCreates), finished: null } } : null;
 }
@@ -72,8 +74,9 @@ function planBefore(store: Store, ticketId: number, eventId: number) {
       if (replays.size > PLANS_KEPT) replays.delete(replays.keys().next().value!);
       if (at?.before !== eventId) store.setSetting(pagePlanKey(ticketId), packPlan(p, eventId - 1));
     }
-    tasks = p.tasks;
-    plans.set(key, tasks);
+    const made: unknown[] = p.tasks;
+    tasks = made;
+    plans.set(key, made);
     if (plans.size > PLANS_KEPT) plans.delete(plans.keys().next().value!);
   }
   return structuredClone(tasks);

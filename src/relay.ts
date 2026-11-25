@@ -17,6 +17,7 @@ import { isOpenPath } from './apps.ts';
 import type { ContraptionRow } from './db.ts';
 import { HttpError, json, type Ctx } from './http.ts';
 import { titleKey } from './mandate-items.ts';
+import { thrown } from './thrown.ts';
 
 /** Who Mandate's hook messages are from in a minion's chat. */
 const MANDATE_NAME = 'Mandate';
@@ -79,8 +80,8 @@ export async function relay(ctx: Ctx, from: ContraptionRow) {
     });
     answer = Buffer.from(await r.arrayBuffer());
     [status, type] = [r.status, r.headers.get('content-type')];
-  } catch (err: any) {
-    if (err?.name === 'TimeoutError') throw new HttpError(504, `${to.title} didn't answer within ${+(RELAY_TIMEOUT_MS / 1000).toFixed(1)} s`);
+  } catch (err) {
+    if (thrown(err).name === 'TimeoutError') throw new HttpError(504, `${to.title} didn't answer within ${+(RELAY_TIMEOUT_MS / 1000).toFixed(1)} s`);
     throw new HttpError(502, `${to.title} is not answering`);
   }
   res.writeHead(status, type ? { 'Content-Type': type } : {}).end(answer);

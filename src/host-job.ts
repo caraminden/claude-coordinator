@@ -10,6 +10,7 @@ import { open, readdir, readFile, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fallbacks } from './fallbacks.ts';
 import { thpProps } from './unit-thp.ts';
+import { thrown } from './thrown.ts';
 
 /** Ships, kit-sync ships and checks, fast-verify and rollbacks (#1280): beside the turns, not crowding their MemoryHigh. */
 export const BUILD_SLICE = 'citadel-builds.slice';
@@ -75,8 +76,8 @@ function onDisk(tmp: string | undefined): boolean {
 export function moveAside(dir: string): void {
   try {
     renameSync(dir, `${dir}.old-${Date.now()}`);
-  } catch (err: any) {
-    if (err?.code !== 'ENOENT') throw err;
+  } catch (err) {
+    if (thrown(err).code !== 'ENOENT') throw err;
   }
   void dropOld(dir);
 }

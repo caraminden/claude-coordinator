@@ -13,6 +13,7 @@ import type { Machine, MachineJob, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
 import { ZONE } from './pacific.ts';
 import { every, type Job } from './every.ts';
+import type { CardQuestion } from './ci-armed.ts';
 
 export const JOB_STATES = ['needs-go', 'queued', 'starting', 'running', 'paused', 'uploading', 'done', 'failed', 'stopped', 'refused'] as const;
 export type JobState = (typeof JOB_STATES)[number];
@@ -102,8 +103,9 @@ const bool = (v: unknown, field: string, dflt?: boolean): boolean => {
 };
 
 /** A kind as sent, checked; throws a 400 naming what is wrong. */
-export function cleanKind(raw: any): JobKind {
-  if (!raw || typeof raw !== 'object') throw new HttpError(400, 'kind must be { name, image, command, reads, gpu, network, resumable, max_limit_h }');
+export function cleanKind(kind: unknown): JobKind {
+  if (!kind || typeof kind !== 'object') throw new HttpError(400, 'kind must be { name, image, command, reads, gpu, network, resumable, max_limit_h }');
+  const raw = kind as Record<string, unknown>;
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
   if (!NAME.test(name)) throw new HttpError(400, 'kind.name: 1 to 60 letters, digits, spaces, dots, dashes or underscores');
   const image = typeof raw.image === 'string' ? raw.image.trim() : '';
@@ -136,8 +138,9 @@ export function kindHash(k: JobKind): string {
 }
 
 /** What an agent's info says about jobs, or null when it has no jobs block. */
-export function cleanOffer(v: any): JobsOffer | null {
-  if (!v || typeof v !== 'object') return null;
+export function cleanOffer(offer: unknown): JobsOffer | null {
+  if (!offer || typeof offer !== 'object') return null;
+  const v = offer as Record<string, unknown>;
   const folders = Array.isArray(v.folders) ? v.folders.filter((f: unknown) => typeof f === 'string' && FOLDER.test(f)).slice(0, 50) : [];
   const h = Number(v.max_limit_h);
   const gb = Number(v.max_disk_gb);
@@ -161,7 +164,7 @@ export function storedSettings(m: Pick<Machine, 'job_settings'>): JobSettings {
 }
 
 /** New settings from a PATCH body over the old; throws a 400. */
-export function cleanSettings(old: JobSettings, body: any, now = Date.now()): JobSettings {
+export function cleanSettings(old: JobSettings, body: Record<string, unknown>, now = Date.now()): JobSettings {
   const next = { ...old };
   for (const k of ['start', 'end'] as const) {
     if (body[k] === undefined) continue;
@@ -169,7 +172,7 @@ export function cleanSettings(old: JobSettings, body: any, now = Date.now()): Jo
     next[k] = body[k];
   }
   if (body.until !== undefined) {
-    if (body.until !== null && (!Number.isFinite(body.until) || body.until <= now || body.until > now + 7 * 24 * 3600_000)) throw new HttpError(400, 'until must be a time in the next 7 days (ms), or null');
+    if (body.until !== null && (typeof body.until !== 'number' || !Number.isFinite(body.until) || body.until <= now || body.until > now + 7 * 24 * 3600_000)) throw new HttpError(400, 'until must be a time in the next 7 days (ms), or null');
     next.until = body.until;
   }
   if (body.paused !== undefined) next.paused = bool(body.paused, 'paused');
@@ -284,7 +287,7 @@ export interface JobDeps {
   online(machineId: number): boolean;
   broadcast(msg: object): void;
   /** Post the go card; returns where it is, or null when there is nowhere to post it. */
-  postCard(job: MachineJob, card: { questions: unknown[]; recipe?: object; to?: string }): { ticket: number; question: string } | null;
+  postCard(job: MachineJob, card: { questions: CardQuestion[]; recipe?: object; to?: string }): { ticket: number; question: string } | null;
   /** The card was answered from somewhere else (the Machines page): settle it, and say in its chat what happened. */
   settleCard(card: { ticket: number; question: string }, by: string, line: string): void;
   /** Tell the minion that queued a job that it ended or was refused; this wakes it, as CI does. `light` for a job that finished OK (#951). */
@@ -568,7 +571,7 @@ export class MachineJobs {
     if (storedSettings(m).paused) throw new HttpError(409, `${m.name}'s jobs are paused: switch the machine's Pause off first`);
     if (!this.d.send(m.id, { type: 'job.resume', id })) throw new HttpError(409, `${m.name} is offline`);
     // Resumed outside job hours by a person: it runs now, or the next pump would pause it again.
-    const now = !hoursOpen(storedSettings(m), this.now()) && job.go !== 'now' ? { go: 'now', go_by: who.name } : {};
+    const now = !hoursOpen(storedSettings(m), this.now()) && job.go !== 'now' ? { go: 'now' as const, go_by: who.name } : {};
     this.store.updateMachineJob(id, { state: 'running', paused_by: null, live_at: this.now(), ...now });
     this.changed(id);
     return this.store.getMachineJob(id)!;
@@ -609,7 +612,7 @@ export class MachineJobs {
   /** A machine's job hours, one-off window or Pause changed (its owner's): pause or resume what runs, start what may. */
   setSettings(m: Machine, body: unknown, who: Actor): JobSettings {
     if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${m.name}'s owner can change its job hours`);
-    const s = cleanSettings(storedSettings(m), body ?? {}, this.now());
+    const s = cleanSettings(storedSettings(m), (body ?? {}) as Record<string, unknown>, this.now());
     this.store.updateMachine(m.id, { job_settings: JSON.stringify(s) });
     this.pump(m.id);
     this.changedMachine(m.id);
@@ -711,7 +714,7 @@ export class MachineJobs {
   }
 
   /** The agent's job-state report (every 10 s while a job runs, and on every change). */
-  report(m: Machine, body: any): void {
+  report(m: Machine, body: Record<string, unknown>): void {
     const id = Number(body?.id);
     const job = Number.isInteger(id) ? this.store.getMachineJob(id) : undefined;
     if (!job || job.machine_id !== m.id) throw new HttpError(404, 'No such job on this machine');
@@ -732,7 +735,9 @@ export class MachineJobs {
     // Running time as the server sees it: report gaps while running, each capped, so a lost agent's silence doesn't count.
     const gap = job.state === 'running' && job.live_at ? Math.min(MAX_REPORT_GAP_S, Math.max(0, (now - job.live_at) / 1000)) : 0;
     const outputs = Array.isArray(body.outputs)
-      ? body.outputs.slice(0, JOB_CAPS.outputs).flatMap((o: any) => (typeof o?.path === 'string' && num(o.size) !== null ? [{ path: o.path.slice(0, 500), size: num(o.size), uploaded: o.uploaded === true, ...(o.uploaded !== true && typeof o.why === 'string' ? { why: o.why.slice(0, 300) } : {}) }] : []))
+      ? body.outputs
+          .slice(0, JOB_CAPS.outputs)
+          .flatMap((o: Record<string, unknown>) => (typeof o?.path === 'string' && num(o.size) !== null ? [{ path: o.path.slice(0, 500), size: num(o.size), uploaded: o.uploaded === true, ...(o.uploaded !== true && typeof o.why === 'string' ? { why: o.why.slice(0, 300) } : {}) }] : []))
       : undefined;
     const live = {
       gpu_pct: num(body.gpu_pct),
@@ -757,7 +762,7 @@ export class MachineJobs {
       ...(state !== 'paused' && !held ? { paused_by: null } : {}),
       ...(outputs ? { outputs: JSON.stringify(outputs) } : {}),
       ...(pauseFailed && !ended ? { error: `${PAUSE_FAILED}${pauseFailed}` } : {}),
-      ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? body.exit_code : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error?.startsWith(PAUSE_FAILED) ? null : job.error } : {}),
+      ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? (body.exit_code as number) : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error?.startsWith(PAUSE_FAILED) ? null : job.error } : {}),
     });
     if (ended) {
       const m2 = this.machineOf(job);

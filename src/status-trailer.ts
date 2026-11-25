@@ -20,7 +20,7 @@ export function takeStatus(text: string): { text: string; status: StatusFields |
   const m = TRAILER.exec(text);
   if (!m) return { text, status: null, bad: null };
   const rest = text.slice(0, m.index);
-  let parsed: any;
+  let parsed: StatusFields | null;
   try {
     parsed = JSON.parse(m[1]);
   } catch {

@@ -11,6 +11,16 @@ import type { GithubLink } from './github-link.ts';
 import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
+import { thrown } from './thrown.ts';
+
+/** A self-hosted runner as GitHub lists it: the fields read here, checked before use. */
+interface GhRunner {
+  id?: unknown;
+  name?: unknown;
+  status?: unknown;
+  busy?: unknown;
+  labels?: unknown;
+}
 
 const API = 'https://api.github.com';
 const GITHUB_WAIT_MS = 10_000;
@@ -123,16 +133,16 @@ export class RunnerTokens {
     const own = schemeLabels(project.name);
     if (typeof label !== 'string' || !own.includes(label)) throw new HttpError(400, `label must be one of ${own.join(', ')}: the label the runner being removed carries`);
     const answer = { scheme: project.name, repo: slug, name };
-    let found: { id?: unknown; labels?: unknown } | undefined;
+    let found: GhRunner | null | undefined;
     for (let page = 1; !found; page++) {
       const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=${RUNNERS_PAGE}&page=${page}`);
       if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
-      const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
+      const body = (await r.json().catch(() => ({}))) as { runners?: (GhRunner | null)[] };
       const runners = Array.isArray(body.runners) ? body.runners : [];
       found = runners.find((x) => x?.name === name);
       if (!found && (runners.length < RUNNERS_PAGE || page >= RUNNERS_PAGES)) return { ...answer, removed: false };
     }
-    if (!Array.isArray(found.labels) || !found.labels.some((l: any) => l?.name === label)) {
+    if (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label)) {
       throw new HttpError(403, `The runner ${name} of ${slug} doesn't carry the label ${label}, so it isn't the kind of runner being removed and Citadel won't remove it; nothing changed.`);
     }
     if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);
@@ -150,8 +160,8 @@ export class RunnerTokens {
     const label = want ?? own;
     const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
-    const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
-    return (Array.isArray(body.runners) ? body.runners : []).filter((x) => Array.isArray(x?.labels) && x.labels.some((l: any) => l?.name === label)).map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
+    const body = (await r.json().catch(() => ({}))) as { runners?: (GhRunner | null)[] };
+    return (Array.isArray(body.runners) ? body.runners : []).filter((x): x is GhRunner => Array.isArray(x?.labels) && x.labels.some((l: { name?: unknown } | null) => l?.name === label)).map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
   }
 
   /** The scheme's repo, owner, owner's GitHub token and runner label; throws an HttpError saying what's missing. */
@@ -178,8 +188,8 @@ export class RunnerTokens {
         signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
       });
-    } catch (err: any) {
-      throw new HttpError(502, `Couldn't reach GitHub (${err?.message ?? err}); try again.`);
+    } catch (err) {
+      throw new HttpError(502, `Couldn't reach GitHub (${thrown(err).message ?? err}); try again.`);
     }
   }
 }
@@ -363,8 +373,8 @@ export class RunnerJobs {
         const idle = runners.filter((x) => x.status === 'online' && !x.busy).length;
         last = runners.length ? runners.map((x) => `${x.name} ${x.status !== 'online' ? x.status : x.busy ? 'Active' : 'Idle'}`).join(', ') : 'none listed yet';
         if (idle >= count) return { ok: true, text: last };
-      } catch (err: any) {
-        last = `couldn't ask GitHub: ${err.message}`;
+      } catch (err) {
+        last = `couldn't ask GitHub: ${thrown(err).message}`;
       }
       if (Date.now() >= end) return { ok: false, text: `${last}; fewer than ${count} Idle after ${Math.round(this.idleWaitMs / 1000)}s` };
       await sleep(this.pollMs);

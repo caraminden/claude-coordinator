@@ -11,6 +11,7 @@ import type { Project, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { every, type Job } from './every.ts';
+import { thrown } from './thrown.ts';
 
 const MIN = 60_000;
 export const KEEP_MS = 14 * 24 * 3600_000;
@@ -80,16 +81,18 @@ const maybe = (v: unknown, what: string, max: number, min = 0) => (v === null ||
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, '').slice(0, max) : '');
 
 /** An agent's sample, field by field: anything that isn't a number in range is refused. The time is the server's: a PC's clock can be off. */
-export function cleanSample(body: any, now: number): Sample {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'A sample is an object');
+export function cleanSample(raw: unknown, now: number): Sample {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, 'A sample is an object');
+  const body = raw as Record<string, unknown>;
   if (body.os !== 'windows' && body.os !== 'linux') throw new HttpError(400, 'os must be windows or linux');
   const host = text(body.host, 100);
   if (!host) throw new HttpError(400, 'host is required');
   if (!Array.isArray(body.runners) || body.runners.length > 64) throw new HttpError(400, 'runners must be a list of at most 64');
   let hv: Sample['hv'] = null;
-  if (body.hv && typeof body.hv === 'object' && typeof body.hv.total === 'number') {
+  if (body.hv && typeof body.hv === 'object' && 'total' in body.hv && typeof body.hv.total === 'number') {
+    const guests = 'vms' in body.hv ? body.hv.vms : null;
     const vms: Record<string, number> = {};
-    for (const [name, pct] of Object.entries(body.hv.vms && typeof body.hv.vms === 'object' ? body.hv.vms : {}).slice(0, 32)) vms[text(name, 100) || 'vm'] = num(pct, "a VM's CPU", 1e5);
+    for (const [name, pct] of Object.entries(guests && typeof guests === 'object' ? guests : {}).slice(0, 32)) vms[text(name, 100) || 'vm'] = num(pct, "a VM's CPU", 1e5);
     hv = { total: num(body.hv.total, 'hv.total', 100), vms };
   }
   const restarts = (Array.isArray(body.restarts) ? body.restarts : [])
@@ -111,7 +114,7 @@ export function cleanSample(body: any, now: number): Sample {
     idle_sec: maybe(body.idle_sec, 'idle_sec', 1e9),
     temp: maybe(body.temp, 'temp', 200, -100),
     hv,
-    runners: body.runners.map((r: any) => ({ name: text(r?.name, 100), repo: text(r?.repo, 200).toLowerCase(), dir: text(r?.dir, 300), cpu: num(r?.cpu, "a runner's cpu", 100), mem: num(r?.mem, "a runner's mem", 1e15) })),
+    runners: body.runners.map((r: Record<string, unknown>) => ({ name: text(r?.name, 100), repo: text(r?.repo, 200).toLowerCase(), dir: text(r?.dir, 300), cpu: num(r?.cpu, "a runner's cpu", 100), mem: num(r?.mem, "a runner's mem", 1e15) })),
     restarts,
   };
 }
@@ -413,8 +416,8 @@ export class CiLoad {
     this.pending = [];
     try {
       this.store.addRunnerLoads(rows);
-    } catch (err: any) {
-      console.error(`CI load: ${rows.length} sample(s) not saved: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`CI load: ${rows.length} sample(s) not saved: ${thrown(err).message ?? err}`);
     }
   }
 

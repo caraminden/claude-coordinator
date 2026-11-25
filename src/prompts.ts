@@ -332,7 +332,7 @@ export function promptParts(
         'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Give `rm` and `mv` absolute paths in a call with no `cd` (`rm -rf "$TMPDIR/out"`, `"${d:?}"/*` for a variable); one whose target it can\'t pin down is stopped.',
         // The dev copy line moved to .claude/rules/dev-copy.md (#1574): Citadel only, it loads where a dev copy starts.
         `Stop your processes by pid (\`$!\`, or \`ss -ltnp 'sport = :<port>'\`): every turn, ${APP_NAME} and its apps run as one account, so a kill by name reaches theirs too.`,
-        ...(ticket.kind === 'coordinator' ? [] : [shotLine(project)]),
+        shotLine(project),
         "Wait for your own background job inside the turn with `citadel-wait pid <pid>` (or `port <n>`, `file <path>`, `cmd '<test>'`) and a Bash timeout of 600000, repeated on exit 124. A Grunt runs in the foreground unless its Agent call passes `run_in_background: true`.",
         'When each lookup only names the next, do every hop in one script that prints only the answer (capped). A Grunt starts fresh at about 15k tokens and hands back its conclusion; each file you read stays in your context, re-read on every later call. So a sweep you need only the conclusion of goes to an `Explore` Grunt on Sonnet; a few targeted reads, or reads you will act on, stay inline (citadel:subagents).',
         "Before changing what a function, method or type does, find its callers, twins (fakes, copies) and pinning tests with `who-uses <file or symbol>` or one batched `rg -n -w 'name' .` from the repo root; update them together.",
@@ -405,9 +405,9 @@ export function shippingLine(p: Pick<Project, 'ship_path' | 'go_from' | 'try_fir
       : p.go_from === 'all' && p.ship_path !== 'citadel' && p.ship_path
         ? // The gate ticks the merge approval here, so the merge's own Approve is the go: a card first would ask twice.
           "Every change waits for a member's go, and the merge's own Approve is that go: open the pull request and run the merge, with no card first."
-        : `${{ high: 'A high-risk change waits', medium: 'A medium or high-risk change waits', all: 'Every change waits' }[p.go_from] ?? 'A high-risk change waits'} for a member's go: stop before shipping, ask with an \`ask_question\` card (kind ship), and ship only on their go${(p.ship_path ?? 'citadel') === 'citadel' ? " (hand_off_land's `go` names who and when)" : ''}.${p.go_from === 'all' || offSkills(p).includes('self-review') ? '' : ` ${fixClause}`}`;
+        : `${({ high: 'A high-risk change waits', medium: 'A medium or high-risk change waits', all: 'Every change waits' } as Partial<Record<string, string>>)[p.go_from] ?? 'A high-risk change waits'} for a member's go: stop before shipping, ask with an \`ask_question\` card (kind ship), and ship only on their go${(p.ship_path ?? 'citadel') === 'citadel' ? " (hand_off_land's `go` names who and when)" : ''}.${p.go_from === 'all' || offSkills(p).includes('self-review') ? '' : ` ${fixClause}`}`;
   const wait = deploys ? "start a preview (`start_preview`), post its link, set state try, and ship only on a member's go." : "post screenshots (and a build or link if the scheme has one), set state try, and ship only on a member's go.";
-  const tryFirst = { ui: ` A change whose diff touches the front-end paths in Project facts (with none listed: one people would see) waits for a try first: ${wait}`, features: ` Every feature (type feature) waits for a try first: ${wait}` }[p.try_first] ?? '';
+  const tryFirst = ({ ui: ` A change whose diff touches the front-end paths in Project facts (with none listed: one people would see) waits for a try first: ${wait}`, features: ` Every feature (type feature) waits for a try first: ${wait}` } as Partial<Record<string, string>>)[p.try_first] ?? '';
   return `Shipping in this scheme (its settings; they win over any shipping rule in the scheme instructions): ${path}. ${go}${tryFirst}`;
 }
 

@@ -7,6 +7,7 @@ import { asData } from './quote.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
 import { every, type Job } from './every.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 
@@ -269,7 +270,66 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
   }
 }`;
 
-export function check(node: any): Check {
+/** An older commit status in GitHub's GraphQL answer. */
+interface StatusContextNode {
+  __typename: 'StatusContext';
+  context: string;
+  state?: string;
+  targetUrl?: string | null;
+}
+/** A check run in GitHub's GraphQL answer. */
+interface CheckRunNode {
+  __typename?: 'CheckRun';
+  name: string;
+  detailsUrl?: string | null;
+  status?: string;
+  conclusion?: string | null;
+  steps?: { totalCount?: number };
+  annotations?: { nodes?: { message?: string }[] };
+}
+export type CheckNode = StatusContextNode | CheckRunNode;
+interface ActorNode {
+  login?: string;
+  __typename?: string;
+}
+interface RemarkNode {
+  databaseId?: number;
+  author?: ActorNode | null;
+  authorAssociation?: string;
+  body?: string;
+  url?: string;
+  path?: string;
+  state?: string;
+  submittedAt?: string | null;
+  createdAt?: string;
+  comments?: { nodes?: RemarkNode[] };
+}
+/** The GraphQL answer parseSnapshot reads, unchecked. */
+interface SnapshotData {
+  viewer?: ActorNode | null;
+  repository?: {
+    workflows?: { entries?: { name: string; object?: { text?: string | null } | null }[] | null } | null;
+    pullRequests?: { nodes?: PrNode[] };
+  } | null;
+}
+interface PrNode {
+  number: number;
+  url: string;
+  state: PrSnapshot['state'];
+  headRefOid: string;
+  mergedAt?: string | null;
+  closedAt?: string | null;
+  mergedBy?: ActorNode | null;
+  timelineItems?: { nodes?: { actor?: ActorNode | null }[] };
+  mergeable: PrSnapshot['mergeable'];
+  baseRefName: PrSnapshot['baseRef'];
+  isDraft?: boolean;
+  comments?: { nodes?: RemarkNode[] };
+  reviews?: { nodes?: RemarkNode[] };
+  commits?: { nodes?: { commit?: { oid?: string; statusCheckRollup?: { contexts?: { nodes?: CheckNode[] } } | null } }[] };
+}
+
+export function check(node: CheckNode): Check {
   if (node.__typename === 'StatusContext') {
     const s = node.state;
     return { name: node.context, url: node.targetUrl ?? null, status: s === 'SUCCESS' ? 'passed' : s === 'PENDING' || s === 'EXPECTED' ? 'pending' : 'failed' };
@@ -286,7 +346,7 @@ export function check(node: any): Check {
   return out;
 }
 
-function remark(kind: Remark['kind'], node: any, extra: Partial<Remark> = {}): Remark {
+function remark(kind: Remark['kind'], node: RemarkNode, extra: Partial<Remark> = {}): Remark {
   return {
     key: `${kind}:${node.databaseId}`,
     kind,
@@ -294,7 +354,7 @@ function remark(kind: Remark['kind'], node: any, extra: Partial<Remark> = {}): R
     bot: node.author?.__typename === 'Bot',
     association: node.authorAssociation ?? 'NONE',
     body: node.body ?? '',
-    url: node.url,
+    url: node.url!,
     createdAt: ts(node.submittedAt ?? node.createdAt) ?? 0,
     ...extra,
   };
@@ -319,12 +379,13 @@ export function runsOnPullRequest(yaml: string): boolean {
 }
 
 /** Turn the GraphQL answer into a snapshot of the branch's newest PR (null if it has none). */
-export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string | null } {
+export function parseSnapshot(answer: unknown): { pr: PrSnapshot | null; self: string | null } {
+  const data = answer as SnapshotData;
   const self = data?.viewer?.login ?? null;
   const n = data?.repository?.pullRequests?.nodes?.[0];
   if (!n) return { pr: null, self };
   const commit = n.commits?.nodes?.[0]?.commit;
-  const remarks: Remark[] = (n.comments?.nodes ?? []).map((c: any) => remark('comment', c));
+  const remarks: Remark[] = (n.comments?.nodes ?? []).map((c) => remark('comment', c));
   for (const r of n.reviews?.nodes ?? []) {
     // A pending review is the reviewer's own draft; it shows up once submitted.
     if (r.state === 'PENDING') continue;
@@ -344,7 +405,7 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
       remarks,
       mergeable: n.mergeable,
       baseRef: n.baseRefName,
-      hasCi: (data.repository.workflows?.entries ?? []).some((e: any) => /\.ya?ml$/.test(e.name) && runsOnPullRequest(e.object?.text ?? '')),
+      hasCi: (data.repository?.workflows?.entries ?? []).some((e) => /\.ya?ml$/.test(e.name) && runsOnPullRequest(e.object?.text ?? '')),
       draft: !!n.isDraft,
     },
   };
@@ -450,14 +511,14 @@ export class GithubWatcher {
         }
         try {
           await this.poll(ticket, repoDir, repo);
-        } catch (err: any) {
-          const text = `${err.stderr ?? ''} ${err.message ?? ''}`;
+        } catch (err) {
+          const text = `${thrown(err).stderr ?? ''} ${thrown(err).message ?? ''}`;
           if (/rate limit/i.test(text)) {
             this.pausedUntil = Date.now() + RATE_LIMITED_MS;
             console.error('GitHub rate limit reached; pausing PR polling.');
             return;
           }
-          console.error(`GitHub poll of ticket ${ticket.id} failed:`, err.message);
+          console.error(`GitHub poll of ticket ${ticket.id} failed:`, thrown(err).message);
           this.schedule.set(ticket.id, { nextAt: Date.now() + MAX_OPEN_MS, wait: OPEN_MS, last: s?.last ?? '', head: s?.head });
         }
       }

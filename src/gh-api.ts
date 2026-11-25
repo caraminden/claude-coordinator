@@ -235,6 +235,11 @@ export async function ghPost(path: string, as: GithubEnv, fields: Record<string,
 
 export class RateLimited extends Error {}
 
+/** Whether GitHub's answer says to slow down: a 429, or a 403 whose message names the rate limit. */
+export function rateLimited(r: { status: number; body: unknown }): boolean {
+  return r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')));
+}
+
 /** A status GitHub answered that skips the scheme's round. */
 export class GhError extends Error {
   status: number;

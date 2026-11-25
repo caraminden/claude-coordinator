@@ -161,9 +161,51 @@ test('only turn scopes are read, so a Taskmaster or the server is never held', a
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }
-  // And the server never calls anything but set-property MemoryHigh (no stop, kill or MemoryMax).
-  const src = readFileSync(join(import.meta.dirname, '..', 'src', 'growth-stop.ts'), 'utf8');
-  assert.doesNotMatch(src, /'(stop|kill)'|MemoryMax=|process\.kill/);
+});
+
+test('a hold and its lift run only set-property MemoryHigh: no stop, kill or MemoryMax', async (t) => {
+  // The real setMemoryHigh, with a fake systemctl that records its arguments as the only one on PATH.
+  const bin = mkdtempSync(join(tmpdir(), 'fake-systemctl-'));
+  const log = join(bin, 'calls');
+  const fake = `#!${process.execPath}
+require('node:fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+`;
+  writeFileSync(join(bin, 'systemctl'), fake, { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = bin; // nothing else on it, so the real systemctl cannot be reached
+  const kill = t.mock.method(process, 'kill', () => true);
+  try {
+    let now = 1_800_000_000_000;
+    let current = 3 * GB;
+    let high: number | null = null;
+    const g = new GrowthStop({
+      turnsDir: '/fake/citadel-turns.slice',
+      now: () => now,
+      log: () => {},
+      read: async () => [{ unit: unit(7), current, high }],
+    });
+    await g.tick('tight');
+    now += 60_000;
+    current = 4 * GB;
+    await g.tick('tight');
+    high = 4 * GB + STOP.headroom; // what the next reading finds, or the hold counts as already lifted
+    await g.tick('ok');
+    const set = ['--user', 'set-property', '--runtime', unit(7)];
+    assert.deepEqual(
+      readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l)),
+      [
+        [...set, `MemoryHigh=${4 * GB + STOP.headroom}`],
+        [...set, 'MemoryHigh=infinity'],
+      ],
+    );
+    assert.equal(kill.mock.callCount(), 0, 'no signal sent');
+  } finally {
+    process.env.PATH = path;
+    rmSync(bin, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });
 
 test('a hold whose set was still running when the server stopped is lifted, and no reading after stop holds anyone', async () => {

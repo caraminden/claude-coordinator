@@ -139,7 +139,7 @@ import { branchTips, type CiView, type GhBody, type GhNote, type Job, type Run, 
 export { type CiView, type Job, type Run, type Runner, runKind, runMinion, runningNow, type ViewRun } from './ci-view.ts';
 import { type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
-import { type GhGet, ghGet, ghPost, RateLimited, GhError } from './gh-api.ts';
+import { type GhGet, ghGet, ghPost, RateLimited, rateLimited, GhError } from './gh-api.ts';
 export { type GhAnswer, type GhGet, ghGet, ghPost } from './gh-api.ts';
 
 const POLL_MS = 5 * 60_000;
@@ -1513,7 +1513,7 @@ ${text}`,
       this.cache.set(path, { etag: r.etag, body: r.body });
       return r.body as T;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')))) throw new RateLimited();
+    if (rateLimited(r)) throw new RateLimited();
     if (quiet && (r.status === 403 || r.status === 404)) return null;
     // Anything else skips this scheme's round: an answer GitHub didn't give mustn't read as "all clear" and clear alerts.
     throw new GhError(r.status, path);

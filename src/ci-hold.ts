@@ -19,7 +19,7 @@
 // Left out: desktop.yml (a release build), other schemes' push-started builds, which the runner agents squeeze (src/ci-ships.ts).
 // A job asks before it starts (POST /api/ci-hold; citadel-heavy reads hold.json). Fails open: a job that can't ask, or a
 // GitHub this can't read, means optional work goes ahead; nothing here is asked by a ship. Off switch: <deploy state>/hold-off.
-import { type GhGet, ghGet, ghPost, RateLimited } from './gh-api.ts';
+import { type GhGet, ghGet, ghPost, RateLimited, rateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import type { Store } from './db.ts';
 import { every, type Job } from './every.ts';
@@ -852,7 +852,7 @@ export class CiHold {
       this.cache.set(path, { etag: r.etag, body });
       return body;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')))) throw new RateLimited();
+    if (rateLimited(r)) throw new RateLimited();
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

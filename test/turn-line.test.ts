@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -215,10 +215,14 @@ async function carded(id: number, use = `use-${id}`) {
 }
 /** Its turn prints a line, which the Runner has read. */
 async function print(id: number, ev: object) {
-  const at = runner['turns'].get(id)!.offset;
-  writeFileSync(join(root, `print-${id}.tmp`), JSON.stringify(ev));
-  renameSync(join(root, `print-${id}.tmp`), join(root, `print-${id}`));
-  await until('its line to be read', () => runner['turns'].get(id)!.offset > at);
+  const file = join(root, `print-${id}`);
+  writeFileSync(`${file}.tmp`, JSON.stringify(ev));
+  renameSync(`${file}.tmp`, file);
+  // Printed (the fake deletes it after) and then read to the end: its first line can still be unread here.
+  await until('its line to be read', () => {
+    const { dir, offset } = runner['turns'].get(id)!;
+    return !existsSync(file) && offset >= statSync(join(dir, 'stream.jsonl')).size;
+  });
 }
 
 // #1916. Josh, 2026-11-24: "shouldnt a minion waiting on a card just release to the pool until the card is answered?"

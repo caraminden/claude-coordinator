@@ -816,7 +816,7 @@ test('ClaudeLink: starting a container turn never runs a blocking process spawn 
   const { syncBuiltinESMExports } = await import('node:module');
   const dataRoot = mkdtempSync(join(root, 'nospawn-'));
   const fakeRun: RunCmd = async (_c, args) => (args[0] === 'container' ? { code: 0, stdout: 'true deadbeef', stderr: '' } : { code: 0, stdout: join(dataRoot, 'vol') + '\n', stderr: '' });
-  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(dataRoot, 'data'), 'claude', new Containers(fakeRun), 'citadel-claude-t-');
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(dataRoot, 'data'), fake, new Containers(fakeRun), 'citadel-claude-t-');
   const real = cp.execFileSync;
   const sync: string[] = [];
   const spy = (...a: Parameters<typeof real>) => (sync.push(String(a[0])), real(...a));

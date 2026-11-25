@@ -490,7 +490,7 @@ smoke() {
     done < <(cat "$state/pulled/${branch//\//-}" 2>/dev/null)
     if [ ${#tests[@]} -gt 0 ]; then
       say "smoke: running ${#tests[@]} test files"
-      out=$(tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
+      out=$(CITADEL_TEST_FILES=0 tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
       if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
         say "smoke: the tests ran past ${LAND_SMOKE_TIMEOUT:-300} s, so they don't decide: getting in line, and CI runs them all"
       elif [ "$rc" = 2 ]; then # citadel-test couldn't start them (its usage and setup errors), which says nothing about the branch
@@ -501,7 +501,7 @@ smoke() {
         local failed=() still=()
         mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.ts)(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
         for f in "${failed[@]}"; do
-          CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
+          CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
         done
         if [ ${#failed[@]} -gt 0 ] && [ ${#still[@]} -eq 0 ]; then
           for f in "${failed[@]}"; do retro_log "flake · $f · smoke · $label"; say "flake: $f · smoke"; done
@@ -1075,7 +1075,7 @@ guard_run() {
   for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts test/size-budget.test.ts; do [ ! -f "$dir/$f" ] || tests+=("$f"); done
   [ -x "$dir/tools/citadel-test" ] && [ ${#tests[@]} -gt 0 ] || return 3
   [ -n "${1:-}" ] || land_mark guards guards
-  guard_out=$(cd "$dir" && CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&- </dev/null) || guard_rc=$?
+  guard_out=$(cd "$dir" && CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&- </dev/null) || guard_rc=$?
   case $guard_rc in 0) return 0 ;; 2 | 124 | 137) return 2 ;; *) return 1 ;; esac
 }
 guard_files() { sed -nE 's/^✖ ([^ :]+\.test\.ts).*/\1/p' <<<"$guard_out" | sort -u | paste -sd, -; }

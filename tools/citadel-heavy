@@ -184,7 +184,7 @@ judge() {
       if (mr < min_run) { printf "light its last %d run(s) took %d s (median)\n", c, mr; exit }
       if (!m) { printf "heavy its last %d run(s) took %d s (median); CPU not measured yet\n", c, mr; exit }
       ms = median(s, m)
-      printf "%s its last %d run(s) took %d s (median), CPU busy %d%% of it\n", ms >= min_cpu ? "heavy" : "light", c, mr, ms
+      printf "%s its last %d run(s) took %d s (median), CPU busy %d%% of it\n", (ms >= min_cpu) ? "heavy" : "light", c, mr, ms
     }' "$h" 2>/dev/null
 }
 # Past about 5 MB the job that notices keeps the newest half of the history, whole lines only.

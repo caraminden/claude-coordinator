@@ -26,7 +26,7 @@ writeFileSync(noList, '# no repo-wide files\n');
 
 function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_TEST_FILES: '0', CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));

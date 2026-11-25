@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -725,4 +725,24 @@ test('a light job (a Claude-bound one here) is not pinned', () => {
   const { env } = folder();
   const r = spawnSync(heavy, ['sh', '-c', seen], { env: { ...env, ...two, CITADEL_HEAVY_JUDGE: '', CITADEL_HEAVY_WHAT: 'claude -p hi' }, encoding: 'utf8' });
   assert.equal(count(r.stdout), allowedHere);
+});
+
+// mawk (the awk in Josh's container) read `>` in the judge's printf as a redirect, so the judge printed nothing and every job queued;
+// gawk takes it, so CI stayed green. The same long job under mawk: judged light, not left waiting.
+const mawk = ['/usr/bin/mawk', '/bin/mawk'].find(existsSync);
+test('the judge works under mawk: a long job busy under 75 % is still judged light', { skip: !mawk && 'mawk is not installed' }, async () => {
+  const { dir, env } = folder(1);
+  seed(dir, past('Idle #1 (cara)', 'sh -c echo idle', 900, 540).repeat(2));
+  const bin = join(root, `mawk-bin-${n++}`);
+  mkdirSync(bin);
+  symlinkSync(mawk!, join(bin, 'awk'));
+  const { go, holder } = await holdSlot(env);
+  try {
+    const r = spawnSync(heavy, ['sh', '-c', 'echo idle'], { env: { ...judged(env), PATH: `${bin}:${process.env.PATH}`, CITADEL_HEAVY_WHO: 'Idle #2 (cara)' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /without a heavy slot: its last 2 run\(s\) took 900 s \(median\), CPU busy 60% of it/);
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
 });

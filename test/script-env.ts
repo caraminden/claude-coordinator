@@ -12,6 +12,7 @@
 //   LAND_FIX                      a person -> land.sh: "this branch fixes the commit whose deploy was rolled back"; the suite a landing runs inherits it.
 //   LAND_URGENT                   a person -> land.sh -> deploy.sh: "this fixes shipping or an outage now": its restart skips the starved-box hold (#1417).
 //   CITADEL_TEST_PROGRESS(_TO)    citadel-heavy and run-tests.sh -> citadel-node -> its reporter: where a run's counts go.
+//   CITADEL_TEST_FILES            land.sh's smoke check -> citadel-test: 0, the shared limit on test files (#1928) doesn't hold a ship's own check.
 //   CITADEL_TEST_ALWAYS           land.sh's smoke check -> citadel-test: rerun a failed file without the always-tests (#1012).
 //   FMT_WHOLE_BUILD               land.sh --build -> its tests -> tools/fmt: every file the build adds is this ship's (#1885).
 //   CITADEL_HEAVY_WHAT            land.sh's CI fallback -> citadel-heavy: how its slot and history name the suite (#1254).
@@ -38,6 +39,7 @@ export const SCRIPT_ENV = [
   'CITADEL_TEST_PROGRESS',
   'CITADEL_TEST_PROGRESS_TO',
   'CITADEL_TEST_ALWAYS',
+  'CITADEL_TEST_FILES',
   'FMT_WHOLE_BUILD',
   'CITADEL_HEAVY_WHAT',
   'CITADEL_TEST_CONCURRENCY',

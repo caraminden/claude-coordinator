@@ -19,12 +19,13 @@ function say(...args: unknown[]) {
   } catch {}
 }
 
-/**
- * A dead stdout or stderr (the reader went away) is no crash: an 'error' listener on the stream keeps its EPIPE from
- * becoming an uncaughtException, and `onDead` runs once. Without it the last-resort handler logged each EPIPE to the dead
- * pipe, which raised the next, through nextTick, so timers and SIGTERM never ran again. Call it at start, before keepServing.
- */
-export function guardPipes(onDead?: () => void) {
+let watching = false;
+let onDead: (() => void) | undefined;
+
+/** One 'error' listener on stdout and stderr, once: a dead one's EPIPE then never becomes an uncaughtException. */
+function watchPipes() {
+  if (watching) return;
+  watching = true;
   for (const s of [process.stdout, process.stderr]) {
     s.on('error', () => {
       if (pipeDead) return;
@@ -34,8 +35,20 @@ export function guardPipes(onDead?: () => void) {
   }
 }
 
+/**
+ * A dead stdout or stderr (the reader went away) is no crash, and `fn` runs once when it dies. Without the listener the
+ * last-resort handler logged each EPIPE to the dead pipe, which raised the next, through nextTick, so timers and SIGTERM
+ * never ran again. Call it early: a pipe that dies during boot is caught; keepServing watches too, for callers without it.
+ */
+export function guardPipes(fn: () => void) {
+  onDead = fn;
+  watchPipes();
+  if (pipeDead) fn();
+}
+
 /** The last resort: log a stray rejection or throw loudly and keep serving everyone else. */
 export function keepServing() {
+  watchPipes();
   process.on('unhandledRejection', (err) => say('UNHANDLED REJECTION, still serving:', err));
   process.on('uncaughtException', (err) => say('UNCAUGHT EXCEPTION, still serving:', err));
 }

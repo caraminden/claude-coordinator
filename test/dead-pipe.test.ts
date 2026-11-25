@@ -89,3 +89,25 @@ test('a live-style server (no exit-with-parent) whose pipes died keeps serving a
     await tmp.teardown();
   }
 });
+
+test('keepServing alone, with its output pipe closed, does not spin on the EPIPE it logs', { timeout: 60_000 }, async () => {
+  const tmp = tempRoot('dead-pipe-min-');
+  const script = `import { keepServing } from ${JSON.stringify(join(REPO, 'src/safely.ts'))}; keepServing(); process.on('SIGTERM', () => process.exit(0)); setInterval(() => console.log('tick'), 50); console.error('up');`;
+  const proc = tmp.spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    await until('the script to start', () => proc.stderr!.read());
+    proc.stdout!.destroy();
+    proc.stderr!.destroy();
+    await until(
+      'a quiet second',
+      async () => (await burned(proc.pid!, 1000)) < 30,
+      undefined,
+      () => `${cpu(proc.pid!)} ticks`,
+    );
+    proc.kill('SIGTERM');
+    await until('SIGTERM to end it', () => exited(proc));
+  } finally {
+    proc.kill('SIGKILL');
+    await tmp.teardown();
+  }
+});

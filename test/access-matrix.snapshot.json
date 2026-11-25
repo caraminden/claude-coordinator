@@ -1219,6 +1219,36 @@
   "m1": "200",
   "m2": "200"
  },
+ "DELETE /api/me/avatar": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/me/avatar": {
+  "anon": "401 Not logged in",
+  "person": "400 The picture must be a PNG, JPEG or WebP image",
+  "member": "400 The picture must be a PNG, JPEG or WebP image",
+  "outsider": "400 The picture must be a PNG, JPEG or WebP image",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/me/avatars": {
+  "anon": "401 Not logged in",
+  "person": "400 on must be true or false",
+  "member": "400 on must be true or false",
+  "outsider": "400 on must be true or false",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "DELETE /api/me/claude": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1438,6 +1468,16 @@
   "person": "404 No such person",
   "member": "403 Only an admin can do that",
   "outsider": "403 Only an admin can do that",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/people/999/avatar": {
+  "anon": "401 Not logged in",
+  "person": "404 No such person",
+  "member": "404 No such person",
+  "outsider": "404 No such person",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",

@@ -7,6 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { WORKER_CHECKS } from '../public/machine-setup.js';
 import { imageHashAsync } from './claude-link.ts';
 import type { Machine, Store } from './db.ts';
 import { gitOut } from './git.ts';
@@ -27,19 +28,8 @@ const AGENT_FILES = ['worker-agent.mjs', 'machine-worker.mjs'].map((f) => join(R
 /** The scratch repo's files beside its nonce: what `node tools/host-tools.ts check` needs, so it runs in the checkout it came in. */
 const SCRATCH_FILES = ['tools/host-tools.ts', 'src/host-tools.ts', 'deploy/host-tools.json'];
 
-/** What the self-test checks, in the order the row shows. */
-export const CHECKS = {
-  image: 'Image built and starts',
-  folders: 'Folders reach the container',
-  sync: 'Scratch repo there and back',
-  process: 'Process started and stopped',
-  link: 'Link to Citadel',
-  tools: 'Host tools',
-  disk: 'Your disk is out of reach',
-  programs: "Windows programs can't start",
-} as const;
-export type CheckKey = keyof typeof CHECKS;
-const KEYS = Object.keys(CHECKS) as CheckKey[];
+export type CheckKey = keyof typeof WORKER_CHECKS;
+const KEYS = Object.keys(WORKER_CHECKS) as CheckKey[];
 
 export type CheckLine = { key: CheckKey; name: string; state: 'waiting' | 'running' | 'ok' | 'fail'; text: string };
 export type SelfTest = { id: string; at: number; done: number | null; ok: boolean; why: string | null; lines: CheckLine[] };
@@ -210,7 +200,7 @@ export class WorkerJoin {
   /** Start a self-test; its worker takes it at its next word. */
   startTest(machine: Machine): SelfTest {
     const now = this.d.now();
-    const lines: CheckLine[] = KEYS.map((key) => ({ key, name: CHECKS[key], state: 'waiting', text: '' }));
+    const lines: CheckLine[] = KEYS.map((key) => ({ key, name: WORKER_CHECKS[key], state: 'waiting', text: '' }));
     const test = { id: randomBytes(6).toString('hex'), at: now, done: null, ok: false, why: null, lines, heard: now };
     this.tests.set(machine.id, test);
     this.scratch.delete(machine.id);

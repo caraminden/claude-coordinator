@@ -16,6 +16,9 @@ import { basename, join } from 'node:path';
 import { parentPort, Worker, workerData } from 'node:worker_threads';
 import { shownCommand } from './reaper.ts';
 
+/** turn-launch.ts's, repeated so this worker doesn't load all of it (test/container-relief.test.ts holds them equal). */
+export const TASKMASTER_SLICE = 'citadel-taskmasters.slice';
+
 export const RELIEF = {
   everyMs: 5000,
   /**
@@ -106,7 +109,7 @@ export function step(s: Watched | undefined, r: Reading, now: number, stuckMs = 
 export interface ReliefDeps {
   /** citadel.slice's cgroup dir. */
   dir: string;
-  /** The container's unit names start with this and end in the person's id (src/claude-link.ts's prefix). */
+  /** The container's unit names start with this and end in the person's id, then -tm for their Taskmasters' (src/claude-link.ts's prefix). */
   prefix: string;
   report: (v: Victim) => void;
   proc?: string;
@@ -195,7 +198,11 @@ export class ContainerRelief {
     if (this.busy) return;
     this.busy = true;
     try {
-      const names = readdirSync(this.d.dir).filter((n) => n.startsWith(this.d.prefix) && /^\d+\.service$/.test(n.slice(this.d.prefix.length)));
+      const ours = (names: string[], end: RegExp) => names.filter((n) => n.startsWith(this.d.prefix) && end.test(n.slice(this.d.prefix.length)));
+      const here = readdirSync(this.d.dir);
+      // The Taskmasters' containers (#1882; Josh, 2026-11-25, "Yes, cover them too"); no such slice until a Taskmaster runs.
+      const tm = here.includes(TASKMASTER_SLICE) ? ours(readdirSync(join(this.d.dir, TASKMASTER_SLICE)), /^\d+-tm\.service$/).map((n) => join(TASKMASTER_SLICE, n)) : [];
+      const names = [...tm, ...ours(here, /^\d+\.service$/)];
       for (const name of [...this.seen.keys()]) if (!names.includes(name)) this.seen.delete(name);
       for (const name of names) await this.look(name);
     } catch (err) {

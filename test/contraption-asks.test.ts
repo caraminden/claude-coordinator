@@ -28,7 +28,7 @@ let booted: ReturnType<typeof bootServer> | undefined;
 /** One server for every route test below, booted by the first that needs it. Each test works in its own contraption (the ask and upload limits count per contraption and person) and registers it before the first call, which the server reads from the DB per request. */
 const server = () => (booted ??= bootServer({ root, ...slowWrites }));
 after(async () => {
-  await (await booted)?.stop(); // waits for the server to exit, so it isn't writing when the folder goes (#218)
+  await (await booted?.catch(() => undefined))?.stop(); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });

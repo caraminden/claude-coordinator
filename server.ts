@@ -2697,6 +2697,8 @@ const listened = (port: number) => {
   if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST, throughFront ? '/api/status' : undefined);
   console.log(onSocket ? `${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})` : `${APP_NAME} listening on http://${HOST}:${boundPort}`);
   handover?.live();
+  // Only a change of this server's own code moves what it asks for, so once per start (#2004).
+  if (!BOOT_CHECK) void claudeLink.raiseLimits();
 };
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.

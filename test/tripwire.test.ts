@@ -1550,3 +1550,16 @@ test("a dirty file checked out or restored: its diff is saved under the turn's T
     rmSync(tmp, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });
+
+test("a turn's copies of its app's data are its own to change, and nothing else in its folder is (#1884)", () => {
+  const turn = `${data}/run/turns/person-2/9-100`;
+  const copies = `${turn}/app-copy`;
+  for (const turnDir of [undefined, turn]) {
+    const c = { ...cfg, copies, ...(turnDir ? { turnDir } : {}) };
+    for (const cmd of [`sqlite3 ${copies}/trips/trips.db < 0018.sql`, `rm ${copies}/trips/trips.db-wal`, `cp ${copies}/trips/trips.db ${copies}/trips/before.db`]) {
+      assert.equal(bash(cmd, worktree, c), null, cmd);
+      assert.ok(bash(cmd), `${cmd} without a copies folder`);
+    }
+    for (const cmd of [`rm ${copies}/../pin/tripwire.ts`, `rm -rf ${turn}`, `echo x > ${turn}/app-copyx`, `rm ${data}/run/turns/person-2/9-200/app-copy/trips/trips.db`, `rm ${data}/run/app-copies/9-100/trips.db`, `rm ${data}/coordinator.db`]) assert.ok(bash(cmd, worktree, c), cmd);
+  }
+});

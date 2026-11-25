@@ -974,6 +974,11 @@ export class Runner {
     return [...this.turns.keys()];
   }
 
+  /** The folder of the turn it runs now, which goes when the turn ends (src/app-copy.ts keeps a copy there). */
+  turnFolder(ticketId: number): string | null {
+    return this.turns.get(ticketId)?.dir ?? null;
+  }
+
   /** Whether a turn of its runs, or one is owed: messages or a worker it waits for, or a cut-off turn to carry on, after its approval card too (#1930). */
   busy(ticketId: number): boolean {
     const waits = this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId) || cardHeld(this.store, ticketId);

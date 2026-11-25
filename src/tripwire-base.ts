@@ -19,11 +19,16 @@ export interface TripwireConfig {
   env?: Record<string, string | undefined>;
   /** The turn's own folder (its pinned tripwire and hook config), read-only to the turn; Codex turns set it (#337). */
   turnDir?: string;
+  /** Where Citadel puts the turn's private copies of its app's live data (src/app-copy.ts): its to change and delete. */
+  copies?: string;
   /** Contraptions' folders this turn reads but never writes: the Citadel scheme's Taskmaster's (#656). */
   readOnly?: string[];
   /** Folders whose .env files this turn never reads, directly or by a recursive search: a Taskmaster's, other schemes' and contraptions' (#656). */
   envFiles?: string[];
 }
+
+/** The folder in a turn's own that holds its copies of an app's data (TripwireConfig.copies). */
+export const COPIES = 'app-copy';
 
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
 export interface Verdict {

@@ -18,6 +18,7 @@ import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, run
 import { CONTRAPTION_NAME, RESERVED } from '../contraptions.ts';
 import { secretName } from '../secrets.ts';
 import { ServiceError } from '../app-services.ts';
+import { copyAppData } from '../app-copy.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
@@ -398,6 +399,8 @@ export const contraptionRoutes: Route[] = [
   { method: ['PUT', 'DELETE'], path: '/api/mandate/items/:key', who: ['taskmaster', 'minion'], refuse: 'Only a minion or Taskmaster puts items for its scheme', handler: mandateItem },
   // contraption_read (#295): a minion or Taskmaster reads its asker's data in a contraption, through the app's read commands.
   { method: 'POST', path: '/api/contraption-read/:app', who: ['taskmaster', 'minion'], refuse: "Only a minion or Taskmaster reads a person's contraption data", handler: contraptionRead },
+  // copy_app_data (#1884): a minion of an app's home scheme gets a private copy of its live data in its turn's own folder.
+  { method: 'POST', path: '/api/app-copy/:app', who: ['minion'], refuse: "Only a minion's turn gets a copy of an app's data", handler: copyAppData },
   // Semantic memory's model for the app's own data (#488): texts in, unit vectors out. The box's CPU does it,
   // so nothing leaves it; the app stores and searches the vectors itself, and keeps them with `model`.
   fromContraption('POST', '/api/contraptions/embed', async ({ req, res, app }) => {

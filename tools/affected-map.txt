@@ -18,6 +18,8 @@ src/db-schema.ts: test/db-setup.test.ts test/host-check.test.ts test/schema-comp
 src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
+src/app-copy-run.ts: test/app-copy.test.ts
+src/app-copy.ts: test/app-copy.test.ts test/access-matrix.test.ts
 
 # The property tests (#1657): random orderings of the minion lane and the claim queue, on the real code.
 src/lanes.ts: test/lanes-property.test.ts

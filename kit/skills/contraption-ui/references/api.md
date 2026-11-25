@@ -1039,6 +1039,23 @@ old may not read data a newer one wrote (Cara, 2026-11-18: "App lists its migrat
 back the newest snapshot of your data taken under code with the same migrations, and is refused when
 there is none.
 
+**Trying a migration on a copy of the live data** (#1884; Josh, 2026-11-25, picked "Copy into the
+turn" and "Any home scheme member"). A minion in your home scheme calls `copy_app_data` with your
+app's name, from a container turn or a host turn, and gets a folder with a private copy of your
+`DATA_DIR`'s SQLite databases, laid out as they are live. Each is taken with SQLite's own backup in
+one step, so it is consistent while your app writes (two databases are two moments, a few writes
+apart). Run your migration on it (`DATA_DIR=<the folder>` for your own code), then compare; the live
+folder isn't touched, calling again gives a fresh copy, and the copy is deleted when that turn ends,
+fails or is killed. A background job that outlives the turn loses it.
+
+- `files: true` brings the other files too. Never copied: `.env` and key files (names like `*.pem`,
+  `*.key`, `id_ed25519`, or holding secret, token, password or credential), links, and `backups/`; the answer lists what was left
+  out. A secret stored inside a database is copied with it.
+- It holds everyone's rows: print counts and checks, never rows. Each copy leaves a line in the chat
+  naming who asked.
+- Refused: a minion outside the home scheme, a turn not asked for by one of its members, a Taskmaster,
+  a copy over 10 GB, or one that would leave under 10 GB of disk free. It takes at most 10 minutes.
+
 **Data snapshots** (#1137; Josh, 2026-11-19, picked "Build it"). A deploy whose commit changes a
 `migrations` path stops your app and its timers, copies its `DATA_DIR` to
 `~/.local/share/.<name>.snapshots/<time>-<commit>/data` (a reflinked copy on perigee's btrfs, so it
@@ -1145,6 +1162,7 @@ Newest first.
   audit, caps, jobs, embeddings, secrets (404 `not_faked`).
 - **2026-11-19:** A deploy that changes your `migrations` snapshots your `DATA_DIR` first, and a roll
   back restores it with the code ("Data snapshots").
+- **2026-11-25:** A minion of your home scheme can try a migration on a private copy of your live data with `copy_app_data` ("Trying a migration on a copy of the live data").
 - **2026-11-19:** Turns take `effort` (`low`, `medium`, `high`) and `toolSearch: true` (MCP tools
   load only when the agent searches for them). Kept turns record both. Claude Code doesn't let a
   turn clear old tool results before compacting yet: Citadel has no switch for it.

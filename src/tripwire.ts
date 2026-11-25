@@ -49,6 +49,7 @@ function hasDeployScript(cfg: TripwireConfig): boolean {
 /** Why a write to this absolute path is blocked, or null. */
 function writeReason(p: string, cfg: TripwireConfig): string | null {
   const configDir = join(cfg.home, '.config');
+  if (cfg.copies && under(p, cfg.copies)) return null;
   if (cfg.turnDir && under(p, cfg.turnDir)) return `${cfg.turnDir} is this turn's own folder: its pinned tripwire and the config its hooks read. Nothing in a turn changes it.`;
   const app = cfg.readOnly?.find((d) => under(p, d));
   if (app) return `${app} is a contraption's folder, which you may read but not change: work there goes to its scheme's Taskmaster with message_taskmaster.`;

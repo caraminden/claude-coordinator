@@ -3,7 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { APP_NAME } from './appname.ts';
 import { pacificStamp } from './pacific.ts';
 import type { AuditTurn } from './mcp-types.ts';
-import { readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, RISKS, type DeployInfo, type ServiceInfo, type ContraptionInfo } from './mcp-text.ts';
+import { copyText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, RISKS, type DeployInfo, type ServiceInfo, type ContraptionInfo, type CopyResult } from './mcp-text.ts';
 import { C, call, NOT_HERE } from './mcp-call.ts';
 
 const CONTRAPTION_FIELDS = {
@@ -221,6 +221,20 @@ export const CONTRAPTION_READ = {
   },
 };
 
+/** A private copy of an app's live data for this turn (src/app-copy.ts): a home scheme's minions. */
+export const COPY_APP_DATA = () => ({
+  name: 'copy_app_data',
+  description: `Get a private, throwaway copy of the live data of one of this scheme's apps (${C().HOME_CONTRAPTIONS.join(', ')}), to try a migration or a check on: its SQLite databases, each consistent while the app keeps running. It returns the folder, yours to change; the live folder isn't touched, and the copy is deleted when this turn ends. Asking again replaces it with a fresh copy. Works in a container turn. It holds everyone's rows, so print counts and checks, never rows, and copy none of it elsewhere. Only on a turn a member of this scheme asked for.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      app: { type: 'string', description: "The contraption's name.", ...(C().HOME_CONTRAPTIONS.length ? { enum: C().HOME_CONTRAPTIONS } : {}) },
+      files: { type: 'boolean', description: 'true: its other files too, except .env and key files, links and backups/' },
+    },
+    required: ['app'],
+  },
+});
+
 /** The scheme's contraption turn audit (#844), for its Taskmaster: what each app's model calls were sent and answered. */
 export const CONTRAPTION_TURNS = () => ({
   name: 'contraption_turns',
@@ -304,6 +318,10 @@ export async function runAppsTool(name: string, args: Record<string, unknown>): 
       if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
       const r = await call<Parameters<typeof readText>[2]>('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
       return readText(args.app, args.command as string | undefined, r);
+    }
+    case 'copy_app_data': {
+      if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
+      return copyText(args.app, await call<CopyResult & { dir: string }>('POST', `/api/app-copy/${encodeURIComponent(args.app)}`, { files: args.files }));
     }
     case 'make_release_key': {
       const { href } = await call('POST', `/api/tickets/${C().TICKET}/release-key`, { contraption: args.contraption });

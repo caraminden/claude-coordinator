@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { exitWithParent } from '../src/exit-with-parent.ts';
+import { exitWithParent, killNaming } from '../src/exit-with-parent.ts';
 import { bootServer, listeningPort, TEST_ZONE, PASSWORD, procsUnder, REPO, SECRET, tempRoot, until } from './helpers.ts';
 
 // A server a test started goes when the test's process does (#1546), and so does what it started.
@@ -94,6 +94,17 @@ test('leaving stops what names the data folder when the test is gone, and nothin
   await exitWithParent(data, () => {}, process.ppid, { CITADEL_EXIT_WITH_PARENT: String(dead) }, exits)();
   await gone(data, 'the supervisor of a dead test to go');
   assert.equal(first.exitCode ?? first.signalCode, 'SIGKILL');
+});
+
+test('a supervisor that starts after the first look finds nothing is stopped too', async () => {
+  const data = tmp.path('late-start');
+  mkdirSync(data, { recursive: true });
+  const done = killNaming(data);
+  let late: ReturnType<typeof tmp.spawn> | undefined;
+  setTimeout(() => (late = tmp.spawn('sh', ['-c', 'sleep 300; :', 'supervisor', join(data, 'v1')], { stdio: 'ignore', detached: true })), 150);
+  await done;
+  assert.ok(late, 'it was still looking when the supervisor started');
+  await gone(data, 'the late supervisor to go');
 });
 
 // A cancelled job's test file is killed while its server is still booting: by the time the server looks, its parent is

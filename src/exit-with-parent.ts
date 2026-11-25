@@ -23,11 +23,14 @@ export async function procsNaming(dir: string, self = process.pid): Promise<numb
 /**
  * Kill what names `dir`: each one's process group first (claude leads one with its tools in it), then the pid. SIGKILL,
  * but a turn supervisor gets SIGTERM: killed, its unit's Restart=on-failure would start it again (#1758). Looks again
- * until it finds nothing, for what was starting meanwhile (a supervisor systemd had still to start, #1900).
+ * until it has found nothing five times running, as systemd may have taken a supervisor's launch and not started it yet
+ * (#1900): counted in looks, not time, so a stalled process doesn't use its quiet up without looking.
  */
 export async function killNaming(dir: string, waitMs = 5000) {
+  let quiet = 0;
   for (const end = Date.now() + waitMs; ; await sleep(100)) {
     const pids = await procsNaming(dir);
+    quiet = pids.length ? 0 : quiet + 1;
     for (const pid of pids) {
       const signal = await readFile(`/proc/${pid}/cmdline`, 'utf8').then(
         (c) => (supervisorHome(c.split('\0')) ? 'SIGTERM' : 'SIGKILL'),
@@ -41,7 +44,7 @@ export async function killNaming(dir: string, waitMs = 5000) {
         } catch {}
       }
     }
-    if (!pids.length || Date.now() >= end) return;
+    if (quiet >= 5 || Date.now() >= end) return;
   }
 }
 

@@ -142,8 +142,12 @@ test('each runner has a short temp folder of its own', () => {
 test('every job that runs tests on the runners sweeps at its start and end', () => {
   for (const f of ['tests.yml', 'flake-proof.yml', 'citadel-heavy.yml']) {
     const text = readFileSync(join(import.meta.dirname, '../.github/workflows', f), 'utf8');
-    const start = text.indexOf('node test/ci-leftovers.ts start');
+    // The steps' own commands, so one commented out or turned into text doesn't count.
+    const command = (mode: string) => new RegExp(`^        run: (?:if \\[ -f test/ci-leftovers\\.ts \\]; then )?node test/ci-leftovers\\.ts ${mode}(?:; fi(?: #.*)?)?$`, 'm');
+    const start = text.search(command('start'));
     assert.ok(start > text.indexOf('actions/setup-node') && start < text.indexOf('- name: pwsh and PSScriptAnalyzer'), `${f}: after node, before the work`);
-    assert.match(text.trimEnd().split('\n      - ').at(-1)!, /if: always\(\)[\s\S]*node test\/ci-leftovers\.ts end/, `${f}: its last step, however the job went`);
+    const last = text.trimEnd().split('\n      - ').at(-1)!;
+    assert.match(last, /^        if: always\(\)$/m, `${f}: its last step runs however the job went`);
+    assert.match(last, command('end'), `${f}: its last step sweeps`);
   }
 });

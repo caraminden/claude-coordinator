@@ -2682,6 +2682,7 @@ if (config.front) {
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
     publish: throughFront.publish,
+    coming: throughFront.coming,
     store,
     runner,
     builds: (id) => builds.get(id),

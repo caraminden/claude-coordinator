@@ -18,7 +18,10 @@ const SWEEP_ALL = 20;
 const UNITS_MS = 60_000;
 
 export type LiveDeps = {
-  publish: (d: SnapDelta) => void;
+  /** `counted`: the change was announced with coming(). */
+  publish: (d: SnapDelta, counted?: boolean) => void;
+  /** A minion's live state changed and is published within this run of the thread. */
+  coming: () => void;
   store: Store;
   runner: Runner;
   builds: (projectId: number) => unknown;
@@ -41,14 +44,19 @@ export function publishLive(d: LiveDeps) {
     if (!batch) return;
     const b = batch;
     batch = null;
-    d.publish({ live: b });
+    d.publish({ live: b }, true);
   };
   const note = (id: number, live: unknown) => {
     const json = JSON.stringify(live);
     if (sent.get(id) === json) return;
     sent.set(id, json);
     // One post for a list's worth of views, before anything else runs on this thread.
-    if (!batch) queueMicrotask(flush);
+    // Told now that a change is on its way (#1963): a response written before the microtask runs let the person's
+    // next request reach a reader that didn't have it yet.
+    if (!batch) {
+      d.coming();
+      queueMicrotask(flush);
+    }
     (batch ??= {})[id] = live;
   };
   runner.onLive = note;

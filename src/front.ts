@@ -254,10 +254,15 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
   // so a reader never answers from older state than main had when the request came (a person's own click included).
   const posted = new Int32Array(new SharedArrayBuffer(4));
   let early: ({ snap: SnapDelta } | { statics: Statics })[] | null = [];
-  const post = (m: { snap: SnapDelta } | { statics: Statics }) => {
+  // Counted before it is sent, and a snapshot change as soon as main has made it (`coming`): a reader asked in between
+  // answered from the state before it, a page without the click its person had just made (#1963). Counted but not yet
+  // applied, the front thread sends the request to main instead.
+  let announced = 0;
+  const post = (m: { snap: SnapDelta } | { statics: Statics }, counted = false) => {
     if (early) return void early.push(m);
+    if (counted && announced) announced--;
+    else Atomics.add(posted, 0, 1);
     front!.postMessage(m);
-    Atomics.add(posted, 0, 1);
   };
   // The front thread's pooled connections stay open until it closes them, so a reused one is never closed under a request.
   server.keepAliveTimeout = 0;
@@ -298,8 +303,15 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     release() {
       front?.postMessage('release');
     },
-    publish(d: SnapDelta) {
-      post({ snap: d });
+    /** `counted`: the change `coming()` already counted. */
+    publish(d: SnapDelta, counted = false) {
+      post({ snap: d }, counted);
+    },
+    /** A snapshot change is made and will be published within this run of the main thread: no reader answers without it. */
+    coming() {
+      if (early) return; // counted when it is posted: nothing is asked before the front thread exists
+      announced++;
+      Atomics.add(posted, 0, 1);
     },
     /** The front end's files as loaded (at the start and on each SIGHUP): the front thread serves them from then on. */
     statics(s: Statics) {

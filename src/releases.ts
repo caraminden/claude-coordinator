@@ -642,6 +642,24 @@ export async function landedIn(store: Store, p: Project, prev: string, head: str
   return { commits, tickets, files, ticketFiles };
 }
 
+/**
+ * When `sha` reached `branch` (ms): the time of the earliest move of the branch whose result had it, from its reflog. A
+ * commit's own time is when it was written, which a kit sync or a long-lived branch makes hours earlier than its ship.
+ * Falls back to `fallback` (the commit's time) when there is no reflog (a fresh clone, a pruned log).
+ */
+export async function reachedMain(repo: string, branch: string, sha: string, fallback: number): Promise<number> {
+  const log = await git(['reflog', 'show', '--date=unix', '--format=%H %gd', '-n', '200', `refs/heads/${branch}`], repo);
+  let at = fallback;
+  for (const line of (log ?? '').split('\n').filter(Boolean)) {
+    const [head, sel] = line.split(' ');
+    const when = Number(/@\{(\d+)\}/.exec(sel ?? '')?.[1]) * 1000;
+    if (!when) break;
+    if (head !== sha && (await git(['merge-base', '--is-ancestor', sha, head], repo)) == null) break;
+    at = Math.max(fallback, when);
+  }
+  return at;
+}
+
 export type Landed = NonNullable<Awaited<ReturnType<typeof landedIn>>>;
 
 /** Every scheme's previews that people were offered, and the builds' previews of the scheme whose code this server runs. */

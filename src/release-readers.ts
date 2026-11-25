@@ -11,7 +11,7 @@ import { desktopPaths, type DesktopIndex, type DesktopTarget } from './desktop-f
 import type { Contains, Green, Pin } from './last-green.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { BEHIND_OLD, CITADEL_TARGET, git, landedIn, OLD_LAND, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
+import { BEHIND_OLD, CITADEL_TARGET, git, landedIn, OLD_LAND, reachedMain, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { behindOld, median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
@@ -138,7 +138,9 @@ export class ContraptionReader implements Reader {
         const landed = deployed === main ? { commits: new Map(), tickets: [] } : all && landedOn(all, shipsOnTarget(t, this.d.finder.list()));
         if (landed) {
           s.ahead = landed.commits.size;
-          s.oldest = landed.commits.size ? Math.min(...landed.commits.values()) : null;
+          // When the oldest of them reached main, not when it was written: a kit sync commit is hours older than its ship.
+          const [oldSha, oldAt] = [...landed.commits].sort((a, b) => a[1] - b[1])[0] ?? [];
+          s.oldest = oldSha ? await reachedMain(p.repo_dir!, row.branch ?? t.branch, oldSha, oldAt!) : null;
           s.changes = landed.tickets.map((x) => ({ ticketId: x.id, number: x.number, title: x.title }));
         }
       }

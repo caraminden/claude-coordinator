@@ -346,7 +346,10 @@ test('an app backup the script cannot read is left out and named, and everything
   try {
     if (!shm) return t.skip('no second filesystem to make the hard link fail');
     const st = new Store(join(own, 'coordinator.db'));
-    for (const [name, port, key] of [['mandate', 9, 'h'], ['peek', 10, 'h2']] as const) {
+    for (const [name, port, key] of [
+      ['mandate', 9, 'h'],
+      ['peek', 10, 'h2'],
+    ] as const) {
       st.createContraption({ name, title: name, icon: null, port, home_scheme: null, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: key, keys_at: 0 });
     }
     st.db.close();

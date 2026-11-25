@@ -37,11 +37,13 @@ foreach ($case in $Cases) {
   $port = Get-Random -Minimum 20000 -Maximum 29999
   $prof = Join-Path $env:TEMP "defender-copy-$port"
   $since = Get-Date
+  $p = $null
   if ($kind -eq 'electron') {
     $p = Start-Process $electron -ArgumentList "--remote-debugging-port=$port", "`"$here\electron-main.cjs`"", $url -PassThru
   } else {
     $p = Start-Process $(if ($kind -eq 'chrome') { $chrome } else { $edge }) -ArgumentList "--remote-debugging-port=$port", "--user-data-dir=`"$prof`"", '--no-first-run', '--no-default-browser-check', '--new-window', $url -PassThru
   }
+  if (-not $p) { "$case ($url): NOT RUN - $kind did not start (is it installed?)"; Remove-Item -Recurse -Force $prof -ErrorAction SilentlyContinue; continue }
   Set-Clipboard -Value 'cleared'
   # The text goes base64: a command line holding `irm ... | iex` is itself a Defender detection (2147852719), on node.
   & $node "$here\copy.mjs" $port ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Text))) | ForEach-Object { "  $_" }
@@ -49,9 +51,11 @@ foreach ($case in $Cases) {
   Set-Clipboard -Value 'cleared'
   if ($shell.AppActivate($p.Id)) { Start-Sleep -Milliseconds 500; [System.Windows.Forms.SendKeys]::SendWait('^c'); "  real Ctrl+C sent" } else { "  real Ctrl+C: window not found" }
   Start-Sleep -Seconds $Wait
-  $clip = (Get-Clipboard -Raw) -replace '\s+$', ''
+  $clip = try { (Get-Clipboard -Raw) -replace '\s+$', '' } catch { "(no clipboard: $($_.Exception.Message))" }
   $new = @(Detections | Where-Object { $_.InitialDetectionTime -ge $since.AddSeconds(-2) })
-  "$case ($url): clipboard '$clip' - new detections: $($new.Count)"
+  # A copy Defender blocked leaves the clipboard without the text: say so, and still print the detections line.
+  $copied = if ($clip -eq $Text.Trim()) { "clipboard '$clip'" } else { "NOT COPIED (clipboard '$clip')" }
+  "$case ($url): $copied - new detections: $($new.Count)"
   foreach ($d in $new) { "  DETECTED ThreatID $($d.ThreatID) at $($d.InitialDetectionTime) process $($d.ProcessName) - $($d.Resources -join '; ')" }
   # Edge leaves helper processes behind its first one: stop every process started from this case's profile or exe.
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine.Contains("--remote-debugging-port=$port") -or $_.CommandLine.Contains($prof)) } |

@@ -20,6 +20,10 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const [build = 'checkout', what = 'all'] = process.argv.slice(2);
+if (!['keys', 'rclick', 'all'].includes(what) || (build === 'edge' && what === 'rclick')) {
+  console.log(`FAIL nothing to run: mode '${what}'${build === 'edge' ? ' in an Edge window (keys only)' : ''}; use keys, rclick or all`);
+  process.exit(1);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const root = path.join(process.env.TEMP, 'citadel-keys');
 const repo = path.resolve(import.meta.dirname, '../../../../..');
@@ -131,6 +135,15 @@ const input = (cmd) =>
     psQ.push(r);
     ps.stdin.write(cmd + '\n');
   });
+// Every exit after the app is up goes through here, so a failed run doesn't leave the app and PowerShell running for the next rig.
+const quit = async (code) => {
+  ps.stdin.end();
+  ps.kill();
+  app.kill();
+  server.close();
+  await sleep(500);
+  process.exit(code);
+};
 const until = async (ok, ms = 15000) => {
   for (let t = 0; t < ms && !ok(); t += 200) await sleep(200);
   return ok();
@@ -201,12 +214,12 @@ const ready = async () => {
 };
 if (!(await until(() => loads.length, 30000))) {
   console.log('FAIL the app never loaded /c/');
-  process.exit(1);
+  await quit(1);
 }
 await ready();
 if (!layout) {
   console.log('FAIL the page never sent its layout');
-  process.exit(1);
+  await quit(1);
 }
 const at = (where) => {
   const L = layout,
@@ -269,7 +282,11 @@ if (!edge && (what === 'rclick' || what === 'all')) {
     const items = (await input('menu')).trim();
     await input(`shot ${path.join(shots, 'rclick-textbox.png')}`);
     console.log(`${items ? 'ok  ' : 'RIG?'} right-click Citadel's text box, menu: ${items || '(none): the rig sees no menu, so the lines below prove nothing'}`);
-    if (!items) console.log('  top-level windows:', await input('windows'));
+    if (!items) {
+      fails++;
+      console.log('FAIL the rig saw no menu on a text box: every right-click result below is unproven');
+      console.log('  top-level windows:', await input('windows'));
+    }
     await closeMenu();
   }
   for (const where of places) {
@@ -312,8 +329,4 @@ if (!edge && (what === 'rclick' || what === 'all')) {
   }
 }
 writeFileSync(path.join(root, 'last.txt'), `fails ${fails}\n`);
-ps.stdin.end();
-app.kill();
-server.close();
-await sleep(500);
-process.exit(fails ? 1 : 0);
+await quit(fails ? 1 : 0);

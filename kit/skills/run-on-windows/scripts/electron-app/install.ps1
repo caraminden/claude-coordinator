@@ -17,11 +17,15 @@ $p = Start-Process (Join-Path $app 'citadel.exe') -PassThru
 Start-Sleep 25
 Write-Output '--- launcher.log'
 Get-Content (Join-Path $app 'launcher.log') -ErrorAction SilentlyContinue
-$w = Get-Process Citadel -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }
+$w = Get-Process Citadel -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -and $_.Path -like "$dir*" }
 Write-Output ('--- window: ' + ($w | ForEach-Object { "$($_.MainWindowTitle) (pid $($_.Id))" }))
 if ($Keep) { return }
 Get-Process Citadel, citadel -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir*" } | Stop-Process -Force
 Start-Sleep 2
-Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Citadel.lnk'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Citadel.lnk'), (Join-Path $env:APPDATA 'Citadel\desktop-shortcut-made')
+# Only a shortcut that points into this install's folder is ours: the box user's own Citadel.lnk stays.
+$shell = New-Object -ComObject WScript.Shell
+foreach ($lnk in @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Citadel.lnk'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Citadel.lnk'))) {
+  if ((Test-Path $lnk) -and $shell.CreateShortcut($lnk).TargetPath -like "$dir*") { Remove-Item -Force $lnk }
+}
 Remove-Item -Recurse -Force $dir
 Write-Output 'cleaned up'

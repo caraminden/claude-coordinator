@@ -247,5 +247,7 @@ else if (cmd === 'status') {
   console.log(devCopy('stop').trim());
   // The driver fetched cleanup.ps1 beside itself, so this works with the rig server gone; it runs from a copy, since it removes that folder.
   console.log(`Shots stay in ${SHOTS}. Now clean the box:`);
-  console.log(JSON.stringify({ task: 'build', args: ["$c = Join-Path $env:TEMP 'citadel-wco-cleanup.ps1'; Copy-Item (Join-Path $env:TEMP 'citadel-wco\\cleanup.ps1') $c; powershell -NoProfile -ExecutionPolicy Bypass -File $c; Remove-Item $c"] }));
+  // -Run names this rig's driver (its command line holds the URL), so the cleanup ends this run and no other minion's.
+  const runUrl = `http://${s.host}:${s.rigPort}/${s.token}`;
+  console.log(JSON.stringify({ task: 'build', args: [`$c = Join-Path $env:TEMP 'citadel-wco-cleanup-${s.token.slice(0, 6)}.ps1'; Copy-Item (Join-Path $env:TEMP 'citadel-wco\\cleanup.ps1') $c; powershell -NoProfile -ExecutionPolicy Bypass -File $c -Run '${runUrl}'; Remove-Item $c`] }));
 } else die('usage: node rig.ts up | status | run <check> [route ...] | js <code> | reload | down');

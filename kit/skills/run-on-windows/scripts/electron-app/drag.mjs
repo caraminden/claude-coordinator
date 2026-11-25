@@ -4,6 +4,8 @@
 //   node drag.mjs <config URL from rig.ts up's box line> [route, default the rig's scheme]
 // Electron is the defender-copy rig's (%LOCALAPPDATA%\defender-copy). Leaves a shot at %TEMP%\electron-drag.png.
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -26,7 +28,9 @@ const port = await new Promise((res) => fwd.listen(0, '127.0.0.1', () => res(fwd
 const origin = `http://localhost:${port}`;
 const dbg = 20000 + Math.floor(Math.random() * 9000);
 const electron = path.join(process.env.LOCALAPPDATA, 'defender-copy', 'node_modules', 'electron', 'dist', 'electron.exe');
-const app = spawn(electron, [`--remote-debugging-port=${dbg}`, path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'inherit' });
+// Its own profile: a Citadel app already up on the box holds the single-instance lock and would make this one quit.
+const profile = mkdtempSync(path.join(os.tmpdir(), 'citadel-drag-'));
+const app = spawn(electron, [`--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`, path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'inherit' });
 
 const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(import.meta.dirname, '..', 'wco', 'mouse.ps1')], { stdio: ['pipe', 'pipe', 'inherit'] });
 const psQ = [];
@@ -37,6 +41,12 @@ const mouse = (cmd) =>
     ps.stdin.write(cmd + '\n');
   });
 
+// Any exit, a throw included, takes the app and PowerShell down and removes the temp profile.
+process.on('exit', () => {
+  app.kill();
+  ps.kill();
+  rmSync(profile, { recursive: true, force: true });
+});
 let browserWs;
 for (let i = 0; i < 60 && !browserWs; i++) {
   try {
@@ -44,6 +54,10 @@ for (let i = 0; i < 60 && !browserWs; i++) {
   } catch {
     await sleep(500);
   }
+}
+if (!browserWs) {
+  console.log(`FAIL the app's DevTools port ${dbg} never answered (did the app start?)`);
+  process.exit(1);
 }
 const ws = new WebSocket(browserWs);
 await new Promise((r, j) => {
@@ -75,7 +89,11 @@ for (let i = 0; i < 60 && !page; i++) {
   if (!page) await sleep(500);
 }
 const s = (await send('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId;
-const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, s)).result.value;
+const ev = async (expr) => {
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, s);
+  if (r.exceptionDetails) throw new Error(`the page threw: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
+  return r.result.value;
+};
 await send('Page.navigate', { url: `${origin}/c/${route}` }, s);
 for (let i = 0; i < 40 && !(await ev("!!document.querySelector('.split .ticket-head, .split')").catch(() => false)); i++) await sleep(500);
 await sleep(2500);

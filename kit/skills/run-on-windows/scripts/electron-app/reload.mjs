@@ -5,6 +5,8 @@
 // Electron is the defender-copy rig's (%LOCALAPPDATA%\defender-copy). The reload is CDP's Page.reload, the same normal
 // reload Ctrl+R runs (not a cache-bypassing one).
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -30,8 +32,16 @@ const port = live ? 0 : await new Promise((res) => fwd.listen(0, '127.0.0.1', ()
 const origin = live ? new URL(cfgUrl).origin : `http://localhost:${port}`;
 const dbg = 20000 + Math.floor(Math.random() * 9000);
 const electron = path.join(process.env.LOCALAPPDATA, 'defender-copy', 'node_modules', 'electron', 'dist', 'electron.exe');
-const app = spawn(electron, [`--remote-debugging-port=${dbg}`, path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'ignore' });
+// Its own profile, so a Citadel app already up on the box (its single-instance lock) can't make this one quit; a live run
+// keeps the real profile on purpose: its cookie is the signed-in one, which a temp profile wouldn't have.
+const profile = live ? null : mkdtempSync(path.join(os.tmpdir(), 'citadel-reload-'));
+const app = spawn(electron, [`--remote-debugging-port=${dbg}`, ...(profile ? [`--user-data-dir=${profile}`] : []), path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'ignore' });
 
+// Any exit, a throw included, takes the app down with it and removes the temp profile.
+process.on('exit', () => {
+  app.kill();
+  if (profile) rmSync(profile, { recursive: true, force: true });
+});
 let browserWs;
 for (let i = 0; i < 60 && !browserWs; i++) {
   try {
@@ -39,6 +49,10 @@ for (let i = 0; i < 60 && !browserWs; i++) {
   } catch {
     await sleep(500);
   }
+}
+if (!browserWs) {
+  console.log(`FAIL the app's DevTools port ${dbg} never answered (did the app start?)`);
+  process.exit(1);
 }
 const ws = new WebSocket(browserWs);
 await new Promise((r, j) => {
@@ -133,10 +147,12 @@ for (let i = 0; i < N; i++) {
         notModified: files.filter((e) => e.responseStatus === 304).length, bytes: files.reduce((n, e) => n + e.transferSize, 0),
         pageStatus: nav?.responseStatus, loadEnd: nav?.loadEventEnd };
     })() : null`).catch(() => null);
+    // The old document's marks answering before the new one commits: its origin is before this reload (a few ms of rounding allowed).
+    if (r && r.origin < t0 - 5) r = null;
     if (r) break;
   }
   if (!r) {
-    console.log(`reload ${i + 1}: did not finish in 15 s`);
+    console.log(`reload ${i + 1}: the new page did not finish in 15 s`);
     continue;
   }
   const off = r.origin - t0; // ms from the reload call to the new page's navigation start
@@ -166,7 +182,10 @@ const med = (k) => {
   return v.length ? v[Math.floor(v.length / 2)] : null;
 };
 console.log(`MEDIAN reload→drawn ${med('toDrawn')} ms, reload→splash gone ${med('toGone')} ms, files 200 ${med('ok200')} / 304 ${med('ok304')} / cache ${med('cached')}, ${med('kb')} KB`);
-app.kill();
 fwd?.close();
 ws.close();
+if (!rows.length) {
+  console.log('FAIL no reload was timed');
+  process.exit(1);
+}
 process.exit(0);

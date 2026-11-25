@@ -226,7 +226,9 @@ test('one let in beside the lane holder hands off unless they came to share a pi
   store.claims.setBeside(store.claims.get(projectId, 'pipeline-lane')!, beside.id);
   const card = await beside.card();
   beside.commit('src/pipe/a.ts');
+  store.claims.handedOff(beside.id); // an earlier ship of it, sent back
   assert.match(String((await beside.post(HAND_OFF)).data.error), /both change src\/pipe\/a\.ts/);
+  assert.equal(store.claims.get(projectId, 'pipeline-lane')!.beside_handed, 0, 'so it is woken when the lane is its own');
   git(beside.cwd, 'reset', '-q', '--hard', 'HEAD~1');
   const r = await beside.press(card);
   assert.equal(r.status, 202, JSON.stringify(r.data));

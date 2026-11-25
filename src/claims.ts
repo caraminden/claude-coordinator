@@ -240,6 +240,11 @@ export class Claims {
     this.db.prepare('UPDATE claims SET beside_handed = 1 WHERE beside = ?').run(holder);
   }
 
+  /** The hand-off of `ticket`, let in beside a holder, was refused: it is told when the claim is its own. */
+  besideRefused(ticket: number): void {
+    this.db.prepare('UPDATE claims SET beside_handed = 0 WHERE beside = ?').run(ticket);
+  }
+
   /**
    * Pass the holder `seen` over for `next`, a waiting ticket (#1985): `next` holds it, and the old holder waits first. No
    * span: its time isn't over. Undefined when it moved, was kept or handed off meanwhile, or `next` left the queue.

@@ -234,6 +234,7 @@ async function besideRefusal(app: App, ticket: Ticket): Promise<string | null> {
   const [mine, theirs] = await Promise.all([pipelineChanges(ticket.cwd!), pipelineChanges(holder.cwd)]);
   const both = mine && theirs && mine.filter((f) => theirs.includes(f));
   if (both?.length === 0) return null;
+  app.store.claims.besideRefused(ticket.id);
   return both ? `you and #${holder.number}, which holds the pipeline lane, both change ${both.join(', ')}` : `it couldn't tell whether you and #${holder.number} share a ship-script file`;
 }
 

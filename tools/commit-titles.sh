@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Commit titles that lost their "#N:" (#1489). Usage: tools/commit-titles.sh <base> [<left behind>], run in the branch's worktree.
+# Commit titles that lost their "#N:" (#1489). Usage: tools/commit-titles.sh <base>, or <git log's range...>, run in the branch's worktree.
 # A rebase stopped on a conflict and continued with GIT_EDITOR=true used to read a "#N: ..." title as a comment and
 # drop it (core.commentChar, src/workspace.ts keepTitles, stops that for new work). Exit 0 when fine; exit 1 and one
 # line naming the first commit when a commit of <base>..HEAD has an empty subject, or has no "#N" while another
-# commit in that range has one. Commits the rebase onto <base> would leave out don't count (#1983): what <base> already has
-# as the same patch, and <left behind> and what is under it (land.sh's $under). A branch whose commits have none of them (a plain scheme) is fine.
-base=${1:?usage: commit-titles.sh <base> [<left behind>]}
-subjects=$(git log --no-merges --cherry-pick --right-only --format='%h %s' "$base...HEAD" ${2:+"^$2"}) || exit 2
+# commit in that range has one. A branch whose commits have none of them (a plain scheme) is fine.
+base=${1:?usage: commit-titles.sh <base>, or <git log's range...>}
+[ $# -gt 1 ] || set -- "$base..HEAD"
+subjects=$(git log --no-merges --format='%h %s' "$@") || exit 2
 numbered='^[0-9a-f]+ (WIP )?#[0-9]+'
 empty='^[0-9a-f]+ *$'
 if grep -qE "$numbered" <<<"$subjects"; then

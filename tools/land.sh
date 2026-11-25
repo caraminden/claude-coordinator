@@ -489,8 +489,9 @@ fi
 
 # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment
 # and drop it. One line in $lost naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
-lost_title() { # <a commit the rebase leaves behind, under_of's, or nothing>
-  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)" ${1:+"$1"} 2>&1)
+lost_title() { # <git log's range...>: what it reads, instead of everything from main or the build
+  [ $# -gt 0 ] || set -- "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)"
+  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$@" 2>&1)
 }
 # The smoke check (#1012): before the line, the checks that fail in seconds, so a land they refuse never waits in line
 # or for CI (#1006: about 40 of 86 refusals at the lock were these). It reads the branch's own tools (a repo without
@@ -498,7 +499,7 @@ lost_title() { # <a commit the rebase leaves behind, under_of's, or nothing>
 # shortcut: the tests run on the branch as it is, not on its rebase onto main; a break only the two together make
 # still meets CI in line. Run them on a merge-tree commit if those show up. Off: LAND_SMOKE=0.
 smoke() {
-  local t0=$SECONDS out rc=0 tests=() f lost
+  local t0=$SECONDS out rc=0 tests=() f lost left=()
   smoke_fail() {
     retro_log "smoke · $label · $1 · $((SECONDS - t0))s"
     refuse "smoke: $1, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again${formatted:+. tools/land.sh $formatted}"
@@ -508,7 +509,9 @@ smoke() {
     under=$(under_of)
     early_check main "before the line" || smoke_fail "it conflicts with main"
   fi
-  lost_title "${under-}" || { say "smoke: $lost"; smoke_fail "a commit title is wrong"; } # what waited in line to hear it (#1983)
+  # What waited in line to hear it (#1983). A plain ship's without what its rebase leaves out: what main has, and under_of's.
+  [ "$mode" != land ] || left=(--cherry-pick --right-only main...HEAD ${under:+"^$under"})
+  lost_title "${left[@]}" || { say "smoke: $lost"; smoke_fail "a commit title is wrong"; }
   if [ -f tools/parse-check.ts ]; then
     out=$("$tools/citadel-node" --no-warnings tools/parse-check.ts 2>/dev/null) || true
     [ -z "$out" ] || { sed 's/^/land: smoke: /' <<<"$out" >&2; smoke_fail "a .ts file does not parse"; }

@@ -2105,6 +2105,11 @@ mock.boards('#takes', { boards: [
     about: "the Releases page's Flow tab (#1989): a scheme with 120 minions over two weeks, of every kind, way to main and ending, with refused ships, closing notes and costs",
     seed(c) {
       const scheme = c.store.createProject('River Works', null);
+      const repo = join(c.dataDir, `river-works-${scheme.id}`);
+      mkdirSync(repo);
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'Start'], { cwd: repo });
+      c.store.setProjectRepoDir(scheme.id, repo);
       const me = c.store.listUsers().find((u) => u.name === c.who);
       if (me) c.store.addMember(scheme.id, me.id);
       const titles = ['Aura list keeps its order', 'Search box in the top bar', 'Crash when a clip has no sound', 'Phone layout for the report page', 'Nightly backup says what it skipped', 'Compare three map libraries', 'Look ideas for the empty shelf', 'Split the settings page by section'];

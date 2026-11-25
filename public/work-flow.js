@@ -159,7 +159,8 @@ function river(minions, on) {
         attrs(g, { class: `flow-node${picked ? ' on' : ''}`, 'data-hue': `${n.col}-${n.key}`, 'aria-pressed': String(picked), 'aria-label': `${n.name}: ${plural(n.ms.length, 'minion')}, ${money(value(n.ms, 'cost'))}. List them` });
         const [hit, bar, lead, text] = g.children;
         attrs(bar, { ...(down ? { x: n.at, y: d, width: n.size, height: THICK } : { x: d, y: n.at, width: THICK, height: n.size }), rx: Math.min(3, n.size / 2) });
-        attrs(hit, down ? { x: n.at - 3, y: d - 14, width: n.size + 6, height: THICK + 28 } : { x: d - 8, y: n.at - 6, width: i === 2 ? pad : THICK + 16, height: n.size + 12 });
+        const tall = Math.max(24, n.size + 12);
+        attrs(hit, down ? { x: n.at - 3, y: d - 14, width: n.size + 6, height: THICK + 28 } : { x: d - 8, y: n.at + n.size / 2 - tall / 2, width: i === 2 ? pad : THICK + 16, height: tall });
         text.children[0].textContent = down ? '' : tight ? n.short : n.name;
         text.children[1].textContent = down && n.size < 40 ? '' : amount(n.v, st.unit);
         if (down) {
@@ -408,7 +409,7 @@ function build(id, name, data, retry, redraw) {
 /** One minion in the list, opening its chat. */
 function rowOf(id, m, most) {
   const bar = put(h('i', {}), { '--pct': `${most ? ((m.cost / most) * 100).toFixed(1) : 0}%` });
-  const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', m.end === 'nothing' || m.end === 'answer' ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
+  const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', ['nothing', 'norepo', 'answer'].includes(m.end) ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
   return h(
     'li',
     {},
@@ -427,7 +428,8 @@ function rowOf(id, m, most) {
 function summary(ms, early) {
   const refused = ms.filter((m) => m.path === 'refused'),
     there = refused.filter((m) => m.end === 'late'),
-    nothing = ms.filter((m) => m.end === 'nothing');
+    nothing = ms.filter((m) => m.end === 'nothing' || m.end === 'norepo'),
+    where = nothing[0]?.end === 'norepo' ? 'closed, with no repo to look in' : 'closed with nothing on main, why not recorded';
   return h(
     'p',
     { class: 'flow-words' },
@@ -436,7 +438,7 @@ function summary(ms, early) {
     ...(refused.length
       ? [h('b', {}, num(refused.length)), ` had two or more refused ships${there.length === refused.length ? ', and all of them still got there. ' : `, and ${num(there.length)} of those still got there. `}`]
       : [early ? 'None is on record with two or more refused ships. ' : 'None had two or more refused ships. ']),
-    ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} closed with nothing on main, why not recorded: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main.']),
+    ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} ${where}: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main.']),
   );
 }
 

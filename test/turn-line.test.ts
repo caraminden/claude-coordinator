@@ -7,9 +7,11 @@ import { after, beforeEach, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { workerRoutes } from '../src/routes/workers.ts';
 import { stormPeople } from '../src/memory-storms.ts';
+import type { WaitEnded } from '../src/minion-jobs.ts';
 import { Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
+import { tooCold, waitsLine } from '../public/threadstate.js';
 import { workerWaitText } from '../src/worker-wait.ts';
 testPins();
 
@@ -775,7 +777,11 @@ test("Auto moves the size and lets turns through as it grows; a person's number 
   await started(a);
   const calm = { cpu: 5, mem: 0, io: 0, starved: false, why: '' };
   runner.turnLine.setSize(1, 'Cara');
+  // A fixed size leaves the pool alone, and what it knows of the pressure still decides how long a wait is held (#1890).
+  runner.turnLine.tick({ ...calm, cpu: 100, mem: 100 });
+  assert.equal(runner.turnLine.starved, true);
   runner.turnLine.tick(calm);
+  assert.equal(runner.turnLine.starved, false);
   await settle();
   assert.equal(runner.turnLine.size(), 1);
   assert.equal(turnsOf(b).length, 0);
@@ -811,13 +817,54 @@ test('an Urgent minion gets the next worker, ahead of every share and of an own 
   assert.equal(runner.urgent.get(urgent), null);
 });
 
+// #1890. Josh, 2026-11-24: "End and wake".
+test("a minion woken by the end of what it waited for goes ahead of its person's new turns", async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, older, woken] = [minion(), minion(), minion()];
+  say(a);
+  await started(a);
+  for (const id of [older, woken]) store.updateTicket(id, { person_id: cara.id });
+  runner.send(older, 'Citadel', 'CI passed');
+  // As MinionJobs.wake does: the mark, then the message.
+  store.setSetting(`minion-job-woken:${woken}`, true);
+  runner.send(woken, 'Citadel', 'the job ended');
+  assert.deepEqual(runner.turnLine.order(), [woken, older]);
+  store.deleteSetting(`minion-job-woken:${woken}`);
+});
+
+test('a Stop stops the job a minion waits for, says so, and a turn meanwhile hears of it; only a running minion turn starts one', async () => {
+  const id = minion();
+  let ran = true;
+  runner.jobs = { running: () => [], turnLine: () => 'The server still works on `npm test`', stop: (t) => t === id && ran && !(ran = false) };
+  try {
+    assert.deepEqual(runner.jobTurn(id), { refuse: 'No turn of this minion is running' });
+    say(id);
+    await started(id);
+    assert.match(turnsOf(id)[0], /The server still works on `npm test`/);
+    assert.deepEqual(runner.jobTurn(id), { container: null, person: cara.id });
+    end(id);
+    await idle(id);
+    assert.equal(runner.stop(id), true, 'the job alone');
+    assert.match(store.listEvents(id).at(-1)!.data, /Stopped by user, with the job it waited for/);
+    assert.equal(runner.stop(id), false, 'nothing left to stop');
+    const t = taskmaster();
+    const n = turnsOf(t).length;
+    say(t);
+    await until('the Taskmaster to start', () => turnsOf(t).length > n && runner.isRunning(t));
+    assert.deepEqual(runner.jobTurn(t), { refuse: "This turn's jobs end with it" });
+  } finally {
+    runner.jobs = null;
+  }
+});
+
+let waits: WaitEnded[] = [];
 /** A call to the Workers tile's route, as Josh. */
 async function workers(method: 'GET' | 'PUT', body?: unknown) {
   const route = workerRoutes.find((r) => r.method === method)!;
   const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? null))]), { headers: { 'content-type': 'application/json' } });
   let out = '';
   const res = { writeHead: () => res, setHeader: () => {}, end: (text: string) => void (out = text) };
-  await route.handler({ req, res, app: { runner, store }, session: { name: 'Josh', uid: josh.id, exp: 0 } } as unknown as Parameters<typeof route.handler>[0]);
+  await route.handler({ req, res, app: { runner, store, minionJobs: { stats: () => waits } }, session: { name: 'Josh', uid: josh.id, exp: 0 } } as unknown as Parameters<typeof route.handler>[0]);
   return JSON.parse(out);
 }
 
@@ -876,6 +923,19 @@ test("no more of a person's turns start while their container is at its memory l
   const e = minion();
   say(e);
   await started(e);
+});
+
+// #1890: the waits that gave their worker back.
+test('the Workers tile counts the waits that ended, how long the middle one ran and the cold wakes, and warns past 10%', async () => {
+  assert.deepEqual((await workers('GET')).waits, { count: 0, median: null, woken: 0, cold: 0 });
+  const wait = (ms: number, cold: boolean | null): WaitEnded => ({ at: Date.now(), kind: 'wait', ms, cold, ticket: 1 });
+  waits = [wait(9 * 60_000, false), wait(60_000, true), wait(5 * 60_000, null)];
+  const got = (await workers('GET')).waits;
+  waits = [];
+  assert.deepEqual(got, { count: 3, median: 5 * 60_000, woken: 2, cold: 1 }, 'a wake whose turn has not started is neither');
+  assert.equal(waitsLine(got), '3 waits gave their worker back in 7 days, the middle one 5m · 1 of 2 wakes cold (50%)');
+  assert.equal(tooCold(got), true);
+  assert.equal(tooCold({ count: 10, median: 1, woken: 10, cold: 1 }), false);
 });
 
 // #1892: the limits on the tile.

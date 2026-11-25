@@ -15,10 +15,12 @@ export interface PoolLimits {
   shrinkFreeGb: number;
   growSec: number;
   shrinkSec: number;
+  /** Seconds a wait stays in its turn before the server takes it over (#1890); none while the box is starved. */
+  waitHold: number;
 }
 export type LimitKey = keyof PoolLimits;
 
-export const DEFAULT_LIMITS: PoolLimits = { min: 4, max: 30, growCpu: 35, growMem: 8, shrinkCpu: 50, shrinkMem: 20, shrinkFreeGb: 6, growSec: 20, shrinkSec: 30 };
+export const DEFAULT_LIMITS: PoolLimits = { min: 4, max: 30, growCpu: 35, growMem: 8, shrinkCpu: 50, shrinkMem: 20, shrinkFreeGb: 6, growSec: 20, shrinkSec: 30, waitHold: 120 };
 
 /** Each number's words and range, in the order the tile shows them. `share`: which host_samples column says how often a box crossed it. */
 export const LIMIT_INFO: { key: LimitKey; label: string; unit: string; lo: number; hi: number; share?: 'cpu' | 'mem' | 'free' }[] = [
@@ -31,6 +33,7 @@ export const LIMIT_INFO: { key: LimitKey; label: string; unit: string; lo: numbe
   { key: 'shrinkFreeGb', label: 'Shrink under free memory', unit: 'GB', lo: 0.5, hi: 64, share: 'free' },
   { key: 'growSec', label: 'Seconds between steps up', unit: 's', lo: 10, hi: 3600 },
   { key: 'shrinkSec', label: 'Seconds between steps down', unit: 's', lo: 10, hi: 3600 },
+  { key: 'waitHold', label: 'Seconds a wait keeps its worker', unit: 's', lo: 0, hi: 600 },
 ];
 
 /** A shrink line must sit this many points above its grow line, or the pool would grow and shrink on the same reading. */

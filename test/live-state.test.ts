@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { liveState } from '../src/live-state.ts';
+import { gruntAtWork, liveState } from '../src/live-state.ts';
 
 // read_ticket's live view (#620): what a turn waits on, from stored events.
 const T0 = 1_800_000_000_000;
@@ -72,4 +72,17 @@ test("a minion with no turn running says so, and a call its turn never answered 
   assert.match(text, /^waiting on: nothing: no turn is running \(state ready\)$/m);
   assert.match(text, /Bash: sleep 999 → no result \(the turn ended\)/);
   assert.match(text, /of the last turn's 1 tool call/);
+});
+
+test('a Grunt is at work while its call is open, or one it made after its launch answered', () => {
+  const at = (...events: object[]) => gruntAtWork(events as Parameters<typeof gruntAtWork>[0]);
+  const bash = use(2, 'b', 'Bash', { command: 'npm test' });
+  assert.equal(at(init(0), bash), false, "the turn's own call is no Grunt");
+  const call = use(3, 'g', 'Agent', { prompt: 'look' });
+  assert.equal(at(init(0), call), true);
+  assert.equal(at(init(0), call, result(9, 'g', 'found it')), false);
+  const inner = use(4, 'x', 'Read', { file_path: '/a' }, 'g');
+  assert.equal(at(init(0), call, result(4, 'g', 'runs in the background'), inner), true);
+  assert.equal(at(init(0), call, result(4, 'g', 'runs in the background'), inner, result(5, 'x', 'text')), false);
+  assert.equal(at(call, init(50), bash), false, 'one an earlier turn left open died with it');
 });

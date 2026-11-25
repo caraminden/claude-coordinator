@@ -4,6 +4,7 @@ import { ago, api, h, view } from './base.js';
 import { hueRow, toneChip } from './look.js';
 import { renderProgress } from './progress-ui.js';
 import { renderTyping } from './thread.js';
+import { tooCold, waitsLine } from './threadstate.js';
 import { optimistic } from './ui/optimistic.js';
 import { lineMoved, openLine } from './worker-line.js';
 
@@ -122,6 +123,7 @@ export function workersPanel(page) {
       h('b', { class: 'st-value' }, value),
       w.paused ? h('div', {}, toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`)) : '',
       h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : `${size} · Taskmasters always run`),
+      h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       h(
         'div',
         { class: 'st-workers-act' },

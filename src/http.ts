@@ -10,6 +10,7 @@ import type { AppServices } from './app-services.ts';
 import type { ContraptionTurns } from './contraption-turns.ts';
 import type { ErrorDigest } from './contraption-errors.ts';
 import type { Landings } from './land.ts';
+import type { MinionJobs } from './minion-jobs.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createReadStream } from 'node:fs';
@@ -385,6 +386,7 @@ export interface App {
   errorDigest?: ErrorDigest;
   /** land.sh runs for container turns' land tool (src/land.ts). */
   landings: Landings;
+  minionJobs: MinionJobs;
   /** Ultra reviews people start on their own Claude login (src/ultrareview.ts, #432). */
   ultrareviews: UltraReviews;
   /** Side questions to minions, in read-only forks of their sessions (src/side-ask.ts, #932). */

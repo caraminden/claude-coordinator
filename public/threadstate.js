@@ -41,7 +41,7 @@ export function rowState(t, usage, now = Date.now()) {
  * Who is working on a minion or Taskmaster now (#727; Cara, 2026-11-14: "either of these (or any other potential
  * "working" in the future, would all still show in the minion list as an in progress working minion"): 'turn' while
  * its own turn runs (or a new minion's first turn sets up, not parked on start_after, #261), 'server' while the server
- * works for it with no turn (`t.server_work`: a handed-off land), else null. A new kind of server work joins through
+ * works for it with no turn (`t.server_work`: a handed-off land, or a job or wait it handed over, #1890), else null. A new kind of server work joins through
  * server_work, not here.
  */
 export function workingBy(t) {
@@ -56,6 +56,18 @@ export const workingLabel = (t, verb = 'working') => `This ${isCoordinator(t) ? 
 const nth = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 /** A minion with a turn to start and no worker yet (#1868): it shows as working, and this is its one line of truth. */
 export const workerWaitLabel = (w) => (w.paused ? `Waiting: ${w.paused} paused all minions` : `Waiting for a worker, ${nth(w.place)} in line`);
+
+/** The waits that gave their worker back (#1890), and whether too many of their wakes came cold (past 10%). */
+export function waitsLine(w) {
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  if (!w?.count) return 'No waits handed over in the last 7 days';
+  const cold = w.woken ? Math.round((w.cold / w.woken) * 100) : 0;
+  return `${plural(w.count, 'wait')} gave their worker back in 7 days, the middle one ${span(w.median)}${w.woken ? ` · ${w.cold} of ${plural(w.woken, 'wake')} cold (${cold}%)` : ''}`;
+}
+export const tooCold = (w) => !!w?.woken && w.cold / w.woken > 0.1;
+
+/** A job or a wait of its own that runs on past its turn (#1890, src/minion-jobs.ts): `{ text, since }`, or null. */
+export const jobOf = (t) => (t.status !== 'closed' && t.server_work?.kind === 'job' ? t.server_work : null);
 
 /** The server's work in words, at its landing's stage (t.wait, src/waits.ts): "Server: testing (CI: the full suite)". */
 export function serverLabel(w) {
@@ -105,7 +117,10 @@ function baseState(t, usage, now) {
   // On its way in a release (#764, releases.js pendingRelease): the release's name where "landing" or "deploying" would be.
   const rel = t.release;
   const relLabel = rel ? `${rel.target} ${rel.name}: ${rel.stage}${rel.text ? `, ${rel.text}` : ''}` : '';
-  if (by === 'server') return { rank: 1, fam: 'work', cell: rel?.name ?? 'shipping', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
+  // A job of its own runs on (#1890): working, unless it stopped on an error or a card of yours, which want you first.
+  const job = by === 'server' && jobOf(t);
+  if (job && t.status !== 'error' && !(t.pending_card_at && cardsYours(t).length)) return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, server: true, label: job.text };
+  if (by === 'server' && !job) return { rank: 1, fam: 'work', cell: rel?.name ?? 'shipping', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited(), label: 'Stuck: the last turn failed' };
   // Dismissed once landed, its change not live yet (on main waiting for CI, a deploy): still on its way.
@@ -245,7 +260,8 @@ export function rowWhy(t, st, now = Date.now()) {
   } else if (t.limit_resume_at && t.state === 'limited') {
     lines.push(`Hit the usage limit at ${pacific(t.updated_at, now)}; resumes by itself at ${pacific(t.limit_resume_at, now)}.`);
   } else if (!w) {
-    lines.push(`Since ${at(st.since ?? t.updated_at)}.`);
+    lines.push(`Since ${at(jobOf(t)?.since ?? st.since ?? t.updated_at)}.`);
+    if (jobOf(t)) lines.push('The server runs it on and wakes this minion when it ends.');
   }
   if (w) {
     lines.push(`${waitWords(w)}.`);

@@ -752,7 +752,7 @@ const SQL_WRITE = /\b(insert|update|delete|drop|alter|create|replace|vacuum|rein
 // Commands that look at a path without showing what's in it; fine even for keys.
 const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei', 'realpath', 'readlink', 'getfacl', 'lsattr', 'chmod', 'chown']);
 // Prefixes that run the next word as the command.
-const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run', 'setsid', 'citadel-heavy', 'heavy-unit']);
+const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run', 'setsid', 'citadel-heavy', 'citadel-job', 'heavy-unit']);
 // systemd-run's options that take the next word as their value (`--unit x`, `-p K=V`, `-qu x`, `--uni x`: getopt takes a
 // long option's prefix; one that's ambiguous makes systemd-run refuse, so skipping a word for it is harmless; #513).
 const SYSTEMD_RUN_LONG = [
@@ -1249,7 +1249,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
           continue;
         }
         if (name === 'env' && (/^(-u|--unset)$/.test(opt) ? GH_VARS.test(words[i]?.text ?? '') : GH_VARS.test(opt.replace(/^(-u|--unset=)/, '')))) return hard(`Unsetting ${opt.replace(/^(-u|--unset=?)/, '') || words[i].text} is blocked. ${GH_ENV_WHY}`);
-        if (/^-(u|C|n|I|P|d|L|s|E|k|a)$|^--(unset|chdir|adjustment|signal|kill-after|arg-file|what)$/.test(opt)) i++;
+        if (/^-(u|C|n|I|P|d|L|s|E|k|a)$|^--(unset|chdir|adjustment|signal|kill-after|arg-file|what|minutes)$/.test(opt)) i++;
         else if (name === 'flock' && /^(-w|--wait|--timeout|--conflict-exit-code)$/.test(opt)) i++;
       }
       // `flock <lock file> cmd …` and `flock <lock file> -c '…'` (#468 S01-15); `flock 9` locks a descriptor.

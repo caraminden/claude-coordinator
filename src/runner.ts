@@ -101,6 +101,7 @@ import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
+import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
 import { Urgent } from './urgent.ts';
@@ -783,7 +784,9 @@ export class Runner {
   /** What it waits on now: the land line, a heavy slot, the restart (src/waits.ts), for its row's badge and bar. */
   wait: (ticketId: number) => Wait | null = () => null;
   /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
-  serverWork: (ticketId: number, fresh?: boolean) => { kind: string } | null = () => null;
+  serverWork: (ticketId: number, fresh?: boolean) => { kind: string; text?: string; since?: number } | null = () => null;
+  /** The jobs it runs on the server past its turns (#1890, src/minion-jobs.ts), set by the server. */
+  jobs: Pick<MinionJobs, 'stop' | 'running' | 'turnLine'> | null = null;
   /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
   onStreamEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
@@ -2993,7 +2996,17 @@ export class Runner {
     return this.turns.get(ticketId)?.startedAt ?? null;
   }
 
+  /** Where its running turn is and whose, for a job it starts (#1890), or why that turn can't start one. */
+  jobTurn(ticketId: number): { container: string | null; person: number | null } | { refuse: string } {
+    const live = this.turns.get(ticketId);
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (!live || !turn) return { refuse: 'No turn of this minion is running' };
+    if (this.store.getTicket(ticketId)?.kind !== 'ticket' || turn.codex || turn.keepalive) return { refuse: "This turn's jobs end with it" };
+    return { container: live.container, person: turn.person ?? null };
+  }
+
   stop(ticketId: number): boolean {
+    const jobs = this.jobs?.stop(ticketId) ?? false;
     const queued = this.queue.msgs(ticketId).filter((m) => m.id != null);
     const stopped = this.stopTurn(ticketId);
     // The stop dropped these from the queue: the outbox must not read that as a send that failed, and send them again.
@@ -3007,7 +3020,8 @@ export class Runner {
       );
       for (const m of queued) if (keep.has(m.id!)) this.queue.hold(ticketId, m);
     }
-    return stopped;
+    if (jobs && !stopped) this.emit(ticketId, 'note', { text: "Stopped by user, with the job it waited for: it won't be woken." });
+    return stopped || jobs;
   }
 
   private stopTurn(ticketId: number): boolean {
@@ -3339,7 +3353,8 @@ export class Runner {
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
     // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
     // and about 30 a day of them were woken cold by their ship's result an hour or more later.
-    if (!(lined || t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
+    // Waiting on a job the server runs (#1890) is idle too.
+    if (!(lined || this.jobs?.running(t.id).length || t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
     if (!inWindow(now)) return 'hours';
     const person = this.turnPerson(t, p, lined ? this.waiting(t.id) : []);
     if (this.codexTurn(t, p, person)) return 'codex';
@@ -4239,6 +4254,8 @@ export class Runner {
       const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
       const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
       if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
+      const jobs = this.jobs?.turnLine(ticket.id);
+      if (jobs) parts.turn.jobs = [jobs];
       // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.
       if (hold?.note) parts.turn.rulesChanged = [hold.note];
       const context = promptText(parts.turn);

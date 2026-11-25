@@ -7,6 +7,7 @@ export interface TicketView {
   id: number;
   number: number;
   worker_wait?: WorkerWait | null;
+  server_work?: { kind: string; text?: string; since?: number } | null;
   title: string;
   properties?: Record<string, unknown>;
   build?: number | string | null;

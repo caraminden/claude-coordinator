@@ -102,7 +102,7 @@ export function storedFacts(store: Store, runner: Pick<Runner, 'view'>, t: Ticke
     number: t.number ?? 0,
     title: t.title,
     scheme: store.getProject(t.project_id)?.name ?? '',
-    status: v.worker_wait ? workerWaitText(v.worker_wait) : t.status,
+    status: v.worker_wait ? workerWaitText(v.worker_wait) : v.server_work?.kind === 'job' ? `${t.status}, ${v.server_work.text}` : t.status,
     state: t.state ?? null,
     note: t.note ?? null,
     parkedOn: v.wakes_on ?? v.parked_for ?? null,

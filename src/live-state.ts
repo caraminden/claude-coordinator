@@ -62,6 +62,21 @@ function callLine(c: Call, now: number, running: boolean): string {
   return `${head} → ${c.result.error ? 'error' : 'ok'} after ${ago(c.result.at - c.at)}${out}`;
 }
 
+/** Whether a Grunt works in the turn these events are from: its call is open, or one it made itself is. */
+export function gruntAtWork(events: EventRow[]): boolean {
+  const open = new Set<string>();
+  for (const e of events) {
+    if (e.kind !== 'claude') continue;
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'system' && ev.subtype === 'init') open.clear();
+    for (const b of Array.isArray(ev.message?.content) ? ev.message.content : []) {
+      if (b?.type === 'tool_use' && (ev.parent_tool_use_id || GRUNT_TOOLS.has(b.name))) open.add(String(b.id));
+      else if (b?.type === 'tool_result') open.delete(String(b.tool_use_id));
+    }
+  }
+  return open.size > 0;
+}
+
 /** A minion as read_minion's API answer gives it, the fields read here. */
 interface LiveMinion {
   number: number;
@@ -74,6 +89,7 @@ interface LiveMinion {
   worker_wait?: WorkerWait | null;
   queued?: number;
   approvals?: number;
+  server_work?: { kind: string; text: string; since: number } | null;
 }
 
 /**
@@ -136,6 +152,8 @@ export function liveState(ticket: LiveMinion, events: EventRow[], now = Date.now
     waits.push(`a person: ${ticket.approvals} approval card(s) waiting, its process ended to free its memory until the answer`);
   } else if (ticket.worker_wait) {
     waits.push(`a worker: no turn is running, its next one starts by itself (${workerWaitText(ticket.worker_wait)})`);
+  } else if (ticket.server_work?.kind === 'job') {
+    waits.push(`a job of its own the server runs on, for ${ago(now - ticket.server_work.since)} so far (${ticket.server_work.text}): no turn is running, and its end wakes it`);
   } else {
     waits.push(`nothing: no turn is running (${ticket.state ? `state ${stateWord(ticket.state)}` : 'its turn ended'})`);
   }

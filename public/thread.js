@@ -6,7 +6,7 @@ import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, load
 import { markSeen } from './seen.js';
 import { alertNote, composer, outbox } from './composer.js';
 import { TRACKING } from './heldmsg.js';
-import { rowState, workerWaitLabel, workingBy, workingLabel } from './threadstate.js';
+import { jobOf, rowState, workerWaitLabel, workingBy, workingLabel } from './threadstate.js';
 import { jobCard, jobMovedNote } from './jobs.js';
 import { recapEvent, showRecap } from './recap.js';
 import { narrationSorter } from './narration.js';
@@ -1115,7 +1115,7 @@ export function renderTyping() {
   if (!show) return;
   el.classList.toggle('in-line', !!t.worker_wait);
   el.title = t.worker_wait ? 'See the line for workers' : 'Show the work so far';
-  const lead = t.approvals ? 'Waiting for someone to approve or deny' : t.worker_wait ? workerWaitLabel(t.worker_wait) : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : rowState(t, usage).label;
+  const lead = t.approvals ? 'Waiting for someone to approve or deny' : t.worker_wait ? workerWaitLabel(t.worker_wait) : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : (jobOf(t)?.text ?? rowState(t, usage).label);
   // Held mail counts as queued while it works (#1067): it has no card then, and its bubble may be above the loaded history.
   const queued = (t.queued ?? 0) + (running ? (t.held_mail?.items?.length ?? 0) : 0);
   const key = `${lead}|${queued}`;

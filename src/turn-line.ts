@@ -159,6 +159,8 @@ export class TurnLine {
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
   /** People whose container stalls at its own memory limit, which the box's readings barely show (#1874). */
+  /** Whether the pool's last reading was starved. */
+  starved = false;
   private stalled = new Set<number>();
   private ordered: { at: number; line: Waiting[] } | null = null;
 
@@ -310,6 +312,7 @@ export class TurnLine {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
     const p = this.pool();
+    this.starved = starvedBy(reading, box, this.limits());
     this.stalled = new Set(p.fixed ? [] : stalled);
     this.pumpIn(0);
     if (p.fixed) return;
@@ -467,6 +470,11 @@ export class TurnLine {
 
   private ready(): LineEntry[] {
     return this.entries.filter((e) => !this.host.busy(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
+  }
+
+  /** Whether this person's container is at its memory limit, so a wait there gives its worker back at once (#1890). */
+  stalledFor(person: number): boolean {
+    return this.stalled.has(person);
   }
 
   /** Their container is out of memory with a turn of theirs in it, so another would only stall it more; with none running, one may start. */

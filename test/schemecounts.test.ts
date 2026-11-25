@@ -64,6 +64,7 @@ test("isWorking: only a turn doing work spins the scheme's spinner and counts be
   // The server landing it after its turn ended is not working (#1294) but shipping: counted apart.
   assert.equal(isWorking(minion({ server_work: { kind: 'land' } })), false, 'its handed-off land is not a running turn');
   assert.equal(isShipping(minion({ server_work: { kind: 'land' } })), true, 'it waits on the server');
+  assert.equal(isShipping(minion({ server_work: { kind: 'job' } })), false, 'a job it handed over is no ship');
   assert.equal(isShipping(minion({ server_work: { kind: 'land' }, status: 'running' })), false, 'a turn runs: working, not waiting');
   assert.equal(isShipping(minion({ server_work: { kind: 'land' }, approvals: 1 })), false, 'a card waits on a person');
   assert.equal(isShipping(minion({ server_work: { kind: 'land' }, status: 'closed' })), false, 'dismissed');

@@ -52,6 +52,10 @@ import { writeHold } from './src/ci-hold-file.ts';
 import { shipsOn, ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
+import { gruntAtWork } from './src/live-state.ts';
+import { MinionJobs } from './src/minion-jobs.ts';
+import { CACHE_TTL_MS } from './src/keepalive.ts';
+import { tmpDirFor } from './src/turn-tmp.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { describesIn } from './src/review-describe.ts';
@@ -410,6 +414,8 @@ runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
 // The line of kill resumes (#1364) holds while the box is starved; nothing else in the runner waits on it.
 runner.killStarved = () => pressure.read();
+/** Whether the box is short of CPU or memory: a wait (#1890) or an approval card (#1916) then gives back what it holds at once. */
+const boxShort = (r: { starved: boolean }) => r.starved || memoryEase.get().level !== 'ok';
 // The worker pool sizes itself to the box (#1868), unless a person set a number.
 setInterval(
   () =>
@@ -419,7 +425,7 @@ setInterval(
         const free = memoryEase.free();
         const { level } = memoryEase.get();
         runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level });
-        runner.endCardWaits(r.starved || level !== 'ok');
+        runner.endCardWaits(boxShort(r));
       })
       .catch((e) => console.error('worker pool:', e)),
   POOL.everyMs,
@@ -484,6 +490,29 @@ registerRunnersBack(store, outbox);
 registerCiArmed(() => app, store, outbox); // armed for CI (#715, ADR 0021 step 5)
 // News of a minion's test-box job (#1425, machines.watchBoxes below): its start, its end with the exit code and last lines.
 outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.payload.text).slice(0, 120)}`, deliver: (rows, ctx) => rows.map((r) => ctx.send(r, String(r.payload.text))) });
+// Jobs that outlive a minion's turn (#1890): citadel-job starts them here, and their end wakes the minion.
+const minionJobs = new MinionJobs({
+  store,
+  tmp: (id) => {
+    const t = store.getTicket(id);
+    return t && t.status !== 'closed' ? tmpDirFor(runner.tmpRoot(t.project_id), id) : null;
+  },
+  turn: (id) => runner.jobTurn(id),
+  live: (id) => runner.turnStartedAt(id) !== null,
+  hold: async (id) => {
+    const turn = runner.jobTurn(id);
+    if (!('refuse' in turn) && turn.person !== null && runner.turnLine.stalledFor(turn.person)) return 0;
+    return runner.turnLine.starved || boxShort(await pressure.read()) ? 0 : runner.turnLine.limits().waitHold * 1000;
+  },
+  grunts: (id) => gruntAtWork(store.listEvents(id, store.eventIdAt(runner.turnStartedAt(id) ?? Date.now()) - 1)),
+  units: () => runner.units,
+  wake: (id, text) => void runner.send(id, APP_NAME, text),
+  changed: (id) => runner.broadcastTicket(id),
+  lastTurnEnd: (id) => store.lastTurnEnd(id),
+  cacheMs: CACHE_TTL_MS,
+});
+runner.jobs = minionJobs;
+if (!BOOT_CHECK && !PREVIEW) every('minion jobs', 3_000, () => minionJobs.pump());
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
@@ -492,6 +521,7 @@ runner.onStop = (ticketId, eventIds) => outbox.stoppedMessages(ticketId, eventId
 runner.onTurnStart = (ticketId, eventIds) => {
   const held = store.listDeliveries({ to: ticketId, states: ['held'] }).some((r) => r.kind === 'wake_when_live' || r.kind === 'chain');
   outbox.turnStarted(ticketId, eventIds);
+  minionJobs.turnStarted(ticketId);
   if (held)
     void outbox
       .poke({ type: 'reopened', ticket: ticketId })
@@ -714,7 +744,7 @@ if (!BOOT_CHECK && !PREVIEW) {
   every('usage ledger flush', 60_000, () => store.usage.flush());
   every('usage ledger prune', 24 * 3600_000, () => store.usage.prune());
 }
-claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
+claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + minionJobs.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
 runner.onMessage = (id) => landings.talked(id);
@@ -941,6 +971,7 @@ if (!BOOT_CHECK) {
   const stopPreview = runner.onClose;
   runner.onClose = (ticketId) => {
     const stopped = stopPreview(ticketId);
+    minionJobs.stop(ticketId);
     void outbox.poke({ type: 'closed', ticket: ticketId });
     // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
     waiters.prs.forget?.();
@@ -1935,7 +1966,7 @@ const serverWork = serverWorkWatch(
   (id) => runner.broadcastTicket(id),
 );
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
-runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : serverWork.of(id));
+runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : (serverWork.of(id) ?? minionJobs.work(id)));
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
 // Was a blocking scan at each start, before the listen (#1463).
 if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);
@@ -2385,6 +2416,7 @@ const app: App = {
   contraptionTurns,
   errorDigest,
   landings,
+  minionJobs,
   status,
   kitSync,
   services,

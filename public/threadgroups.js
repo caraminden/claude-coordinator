@@ -23,7 +23,7 @@ const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new
 /** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
 const isDeploying = (t) => ((t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t)) || onMainDeploying(t);
 /** The server is landing its change (server_work: line, rebase, tests, deploy, restart), nothing of its own is stuck: a failed land, a running turn or a waiting approval keeps it in its type (#1003). */
-const onMainDeploying = (t) => !!t.server_work && t.status !== 'closed' && !t.approvals && !['running', 'error'].includes(t.status) && !['live', 'failed'].includes(t.ship?.stage);
+const onMainDeploying = (t) => !!t.server_work && t.server_work.kind !== 'job' && t.status !== 'closed' && !t.approvals && !['running', 'error'].includes(t.status) && !['live', 'failed'].includes(t.ship?.stage);
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
 const wakesItself = (t) => !!t.wakes_on;
 

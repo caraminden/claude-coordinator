@@ -8,6 +8,7 @@ import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000,
   HOUR = 60 * MIN;
+const JOB = { kind: 'job', text: 'Waiting for npm test to finish', since: NOW - 20 * MIN };
 const t = (over) => ({ status: 'idle', updated_at: NOW - 5 * MIN, ...over });
 const pill = (over, usage = null) => {
   const { rank, fam, cell, pulse } = rowState(t(over), usage, NOW);
@@ -45,6 +46,11 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     [{ server_work: { kind: 'land' } }, [1, 'work', 'shipping', 'pulse']],
     [{ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line', since: NOW, usual: 60 } }, [1, 'work', 'shipping', 'pulse']],
     [{ server_work: { kind: 'land' }, status: 'closed' }, [5, 'idle', 'dismissed']],
+    // A job or wait it handed over (#1890) is work, not a ship, unless it stopped on something of yours.
+    [{ server_work: JOB }, [1, 'work', 'working', 'pulse']],
+    [{ server_work: JOB, steps: { done: 3, total: 7 } }, [1, 'work', '3/7', 'pulse']],
+    [{ server_work: JOB, status: 'error' }, [0, 'broken', '5m']],
+    [{ server_work: JOB, status: 'closed' }, [5, 'idle', 'dismissed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
@@ -56,6 +62,7 @@ test("rowState: amber only for a card or replies of yours; another person's says
     const age = { pending_card_at: NOW - HOUR };
     assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'josh' })] }), [0, 'you', '1h'], 'addressed to you, any case');
     assert.deepEqual(pill({ ...age, open_cards: [card()] }), [0, 'you', '1h'], "anyone's, on no one's minion");
+    assert.deepEqual(pill({ ...age, open_cards: [card()], server_work: JOB }), [0, 'you', '1h'], 'a card wants you first, a job running on or not');
     assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Josh' } }), [0, 'you', '1h'], "anyone's, on yours");
     assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'Cara' })] }), [2, 'wait', 'Cara 1h'], 'addressed to Cara');
     assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 1h'], "anyone's, on Cara's minion");
@@ -376,6 +383,7 @@ test('workingBy: one working rule with two sources, a turn and the server; label
   // Cara, 2026-11-14: "This Minion is working" and "This Taskmaster is working".
   assert.equal(rowState(t({ status: 'running' }), null, NOW).label, 'This Minion is working');
   assert.equal(rowState(t({ status: 'running', kind: 'coordinator' }), null, NOW).label, 'This Taskmaster is working');
+  assert.equal(rowState(t({ server_work: JOB }), null, NOW).label, 'Waiting for npm test to finish');
   assert.equal(rowState(t({ server_work: { kind: 'land' }, wait: { kind: 'land', stage: 'test', chip: 'ship · CI', text: 'waiting for CI', brief: 'CI: the full suite', since: NOW, usual: null } }), null, NOW).label, 'Server: testing (CI: the full suite)');
 });
 

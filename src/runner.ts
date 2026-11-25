@@ -10,9 +10,9 @@ import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs
 import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
-import { Relay, clip, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
+import { Relay, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState, type TurnResult } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
@@ -21,7 +21,7 @@ import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
 import type { SchemeRefs } from './scheme-refs.ts';
-import { cardHref, cardLabel, cardText, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
+import { cardHref, cardLabel, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
@@ -30,6 +30,7 @@ import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, re
 import { Fresh, roleWord, type FreshState } from './fresh.ts';
 import { HeldMail } from './held-mail.ts';
 import { KeepaliveRun } from './keepalive-run.ts';
+import { Closing } from './closing.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
 import { buildBranch, landsBuilds, projectDir, surveyReports } from './workspace.ts';
@@ -43,7 +44,7 @@ import { accountUsageKey, usageKey } from './account-pick.ts';
 import { type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo, type Chain } from './wake.ts';
-import { clearTmpDirLater, dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
+import { dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
 import { size } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
@@ -87,7 +88,7 @@ import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { describeActivity, DROPPED_TYPES, guessWindow, pushKind, slimEvent } from './stream-events.ts';
 import { usageWindow, type CodexLimits, type CodexWindow, type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type RateLimitInfo, type Usage } from './turn-messages.ts';
-import { contextKey, windowKey, freshKey, handoffKey, shippedKey, failNoteKey, closeCancelledKey, turnKey, warmKey, talkedKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
+import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
 
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
@@ -590,6 +591,7 @@ export class Runner {
   private held: HeldMail;
   private keepaliveRun: KeepaliveRun;
   private fresh: Fresh;
+  private closer: Closing;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null, warm?: string, taskmaster?: boolean) => TurnPlace | { refused: string };
@@ -901,6 +903,39 @@ export class Runner {
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
     this.dataDir = resolve(dirname(store.path));
     this.cleanup = new DismissedCleanup({ store, dataDir: this.dataDir, turns: this.turns, lanes: this.lanes, emit: (id, kind, data) => this.emit(id, kind, data) });
+    this.closer = new Closing({
+      store,
+      queue: this.queue,
+      lanes: this.lanes,
+      turnLine: this.turnLine,
+      urgent: this.urgent,
+      places: this.places,
+      resumes: this.resumes,
+      approvals: this.approvals,
+      turns: this.turns,
+      closing: this.closing,
+      deployedMidTurn: this.deployedMidTurn,
+      emit: (id, kind, data) => this.emit(id, kind, data),
+      broadcast: (msg) => this.broadcast(msg),
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      setStatus: (id, status) => this.setStatus(id, status),
+      saveTurn: (id, patch) => this.saveTurn(id, patch),
+      isRunning: (id) => this.isRunning(id),
+      queued: (id) => this.queued(id),
+      heldFor: (id) => this.heldFor(id),
+      send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer),
+      leaveMail: (to, author, text) => this.leaveMail(to, author, text),
+      dropCard: (id, reason) => this.dropCard(id, reason),
+      forgetMaps: (id) => this.forgetMaps(id),
+      tmpRoot: (projectId) => this.tmpRoot(projectId),
+      onClose: (id) => this.onClose(id),
+      endStartNow: (id) => this.startNow.end(id),
+      clearBuild: (t) => this.cleanup.clearBuild(t),
+      restoreDir: (t, p) => this.restoreDir(t, p),
+      cardLinks: (t) => this.cardLinks(t),
+      ciHold: (id) => this.ciHold?.(id),
+      probeHold: (id) => this.probeHold?.(id),
+    });
     this.promptHolds = new Holds(store);
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
   }
@@ -1239,49 +1274,58 @@ export class Runner {
     };
   }
 
-  /**
-   * A claim holder's work shipped (#1334, the land's `landed` hook): when it is dismissed, its claims pass on as shipped,
-   * which the time estimate counts, not as an unshipped dismissal. A setting, so a restart before it goes live keeps it.
-   */
+  // Dismissing a minion, what keeps it open, and its claims: src/closing.ts.
+
   holderShipped(ticketId: number) {
-    const t = this.store.getTicket(ticketId);
-    if (t && this.store.claims.list(t.project_id).some((c) => c.holder === ticketId)) this.store.setSetting(shippedKey(ticketId), true);
+    return this.closer.holderShipped(ticketId);
   }
 
-  /** A dismissed minion's claims (#921) pass to the next in each one's queue, or free themselves (#1334: claimPassed). */
-  private freeClaims(ticketId: number) {
-    const minion = this.store.getTicket(ticketId);
-    const shipped = !!this.store.getSetting(shippedKey(ticketId));
-    if (shipped) this.store.deleteSetting(shippedKey(ticketId));
-    const passed = this.store.claims.releaseHeldBy(ticketId, shipped ? 'live' : 'dismissed');
-    if (minion) this.claimPassed(minion.project_id, passed, `#${minion.number}, its holder, ${shipped ? 'shipped and was dismissed' : 'was dismissed'}`, `#${minion.number} ${minion.title}`);
-  }
-
-  /**
-   * Claims that changed hands (#1334). The new holder hears it in one chat line, which wakes it, sealed or not. One wake
-   * when a chain or wake_when_live fires for it at the same go-live (Cara, 2026-11-20, "Separate, one wake"): a chained
-   * minion still holding its brief gets the line as held mail, read with its brief when its chain starts it, and one
-   * already running (just started by its chain or wake) takes it mid-turn. Whoever keeps the scheme's claims hears it as
-   * held mail. A scheme's page redraws either way.
-   */
   claimPassed(projectId: number, passed: ({ from: Claim; to?: Claim } | { from?: undefined; to: Claim })[], why: string, author: string) {
-    if (!passed.length) return;
-    const keeper = this.store.getOverlord(projectId);
-    for (const { from, to } of passed) {
-      const next = to && this.store.getTicket(to.holder);
-      if (next && next.status !== 'closed') {
-        const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when you are dismissed.`;
-        if (this.heldFor(next.id)) this.send(next.id, APP_NAME, line, [], { hold: true });
-        else {
-          if (next.state === 'parked') this.store.updateTicket(next.id, { state: null });
-          this.send(next.id, APP_NAME, line, [], {}, this.isRunning(next.id));
-        }
-      }
-      if (keeper && keeper.id !== to?.holder) {
-        this.leaveMail(keeper.id, author, `(nothing to do unless something waits on it) ${(from ?? to)!.name} ${next ? `passed to #${next.number} ${next.title}, next in its queue` : 'is free'}: ${why}.`);
-      }
-    }
-    this.broadcast({ type: 'claims', projectId });
+    return this.closer.claimPassed(projectId, passed, why, author);
+  }
+
+  close(ticketId: number, text: string): Promise<void> {
+    return this.closer.close(ticketId, text);
+  }
+
+  closedCleanup(ticketId: number, keepHeld = false) {
+    return this.closer.closedCleanup(ticketId, keepHeld);
+  }
+
+  reopened(ticketId: number): Promise<void> {
+    return this.closer.reopened(ticketId);
+  }
+
+  deployLive(ticketId: number): boolean {
+    return this.closer.deployLive(ticketId);
+  }
+
+  personWrote(ticketId: number) {
+    return this.closer.personWrote(ticketId);
+  }
+
+  deployPending(ticketId: number) {
+    return this.closer.deployPending(ticketId);
+  }
+
+  keptOpen(ticketId: number, atCall = false): string | null {
+    return this.closer.keptOpen(ticketId, atCall);
+  }
+
+  ciGreen(ticketId: number, text: string) {
+    return this.closer.ciGreen(ticketId, text);
+  }
+
+  closeAfterTurn(ticketId: number, reason: string | null): boolean {
+    return this.closer.closeAfterTurn(ticketId, reason);
+  }
+
+  closeIfSeen(ticketId: number, name: string): boolean {
+    return this.closer.closeIfSeen(ticketId, name);
+  }
+
+  closeCancelled(ticketId: number, byOther = false): string | null {
+    return this.closer.closeCancelled(ticketId, byOther);
   }
 
   /** True once an hour per account-error text; texts older than that hour are forgotten, so the map stays small. */
@@ -1300,80 +1344,6 @@ export class Runner {
     this.gateCounted.delete(ticketId);
     this.contextSizes.delete(ticketId);
     this.contextShown.delete(ticketId);
-  }
-
-  /**
-   * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder, preview and
-   * build output (#336) go on its lane, after its last turn's save; resolves once they are gone.
-   */
-  close(ticketId: number, text: string): Promise<void> {
-    // A wait's messages stay in the queue: dropQueue below names them.
-    this.resumes.cancelLimitWait(ticketId);
-    this.resumes.cancelNetWait(ticketId);
-    this.resumes.cancelKillWait(ticketId);
-    this.dropCard(ticketId, 'The minion was dismissed while this waited.');
-    this.store.deleteSetting(closeCancelledKey(ticketId));
-    // Nor wait on its start card (#1674): a person's reopen is its start.
-    this.store.deleteSetting(startHoldKey(ticketId));
-    // A reopened minion shouldn't offer the go-ahead it had when dismissed.
-    if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
-    this.setStatus(ticketId, 'closed');
-    this.emit(ticketId, 'note', { text });
-    // At once, not on the lane: a closed minion holds nothing for a next turn, and next() must find nothing to start.
-    this.dropQueue(ticketId);
-    this.freeClaims(ticketId);
-    this.forgetMaps(ticketId);
-    // A split scheme's Taskmasters read it in their next turn's digest (#919's noteDigest).
-    const gone = this.store.getTicket(ticketId);
-    if (gone && gone.kind !== 'coordinator' && this.store.isSplit(gone.project_id)) this.store.noteDigest(gone.project_id, 0, `#${gone.number} ${gone.title} was dismissed`);
-    return this.lanes.run(ticketId, 'dismissal cleanup', async () => {
-      const ticket = this.store.getTicket(ticketId);
-      // Reopened while this waited (the status route): its temp folder is in use again.
-      if (ticket?.status === 'closed') {
-        try {
-          await clearTmpDirLater(this.tmpRoot(ticket.project_id), ticketId);
-        } catch (err) {
-          console.error(`Ticket ${ticketId}: could not clear its temp folder: ${thrown(err).message}`);
-        }
-      }
-      await this.onClose(ticketId);
-      // Read again: it may have been reopened while its preview stopped.
-      const still = this.store.getTicket(ticketId);
-      if (still?.status === 'closed') {
-        this.closedRows(ticketId);
-        await this.cleanup.clearBuild(still).then(
-          (r) => r?.dirs && console.log(`Ticket ${ticketId}: cleared ${size(r.bytes)} of build output on dismissal.`),
-          (err) => console.error(`Ticket ${ticketId}: could not clear its build output: ${err.message}`),
-        );
-      }
-    });
-  }
-
-  /**
-   * A dismissed minion's queue and the per-minion rows nothing else deletes (#1378). What still waited in the queue,
-   * held mail included, is named in a chat line (no-action notices aside): each already has its own message in the chat, marked unread.
-   */
-  closedCleanup(ticketId: number, keepHeld = false) {
-    this.dropQueue(ticketId, keepHeld);
-    this.closedRows(ticketId);
-  }
-
-  private dropQueue(ticketId: number, keepHeld = false) {
-    this.turnLine.leave(ticketId);
-    this.urgent.done(ticketId);
-    this.startNow.end(ticketId);
-    this.places.refused(ticketId, false);
-    // A no-action notice (its own PR merged, #619) was never meant to be read before a close: it isn't named.
-    const left = this.queue.clear(ticketId, keepHeld).filter((m) => !m.fyi);
-    if (left.length) {
-      const what = left.map((m) => clip(`${m.author}: ${m.text}`)).join('; ');
-      this.emit(ticketId, 'note', { text: `Dismissed before ${left.length === 1 ? 'this message was' : `these ${left.length} messages were`} read: ${what}` });
-    }
-  }
-
-  private closedRows(ticketId: number) {
-    // Not its budget marks: each is once ever per minion, so a reopen isn't asked and its Taskmaster woken again (2R1).
-    for (const key of [contextKey(ticketId), windowKey(ticketId), commandsKey(ticketId), planKey(ticketId), pagePlanKey(ticketId), keepaliveKey(ticketId), askerKey(ticketId)]) this.store.deleteSetting(key);
   }
 
   /** Clear dismissed minions' build output (src/dismissed-cleanup.ts): at boot and daily. */
@@ -1407,15 +1377,6 @@ export class Runner {
     this.cleanup.restoreDir(ticket, project);
   }
 
-  /** A reopened minion gets its worktree back now, not at its next turn, so its files and preview are there (#660). */
-  reopened(ticketId: number): Promise<void> {
-    return this.lanes.run(ticketId, 'worktree restore', () => {
-      const ticket = this.store.getTicket(ticketId);
-      const project = ticket && this.store.getProject(ticket.project_id);
-      if (ticket && ticket.status !== 'closed' && project) this.restoreDir(ticket, project);
-    });
-  }
-
   /** Remove dismissed minions' worktrees and leftover Grunt worktrees (src/dismissed-cleanup.ts): at boot and daily. */
   sweepWorktrees(now = Date.now()) {
     return this.cleanup.sweepWorktrees(now);
@@ -1440,80 +1401,6 @@ export class Runner {
   }
 
   /**
-   * A deploy this minion queued is live (tools/deploy.sh reported ok). A minion waiting on it in state
-   * pending-deploy is dismissed, unless something is still open: a question card, a failed last turn,
-   * or a person who wrote to it since it went into pending-deploy.
-   * Mid-turn or with messages queued (approval cards only exist mid-turn), it waits for the last of
-   * those turns to end. Returns whether it was dismissed.
-   */
-  deployLive(ticketId: number): boolean {
-    if (this.isRunning(ticketId) || this.queued(ticketId) || this.turnLine.has(ticketId)) {
-      this.deployedMidTurn.add(ticketId);
-      if (this.turns.has(ticketId)) this.saveTurn(ticketId, { deployed: true });
-      return false;
-    }
-    const t = this.store.getTicket(ticketId);
-    // shortcut: also takes the interim "outside" + "pending deploy" note, for minions that deployed before this state existed; drop it once none are left.
-    const pending = t?.state === 'pending-deploy' || (t?.state === 'outside' && /pending deploy/i.test(t.note ?? ''));
-    if (!t || t.status === 'closed' || t.status === 'error' || !pending) return false;
-    if (this.store.getSetting(talkedKey(ticketId))) {
-      this.store.deleteSetting(talkedKey(ticketId));
-      this.store.updateTicket(ticketId, { state: null });
-      this.broadcastTicket(ticketId);
-      this.emit(ticketId, 'note', { text: 'The deploy is live, but someone wrote to this minion after it deployed, so it stays open.' });
-      return false;
-    }
-    if (this.store.openCards(t.project_id).some((e) => e.ticket_id === ticketId && e.kind === 'question')) {
-      this.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
-      return false;
-    }
-    const held = this.ciHold?.(ticketId);
-    if (held) {
-      this.store.updateTicket(ticketId, { state: 'outside', note: 'live; waiting on the CI re-run on main' });
-      this.broadcastTicket(ticketId);
-      this.emit(ticketId, 'note', { text: `The deploy is live, but ${held}, so this minion stays open.` });
-      return false;
-    }
-    // #1741: a live probe still to run holds the dismissal; LiveProbes dismisses it on a pass, or wakes it on a fail.
-    if (this.probeHold?.(ticketId)) return false;
-    this.store.updateTicket(ticketId, { state: null });
-    this.close(ticketId, 'The deploy is live, so it dismissed this minion.');
-    return true;
-  }
-
-  /** A person wrote to this minion (a message, a comment or a card answer). */
-  personWrote(ticketId: number) {
-    if (this.store.getTicket(ticketId)?.state === 'pending-deploy') this.store.setSetting(talkedKey(ticketId), true);
-  }
-
-  /** The minion went into pending-deploy: a new deploy to wait on, so earlier talk no longer counts. */
-  deployPending(ticketId: number) {
-    this.store.deleteSetting(talkedKey(ticketId));
-  }
-
-  /**
-   * Why close_self must leave this minion open for people, or null: a question, plan or approval card still
-   * waiting on them, or a state (try, ready, complete) that tells them something is theirs to do. The deploy's
-   * own dismissal (deployLive) has its own checks. `atCall`, for close_self's own answer: the card
-   * reason carries the card's link, and ready doesn't count, since a finished minion sets it by habit
-   * before close_self (closeAfterTurn clears it, #480). At the turn end it does count: a ready set
-   * after close_self is the minion changing its mind.
-   */
-  keptOpen(ticketId: number, atCall = false): string | null {
-    if (this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) {
-      const card = atCall && this.cardLinks(this.store.getTicket(ticketId)!)[0];
-      return card ? `${card.kind === 'approval' ? 'an' : 'a'} ${cardText(card)} is still waiting on people` : 'a question, plan or approval card is still waiting on people';
-    }
-    const state = this.store.getTicket(ticketId)?.state;
-    if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
-    // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
-    if (state === 'complete') return 'its state is complete: it closes once a member has seen it';
-    // Its running turn's own close_self closes after it; a turn still waiting is work nobody has done.
-    if (!(atCall && this.isRunning(ticketId)) && this.turnLine.has(ticketId)) return 'a turn of its own waits for a worker';
-    return this.ciHold?.(ticketId) ?? null;
-  }
-
-  /**
    * #1074: why CI health keeps this minion open (a red's fix minion, until its workflow is green on the default branch
    * again), or null. Set by the server; CI health's ciGreen lets it go.
    */
@@ -1521,76 +1408,6 @@ export class Runner {
 
   /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
   probeHold?: (ticketId: number) => boolean;
-
-  /**
-   * #1074: the red this minion fixed is green again, so dismiss it as its live deploy would have: after a running
-   * turn, and not past a card or a state that keeps it open for people.
-   */
-  ciGreen(ticketId: number, text: string) {
-    const t = this.store.getTicket(ticketId);
-    if (!t || t.status === 'closed') return;
-    if (this.isRunning(ticketId) || this.queued(ticketId) || this.turnLine.has(ticketId)) {
-      if (!this.closeAfterTurn(ticketId, text)) this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open for the work still under way.` });
-      return;
-    }
-    const kept = this.keptOpen(ticketId);
-    if (kept) {
-      if (t.state === 'outside') this.store.updateTicket(ticketId, { state: null, note: null });
-      this.broadcastTicket(ticketId);
-      this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open: ${kept}.` });
-      return;
-    }
-    this.store.updateTicket(ticketId, { state: null });
-    void this.close(ticketId, text);
-  }
-
-  /**
-   * Close a running ticket once its current turn finishes cleanly. A turn that fails or is
-   * stopped, or a message that arrives during it, leaves the ticket open instead. A state ready
-   * is cleared here (keptOpen's atCall).
-   */
-  closeAfterTurn(ticketId: number, reason: string | null): boolean {
-    if (!this.isRunning(ticketId) || this.keptOpen(ticketId, true)) return false;
-    if (this.store.getTicket(ticketId)?.state === 'ready') this.store.updateTicket(ticketId, { state: null });
-    this.closing.set(ticketId, reason);
-    if (this.turns.has(ticketId)) this.saveTurn(ticketId, { closing: reason });
-    this.broadcastTicket(ticketId);
-    return true;
-  }
-
-  /**
-   * Close a finished minion once a member has read it (#811): its state is complete, no turn is running or queued,
-   * no card waits, and `name` had it open at its latest update (seen_at is at least updated_at, the sidebar's own
-   * isSeen). Called when they leave it, so nobody is closed out from under their reading. Try, ready and by-hand
-   * work are never complete, so they stay open. A message to the closed minion reopens it as before.
-   */
-  closeIfSeen(ticketId: number, name: string): boolean {
-    const t = this.store.getTicket(ticketId);
-    if (!t || t.state !== 'complete' || t.status === 'closed' || t.status === 'running' || this.isRunning(ticketId)) return false;
-    if (this.queue.size(ticketId) || this.turnLine.has(ticketId) || this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) return false;
-    if (this.store.seenAt(name, ticketId) < t.updated_at) return false;
-    void this.close(ticketId, `Closed: ${name} saw its result`);
-    return true;
-  }
-
-  /**
-   * A state set after close_self that keeps the minion open (complete, try, ready) cancels the pending close
-   * there and then (#604), so the view and the state tool's reply stop promising a dismissal the turn end
-   * would refuse. Returns why it was cancelled, or null when nothing was. `byOther`: a person (not the
-   * minion's own state call, whose reply says so) set it, so the next turn is told (#619).
-   */
-  closeCancelled(ticketId: number, byOther = false): string | null {
-    if (!this.closing.has(ticketId)) return null;
-    const kept = this.keptOpen(ticketId);
-    if (!kept?.startsWith('its state')) return null;
-    this.closing.delete(ticketId);
-    const { closing: _, ...turn } = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? {};
-    this.store.setSetting(turnKey(ticketId), turn);
-    this.emit(ticketId, 'note', { text: `Claude's close_self was cancelled: ${kept}, so it stays open.` });
-    if (byOther) this.store.setSetting(closeCancelledKey(ticketId), kept);
-    this.broadcastTicket(ticketId);
-    return kept;
-  }
 
   /**
    * After a server restart: re-attach to turns still running in their units (or that ended while the

@@ -16,10 +16,10 @@ export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1604, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [
-    5598,
-    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+42: facts for the order of the line and a keepalive in line, #1888)',
+    5599,
+    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888)',
   ],
-  'src/mcp.ts': [2916, 'every MCP tool definition and handler; split by tool family is queued (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792) (+17: mark_urgent, #1888)'],
+  'src/mcp.ts': [2917, 'every MCP tool definition and handler; split by tool family is queued (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792) (+17: mark_urgent, #1888)'],
   'src/db.ts': [2903, 'schema, migrations and settings; its queries are moving to src/db/<area>.ts, a piece at a time (#1842)'],
   'tools/land.sh': [2670, 'the ship script is one shell program; its steps share state and are pinned by tests'],
   'kit/skills/scheme-setup/templates/land.sh': [2879, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],

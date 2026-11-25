@@ -57,7 +57,7 @@ export function splitting(files: readonly { path: string }[], minions: readonly 
           .at(-1)
           ?.replace(/\.\w+$/, '')
           .toLowerCase() ?? '';
-      if (words.some((w) => (/\.\w+$/.test(w) && (f.path === w || f.path.endsWith(`/${w}`))) || (stem.length > 3 && w.toLowerCase() === stem))) (out[f.path] ??= []).push({ number: m.number, title: m.title });
+      if (words.some((w) => (/\.\w+$/.test(w) && (f.path === w || f.path.endsWith(`/${w}`))) || (stem.length > 4 && w.toLowerCase() === stem))) (out[f.path] ??= []).push({ number: m.number, title: m.title });
     }
   }
   return out;

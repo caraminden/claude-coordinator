@@ -28,6 +28,7 @@ export function capacityPanel(page) {
   let n = null; // the slider's number; the pool's size until a person moves it
   let moved = false;
   let held = false;
+  let owed = false; // news came while a person held the slider: drawn when they let go
   let chart = null; // what a move of the slider updates
   let width = 0;
 
@@ -41,6 +42,7 @@ export function capacityPanel(page) {
         () => {
           held = false;
           end.abort();
+          if (owed) draw();
         },
         { signal: end.signal },
       );
@@ -53,7 +55,8 @@ export function capacityPanel(page) {
   const table = h('details', { class: 'st-limits st-fit-table' });
   const control = h('label', { class: 'st-fit-pick' }, h('span', {}, 'Turns at once'), range, number);
   const body = h('div', { class: 'st-fit-body' }, control, numbers, figure, notes, table);
-  const el = h('section', { class: 'st-tile wide st-lines st-fit', 'data-tile': 'fit' }, h('h4', {}, 'How many minions fit'), head, body);
+  const title = h('h4', {}, 'How many minions fit');
+  const el = h('section', { class: 'st-tile wide st-lines st-fit loading', 'data-tile': 'fit' }, title, head, body);
 
   const near = () => d.near[n] ?? NONE;
   const most = () => Math.max(d.near.length - 1, pool ?? 0, 1);
@@ -93,19 +96,17 @@ export function capacityPanel(page) {
       head.replaceChildren(h('b', { class: 'st-value' }, words), h('div', { class: 'st-sub muted' }, `A number needs ${d.enough} readings near it.`));
       return;
     }
-    const chip = pool === null ? '' : pool > turns ? toneChip('warn', `pool is ${pool}, ${pool - turns} past it`) : toneChip('ok', `pool is ${pool}, inside it`);
+    const chip = pool === null ? '' : pool > turns ? toneChip('warn', `pool is ${pool}, ${pool - turns} above`) : toneChip('info', `pool is ${pool}`);
     const why = past === null ? ` Past ${turns} there are not enough readings to say.` : '';
-    head.replaceChildren(
-      h('div', { class: 'st-fit-say' }, h('b', { class: 'st-value' }, `${past === null ? 'At least ' : ''}${plural(turns, 'turn')} at once ${turns === 1 ? 'is' : 'are'} comfortable`), chip),
-      h('div', { class: 'st-sub muted' }, `From ${plural(d.near[turns].count, 'reading')} near ${turns}. Comfortable: typical load within the ${d.cores} cores, and memory stalled in no more than ${Math.round(d.stallShare * 100)}% of readings, there and at every lower number.${why}`),
-    );
+    head.replaceChildren(h('div', { class: 'st-fit-say' }, h('b', { class: 'st-value' }, `${past === null ? 'At least ' : ''}${plural(turns, 'turn')} at once ${turns === 1 ? 'is' : 'are'} comfortable`), chip), h('div', { class: 'st-sub muted' }, `From ${plural(d.near[turns].count, 'reading')} near ${turns}.${why}`));
   };
 
   const drawNotes = () => {
     const old = d.waiting.count;
     const all = d.readings.length;
     notes.replaceChildren(
-      h('p', { class: 'look-prose' }, 'Load is the whole box: heavy builds and tests land on it too, so turns explain only part of it. Turns running also counts Taskmasters, which the pool leaves out, so a pool this size runs a few more turns than its number.'),
+      h('p', { class: 'look-prose' }, `Comfortable: typical load within the ${d.cores} cores, and memory stalled in no more than ${Math.round(d.stallShare * 100)}% of readings, at that number and every lower one with enough readings.`),
+      h('p', { class: 'look-prose' }, 'Load is the whole box: heavy builds and tests land on it too, so turns explain only part of it. Turns running also counts Taskmasters and, for a few minutes, turns waiting on a card. The pool leaves both out, so a pool this size runs a few more turns than its number.'),
       old
         ? h(
             'p',
@@ -189,7 +190,8 @@ export function capacityPanel(page) {
       band,
       svg('line', { class: 'st-fit-cores', x1: L, x2: W - R, y1: y(d.cores), y2: y(d.cores) }),
       svg('text', { class: 'st-fit-tick halo', x: W - R, y: y(d.cores) - 5, 'text-anchor': 'end' }, `${d.cores} cores`),
-      fits === null ? '' : svg('rect', { class: 'st-fit-ok', x: L, y: base + 2, width: (x(fits) + step / 2 - L).toFixed(1), height: 4, rx: 2 }),
+      // Only under numbers with enough readings: a gap in them is a gap in the bar.
+      ...d.near.flatMap((r, t) => (fits !== null && t <= fits && r.count >= d.enough ? [svg('rect', { class: 'st-fit-ok', x: L + t * step, y: base + 2, width: step + 0.5, height: 4 })] : [])),
       ...columns.values(),
       svg('path', { class: 'st-fit-halo', d: path(d.enough) }),
       svg('path', { class: 'st-fit-line few', d: path(4) }),
@@ -255,10 +257,13 @@ export function capacityPanel(page) {
 
   const draw = () => {
     const none = !d?.readings.length;
+    owed = false;
     body.hidden = none;
+    el.classList.toggle('loading', !d && !failed);
+    title.textContent = d && failed ? `How many minions fit · couldn't read again: ${failed}` : 'How many minions fit';
     if (!d) return head.replaceChildren(h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     if (none) return head.replaceChildren(emptyCard('No readings yet', 'The server reads its load and the turns running every 5 minutes. Each reading becomes a dot here.', { mark: '·', hue: 'running' }));
-    if (!moved) n = pool ?? d.comfortable.turns ?? 0;
+    n = moved ? Math.min(n, most()) : (pool ?? d.comfortable.turns ?? 0);
     drawHead();
     drawNotes();
     drawTable();
@@ -269,7 +274,8 @@ export function capacityPanel(page) {
   page.addEventListener('pool', (e) => {
     if (pool === e.detail) return;
     pool = e.detail;
-    if (d && !held) draw();
+    if (held) owed = true;
+    else if (d) draw();
   });
   new ResizeObserver(() => {
     const w = Math.floor(figure.clientWidth);
@@ -285,10 +291,13 @@ export function capacityPanel(page) {
       const same = d && !failed && next.readings.at(-1)?.[0] === d.readings.at(-1)?.[0] && next.readings.length === d.readings.length;
       failed = null;
       d = next;
-      if (!same && !held) draw();
+      if (same) return;
+      if (held) owed = true;
+      else draw();
     } catch (err) {
       failed = err.message;
-      if (!d) draw();
+      if (held) owed = true;
+      else draw();
     }
   }, READ_MS);
   draw();

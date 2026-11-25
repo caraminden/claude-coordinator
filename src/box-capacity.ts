@@ -51,7 +51,7 @@ function comfortable(near: BoxRow[], cores: number): { turns: number | null; pas
   for (const [n, r] of near.entries()) {
     if (r.count < ENOUGH) continue;
     if (r.typical! > cores || r.stalls > STALL_SHARE * r.stallOf) return { turns, past: n };
-    turns = n;
+    if (r.stallOf >= ENOUGH) turns = n; // readings with no memory pressure can't vouch for a number
   }
   return { turns, past: null };
 }

@@ -620,6 +620,7 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-fit-head .st-sub { margin-top: var(--space-1); }
 .st-fit-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-2); }
 .st-fit-body[hidden] { display: none; }
+.st-fit.loading { min-height: 44rem; } /* about what it fills, so the tiles under it stay put */
 .st-fit-pick { display: grid; grid-template-columns: auto minmax(0, 1fr) 2.2rem; align-items: center; gap: var(--space-3); margin: 0; font-size: 0.9em; }
 .st-fit-n { font-size: 1.5rem; font-weight: 750; line-height: 1; text-align: right; color: var(--running); }
 .st-fit-range { width: 100%; min-height: 2.25rem; margin: 0; padding: 0; border: 0; background: none; appearance: none; cursor: grab; }
@@ -667,6 +668,9 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-fit-tick.halo { stroke: var(--panel); stroke-width: 4px; paint-order: stroke; }
 .st-fit-scroll { overflow-x: auto; font-size: 0.9em; }
 .st-fit-scroll .ci-pools thead th { white-space: normal; vertical-align: bottom; }
+.st-fit-scroll .ci-pools th, .st-fit-scroll .ci-pools td { padding-inline: var(--space-1); }
+.st-fit-scroll .ci-pools :is(th, td):first-child { padding-left: 0; }
+.st-fit-scroll .ci-pools :is(th, td):last-child { padding-right: 0; }
 @media (max-width: 480px) {
   .st-fit-numbers { min-height: 8.6rem; }
   .st-fit-numbers .stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }

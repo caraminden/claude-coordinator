@@ -42,6 +42,8 @@ test('comfortable is the last number before typical load passes the cores or sta
 test('a number with too few readings near it neither counts nor stops the count, and none at all says nothing', () => {
   const gap = boxCapacity([...at(1, 20, 0.1), ...at(4, ENOUGH - 1, 50), ...at(8, 20, 1)], 16);
   assert.deepEqual(gap.comfortable, { turns: 8, past: null });
+  const blind = at(6, 40, 0.1).map((r) => ({ ...r, stall: null }));
+  assert.deepEqual(boxCapacity([...at(2, 20, 1), ...blind], 16).comfortable, { turns: 3, past: null }, 'no memory pressure read near 6: nothing to vouch for it');
   assert.deepEqual(boxCapacity(at(3, ENOUGH - 1, 1), 16).comfortable, { turns: null, past: null });
   assert.deepEqual(boxCapacity([], 16).comfortable, { turns: null, past: null });
   assert.deepEqual(boxCapacity(at(0, ENOUGH, 10), 16).comfortable, { turns: null, past: 0 }, 'loaded at the fewest');

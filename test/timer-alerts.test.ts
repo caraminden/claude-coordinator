@@ -43,12 +43,12 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
 
   runs = [run('inactive')];
   await alerts.tick(AT);
-  assert.deepEqual(calls, [], 'a job that never failed tells no one');
+  assert.deepEqual<unknown>(calls, [], 'a job that never failed tells no one');
 
   down = 'Josh';
   runs = [run('failed')];
   await alerts.tick(AT);
-  assert.deepEqual(calls, [], 'no phone rings yet');
+  assert.deepEqual<unknown>(calls, [], 'no phone rings yet');
   assert.deepEqual(
     wakes.map((x) => x.from),
     ['Mandate'],
@@ -78,7 +78,7 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   calls.length = 0;
   runs = [run('activating')];
   await alerts.tick(AT + H + 900_000);
-  assert.deepEqual(calls, [], 'a run in progress settles nothing');
+  assert.deepEqual<unknown>(calls, [], 'a run in progress settles nothing');
 
   down = 'Cara';
   runs = [run('inactive')];
@@ -101,7 +101,7 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   );
   calls.length = 0;
   await alerts.tick(AT + H + 1_800_000);
-  assert.deepEqual(calls, [], 'then nothing is left');
+  assert.deepEqual<unknown>(calls, [], 'then nothing is left');
 
   runs = [run('failed'), run('failed', 'citadel-app-mandate-prune.service', 'prune')];
   await alerts.tick(AT + H + 2_100_000);
@@ -122,13 +122,13 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   calls.length = 0;
   runs = [run('unknown')];
   await alerts.tick(AT + 2 * H + 2_550_000);
-  assert.deepEqual(calls, [], "a job whose state couldn't be read is neither raised nor cleared");
+  assert.deepEqual<unknown>(calls, [], "a job whose state couldn't be read is neither raised nor cleared");
   calls.length = 0;
   alerts['deps'].runs = async () => {
     throw new Error('systemd is not answering');
   };
   await assert.rejects(alerts.tick(AT + 2 * H + 2_700_000));
-  assert.deepEqual(calls, [], 'a round that cannot read the runs clears nothing');
+  assert.deepEqual<unknown>(calls, [], 'a round that cannot read the runs clears nothing');
 });
 
 test('a job fixed inside the hour rings no one; one failing 2-9 AM Pacific wakes its Taskmaster at 9 and rings at 10; Broken now lists it; one kept from before #1662 rings as it did (#1662)', async () => {

@@ -7,6 +7,8 @@ import type { Ship } from '../src/branch.ts';
 import { earlyCi } from '../src/land-news.ts';
 import { flockedInodes, landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
 import { tempRoot } from './helpers.ts';
+import type { CiRuns } from '../src/ci-wait.ts';
+import { fake } from './typed.ts';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
 const tmp = tempRoot('waits-');
@@ -265,7 +267,7 @@ test('every poll hands the land line to the land alarm (#561): each landing by i
   const views = new Map<number, string>();
   const a = minion(),
     b = minion();
-  const ci = { view: (id: number) => (views.has(id) ? { stage: views.get(id), short: 'step 3/8', text: 'test-linux step 3 of 8', since: now, what: '', usual: null } : null), runOf: (id: number) => (views.has(id) ? 4308 : null), landings: () => {} } as any;
+  const ci = fake<CiRuns>({ view: (id: number) => (views.has(id) ? { stage: views.get(id)!, short: 'step 3/8', text: 'test-linux step 3 of 8', since: now, what: '', usual: null } : null), runOf: (id: number) => (views.has(id) ? 4308 : null), landings: () => {} });
   const waits = new Waits({
     store,
     deployState: state,

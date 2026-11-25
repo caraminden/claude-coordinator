@@ -19,7 +19,7 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
   const [cara, josh] = [store.createUser({ name: 'Cara', login: 'cara' }), store.createUser({ name: 'Josh', login: 'josh' })];
   const tickets = Array.from({ length: 60 }, (_, i) => {
     const t = store.createTicket({ project_id: project.id, title: `M${i}`, permission_mode: 'default', created_by: 'Cara' });
-    store.updateTicket(t.id, { status: i % 3 ? 'closed' : 'idle', person_id: i % 4 === 0 ? null : i % 2 ? cara.id : josh.id } as any);
+    store.updateTicket(t.id, { status: i % 3 ? 'closed' : 'idle', person_id: i % 4 === 0 ? null : i % 2 ? cara.id : josh.id });
     if (i % 5 === 0) store.props.set('minion', t.id, project.id, { type: 'bug' }, 'Cara');
     return store.getTicket(t.id)!;
   });
@@ -35,15 +35,15 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
   );
 
   const one = tickets.map((t) => runner.view(t));
-  assert.ok(one.some((v) => (v.properties as any).type === 'bug') && one.some((v) => v.payer?.name === 'Josh'));
+  assert.ok(one.some((v) => v.properties.type === 'bug') && one.some((v) => v.payer?.name === 'Josh'));
   assert.equal(one[3].queued, 1);
   assert.equal(one[6].limit_resume_at, 123);
   assert.ok(one[0].touched.includes(josh.id), 'an open row counts its assignee as touching it');
 
   const calls: Record<string, number> = { getProject: 0, getUser: 0, forTarget: 0, forTargets: 0, waits: 0 };
-  const count = (obj: any, name: string, key = name, when: (...a: any[]) => boolean = () => true) => {
-    const f = obj[name].bind(obj);
-    obj[name] = (...a: any[]) => (when(...a) && calls[key]++, f(...a));
+  const count = <T extends object>(obj: T, name: keyof T & string, key: string = name, when: (k: string) => boolean = () => true) => {
+    const f = (obj[name] as (...a: unknown[]) => unknown).bind(obj);
+    Object.assign(obj, { [name]: (k: string, ...a: unknown[]) => (when(k) && calls[key]++, f(k, ...a)) });
   };
   count(store, 'getProject');
   count(store, 'getUser');

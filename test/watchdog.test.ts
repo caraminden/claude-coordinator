@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
@@ -90,7 +91,7 @@ test('check skips contraptions whose unit is not enabled, and probes only active
     'citadel-app-b.service': { active: 'inactive', enabled: 'disabled' },
   };
   const probed: number[] = [];
-  const found = await check(list, { unitState: async (u) => units[u], answer: async (p) => (probed.push((p as any).port), 'port 2 closed') });
+  const found = await check(list, { unitState: async (u) => units[u], answer: async (p) => (probed.push((p as { port: number }).port), 'port 2 closed') });
   assert.deepEqual(
     [...found],
     [
@@ -103,10 +104,10 @@ test('check skips contraptions whose unit is not enabled, and probes only active
   assert.deepEqual([...wedged.keys()].sort(), ['app:a', 'citadel'], 'one failing systemctl still lets every target through, probed');
 });
 
-const listen = (s: Server) => new Promise<number>((ok) => s.listen(0, '127.0.0.1', () => ok((s.address() as any).port)));
+const listen = (s: Server) => new Promise<number>((ok) => s.listen(0, '127.0.0.1', () => ok((s.address() as AddressInfo).port)));
 
 test('answer: a 2xx is up, anything else says why', async () => {
-  const hang: any[] = [];
+  const hang: ServerResponse[] = [];
   const srv = createServer((req, res) => (req.url === '/hang' ? hang.push(res) : ((res.statusCode = req.url === '/ok' ? 204 : 503), res.end())));
   const port = await listen(srv);
   after(() => (hang.forEach((r) => r.destroy()), srv.close()));
@@ -174,7 +175,7 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   const store = new Store(join(dir, 'coordinator.db'));
   store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const keys = loadVapidKeys(dir);
-  const got: { headers: any; body: Buffer }[] = [];
+  const got: { headers: IncomingHttpHeaders; body: Buffer }[] = [];
   const push = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c) => chunks.push(c)).on('end', () => (got.push({ headers: req.headers, body: Buffer.concat(chunks) }), res.writeHead(201).end()));
@@ -209,10 +210,10 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   assert.match(out, /2 watched, down: Citadel: failed/);
   assert.match(out, /Pushing to Cara: Citadel down: Down: Citadel 11 min \(failed\)\./);
   assert.equal(got.length, 1);
-  assert.match(got[0].headers.authorization, new RegExp(`^vapid t=.+, k=${keys.publicKey}$`));
+  assert.match(got[0].headers.authorization!, new RegExp(`^vapid t=.+, k=${keys.publicKey}$`));
   assert.equal(got[0].headers.topic, 'citadel-watchdog');
   assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).citadel.alerted, true);
-  const sub = () => JSON.parse(Buffer.from(/t=[^.]+\.([^.]+)\./.exec(got.at(-1)!.headers.authorization)![1], 'base64url').toString()).sub;
+  const sub = () => JSON.parse(Buffer.from(/t=[^.]+\.([^.]+)\./.exec(got.at(-1)!.headers.authorization!)![1], 'base64url').toString()).sub;
   assert.equal(sub(), 'https://localhost', 'no subject set anywhere');
   await run();
   assert.equal(got.length, 1, 'no second push while it stays down');

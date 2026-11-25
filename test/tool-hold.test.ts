@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { heldTools, toolsForTurn } from '../src/tool-hold.ts';
 
-const tool = (description: string, extra: object = {}) => ({ name: 'hand_off_land', description, inputSchema: { type: 'object', properties: { summary: { type: 'string', description: `${description} summary` }, ...extra } } });
+type Tool = { name: string; description: string; inputSchema: { type: string; properties: Record<string, { type: string; description?: string }> } };
+const tool = (description: string, extra: Record<string, { type: string }> = {}): Tool => ({ name: 'hand_off_land', description, inputSchema: { type: 'object', properties: { summary: { type: 'string', description: `${description} summary` }, ...extra } } });
 const seen = [tool('Ship: the server runs land.sh. Use it once tested.')];
 const reworded = [tool('Ship: the server runs land.sh.')];
 

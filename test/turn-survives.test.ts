@@ -71,7 +71,7 @@ const texts = (id: number) =>
     .listEvents(id)
     .filter((e) => e.kind === 'claude')
     .flatMap((e) => JSON.parse(e.data).message?.content ?? [])
-    .map((b: any) => b.text);
+    .map((b) => b.text);
 const notes = (id: number) =>
   store
     .listEvents(id)
@@ -263,7 +263,7 @@ test('a running ticket says when its turn started, before any claude event, and 
   // The fake never sends an init event, so the page has only this to time the turn by.
   const r = await started(id);
   const at = r.view(store.getTicket(id)!).turnStartedAt;
-  assert.ok(at >= t0 && at <= Date.now(), `turnStartedAt ${at} is this turn's start`);
+  assert.ok(at! >= t0 && at! <= Date.now(), `turnStartedAt ${at} is this turn's start`);
   r.detachAll();
 
   const next = server();

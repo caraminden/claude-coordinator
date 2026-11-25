@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import type { Block, Turn } from '../public/ui/chat.d.ts';
 import { themeCss } from '../src/theme.ts';
 
 const ui = join(import.meta.dirname, '..', 'public', 'ui');
@@ -86,7 +87,7 @@ const LINES: [string, string, object?][] = [
 // error; once collapsed and once with its run open, and the same turn mid-flight.
 const { chatModel, renderChat } = await import('../public/ui/chat.js');
 const at = (s: number) => Date.UTC(2026, 10, 2, 12, 0, s);
-const ev = (type: string, data: object, s?: number) => ({ type, data, at: s === undefined ? undefined : at(s) });
+const ev = (type: string, data: Record<string, unknown>, s?: number) => ({ type, data, at: s === undefined ? undefined : at(s) });
 const RECORDED = [
   ev('text', { delta: 'Let me **check** Thursday.', parent: null, message: 'm1' }),
   ev('tool', { id: 'a', name: 'mcp__mandate__list_todos', input: {}, parent: null }, 1),
@@ -103,7 +104,7 @@ const RECORDED = [
   ev('error', { code: 'limit', message: "You've reached your usage limit." }),
 ];
 const stepLabel = (name: string, input: { title?: string }) => (name === 'mcp__mandate__move_todo' ? `Moving “${input.title}”` : undefined);
-const CHATS: [string, object[], object][] = [
+const CHATS: [string, Turn[], object][] = [
   ['a recorded turn, folded', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50) }],
   ['a recorded turn, its run open', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50), open: ['0.1'] }],
   ['the same turn mid-flight', [{ ask: 'Move my errands', events: RECORDED.slice(0, 9) }], { stepLabel, now: at(7) }],
@@ -150,7 +151,7 @@ function current() {
       markdownLine: Object.fromEntries(LINES.map(([name, src, opts]) => [name, markdownLine(src, opts)])),
       chat: Object.fromEntries(CHATS.map(([name, turns, opts]) => [name, renderChat(turns, opts)])),
       // What mountChat's block(name, input, result) gets as `result` (#287): the tool_result's data, an app's own fields included.
-      blockResult: chatModel([{ events: [ev('tool', { id: 'v', name: 'viability', input: {}, parent: null }), ev('tool_result', { id: 'v', ok: true, parent: null, output: { odds: 0.4 } })] }], { card: () => true }).items[0].blocks[0].result,
+      blockResult: (chatModel([{ events: [ev('tool', { id: 'v', name: 'viability', input: {}, parent: null }), ev('tool_result', { id: 'v', ok: true, parent: null, output: { odds: 0.4 } })] }], { card: () => true }).items[0].blocks[0] as Extract<Block, { kind: 'card' }>).result,
     };
   });
 }

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { budgetKey } from '../src/minion-budget.ts';
-import { Store } from '../src/db.ts';
+import { Store, type Ticket } from '../src/db.ts';
 import { TroubleRetros, troubleKey, SINCE_KEY, postMortemOfKey, PER_TICK } from '../src/effort-retros.ts';
 
 const H = 3_600_000;
@@ -23,7 +23,7 @@ function setup(mode: 'act' | 'log-only' = 'act') {
     newMinion: async (project, m) => {
       made.push(m);
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
-      return { id: x.id, number: x.number };
+      return { id: x.id, number: x.number! };
     },
     runner: {
       emit: () => {},
@@ -35,10 +35,10 @@ function setup(mode: 'act' | 'log-only' = 'act') {
       notes.push(line);
     },
   });
-  const minion = (status = 'closed') => {
-    const x = store.createTicket({ project_id: peek.id, title: 'feature', permission_mode: 'default', created_by: 'Cara', model: 'claude-sonnet-5-5' } as any);
+  const minion = (status: Ticket['status'] = 'closed') => {
+    const x = store.createTicket({ project_id: peek.id, title: 'feature', permission_mode: 'default', created_by: 'Cara', model: 'claude-sonnet-5-5' } as Parameters<Store['createTicket']>[0]);
     store.addPick(x.id, 'claude-sonnet-5-5', 'medium', 'table', 'feature → Sonnet 5.5 medium', T0 - 5 * H);
-    store.updateTicket(x.id, { status } as any);
+    store.updateTicket(x.id, { status });
     return x;
   };
   const over = (id: number, at = T0) => store.setSetting(budgetKey(id), { asked: at, woke: at });
@@ -121,7 +121,7 @@ test('it waits while the minion is still open, and the table pick alone is no tr
   s.over(open.id);
   s.minion(); // only its first, table pick
   assert.deepEqual(await s.retros.tick(), []);
-  s.store.updateTicket(open.id, { status: 'closed' } as any);
+  s.store.updateTicket(open.id, { status: 'closed' });
   assert.equal((await s.retros.tick()).length, 1);
 });
 
@@ -132,7 +132,7 @@ test('a post-mortem minion never gets one, even past twice its own budget (#1796
   await s.retros.tick();
   const pm = s.store.listTickets(s.peek.id).find((t) => t.title.startsWith('Post-mortem'))!;
   assert.ok(s.store.getSetting(postMortemOfKey(pm.id)));
-  s.store.updateTicket(pm.id, { status: 'closed' } as any);
+  s.store.updateTicket(pm.id, { status: 'closed' });
   s.over(pm.id);
   await s.retros.tick();
   assert.equal(s.made.length, 1);

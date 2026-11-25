@@ -3,7 +3,11 @@ import { createServer } from 'node:http';
 import { after, test } from 'node:test';
 import { tempRoot } from './helpers.ts';
 import { agentEnv, mcpAgent } from './mcp-agent.ts';
-import { router, type Route } from '../src/http.ts';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Project, Store, Ticket } from '../src/db.ts';
+import { router, type App, type Route } from '../src/http.ts';
+import { thrown } from '../src/thrown.ts';
+import { fake } from './typed.ts';
 import { appRoutes } from '../src/routes/app.ts';
 import { fileRoutes } from '../src/routes/files.ts';
 import { machineRoutes } from '../src/routes/machines.ts';
@@ -17,21 +21,21 @@ const NUMBER = 25;
 
 // The real route table, with every handler swapped for a no-op, over a stand-in store holding the
 // minion and another one numbered like its own #.
-const minion = { id: ID, number: NUMBER, project_id: 2, kind: 'ticket' };
-const other = { id: NUMBER, number: 21, project_id: 2, kind: 'ticket' };
-const stub: any = {
-  store: { getTicket: (id: number) => [minion, other].find((t) => t.id === id), getProject: (id: number) => ({ id }) },
-  runner: { view: (t: unknown) => t },
-};
+const minion = { id: ID, number: NUMBER, project_id: 2, kind: 'ticket' as const };
+const other = { id: NUMBER, number: 21, project_id: 2, kind: 'ticket' as const };
+const stub = fake<App>({
+  store: fake<Store>({ getTicket: (id: number) => [fake<Ticket>(minion), fake<Ticket>(other)].find((t) => t.id === id), getProject: (id: number) => fake<Project>({ id }) }),
+  runner: fake<App['runner']>({ view: (t: unknown) => t as ReturnType<App['runner']['view']> }),
+});
 const all: Route[] = [...appRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes];
 const table = router(all.map((r) => ({ ...r, handler: () => 'ok' })));
 /** Would the route table let this minion's token make the call (anything but a 403)? */
 async function mayCall(method: string, path: string): Promise<boolean> {
   try {
-    await table(stub, { method, headers: {} } as any, {} as any, new URL(path, 'http://x'), { name: '#25', exp: 0, agent: ID });
+    await table(stub, fake<IncomingMessage>({ method, headers: {} }), fake<ServerResponse>({}), new URL(path, 'http://x'), { name: '#25', exp: 0, agent: ID });
     return true;
-  } catch (err: any) {
-    if (err.status === 403) return false;
+  } catch (err) {
+    if (thrown(err).status === 403) return false;
     throw err;
   }
 }
@@ -52,7 +56,7 @@ const apiPort = await tmp.serve(api);
 const mcp = mcpAgent(agentEnv(`http://127.0.0.1:${apiPort}`, `${ID}.sig`, { id: ID, project_id: 2 }, 'thread'), tmp.track);
 // After the last top-level await: set before one, this hook left the MCP child and API up and the file never exited (#1535).
 after(() => tmp.teardown()); // stops the MCP server and the stand-in API
-const rpc = (method: string, params: object): Promise<any> => mcp.rpc(method, params);
+const rpc = (method: string, params: object) => mcp.rpc(method, params);
 const tool = (name: string, args: object) => mcp.call('tools/call', { name, arguments: args });
 
 // Every test sits below the top-level await above: under the gate's force-exit, the file ran only the tests before it (#1732).
@@ -72,7 +76,7 @@ test('a thread token may read, relabel, ask and close only its own internal id',
 });
 
 test('close_self and set_thread_status address the internal id, whatever the model passes', async () => {
-  const tools = (await rpc('tools/list', {})).result.tools.map((t: any) => t.name);
+  const tools = (await rpc('tools/list', {})).result!.tools.map((t) => t.name);
   assert.ok(tools.includes('close_self'));
   calls.length = 0;
   const closed = await tool('close_self', { reason: 'merged', ticket_id: 7 });

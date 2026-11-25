@@ -6,7 +6,6 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
-// @ts-ignore: plain JS from the kit
 import { findChrome } from '../kit/skills/critique/scripts/ui-measure.mjs';
 import { open } from '../tools/ui-shot.ts';
 import { tempRoot } from './helpers.ts';
@@ -39,8 +38,8 @@ function uiShot(...args: string[]) {
   return new Promise<{ code: number | null; text: string }>((ok) => {
     const p = tmp.spawn(process.execPath, [tool, '--url', url, '--anon', '--out', out, ...args], { env: { ...process.env, DEV_URL: '', DEV_COOKIE: '' } });
     let text = '';
-    p.stdout.on('data', (d) => (text += d));
-    p.stderr.on('data', (d) => (text += d));
+    p.stdout!.on('data', (d) => (text += d));
+    p.stderr!.on('data', (d) => (text += d));
     p.on('exit', (code) => ok({ code, text }));
   });
 }

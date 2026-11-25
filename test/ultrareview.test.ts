@@ -9,6 +9,11 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, until } from './helpers.ts';
 import { Readable } from 'node:stream';
+import type { TurnPlace } from '../src/claude-link.ts';
+import type { Ctx, TicketView } from '../src/http.ts';
+import type { Ticket } from '../src/db.ts';
+import type { IncomingMessage } from 'node:http';
+import { fake, json, type Refused } from './typed.ts';
 import { ticketRoutes } from '../src/routes/tickets.ts';
 
 // Ultra review (#432): every test stubs `claude` with a script, so none of them launches a real (billed) review.
@@ -105,8 +110,8 @@ test("a branch review clones the minion's branch, committed work only, against m
   assert.equal(readFileSync(join(clone, 'src/a.ts'), 'utf8'), 'a\nb\nc\n', 'nothing uncommitted came along');
 });
 
-function reviews(bin: string, place: any = { host: true }, extra: Record<string, unknown> = {}) {
-  const events: { ticketId: number; kind: string; data: any }[] = [];
+function reviews(bin: string, place: TurnPlace | null = { host: true }, extra: Record<string, unknown> = {}) {
+  const events: { ticketId: number; kind: string; data: Partial<ReviewResult> }[] = [];
   const settings = new Map<string, unknown>();
   const scratch = mkdtempSync(join(root, 'scratch-'));
   const jobsDir = mkdtempSync(join(root, 'jobs-'));
@@ -116,8 +121,8 @@ function reviews(bin: string, place: any = { host: true }, extra: Record<string,
     scratch: () => scratch,
     hostEnv: { PATH: process.env.PATH! },
     jobsDir,
-    emit: (ticketId, kind, data) => events.push({ ticketId, kind, data }),
-    getSetting: (k) => settings.get(k) as any,
+    emit: (ticketId, kind, data) => events.push({ ticketId, kind, data: data as Partial<ReviewResult> }),
+    getSetting: <T>(k: string) => settings.get(k) as T | undefined,
     setSetting: (k, v) => settings.set(k, v),
     github: () => null,
     ...extra,
@@ -174,7 +179,7 @@ test('nobody without a Claude login of their own can start one, and a restart re
   next.recover();
   assert.equal(after[0].kind, 'ultrareview_result');
   assert.equal(after[0].data.ok, false);
-  assert.match(after[0].data.text, /restarted/);
+  assert.match(after[0].data.text!, /restarted/);
   assert.ok(!existsSync(dir));
   assert.deepEqual(settings.get('ultrareview_running'), []);
 });
@@ -240,13 +245,13 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
     for (const id of [M2.id, TM.id]) for (const method of ['GET', 'POST']) assert.equal((await batchAs(id, method, 'batch')).status, 403, `another thread ${id} ${method} batch`);
     const own = await batchAs(M.id, 'GET', 'batch');
     assert.equal(own.status, 200);
-    assert.deepEqual((await own.json()).rows, []);
+    assert.deepEqual((await json<{ rows: unknown[] }>(own)).rows, []);
     const noGithub = await batchAs(M.id, 'POST', 'batch');
     assert.equal(noGithub.status, 409);
-    assert.match((await noGithub.json()).error, /^Josh has no GitHub login linked .*never borrow someone else's/, "preps go out as the turn's person, never the server's login");
+    assert.match((await json<Refused>(noGithub)).error, /^Josh has no GitHub login linked .*never borrow someone else's/, "preps go out as the turn's person, never the server's login");
     const nobody = await batchAs(M2.id, 'POST', 'batch', M2.id);
     assert.equal(nobody.status, 403);
-    assert.match((await nobody.json()).error, /No person to prep for/);
+    assert.match((await json<Refused>(nobody)).error, /No person to prep for/);
     const batch = await srv.call(`/api/tickets/${M.id}/ultrareview/batch`, { areas: [{ name: 'Lib', paths: 'lib' }, { paths: 'nope' }] });
     assert.equal(batch.status, 200, JSON.stringify(batch.data));
     assert.deepEqual(batch.data.rows, []);
@@ -274,7 +279,7 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
     const done = await until('the findings', async () => {
       const list = await events();
       const rows = Array.isArray(list) ? list : list.events;
-      return rows?.find((e: any) => e.kind === 'ultrareview_result');
+      return rows?.find((e: { kind: string }) => e.kind === 'ultrareview_result');
     });
     const res = typeof done.data === 'string' ? JSON.parse(done.data) : done.data;
     assert.equal(res.ok, true, res.text);
@@ -296,25 +301,25 @@ test("a minion's prep goes out as its turn's person: their GitHub login, their b
     ultrareviews: { prep: async (_t: number, uid: number, by: string, a: { name: string }) => void preps.push({ uid, by, name: a.name }), rows: (_t: number, uid: number) => preps.filter((x) => x.uid === uid).map((x) => ({ ...x, repo: r })) },
   };
   const route = ticketRoutes.find((x) => x.method === 'POST' && x.path === '/api/tickets/:ticket/ultrareview/batch')!;
-  const post = async (caller: any) => {
-    const req: any = Readable.from([Buffer.from(JSON.stringify({ areas: [{ name: 'Lib', paths: ['lib'] }] }))]);
-    req.headers = { 'content-type': 'application/json' };
+  const post = async (caller: Ticket) => {
+    const req = Readable.from([Buffer.from(JSON.stringify({ areas: [{ name: 'Lib', paths: ['lib'] }] }))]);
+    Object.assign(req, { headers: { 'content-type': 'application/json' } });
     let status = 0,
       body = '';
     const res: any = { destroyed: false, headersSent: false, writeHead: (s: number) => void (status = s), end: (b: Buffer) => void (body = String(b)) };
     try {
-      await route.handler({ req, res, app, session: { name: 'agent', agent: caller.id, exp: 0 }, caller, ticket: { id: 9, project_id: 1 }, params: { ticket: '9' } } as any);
-    } catch (err: any) {
-      return { status: err.status, body: { error: err.message } };
+      await route.handler(fake<Ctx>({ req: req as IncomingMessage, res, app, session: { name: 'agent', agent: caller.id, exp: 0 }, caller, ticket: fake<TicketView>({ id: 9, project_id: 1 }), params: { ticket: '9' } }));
+    } catch (err) {
+      return { status: (err as Error & { status: number }).status, body: { error: (err as Error).message } };
     }
     return { status, body: JSON.parse(body) };
   };
-  const ok = await post({ id: 9, kind: 'ticket' });
+  const ok = await post(fake<Ticket>({ id: 9, kind: 'ticket' }));
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   assert.deepEqual(preps, [{ uid: 5, by: 'Josh', name: 'Lib' }], "prepped in Josh's batch, as Josh");
   assert.equal(ok.body.for, 'Josh');
   assert.equal(ok.body.rows.length, 1);
-  const tm = await post({ id: 9, kind: 'coordinator' });
+  const tm = await post(fake<Ticket>({ id: 9, kind: 'coordinator' }));
   assert.equal(tm.status, 403, 'a Taskmaster on its own chat preps nothing');
   assert.match(tm.body.error, /not a Taskmaster/);
   assert.equal(preps.length, 1);
@@ -362,7 +367,7 @@ test('a review outlives a restart: the next server follows it and posts its find
     writeFileSync(go, '');
     const done = await until('the findings', async () => {
       const list = (await srv!.call(`/api/tickets/${M.id}/events`)).data;
-      return (Array.isArray(list) ? list : list.events)?.find((e: any) => e.kind === 'ultrareview_result');
+      return (Array.isArray(list) ? list : list.events)?.find((e: { kind: string }) => e.kind === 'ultrareview_result');
     });
     const res = typeof done.data === 'string' ? JSON.parse(done.data) : done.data;
     assert.equal(res.ok, true, res.text);
@@ -507,7 +512,7 @@ test('a batch preps one draft PR per area, refuses one over the caps, and surviv
   assert.deepEqual(ur.rows(7, 2), [], 'a person sees only their own rows');
   // A row still prepping when the server stops can't be finished: the next server marks it failed and deletes its branches.
   const half = { ...ready, id: 'half', state: 'prepping', pr: { slug: 'o/r', head: 'review/half-x', base: 'review/half-x-base' } };
-  settings.set('ultrareview_batch', [...(settings.get('ultrareview_batch') as any[]), half]);
+  settings.set('ultrareview_batch', [...(settings.get('ultrareview_batch') as unknown[]), half]);
   const next = reviews(bin, { host: true }, extra);
   for (const [k, v] of settings) next.settings.set(k, v);
   next.ur.recover();
@@ -569,7 +574,7 @@ test("a batch row's Start reviews its PR, posts the findings and cleans up; disc
   const notes = events.filter((e) => e.kind === 'note');
   assert.equal(notes.length, 1);
   assert.equal(notes[0].ticketId, 7);
-  assert.match(notes[0].data.text, /^Discarded 1 prepped ultra review nobody started in 7 days \(Three\) and closed its draft PR\.$/);
+  assert.match(notes[0].data.text!, /^Discarded 1 prepped ultra review nobody started in 7 days \(Three\) and closed its draft PR\.$/);
   assert.ok(gh.calls().filter((c) => c.includes('pr close 42')).length >= 3);
   void three;
 });

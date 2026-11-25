@@ -29,7 +29,7 @@ symlinkSync(outside, join(data, 'linkdir'));
 writeFileSync(join(data, 'notes.txt'), 'not an image');
 
 const refused = async (paths: unknown, status: number, re: RegExp) => {
-  await assert.rejects(loadImages(paths, data), (e: any) => e.status === status && re.test(e.message));
+  await assert.rejects(loadImages(paths, data), (e: Error & { status: number }) => e.status === status && re.test(e.message));
 };
 
 test('downscales to 1568 on the long side as JPEG', async () => {
@@ -62,7 +62,7 @@ test('count cap is a 413 naming the count', async () => {
 
 test('total size cap is a 413 naming the size', async () => {
   assert.ok(MAX_IMAGE_BYTES > 0);
-  await assert.rejects(loadImages(['big.png', 'big.png'], data, { maxBytes: 100 }), (e: any) => e.status === 413 && /total size/i.test(e.message));
+  await assert.rejects(loadImages(['big.png', 'big.png'], data, { maxBytes: 100 }), (e: Error & { status: number }) => e.status === 413 && /total size/i.test(e.message));
 });
 
 test('images ride as image blocks before the text in the first user message', () => {

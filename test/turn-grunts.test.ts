@@ -56,7 +56,7 @@ test('the store keeps them under the turn, and a later read updates a Grunt inst
     turn.id + 1,
     rows.map((r) => ({ ...r, cost_usd: r.cost_usd + 1 })),
   );
-  const got = store.db.prepare('SELECT turn_id, agent_id, cost_usd FROM turn_grunts ORDER BY agent_id').all() as any[];
+  const got = store.db.prepare('SELECT turn_id, agent_id, cost_usd FROM turn_grunts ORDER BY agent_id').all() as { turn_id: number; agent_id: string; cost_usd: number }[];
   assert.equal(got.length, 2);
   assert.deepEqual(
     got.map((g) => g.turn_id),

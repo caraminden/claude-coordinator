@@ -1,7 +1,7 @@
 // The ship watcher (#1268): which runners are on a ship run's job now, from GitHub, sent to the runner agents.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ShipWatch, type Ship } from '../src/ci-ships.ts';
+import { ShipWatch, shipsOn, type Ship } from '../src/ci-ships.ts';
 
 /** A fake GitHub: paths to bodies, a 304 for a path asked again with the etag it gave, and every path asked. */
 function github(pages: Record<string, unknown>) {
@@ -109,7 +109,7 @@ test('a rate limit sends an empty list once, then nothing for 5 minutes, then lo
   assert.match(logs[0], /slow down/);
 });
 
-test("while Citadel's own ship runs, only its runners are ships, so another scheme's ship is squeezed; alone, that ship counts", async () => {
+test("while Citadel's own ship runs, only its runners are ships on that PC, so another scheme's ship is squeezed; alone, that ship counts", async () => {
   const gh = github({
     [runs('caraminden/claude-coordinator')]: { workflow_runs: [{ id: 1, head_branch: 'land/1268-x' }] },
     [jobs('caraminden/claude-coordinator', 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8-linux' }] },
@@ -120,8 +120,12 @@ test("while Citadel's own ship runs, only its runners are ships, so another sche
   await w.tick(0);
   gh.pages[runs('caraminden/claude-coordinator')] = { workflow_runs: [] };
   await w.tick(15_000);
-  // What the agents are sent, not just what tick returns.
-  assert.deepEqual(sent, [[{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux', first: true }], [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]]);
+  // What the PC's agents are sent, not just what tick returns.
+  const pcs = new Map([['desktop-g248ij8', new Set<string>()]]);
+  assert.deepEqual(
+    sent.map((s) => shipsOn('DESKTOP-G248IJ8', s, pcs)),
+    [[{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux', first: true }], [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]],
+  );
 });
 
 test("an early next train's run is squeezed while a ship runs; with none, the oldest early run is the ship, being a train's own counted CI (#1568)", async () => {
@@ -142,4 +146,34 @@ test("an early next train's run is squeezed while a ship runs; with none, the ol
   assert.deepEqual(await w.tick(0), [{ repo, runner: 'DESKTOP-linux' }], 'the ship run alone: both early runs are squeezed');
   gh.pages[runs(repo)] = { workflow_runs: (gh.pages[runs(repo)] as { workflow_runs: { id: number }[] }).workflow_runs.filter((r) => r.id !== 1) };
   assert.deepEqual(await w.tick(15_000), [{ repo, runner: 'DESKTOP-linux-2' }], "ticket/4-x's early run counted once ticket/3-x shipped: it is the ship, and ticket/5-x's stays squeezed");
+});
+
+test("each PC gets its own ships only (#1934): by the runners its agents list, else by the runner's name; a ship on no known PC squeezes none", () => {
+  const pcs = new Map([
+    ['desk', new Set(['a/b/desk-linux', 'a/b/odd name'])],
+    ['desk-2', new Set<string>()],
+    ['laptop', new Set(['a/b/desk-2-linux'])],
+  ]);
+  const on = (runner: string, repo = 'a/b') => [...pcs.keys()].filter((h) => shipsOn(h, [{ repo, runner }], pcs).length);
+  assert.deepEqual(on('DESK-linux'), ['desk']);
+  assert.deepEqual(on('Odd Name'), ['desk'], 'a hand-named runner is known from its agent');
+  assert.deepEqual(on('desk-2-linux'), ['laptop'], "the agents' own list beats the name");
+  assert.deepEqual(on('desk-2-linux', 'c/d'), ['desk-2'], 'no list yet: the longest hostname the name starts with');
+  assert.deepEqual(on('DESK', 'c/d'), ['desk']);
+  assert.deepEqual(on('deskside', 'c/d'), []);
+  assert.deepEqual(shipsOn('DESK', [{ repo: 'a/b', runner: 'DESK-linux' }], pcs), [{ repo: 'a/b', runner: 'DESK-linux' }], "an agent's hostname in any case");
+});
+
+test("a Citadel ship on one PC leaves another scheme's ship on a second PC its share (#1934)", () => {
+  const pcs = new Map([
+    ['desk', new Set<string>()],
+    ['laptop', new Set<string>()],
+  ]);
+  const ships: Ship[] = [
+    { repo: 'c/citadel', runner: 'desk-linux', first: true },
+    { repo: 'c/peek', runner: 'desk' },
+    { repo: 'c/peek', runner: 'laptop' },
+  ];
+  assert.deepEqual(shipsOn('desk', ships, pcs), [ships[0]]);
+  assert.deepEqual(shipsOn('laptop', ships, pcs), [ships[2]]);
 });

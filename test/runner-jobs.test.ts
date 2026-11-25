@@ -32,15 +32,23 @@ function stream() {
 /** GitHub: mints tokens for Cara and lists the repo's runners from `runners`. */
 function fakeGithub() {
   const calls: string[] = [];
-  const runners: { name: string; status: string; busy: boolean; labels: { name: string }[] }[] = [];
+  const runners: { id?: number; name: string; status: string; busy: boolean; labels: { name: string }[] }[] = [];
+  /** Set to make GitHub refuse to change labels. */
+  const refuse = { labels: false };
   const fetch = (async (url: string, init?: RequestInit) => {
     const path = url.replace('https://api.github.com', '');
     calls.push(`${init?.method ?? 'GET'} ${path}`);
     if (String((init?.headers as any)?.Authorization) !== 'Bearer gho_cara') return Response.json({ message: 'Bad credentials' }, { status: 401 });
-    if (path.startsWith('/repos/caraminden/peek-auras/actions/runners?')) return Response.json({ total_count: runners.length, runners });
+    if (path.startsWith('/repos/caraminden/peek-auras/actions/runners?')) return Response.json({ total_count: runners.length, runners: runners.map((r, i) => Object.assign(r, { id: r.id ?? i + 1 })) });
+    const put = init?.method === 'PUT' && /^\/repos\/caraminden\/peek-auras\/actions\/runners\/(\d+)\/labels$/.exec(path);
+    if (put && refuse.labels) return Response.json({ message: 'no labels today' }, { status: 500 });
+    // GitHub's own labels (self-hosted, the OS) stay; the custom ones become what was sent.
+    const at = put && runners.find((r) => r.id === Number(put[1]));
+    if (at) at.labels = [...at.labels.filter((l) => /^(self-hosted|Linux|X64)$/.test(l.name)), ...JSON.parse(String(init!.body)).labels.map((name: string) => ({ name }))];
+    if (at) return Response.json({ labels: at.labels });
     return Response.json({ message: 'unfaked' }, { status: 500 });
   }) as typeof globalThis.fetch;
-  return { fetch, calls, runners };
+  return { fetch, calls, runners, refuse };
 }
 
 // Each connected agent holds a ping timer until its stream closes.
@@ -82,7 +90,7 @@ function world(idleMs = 10_000) {
     assert.equal(relay.runnerResult(pc, { id: job.id, ok, output }), true);
     return job;
   };
-  return { store, cara, josh, olive, scheme, other, gh, relay, jobs, tokens, notes, details, pc, agent, answer };
+  return { store, link, cara, josh, olive, scheme, other, gh, relay, jobs, tokens, notes, details, pc, agent, answer };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
@@ -93,7 +101,21 @@ test('asks are checked: an op, and a count of 1 to 4 for add only', () => {
   assert.deepEqual(runnerAsk({ op: 'list', os: 'windows' }), { op: 'list', count: null, os: 'windows' });
   assert.deepEqual(runnerAsk({ op: 'add', count: 2, os: 'linux' }), { op: 'add', count: 2, os: 'linux' });
   assert.deepEqual(runnerAsk({ op: 'remove', os: 'linux' }), { op: 'remove', count: null, os: 'linux' });
-  for (const bad of [{ op: 'run' }, {}, { op: 'add', count: 5 }, { op: 'add', count: 0 }, { op: 'add', count: 1.5 }, { op: 'add', count: '2' }, { op: 'remove', count: 1 }, { op: 'list', os: 'macos' }, { op: 'add', os: 'Linux' }]) {
+  assert.deepEqual(runnerAsk({ op: 'add', os: 'linux', role: 'check' }), { op: 'add', count: 1, os: 'linux', role: 'check' });
+  for (const bad of [
+    { op: 'run' },
+    {},
+    { op: 'add', count: 5 },
+    { op: 'add', count: 0 },
+    { op: 'add', count: 1.5 },
+    { op: 'add', count: '2' },
+    { op: 'remove', count: 1 },
+    { op: 'list', os: 'macos' },
+    { op: 'add', os: 'Linux' },
+    { op: 'add', role: 'ship' },
+    { op: 'remove', role: 'side' },
+    { op: 'list', role: 'land' },
+  ]) {
     assert.throws(() => runnerAsk(bad), { status: 400 }, JSON.stringify(bad));
   }
 });
@@ -333,4 +355,109 @@ test("a member's own CI host runs CI only for the schemes they lent it to and ar
   // He leaves the scheme: the lend stays on the list and reaches nothing.
   w.store.removeMember(w.scheme.id, w.josh.id);
   await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null, os: 'linux' }), { status: 409 });
+});
+
+// ---------- roles (#1934) ----------
+
+const gh = (name: string, ...labels: string[]) => ({ name, status: 'online', busy: false, labels: labels.map((l) => ({ name: l })) });
+const labelsOf = (w: ReturnType<typeof world>, name: string) => w.gh.runners.find((r) => r.name === name)!.labels.map((l) => l.name);
+const puts = (w: ReturnType<typeof world>) => w.gh.calls.filter((c) => c.startsWith('PUT'));
+
+for (const [role, want] of Object.entries({
+  land: ['peek-auras-ci'],
+  side: ['peek-auras-ci', 'peek-auras-ci-side'],
+  long: ['peek-auras-ci', 'peek-auras-ci-side', 'peek-auras-ci-long'],
+  check: ['peek-auras-ci-check'],
+})) {
+  test(`an add with the role ${role} sets its labels through GitHub on the new runner, and leaves the ones already there`, async () => {
+    const w = world();
+    w.gh.runners.push(gh('DESKTOP-G248IJ8', 'self-hosted', 'peek-auras-ci', 'by-hand'), gh('DESKTOP-G248IJ8-2', 'self-hosted', 'peek-auras-ci'));
+    await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 3, os: 'windows', role: role as 'side' });
+    // The script's own labels, whatever they are: -side from its position here.
+    w.gh.runners.push(gh('DESKTOP-G248IJ8-3', 'self-hosted', 'peek-auras-ci', 'peek-auras-ci-side'));
+    w.answer(true, 'Registering DESKTOP-G248IJ8-3 on caraminden/peek-auras with label peek-auras-ci\nDone');
+    const done = (await w.jobs.wait(w.scheme.id, 5000))!;
+    assert.equal(done.ok, true, done.text);
+    assert.deepEqual(labelsOf(w, 'DESKTOP-G248IJ8-3'), ['self-hosted', ...want]);
+    assert.match(done.text, new RegExp(`DESKTOP-G248IJ8-3 Idle, role ${role} \\(${want.join(', ')}\\)`));
+    assert.deepEqual(puts(w), ['PUT /repos/caraminden/peek-auras/actions/runners/3/labels']);
+    assert.deepEqual(labelsOf(w, 'DESKTOP-G248IJ8'), ['self-hosted', 'peek-auras-ci', 'by-hand']);
+  });
+}
+
+test('a new runner gets its role while the PC is still adding the next one, and the add waits for every runner the PC registered', async () => {
+  const w = world();
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 2, os: 'windows', role: 'check' });
+  w.gh.runners.push(gh('DESKTOP-G248IJ8', 'peek-auras-ci'));
+  await tick();
+  await tick();
+  assert.deepEqual(labelsOf(w, 'DESKTOP-G248IJ8'), ['peek-auras-ci-check'], 'not left a land runner until the PC is done');
+  const reg = (n: string) => `Registering ${n} on caraminden/peek-auras with label peek-auras-ci`;
+  w.answer(true, [reg('DESKTOP-G248IJ8'), reg('DESKTOP-G248IJ8-2')].join('\n'));
+  await tick();
+  assert.equal((await w.jobs.wait(w.scheme.id, 0))!.ok, null, "GitHub hasn't listed the second yet");
+  w.gh.runners.push({ ...gh('DESKTOP-G248IJ8-2', 'peek-auras-ci'), status: 'offline' });
+  await tick();
+  assert.equal((await w.jobs.wait(w.scheme.id, 0))!.ok, null, "it isn't online yet");
+  w.gh.runners[1].status = 'online';
+  assert.equal((await w.jobs.wait(w.scheme.id, 5000))!.ok, true);
+  assert.deepEqual(labelsOf(w, 'DESKTOP-G248IJ8-2'), ['peek-auras-ci-check']);
+});
+
+test('a role the add could give to no runner, or GitHub refuses to set, is a failed add that says so', async () => {
+  const w = world(300);
+  w.gh.runners.push(gh('DESKTOP-G248IJ8', 'peek-auras-ci'));
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', role: 'side' });
+  w.answer(true, 'already has 1 runner(s) here, so nothing changed.');
+  const none = (await w.jobs.wait(w.scheme.id, 5000))!;
+  assert.equal(none.ok, false);
+  assert.match(none.text, /No new runner, so none got the role side; runners already there keep their labels/);
+  assert.deepEqual(puts(w), []);
+
+  w.gh.refuse.labels = true;
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 2, os: 'windows', role: 'side' });
+  w.gh.runners.push(gh('DESKTOP-G248IJ8-2', 'peek-auras-ci'));
+  w.answer(true, 'Registering DESKTOP-G248IJ8-2 on caraminden/peek-auras with label peek-auras-ci');
+  const refused = (await w.jobs.wait(w.scheme.id, 5000))!;
+  assert.equal(refused.ok, false);
+  assert.match(refused.text, /no labels today/);
+  assert.match(refused.text, /gh api -X PUT repos\/caraminden\/peek-auras\/actions\/runners\/2\/labels -f 'labels\[\]=peek-auras-ci' -f 'labels\[\]=peek-auras-ci-side'/);
+});
+
+test('a failed add still gives the runners it did register their role, so none is left a land runner', async () => {
+  const w = world();
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 2, os: 'windows', role: 'side' });
+  w.gh.runners.push(gh('DESKTOP-G248IJ8', 'peek-auras-ci'));
+  w.answer(false, "1 runner(s) weren't added");
+  const done = (await w.jobs.wait(w.scheme.id, 5000))!;
+  assert.equal(done.ok, false);
+  assert.match(done.text, /DESKTOP-G248IJ8 Idle, role side/);
+  assert.match(w.notes[0], /failed: 1 runner\(s\) weren't added$/, "the note's reason is the PC's");
+  assert.deepEqual(labelsOf(w, 'DESKTOP-G248IJ8'), ['peek-auras-ci', 'peek-auras-ci-side']);
+});
+
+test("a second PC's first runner is a side one by default; the first PC's keeps the labels its script gave it, and a role asked for wins", async () => {
+  const w = world();
+  const two = secondPc(w);
+  w.gh.runners.push(gh('DESKTOP-G248IJ8', 'peek-auras-ci'));
+  const add = async (host: string, name: string, answer: (ok: boolean, text: string) => unknown, role?: 'land') => {
+    await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', host, ...(role && { role }) });
+    w.gh.runners.push(gh(name, 'peek-auras-ci'));
+    answer(true, `Registering ${name} on caraminden/peek-auras with label peek-auras-ci`);
+    const done = (await w.jobs.wait(w.scheme.id, 5000))!;
+    assert.equal(done.ok, true, done.text);
+    return labelsOf(w, name);
+  };
+  assert.deepEqual(await add('DESKTOP-G248IJ8', 'DESKTOP-G248IJ8-2', w.answer), ['peek-auras-ci']);
+  assert.deepEqual(await add('LAPTOP-JOSH', 'LAPTOP-JOSH', two.answer), ['peek-auras-ci', 'peek-auras-ci-side']);
+  assert.deepEqual(await add('LAPTOP-JOSH', 'LAPTOP-JOSH-2', two.answer, 'land'), ['peek-auras-ci']);
+  assert.deepEqual(await add('LAPTOP-JOSH', 'LAPTOP-JOSH-3', two.answer), ['peek-auras-ci'], 'a PC with a land runner keeps what its script gives');
+});
+
+test('an add asks GitHub what is there first: when it cannot, nothing reaches the PC', async () => {
+  const w = world();
+  const fetchBroken = new RunnerTokens(w.store, w.link, true, (async () => Response.json({ message: 'down' }, { status: 503 })) as typeof globalThis.fetch);
+  const jobs = new RunnerJobs(w.store, fetchBroken, w.relay, 100, 10);
+  await assert.rejects(jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', role: 'side' }), { status: 502, message: /down/ });
+  assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
 });

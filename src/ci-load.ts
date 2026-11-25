@@ -9,6 +9,7 @@
 import { clock, type Job as CiJob } from './ci-health.ts';
 import type { Project, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
+import type { Pcs } from './ci-ships.ts';
 import { repoSlug } from './prlinks.ts';
 import { every, type Job } from './every.ts';
 import { thrown } from './thrown.ts';
@@ -443,6 +444,19 @@ export class CiLoad {
           .filter(Boolean),
       ),
     ];
+  }
+
+  /** Each PC connected or heard from in the last 10 minutes, with the runners its agents' newest samples list (#1934). */
+  runnersByPc(now = Date.now()): Pcs {
+    const pcs: Pcs = new Map(this.deps.hosts().map((h) => [h.toLowerCase(), new Set()]));
+    for (const s of this.latest.values()) {
+      if (now - s.at >= 10 * MIN) continue;
+      const host = s.host.toLowerCase();
+      const runners = pcs.get(host) ?? new Set();
+      pcs.set(host, runners);
+      for (const r of s.runners) if (r.repo) runners.add(`${r.repo}/${r.name.toLowerCase()}`);
+    }
+    return pcs;
   }
 
   /** A deleted machine's samples go with it (its rows cascade). */

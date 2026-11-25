@@ -49,7 +49,7 @@ import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
-import { ShipWatch } from './src/ci-ships.ts';
+import { shipsOn, ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
@@ -2013,7 +2013,7 @@ const ciLoad = new CiLoad(store, {
 });
 if (!BOOT_CHECK) ciLoad.start();
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
-// agent's PC go to the runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
+// agent's PC go to that PC's runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
 // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
 const runnerRepos = () =>
   [
@@ -2031,7 +2031,7 @@ const asScheme = (repo: string) => {
 const shipWatch = new ShipWatch({
   repos: runnerRepos,
   as: asScheme,
-  send: (ships) => machines.sendShips(ships),
+  send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
 });
 if (!BOOT_CHECK) shipWatch.start();

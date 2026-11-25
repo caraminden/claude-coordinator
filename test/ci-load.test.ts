@@ -370,3 +370,22 @@ test('samples wait in memory and are written together, with nothing lost to a re
   );
   store.db.close();
 });
+
+test("each PC's own runners come from its agents' newest samples; a PC connected with none yet is there, and a stale sample isn't (#1934)", () => {
+  const store = new Store(join(root, 'pcs.db'));
+  const load = new CiLoad(store, { jobs: () => [], hosts: () => ['LAPTOP', 'Desk'], mandate: async () => true });
+  const win = store.createMachine('win', '', 'Cara');
+  const wsl = store.createMachine('wsl', '', 'Cara');
+  const use = (name: string, repo: string) => ({ name, repo, dir: '', cpu: 0, mem: 0 });
+  load.add(win.id, sample(0, { host: 'DESK', runners: [use('DESK', 'c/Peek'), use('who', '')] }), NOW);
+  load.add(wsl.id, sample(0, { host: 'desk', os: 'linux', runners: [use('DESK-linux', 'c/citadel')] }), NOW);
+  assert.deepEqual(
+    load.runnersByPc(NOW + MIN),
+    new Map([
+      ['laptop', new Set()],
+      ['desk', new Set(['c/peek/desk', 'c/citadel/desk-linux'])],
+    ]),
+    'the Windows and WSL agents of one PC are one PC',
+  );
+  assert.deepEqual(load.runnersByPc(NOW + 11 * MIN).get('desk'), new Set());
+});

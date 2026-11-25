@@ -25,6 +25,7 @@ interface Manifest {
 }
 
 const HEALTH_MS = Number(process.env.BOOT_CHECK_MS) || 60_000;
+const PAUSE_MS = Number(process.env.BOOT_CHECK_PAUSE_MS) || 2000;
 const args = process.argv.slice(2);
 const app = resolve(args.find((a) => !a.startsWith('--')) ?? '.');
 
@@ -63,8 +64,7 @@ async function look(port: number, health: string | null): Promise<{ up: boolean;
     return { up, saw: up ? `port ${port} open` : `port ${port} closed` };
   }
   try {
-    // No redirect followed: the health path itself has to answer 2xx, as at a deploy.
-    const r = await fetch(`http://127.0.0.1:${port}${health}`, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`http://127.0.0.1:${port}${health}`, { signal: AbortSignal.timeout(3000) });
     await r.body?.cancel();
     return { up: r.ok, saw: `${health} answered ${r.status}` };
   } catch {
@@ -72,7 +72,7 @@ async function look(port: number, health: string | null): Promise<{ up: boolean;
   }
 }
 
-/** Ask the app to stop, then make it. True when it stopped by itself. */
+/** Ask the app to stop, then make it, and whatever it left in its group. True when it stopped by itself. */
 async function stop(p: ChildProcess): Promise<boolean> {
   if (p.pid === undefined) return true;
   // The whole group: an app started through a wrapper leaves its child behind otherwise.
@@ -106,10 +106,13 @@ const health = manifest.health ?? null;
 const name = /^\/apps\/([^/]+)/.exec(health ?? '')?.[1] ?? basename(app);
 
 if (!args.includes('--no-build')) {
+  // One clock for the whole build, as at a deploy.
+  const minutes = manifest.build_timeout ?? 20;
+  const deadline = Date.now() + minutes * 60_000;
   for (const step of manifest.build ?? []) {
     console.log(`boot check: $ ${step}`);
-    const r = spawnSync('bash', ['-c', step], { cwd: app, stdio: 'inherit', timeout: (manifest.build_timeout ?? 20) * 60_000 });
-    if (r.status !== 0) fail(`the build step "${step}" ${r.error ? `didn't finish: ${r.error.message}` : `exited ${r.status ?? r.signal}`}`);
+    const r = spawnSync('bash', ['-c', step], { cwd: app, stdio: 'inherit', timeout: Math.max(1, deadline - Date.now()) });
+    if (r.status !== 0) fail(`the build step "${step}" ${r.error ? `didn't finish (the build has ${minutes} min): ${r.error.message}` : `exited ${r.status ?? r.signal}`}`);
   }
 }
 
@@ -130,8 +133,9 @@ async function main(): Promise<void> {
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     LANG: process.env.LANG ?? 'C.UTF-8',
-    // Where a toolchain the app starts through lives, now that HOME is an empty folder.
-    ...Object.fromEntries(['LD_LIBRARY_PATH', 'MISE_DATA_DIR', 'RUSTUP_HOME', 'CARGO_HOME'].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : []))),
+    // The runner's mark, by which it ends what a cancelled job left running; then where a toolchain the app starts
+    // through lives, now that HOME is an empty folder.
+    ...Object.fromEntries(['RUNNER_TRACKING_ID', 'LD_LIBRARY_PATH', 'MISE_DATA_DIR', 'RUSTUP_HOME', 'CARGO_HOME'].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : []))),
     ...Object.fromEntries(own),
     HOME: home,
     TMPDIR: scratch,
@@ -145,7 +149,9 @@ async function main(): Promise<void> {
   const program = basename(command) === 'node' ? process.execPath : command;
 
   let out = '';
-  const child = spawn(program, manifest.start.slice(1), { cwd: join(app, manifest.workdir ?? '.'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  // As in its systemd unit: ~/ is the home folder, ${VAR} comes from the environment.
+  const words = manifest.start.slice(1).map((a) => a.replace(/^~(?=\/)/, home).replace(/\$\{(\w+)\}/g, (_, v: string) => env[v] ?? ''));
+  const child = spawn(program, words, { cwd: join(app, manifest.workdir ?? '.'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const keep = (b: Buffer) => {
     out = (out + b.toString()).slice(-20_000);
   };
@@ -167,12 +173,13 @@ async function main(): Promise<void> {
     saw = seen.saw;
     answers = seen.up ? answers + 1 : 0;
     // Twice, a moment apart, as Citadel's deploy asks: one answer can come just before a crash.
-    if (answers < 2) await sleep(seen.up ? 2000 : 250);
+    if (answers < 2) await sleep(seen.up ? PAUSE_MS : 250);
   }
   const secs = ((Date.now() - started) / 1000).toFixed(1);
   const died = gone(child);
   const how = child.signalCode ?? child.exitCode;
-  const clean = died || startError ? true : await stop(child);
+  // Even when it died first: a start script that exits can leave its server running.
+  const clean = (await stop(child)) || startError !== '';
 
   if (answers < 2) {
     const tail = out.trimEnd().split('\n').slice(-60).join('\n');

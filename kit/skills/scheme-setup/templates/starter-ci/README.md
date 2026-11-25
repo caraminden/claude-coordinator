@@ -27,18 +27,19 @@ check, both on the scheme's own Linux runner. An app with a Windows desktop part
 
 It reads `citadel-app.json` (`build`, `start`, `workdir`, `env`, `health`) and needs no settings. The app gets the variables
 Citadel sets (`PORT`, `DATA_DIR`, `CITADEL_KEYS`, `CITADEL_URL`, `BASE_PATH`) and its manifest's `env`, with an empty data folder, a
-HOME of its own, a throwaway identity key and a Citadel that doesn't answer. Two 2xx answers within 60 s pass;
-with no `health`, an open port counts. An app that can't start on a fresh database, or while Citadel is away, fails,
-and that is a bug in the app. A repo with no `citadel-app.json` leaves out `boot.yml` and `boot-check.ts`.
+HOME of its own, a throwaway identity key and a Citadel that doesn't answer. Two 2xx answers within 60 s pass, redirects followed, as at a deploy;
+with no `health`, an open port counts. An app that can't start on a fresh database, or while Citadel is away, fails:
+CI has no real data to start on, and Citadel does restart, so fix the app. A repo with no `citadel-app.json` leaves out `boot.yml` and `boot-check.ts` (steps 4 and 6's boot half with them).
 
 ## The nightly, as a trigger
 
 - **Starts it:** the cron, once a night, or a person's dispatch.
 - **Reads and writes:** the checkout and a temp folder it deletes. No real data, no Citadel.
 - **Starts next:** nothing itself. A red run reaches the scheme's Taskmaster through Citadel's CI health (#588),
-  once per run, and the Taskmaster starts a bug minion unless one is open on it.
+  once per red streak (the next red nights say nothing until it's green again), and the Taskmaster starts a bug minion unless one is open on it.
 - **A person comes back in** through that minion's chat.
 - **Two at once:** the `boot` concurrency group.
 
-Never `ubuntu-latest`, and no `CI_RUNNER` switch: GitHub's runners cost Actions minutes (Cara, 2026-11-05).
+No `CI_RUNNER` switch, unlike `references/push-guard.md`'s `runs-on`: as in Citadel's other Linux jobs, GitHub's runners cost Actions minutes and need
+a person's yes (`citadel:ci-store`), and a nightly can wait.
 While Cara's PC is off or she is logged off, runs wait in GitHub's queue.

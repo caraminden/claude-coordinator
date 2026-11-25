@@ -122,7 +122,8 @@ Idle (or its failure is in your done note).
 
 **A repo with no CI** starts from this skill's `templates/starter-ci/` when the plan gives it CI: the check on the
 scheme's Linux runner after each ship, and a nightly boot check that starts the app and gets its health page. Its
-`README.md` says where each file goes; its jobs name the Linux runner only, with no hosted fallback (GitHub's minutes cost). *Done when* both workflows have run green on the default branch.
+`README.md` says where each file goes; the one exception to the `runs-on` above is its jobs, which name the Linux runner with no hosted
+fallback. *Done when* both workflows have run green on the default branch.
 
 **A Windows app's CI** starts from this skill's `templates/windows-ci/` when the plan gives the
 scheme Windows CI: its `README.md` says where each file goes, and its lint line joins the check

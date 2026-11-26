@@ -24,11 +24,11 @@ test/one-home.test.ts
 test/css-has-cost.test.ts
 test/help-words.test.ts
 test/unit-thp.test.ts
+test/db-handle-timeouts.test.ts
 test/size-budget.test.ts
 test/ui-contract.test.ts
 test/config.test.ts
 test/raw-log-read.test.ts
-test/db-handle-timeouts.test.ts
 test/ship-core-parity.test.ts
 # The pinning tests (#2037, Josh 2026-11-25 "Always-run list plus smoke"): each reads source text and goes red for an edit
 # that never touched it, and #1928's narrow pick left them to the train's CI. Together about 2.5 CPU-s. The slow ones that

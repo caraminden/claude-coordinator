@@ -123,6 +123,7 @@ done
 if [ "${1:-}" = --long ]; then
   [ -z "$here" ] || { say "a long job runs on the scheme's CI only, so --long and --here (or CITADEL_HEAVY_HERE) don't go together"; exit 2; }
   shift
+  case ${1:-} in --here|--heavy|--long) say "--long takes the command next, not $1"; exit 2 ;; esac
   exec "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts" --long "$@"
 fi
 [ $# -gt 0 ] || { usage >&2; exit 2; }

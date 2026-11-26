@@ -789,7 +789,12 @@ test('--help and -h print usage, exit 0 and start no job', () => {
   for (const args of [['--help'], ['-h'], ['--here', '--help'], ['--heavy', '-h'], ['--long', '--help']]) {
     const { dir, env } = folder(1);
     const ran = join(root, `help-ran-${n++}`);
-    const r = spawnSync(heavy, [...args, 'touch', ran], { env, encoding: 'utf8', timeout: 10_000 });
+    // CI on, with a stand-in citadel-node, so a --long that reached heavy-ci.ts would show.
+    const bin = join(root, `help-bin-${n++}`);
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'citadel-node'), `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 });
+    const onCi = { ...env, CITADEL_HEAVY_HERE: undefined, PATH: `${bin}:${process.env.PATH}` };
+    const r = spawnSync(heavy, [...args, 'touch', ran], { env: onCi, encoding: 'utf8', timeout: 10_000 });
     assert.equal(r.status, 0, `${args}: ${r.stderr}`);
     for (const opt of ['--here', '--heavy', '--long']) assert.ok(r.stdout.includes(opt), `${args}: usage names ${opt}`);
     assert.ok(!existsSync(ran), `${args}: ran nothing`);
@@ -810,6 +815,19 @@ test('an unknown option before the command is refused with the usage', () => {
   assert.match(r.stderr, /unknown option --hlep/);
   assert.match(r.stderr, /usage: citadel-heavy/);
   assert.ok(!existsSync(join(dir, 'history')));
+});
+
+test('an option after --long is refused, not queued as the command', () => {
+  const { env } = folder(1);
+  const bin = join(root, `long-bin-${n++}`);
+  mkdirSync(bin);
+  const ran = join(bin, 'ran');
+  writeFileSync(join(bin, 'citadel-node'), `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 });
+  const onCi = { ...env, CITADEL_HEAVY_HERE: undefined, PATH: `${bin}:${process.env.PATH}` };
+  const r = spawnSync(heavy, ['--long', '--here', 'make'], { env: onCi, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--long takes the command next, not --here/);
+  assert.ok(!existsSync(ran), 'nothing was queued');
 });
 
 test('--help after the command belongs to the command', () => {

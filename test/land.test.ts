@@ -1735,6 +1735,11 @@ test('the smoke check adds the @pinned tests (the route test, list-reads, the bo
     run('src/runner.ts', (m) => m.replace(/^@pinned .*\n/m, '')),
     /list-reads|boot-check/,
   );
+  // A map that can't answer runs every @pinned test, never skips one.
+  assert.match(
+    run('notes/c.txt', (m) => `${m}a line that is no rule\n`),
+    new RegExp(`test/${route}\\.test\\.ts test/list-reads\\.test\\.ts test/boot-check\\.test\\.ts$`),
+  );
 });
 
 test("a clean smoke check lands as before, its time outside the timing line; tests past the limit don't decide; LAND_SMOKE=0 skips it (#1012)", () => {

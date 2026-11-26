@@ -47,10 +47,17 @@ src/supervisor-client.ts: test/turn-supervisor.test.ts
 src/turn-run.mjs: test/turn-supervisor.test.ts test/steer.test.ts test/turn-survives.test.ts
 src/turn-wrapper.mjs: test/steer.test.ts test/turn-survives.test.ts test/claude-container.test.ts
 # closed-cleanup and background-jobs broke ships #1449-#1464 and #1364-#1383 (#1622); each runs in about 1 s.
-# list-reads counts the list routes' statements (#1757); the boot check boots the server and calls the turn tools (#1799).
+# list-reads counts the list routes' statements (#1757); the boot check boots the server, calls the turn tools and builds a
+# turn's launch (#1799), and breaks each of the files below on purpose.
 src/runner.ts: test/list-reads.test.ts test/boot-check.test.ts
 src/db.ts: test/list-reads.test.ts
 src/db/*.ts: test/list-reads.test.ts
+src/routes/projects.ts: test/list-reads.test.ts
+server.ts: test/boot-check.test.ts
+src/mcp.ts: test/boot-check.test.ts
+src/mcp-minions.ts: test/boot-check.test.ts
+src/routes/files.ts: test/boot-check.test.ts
+src/turn-launch.ts: test/boot-check.test.ts
 src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
@@ -187,7 +194,7 @@ tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts
 public/sw.js: test/backup.test.ts test/shell.test.ts
 tools/deploy-queue.sh: test/ci-runner-choice.test.ts
 deploy/claude-container/Containerfile: test/claude-container.test.ts
-server.ts: test/deploy.test.ts test/off-thread-fs.test.ts test/one-home.test.ts
+server.ts: test/deploy.test.ts test/off-thread-fs.test.ts test/one-home.test.ts test/flake-start-model.test.ts test/held-starts.test.ts
 kit/skills/scheme-setup/templates/biome.config.json: test/format.test.ts
 deploy/citadel-heavy.slice: test/heavy-unit.test.ts
 kit/skills/writing-for-agents/HOOKS.md: test/kit-hooks.test.ts
@@ -205,7 +212,12 @@ tools/land.local.sh: test/ship-core-parity.test.ts
 public/slow-moments.js: test/slow-recorder-browser.test.ts
 kit/skills/skills-survey/survey.workflow.js: test/survey-workflow.test.ts
 kit/.claude-plugin/plugin.json: test/turn-setup.test.ts
-tools/citadel-heavy: test/turn-setup.test.ts
+tools/citadel-heavy: test/turn-setup.test.ts test/pressure.test.ts
 tools/citadel-wait: test/turn-setup.test.ts
 tools/citadel-dev-copy: test/turn-setup.test.ts
 tools/ci-failures: test/turn-setup.test.ts
+public/error-beacon.js: test/deploy-watch.test.ts
+public/minion-rules.js: test/held-list.test.ts
+src/wake.ts: test/held-starts.test.ts
+kit/skills/android-app/scripts/gen-icons.mjs: test/icon-gen.test.ts
+tools/deploy.sh: test/pressure.test.ts

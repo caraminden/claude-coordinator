@@ -532,7 +532,7 @@ smoke() {
       if aff=$("$tools/citadel-node" --no-warnings tools/affected.ts --root . --base "$(git merge-base main HEAD)" 2>/dev/null); then
         for f in $(awk -F'\t' '$1 == "run" { print $2 }' <<<"$aff"); do case "$pinned" in *" $f "*) [ ! -f "$f" ] || tests+=("$f") ;; esac; done
       else
-        say "smoke: the affected map couldn't answer, so the route test runs"; tests+=(test/access-matrix.test.ts)
+        say "smoke: the affected map couldn't answer, so its pinned tests run"; for f in $pinned; do [ ! -f "$f" ] || tests+=("$f"); done
       fi
     fi
     # Sent back by its last ship for these (pulled_out): they pass here before it boards again.

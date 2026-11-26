@@ -20,14 +20,15 @@ const always = new Set(
 );
 
 // The source paths a test reads: on a line that reads a file (readFileSync, a one-line helper around it, readdirSync, git
-// ls-files), a tracked path under src/, public/, tools/, kit/ or deploy/, or server.ts, written whole or as join()'s parts.
+// ls-files), a tracked path under src/, public/, tools/, kit/ or deploy/, or server.ts, written whole (after any ../) or
+// as join()'s parts.
 // shortcut: a read split over lines or through a helper of another shape is missed; widen the patterns when one bites.
 export function pinnedPaths(text: string, isFile: (p: string) => boolean): string[] {
   const helpers = [...text.matchAll(/const (\w+) = \([^)]*\)(?:: \w+)? => readFileSync\(/g)].map((m) => m[1]);
   const reads = new RegExp(`readFileSync\\(|readdirSync\\(|ls-files${helpers.map((h) => `|\\b${h}\\(`).join('')}`);
   const paths = new Set<string>();
   for (const line of text.split('\n').filter((l) => reads.test(l))) {
-    for (const m of line.matchAll(/(?<![\w./-])((?:src|public|tools|kit|deploy)\/[\w./-]+\w|server\.ts)\b/g)) if (isFile(m[1])) paths.add(m[1]);
+    for (const m of line.matchAll(/(?<![\w./-])(?:\.\.\/)*((?:src|public|tools|kit|deploy)\/[\w./-]+\w|server\.ts)\b/g)) if (isFile(m[1])) paths.add(m[1]);
     for (const m of line.matchAll(/'(src|public|tools|kit|deploy)'((?:,\s*'[\w.-]+')+)/g)) {
       const p = [m[1], ...[...m[2].matchAll(/'([\w.-]+)'/g)].map((x) => x[1])].join('/');
       if (isFile(p)) paths.add(p);
@@ -43,10 +44,11 @@ test('the scan finds a source path a test reads, whole, in parts or through a he
     "const db = readFileSync(join(repo, 'src', 'db', 'b.ts'), 'utf8');",
     "const read = (p: string) => readFileSync(join(repo, p), 'utf8');",
     "assert.ok(read('server.ts').includes('x'));",
+    "const w = readFileSync(new URL('../public/c.js', import.meta.url), 'utf8');",
     "spawnSync('node', ['src/a.ts']); // runs it, doesn't read it",
     "readFileSync(join(repo, 'src/gone.ts'));",
   ].join('\n');
-  assert.deepEqual(pinnedPaths(text, (p) => files.has(p)).sort(), ['server.ts', 'src/db/b.ts', 'tools/land.sh']);
+  assert.deepEqual(pinnedPaths(text, (p) => files.has(p)).sort(), ['public/c.js', 'server.ts', 'src/db/b.ts', 'tools/land.sh']);
 });
 
 test('every test that reads a source file is picked when that file changes, or runs on every run', () => {

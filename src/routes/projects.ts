@@ -359,9 +359,10 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number!, effort: effortOf(leader) } : null, effortOf(parent));
   if (joins?.name) props[EFFORT_KEY] = joins.name;
   if (joins?.stampLeader && leader) store.props.set('minion', leader.id, project.id, { [EFFORT_KEY]: joins.name }, session.name);
-  // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
-  const owner = body.build_owner === true;
+  const owner = body.build_owner === true; // the build's own minion (specs/build-branches.md): it keeps the list and ships the build
   if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
+  const leads = owner || body.lead === true; // a cabal's Overseer (#2095): its board exists from its first turn, so it gets the cabal tools
+  if (leads && body.cabal != null) throw new HttpError(400, "A cabal's Overseer can't be on another cabal: leave out cabal, or lead and build_owner");
   if (body.cabal != null) cabalLead(store, project.id, body.cabal, null, typeof body.title === 'string' ? body.title : ''); // refused before anything is made
   const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
   // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
@@ -369,6 +370,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
   await ownWrites(); // its build owner and the reply read the row back (#1244)
   if (body.cabal != null) putOnCabal(app, { id, project_id: project.id, title }, body.cabal, session.name, cabal?.row);
+  else if (leads) store.ensureCabal(id, project.id);
   const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
   if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
   // And it is that turn's asker's ask (#255), so its messages back count as theirs.

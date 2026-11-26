@@ -118,6 +118,11 @@ jobs:
           # A newline first: output with none at its end would hide the marker mid-line (heavy-ci.ts drops this line again).
           printf '\n=== citadel-heavy: the command exited %s ===\n' "$rc"
           exit $rc
+      # A cancel leaves a window open (tools/ci-window.sh --close).
+      - name: close this job's window
+        if: always()
+        continue-on-error: true
+        run: if [ -x tools/ci-window.sh ]; then tools/ci-window.sh --close; fi
       # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
       - name: clear what this job left running
         if: always()

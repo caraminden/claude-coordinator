@@ -320,5 +320,16 @@ test("a proof's or heavy job's window marks the ship suite it crossed as overlap
   assert.equal(out.status, 0, String(out.stderr));
   assert.ok(existsSync(join(d, 'suite-overlap')));
   assert.doesNotMatch(readFileSync(join(win, readdirSync(win)[0]), 'utf8'), / 0$/m); // closed
-  for (const f of ['flake-proof.yml', 'citadel-heavy.yml']) assert.match(readFileSync(here(`.github/workflows/${f}`), 'utf8'), /tools\/ci-window\.sh/);
+  for (const f of ['flake-proof.yml', 'citadel-heavy.yml']) {
+    const yml = readFileSync(here(`.github/workflows/${f}`), 'utf8');
+    assert.match(yml, /(window=|run: )tools\/ci-window\.sh/);
+    assert.match(yml, /if: always\(\)\n {8}continue-on-error: true\n {8}run: if \[ -x tools\/ci-window\.sh \]; then tools\/ci-window\.sh --close; fi/);
+  }
+  // A cancelled job's window, left open: --close ends this run's, and no other run's.
+  writeFileSync(join(win, '9-1'), '100 0\n');
+  writeFileSync(join(win, '8-1'), '100 0\n');
+  const closed = spawnSync('bash', [here('tools/ci-window.sh').pathname, '--close'], { env: { ...process.env, CITADEL_SUITE_WINDOWS: win, GITHUB_RUN_ID: '9' }, encoding: 'utf8' });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.match(readFileSync(join(win, '9-1'), 'utf8'), /^100 [1-9]\d+$/m);
+  assert.equal(readFileSync(join(win, '8-1'), 'utf8'), '100 0\n');
 });

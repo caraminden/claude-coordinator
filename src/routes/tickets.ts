@@ -367,7 +367,7 @@ export function deliverAnswer(app: App, ticketId: number, author: string, text: 
 export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: string, author: string, quiet = false): Promise<void> {
   if (ticket.kind === 'coordinator') throw new HttpError(400, `The ${AGENT_NAME} is never sealed`);
   if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
-  // A brief expected over $30 (#1674) starts on a person's OK: a person's Unseal (`author` is their name) is one and
+  // A brief expected over START_CARD_USD (#1674) starts on a person's OK: a person's Unseal (`author` is their name) is one and
   // settles its start card; the Taskmaster's or a minion's isn't.
   const hold = app.store.getSetting<{ usd: number; card: string }>(startHoldKey(ticket.id));
   if (hold) {

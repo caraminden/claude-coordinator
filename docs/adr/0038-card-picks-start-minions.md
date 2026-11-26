@@ -22,7 +22,7 @@ Status: accepted, 2026-11-25. Built by #2050. Reverses Cara's "Not now" of 2026-
   the scheme turned Fable off). Ship cards, cards for everyone and a Taskmaster's cards can't carry one: a Taskmaster starts its own minions with create_ticket.
 - A person's plain pick (no typed words, no picture or file) starts each picked option's minion through the
   Taskmaster's own create path: brief "Start from the handoff <path>", parent the card's owner, the picker's own
-  (assigned, requested by, and run on the picker's login), the worker pool's line, the start card over $30, and the
+  (assigned, requested by, and run on the picker's login), the worker pool's line, the start card over $50 (below), and the
   duplicate-handoff refusal (a handoff an open minion, or one closed in the last 3 days, started from). Two picks of one
   handoff at once: the second is refused. The handoff is checked again at the pick, so one moved or deleted since the
   card was posted is refused too. A path with spaces, quotes or brackets is refused when posted: the duplicate check
@@ -34,6 +34,9 @@ Status: accepted, 2026-11-25. Built by #2050. Reverses Cara's "Not now" of 2026-
 - The scheme's Taskmaster gets held mail (a fyi) naming what started.
 - A pick with typed words or a picture starts nothing: the words may change the brief, so the owner is woken as before
   and passes the picks on.
+
+**The start card's threshold:** $30 until 2026-11-26, then $50 (Josh: "Can we raise the threshold for approval to $50
+estimate? I see the $30 too often"). It is `START_CARD_USD` in `src/minion-budget.ts`, for every scheme.
 
 ## What the Taskmaster gives up
 

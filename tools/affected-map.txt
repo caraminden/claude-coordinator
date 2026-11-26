@@ -56,7 +56,7 @@ src/db/*.ts: test/list-reads.test.ts
 src/routes/projects.ts: test/list-reads.test.ts
 server.ts: test/boot-check.test.ts
 src/mcp.ts: test/boot-check.test.ts
-src/mcp-minions.ts: test/boot-check.test.ts
+src/mcp-minions.ts: test/boot-check.test.ts test/expected-cost.test.ts
 src/routes/files.ts: test/boot-check.test.ts
 src/turn-launch.ts: test/boot-check.test.ts
 src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts

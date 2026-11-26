@@ -6,6 +6,8 @@
  * so a brief's own cost estimate can stand in for the usual cost later without touching the marks.
  * Since #1674 it does: a brief's "Expected cost: $N" (or create_ticket's expected_cost) is the base when it is the larger,
  * and one over START_CARD_USD waits for a person's start card (Cara, 2026-11-22, "Build it" on #1668's card).
+ * The threshold went from $30 to $50 (Josh, 2026-11-26: "Can we raise the threshold for approval to $50 estimate? I see
+ * the $30 too often").
  *
  * Josh's picks, 2026-11-19 (grilling cards on #1114): "2x and past $3" for the minion's ask, "4x and past $10" for the
  * Taskmaster, "Yes, each turn" for the line up front, "Say why, or split" for the ask, "Chat line + minion page" for people.
@@ -29,7 +31,7 @@ export const WAKE = { times: 4, floor: 10 };
 export const CARD = { times: 10, floor: 50 };
 
 /** A brief expected to cost more than this waits for a person's start card (the one exception to "stop rate limiting my minions"). */
-export const START_CARD_USD = 30;
+export const START_CARD_USD = 50;
 
 /** The usual cost of a minion's kind of work, and what it rests on; with `estimate`, its brief's estimate is the base instead. */
 export interface Budget {

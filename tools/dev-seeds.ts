@@ -598,12 +598,12 @@ mock.boards('#takes', { boards: [
     },
   },
   'start-card': {
-    about: 'a minion the Taskmaster started whose brief expects $35: not sealed, its start card in Needs you, its brief held (#1757)',
+    about: 'a minion the Taskmaster started whose brief expects $65: not sealed, its start card in Needs you, its brief held (#1757)',
     seed(c) {
-      const t = minion(c, 'Turns ease off as memory fills', { status: 'new', note: startNote(35) }, 'feature');
-      c.store.setSetting(startHoldKey(t.id), { usd: 35, card: 'seed-start' });
-      c.store.addEvent(t.id, 'user_message', { text: 'Start from the handoff. Expected cost: ~$35.', author: 'Taskmaster', brief: true, mail: true, parked: true, startHold: true });
-      const e = c.store.addEvent(t.id, 'question', { id: 'seed-start', questions: [startCard(t.number!, t.title, 35)], startCost: 35 });
+      const t = minion(c, 'Turns ease off as memory fills', { status: 'new', note: startNote(65) }, 'feature');
+      c.store.setSetting(startHoldKey(t.id), { usd: 65, card: 'seed-start' });
+      c.store.addEvent(t.id, 'user_message', { text: 'Start from the handoff. Expected cost: ~$65.', author: 'Taskmaster', brief: true, mail: true, parked: true, startHold: true });
+      const e = c.store.addEvent(t.id, 'question', { id: 'seed-start', questions: [startCard(t.number!, t.title, 65)], startCost: 65 });
       return route(c, t, e.id);
     },
   },

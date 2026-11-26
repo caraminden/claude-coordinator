@@ -131,7 +131,7 @@ export const CREATE_TICKET = {
       expected_cost: {
         type: 'number',
         description:
-          'What the brief expects this minion to cost, in dollars (its "Expected cost: ~$N" line, citadel:briefing part 8; left out, that line is read). Its budget alarms count from the larger of this and the usual cost; over $30 no turn runs until a person answers its start card (Start, or Split first): it isn\'t sealed but shows as waiting on a person, and messages to it are held until it starts.',
+          'What the brief expects this minion to cost, in dollars (its "Expected cost: ~$N" line, citadel:briefing part 8; left out, that line is read). Its budget alarms count from the larger of this and the usual cost; over $50 no turn runs until a person answers its start card (Start, or Split first): it isn\'t sealed but shows as waiting on a person, and messages to it are held until it starts.',
       },
       not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, or one open or closed in the last 3 days started from the same handoff file, and you checked it is not the same work' },
     },

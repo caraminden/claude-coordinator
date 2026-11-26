@@ -389,7 +389,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
     store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
   }
   if (estimate) store.setSetting(budgetKey(id), { estimate } satisfies BudgetState);
-  // Over $30, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
+  // Over START_CARD_USD, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
   // to it is held meanwhile (runner.send), a chained one's brief too.
   if (caller && estimate && estimate > START_CARD_USD && !(cabal?.usd && estimate <= cabal.usd)) {
     const t = store.getTicket(id)!;

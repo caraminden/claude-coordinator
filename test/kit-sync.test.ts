@@ -478,3 +478,45 @@ test("a round is saved as each scheme's check starts, so a restart mid-round fin
     await tidy(jobs, root);
   }
 });
+
+test("a scheme's check runs in a citadel-heavy slot, so a round with several schemes behind can't start them all at once (#2112)", async () => {
+  const { HostJobs } = await import('../src/host-job.ts');
+  const { KitSync } = await import('../src/kit-sync.ts');
+  const root = mkdtempSync(join(tmpdir(), 'kit-sync-heavy-'));
+  const jobs = new HostJobs(() => false);
+  try {
+    const kit = repo(root, 'kit');
+    const land1 = "#!/usr/bin/env bash\n# v1\nCHECK='true'\n";
+    commit(kit, { [LAND.template]: land1 }, 'v1');
+    const projectsDir = join(root, 'projects');
+    commit(repo(projectsDir, '3/repo'), { [LAND.path]: land1 }, 'setup');
+    commit(kit, { [LAND.template]: land1.replace('# v1', '# v2') }, 'v2');
+    const argvs: string[][] = [];
+    const watching = { start: (o: Parameters<typeof jobs.start>[0]) => (argvs.push(o.argv), jobs.start(o)), state: jobs.state.bind(jobs) };
+    let saved: unknown;
+    const ks = new KitSync({
+      kitDir: kit,
+      projectsDir,
+      runDir: join(root, 'run'),
+      jobs: watching,
+      load: () => saved && JSON.parse(JSON.stringify(saved)),
+      save: (s) => (saved = JSON.parse(JSON.stringify(s))),
+      projects: () => [{ id: 3, name: 'One' }],
+      home: () => 2,
+      chat: async (p) => 100 + p,
+      env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME! }),
+      canPush: async () => true,
+      postCard: () => 'q',
+      settle: () => {},
+      note: () => {},
+      mail: () => {},
+    } as never);
+    await ks.poll();
+    assert.equal(argvs.length, 1);
+    assert.match(argvs[0][0], /tools\/citadel-heavy$/, 'the check is wrapped in citadel-heavy');
+    assert.ok(argvs[0].includes('--here'), 'and stays on perigee, in the scheme worktree');
+    assert.deepEqual(argvs[0].slice(-2), ['-c', CHECK_SCRIPT]);
+  } finally {
+    await tidy(jobs, root);
+  }
+});

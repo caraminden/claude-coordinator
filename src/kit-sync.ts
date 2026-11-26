@@ -498,7 +498,10 @@ export class KitSync {
       this.d.jobs.start({
         dir: this.jobDir(project, 'check'),
         cwd: this.worktree(project),
-        argv: ['bash', '-c', CHECK_SCRIPT],
+        // In a heavy slot like every other heavy job (#2112): a round with many schemes behind checks a few at a time. CHECK_TIMEOUT
+        // is inside the script, so it times the run and not the wait; the card shows 'checking' while it waits. --here: it needs
+        // this worktree. A ship isn't wrapped: land.sh refuses under citadel-heavy and takes its own slot for its suite.
+        argv: [join(import.meta.dirname, '../tools/citadel-heavy'), '--here', '--heavy', 'bash', '-c', CHECK_SCRIPT],
         env: { ...this.d.env(null), KIT_SYNC_GUARD: guard ? '1' : '0' },
         unit: `citadel-kit-sync-check-${project}-${Date.now()}`,
         description: `Kit sync check for ${name}`,

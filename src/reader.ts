@@ -187,9 +187,9 @@ export function wholeSteps(db: DatabaseSync, shared: BigInt64Array | null, pin =
       }
       let end!: () => void;
       tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
-      // Pinned after this request came, so new enough for it whatever opened since. Checked again against the steps
-      // opened, one that opened in this instant sent it to wait for a transaction nobody holds, which never ends, and
-      // every later request on this thread behind it (#2086: every page read a 503 for 30 minutes, Nov 25).
+      // Pinned after this request came, so new enough for it whatever opened since: no second check against the steps
+      // opened. With one, a step that opened in this instant sent the request to wait for a transaction nobody holds,
+      // which never ends, and every later request on this thread behind it (#2086: every page read a 503 for 30 minutes, Nov 25).
       break;
     }
     const mine = tx;

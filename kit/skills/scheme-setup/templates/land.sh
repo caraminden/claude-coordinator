@@ -1293,9 +1293,7 @@ here=$(git rev-parse --show-toplevel)
 cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
-# For the scheme's own checks a --full run makes (its exported environment): the $BRANCH commit the build took in. A check
-# that compares with the last release (Citadel's schema-compat test) compares with this when that release isn't under
-# HEAD: the run ships nothing, and $BRANCH may ship past it while it waits in line (#2067). --build meets the last release.
+# A --full run's checks: the $BRANCH commit the build took in, to compare with in place of a newer last release (#2067).
 if [ "$mode" = full ]; then LAND_BUILD_BASE=$(git merge-base HEAD "refs/heads/$BRANCH") && export LAND_BUILD_BASE; fi
 [ -z "$verify" ] || branch=verify LAND_KNOWN_RED='' LAND_FAST='' # its scratch branch is land/verify; it judges, so nothing is known red
 if [ "$CONFLICT_PREP" = 1 ] && [ "$mode" = land ] && [ -z "$verify" ]; then

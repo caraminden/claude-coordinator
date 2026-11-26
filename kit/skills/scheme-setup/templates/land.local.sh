@@ -16,6 +16,9 @@
 # The smoke check also runs CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the
 # line too, and skipped in line when main hasn't moved since. 0: only in line (it runs twice when main moves).
 # EARLY_CHECK=${LAND_EARLY_CHECK:-1}
+# What a fast land (no check, no CI) still runs on its rebase: the quick gates. Unset: the kit's type check and size
+# budget, when the repo has them. '' none.
+# FAST_CHECK='node tools/typecheck.ts && node --test test/size-budget.test.ts'
 
 # The scheme's main branch.
 # BRANCH=main

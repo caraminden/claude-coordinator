@@ -24,7 +24,7 @@ When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (exe
 for byte, and `land.local.sh` to `tools/land.local.sh`. Every setting below goes in `land.local.sh`,
 never in `land.sh`: the core stays the kit's, so a kit fix reaches the scheme as one copy, and
 Citadel's deploy lists the schemes whose copy differs. Set `CHECK` there to the check command from
-Project facts, or `true` while there is none (your done note says so); `SMOKE_CMD` to the check's quick part (a lint or a type check that answers in seconds; empty leaves only the conflict check before the line); `PUSH_MAIN=0` keeps main
+Project facts, or `true` while there is none (your done note says so); `SMOKE_CMD` to the check's quick part (a lint or a type check that answers in seconds; empty leaves only the conflict check before the line; a fast land also runs `FAST_CHECK` on its rebase, by default the kit's type check and size budget when the repo has them); `PUSH_MAIN=0` keeps main
 local, and `land_after` is the hook for what the scheme does after a ship is pushed (closing a
 PR, say). It rebases, runs the check, fast-forwards the main checkout and
 pushes main; read its header. Ships wait for its lock in a line, oldest first, with no time

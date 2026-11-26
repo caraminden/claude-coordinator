@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -311,10 +311,13 @@ test("minion-state claims: another minion's state with no read is its own shape;
   assert.match(liveClaimCheck(turn('The last four lands all failed.'))[0], /^live-state/);
 });
 
-test('a minion-state claim with no read sends the stop back once per prompt, naming live_facts; a read in the rewrite clears it', () => {
+test('a minion-state claim with no read sends the stop back once per prompt, naming live_facts; a read in the rewrite clears it', (t) => {
   const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
   const stateDir = mkdtempSync(join(tmpdir(), 'answer-state-'));
-  const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
+  const dir = mkdtempSync(join(tmpdir(), 'answer-t-'));
+  // timing-ok: own temp dir
+  t.after(() => [shared, stateDir, dir].forEach((d) => rmSync(d, { recursive: true, force: true })));
+  const path = join(dir, 't.jsonl');
   const env = { COORDINATOR_ROLE: 'coordinator', COORDINATOR_SHARED_DIR: shared };
   writeFileSync(path, jsonl(prompt('[Josh]: is the burn-in fix in?'), say('Yes: #1725 has shipped.')));
   const out: { block?: string } = {};

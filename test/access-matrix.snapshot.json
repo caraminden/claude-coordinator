@@ -3009,7 +3009,27 @@
   "outsider": "403 Only a cabal member or its lead writes on its board",
   "tmA": "403 Only a cabal member or its lead writes on its board",
   "tmB": "403 Only a cabal member or its lead writes on its board",
-  "m1": "400 action must be read, note, ask, answer, row, log or red",
+  "m1": "400 action must be read, note, ask, answer, row, log, red or form",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/cabal/member": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal's lead acts on its members",
+  "member": "403 Only a cabal's lead acts on its members",
+  "outsider": "403 Only a cabal's lead acts on its members",
+  "tmA": "403 Only a cabal's lead acts on its members",
+  "tmB": "403 Only a cabal's lead acts on its members",
+  "m1": "403 Only a cabal's lead does this, and you lead none",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/cabal/start": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal's lead starts its members",
+  "member": "403 Only a cabal's lead starts its members",
+  "outsider": "403 Only a cabal's lead starts its members",
+  "tmA": "403 Only a cabal's lead starts its members",
+  "tmB": "403 Only a cabal's lead starts its members",
+  "m1": "403 Only a cabal's lead starts its members, and you lead none",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/check": {
@@ -3939,6 +3959,26 @@
   "outsider": "403 Only a cabal member or its lead writes on its board",
   "tmA": "403 Only a cabal member or its lead writes on its board",
   "tmB": "403 Only a cabal member or its lead writes on its board",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cabal/member": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal's lead acts on its members",
+  "member": "403 Only a cabal's lead acts on its members",
+  "outsider": "403 Only a cabal's lead acts on its members",
+  "tmA": "403 Only a cabal's lead acts on its members",
+  "tmB": "403 Only a cabal's lead acts on its members",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cabal/start": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal's lead starts its members",
+  "member": "403 Only a cabal's lead starts its members",
+  "outsider": "403 Only a cabal's lead starts its members",
+  "tmA": "403 Only a cabal's lead starts its members",
+  "tmB": "403 Only a cabal's lead starts its members",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

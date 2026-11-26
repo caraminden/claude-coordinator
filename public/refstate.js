@@ -8,21 +8,24 @@ import { pendingRelease, releasesLoaded } from './releases.js';
 const TARGET = 'a.thread-ref[href], a[data-pr-url][href]';
 const THREAD_HREF = /^#\/p\/(\d+)\/t\/(\d+)$/;
 
-/** Paint every minion link under `root` (the whole page by default) from the open scheme's minions. */
+/**
+ * Paint every minion link under `root` (the whole page by default) from the open scheme's minions.
+ * @param {ParentNode} [root]
+ */
 export function paintRefs(root = document) {
   if (view?.kind !== 'project' || !view.tickets) return;
-  const links = [...root.querySelectorAll(TARGET)];
+  const links = [.../** @type {NodeListOf<HTMLAnchorElement>} */ (root.querySelectorAll(TARGET))];
   if (!links.length) return;
   const byNumber = new Map([...view.tickets.values()].map((t) => [t.number, t]));
   for (const a of links) {
-    const m = THREAD_HREF.exec(a.getAttribute('href'));
+    const m = THREAD_HREF.exec(/** @type {string} */ (a.getAttribute('href')));
     if (!m) continue;
     const t = Number(m[1]) === view.projectId ? byNumber.get(Number(m[2])) : null;
     const release = t && t.status === 'closed' ? pendingRelease(t) : null;
     // A dismissed minion's release may still be on its way: until the releases are known, say nothing rather than guess green.
     const bucket = t?.status === 'closed' && !releasesLoaded() ? 'neutral' : refBucket(release ? { ...t, release } : t);
     if (a.dataset.baseTitle === undefined) a.dataset.baseTitle = a.getAttribute('title') ?? '';
-    const word = REF_WORDS[bucket];
+    const word = /** @type {Record<string, string>} */ (REF_WORDS)[bucket];
     if (word) {
       if (a.dataset.refState !== bucket) a.dataset.refState = bucket;
     } else delete a.dataset.refState;
@@ -47,6 +50,6 @@ export function schedulePaintRefs() {
 /** Paint links as chats draw them, and again whenever `schedulePaintRefs` is asked (core.js, on each ticket update). */
 export function watchRefs() {
   new MutationObserver((muts) => {
-    if (muts.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches?.(TARGET) || n.querySelector?.(TARGET))))) schedulePaintRefs();
+    if (muts.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && /** @type {Element} */ (n.matches?.(TARGET) || /** @type {Element} */ (n).querySelector?.(TARGET))))) schedulePaintRefs();
   }).observe(document.body, { childList: true, subtree: true });
 }

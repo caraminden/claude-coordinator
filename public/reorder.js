@@ -6,21 +6,41 @@
 // pointer, the rows it passes slide aside, a dashed slot marks where it will land, and onDrop says where it went; a plain click still opens it.
 // Standalone like rail.js beside it, which contraptions load as /apps/_citadel/rail.js; the server imports inOrder.
 
+/** Where a row sits with its carried lines, measured once as the drag starts. @typedef {{ row: HTMLElement, top: number, bottom: number, left: number, width: number }} Extent */
+/** A press on a row, from the pointer going down to it coming up. @typedef {{ row: HTMLElement, id: number, x: number, y: number, mouse: boolean, timer?: ReturnType<typeof setTimeout>, dragging: boolean, from: number, to: number, self: Extent, slots: Extent[], pitch: number, marker: HTMLElement }} Press */
+
 const HOLD_MS = 350;
 const SLOP = 8; // px a press may wander and still be a click, or a hold
 
-/** `items` in `keys`' order: those it names first, as it orders them, then the rest as they came (a new one goes at the end). */
+/**
+ * `items` in `keys`' order: those it names first, as it orders them, then the rest as they came (a new one goes at the end).
+ * @template T
+ * @param {Partial<T>[]} items Partial: the server hands over rows it picked a few columns of, and its keyOf names the whole row.
+ * @param {(item: T) => unknown} keyOf
+ * @param {unknown[] | null | undefined} keys
+ * @returns {T[]}
+ */
 export function inOrder(items, keyOf, keys) {
-  if (!keys?.length) return items;
+  if (!keys?.length) return /** @type {T[]} */ (items);
   const at = new Map(keys.map((k, i) => [String(k), i]));
-  const rank = (x) => at.get(String(keyOf(x))) ?? Infinity;
-  return items
-    .map((x, i) => [x, i])
-    .sort(([a, i], [b, j]) => rank(a) - rank(b) || i - j)
-    .map(([x]) => x);
+  /** @param {Partial<T>} x */
+  const rank = (x) => at.get(String(keyOf(/** @type {T} */ (x)))) ?? Infinity;
+  return /** @type {T[]} */ (
+    items
+      .map((x, i) => /** @type {[Partial<T>, number]} */ ([x, i]))
+      .sort(([a, i], [b, j]) => rank(a) - rank(b) || i - j)
+      .map(([x]) => x)
+  );
 }
 
-/** `keys` with the one at `from` moved to `to`. */
+/**
+ * `keys` with the one at `from` moved to `to`.
+ * @template T
+ * @param {T[]} keys
+ * @param {number} from
+ * @param {number} to
+ * @returns {T[]}
+ */
 export function moved(keys, from, to) {
   const next = keys.slice();
   next.splice(to, 0, ...next.splice(from, 1));
@@ -33,14 +53,23 @@ export function moved(keys, from, to) {
  * release lines under a scheme. onDrop(from, to) gets indexes into items(), only when the row changed place, and
  * must have redrawn the list in its new order by the time it returns (the keyboard's move refocuses the row there).
  * Once per list element: a redraw that keeps the element keeps it working.
+ * @param {HTMLElement} list
+ * @param {{ items: () => HTMLElement[], carry?: (row: HTMLElement) => HTMLElement[], onDrop: (from: number, to: number) => void }} options
  */
 export function dragReorder(list, { items, carry = () => [], onDrop }) {
   if (list.hasAttribute('data-reorder')) return;
   list.setAttribute('data-reorder', '');
   addStyles();
-  let press = null; // { row, id, x, y, mouse, timer, dragging, from, to, slots, pitch, marker }
+  // Null while no row is held; typed whole so the handlers that only run during a press read it plainly.
+  /** @type {Press} */
+  let press = /** @type {never} */ (null);
 
+  /** @param {HTMLElement} row */
   const parts = (row) => [row, ...carry(row)];
+  /**
+   * @param {HTMLElement} row
+   * @param {number} px
+   */
   const shift = (row, px) => {
     for (const el of parts(row)) el.style.transform = px ? `translateY(${px}px)` : '';
   };
@@ -57,10 +86,14 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     removeEventListener('pointermove', move, true);
     removeEventListener('pointerup', up, true);
     removeEventListener('pointercancel', cancel, true);
-    press = null;
+    press = /** @type {never} */ (null);
   };
 
   /** Where `row` sits with its carried lines, measured once as the drag starts. */
+  /**
+   * @param {HTMLElement} row
+   * @returns {Extent}
+   */
   const extent = (row) => {
     const all = parts(row)
       .map((el) => el.getBoundingClientRect())
@@ -87,6 +120,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     getSelection?.()?.removeAllRanges();
   };
 
+  /** @param {number} y */
   const follow = (y) => {
     const { self, slots, from, pitch } = press;
     shift(press.row, y - press.y);
@@ -106,6 +140,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     });
   };
 
+  /** @param {PointerEvent} e */
   function move(e) {
     if (e.pointerId !== press.id) return;
     if (press.dragging) return void follow(e.clientY);
@@ -115,6 +150,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     if (press) follow(e.clientY);
   }
 
+  /** @param {PointerEvent} e */
   function up(e) {
     if (e.pointerId !== press.id) return;
     const { dragging, from, to } = press;
@@ -124,15 +160,16 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     if (to !== from) onDrop(from, to);
   }
 
+  /** @param {PointerEvent} e */
   function cancel(e) {
     if (e.pointerId === press?.id) stop();
   }
 
   list.addEventListener('pointerdown', (e) => {
     if (press || e.button !== 0 || !e.isPrimary) return;
-    const row = items().find((r) => r.contains(e.target));
-    if (!row || e.target.closest('button, input, select, textarea')) return;
-    press = { row, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', dragging: false };
+    const row = items().find((r) => r.contains(/** @type {Node} */ (e.target)));
+    if (!row || /** @type {Element} */ (e.target).closest('button, input, select, textarea')) return;
+    press = /** @type {Press} */ ({ row, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', dragging: false }); // the rest is filled in as the drag begins
     // A finger or pen picks a row up by holding it; a mouse once it moves, so a slow click still opens it.
     if (!press.mouse) press.timer = setTimeout(() => press && !press.dragging && (begin(), press && follow(press.y)), HOLD_MS);
     addEventListener('pointermove', move, true);
@@ -149,7 +186,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     e.preventDefault();
     onDrop(from, to);
     const row = items()[to];
-    (row?.matches('a, button, [tabindex]') ? row : row?.querySelector('a, button, [tabindex]'))?.focus();
+    /** @type {HTMLElement | null | undefined} */ (row?.matches('a, button, [tabindex]') ? row : row?.querySelector('a, button, [tabindex]'))?.focus();
   });
   // Once a row is up, the finger moves it: no scrolling, and no drawer swipe (drawers.js listens on document).
   list.addEventListener(
@@ -163,11 +200,12 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
   );
   // The phone's long-press menu, and the browser's own drag of a link or an image, would steal the press.
   list.addEventListener('contextmenu', (e) => press && e.preventDefault());
-  list.addEventListener('dragstart', (e) => items().some((r) => r.contains(e.target)) && e.preventDefault());
+  list.addEventListener('dragstart', (e) => items().some((r) => r.contains(/** @type {Node} */ (e.target))) && e.preventDefault());
 }
 
 /** The click a drop ends in (the row is a link) doesn't open it. */
 function swallowClick() {
+  /** @param {Event} e */
   const eat = (e) => {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -177,6 +215,7 @@ function swallowClick() {
 }
 
 // A constructed sheet, as in rail.js: Citadel's Content-Security-Policy refuses inline <style>.
+/** @type {CSSStyleSheet | null} */
 let sheet = null;
 function addStyles() {
   if (sheet) return;

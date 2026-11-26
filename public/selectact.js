@@ -4,10 +4,20 @@
 import { h, jumpHref, view } from './base.js';
 import { toast } from './ui/status.js';
 
-const MESSAGE = '.msg.reply[data-reply-event], .msg.user[data-event]';
-const idOf = (el) => Number(el.dataset.replyEvent ?? el.dataset.event);
+/**
+ * @typedef {{ text: string, first: Element, single?: boolean }} SelectionInput What selectionActions needs of a selection.
+ * @typedef {SelectionInput & { last: Element, rect: DOMRect }} Selected What readSelection finds.
+ * @typedef {{ id: string, label: string, short: string, title: string, icon: string, run: () => void }} SelectionAction
+ */
 
-/** A selection as a markdown quote: every line behind "> ", then a blank line to type below it. Pure, for tests. */
+const MESSAGE = '.msg.reply[data-reply-event], .msg.user[data-event]';
+/** @param {Element} el */
+const idOf = (el) => Number(/** @type {HTMLElement} */ (el).dataset.replyEvent ?? /** @type {HTMLElement} */ (el).dataset.event);
+
+/**
+ * A selection as a markdown quote: every line behind "> ", then a blank line to type below it. Pure, for tests.
+ * @param {string} text
+ */
 export function quoteOf(text) {
   const lines = text
     .trim()
@@ -16,10 +26,17 @@ export function quoteOf(text) {
   return `${lines.join('\n')}\n\n`;
 }
 
-/** The message a node sits in, or null (cards, notes, the composer and the menu itself are not messages). */
-const messageOf = (node) => (node?.nodeType === 3 ? node.parentElement : node)?.closest?.(MESSAGE) ?? null;
+/**
+ * The message a node sits in, or null (cards, notes, the composer and the menu itself are not messages).
+ * @param {Node | null} node
+ */
+const messageOf = (node) => (node?.nodeType === 3 ? node.parentElement : /** @type {Element | null} */ (node))?.closest?.(MESSAGE) ?? null;
 
-/** What is selected inside the log: { text, first, last, rect } or null. */
+/**
+ * What is selected inside the log: { text, first, last, rect } or null.
+ * @param {Element} log
+ * @returns {Selected | null}
+ */
 export function readSelection(log) {
   const sel = getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
@@ -39,10 +56,14 @@ export function readSelection(log) {
  * What can be done with a selection `s` (readSelection's) in a chat whose composer is `form`: one list that the select
  * bar and the right-click menu (context-menu.js, #1663) both draw, so neither has its own copy. Each is
  * { id, label, short (the bar's word), title, icon, run }.
+ * @param {SelectionInput} s
+ * @param {HTMLFormElement} form
+ * @returns {SelectionAction[]}
  */
 export function selectionActions(s, form) {
-  const textarea = form.querySelector('textarea');
+  const textarea = /** @type {HTMLTextAreaElement & { _asideDraft?: { draft: string, aside: string } }} */ (form.querySelector('textarea'));
   const done = () => getSelection()?.removeAllRanges();
+  /** @param {string} value */
   const put = (value) => {
     textarea.value = value;
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -51,53 +72,60 @@ export function selectionActions(s, form) {
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   };
   const id = idOf(s.first);
-  return [
-    {
-      id: 'reply',
-      label: 'Reply to this',
-      short: 'Reply',
-      title: 'Quote this in the chat box',
-      icon: '❝',
-      run: () => {
-        const q = quoteOf(s.text);
-        put(textarea.value.trim() ? `${textarea.value.replace(/\s+$/, '')}\n\n${q}` : q);
-      },
-    },
-    // Aside is the composer's own (minions only); a selection across two messages offers only Reply.
-    s.single &&
-      form.querySelector('.side-ask') && {
-        id: 'aside',
-        label: 'Ask on the side',
-        title: 'Start a side question with this quote',
-        icon: '💬',
+  return /** @type {SelectionAction[]} */ (
+    [
+      {
+        id: 'reply',
+        label: 'Reply to this',
+        short: 'Reply',
+        title: 'Quote this in the chat box',
+        icon: '❝',
         run: () => {
-          // The composer puts the draft back once this question is asked (C2), if the box still holds exactly this.
-          const aside = `/btw ${quoteOf(s.text)}`;
-          textarea._asideDraft = { draft: textarea.value, aside };
-          put(aside);
+          const q = quoteOf(s.text);
+          put(textarea.value.trim() ? `${textarea.value.replace(/\s+$/, '')}\n\n${q}` : q);
         },
       },
-    s.single &&
-      id && {
-        id: 'link',
-        label: 'Copy link',
-        title: 'Copy a link to this message',
-        icon: '🔗',
-        run: () => {
-          const url = new URL(jumpHref(view.ticket, id), location.href).href;
-          navigator.clipboard?.writeText(url).then(
-            () => toast('Link to this message copied'),
-            () => toast('Could not copy the link'),
-          );
-          done();
+      // Aside is the composer's own (minions only); a selection across two messages offers only Reply.
+      s.single &&
+        form.querySelector('.side-ask') && {
+          id: 'aside',
+          label: 'Ask on the side',
+          title: 'Start a side question with this quote',
+          icon: '💬',
+          run: () => {
+            // The composer puts the draft back once this question is asked (C2), if the box still holds exactly this.
+            const aside = `/btw ${quoteOf(s.text)}`;
+            textarea._asideDraft = { draft: textarea.value, aside };
+            put(aside);
+          },
         },
-      },
-  ].filter(Boolean);
+      s.single &&
+        id && {
+          id: 'link',
+          label: 'Copy link',
+          title: 'Copy a link to this message',
+          icon: '🔗',
+          run: () => {
+            const url = new URL(jumpHref(/** @type {NonNullable<typeof view>} */ (view).ticket, id), location.href).href;
+            navigator.clipboard?.writeText(url).then(
+              () => toast('Link to this message copied'),
+              () => toast('Could not copy the link'),
+            );
+            done();
+          },
+        },
+    ].filter(Boolean)
+  );
 }
 
+/**
+ * @param {Element} log
+ * @param {HTMLFormElement} form
+ */
 export function selectActions(log, form) {
   const menu = h('div', { class: 'select-menu', role: 'toolbar', 'aria-label': 'Actions for the selected text', hidden: true });
   document.body.append(menu);
+  /** @type {Selected | null} */
   let current = null;
   // The menu must not take the selection away when it is pressed.
   menu.addEventListener('mousedown', (e) => e.preventDefault());

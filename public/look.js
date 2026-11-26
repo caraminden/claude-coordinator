@@ -21,7 +21,7 @@ export const toneChip = (tone, text) => h('span', { class: 'cui-chip state-chip'
  * Stat tiles: each [value, label, hue] (hue a data-hue name, running by default); a falsy tile is left out.
  * @param {...([Child, Child, string?] | false | 0 | '' | null | undefined)} tiles
  */
-export const statTiles = (...tiles) => h('div', { class: 'stat-tiles' }, ...tiles.filter(Boolean).map(([value, label, hue = 'running']) => h('div', { class: 'stat-tile', 'data-hue': hue }, h('b', {}, value), h('span', {}, label))));
+export const statTiles = (...tiles) => h('div', { class: 'stat-tiles' }, .../** @type {[Child, Child, string?][]} */ (tiles.filter(Boolean)).map(([value, label, hue = 'running']) => h('div', { class: 'stat-tile', 'data-hue': hue }, h('b', {}, value), h('span', {}, label))));
 
 /**
  * An item row with a bar in its hue down the left: `lead` (a number or a short word), the text, and `meta` on the

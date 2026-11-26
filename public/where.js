@@ -7,27 +7,54 @@ import { codexWindowsBlock } from './core.js';
 import { modelsSection } from './models.js';
 import { loadingLine } from './ui/state.js';
 
-/** A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it. */
+/** @import { Child } from './base.js' */
+/**
+ * The shapes of /api/costs/mine (src/costs.ts Slice and WhereItWent).
+ * @typedef {{ name: string, usd: number, lastWeek: number, estimated: number }} Slice
+ * @typedef {{ id: number, project_id: number, kind: 'coordinator' | 'ticket', scheme: string, number: number | null, title: string, usd: number }} TopMinion
+ * @typedef {{ range: 'week' | 'all', since: number, until: number, total: number, lastWeek: number, weekUsd: number | null, accounts: number, models: Slice[], schemes: (Slice & { id: number })[], kinds: Slice[], top: TopMinion[] }} WhereItWent
+ */
+
+/**
+ * A share of the weekly limit (all your accounts together), "4.2%", or null while no meter can price it.
+ * @param {number} usd
+ * @param {number | null} weekUsd
+ */
 function share(usd, weekUsd) {
   if (!weekUsd) return null;
   const p = (usd / weekUsd) * 100;
   return `${p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : Math.round(p)}%`;
 }
 
-/** The share first and the dollars beside it (Cara, 2026-11-17: "% first, $ beside"), or dollars alone. */
+/**
+ * The share first and the dollars beside it (Cara, 2026-11-17: "% first, $ beside"), or dollars alone.
+ * @param {number} usd
+ * @param {number | null} weekUsd
+ */
 function amount(usd, weekUsd) {
   const s = share(usd, weekUsd);
   return s ? [h('b', {}, s), h('span', { class: 'usd' }, costText(usd))] : h('b', {}, usd ? costText(usd) : '–');
 }
 
-/** A bar `pct` wide; through the CSSOM, since the page's CSP refuses style attributes. */
+/**
+ * A bar `pct` wide; through the CSSOM, since the page's CSP refuses style attributes.
+ * @param {number} pct
+ */
 function bar(pct) {
   const el = h('span', { class: 'bar' });
   el.style.setProperty('--pct', `${pct}%`);
   return el;
 }
 
-/** One table: a row per slice with a bar against the biggest this week, this week, and last week. */
+/**
+ * One table: a row per slice with a bar against the biggest this week, this week, and last week.
+ * @template {Slice} T
+ * @param {string} head
+ * @param {T[]} rows
+ * @param {number | null} weekUsd
+ * @param {(r: T) => Child} [name]
+ * @param {boolean} [all]
+ */
 function sliceTable(head, rows, weekUsd, name = (r) => r.name, all = false) {
   const max = Math.max(...rows.map((r) => r.usd), 0);
   return h(
@@ -51,15 +78,26 @@ function sliceTable(head, rows, weekUsd, name = (r) => r.name, all = false) {
   );
 }
 
-/** Fable's share of all spend, this week and last: the number "use it half as often" is checked by. */
+/**
+ * Fable's share of all spend, this week and last: the number "use it half as often" is checked by.
+ * @param {WhereItWent} w
+ * @param {boolean} all
+ */
 function fableShare(w, all) {
+  /** @param {'usd' | 'lastWeek'} k */
   const sum = (k) => w.models.filter((m) => m.name.startsWith('Fable')).reduce((a, m) => a + m[k], 0);
+  /**
+   * @param {number} part
+   * @param {number} all
+   */
   const pct = (part, all) => (all ? `${Math.round((part / all) * 100)}%` : '–');
   if (all) return h('p', { class: 'where-fable' }, 'Fable: ', h('b', {}, pct(sum('usd'), w.total)), ' of all spend');
   return h('p', { class: 'where-fable' }, 'Fable: ', h('b', {}, pct(sum('usd'), w.total)), ' of spend this week, ', h('b', {}, pct(sum('lastWeek'), w.lastWeek)), ' last week');
 }
 
-/** The whole view for one fetched summary. All time (#956) has no week before to compare, and a share of a weekly limit means little over months, so it reads in dollars. */
+/** The whole view for one fetched summary. All time (#956) has no week before to compare, and a share of a weekly limit means little over months, so it reads in dollars.
+ * @param {WhereItWent} w
+ */
 export function whereView(w) {
   const all = w.range === 'all';
   const weekUsd = all ? null : w.weekUsd;
@@ -95,13 +133,17 @@ export function whereView(w) {
   );
 }
 
-/** Fetch your summary and draw it into `into`, which keeps its reserved height until then; a failure leaves a line saying so. */
+/** Fetch your summary and draw it into `into`, which keeps its reserved height until then; a failure leaves a line saying so.
+ * @param {Element} into
+ * @param {'week' | 'all'} [range]
+ * @param {() => boolean} [current]
+ */
 export async function renderWhere(into, range = 'week', current = () => true) {
   let view;
   try {
     view = whereView(await api(`api/costs/mine${range === 'all' ? '?range=all' : ''}`));
   } catch (err) {
-    view = h('p', { class: 'key' }, `Couldn't load where it went: ${err.message}`);
+    view = h('p', { class: 'key' }, `Couldn't load where it went: ${err instanceof Error ? err.message : err}`);
   }
   if (!current()) return; // another range was picked while this one loaded: its answer must not paint over the newer
   into.replaceChildren(view);
@@ -115,14 +157,15 @@ export function usagePage() {
   const pick = h(
     'div',
     { class: 'range-pick', role: 'group', 'aria-label': 'Range' },
-    [
+    /** @type {['week' | 'all', string][]} */ ([
       ['week', 'Last 7 days'],
       ['all', 'All time'],
-    ].map(([key, label]) => h('button', { type: 'button', 'data-range': key, onclick: () => choose(key) }, label)),
+    ]).map(([key, label]) => h('button', { type: 'button', 'data-range': key, onclick: () => choose(key) }, label)),
   );
+  /** @param {'week' | 'all'} key */
   const choose = (key) => {
     pickedRange = key;
-    for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.range === key));
+    for (const b of pick.children) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.range === key));
     slot.classList.add('loading');
     renderWhere(slot, key, () => pickedRange === key);
   };
@@ -133,7 +176,7 @@ export function usagePage() {
     h(
       'div',
       { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {NonNullable<typeof view>} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.'),
     ),
@@ -149,6 +192,7 @@ export function usagePage() {
   );
 }
 
+/** @type {'week' | 'all'} */
 let pickedRange = 'week';
 
 /** The Models section (#1061), filled once its data arrives; it keeps a reserved height until then. */

@@ -6,9 +6,13 @@
 const still = matchMedia('(prefers-reduced-motion: reduce)');
 const LS = 2.3; // the mark's scale in the art (scenes9.js)
 
-/** Puts the map behind app's sign-in card. Without the art (its script didn't load), the card shows on its own. */
+/**
+ * Puts the map behind app's sign-in card. Without the art (its script didn't load), the card shows on its own.
+ * @param {Element} app
+ */
 export function mountLoginMap(app) {
-  if (!globalThis.citadelMap) return;
+  const map = /** @type {{ citadelMap?: { draw: (host: HTMLElement, prefix: string) => SVGSVGElement } }} */ (globalThis).citadelMap;
+  if (!map) return;
   const root = document.createElement('div');
   root.className = 'login-map';
   root.setAttribute('aria-hidden', 'true');
@@ -16,7 +20,7 @@ export function mountLoginMap(app) {
   scene.className = 'scene scene-m';
   root.append(scene);
   app.prepend(root);
-  globalThis.citadelMap.draw(scene, 'lm-');
+  map.draw(scene, 'lm-');
   // The map starts under the top bar, so the CITADEL banner at its top isn't hidden behind it.
   // Watched by its border box: a notch's inset (it changes on rotation) is padding, which the default content box misses.
   const fit = () => {
@@ -31,21 +35,31 @@ export function mountLoginMap(app) {
   watch(root);
 }
 
-/** One loop per map: the mark picks a minion it can see, faces it and lights it, then darts to another. */
+/**
+ * One loop per map: the mark picks a minion it can see, faces it and lights it, then darts to another.
+ * The map's art always has the elements below, so each lookup is cast to what it finds.
+ * @param {HTMLElement} root
+ */
 function watch(root) {
-  const el = root.querySelector('[data-watch]');
+  const el = /** @type {SVGGraphicsElement | null} */ (root.querySelector('[data-watch]'));
   if (!el) return;
-  const svg = el.ownerSVGElement,
-    scene = root.querySelector('.scene');
-  const look = el.querySelector('.logo-look'),
-    halo = el.querySelector('.logo-halo'),
-    at = el.querySelector('.eye-at');
-  const float = el.closest('.mark-float'),
-    light = float.previousElementSibling;
-  const ray = light.querySelector('.logo-ray'),
-    core = light.querySelector('.logo-core');
+  const svg = /** @type {SVGSVGElement} */ (el.ownerSVGElement),
+    scene = /** @type {Element} */ (root.querySelector('.scene'));
+  const look = /** @type {Element} */ (el.querySelector('.logo-look')),
+    halo = /** @type {Element} */ (el.querySelector('.logo-halo')),
+    at = /** @type {Element} */ (el.querySelector('.eye-at'));
+  const float = /** @type {Element} */ (el.closest('.mark-float')),
+    light = /** @type {Element} */ (float.previousElementSibling);
+  const ray = /** @type {Element} */ (light.querySelector('.logo-ray')),
+    core = /** @type {Element} */ (light.querySelector('.logo-core'));
+  /** @type {{ bx: number, by: number, yw: number, tp: number, flare: number, t: number, pawn: Element | null, gx: number, gy: number }} */
   const st = { bx: 0, by: 0, yw: 0, tp: 0, flare: 0, t: 0, pawn: null, gx: 0, gy: 0 };
+  /**
+   * @param {DOMRect | { left: number, top: number, right: number, bottom: number }} r
+   * @param {DOMRect | { left: number, top: number, right: number, bottom: number }} v
+   */
   const vis = (r, v) => r.right > v.left && r.left < v.right && r.bottom > v.top && r.top < v.bottom;
+  /** @param {number} now */
   const tick = (now) => {
     if (!root.isConnected) return;
     requestAnimationFrame(tick);
@@ -109,6 +123,10 @@ function watch(root) {
       len = Math.hypot(tx - px, ty - py) || 1,
       nx = -(ty - py) / len,
       ny = (tx - px) / len;
+    /**
+     * @param {number} w0
+     * @param {number} w1
+     */
     const cone = (w0, w1) => `M${(px + nx * w0).toFixed(1)} ${(py + ny * w0).toFixed(1)}L${(tx + nx * w1).toFixed(1)} ${(ty + ny * w1).toFixed(1)}L${(tx - nx * w1).toFixed(1)} ${(ty - ny * w1).toFixed(1)}L${(px - nx * w0).toFixed(1)} ${(py - ny * w0).toFixed(1)}Z`;
     ray.setAttribute('d', cone(6, 24));
     core.setAttribute('d', cone(2.5, 10));

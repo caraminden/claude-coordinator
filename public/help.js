@@ -6,10 +6,22 @@ import { WORDS } from './help-words.js';
 import { settingsTabs, settingsTitle } from './settings.js';
 /** @import { Child } from './base.js' */
 
-/** A word in a sentence: lowercase, but Taskmaster and Grunt are names. */
+/**
+ * A word in a sentence: lowercase, but Taskmaster and Grunt are names.
+ * @param {keyof typeof WORDS} key
+ * @param {string} [tail]
+ */
 const w = (key, tail = '') => h('strong', {}, (/^(taskmaster|grunt)$/.test(key) ? WORDS[key].word : WORDS[key].word.toLowerCase()) + tail);
-const show = (part, text) => h('a', { class: 'help-show', href: `#/p/${view.projectId}?show=${part}` }, text);
-/** The screenshots are real ones from a dev copy (tools/ui-shot.ts), as public/help-<name>.png (the server serves public/ flat). */
+/**
+ * @param {string} part
+ * @param {string} text
+ */
+const show = (part, text) => h('a', { class: 'help-show', href: `#/p/${/** @type {NonNullable<typeof view>} */ (view).projectId}?show=${part}` }, text);
+/**
+ * The screenshots are real ones from a dev copy (tools/ui-shot.ts), as public/help-<name>.png (the server serves public/ flat).
+ * @param {string} name
+ * @param {string} alt
+ */
 const shot = (name, alt) => h('img', { class: 'help-shot', src: `help-${name}.png`, alt, loading: 'lazy' });
 
 /** The steps: [title, words, [screenshot, alt], link]. */

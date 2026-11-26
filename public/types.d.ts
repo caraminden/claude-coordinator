@@ -281,6 +281,17 @@ export interface SharedFile {
   missing: number;
 }
 
+/** One thing waiting on a person in a scheme's Needs-you list (src/inbox.ts InboxItem; its `card` is the stored card, read here for who and which). */
+export interface InboxItem {
+  kind: string;
+  ticketId: number;
+  at: number;
+  card?: { id?: number | string; by?: string; to?: string; stage?: number; notice?: unknown; secret?: unknown; doc?: { path?: string } };
+  key: string;
+  eventId?: number;
+  from?: { projectId: number; scheme: string; number: number | null; kind: string; title: string };
+}
+
 /** A chat event as stored and sent (src/db-rows.ts EventRow): `data` is JSON text. */
 export interface ChatEvent {
   id: number;

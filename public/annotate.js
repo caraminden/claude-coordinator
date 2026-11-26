@@ -4,13 +4,19 @@
 import { h } from './base.js';
 import { COLOURS, drawMark, lineWidth } from './ui/marks.js';
 
+/** @import { Mark } from './ui/marks.js' */
+
+/** @type {[Mark['tool'], string, string][]} */
 const TOOLS = [
   ['pen', '✎', 'Pen'],
   ['arrow', '↗', 'Arrow'],
   ['box', '▭', 'Box'],
 ];
 
-// The page's CSP refuses style attributes; a property set from script is allowed.
+/**
+ * The page's CSP refuses style attributes; a property set from script is allowed.
+ * @param {string} hex
+ */
 const swatch = (hex) => {
   const i = h('i', { class: 'swatch' });
   i.style.background = hex;
@@ -22,12 +28,16 @@ const swatch = (hex) => {
  * a marked picture can undo back to the clean one; a minion's marks (#960) come with `size`, the picture size they
  * were placed on, and are scaled to the picture as it loads. onDone(canvas, marks) runs on Done, with the marked picture
  * (null when every mark was undone); the caller closes the lightbox.
+ * @param {HTMLElement} stage
+ * @param {string} src
+ * @param {{ marks?: Mark[], size?: { w: number, h: number } | null, onDone: (canvas: HTMLCanvasElement | null, marks: Mark[]) => unknown, doneLabel?: string }} opts
  */
 export function annotator(stage, src, { marks = [], size = null, onDone, doneLabel = 'Done' }) {
   marks = [...marks];
+  /** @type {{ tool: Mark['tool'], colour: Mark['colour'] }} */
   const s = { tool: 'pen', colour: 'red' };
   const canvas = h('canvas', { class: 'annotate-canvas', 'aria-label': 'Picture to draw on' });
-  const g = canvas.getContext('2d');
+  const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
   const img = new Image();
   let width = 3;
   const paint = () => {
@@ -49,10 +59,12 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
   };
   img.src = src;
 
+  /** @param {MouseEvent} e */
   const at = (e) => {
     const r = canvas.getBoundingClientRect();
     return { x: ((e.clientX - r.left) * canvas.width) / r.width, y: ((e.clientY - r.top) * canvas.height) / r.height };
   };
+  /** @type {Mark | null} */
   let cur = null;
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || !img.naturalWidth) return;
@@ -81,6 +93,13 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
   canvas.addEventListener('pointerdown', (e) => e.stopPropagation());
   canvas.addEventListener('pointerup', (e) => e.stopPropagation());
 
+  /**
+   * @param {string} label
+   * @param {string} title
+   * @param {boolean} pressed
+   * @param {() => void} onclick
+   * @param {Node} [extra]
+   */
   const choice = (label, title, pressed, onclick, extra) => h('button', { type: 'button', class: 'cui-choice', title, 'aria-label': title, 'aria-pressed': String(pressed), onclick }, extra ?? label);
   const undo = h(
     'button',
@@ -129,7 +148,7 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
           c[0].toUpperCase() + c.slice(1),
           s.colour === c,
           () => {
-            s.colour = c;
+            s.colour = /** @type {Mark['colour']} */ (c);
             sync();
           },
           swatch(hex),
@@ -143,6 +162,7 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
   stage.append(h('div', { class: 'annotate-pic' }, canvas), bar);
   stage.classList.add('annotate');
 
+  /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && canvas.isConnected) {
       e.preventDefault();
@@ -164,6 +184,7 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
 /**
  * Whether a picture can be drawn on and saved: one this server sends (or a blob or data URL). A picture from
  * another site would taint the canvas, so it only shows.
+ * @param {string} src
  */
 export function drawable(src) {
   try {
@@ -174,5 +195,9 @@ export function drawable(src) {
   }
 }
 
-/** The marked picture as a PNG blob, for the message box (which shrinks it if it must, as a pasted one). */
+/**
+ * The marked picture as a PNG blob, for the message box (which shrinks it if it must, as a pasted one).
+ * @param {HTMLCanvasElement} canvas
+ * @returns {Promise<Blob>}
+ */
 export const canvasBlob = (canvas) => new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('could not save the marked picture'))), 'image/png'));

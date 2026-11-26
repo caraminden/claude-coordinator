@@ -15,7 +15,31 @@ import { renderFiles } from './files.js';
 import { ARTIFACT_ALLOW, ARTIFACT_SANDBOX } from './frames.js';
 import { loadingLine } from './ui/state.js';
 
+/** @import { ArtifactFile, SharedFile, View } from './types.js' */
+/** @import { ThreadRef } from './base.js' */
+/** @import { BridgeOpen, BridgeDraw } from './bridge-host.js' */
+/** @import { Lightbox, LightboxItem } from './ui/media.js' */
+/** @import { Mark } from './ui/marks.js' */
+
+/** A file as the viewer and the file bodies show it: what api/tickets/:id/file?info says, or a stand-in for one that has gone (`missing` then says why). @typedef {{ path: string, name: string, kind: string, display_path?: string, size: number, mtime: number, missing?: string | number | null, abs?: string, artifact?: ArtifactFile }} ShownFile */
+/** What can be pinned and listed on the shelf: a minion's artifact, or a shared-folder file (which has no id, only its path). @typedef {{ id?: number, path: string, name: string, kind: string, display_path?: string, size: number, mtime: number, missing?: number | null, pinned_at: number | null, pinned_by: string | null, ticket_id?: number, ticket_kind?: string, ticket_number?: number | null, ticket_title?: string, project_id?: number }} Listed */
+/** An element a file's text is loaded into: `textLoad` marks which load may still fill it. @typedef {HTMLElement & { textLoad?: object | null }} Holder */
+/** What a page's bridge says the viewer opened, and who owns the page (see bridge-host.js attachBridge). @typedef {{ open: BridgeOpen, owner: string | null, afterSend?: () => void }} Bridge */
+/** One picture of a question card, as cards.js hands it over. @typedef {{ path: string, label: string, picked(): boolean, pick(): void }} GalleryOption */
+/** A question card's picture options, set as one is opened: the bar steps between them and picks one. @typedef {{ ticketId: number, at: number, answered(): boolean, options: GalleryOption[] }} Gallery */
+/** The open full-screen viewer: the chat section lives inside it until it closes. @typedef {{ dialog: HTMLDialogElement, stage: Holder, bar: HTMLElement, chat: Element, placeholder: Comment, ticket: ThreadRef, file: ShownFile, inPlace: boolean, scrollY: number, stopKeyboard?: () => void, media?: { ticketId: number, paths: string[], lb: Lightbox } | null }} Viewer */
+/** An item of the kit's lightbox with the marks a minion put on the picture (#960); ui/media.d.ts's LightboxItem has none. @typedef {LightboxItem & { marks?: { w: number, h: number, marks: Mark[] } | null }} MarkedItem */
+/** What renderFileBody shows: the file's own fields, where to load it from, and how its links and bridge reach the app. @typedef {{ kind: string, src: string, size: number, name: string, path: string, ticketId?: number, bridge?: Bridge | null, onMissing?: (message: string) => unknown, urlFor?: (path: string) => string, hrefFor?: (path: string) => string }} FileBodyOptions */
+
+/** These run only with a scheme's page open (their callers check), so `view` is not null in them. */
+const page = () => /** @type {View} */ (view);
+/** The scheme's artifacts as the page has them: loaded before anything here asks. */
+const artifactList = () => /** @type {ArtifactFile[]} */ (page().artifacts);
+/** The shared file the page shows (types.d.ts View.file says string; the shared view keeps the file itself). */
+const sharedFileShown = () => /** @type {ShownFile} */ (/** @type {unknown} */ (page().file));
+
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
+/** @param {number} ticketId @param {string} path */
 export async function showFile(ticketId, path) {
   const seq = routeSeq;
   const [{ ticket }, file] = await Promise.all([
@@ -30,7 +54,7 @@ export async function showFile(ticketId, path) {
   ]);
   if (seq !== routeSeq) return;
   // Opened from its own chat, the chat stays as it is and closing comes straight back to it.
-  const inPlace = view?.kind === 'project' && view.main === 'chat' && view.id === ticketId && !!document.getElementById('log');
+  const inPlace = view?.kind === 'project' && page().main === 'chat' && page().id === ticketId && !!document.getElementById('log');
   if (!inPlace) {
     closeViewer();
     await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
@@ -40,6 +64,7 @@ export async function showFile(ticketId, path) {
 }
 
 /** A file in the project's shared folder, opened from the Shared group of the artifacts panel. */
+/** @param {number} projectId @param {string} path */
 export async function showSharedFile(projectId, path) {
   const seq = routeSeq;
   const file = await api(`api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
@@ -52,6 +77,7 @@ export async function showSharedFile(projectId, path) {
   await showProject(projectId, { kind: 'shared', file: { ...file, path } });
 }
 
+/** @param {number} artifactId */
 export async function showArtifact(artifactId) {
   const seq = routeSeq;
   const { artifact } = await api(`api/artifacts/${artifactId}`);
@@ -64,14 +90,20 @@ export async function showArtifact(artifactId) {
 const RECENT_ARTIFACTS = 5;
 const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
 
+/** @param {Pick<ArtifactFile, 'id' | 'mtime'>} a */
 const rawUrl = (a) => `api/artifacts/${a.id}/raw?v=${a.mtime}`;
-const extOf = (a) => (a.name.includes('.') ? a.name.split('.').pop() : a.kind).slice(0, 5).toUpperCase();
-const artifactThread = (a) => ({ id: a.ticket_id, kind: a.ticket_kind, project_id: a.project_id, number: a.ticket_number, title: a.ticket_title });
+/** @param {{ name: string, kind: string }} a */
+const extOf = (a) => (a.name.includes('.') ? /** @type {string} */ (a.name.split('.').pop()) : a.kind).slice(0, 5).toUpperCase();
+/** @param {Listed} a @returns {ThreadRef} */
+const artifactThread = (a) => /** @type {ThreadRef} */ ({ id: a.ticket_id, kind: a.ticket_kind, project_id: a.project_id, number: a.ticket_number, title: a.ticket_title });
+/** @param {Parameters<typeof artifactThread>[0]} a */
 const threadName = (a) => threadLabel(artifactThread(a));
 
-let artifactRefresh = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let artifactRefresh;
+/** @param {number} projectId */
 export function onArtifactsChanged(projectId) {
-  if (view?.kind !== 'project' || view.projectId !== projectId) return;
+  if (view?.kind !== 'project' || page().projectId !== projectId) return;
   // Scans of several tickets can land together; fetch once for the lot.
   clearTimeout(artifactRefresh);
   artifactRefresh = setTimeout(refreshArtifacts, 300);
@@ -79,38 +111,41 @@ export function onArtifactsChanged(projectId) {
 
 export async function refreshArtifacts() {
   if (view?.kind !== 'project') return;
-  const projectId = view.projectId;
+  const projectId = page().projectId;
   try {
-    const [artifacts, shared] = await Promise.all([api(`api/projects/${projectId}/artifacts`), api(`api/projects/${projectId}/shared`).catch(() => view.shared)]);
-    if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts, shared);
+    const [artifacts, shared] = await Promise.all([api(`api/projects/${projectId}/artifacts`), api(`api/projects/${projectId}/shared`).catch(() => page().shared)]);
+    if (view?.kind === 'project' && page().projectId === projectId) setArtifacts(artifacts, shared);
   } catch {
-    if (view?.kind === 'project' && view.projectId === projectId && view.main === 'artifact') {
-      view.filesFailed = true;
+    if (view?.kind === 'project' && page().projectId === projectId && page().main === 'artifact') {
+      page().filesFailed = true;
       renderArtifactHead();
     }
   }
 }
 
 /** The lists as read; null for one whose read failed keeps what the page has. */
-export function setArtifacts(artifacts, shared = view.shared) {
-  view.filesFailed = artifacts === null;
-  view.artifacts = artifacts ?? view.artifacts ?? [];
-  view.shared = shared ?? view.shared ?? [];
+/** @param {ArtifactFile[] | null} artifacts @param {SharedFile[] | null} [shared] */
+export function setArtifacts(artifacts, shared = page().shared) {
+  page().filesFailed = artifacts === null;
+  page().artifacts = artifacts ?? page().artifacts ?? [];
+  page().shared = shared ?? page().shared ?? [];
   renderShelf();
-  if (view.main === 'files') renderFiles();
-  if (view.main === 'artifact') renderArtifactHead();
+  if (page().main === 'files') renderFiles();
+  if (page().main === 'artifact') renderArtifactHead();
   renderViewerBar();
-  if (view.main === 'shared') renderSharedHead();
+  if (page().main === 'shared') renderSharedHead();
 }
 
 /** Pin or unpin an artifact, or a shared-folder file (which has no id, only its path). */
+/** @param {Listed} a @param {boolean} pinned */
 function setPinned(a, pinned) {
   const was = { pinned_at: a.pinned_at, pinned_by: a.pinned_by };
+  /** @param {{ pinned_at: number | null, pinned_by: string | null }} pin */
   const show = (pin) => {
     Object.assign(a, pin);
-    setArtifacts(view.artifacts, view.shared);
+    setArtifacts(page().artifacts, page().shared);
   };
-  const projectId = view.projectId;
+  const projectId = page().projectId;
   optimistic({
     sets: `artifact-pin:${a.id ?? a.path}`,
     apply: () => show(pinned ? { pinned_at: Date.now(), pinned_by: me } : { pinned_at: null, pinned_by: null }),
@@ -123,6 +158,7 @@ function setPinned(a, pinned) {
   ); // a failure already said so in its toast
 }
 
+/** @param {Listed} a */
 export function pinButton(a) {
   const pinned = !!a.pinned_at;
   return h(
@@ -132,7 +168,7 @@ export function pinButton(a) {
       class: `pin${pinned ? ' on' : ''}`,
       title: pinned ? `Pinned by ${a.pinned_by}; click to unpin` : 'Pin to the top of the artifacts panel',
       'aria-pressed': String(pinned),
-      onclick: (e) => {
+      onclick: (/** @type {Event} */ e) => {
         e.preventDefault();
         e.stopPropagation();
         setPinned(a, !pinned);
@@ -146,21 +182,23 @@ export function pinButton(a) {
 export function renderShelf() {
   const el = document.getElementById('artifact-shelf');
   if (!el) return;
-  const all = view.artifacts;
+  const all = artifactList();
   // Pinned shared-folder files sit with pinned artifacts; they have no id.
-  const pinned = [...all, ...(view.shared ?? [])].filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
+  const pinned = /** @type {Listed[]} */ ([...all, ...(page().shared ?? [])]).filter((a) => a.pinned_at).sort((a, b) => /** @type {number} */ (b.pinned_at) - /** @type {number} */ (a.pinned_at));
   const recent = all.filter((a) => !a.pinned_at && !a.missing).slice(0, RECENT_ARTIFACTS);
+  /** @param {Listed} a */
   const item = (a) =>
     h(
       'a',
       {
-        class: `artifact-item${(a.id ? view.artifactId === a.id : view.main === 'shared' && view.file?.path === a.path) ? ' active' : ''}${a.missing ? ' missing' : ''}`,
-        href: a.id ? `#/a/${a.id}` : sharedHref(view.projectId, a.path),
+        class: `artifact-item${(a.id ? page().artifactId === a.id : page().main === 'shared' && sharedFileShown()?.path === a.path) ? ' active' : ''}${a.missing ? ' missing' : ''}`,
+        href: a.id ? `#/a/${a.id}` : sharedHref(page().projectId, a.path),
         title: a.display_path ?? a.path,
       },
       h('span', { class: `badge k-${a.kind}` }, extOf(a)),
       h('span', { class: 'text' }, h('span', { class: 'name' }, a.name), h('span', { class: 'meta' }, `${!a.id ? 'Shared' : a.ticket_kind === 'coordinator' ? taskmasterName() : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)),
     );
+  /** @param {string} title @param {number} count @param {Listed[]} items @param {string} empty @param {(a: Listed) => HTMLElement} [render] */
   const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' }, h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''), items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
   // Recent starts collapsed; opening it is remembered with the panels' own open state.
   const recentFold = h(
@@ -174,7 +212,7 @@ export function renderShelf() {
     h(
       'section',
       { class: 'column' },
-      h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }), h('a', { class: `browse${view.main === 'files' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Every file: the shared folder and what minions linked' }, 'All files')),
+      h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }), h('a', { class: `browse${page().main === 'files' ? ' active' : ''}`, href: `#/p/${page().projectId}/shared`, title: 'Every file: the shared folder and what minions linked' }, 'All files')),
       sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
       recentFold,
     ),
@@ -186,8 +224,10 @@ export function renderShelf() {
  * A choices page's picture, open over the viewer ready to draw (#946, bridge-host's draw): resolves null when
  * closed without Done, else { marks, image } with the marked copy as a message carries it (null with no marks).
  */
+/** @type {BridgeDraw} */
 function drawForPage(src, marks) {
   return new Promise((resolve, reject) => {
+    /** @type {{ canvas: HTMLCanvasElement | null, marks: Mark[] } | null} */
     let done = null;
     const lb = lightbox([{ src, caption: 'Picture on the page' }], {
       label: 'Draw on the picture',
@@ -204,18 +244,21 @@ function drawForPage(src, marks) {
         if (!done.canvas) return resolve({ marks: [], image: null });
         canvasBlob(done.canvas)
           .then(sendableImage)
-          .then((image) => resolve({ marks: done.marks, image }), reject);
+          .then((image) => resolve({ marks: /** @type {{ marks: Mark[] }} */ (done).marks, image }), reject);
       },
     });
   });
 }
 
+/** @param {ThreadRef} ticket @param {{ path: string }} file @returns {Bridge} */
 const viewerBridge = (ticket, file) => ({ open: { ticket: ticket.id, path: file.path }, owner: threadLabel(ticket) });
-const sharedBridge = (file) => ({ open: { project: view.projectId, path: file.path }, owner: null });
+/** @param {{ path: string }} file @returns {Bridge} */
+const sharedBridge = (file) => ({ open: { project: page().projectId, path: file.path }, owner: null });
 
 /**
  * The Open button. An HTML page opens in a tab that keeps its bridge to this one, so the page can still
  * save and send (#417); a modified click, or a browser that blocks the tab, follows the plain link.
+ * @param {string} src @param {{ kind: string, name: string }} file @param {Bridge} bridge
  */
 function openButton(src, file, bridge) {
   const link = h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open');
@@ -229,6 +272,7 @@ function openButton(src, file, bridge) {
 }
 
 /** Main panel: one artifact, shown inline according to its type. */
+/** @param {ArtifactFile} a */
 export function artifactViewer(a) {
   const body = h('div', { class: 'artifact-body' });
   const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'artifact-head' }), body);
@@ -240,7 +284,7 @@ export function artifactViewer(a) {
     // The head reads the list's copy of the artifact, not this one.
     const onMissing = () => {
       a.missing = 1;
-      const listed = view.artifacts.find((x) => x.id === a.id);
+      const listed = artifactList().find((x) => x.id === a.id);
       if (listed) listed.missing = 1;
       comment.remove();
       renderArtifactHead();
@@ -252,11 +296,13 @@ export function artifactViewer(a) {
 }
 
 // The open full-screen viewer: the chat section lives inside it until it closes.
-let viewer = null; // { dialog, stage, bar, chat, placeholder, ticket, file, inPlace, scrollY }
+/** @type {Viewer | null} */
+let viewer = null;
 // A question card's picture options (#634), set as one is opened: the bar steps between them and picks one.
-let gallery = null; // { ticketId, at, answered(), options: [{ path, label, picked(), pick() }] }
+/** @type {Gallery | null} */
+let gallery = null;
 
-/** Browse a question card's picture options in the viewer (cards.js), until it closes. */
+/** Browse a question card's picture options in the viewer (cards.js), until it closes. @param {Gallery | null} g */
 export function setViewerGallery(g) {
   gallery = g;
   renderViewerBar();
@@ -267,6 +313,7 @@ export const refreshViewerBar = () => renderViewerBar();
 /**
  * Show a file a chat linked full screen: the file as big as it fits, and the chat itself (moved,
  * so it stays live and keeps its draft) in a compact column beside it, with nothing else.
+ * @param {ThreadRef} ticket @param {ShownFile} file @param {boolean} inPlace
  */
 function openViewer(ticket, file, inPlace) {
   if (!viewer) {
@@ -288,14 +335,14 @@ function openViewer(ticket, file, inPlace) {
     });
     // Another file from the chat swaps in place, so closing still goes straight back to the chat.
     dialog.addEventListener('click', (e) => {
-      const a = e.target.closest?.('a[href^="#/f/"]');
+      const a = /** @type {Element} */ (e.target).closest?.('a[href^="#/f/"]');
       if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
-      replaceHash(a.getAttribute('href'));
+      replaceHash(/** @type {string} */ (a.getAttribute('href')));
     });
     document.body.append(dialog);
     dialog.showModal();
-    viewer = { dialog, stage, bar, chat, placeholder, inPlace, scrollY };
+    viewer = /** @type {Viewer} */ (/** @type {unknown} */ ({ dialog, stage, bar, chat, placeholder, inPlace, scrollY })); // its ticket and file follow at once, below
     viewer.stopKeyboard = watchKeyboard(dialog);
     // Keep the clicked embed in sight in the narrower chat, unless you were following the end.
     const link = [...chat.querySelectorAll('#log a[href]')].reverse().find((a) => a.getAttribute('href') === location.hash);
@@ -306,9 +353,10 @@ function openViewer(ticket, file, inPlace) {
   Object.assign(viewer, { ticket, file });
   viewer.dialog.setAttribute('aria-label', file.name);
   // Stepping in the lightbox changed the address: it already shows this file, so only the bar changes.
-  const shown = viewer.media?.paths.indexOf(file.path) ?? -1;
-  if (shown >= 0 && viewer.media.ticketId === ticket.id && viewer.media.lb.el.isConnected) {
-    if (viewer.media.lb.at !== shown) viewer.media.lb.go(shown);
+  const { media } = viewer;
+  const shown = media?.paths.indexOf(file.path) ?? -1;
+  if (media && shown >= 0 && media.ticketId === ticket.id && media.lb.el.isConnected) {
+    if (media.lb.at !== shown) media.lb.go(shown);
     return renderViewerBar();
   }
   viewer.media?.lb.destroy();
@@ -345,40 +393,48 @@ function openViewer(ticket, file, inPlace) {
  * A picture or clip opens in the kit's lightbox (#833): clips get the scrubber, pictures whole (a wide screenshot is not panned), and
  * the other pictures and clips of the message it was linked from come along, stepped with ‹ ›, ←/→ or the
  * filmstrip. A card's picture options keep their own stepping (galleryControls), so they don't come here.
+ * @param {ThreadRef} ticket @param {ShownFile} file
  */
 function showMedia(ticket, file) {
+  const vw = /** @type {Viewer} */ (viewer); // openViewer has just made it
   if (file.kind !== 'image' && file.kind !== 'video') return false;
   if (gallery?.ticketId === ticket.id && gallery.options.some((o) => o.path === file.path)) return false;
   const prefix = `#/f/${ticket.id}/`;
-  const pathOf = (a) => a.dataset.file ?? decodeURIComponent(a.getAttribute('href').slice(prefix.length));
-  const link = [...viewer.chat.querySelectorAll(`#log a[href^="${prefix}"]`)].find((a) => pathOf(a) === file.path);
-  const links = [...(link?.closest('.msg')?.querySelectorAll(`a[href^="${prefix}"]`) ?? [])];
-  const paths = [...new Set(links.map(pathOf))].filter((p) => ['image', 'video'].includes(fileKind(p)));
+  /** @param {HTMLElement} a */
+  const pathOf = (a) => a.dataset.file ?? decodeURIComponent(/** @type {string} */ (a.getAttribute('href')).slice(prefix.length));
+  const link = [.../** @type {NodeListOf<HTMLElement>} */ (vw.chat.querySelectorAll(`#log a[href^="${prefix}"]`))].find((a) => pathOf(a) === file.path);
+  const links = /** @type {HTMLElement[]} */ ([...(link?.closest('.msg')?.querySelectorAll(`a[href^="${prefix}"]`) ?? [])]);
+  const paths = [...new Set(links.map(pathOf))].filter((p) => ['image', 'video'].includes(/** @type {string} */ (fileKind(p))));
   // A minion's marked picture (#960) opens with its marks, as marks people can undo, while its Marks toggle is on.
+  /** @type {Map<string, { w: number, h: number, marks: Mark[] }>} */
   const minionMarks = new Map();
   for (const a of links) {
     const marked = a.closest('.cui-marked');
-    const own = marked?.querySelector('.cui-marks-toggle > input')?.checked && parseMarks(marked.dataset.marks);
+    const own = /** @type {HTMLInputElement | null | undefined} */ (marked?.querySelector('.cui-marks-toggle > input'))?.checked && parseMarks(/** @type {HTMLElement} */ (marked).dataset.marks);
     if (own && !minionMarks.has(pathOf(a))) minionMarks.set(pathOf(a), own);
   }
   if (!paths.includes(file.path)) paths.splice(0, paths.length, file.path);
-  const items = paths.map((p) => ({
-    src: p === file.path ? `${fileUrl(ticket.id, p)}&v=${file.mtime}` : fileUrl(ticket.id, p),
-    kind: fileKind(p),
-    alt: baseName(p),
-    marks: minionMarks.get(p),
-  }));
-  viewer.stage.className = 'viewer-stage k-media';
+  const items = paths.map(
+    (p) =>
+      /** @type {MarkedItem} */ ({
+        src: p === file.path ? `${fileUrl(ticket.id, p)}&v=${file.mtime}` : fileUrl(ticket.id, p),
+        kind: /** @type {'image' | 'video'} */ (fileKind(p)),
+        alt: baseName(p),
+        marks: minionMarks.get(p),
+      }),
+  );
+  vw.stage.className = 'viewer-stage k-media';
+  /** @type {Map<string, Mark[]>} */
   const kept = new Map();
   const lb = lightbox(items, {
     at: paths.indexOf(file.path),
-    into: viewer.stage,
+    into: vw.stage,
     autoplay: true,
     label: 'Pictures and clips in this message',
     onChange: (at) => replaceHash(fileHref(ticket.id, paths[at])),
     // A picture is ready to draw on (#946): Done puts the marked copy in the chat's message box and goes back to it.
     // Each picture's marks outlive stepping to another one, while the viewer stays open.
-    render: (item, stage, _, show) => {
+    render: (/** @type {MarkedItem} */ item, stage, _, show) => {
       if (item.kind !== 'image') return show();
       const a = annotator(stage, item.src, {
         ...(kept.has(item.src) ? { marks: kept.get(item.src) } : item.marks ? { marks: item.marks.marks, size: { w: item.marks.w, h: item.marks.h } } : {}),
@@ -396,7 +452,7 @@ function showMedia(ticket, file) {
       };
     },
   });
-  viewer.media = { ticketId: ticket.id, paths, lb };
+  vw.media = { ticketId: ticket.id, paths, lb };
   return true;
 }
 
@@ -424,6 +480,7 @@ export function closeViewer() {
  * whole screen: `kb-page` hides the chat under it and sizes the dialog to the visual viewport. Both come back when
  * the keyboard closes. Only a class and a height change, so nothing else moves.
  */
+/** @param {HTMLDialogElement} dialog */
 function watchKeyboard(dialog) {
   const vv = window.visualViewport;
   if (!vv) return () => {};
@@ -461,20 +518,21 @@ function watchKeyboard(dialog) {
 
 /** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */
 function leaveViewer() {
-  if (viewer.inPlace) history.back();
-  else replaceHash(threadHref(viewer.ticket));
+  const vw = /** @type {Viewer} */ (viewer);
+  if (vw.inPlace) history.back();
+  else replaceHash(threadHref(vw.ticket));
 }
 
 function renderViewerBar() {
   if (!viewer) return;
   const { file, ticket: t } = viewer;
   // A file that is also an artifact can be pinned; keep its pin state live.
-  const a = file.artifact && (view.artifacts.find((x) => x.id === file.artifact.id) ?? file.artifact);
+  const a = file.artifact && (artifactList().find((x) => x.id === /** @type {ArtifactFile} */ (file.artifact).id) ?? file.artifact);
   const src = `${fileUrl(t.id, file.path)}&v=${file.mtime}`;
   const options = gallery?.ticketId === t.id ? gallery.options : [];
   // By place, not path alone: two options may share one picture.
-  const at = options[gallery?.at]?.path === file.path ? gallery.at : options.findIndex((o) => o.path === file.path);
-  if (at >= 0) gallery.at = at;
+  const at = options[/** @type {number} */ (gallery?.at)]?.path === file.path ? /** @type {Gallery} */ (gallery).at : options.findIndex((o) => o.path === file.path);
+  if (at >= 0) /** @type {Gallery} */ (gallery).at = at;
   const open = file.missing ? '' : openButton(src, file, viewerBridge(t, file));
   if (open && at >= 0) open.classList.add('wide-only'); // a phone's bar keeps its room for the option's controls
   // ‹ › on the picture's own edges too, so it steps like a carousel (Cara, 2026-11-14).
@@ -496,6 +554,7 @@ function renderViewerBar() {
  * A picture option's controls in the bar: ‹ › to the card's other pictures (swapped in place, as a link
  * from the chat is) and Pick this, which only picks: the card's Send still sends. Read-only once answered.
  */
+/** @param {ThreadRef} t @param {GalleryOption[]} options @param {number} at @param {number} by @param {string} [cls] */
 function stepLink(t, options, at, by, cls = '') {
   if (options.length < 2) return '';
   const to = (at + by + options.length) % options.length;
@@ -505,8 +564,8 @@ function stepLink(t, options, at, by, cls = '') {
       class: `button secondary step ${cls}`,
       href: fileHref(t.id, options[to].path),
       'aria-label': by < 0 ? 'Previous option' : 'Next option',
-      onclick: (e) => {
-        gallery.at = to;
+      onclick: (/** @type {Event} */ e) => {
+        /** @type {Gallery} */ (gallery).at = to;
         // The same picture under another option: no new address to go to, so only the bar changes.
         if (options[to].path === options[at].path) {
           e.preventDefault();
@@ -518,10 +577,11 @@ function stepLink(t, options, at, by, cls = '') {
   );
 }
 
+/** @param {ThreadRef} t @param {GalleryOption[]} options @param {number} at */
 function galleryControls(t, options, at) {
   const o = options[at];
   const picked = o.picked();
-  const pick = gallery.answered()
+  const pick = /** @type {Gallery} */ (gallery).answered()
     ? picked
       ? h('span', { class: 'picked' }, '✓ Picked')
       : ''
@@ -533,7 +593,7 @@ function galleryControls(t, options, at) {
           'aria-pressed': String(picked),
           onclick: () => {
             o.pick();
-            viewer?.bar.querySelector('.pick')?.focus(); // the pick redrew the bar
+            /** @type {HTMLElement | null | undefined} */ (viewer?.bar.querySelector('.pick'))?.focus(); // the pick redrew the bar
           },
         },
         picked ? '✓ Picked' : 'Pick this',
@@ -545,6 +605,7 @@ function galleryControls(t, options, at) {
 /**
  * Under a file's view: a comment that goes to the thread that made the file as a chat message
  * ("[Cara on report.md]: …"), waking it like any message. Text selected in the file can lead it as a quote.
+ * @param {ThreadRef} t @param {string} path @param {string} name @param {HTMLElement} body
  */
 function commentBox(t, path, name, body) {
   const draftKey = `cc-comment:${t.id}:${path}`;
@@ -555,6 +616,7 @@ function commentBox(t, path, name, body) {
   const quoteEl = h('div', { class: 'quote', hidden: true });
   let quote = '';
   let selected = '';
+  /** @param {string} text */
   const setQuote = (text) => {
     quote = text;
     quoteEl.hidden = !text;
@@ -568,7 +630,7 @@ function commentBox(t, path, name, body) {
       hidden: true,
       title: 'Quote the text selected in the file',
       // Keep the selection when the button is pressed, so there is still something to quote.
-      onpointerdown: (e) => e.preventDefault(),
+      onpointerdown: (/** @type {Event} */ e) => e.preventDefault(),
       onclick: () => {
         setQuote(selected);
         textarea.focus();
@@ -618,7 +680,7 @@ function commentBox(t, path, name, body) {
       grow();
       status.replaceChildren(`Sent to ${threadLabel(t)} · `, h('a', { href: threadHref(t) }, 'see the chat'));
     } catch (ex) {
-      status.textContent = ex.message;
+      status.textContent = /** @type {Error} */ (ex).message;
     } finally {
       sendBtn.disabled = false;
       setSending(sending - 1);
@@ -629,28 +691,30 @@ function commentBox(t, path, name, body) {
 }
 
 /** Main panel: a file from the project's shared folder. */
+/** @param {ShownFile} file */
 export function sharedViewer(file) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
   // Comments on a shared page go to the Taskmaster; the page's own Send goes to the minion that linked it, if one did (the server knows).
-  const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
+  const comment = !file.missing && file.kind === 'html' && page().coordinator ? commentBox(page().coordinator, /** @type {string} */ (file.abs), file.name, body) : null;
   const bridge = sharedBridge(file);
+  /** @param {string} message */
   const onMissing = (message) => {
     file.missing = message;
     comment?.remove();
     renderSharedHead();
   };
-  if (!file.missing) renderFileBody(body, { ...file, onMissing, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), bridge });
+  if (!file.missing) renderFileBody(body, { ...file, onMissing, src: `${sharedUrl(page().projectId, file.path)}&v=${file.mtime}`, urlFor: (/** @type {string} */ p) => sharedUrl(page().projectId, p), hrefFor: (/** @type {string} */ p) => sharedHref(page().projectId, p), bridge });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }
 
 export function renderSharedHead() {
   const el = document.getElementById('shared-head');
   if (!el) return;
-  const { file } = view;
+  const file = sharedFileShown();
   // Its entry in the Shared list carries the pin, kept live as it changes.
-  const listed = view.shared.find((f) => f.path === file.path);
-  const src = `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`;
+  const listed = /** @type {SharedFile[]} */ (page().shared).find((f) => f.path === file.path);
+  const src = `${sharedUrl(page().projectId, file.path)}&v=${file.mtime}`;
   el.replaceChildren(
     h(
       'div',
@@ -671,6 +735,7 @@ export function renderSharedHead() {
  * Full screen for the HTML page framed in `scope()`, in this tab so its bridge keeps saving (Open's new
  * tab has no viewer behind it). Where a frame can't go full screen (iPhone), it fills the window instead.
  */
+/** @param {() => Element | null | undefined} scope */
 function fullScreenButton(scope) {
   return h(
     'button',
@@ -678,7 +743,7 @@ function fullScreenButton(scope) {
       type: 'button',
       class: 'secondary full-screen',
       onclick: () => {
-        const frame = scope()?.querySelector('iframe.artifact-frame');
+        const frame = /** @type {HTMLIFrameElement | null | undefined} */ (scope()?.querySelector('iframe.artifact-frame'));
         if (!frame) return;
         if (document.fullscreenEnabled && frame.requestFullscreen) frame.requestFullscreen().catch(() => fillWindow(frame));
         else fillWindow(frame);
@@ -688,9 +753,11 @@ function fullScreenButton(scope) {
   );
 }
 
+/** @param {HTMLIFrameElement & { leaveFill?: () => void }} frame */
 function fillWindow(frame) {
   const close = h('button', { type: 'button', class: 'frame-fill-close', title: 'Leave full screen', 'aria-label': 'Leave full screen', onclick: () => leave() }, icon('close'));
   // Esc leaves the fill, not the viewer under it.
+  /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     if (e.key !== 'Escape') return;
     if (frame.isConnected) e.preventDefault(), e.stopPropagation();
@@ -711,8 +778,9 @@ function fillWindow(frame) {
 /**
  * Show a file in `body` by its kind. Markdown's relative image links load from next to it, its links
  * to files beside it open them (`hrefFor`).
+ * @param {Holder} body @param {FileBodyOptions} options
  */
-function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, onMissing, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
+function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, onMissing, urlFor = (p) => fileUrl(/** @type {number} */ (ticketId), p), hrefFor = (p) => fileHref(/** @type {number} */ (ticketId), p) }) {
   // The full-screen viewer reuses its stage: a text answer for a file opened before the one showing is dropped.
   const load = (body.textLoad = {});
   if (kind === 'image') {
@@ -735,6 +803,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, o
     body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(size)}). Open or download it instead.`));
   } else {
     body.append(loadingLine('Loading…'));
+    /** @param {Node} el */
     const show = (el) => body.textLoad === load && body.replaceChildren(el);
     fetch(src)
       .then(async (res) => {
@@ -749,6 +818,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, o
         }
         const text = await res.text();
         const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+        /** @param {string} href */
         const imageUrl = (href) => (isLocalPath(href) ? urlFor(joinPath(dir, href.split('#')[0])) : null);
         let shown = text;
         if (kind === 'canvas') {
@@ -757,6 +827,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, o
             shown = JSON.stringify(JSON.parse(text), null, 2);
           } catch {}
         }
+        /** @param {string} href */
         const linkHref = (href) => hrefFor(joinPath(dir, href));
         const doc = kind === 'markdown' && markdownDoc(text, { imageUrl, linkHref });
         // Plain text keeps its URLs clickable too (#440): linkify escapes everything else.
@@ -769,19 +840,20 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, o
 }
 
 /** A file's body for the Files view's preview: a minion's artifact (it has an id) or a shared-folder file. */
+/** @param {Listed} file @param {string} src @param {(message: string) => unknown} [onMissing] */
 export function previewBody(file, src, onMissing) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, 'This file no longer exists. Unpin it to take it off the list.'));
   else if (file.id) renderFileBody(body, { ...file, src, ticketId: file.ticket_id, bridge: { open: { artifact: file.id }, owner: threadName(file) }, onMissing });
-  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), bridge: sharedBridge(file), onMissing });
+  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(page().projectId, p), hrefFor: (p) => sharedHref(page().projectId, p), bridge: sharedBridge(file), onMissing });
   return body;
 }
 
 export function renderArtifactHead() {
   const el = document.getElementById('artifact-head');
   if (!el) return;
-  const a = view.artifacts.find((x) => x.id === view.artifactId);
-  if (!a && view.filesFailed) {
+  const a = artifactList().find((x) => x.id === page().artifactId);
+  if (!a && page().filesFailed) {
     el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, "Couldn't load this artifact"), h('span', { class: 'muted' }, 'The list of files did not load. '), h('button', { type: 'button', onclick: refreshArtifacts }, 'Retry')));
     return;
   }

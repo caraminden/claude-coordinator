@@ -223,6 +223,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
 | `deploy/offbox.sh`, `deploy/offbox-serve.sh`, `deploy/desktop/` | The off-box copy set backup.sh refreshes, the forced command the desktop's key runs, and the desktop's pull script and setup |
 | `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock; `--into build/<n>` and `--build` for build branches |
+| `tools/land/` | land.sh's parts, sourced up front (definitions only): `common.sh` (retro log, phase times, gh calls), `prepare.sh` (before the line: base, number merges, conflicts, smoke), `build.sh` (build branches), `guards.sh` (guard tests, boot check) |
 | `tools/deploy-queue.sh` | The line for the deploy lock, and whether another Citadel job has the CI desktop, sourced by `land.sh` and `deploy.sh`: oldest waiter first, each told its place |
 | `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, restarts that keep turns running, rollback |
 | `tools/ci-runner/`, `src/ci-runner.ts`, `src/runner-cap.ts`, `public/runner-agent.mjs` | Every scheme's CI on self-hosted runners on Cara's desktop: the runner agent there (installed once, as SYSTEM) that adds, lists and removes a scheme's runners when a member asks through `ci_runners`, its scripts, the `runs-on` line, and the route that mints runner tokens with the scheme owner's GitHub login |

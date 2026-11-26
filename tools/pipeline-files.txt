@@ -8,6 +8,7 @@
 # A `# lane-only: <path>` line marks a listed path no pipeline test can read (outside test/, tools/ and kit/): it stays in
 # the lane, and changing it alone runs the product tier (#2138). test/pipeline-files.test.ts checks that too.
 tools/land.sh
+tools/land/
 tools/land-core.sh
 tools/land.local.sh
 tools/own-check.sh

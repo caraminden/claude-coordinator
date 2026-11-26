@@ -66,7 +66,7 @@ train[^l].
   conflicted with each other[^c]. #1992 gave #1991 its query in one held message, and #1991 needed no change[^r].
 - **The early unseal:** Josh unsealed #1994 at 14:34 onto #1991's branch, an hour before #1991 was live at 15:39. #1994
   then reused #1991's reader, route and colours as briefed[^u][^l].
-- **Handoffs deleted:** all three handoff files were gone from `shared/project/handoffs/` by the retro[^h].
+- **Handoffs deleted:** the effort's own handoff files (`handoff-time-log-explain.md` and its siblings) were gone from `shared/project/handoffs/` by the retro[^h].
 
 ## Did the last retro's fixes hold
 
@@ -79,11 +79,11 @@ train[^l].
 [^u]: `host_check db`, Nov 26: #1994's `note` and `user_message` events (`SELECT ... FROM events e JOIN tickets k ON k.id=e.ticket_id WHERE k.project_id=2 AND k.number=1994 AND e.kind NOT IN ('assistant','tool_use','tool_result','result','stream') ORDER BY e.id LIMIT 8`): "Josh unsealed it before its leader's work was in" at 14:34:04.
 [^l]: `grep -hE 'timing · ticket/(1991|1992|1994)' shared/project/retro-log/2026-11-2[56]/land.md` and the `ship train suspects` lines naming those branches, Nov 26. UTC converted to PST.
 [^s]: The `line` (plus `ci-queue` and `ci-run` when refused at CI) on the five refused `timing` lines in [^l]: 2281 + 1546 + 412 + 1146 + (4906 + 29 + 988) = 11,308 s.
-[^g]: `grep -hE 'timing · ticket/(1983|2037|2065)[^ ]* .*landed' shared/project/retro-log/2026-11-26/land.md`, Nov 26: 02:11Z, 04:01Z and 05:18Z on Nov 26 UTC. `grep -nE 'one-pacific|one-home|size-budget|ui-contract' tools/always-tests.txt` lists all four on main 2830f3d87.
+[^g]: `grep -hE 'timing · ticket/(1983|2037|2065)[^ ]* .*landed' shared/project/retro-log/2026-11-26/land.md`, Nov 26: #2065 at 02:11Z, #1983 at 04:01Z, #2037 at 05:18Z, all Nov 26 UTC. `grep -nE 'one-pacific|one-home|size-budget|ui-contract' tools/always-tests.txt` lists all four on main 2830f3d87.
 [^c]: `for d in 2026-11-25 2026-11-26; do grep -cE '(train prep|land) conflict' $d/land.md; grep -E '(train prep|land) conflict' $d/land.md | grep -c README.md; done` in `shared/project/retro-log/`, Nov 26: 100/21 and 28/13. The #1994 and #1996 lines are at 01:14:05Z, 01:38:05Z and 01:38:22Z in 2026-11-26/land.md.
 [^m]: `search_minions "README Layout conflict merge"` since 2026-11-20, Nov 26.
 [^mg]: `sed -n 154,161p tools/land.local.sh` and `sed -n 300,316p tools/land-core.sh` on 2830f3d87.
 [^p]: `grep -c '· process ·' shared/project/retro-log/2026-11-25/01adc402-980f-4064-9c06-877f94ea7de0.md` (#1991's session), Nov 26: 2.
 [^r]: `read_minion` on #1991, #1992 and #1994, by a Sonnet Grunt, Nov 26. Its counts come from the chats. Costs come from [^t] instead.
 [^b]: `host_check db`, Nov 26: the `"brief":true` user_message of #1991 and #1992. #1992's ends with "may also need the next SCHEMA_HISTORY number: take yours when you ship, not before", and #1991's Done when reads "the query timed on a copy of the live data".
-[^h]: `ls shared/project/handoffs/ | grep -i time-log`, Nov 26: no file.
+[^h]: `ls shared/project/handoffs/ | grep -i time-log`, Nov 26, before this retro wrote its own: no file. (`handoff-citadel-minion-time-log.md` is this retro's proposal, fix 3.)

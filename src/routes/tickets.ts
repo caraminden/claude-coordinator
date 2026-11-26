@@ -27,7 +27,7 @@ import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs } from '../land.ts';
-import { checkHandoff, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { checkHandoff, laneHold, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
 import { reviewRefusal } from '../review-gate.ts';
 import { criticRefusal } from '../critic-gate.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
@@ -1411,10 +1411,20 @@ export const ticketRoutes: Route[] = [
       if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster cannot be dismissed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the minion before dismissing it');
+      // Why it closed, in one word (#1989; Josh, 2026-11-25, "Save one word"): an agent says it, a person's one click doesn't.
+      const as = body.status === 'closed' && body.as != null ? { closedAs: body.as } : null;
+      if (as) store.props.check(ticket.project_id, as);
       // Already as asked: a second dismissal, or a reopen of a minion that isn't dismissed, changes nothing.
-      if ((body.status === 'closed') === (ticket.status === 'closed')) return json(res, 200, ticketView(app, id));
+      if ((body.status === 'closed') === (ticket.status === 'closed')) {
+        if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
+        if (as) runner.broadcastTicket(id);
+        return json(res, 200, ticketView(app, id));
+      }
       if (body.status === 'closed') {
-        await runner.close(id, `${session.name} dismissed this minion.`);
+        const closed = runner.close(id, `${session.name} dismissed this minion.`);
+        if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
+        if (as) runner.broadcastTicket(id);
+        await closed;
       } else {
         store.updateTicket(id, { status: body.status });
         await ownWrites(); // the broadcast, the worktree check and the reply read it back (#1244)
@@ -1665,6 +1675,9 @@ export const ticketRoutes: Route[] = [
       const body = (await readJson(req)) ?? {};
       const mine = app.store.getTicket(ticket.id)!;
       const ready = await checkHandoff(app, mine, body, bearer(req));
+      // A fix for shipping that is broken right now jumps the lane.
+      const held = body.into === undefined && body.outage !== true && body.fix !== true && (await laneHold(app, mine));
+      if (held) throw new HttpError(409, `Not handed off: ${held}`);
       if (!startHandoff(app, mine, ready, { kind: 'minion' })) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },
@@ -1847,7 +1860,7 @@ export const ticketRoutes: Route[] = [
     who: ['minion'],
     refuse: 'A minion may only be dismissed by itself',
     async handler(ctx) {
-      const { req, res, app, ticket } = ctx;
+      const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
       const { runner } = app;
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.
@@ -1857,7 +1870,10 @@ export const ticketRoutes: Route[] = [
       const kept = runner.keptOpen(id, true);
       if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first. If it stays open, say why in your reply`);
       const cleared = app.store.getTicket(id)!.state === 'ready';
+      // Checked before the close, written after it: a refused one leaves no word.
+      if (body.as != null) app.store.props.check(ticket.project_id, { closedAs: body.as });
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
+      if (body.as != null) app.store.props.set('minion', id, ticket.project_id, { closedAs: body.as }, session.name);
       return json(res, 202, { ...ticketView(app, id), cleared });
     },
   },

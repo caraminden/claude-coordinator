@@ -14,7 +14,7 @@ type Data = {
   skip?: unknown;
   todo?: unknown;
   message?: string;
-  details?: { error?: Err; duration_ms?: number; type?: string };
+  details?: { error?: Err; duration_ms?: number; type?: string; passed?: boolean };
   counts?: { passed: number; failed: number; cancelled: number; skipped: number; todo: number };
   duration_ms?: number;
   tests?: Data[];
@@ -57,6 +57,12 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
   const running = new Map<string, Data>();
   const failures: { file: string; own: boolean; where: string; name: string; error?: Err }[] = [];
   let passed = 0;
+  // node holds a file's pass and fail events back until the files before it end; only test:complete comes at once, so
+  // results are read from it, and test:fail adds what has no complete (a root hook).
+  // The files whose process is done, and whether node passed it: what a stopped run doesn't rerun (#1925).
+  const done = new Map<string, boolean>();
+  const passes = new Map<string, number>();
+  const seen = new Set<string>();
 
   /** The summary; with `still` (the run was stopped from outside) the counts so far and what was still running. */
   function report(total?: Data, still?: Data[]): string {
@@ -73,6 +79,13 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
           })
           .join('')}`
       : `${failed ? '✖' : '✔'} ${counts} in ${((total?.duration_ms ?? 0) / 1000).toFixed(1)} s\n`;
+    // For tools/citadel-test's rerun: a line a finished file, written now so a failure node reports after the file's end counts.
+    if (process.env.CITADEL_TEST_DONE_FILE) {
+      const lines = [...done].map(([file, ok]) => `${file}\t${passes.get(file) ?? 0}\t${failures.filter((f) => f.file === file).length || (ok ? 0 : 1)}\n`);
+      try {
+        appendFileSync(process.env.CITADEL_TEST_DONE_FILE, lines.join(''));
+      } catch {}
+    }
     // tools/citadel-test reads the failed files from here, for its hint on a red (#1650); nothing about the summary changes.
     if (process.env.CITADEL_TEST_FAILED_FILE && !still) {
       try {
@@ -116,16 +129,26 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
       names.push(data.name ?? '');
       path.set(file, names);
       if (data.details?.type !== 'suite') running.set(file, data);
-    } else if (type === 'test:pass' || type === 'test:fail') {
-      if (running.get(file)?.name === data.name) running.delete(file);
-      if (type === 'test:pass') {
-        if (data.details?.type !== 'suite' && !data.skip && !data.todo) passed++;
-        continue;
+    } else if (type === 'test:pass' || type === 'test:complete' || type === 'test:fail') {
+      if (type !== 'test:fail' && running.get(file)?.name === data.name) running.delete(file);
+      if (type === 'test:pass') continue;
+      const own = resolve(data.name ?? '') === resolve(file);
+      if (type === 'test:complete') {
+        if (own) done.set(file, data.details?.passed !== false);
+        if (data.details?.passed !== false) {
+          if (!own && data.details?.type !== 'suite' && !data.skip && !data.todo) {
+            passed++;
+            passes.set(file, (passes.get(file) ?? 0) + 1);
+          }
+          continue;
+        }
       }
       const error = data.details?.error;
       // A suite that failed because a test inside it did: that test is listed already.
       if (error?.failureType === 'subtestsFailed') continue;
-      const own = resolve(data.name ?? '') === resolve(file);
+      const key = [file, data.nesting, data.line, data.name].join('\0');
+      if (type === 'test:fail' && seen.has(key)) continue;
+      if (type === 'test:complete') seen.add(key);
       const name = own ? '(the file itself)' : [...(path.get(file) ?? []).slice(0, data.nesting ?? 0), data.name].join(' › ');
       failures.push({ file, own, where: `${rel(file)}${data.line && !own ? `:${data.line}` : ''}`, name, error });
     }

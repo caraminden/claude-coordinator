@@ -9,8 +9,8 @@ import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node
 import { createServer as listen, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, test } from 'node:test';
-import { bootServer, until, PASSWORD, type Booted } from './helpers.ts';
+import { after, test, type TestContext } from 'node:test';
+import { bootServer, repoCopy, until, PASSWORD, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 import { holds } from './holds.ts';
 
@@ -19,20 +19,29 @@ const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
 const shots = process.env.INSTANT_OPEN_SHOTS; // a folder: write desktop and phone screenshots there
 
 const servers: Booted[] = [];
+const pages: Page[] = []; // the running test's open pages (server)
 let browser: Browser | null = null;
 after(async () => {
   await browser?.close();
   for (const s of servers) await s.stop();
 });
 
-/** A server with a scheme and a quiet minion (CLAUDE_BIN is /bin/false, so its first turn just ends). */
-async function server() {
+/**
+ * A server with a scheme and a quiet minion (CLAUDE_BIN is /bin/false, so its first turn just ends). It and the pages opened
+ * on it go when the test `t` ends, not when the file does: each test's server and open page, its stream live or retrying a
+ * dead address, kept running under the next ones, and by the fifth test 10 copies at once took over 10 s to draw a chat (#1895).
+ */
+async function server(t: TestContext) {
   const srv = await bootServer();
   servers.push(srv);
+  t.after(async () => {
+    for (const page of pages.splice(0)) await page.send('Page.close').catch(() => {});
+    if (servers.includes(srv)) await servers.splice(servers.indexOf(srv), 1)[0].stop();
+  });
   const projectId = (await srv.call('/api/projects', { name: 'P' })).data.id;
-  const t = (await srv.call(`/api/projects/${projectId}/tickets`, { title: 'Kept', message: 'hello from before' })).data;
-  await until('the first turn to end', async () => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
-  return { srv, hash: `#/p/${projectId}/t/${t.number}`, ticket: t };
+  const made = (await srv.call(`/api/projects/${projectId}/tickets`, { title: 'Kept', message: 'hello from before' })).data;
+  await until('the first turn to end', async () => (await srv.call(`/api/tickets/${made.id}`)).data.ticket.status !== 'running');
+  return { srv, hash: `#/p/${projectId}/t/${made.number}`, ticket: made };
 }
 
 const said = (text: string) => `[...document.querySelectorAll('#log .msg.user')].some((m) => m.textContent.includes(${JSON.stringify(text)}))`;
@@ -42,6 +51,7 @@ const chip = `document.querySelector('.reconnecting')?.textContent`;
 async function openOnce(srv: Booted, hash: string, width = 1280) {
   browser ??= await launch(bin!);
   const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width, height: 800 });
+  pages.push(page);
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
   // A stream's hello redraws the usage meter from the server's usage (none on a test server: it hides the meter), so a
@@ -60,7 +70,11 @@ async function openOnce(srv: Booted, hash: string, width = 1280) {
   })()`,
   });
   await page.send('Page.navigate', { url: `${srv.base}/c/${hash}` });
-  await waitFor(page, 'the chat', said('hello from before'));
+  await waitFor(page, 'the chat', said('hello from before')).catch(async (e) => {
+    // What the page had instead: still loading, the sign-in screen, or a chat without its message.
+    const shows = `JSON.stringify({ at: location.href, state: document.readyState, signIn: !!document.querySelector('#login-form:not([hidden])'), topbar: !!document.querySelector('.topbar'), messages: document.querySelectorAll('#log .msg').length })`;
+    throw new Error(`${e.message}: the page shows ${await page.eval(shows).catch((x) => `nothing (${x?.message ?? x})`)}`);
+  });
   await waitFor(page, 'the kept chat', `JSON.parse(localStorage.getItem('cc-last-chat') || '{}').hash === ${JSON.stringify(hash)}`);
   await page.eval(`navigator.serviceWorker.ready.then(() => undefined)`);
   await waitFor(page, 'the kept files', `caches.keys().then((k) => k.some((n) => n.startsWith('shell-')))`);
@@ -77,8 +91,8 @@ for (const [width, label] of [
   [1440, 'desktop'],
   [390, 'phone'],
 ] as const) {
-  test(`at ${label} width, with the server gone, the app opens on the last chat at once and says it is catching up`, { skip }, async () => {
-    const { srv, hash } = await server();
+  test(`at ${label} width, with the server gone, the app opens on the last chat at once and says it is catching up`, { skip }, async (t) => {
+    const { srv, hash } = await server(t);
     const page = await openOnce(srv, hash, width);
     await srv.stop();
     servers.splice(servers.indexOf(srv), 1);
@@ -109,8 +123,8 @@ for (const [width, label] of [
   });
 }
 
-test('with the server there, the kept chat shows first and the live one replaces it in place', { skip }, async () => {
-  const { srv, hash, ticket } = await server();
+test('with the server there, the kept chat shows first and the live one replaces it in place', { skip }, async (t) => {
+  const { srv, hash, ticket } = await server(t);
   const page = await openOnce(srv, hash);
   // Hold the launch's sign-in check, so what shows before it answers is only what was kept.
   await page.send('Page.addScriptToEvaluateOnNewDocument', {
@@ -134,8 +148,8 @@ test('with the server there, the kept chat shows first and the live one replaces
   assert.equal(await page.eval(`[...document.querySelectorAll('#log .msg.user')].filter((m) => m.textContent.includes('hello from before')).length`), 1, 'nothing drawn twice');
 });
 
-test('Back and Forward work after the app opened on its kept chat (#1854)', { skip }, async () => {
-  const { srv, hash } = await server();
+test('Back and Forward work after the app opened on its kept chat (#1854)', { skip }, async (t) => {
+  const { srv, hash } = await server(t);
   const page = await openOnce(srv, hash);
   await page.send('Page.navigate', { url: `${srv.base}/c/` });
   await waitFor(page, 'the live chat', `${said('hello from before')} && !document.querySelector('.reconnecting')`);
@@ -148,8 +162,8 @@ test('Back and Forward work after the app opened on its kept chat (#1854)', { sk
   await until('the way forward again', async () => (await page.eval(nav)) === 'back false, forward true');
 });
 
-test('signing out forgets the kept chat, and what was asked, so the next person signing in on that page keeps none of it', { skip }, async () => {
-  const { srv, hash, ticket } = await server();
+test('signing out forgets the kept chat, and what was asked, so the next person signing in on that page keeps none of it', { skip }, async (t) => {
+  const { srv, hash, ticket } = await server(t);
   const page = await openOnce(srv, hash);
   const asked = `import(new URL('base.js', location.href)).then((m) => Object.keys(m.keptAnswers(${ticket.project_id}, ${ticket.id})).length)`;
   assert.ok((await page.eval(asked)) > 0);
@@ -158,8 +172,8 @@ test('signing out forgets the kept chat, and what was asked, so the next person 
   assert.equal(await page.eval(asked), 0);
 });
 
-test('signed out, the top bar has no usage meter or chips (#1439); signing back in brings them back with no reload', { skip }, async () => {
-  const { srv, hash } = await server();
+test('signed out, the top bar has no usage meter or chips (#1439); signing back in brings them back with no reload', { skip }, async (t) => {
+  const { srv, hash } = await server(t);
   const page = await openOnce(srv, hash);
   const seen = `({ chips: document.querySelectorAll('.topbar .meters .ci-chip, .topbar .meters .status-chip, .topbar .meters .releases-chip').length, usage: !!document.querySelector('.topbar .meters .usage:not([hidden])') })`;
   await waitFor(page, "the stream's hello", 'window.hellos > 0');
@@ -180,10 +194,13 @@ test('signed out, the top bar has no usage meter or chips (#1439); signing back 
 test("a ship reaches an open app out of sight: a visible page stays, the next navigation loads the new version from the worker's kept files", { skip }, async () => {
   // A copy of the repo to ship into, so the change to public/ stays out of this checkout.
   const repo = join(import.meta.dirname, '..');
-  const copy = mkdtempSync(join(tmpdir(), 'ship-'));
-  after(() => rmSync(copy, { recursive: true, force: true }));
+  // It sits where the compile cache expects it (repoCopy): at any other path its boot compiles the whole app again, and
+  // under load that boot ran past the 20 s the server has to name its port (#1895).
+  const base = mkdtempSync(join(tmpdir(), 'ship-'));
+  after(() => rmSync(base, { recursive: true, force: true }));
+  const { copy, env } = repoCopy(base);
   cpSync(repo, copy, { recursive: true, filter: (src) => !/[/\\](\.git|node_modules)$/.test(src) });
-  const srv = await bootServer({ script: join(copy, 'server.ts') });
+  const srv = await bootServer({ script: join(copy, 'server.ts'), env });
   servers.push(srv);
   browser ??= await launch(bin!);
   const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width: 1280, height: 800 });

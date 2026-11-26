@@ -1,6 +1,8 @@
 // The post-deploy watch (#724): after each deploy goes live, compare a few health readings from just before it with
 // just after it, at +20 min, +1 h and +1 day. When one clearly gets worse, wake the minions whose commits went live in
-// that deploy, once each, and leave the Taskmaster held mail. It never reverts, rolls back or blocks a land: a person or
+// that deploy, once each, and leave the Taskmaster held mail. A minion is woken only when the readings name a file its
+// commits touched, or the rise holds over a second HOLD_MS window (#2049: 56 of 68 wakes ended "not mine"); otherwise
+// it gets a note, which starts no turn. It never reverts, rolls back or blocks a land: a person or
 // the minion decides. Plain server code, no model: the only spend is the turn each woken minion takes.
 //
 // The readings, all from what's already stored, so a restart loses none of them:
@@ -19,6 +21,8 @@ export const WATCH_KEY = 'deploy-watch';
 const MIN = 60_000;
 /** When each check runs, after the deploy went live. */
 export const CHECKS = [20 * MIN, 60 * MIN, 24 * 60 * MIN];
+/** The second window a rise must hold over before it wakes a minion whose files no reading names (#2049). */
+export const HOLD_MS = 20 * MIN;
 /** A window cut shorter than this by the next deploy says too little to compare. */
 export const MIN_WINDOW = 5 * MIN;
 /**
@@ -59,6 +63,8 @@ export interface Watched {
   len: number;
   /** Set once it raised an alert: no more checks or wakes for it. */
   alerted?: boolean;
+  /** An alert that woke only some minions: at `due` the found signals are read again, and if they held, `noted` are woken. */
+  hold?: { due: number; names: string[]; noted: number[] };
 }
 export interface WatchState {
   live: string | null;
@@ -86,6 +92,10 @@ export interface WatchDeps {
   commits(prev: string, head: string): Promise<{ sha: string; subject: string }[] | null>;
   /** Wake (or reopen) a minion with a message from the server. */
   wake(ticketId: number, text: string): void;
+  /** A note on a minion's chat, starting no turn and reopening nothing. */
+  note(ticketId: number, text: string): void;
+  /** The files these commits touched, or null when git can't say. */
+  files(shas: string[]): Promise<string[] | null>;
   /** Leave a Taskmaster held mail, starting no turn. */
   mail(taskmasterId: number, text: string): void;
   /** The scheme whose code this server runs: its Taskmaster hears, and its minion numbers name the suspects. */
@@ -117,6 +127,23 @@ export function gitCommits(dir: string): WatchDeps['commits'] {
         ),
       ),
     );
+}
+
+/** WatchDeps.files from the git checkout in `dir`. */
+export function gitFiles(dir: string): WatchDeps['files'] {
+  return (shas) => new Promise((done) => execFile('git', ['log', '--no-walk=unsorted', '--name-only', '--format=', ...shas], { cwd: dir, timeout: 30_000, maxBuffer: 16 << 20 }, (err, out) => done(err ? null : [...new Set(out.split('\n').filter(Boolean))])));
+}
+
+/**
+ * The changed files a reading's text names, as a whole path: by repo path (a stall's frames, a failing turn's stack), or
+ * for a public/ file by the path it is served at (the beacon's source).
+ */
+export function namedFiles(files: string[], texts: string[]): string[] {
+  const at = (p: string) => new RegExp(`(?:^|[^\\w.-])${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-])`);
+  return files.filter((f) => {
+    const forms = [at(f), ...(f.startsWith('public/') ? [at(f.slice('public'.length))] : [])];
+    return texts.some((t) => forms.some((r) => r.test(t)));
+  });
 }
 
 /**
@@ -221,13 +248,14 @@ export class DeployWatch {
           if (found.length) await this.alert(cur, len, found);
         }
       }
+      for (const w of this.state().deploys) if (w.hold && w.hold.due <= now) await this.recheck(w);
     } finally {
       this.ticking = false;
     }
   }
 
-  /** Every reading in [at, at + len) against [at - len, at), each with whether it got worse. */
-  readings(at: number, len: number): Reading[] {
+  /** Every reading in [from, from + len) (from defaults to at) against [at - len, at), each with whether it got worse. */
+  readings(at: number, len: number, from = at): Reading[] {
     const { store } = this.d;
     const out: Reading[] = [];
     for (const sig of SIGNALS) {
@@ -235,11 +263,11 @@ export class DeployWatch {
       // Stalls just after a boot are stored as BOOT_STALL (#734), so a front-end deploy soon after a restart would see "0 before":
       // the before side counts both kinds, so warm-up stalls that go on past the quiet window aren't the deploy's.
       if (sig.key === 'loop-lag') b.count += store.healthCount(BOOT_STALL, at - len, at).count;
-      const a = store.healthCount(sig.key, at, at + len);
+      const a = store.healthCount(sig.key, from, from + len);
       out.push({ name: sig.name, before: String(b.count), after: String(a.count), first: a.first, top: a.top, worse: worse(b.count, a.count, sig.floor) });
     }
     const b = store.turnOutcomes(at - len, at);
-    const a = store.turnOutcomes(at, at + len);
+    const a = store.turnOutcomes(from, from + len);
     const share = (o: { turns: number; failed: number }) => (o.turns ? o.failed / o.turns : 0);
     const pct = (o: { turns: number; failed: number }) => `${Math.round(100 * share(o))}% (${o.failed} of ${o.turns})`;
     out.push({ name: 'failed turns', before: pct(b), after: pct(a), first: a.first, top: [], worse: a.failed >= TURN_FLOOR && share(a) >= 2 * share(b) });
@@ -324,42 +352,121 @@ export class DeployWatch {
     return { suspects: [...by.values()], unowned };
   }
 
+  /** The texts a finding's files are looked for in: each worse reading's commonest details, and the failing turns' errors. */
+  private texts(from: number, len: number, found: Finding[]): string[] {
+    const texts = found.flatMap((f) => f.top.map((t) => t.detail));
+    if (found.some((f) => f.name === 'failed turns')) texts.push(...this.d.store.turnErrorTexts(from, from + len));
+    return texts;
+  }
+
   private async alert(w: Watched, len: number, found: Finding[]) {
-    const { store } = this.d;
     const { suspects, unowned } = await this.suspects(w);
+    const texts = this.texts(w.at, len, found);
+    const named = new Map<Suspect, string[]>();
+    for (const s of suspects) {
+      const files = (await this.d.files(s.commits.map((c) => c.sha))) ?? [];
+      const hit = namedFiles(files, texts);
+      if (hit.length) named.set(s, hit);
+    }
+    const woken = suspects.filter((s) => named.has(s));
+    const noted = suspects.filter((s) => !named.has(s));
     const when = `${pacific(w.at)} (deploy ${w.commit.slice(0, 8)})`;
     const window = span(len);
-    const lines = found.map((f) => `${f.name} went from ${f.before} to ${f.after}${f.first ? `; first seen ${pacific(f.first)}` : ''}`);
-    const tops = found.flatMap((f) => f.top.map((t) => `- ${t.n}× ${t.detail.slice(0, 300)}`));
-    const sql = `sqlite3 -readonly ${this.d.dbPath} "SELECT datetime(at/1000, 'unixepoch'), kind, commit_sha, detail FROM health_events WHERE at >= ${w.at - len} AND at < ${w.at + len} ORDER BY at"`;
+    const lines = this.lines(found);
+    const holdEnd = w.at + len + HOLD_MS;
+    if (noted.length) {
+      // Saved before anything is sent, like the alert itself: a crash never wakes anyone twice.
+      const s = this.state();
+      const cur = s.deploys.find((o) => o.commit === w.commit && o.at === w.at);
+      if (cur) cur.hold = { due: holdEnd, names: found.map((f) => f.name), noted: noted.map((n) => n.ticketId) };
+      this.save(s);
+    }
     for (const s of suspects) {
-      const others = suspects.filter((o) => o !== s).map((o) => `#${o.number ?? o.ticketId} (${o.commits.length})`);
-      const text = [
-        `Post-deploy watch: since your change went live at ${when}, ${lines.join('; ')}, comparing the ${window} after the deploy with the ${window} before it.`,
-        ...(tops.length ? ['Commonest:', ...tops] : []),
-        `Your commits in that deploy: ${s.commits.map((c) => `${c.sha.slice(0, 8)} ${c.subject}`).join('; ')}.`,
-        ...(others.length || unowned.length ? [`Also in it: ${[...others, ...(unowned.length ? [`${unowned.length} commit${unowned.length > 1 ? 's' : ''} with no minion`] : [])].join(', ')}.`] : []),
-        `Nothing was reverted or blocked. Check whether your change caused it: if it did, fix it and ship the fix; if not, say why in one line and close. The readings: ${sql} (turn failures come from the turns table and error events). This is the watch's only message to you about this deploy.`,
-      ].join('\n');
+      const hit = named.get(s);
+      const head = hit
+        ? `Post-deploy watch: since your change went live at ${when}, ${lines.join('; ')}, comparing the ${window} after the deploy with the ${window} before it. Its readings name ${hit.join(', ')}, which your change touched.`
+        : `Post-deploy watch (not woken: no reading names a file your change touched): since your change went live at ${when}, ${lines.join('; ')}, comparing the ${window} after the deploy with the ${window} before it. If it still holds over the next ${span(HOLD_MS)} (to ${pacific(holdEnd)}), the watch wakes this minion.`;
+      const text = this.message(head, s, suspects, unowned, found, w, len, !!hit);
       try {
-        this.d.wake(s.ticketId, text);
+        if (hit) this.d.wake(s.ticketId, text);
+        else this.d.note(s.ticketId, text);
       } catch (err) {
-        console.error(`Deploy watch: waking minion ${s.ticketId} failed: ${thrown(err).message ?? err}`);
+        console.error(`Deploy watch: ${hit ? 'waking' : 'noting on'} minion ${s.ticketId} failed: ${thrown(err).message ?? err}`);
       }
     }
-    const scheme = this.d.scheme();
-    // Nobody's in particular: the Overlord's (#921), the scheme's only Taskmaster before a split.
-    const tm = scheme && store.getOverlord(scheme.id);
-    if (!tm) return;
-    const woke = suspects.length ? `Woke ${suspects.map((s) => `#${s.number ?? s.ticketId}`).join(', ')}.` : 'No minion to wake: none of its commits names one.';
+    const nums = (l: Suspect[]) => l.map((s) => `#${s.number ?? s.ticketId}`).join(', ');
     const loose = unowned.length
       ? ` Commits with no minion: ${unowned
           .slice(0, 5)
           .map((c) => `${c.sha.slice(0, 8)} ${c.subject.slice(0, 80)}`)
           .join('; ')}${unowned.length > 5 ? `; and ${unowned.length - 5} more` : ''}.`
       : '';
+    const who = suspects.length
+      ? [woken.length ? `Woke ${nums(woken)}. The readings name files they touched.` : '', noted.length ? `Noted on ${nums(noted)}, not woken: no reading names their files; they are woken if it holds to ${pacific(holdEnd)} (a deploy before then ends the hold: its own watch covers what follows).` : '']
+          .filter(Boolean)
+          .join(' ')
+      : 'No minion to wake: none of its commits names one.';
+    this.mailTaskmaster(`Post-deploy watch: after ${when}, ${lines.join('; ')} (${window} after vs before). ${who}${loose} Nothing was reverted.`);
+  }
+
+  /** At the hold's end: the signals the alert found, read again over the next HOLD_MS; if any is still worse, wake the noted minions. */
+  private async recheck(w: Watched) {
+    const s = this.state();
+    const cur = s.deploys.find((o) => o.commit === w.commit && o.at === w.at);
+    const hold = cur?.hold;
+    if (!cur || !hold) return;
+    delete cur.hold;
+    this.save(s);
+    const from = cur.at + cur.len;
+    const next = s.deploys.filter((o) => o.at > cur.at).reduce((a, o) => Math.min(a, o.at), Infinity);
+    // The next deploy's trouble is its own: a second window it cuts short says too little.
+    const len = Math.min(from + HOLD_MS, next) - from;
+    if (len < MIN_WINDOW) return;
+    const found = this.readings(cur.at, len, from)
+      .filter((r) => r.worse && hold.names.includes(r.name))
+      .map(({ worse: _w, ...f }) => f);
+    if (!found.length) return;
+    const { suspects, unowned } = await this.suspects(cur);
+    const wake = suspects.filter((x) => hold.noted.includes(x.ticketId));
+    const when = `${pacific(cur.at)} (deploy ${cur.commit.slice(0, 8)})`;
+    const lines = this.lines(found);
+    for (const x of wake) {
+      const head = `Post-deploy watch: the rise after your change went live at ${when} held over the next ${span(len)}: ${lines.join('; ')}, comparing ${pacific(from)} onward with the ${span(len)} before the deploy. No reading names a file your change touched, so it may not be yours.`;
+      try {
+        this.d.wake(x.ticketId, this.message(head, x, suspects, unowned, found, cur, len, true, from));
+      } catch (err) {
+        console.error(`Deploy watch: waking minion ${x.ticketId} failed: ${thrown(err).message ?? err}`);
+      }
+    }
+    if (wake.length) this.mailTaskmaster(`Post-deploy watch: after ${when}, the rise held over the next ${span(len)} (${lines.join('; ')}). Woke ${wake.map((x) => `#${x.number ?? x.ticketId}`).join(', ')}. Nothing was reverted.`);
+  }
+
+  private lines(found: Finding[]): string[] {
+    return found.map((f) => `${f.name} went from ${f.before} to ${f.after}${f.first ? `; first seen ${pacific(f.first)}` : ''}`);
+  }
+
+  private message(head: string, s: Suspect, suspects: Suspect[], unowned: { sha: string }[], found: Finding[], w: Watched, len: number, woken: boolean, from = w.at): string {
+    const tops = found.flatMap((f) => f.top.map((t) => `- ${t.n}× ${t.detail.slice(0, 300)}`));
+    const sql = `sqlite3 -readonly ${this.d.dbPath} "SELECT datetime(at/1000, 'unixepoch'), kind, commit_sha, detail FROM health_events WHERE at >= ${w.at - len} AND at < ${from + len} ORDER BY at"`;
+    const others = suspects.filter((o) => o !== s).map((o) => `#${o.number ?? o.ticketId} (${o.commits.length})`);
+    return [
+      head,
+      ...(tops.length ? ['Commonest:', ...tops] : []),
+      `Your commits in that deploy: ${s.commits.map((c) => `${c.sha.slice(0, 8)} ${c.subject}`).join('; ')}.`,
+      ...(others.length || unowned.length ? [`Also in it: ${[...others, ...(unowned.length ? [`${unowned.length} commit${unowned.length > 1 ? 's' : ''} with no minion`] : [])].join(', ')}.`] : []),
+      woken
+        ? `Nothing was reverted or blocked. Check whether your change caused it: if it did, fix it and ship the fix; if not, say why in one line and close. The readings: ${sql} (turn failures come from the turns table and error events). This is the watch's only wake about this deploy.`
+        : `Nothing was reverted or blocked, and nothing is asked of this minion. The readings: ${sql} (turn failures come from the turns table and error events).`,
+    ].join('\n');
+  }
+
+  private mailTaskmaster(text: string) {
+    const scheme = this.d.scheme();
+    // Nobody's in particular: the Overlord's (#921), the scheme's only Taskmaster before a split.
+    const tm = scheme && this.d.store.getOverlord(scheme.id);
+    if (!tm) return;
     try {
-      this.d.mail(tm.id, `Post-deploy watch: after ${when}, ${lines.join('; ')} (${window} after vs before). ${woke}${loose} Nothing was reverted.`);
+      this.d.mail(tm.id, text);
     } catch (err) {
       console.error(`Deploy watch: mailing the Taskmaster failed: ${thrown(err).message ?? err}`);
     }

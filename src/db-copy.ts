@@ -39,7 +39,8 @@ export async function copyDb(src: string, dest: string, { events = 'all' }: { ev
   }
 }
 
-async function copyFile(src: string, dest: string) {
+/** One SQLite file, in one step: safe while another process writes it. */
+export async function copyFile(src: string, dest: string) {
   const live = new DatabaseSync(src, { readOnly: true, timeout: 30_000 });
   try {
     await backup(live, dest, { rate: 2 ** 31 - 1 });

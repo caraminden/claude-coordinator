@@ -19,6 +19,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/app-copy/nope": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn gets a copy of an app's data",
+  "member": "403 Only a minion's turn gets a copy of an app's data",
+  "outsider": "403 Only a minion's turn gets a copy of an app's data",
+  "tmA": "403 Only a minion's turn gets a copy of an app's data",
+  "tmB": "403 Only a minion's turn gets a copy of an app's data",
+  "m1": "403 nope isn't one of this scheme's contraptions: only a minion in an app's home scheme may copy its data. Ask that scheme's Taskmaster.",
+  "m2": "403 nope isn't one of this scheme's contraptions: only a minion in an app's home scheme may copy its data. Ask that scheme's Taskmaster."
+ },
  "GET /api/app/instructions": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1913,6 +1923,16 @@
   "m1": "403 Only the scheme's Taskmaster and its app turns check read the turn audit",
   "m2": "403 Only the scheme's Taskmaster and its app turns check read the turn audit"
  },
+ "GET /api/projects/:p/day-strips": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/decisions": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1942,6 +1962,16 @@
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "GET /api/projects/:p/flow": {
+  "anon": "401 Not logged in",
+  "person": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "member": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "outsider": "404 No such scheme",
+  "tmA": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "m2": "400 from and to are days like 2026-11-25, at most 400 apart"
  },
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",

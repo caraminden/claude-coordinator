@@ -4,7 +4,7 @@
 // the app's services; reading SSH keys, the Claude, Codex or GitHub login, the service's env file or any
 // process's environment, or printing the turn's own; state.db opened writable and the credentials
 // table; other people's homes and Claude runners; signing Claude in; running server.ts against the
-// live data) and the git habits every scheme shares (src/tripwire-git.ts: no stash; a file checkout or restore only once its diff is saved, no folder or other ref; no checkout,
+// live data) and the git habits every scheme shares (src/tripwire-git.ts: no stash; a checkout or restore of files or folders only once their diff is saved; no checkout,
 // merge or reset over uncommitted changes, outside a scratch clone in $TMPDIR and --ours/--theirs mid-merge;
 // no soft or mixed reset onto commits the branch lacks, a squash that reverts them; no push to main or plain force push from a minion's
 // worktree), and says why and what to do instead.
@@ -49,6 +49,7 @@ function hasDeployScript(cfg: TripwireConfig): boolean {
 /** Why a write to this absolute path is blocked, or null. */
 function writeReason(p: string, cfg: TripwireConfig): string | null {
   const configDir = join(cfg.home, '.config');
+  if (cfg.copies && under(p, cfg.copies)) return null;
   if (cfg.turnDir && under(p, cfg.turnDir)) return `${cfg.turnDir} is this turn's own folder: its pinned tripwire and the config its hooks read. Nothing in a turn changes it.`;
   const app = cfg.readOnly?.find((d) => under(p, d));
   if (app) return `${app} is a contraption's folder, which you may read but not change: work there goes to its scheme's Taskmaster with message_taskmaster.`;
@@ -1123,7 +1124,7 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   // The turn's own scheme folder (its worktrees, TMPDIRs) holds the scheme's own databases, not the live
   // ones (#468 S01-5); where a symlink or glob there leads still counts.
   const own = join(cfg.data, 'projects', String(cfg.project));
-  const p = pathsOf(file, st, cfg).find((x) => under(x, cfg.data) && !under(x, own));
+  const p = pathsOf(file, st, cfg).find((x) => under(x, cfg.data) && !under(x, own) && !(cfg.copies && under(x, cfg.copies)));
   if (!p) return null;
   const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;

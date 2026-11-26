@@ -110,6 +110,7 @@ export const JUDGES: Judge[] = [
           'CiHold.mainMay',
           'CiHold.mainDue',
           'CiHold.oneMain',
+          'CiHold.mainAlone',
           'CiHold.gap',
           'CiHold.look',
           'CiHold.follow',

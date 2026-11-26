@@ -52,8 +52,8 @@ export interface LongJob {
 export interface LongDeps {
   /** citadel-heavy's folder; jobs are in its long/. */
   dir: string;
-  /** The minion's scheme and its repo's owner/name; null when the minion is gone. */
-  scheme(ticket: number): { projectId: number; slug: string | null } | null;
+  /** The minion's scheme and its repo's owner/name, and whether it is dismissed (pending-deploy isn't); null when the minion is gone. */
+  scheme(ticket: number): { projectId: number; slug: string | null; closed?: boolean } | null;
   /** The job hours of the PC that runs this repo's CI runners. */
   hours(slug: string): JobSettings;
   /** `gh api <args>` as the scheme's GitHub login; resolves to its stdout. */
@@ -213,6 +213,12 @@ export class LongJobs {
           await this.finish(j, 'lost', null, 'the minion that queued it is gone', null);
           continue;
         }
+        // Nobody reads it (#2059). A run already on a runner is left alone; and no wake, which would reopen the minion.
+        if (s.closed && j.state === 'queued') {
+          await this.finish(j, 'lost', null, 'its minion closed', s.projectId, false);
+          this.d.note(j.ticket, `${j.quiet ? 'Heavy' : 'Long'} job ${j.id} (${j.what}) was dropped before it started: its minion closed.`);
+          continue;
+        }
         if (!same(s.slug, j.slug)) {
           await this.finish(j, 'lost', null, `its repo ${j.slug} isn't its scheme's (${s.slug ?? 'none'})`, s.projectId);
           continue;
@@ -290,6 +296,8 @@ export class LongJobs {
     const minutes = !j.quiet && /^\s+minutes:\s*$/m.test(text) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
     // A `long` input sends it to the runner with the long label, so flake proofs and heavy runs never queue behind it on the side runner (#1592; that runner takes side work too between long jobs, #1646).
     if (!j.quiet && /^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
+    // Dismissed while GitHub answered: the next pass drops it.
+    if (this.d.scheme(j.ticket)?.closed) return false;
     // Saved first and never put back on an error: a dispatch GitHub took but didn't answer is found by watch(), and one it
     // never took goes back in line there once it shows no run, so the command can't run twice.
     Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1, held_why: undefined });
@@ -347,15 +355,15 @@ export class LongJobs {
     else await this.finish(j, out.code === 0 ? 'done' : 'failed', out.code, undefined, projectId);
   }
 
-  /** End a job: save it, drop its snapshot ref, wake its minion with the status and where the output is. */
-  private async finish(j: LongJob, state: 'done' | 'failed' | 'lost', code: number | null, why: string | undefined, projectId: number | null) {
-    Object.assign(j, { state, code, why, ended_at: this.now(), woke: projectId === null });
+  /** End a job: save it, drop its snapshot ref, wake its minion (unless `wake` is false) with the status and where the output is. */
+  private async finish(j: LongJob, state: 'done' | 'failed' | 'lost', code: number | null, why: string | undefined, projectId: number | null, wake = true) {
+    Object.assign(j, { state, code, why, ended_at: this.now(), woke: !wake || projectId === null });
     await this.save(j);
     if (projectId === null) return;
     this.d.gh(projectId, ['-X', 'DELETE', `repos/${j.slug}/git/refs/citadel-heavy/${j.id}`]).catch(() => {
       /* a stray ref costs nothing */
     });
-    await this.tell(j);
+    if (wake) await this.tell(j);
   }
 
   /** Wake an ended job's minion, then mark it woken. */

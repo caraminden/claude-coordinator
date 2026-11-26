@@ -78,6 +78,20 @@ test("the environment is the server's filtered one plus the turn's own, and noth
   assert.equal(p.configDir, '/srv/claude');
 });
 
+test("a minion's tripwire lets it change its copies of its scheme's apps' data, and only in a scheme with an app (#1884)", () => {
+  const settings = (over: Partial<TurnFacts>) =>
+    plan(over)
+      .files.map((f) => f.text)
+      .join('\n');
+  const copies = JSON.stringify(join(dir, 'app-copy'));
+  assert.ok(
+    settings({ homeContraptions: ['a'] })
+      .replaceAll('\\', '')
+      .includes(`"copies":${copies}`),
+  );
+  assert.ok(!settings({}).includes('app-copy'));
+});
+
 // One fact each: the env names it adds to the plain minion's, and no others.
 const adds: [string, Partial<TurnFacts>, Record<string, string>][] = [
   ['deploys', { deploys: true }, { COORDINATOR_DEPLOYS: '1' }],

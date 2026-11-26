@@ -23,7 +23,7 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
 // Two ships that change an entry merge by rule (count, MERGES in tools/land.local.sh, #1917).
 // biome-ignore format: one line per entry is what the merge rule reads
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
-  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 45 },
+  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 47 },
   'src/apk-deploy.ts': { why: 'wiring moved out of server.ts (#1838): tells the Taskmaster who published an Android build; judges nothing', calls: 1 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/running-turn.ts': { why: 'sends a running turn the signal the runner asks for (a stop, or what is left of a killed turn); judges nothing (#1937)', calls: 2 },
@@ -48,6 +48,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile', calls: 2 },
   'src/minion-relay.ts': { why: 'leaveMail itself', calls: 1 },
   'src/closing.ts': { why: 'claimPassed: who a claim passed to, told to its keeper as held mail', calls: 1 },
+  'src/ship-lane.ts': { why: 'passes the lane to a minion that said it is ready, on the 10 min Josh picked (#1985), and tells the one it passed over; acts from day one rather than log-only: Josh, 2026-11-25, "Act from day one"', calls: 2 },
   'src/keepalive-run.ts': { why: 'the weekly keepalive readout, and the note that keepalives switched themselves off, as held mail', calls: 1 },
   'src/rule-parks.ts': { why: "held mail (no wake) after a person's Settings save, listing parks for the Taskmaster to check; it refuses, wakes and stops nothing", calls: 1 },
   'src/exec.ts': { why: 'stops its own child on its own timeout', calls: 2 },

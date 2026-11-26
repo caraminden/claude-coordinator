@@ -256,10 +256,13 @@ export const LIST_CLAIMS = {
   inputSchema: { type: 'object', properties: {} },
 };
 
+/** Why a minion closes (`closedAs`, src/property-seed.ts; Josh, 2026-11-25, "Save one word"). */
+const CLOSED_AS = { type: 'string', enum: ['done', 'replaced', 'dropped'], description: 'replaced: another minion has the work; dropped: nobody does' };
+
 export const CLOSE_TICKET = {
   name: 'close_ticket',
   description: 'Dismiss a finished or abandoned minion. Its worktree and branch are kept. A running minion must be stopped first.',
-  inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
+  inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, as: CLOSED_AS }, required: ['ticket_id', 'as'] },
 };
 
 export const REOPEN_TICKET = {
@@ -480,7 +483,8 @@ export const CLOSE_SELF = () => ({
     `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${C().DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}.`,
   inputSchema: {
     type: 'object',
-    properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Shipped abc1234; live after the restart"' } },
+    properties: { as: CLOSED_AS, reason: { type: 'string', maxLength: 500, description: 'One line shown with it, e.g. "Shipped abc1234; live after the restart"' } },
+    required: ['as'],
   },
 });
 
@@ -507,7 +511,7 @@ function claimLine(c: ClaimView) {
   const waiting = (c.queue ?? []).filter((q) => q.state !== 'done');
   const left = c.estimate ? `, about ${Math.round((c.estimate.left_ms / 3_600_000) * 10) / 10} h left (an estimate from the last ${c.estimate.of} holders)` : '';
   const line = waiting.length ? `; queue: ${waiting.map(chip).join(', ')}; ${c.done} of ${c.total} done${left}` : '';
-  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${c.keep ? ', kept through its next live' : ''}${line}`;
+  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${c.keep ? ', kept through its next live' : ''}${c.beside_number ? `, #${c.beside_number} shipping beside it` : ''}${line}`;
 }
 
 /** Answers this family's tools; NOT_HERE for any other. */
@@ -666,7 +670,7 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
     case 'close_self': {
       let closed: { cleared?: boolean } | undefined;
       try {
-        closed = await call<{ cleared?: boolean }>('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null });
+        closed = await call<{ cleared?: boolean }>('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null, as: args.as ?? null });
       } catch (err) {
         // A server from before close_self refuses the route with its generic "only itself" error.
         if (/only update itself|Not found/.test(thrown(err).message!)) {
@@ -677,7 +681,7 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
       return closeSelfResult(!!closed?.cleared);
     }
     case 'close_ticket':
-      return `Closed. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
+      return `Closed. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed', as: args.as ?? null }))}`;
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'fresh_session':

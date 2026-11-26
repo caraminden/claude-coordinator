@@ -1,7 +1,7 @@
 // One Peek build while Citadel ships (#1902): the spare runners' label goes off and always comes back. GitHub is faked.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { RunnerCap, RUNNER_CAP_MS, runnersBeside } from '../src/runner-cap.ts';
+import { type CapDeps, RunnerCap, RUNNER_CAP_MS, runnersBeside } from '../src/runner-cap.ts';
 import { RunnerTokens, type Listed } from '../src/ci-runner.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
@@ -15,7 +15,7 @@ function world(names = ['DESK', 'DESK-2', 'DESK-3', 'DESK-4']) {
   const runners: Listed[] = names.map((name, i) => ({ id: i + 1, name, status: 'online', busy: false, labels: [L, 'extra'] }));
   runners.push({ id: 90, name: 'DESK-heavy', status: 'online', busy: false, labels: ['peek-auras-heavy'] }, { id: 91, name: 'OTHER', status: 'online', busy: false, labels: [L] });
   const w = { store, runners, why: null as string | null, down: false, unknown: false, ops: [] as string[], reports: [] as string[], beforeDrop: () => {} };
-  const boot = () =>
+  const boot = (o: Partial<CapDeps> = {}) =>
     new RunnerCap({
       project: () => store.getProject(1) ?? null,
       label: () => L,
@@ -42,6 +42,7 @@ function world(names = ['DESK', 'DESK-2', 'DESK-3', 'DESK-4']) {
           return !!r;
         },
       },
+      ...o,
     });
   const user = store.createUser({ name: 'Cara', login: 'cara' });
   store.createProject('Peek Auras', null, user.id);
@@ -73,6 +74,23 @@ test('while a ship is in line one build runner on that PC keeps the label; the r
     cap.text(() => true),
     null,
   );
+});
+
+test("main's own cap: the label stays only on a runner main can take, busy or not, in a setting of its own, for its own limit (Josh, 2026-11-25)", async () => {
+  const w = world();
+  w.runners[0].busy = true; // a ship's run, finishing
+  w.runners[2].labels.push('side');
+  w.why = "main's run goes first";
+  const cap = w.boot({ key: 'runner-cap-main', capMs: 60 * MIN, keepOn: (x) => x.labels.includes('side') });
+  await cap.tick(0);
+  assert.deepEqual(w.can(), ['DESK-3', 'OTHER']);
+  assert.deepEqual(w.store.getSetting('runner-cap'), null, "not the Peek cap's setting");
+  assert.equal((w.store.getSetting('runner-cap-main') as { off: unknown[] }).off.length, 3);
+  await cap.tick(61 * MIN);
+  assert.deepEqual(w.can(), ALL, 'past its own limit the labels go back');
+  w.runners[2].status = 'offline';
+  await w.boot({ key: 'runner-cap-x', keepOn: (x) => x.labels.includes('side') }).tick(0);
+  assert.deepEqual(w.can(), ALL, 'no runner main can take: nothing comes off');
 });
 
 test('the runner with a build on it keeps the label', async () => {

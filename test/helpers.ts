@@ -2,9 +2,9 @@
 import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo, type Server as NetServer } from 'node:net';
-import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import type { Store } from '../src/db.ts';
@@ -360,8 +360,12 @@ export type Booted = {
  * says otherwise; `env` entries override the defaults, and an undefined one removes it.
  */
 let compileCacheDir: string | null | undefined;
-/** NODE_COMPILE_CACHE for booted servers: `<git dir>/compile-cache`, or nothing outside a git checkout. */
-function compileCache(): { NODE_COMPILE_CACHE?: string } {
+/**
+ * NODE_COMPILE_CACHE for booted servers: `<git dir>/compile-cache`, or nothing outside a git checkout. Portable, so Node keys
+ * each entry by the file's path from the cache folder, not its full path: a copy of the checkout laid out the same way from a
+ * link to the cache boots warm too (mirroredCopy).
+ */
+export function compileCache(): { NODE_COMPILE_CACHE?: string; NODE_COMPILE_CACHE_PORTABLE?: string } {
   if (compileCacheDir === undefined) {
     try {
       compileCacheDir = resolve(REPO, execFileSync('git', ['-C', REPO, 'rev-parse', '--git-path', 'compile-cache'], { encoding: 'utf8', timeout: 10_000 }).trim());
@@ -369,7 +373,33 @@ function compileCache(): { NODE_COMPILE_CACHE?: string } {
       compileCacheDir = null;
     }
   }
-  return compileCacheDir ? { NODE_COMPILE_CACHE: compileCacheDir } : {};
+  return compileCacheDir ? { NODE_COMPILE_CACHE: compileCacheDir, NODE_COMPILE_CACHE_PORTABLE: '1' } : {};
+}
+
+/**
+ * Where under `base` a copy of `repo` and a link to its portable compile cache go, so the copy sits where the cache's entries
+ * expect it: the same path from the link as `repo` has from `cache`. Makes the link (and the folders above both); the caller
+ * copies the files into `copy`. A server booted from a copy at any other path compiles the whole app again, about twice a warm
+ * boot's CPU, which 10 copies at once under load stretched past listeningPort's 20 s (#1895).
+ */
+export function mirroredCopy(base: string, repo: string, cache: string): { copy: string; cache: string } {
+  let above = repo;
+  while (relative(above, cache).startsWith(`..${sep}`)) above = dirname(above);
+  const copy = join(base, relative(above, repo));
+  const link = join(base, relative(above, cache));
+  mkdirSync(cache, { recursive: true });
+  mkdirSync(copy, { recursive: true });
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(cache, link);
+  return { copy, cache: link };
+}
+
+/** mirroredCopy for this checkout: where its copy goes under `base`, and the `env` its server boots warm with (bootServer). */
+export function repoCopy(base: string): { copy: string; env: NodeJS.ProcessEnv } {
+  const dir = compileCache().NODE_COMPILE_CACHE;
+  if (!dir) return { copy: join(base, 'copy'), env: {} };
+  const at = mirroredCopy(base, REPO, dir);
+  return { copy: at.copy, env: { NODE_COMPILE_CACHE: at.cache } };
 }
 
 /** How long bootServer's client keeps asking a read again on the front's "try again" 503: the page's GET_MS (public/base.js). */

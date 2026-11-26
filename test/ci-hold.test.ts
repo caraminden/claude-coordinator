@@ -816,7 +816,7 @@ test("main's full run held for hours still goes before optional work in the firs
   assert.ok(!w.posts.includes(`rerun ${heavy.id}`));
 });
 
-test("main's full run that ships held for 4 hours runs beside a ship's tests", async () => {
+test("main's full run that ships held for 4 hours runs once the ship running ends, and is not stopped", async () => {
   const w = world();
   await w.for(10 * MIN);
   w.land({ id: 50 });
@@ -833,11 +833,46 @@ test("main's full run that ships held for 4 hours runs beside a ship's tests", a
   await ships(MAIN_WAIT_MS - 10 * MIN);
   assert.ok(!w.posts.includes(`rerun ${main.id}`));
   await ships(20 * MIN);
+  assert.ok(!w.posts.includes(`rerun ${main.id}`), 'not beside a ship that runs (Josh, 2026-11-25, "After 4 h, ships wait")');
+  end(w.runs.find((r) => r.id === 50)!);
+  await w.tick();
   assert.ok(w.posts.includes(`rerun ${main.id}`));
   main.status = 'in_progress';
   assert.equal(await w.ask(main), true);
   await w.for(10 * MIN);
   assert.equal(main.status, 'in_progress', 'and is not stopped again');
+});
+
+test('past its 4 hours main waits for the ship running, not the line, and has the runners to itself till it ends (Josh, 2026-11-25)', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  w.line = 3;
+  const main = w.main();
+  assert.equal(await w.ask(main), false);
+  assert.equal(w.hold.mainAlone(w.now), null, 'not before its 4 hours');
+  await w.tick(MAIN_WAIT_MS - MIN);
+  const ship = w.land();
+  await w.for(2 * MIN);
+  assert.match(w.hold.mainAlone(w.now) ?? '', /main's full test run/, 'the labels come off while the ship still runs');
+  assert.ok(!w.posts.includes(`rerun ${main.id}`), 'not beside a ship that runs');
+  end(ship);
+  w.land({ status: 'queued' }); // the next ship waits in GitHub's queue
+  await w.for(MIN);
+  assert.ok(w.posts.includes(`rerun ${main.id}`), 'a ship that waits for a runner keeps it waiting no longer');
+  main.status = 'in_progress';
+  await w.for(5 * MIN);
+  assert.equal(main.status, 'in_progress');
+  assert.ok(w.hold.mainAlone(w.now), 'still alone while it runs');
+  end(main);
+  await w.for(12 * MIN);
+  assert.equal(w.hold.mainAlone(w.now), null, 'the runners go back once it ends');
+  const next = w.main();
+  assert.equal(await w.ask(next), false);
+  await w.tick(MAIN_WAIT_MS);
+  assert.ok(w.hold.mainAlone(w.now));
+  w.off = true;
+  await w.tick();
+  assert.equal(w.hold.mainAlone(w.now), null, 'the off switch');
 });
 
 test("a ship's run stops whatever runs within a minute: a check, an early run, main's", async () => {
@@ -1260,4 +1295,13 @@ test("a second main run held drops the first: one comes back, the newest, with t
   await w.for(60 * MIN);
   assert.equal(b.status, 'queued', 'its 4 hours count from the first');
   assert.ok(!w.posts.includes(`rerun ${a.id}`));
+});
+
+test('a held job whose minion closed is not in the 2-hour note', async () => {
+  const w = world();
+  w.waiting.push({ id: 'h1', repo: OWN, ticket: 7, what: 'burn-in', since: w.now, why: 'a ship is in line', reported: false });
+  w.closed.add(7);
+  await w.tick();
+  await w.tick(REPORT_MS);
+  assert.equal(w.reports.length, 0);
 });

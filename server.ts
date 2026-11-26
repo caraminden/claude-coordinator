@@ -35,7 +35,7 @@ import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
 import { markStop, restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
-import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
+import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits, gitFiles } from './src/deploy-watch.ts';
 import { judge, judged, noteWould } from './src/judges.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
@@ -97,6 +97,7 @@ import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime,
 import { agentRoutes } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
 import { CodeCounts, countApart } from './src/code-counts.ts';
+import { readApart, WorkFlow } from './src/work-flow.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
 import { Launchers } from './src/desktop-launcher.ts';
 import { CiStore } from './src/ci-store.ts';
@@ -116,6 +117,7 @@ import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
 import { sweepOrphanTmp } from './src/tmp-sweep.ts';
 import { sweepKept } from './src/replay-keep.ts';
+import { sweepAppCopies } from './src/app-copy.ts';
 import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
@@ -164,7 +166,8 @@ import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
-import { StallWatch } from './src/stall-signals.ts';
+import { ShipLane } from './src/ship-lane.ts';
+import { StallWatch, refusalKind } from './src/stall-signals.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
@@ -618,6 +621,8 @@ deployWatch = new DeployWatch({
     () => {},
     judgeNote((id) => store.getTicket(id)?.project_id),
   ),
+  note: (id, text) => runner.emit(id, 'note', { text }),
+  files: gitFiles(import.meta.dirname),
 });
 // The last run was stopped by systemd's watchdog: a health event, with the last stall it recorded before (#1135).
 const watchdogAt = takeMark(DATA_DIR);
@@ -716,6 +721,7 @@ if (!BOOT_CHECK)
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
+const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: readApart, db: store.path });
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
@@ -812,7 +818,7 @@ const longJobs = new LongJobs({
   scheme: (id) => {
     const t = store.getTicket(id);
     const p = t && store.getProject(t.project_id);
-    return p ? { projectId: p.id, slug: repoSlug(p.repo_url) } : null;
+    return p ? { projectId: p.id, slug: repoSlug(p.repo_url), closed: t.status === 'closed' } : null;
   },
   hours: (slug) => {
     const lower = slug.toLowerCase();
@@ -1190,6 +1196,8 @@ if (!BOOT_CHECK && !PREVIEW) {
   );
   // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
   every('contraption media sweep', 24 * 60 * 60_000, async () => void sweepMedia(join(DATA_DIR, 'contraption-media')), 10 * 60_000);
+  // Half-made copies of an app's data a crash left (#1884): at once, since they hold its people's rows.
+  void sweepAppCopies(DATA_DIR).catch((err) => console.error(`Sweeping app copies failed: ${err?.message ?? err}`));
   // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
   every('kept chats sweep', 24 * 60 * 60_000, async () => sweepKept(DATA_DIR), 10 * 60_000);
 }
@@ -1838,6 +1846,21 @@ const liveProbes = new LiveProbes({
 });
 runner.probeHold = (id) => liveProbes.hold(id);
 const shipApps = shipDeploys({ store, services, autoDeploy, startDeploy: (row, by, uid) => startDeploy(app, row, by, null, uid) });
+const shipLane = new ShipLane({
+  store,
+  busy: (id) => runner.busy(id),
+  heldFor: (id) => runner.heldFor(id),
+  shipping: (id) => landings.hasHandoff(id),
+  claimPassed: (projectId, passed, why, author) => runner.claimPassed(projectId, passed, why, author),
+  wake: (id, text) => {
+    if (store.getTicket(id)?.state === 'parked') store.updateTicket(id, { state: null });
+    runner.send(id, APP_NAME, text, [], {}, runner.isRunning(id));
+  },
+  leaveMail: (id, author, text) => runner.leaveMail(id, author, text),
+  broadcast,
+});
+// Not in a preview or a dev copy: they name the live worktrees, and wake nobody.
+if (!runner.noTurns) setInterval(() => void shipLane.sweep().catch((err) => console.error('The ship-script lane:', err)), 60_000).unref();
 const landHandoffs = new LandHandoffs({
   landings,
   store,
@@ -1850,8 +1873,8 @@ const landHandoffs = new LandHandoffs({
   },
   failed: (id, kind) => {
     runner.places.refused(id, true);
-    stallWatch.shipFailed(id, kind);
     const run = landings.get(id);
+    stallWatch.shipFailed(id, run ? refusalKind(run.output, run.code) : kind);
     if (run) recordFailure(store, id, run.output, run.code);
   },
   landed: (id, commit) => {
@@ -2052,8 +2075,28 @@ const runnerCap = new RunnerCap({
   store,
   report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
 });
-runnerTokens.owed = (id, label) => runnerCap.owes(id, label);
-if (!BOOT_CHECK && !PREVIEW) runnerCap.start();
+// Main's run past its 4 hours has Citadel's runners to itself (Josh, 2026-11-25, "After 4 h, ships wait"): the label ships ask for
+// stays only on a runner main's run can take (the side label), so the next ship waits in GitHub's queue, as land.sh allows for 15 minutes.
+const mainCap = new RunnerCap({
+  project: ownScheme,
+  label: (p) => runnerLabel(p.name),
+  why: () => ciHold.mainAlone(),
+  here: () => (liveSlug ? runnersBeside(ciLoad.runnersByPc(), liveSlug, liveSlug) : null),
+  keepOn: (x) => {
+    const p = ownScheme();
+    return !!p && x.labels.includes(`${runnerLabel(p.name)}-side`);
+  },
+  key: 'runner-cap-main',
+  capMs: 3600_000, // tests.yml stops main's run at 45 minutes
+  tokens: runnerTokens,
+  store,
+  report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
+});
+runnerTokens.owed = (id, label) => runnerCap.owes(id, label) || mainCap.owes(id, label);
+if (!BOOT_CHECK && !PREVIEW) {
+  runnerCap.start();
+  mainCap.start();
+}
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
@@ -2385,6 +2428,7 @@ const app: App = {
   ciStore,
   ciNumbers,
   codeCounts,
+  workFlow,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
   runnerCap,

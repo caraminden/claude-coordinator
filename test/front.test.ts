@@ -68,7 +68,7 @@ const PATHS = [
   '/api/box-capacity',
   // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
   ...['commands', 'ship-risk', 'time-log'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
-  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns'].flatMap((r) => [
+  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns', 'day-strips?day=2026-11-20'].flatMap((r) => [
     `/api/projects/${A.id}/${r}`,
     `/api/projects/${B.id}/${r}`,
     `/api/projects/999/${r}`,
@@ -131,9 +131,15 @@ const signIn = async (srv: Booted, name: string, password: string) => {
 type Got = { status: number; body: string; reader: boolean; timed: boolean };
 /** One stamp of the server's own time (#1752), never two: a main answer the front passes on carries the front's alone. */
 const TIMED = /^app;dur=\d+(\.\d)?$/;
-const get = async (srv: Booted, path: string, cookie?: string): Promise<Got> => {
-  const res = await fetch(srv.base + path, { headers: cookie ? { Cookie: cookie } : {} });
-  return { status: res.status, body: await res.text(), reader: res.headers.get('x-citadel-answered') === 'reader', timed: TIMED.test(res.headers.get('server-timing') ?? '') };
+/** Asks again on the front thread's "try again" 503, as the page does (public/base.js); `once` gives that answer itself. */
+const get = async (srv: Booted, path: string, cookie?: string, once = false): Promise<Got> => {
+  for (;;) {
+    const res = await fetch(srv.base + path, { headers: cookie ? { Cookie: cookie } : {} });
+    const body = await res.text();
+    if (once || res.status !== 503 || res.headers.get('x-citadel-answered') !== 'front') return { status: res.status, body, reader: res.headers.get('x-citadel-answered') === 'reader', timed: TIMED.test(res.headers.get('server-timing') ?? '') };
+    // timing-ok: the page's own pause between asks, not a wait for a state
+    await new Promise((r) => setTimeout(r, 1000));
+  }
 };
 /** Each caller's answer to each path. */
 async function answers(srv: Booted) {
@@ -274,7 +280,7 @@ test('a reader that dies mid-request is replaced, and its request answered by th
 
 test('a reader that hangs: its request gets a 503 the page retries, the other reader answers, and the thread is replaced', { timeout: 60_000 }, async () => {
   await readerAnswers(srv);
-  const hanging = get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie);
+  const hanging = get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie, true);
   // Meanwhile the other reader answers, those asked of the hung one first included.
   for (const got of await Promise.all(Array.from({ length: 4 }, () => get(srv, PATHS[0], srv.cookie)))) assert.ok(got.reader);
   const hung = await hanging;
@@ -453,7 +459,8 @@ test('a write the writer is still holding is never missed: the read waits for it
   const slow = await bootServer({ root, env: { CITADEL_DB_WRITE_DELAY_MS: '300' } });
   try {
     await readerAnswers(slow);
-    // Held 300 ms on the writer: a reader waits for it, never the main thread.
+    // Held 300 ms on the writer: a reader waits for it, never the main thread. Once its queue is more than a reader's
+    // wait behind (many copies of this file at once), get asks again, as the page does.
     const sent = slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' });
     await until('a read that waited for the held write', async () => {
       const t0 = Date.now();

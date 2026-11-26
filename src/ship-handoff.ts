@@ -16,6 +16,7 @@ import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from './live-probe.
 import { pacificStamp } from './pacific.ts';
 import { reviewRefusal } from './review-gate.ts';
 import type { ChangeBy } from './db/wait-records.ts';
+import { pipelineChanges, sharedPipelineFiles, SHIP_LANE } from './ship-lane.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
@@ -143,6 +144,10 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
     const known = app.fastMode?.knownRed(ticket.project_id);
     if (known) env.LAND_KNOWN_RED = known;
   }
+  if (body.into === undefined) {
+    const shares = await besideRefusal(app, ticket);
+    if (shares) throw new HttpError(409, `Not handed off: ${shares}, so it doesn't ship beside it. You are told when the lane is yours; hand off then`);
+  }
   // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
   const clash = await landConflict(ticket.cwd, env, args);
   if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
@@ -158,6 +163,7 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
 /** Start it: land.sh runs and the minion shows as landing. False when a landing already runs for it. */
 export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy): boolean {
   if (!app.landings.handOff(ticket.id, cwd, env, args, h)) return false;
+  app.store.claims.handedOff(ticket.id);
   app.runner.places.refused(ticket.id, false);
   app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') }, by);
   app.runner.broadcastTicket(ticket.id);
@@ -202,17 +208,33 @@ export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, que
 
 /** Whether a change touches the ship pipeline (tools/pipeline-files.txt, where a repo has one) and so ships only from the `pipeline-lane` claim's holder; null when it may ship. */
 async function laneRefusal(app: App, ticket: Ticket): Promise<string | null> {
-  if (app.store.claims.get(ticket.project_id, 'pipeline-lane')?.holder === ticket.id) return null;
-  // A branch that drops the list changes the list, which is in its own list; a repo without one has no pipeline files.
-  const list = await readFile(join(ticket.cwd!, 'tools', 'pipeline-files.txt'), 'utf8').catch((err) => {
-    if (err.code === 'ENOENT') return '';
-    throw err;
-  });
-  const changed = await gitOut(['diff', '--name-only', '--no-renames', '-z', 'main...HEAD'], ticket.cwd!, { trim: false });
+  const lane = app.store.claims.get(ticket.project_id, SHIP_LANE);
+  if (lane?.holder === ticket.id || lane?.beside === ticket.id) return null;
+  const changed = await pipelineChanges(ticket.cwd!);
   if (changed === null) return "it couldn't tell whether the change needs the pipeline lane";
-  const paths = ['tools/pipeline-files.txt', ...list.split('\n').map((l) => l.trim())].filter((l) => l && !l.startsWith('#'));
-  const hit = changed.split('\0').find((f) => f && paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p)));
-  return hit ? `${hit} is a pipeline file and you don't hold the pipeline lane` : null;
+  return changed.length ? `${changed[0]} is a pipeline file and you don't hold the pipeline lane` : null;
+}
+
+/** Why a minion waiting for the lane may not hand a pipeline change off yet, null when it may; it is marked ready (#1985). */
+export async function laneHold(app: App, ticket: Ticket): Promise<string | null> {
+  const lane = app.store.claims.get(ticket.project_id, SHIP_LANE);
+  // One not in the queue ships as it always did: its brief or the Taskmaster said how.
+  if (!lane || !app.store.claims.waiting(ticket.project_id, SHIP_LANE).includes(ticket.id) || !(await laneRefusal(app, ticket))) return null;
+  app.store.claims.setReady(ticket.project_id, SHIP_LANE, ticket.id);
+  app.broadcast({ type: 'claims', projectId: ticket.project_id });
+  const holder = app.store.getTicket(lane.holder);
+  return `#${holder?.number ?? lane.holder} holds the pipeline lane. You are marked ready in its queue: you are woken when it is yours, when its holder is slow, or when you can ship beside it. End your turn now, sealed`;
+}
+
+/** Why one let in beside the lane's holder may not hand off after all (#1985): since it was, the two came to share a pipeline file. */
+async function besideRefusal(app: App, ticket: Ticket): Promise<string | null> {
+  const lane = app.store.claims.besideOf(ticket.project_id, ticket.id);
+  const holder = lane && app.store.getTicket(lane.holder);
+  if (!holder?.cwd) return null;
+  const both = await sharedPipelineFiles(ticket.cwd!, holder.cwd);
+  if (both?.length === 0) return null;
+  app.store.claims.besideRefused(ticket.id);
+  return both ? `you and #${holder.number}, which holds the pipeline lane, both change ${both.join(', ')}` : `it couldn't tell whether you and #${holder.number} share a ship-script file`;
 }
 
 /** What the chat and the queue say now that rules out shipping with no turn; null when nothing does. Read again after the slow checks. */

@@ -19,8 +19,9 @@
  *                                      refused if the repo's total errors or escapes went up
  *   node tools/typecheck.ts <file>...  tsc's errors and the escapes in those files
  */
-import { execFile } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import * as nodeModule from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -33,6 +34,40 @@ export const PROJECTS = ['tsconfig.json'];
 // --- end of config ---
 
 const run = promisify(execFile);
+
+/**
+ * Waits for a place under the box's shared limit on heavy test runs, the one citadel-test uses (tools/test-gate.ts, #1928), so
+ * type checks started together in one container don't each take ~1 GB at once (#2033). The place is held until this process
+ * exits. With no tools/test-gate.ts in the repo, on CI, inside a heavy job, with CITADEL_TEST_FILES=0 or no flock, it doesn't wait.
+ */
+async function waitForRoom(): Promise<void> {
+  const gate = join(ROOT, 'tools', 'test-gate.ts');
+  if (!PROJECTS.length || !existsSync(gate) || process.env.CITADEL_TEST_FILES === '0' || process.env.RUNNER_TEMP || process.env.GITHUB_ACTIONS || process.env.CITADEL_HEAVY_HELD) return;
+  if (spawnSync('flock', ['--version'], { stdio: 'ignore' }).status !== 0) return;
+  const dir = mkdtempSync(join(tmpdir(), 'typecheck-gate-'));
+  const note = join(dir, 'note');
+  process.env.CITADEL_TEST_GATE_NOTE = note;
+  let said = false;
+  const say = () => {
+    if (said || !existsSync(note)) return;
+    said = true;
+    console.error(
+      `typecheck: ${readFileSync(note, 'utf8')
+        .trim()
+        .replace(/test files/, 'heavy runs')}`,
+    );
+  };
+  const watch = setInterval(say, 200);
+  try {
+    await import(gate);
+  } catch {
+    // Any trouble with the gate lets the check run.
+  } finally {
+    clearInterval(watch);
+    say();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 export type Counts = { errors: number; escapes: number };
 export type Table = Record<string, Counts>;
@@ -324,6 +359,7 @@ export function upMessage(up: Change[], errors: TscError[]): string {
 }
 
 async function main(args: string[]) {
+  await waitForRoom();
   const { table, errors } = await measure();
   const files = args.filter((a) => !a.startsWith('--'));
   if (files.length) {

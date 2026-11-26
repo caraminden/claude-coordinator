@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { emptyState, failingTests, observe, shipFailed, StallWatch, stallKey, SUGGESTIONS_KEY, type StallState } from '../src/stall-signals.ts';
+import { emptyState, failingTests, observe, shipFailed, StallWatch, stallKey, SUGGESTIONS_KEY, refusalKind, type StallState } from '../src/stall-signals.ts';
+import { NO_CODE } from '../src/land.ts';
 import { nextStep, TIERS } from '../public/model-table.js';
 import { editedFiles, testCommand } from '../src/stall-signals.ts';
 
@@ -126,11 +127,49 @@ test("a Grunt's tool calls are its own, not the minion's", () => {
 
 test('two failed ships fire, naming their kinds', () => {
   const s = emptyState();
-  assert.deepEqual(shipFailed(s, 'conflict'), []);
-  const got = shipFailed(s, 'flake');
-  assert.equal(got.length, 1);
-  assert.match(got[0].evidence[0], /conflict, flake/);
   assert.deepEqual(shipFailed(s, 'own-test'), []);
+  const got = shipFailed(s, 'parse');
+  assert.equal(got.length, 1);
+  assert.match(got[0].evidence[0], /own-test, parse/);
+  assert.deepEqual(shipFailed(s, 'own-test'), []);
+});
+
+// #2047 (Josh, 2026-11-25): a refusal the minion couldn't help says nothing about its model.
+test("refusals that are not the model's fault never count: conflict, passed alone, boot-check copy, cut off, CI", () => {
+  const s = emptyState();
+  for (const kind of ['conflict', 'conflict', 'passed-alone', 'boot-copy', 'cut-off', 'ci', 'no-answer']) assert.deepEqual(shipFailed(s, kind), [], kind);
+  assert.deepEqual(s.ships, []);
+  assert.deepEqual(shipFailed(s, 'own-test'), []);
+  assert.deepEqual(shipFailed(s, 'conflict'), [], 'one real failure and a conflict are not two');
+  assert.match(shipFailed(s, 'own-test')[0].evidence[0], /kinds: own-test, own-test/);
+});
+
+// How server.ts reads a handed-off run before counting it.
+test('a handed-off run that gave no exit code or no CI verdict is read as one that does not count', () => {
+  const red = 'land: smoke: ✖ test/a.test.ts › b';
+  assert.equal(refusalKind(red, 1), 'own-test');
+  assert.equal(refusalKind(`${red}${NO_CODE}`, 1), 'cut-off', 'a red printed before the cut still counts as cut off');
+  assert.equal(refusalKind(red, 75), 'no-answer');
+  assert.equal(refusalKind('something else', 1), null);
+  // Run by the minion, the exit code is only in the text.
+  for (const head of ['tools/land.sh exited 75 (read its output).', 'Exit code 75']) assert.equal(refusalKind(`${head}\n${red}`), 'no-answer', head);
+  // A conflict the recorded fix resolved did not refuse the ship: what came after it did.
+  const resolved = "CONFLICT (content): Merge conflict in a.ts\nland: the fix recorded ahead of time (git rerere, conflict prep) resolved the rebase's conflicts";
+  assert.equal(refusalKind(`${resolved}\n${red}`, 1), 'own-test');
+});
+
+test('a count saved before these kinds stopped counting does not fire on one real failure', () => {
+  const s = { ...emptyState(), ships: ['conflict'] };
+  assert.deepEqual(shipFailed(s, 'own-test'), []);
+  assert.deepEqual(s.ships, ['own-test']);
+});
+
+test('a land.sh the minion runs itself that hits a merge conflict or is cut off does not count either', () => {
+  const s = emptyState();
+  const out = 'tools/land.sh exited 1 (read its output: main only moved if it says so).\nCONFLICT (content): Merge conflict in src/a.ts';
+  const cut = `tools/land.sh exited 1 (read its output: main only moved if it says so).\n\n✖ test/a.test.ts › b${NO_CODE}`;
+  for (const o of [out, out, cut, cut]) assert.deepEqual(feed(s, [run('tools/land.sh'), result(o, true)]), []);
+  assert.deepEqual(s.ships, []);
 });
 
 test('a land.sh the minion runs itself counts as a ship; a clean one does not', () => {
@@ -185,7 +224,7 @@ test('a stalled minion gets exactly one suggestion to its Taskmaster, with the e
   // Red three times on one test, then the same file churned, then two failed ships: all one stall at one tier.
   for (let i = 0; i < 4; i++) for (const e of [run('citadel-test test/land.test.ts'), result(RED, true), edit('/w/src/land.ts')]) w.watch.observe(w.t.id, e);
   w.watch.shipFailed(w.t.id, 'own-test');
-  w.watch.shipFailed(w.t.id, 'conflict');
+  w.watch.shipFailed(w.t.id, 'parse');
   assert.equal(w.told.length, 1);
   assert.match(w.told[0], /Stall signal on #\d+ Crop keeps its field/);
   assert.match(w.told[0], /test\/land\.test\.ts › keeps the queue red 3 times/);
@@ -225,8 +264,8 @@ test('the same stall going on after a step-up signals again at the new tier: the
   red(u);
   assert.equal(u.told.length, 2, 'reds at a told tier are not carried past the step-up');
   const v = world();
-  v.watch.shipFailed(v.t.id, 'conflict');
-  v.watch.shipFailed(v.t.id, 'flake');
+  v.watch.shipFailed(v.t.id, 'parse');
+  v.watch.shipFailed(v.t.id, 'burn-in');
   assert.equal(v.told.length, 1);
   v.store.updateTicket(v.t.id, { effort: 'high' });
   v.watch.shipFailed(v.t.id, 'own-test');

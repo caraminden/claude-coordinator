@@ -17,6 +17,7 @@ import type { Project, Ticket } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { claudeConfigDir } from './sessions.ts';
 import type { TripwireConfig } from './tripwire.ts';
+import { COPIES } from './tripwire-base.ts';
 import { hookRunMatchers, type HookRunConfig } from './hook-run.ts';
 import { SCHEME_REFS_MATCHER, SIDE_GUARD_MATCHER, TRIPWIRE_MATCHER, WORDING_MATCHER } from './hook-matchers.ts';
 import { offSkills, skillDenies } from './skills.ts';
@@ -831,12 +832,14 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? (facts.everyScheme?.apps ?? []) : [];
   // A Taskmaster reads the whole data folder (and the contraptions'), never a .env file in it.
   const envFiles = ticket.kind === 'coordinator' ? [facts.folders.data, ...readOnly] : [];
+  // A minion's copies of its scheme's apps' data (src/app-copy.ts) are its own to change.
+  const copies = ticket.kind !== 'coordinator' && facts.homeContraptions.length ? { copies: join(dir, COPIES) } : {};
   const kit = pins.PIN_HAS.kit ? pinned(pins.KIT) : null;
   // Every PreToolUse check in one process (#1296); the kit's big-read guard rides it, so hooks.json leaves it out.
   const preToolUse = hookRunHooks(
     {
       ...(facts.side ? { side: true } : {}),
-      tripwire: tripwireConfig(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', readOnly, envFiles),
+      tripwire: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', readOnly, envFiles), ...copies },
       wording: { shared: [filesDir, sharedDir].filter((d): d is string => !!d), sent: join(dir, 'wording-sent') },
       schemeRefs: { refs: refsFile, sent: join(dir, 'scheme-refs-sent') },
       ...(kit ? { kit } : {}),
@@ -851,7 +854,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const codexTripwire = join(dir, 'codex-tripwire.json');
   files.push({
     name: 'codex-tripwire.json',
-    text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }),
+    text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...copies, ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }),
     mode: 0o444,
   });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {

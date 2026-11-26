@@ -66,6 +66,10 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
 - The eight parts as its sections, in the same order. Part 2 is the pick that started it: `**Pick
   (Josh, 2026-11-19):** "Go on A1"`, plus the original ask it came from.
 - Under about 60 lines; link the long material rather than copy it.
+- No one deletes a handoff: Citadel files it by itself once the minion started from it closes,
+  as a rule into `handoffs/shipped/` (#1371). To tell another minion of its ship, a minion calls
+  `relay_when_live` before `hand_off_land` (it wakes nothing; a minion that must wake sets its own
+  `wake_when_live`). Neither chore is a reason for `stay_open`, or goes in a brief as an after-ship step.
 - An idea or research minion ends in one handoff per piece of work it proposes, then the card that
   asks which to start (past four handoffs, a choices page: the Citadel-wide card rule (Asking and picking)).
 

@@ -13,6 +13,11 @@ export const releaseQueries = {
     return this.db.prepare("SELECT * FROM releases WHERE outcome = 'live' AND live_at >= ? AND started_at IS NOT NULL ORDER BY id").all(since) as unknown as ReleaseRow[];
   },
 
+  /** A scheme's releases that went live in [from, to) and carried minions (#1996, the day strips). */
+  liveReleasesIn(this: Store, projectId: number, from: number, to: number): ReleaseRow[] {
+    return this.db.prepare("SELECT * FROM releases WHERE project_id = ? AND outcome = 'live' AND live_at >= ? AND live_at < ? AND changes != '[]' ORDER BY live_at").all(projectId, from, to) as unknown as ReleaseRow[];
+  },
+
   /** Every app's deploys that went live since `since`, with their stages (#1132). */
   deployedSince(this: Store, since: number): ContraptionDeployRow[] {
     return this.db.prepare("SELECT * FROM contraption_deploys WHERE outcome = 'deployed' AND finished_at >= ? ORDER BY id").all(since) as unknown as ContraptionDeployRow[];

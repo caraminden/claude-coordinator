@@ -14,6 +14,7 @@ import { ciNumberQueries } from './db/ci-numbers.ts';
 import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
 import { flakeQueries } from './db/flakes.ts';
+import { flowQueries } from './db/flow.ts';
 import { machineQueries } from './db/machines.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
@@ -334,6 +335,7 @@ export const SCHEMA_HISTORY = [
   [116, 'machine_jobs.pause_failed (#1956)'],
   [117, 'claims.landed, keep (#1985)'],
   [118, 'wait_records (#1992)'],
+  [119, 'claims.handed, beside, beside_since, beside_handed, beside_landed, claim_queue.ready (#1985)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -807,6 +809,7 @@ const AREAS = [
   contraptionRunQueries,
   deliveryQueries,
   flakeQueries,
+  flowQueries,
   machineQueries,
   minionQueries,
   pushQueries,
@@ -833,6 +836,7 @@ type Areas = typeof healthQueries &
   typeof contraptionRunQueries &
   typeof deliveryQueries &
   typeof flakeQueries &
+  typeof flowQueries &
   typeof machineQueries &
   typeof minionQueries &
   typeof pushQueries &

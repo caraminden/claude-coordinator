@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { envBelow, tripwire, tripwireResult, type TripwireConfig } from '../src/tripwire.ts';
+import type { Save } from '../src/tripwire-git.ts';
 import { tripwireHooks } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
@@ -713,9 +714,8 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     for (const move of ['git checkout other', 'git switch other', 'git merge other', 'git reset --hard HEAD', 'git rebase other', 'git pull', 'git cherry-pick other', 'cd sub && git merge other']) {
       assert.match(at(move) ?? '', /^Commit first: .* 1 uncommitted tracked file\(s\) \(a\.txt\)/, move);
     }
-    // A folder checkout's refusal names the file-by-file way, which saves first (#1716); writing a file over from HEAD passes too (Mandate #86's logs).
-    assert.match(at('git checkout -- .')!, /`git checkout -- path`.*saves their diff/);
-    assert.match(at('git restore sub')!, /`git restore path`/);
+    // A folder checkout saves first (#1716, #2038); writing a file over from HEAD passes too (Mandate #86's logs).
+    for (const ok of ['git checkout -- .', 'git restore sub']) assert.equal(at(ok), null, ok);
     for (const ok of ['git show HEAD:./a.txt > a.txt', `git show HEAD:./a.txt > ${wt}/a.txt`, `git -C ${wt} show HEAD:./a.txt > ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
     sh('git show HEAD:./a.txt > a.txt');
     // `./` reads the path from the folder it runs in, so it is right from a subfolder too.
@@ -1089,9 +1089,10 @@ test("git: --ours and --theirs mid-merge, and any checkout in a clone under the 
     assert.match(at('git checkout --ours a.txt') ?? '', /names a path/);
     sh('git merge other || true');
     for (const ok of ['git checkout --ours a.txt', 'git checkout --theirs -- a.txt', `git checkout --ours -- ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
-    // --ours on a file with no open conflict, or on a folder or glob, stays refused; so does a folder without it.
+    // --ours on a file with no open conflict, or on a folder or glob, stays refused. A folder without it saves first
+    // (#2038), and git itself stops it at the open conflict before writing anything.
     writeFileSync(join(wt, 'b.txt'), 'changed');
-    for (const no of ['git checkout -- .', 'git restore .', 'git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"']) assert.ok(at(no), no);
+    for (const no of ['git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"']) assert.ok(at(no), no);
     sh('git checkout -q -- b.txt');
     sh('git merge --abort');
 
@@ -1100,14 +1101,66 @@ test("git: --ours and --theirs mid-merge, and any checkout in a clone under the 
     sh(`git clone -q ${wt} ${clone}`);
     writeFileSync(join(clone, 'a.txt'), 'changed');
     for (const ok of [`git -C ${clone} checkout -- a.txt`, `cd ${clone} && git checkout -- a.txt`, 'cd "$TMPDIR/clone" && git checkout HEAD~1 a.txt', `git -C ${clone} checkout other`, `git -C ${clone} restore a.txt`]) assert.equal(at(ok), null, ok);
-    // The worktree itself stays refused, from inside or by -C from the clone, and so does a clone outside the turn's TMPDIR.
+    // The worktree itself stays refused, from inside or by -C from the clone, and so does a clone outside the turn's TMPDIR
+    // (a folder there saves first, #2038, so a forced one stands in).
     writeFileSync(join(wt, 'a.txt'), 'changed');
-    for (const no of ['git checkout -- .', 'git restore .', 'git checkout other']) assert.ok(at(no), no);
-    assert.ok(at(`git -C ${wt} checkout -- .`, clone));
+    for (const no of ['git checkout -f -- .', 'git restore -p .', 'git checkout other']) assert.ok(at(no), no);
+    assert.ok(at(`git -C ${wt} checkout -f -- .`, clone));
     const other = join(tmp, 'elsewhere');
     sh(`git clone -q ${wt} ${other}`);
     writeFileSync(join(other, 'a.txt'), 'changed');
-    assert.ok(at('git checkout -- .', other));
+    assert.ok(at('git checkout -f -- .', other));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("git clean: only a dry run passes, except in a clone under the turn's TMPDIR (#2063)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-2063-'));
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: join(tmp, 'projects/2/tmp/9') } };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const clone = join(tmp, 'projects/2/tmp/9/clone');
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env });
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c, [])?.reason ?? null;
+  try {
+    mkdirSync(wt, { recursive: true });
+    sh('git init -q -b ticket/9 && echo a > a.txt && git add a.txt && git commit -qm a && echo work > new.txt');
+    // In a worktree, every spelling that deletes is refused, ignored-only (-X) too: no minion was found using it (#2063).
+    for (const no of [
+      'git clean -fd',
+      'git clean -fdx',
+      'git clean -qfdx',
+      'git clean -f',
+      'git clean --force -d',
+      'git clean -d -f',
+      'git clean -fX',
+      'git clean -ffdx -e .big',
+      'git clean -fenew -d',
+      'git clean -i',
+      'git clean -d',
+      `git -C ${wt} clean -fd`,
+      'git -c clean.requireForce=false clean -d',
+      'git clean -fd -- -n',
+      // The last of -n, --dry-run and --no-dry-run decides, abbreviated as git takes them; a word it can't read could be either.
+      'git clean -n -fd --no-dry-run',
+      'git clean -nfd --no-dry',
+      'git clean -n "$X" -fd',
+      'git clean -h',
+    ]) {
+      assert.match(at(no) ?? '', /git clean .*is blocked: it deletes untracked files.*git clean -n.*`rm`/, no);
+    }
+    // A folder it can't follow is refused on the words alone.
+    assert.ok(at('cd "$D" && git clean -fd'));
+    // A dry run passes, in any spelling.
+    for (const ok of ['git clean -n', 'git clean -nd', 'git clean -fdn', 'git clean -fdxn', 'git clean --dry-run -fdx', 'git clean --dry -fd', 'git clean -fd --no-dry-run -n', 'git clean -fd -e x -n', 'git clean -ne .big -fdx']) assert.equal(at(ok), null, ok);
+    // -e and --exclude take their pattern: the n in "-e n" or "-enew" is a pattern, not a dry run.
+    for (const no of ['git clean -fd -e n', 'git clean -fd --exclude -n', 'git clean -fd --excl -n', 'git clean -fdenew']) assert.ok(at(no), no);
+    // A clone under the turn's TMPDIR is scratch: it cleans freely, from inside or by -C; the worktree by -C from it stays refused.
+    mkdirSync(join(tmp, 'projects/2/tmp/9'), { recursive: true });
+    sh(`git clone -q ${wt} ${clone}`);
+    for (const ok of [`git -C ${clone} clean -fdx`, 'cd "$TMPDIR/clone" && git clean -qfd', `cd ${clone} && git clean -fX`]) assert.equal(at(ok), null, ok);
+    assert.ok(at(`git -C ${wt} clean -fd`, clone));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1517,27 +1570,8 @@ test("a dirty file checked out or restored: its diff is saved under the turn's T
     assert.deepEqual(run('git checkout -- b.txt'), {});
     assert.equal(patches(), before);
 
-    // Still refused: a folder, a pattern, an unknown path, another commit's version, -f, a branch switch over the edit, stash, reset --hard.
-    for (const no of [
-      'git checkout -- .',
-      'git checkout .',
-      'git checkout -- sub',
-      'git restore sub',
-      'git restore .',
-      "git checkout -- '*.txt'",
-      'git checkout -- "$F"',
-      'git checkout -- {a,b}.txt',
-      'git checkout -- :/a.txt',
-      'git checkout other -- a.txt',
-      'git checkout other a.txt',
-      'git restore --source=other a.txt',
-      'git checkout -f -- a.txt',
-      'git checkout -p -- a.txt',
-      'git checkout other',
-      'git stash',
-      'git reset --hard',
-    ])
-      assert.ok(at(no), no);
+    // Still refused: a pattern, an unknown path, -f, a branch switch over the edit, stash, reset --hard (folders and other commits: #2038's test).
+    for (const no of ["git checkout -- '*.txt'", 'git checkout -- "$F"', 'git checkout -- {a,b}.txt', 'git checkout -- :/a.txt', 'git checkout -f -- a.txt', 'git checkout -p -- a.txt', 'git checkout other', 'git stash', 'git reset --hard']) assert.ok(at(no), no);
     // A refusal later in the same call writes no patch.
     assert.equal(run('git checkout -- a.txt && git stash').code, 2);
     assert.equal(patches(), before);
@@ -1546,6 +1580,167 @@ test("a dirty file checked out or restored: its diff is saved under the turn's T
     assert.match(tripwire({ tool_name: 'Bash', tool_input: { command: 'git checkout -- a.txt' }, cwd: wt }, c)?.reason ?? '', /can't save/);
     // Chained -C folders: the second is inside the first, as git reads them.
     saved(`git -C ${tmp} -C projects/2/tickets/9 checkout -- a.txt`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
+test("a turn's copies of its app's data are its own to change, and nothing else in its folder is (#1884)", () => {
+  const turn = `${data}/run/turns/person-2/9-100`;
+  const copies = `${turn}/app-copy`;
+  for (const turnDir of [undefined, turn]) {
+    const c = { ...cfg, copies, ...(turnDir ? { turnDir } : {}) };
+    for (const cmd of [`sqlite3 ${copies}/trips/trips.db < 0018.sql`, `rm ${copies}/trips/trips.db-wal`, `cp ${copies}/trips/trips.db ${copies}/trips/before.db`]) {
+      assert.equal(bash(cmd, worktree, c), null, cmd);
+      assert.ok(bash(cmd), `${cmd} without a copies folder`);
+    }
+    for (const cmd of [`rm ${copies}/../pin/tripwire.ts`, `rm -rf ${turn}`, `echo x > ${turn}/app-copyx`, `rm ${data}/run/turns/person-2/9-200/app-copy/trips/trips.db`, `rm ${data}/run/app-copies/9-100/trips.db`, `rm ${data}/coordinator.db`]) assert.ok(bash(cmd, worktree, c), cmd);
+  }
+});
+
+test("a folder, `.` or another commit's version checked out or restored: its diff is saved, and the note's steps put it back (#2038)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-2038-'));
+  const turnTmp = join(tmp, 'projects/2/tmp/9');
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: turnTmp } };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env }).toString();
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c, [])?.reason ?? null;
+  /** Lets the call through as the hook does, runs it, then runs the note's steps: the state they give back. */
+  const roundTrip = (command: string, cwd = wt) => {
+    const r = tripwireResult(JSON.stringify({ tool_name: 'Bash', tool_input: { command, description: WHY }, cwd }), JSON.stringify(c));
+    assert.equal(r.code, undefined, `${command}: ${r.stderr}`);
+    const note: string = JSON.parse(r.stdout ?? '{}').hookSpecificOutput?.additionalContext ?? '';
+    const steps = [...note.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    assert.ok(
+      steps.some((s) => s.includes(`${turnTmp}/tripwire-saves/`)),
+      `${command}: the note names patches in TMPDIR: ${note}`,
+    );
+    sh(command, cwd);
+    // The note's own steps are tripwire-checked too: a ref checkout's undo is itself a restore over changed files.
+    for (const s of steps) {
+      assert.equal(at(s), null, s);
+      sh(s);
+    }
+    return steps;
+  };
+  const state = () => sh('git status --porcelain=v1 -uall && git diff --cached && git diff');
+  try {
+    mkdirSync(join(wt, 'sub'), { recursive: true });
+    mkdirSync(turnTmp, { recursive: true });
+    sh('git init -q -b ticket/9 && echo a > a.txt && echo b > b.txt && echo c > sub/c.txt && git add . && git commit -qm a');
+    sh('git checkout -q -b main && echo theirs > sub/c.txt && echo new > sub/new.txt && echo theirs > a.txt && git add . && git commit -qm main && git checkout -q ticket/9');
+    const sha = sh('git rev-parse main').trim();
+    // Staged and unstaged edits, a staged new file and an untracked one: every kind a checkout can meet.
+    const dirty = () => {
+      writeFileSync(join(wt, 'a.txt'), 'staged\n');
+      writeFileSync(join(wt, 'sub/c.txt'), 'staged c\n');
+      writeFileSync(join(wt, 'sub/added.txt'), 'added\n');
+      sh('git add a.txt sub/c.txt sub/added.txt');
+      writeFileSync(join(wt, 'a.txt'), 'unstaged\n');
+      writeFileSync(join(wt, 'sub/c.txt'), 'unstaged c\n');
+      writeFileSync(join(wt, 'sub/added.txt'), 'added more\n');
+      writeFileSync(join(wt, 'sub/scratch.txt'), 'untracked\n');
+    };
+    const clean = () => {
+      sh('git reset -q --hard && git clean -qfd');
+    };
+
+    // The digest's five habits, and restore's matching forms: each saved, run, and put back exactly as it was.
+    for (const [command, cwd] of [
+      ['git checkout -q -- .', wt],
+      ['git checkout -- .', join(wt, 'sub')],
+      ['git checkout -- sub', wt],
+      [`git checkout ${sha} -- a.txt`, wt],
+      ['git checkout main -- a.txt', wt],
+      ['git checkout main -- sub/c.txt', wt],
+      ['git checkout HEAD -- sub', wt],
+      ['git checkout main a.txt', wt],
+      ['git restore sub', wt],
+      ['git restore .', wt],
+      ['git restore --source=main a.txt', wt],
+      ['git restore -s main sub/c.txt sub/added.txt', wt],
+      ['git restore --source=main --staged --worktree a.txt', wt],
+      ['git restore -SW .', wt],
+    ] as const) {
+      dirty();
+      const before = state();
+      roundTrip(command, cwd);
+      assert.equal(state(), before, command);
+      clean();
+    }
+
+    // A ref with files the index lacks: written over even when untracked, which no diff holds, so refused by name.
+    dirty();
+    writeFileSync(join(wt, 'sub/new.txt'), 'mine, untracked\n');
+    for (const no of ['git checkout main -- sub', 'git checkout main -- .', 'git restore --source=main sub', 'git checkout main sub']) assert.match(at(no) ?? '', /write over 1 untracked file\(s\) \(sub\/new\.txt\)/, no);
+    // Without it, the folder from main saves, and the note's undo puts the folder back without main's new file.
+    rmSync(join(wt, 'sub/new.txt'));
+    const before = state();
+    const steps = roundTrip('git checkout main -- sub');
+    assert.match(steps[0], /restore --source=HEAD --staged --worktree -- sub$/);
+    assert.equal(state(), before);
+    // HEAD too, for a file taken out of the index but kept on disk.
+    clean();
+    sh('git rm -q --cached b.txt');
+    assert.match(at('git checkout HEAD -- .') ?? '', /untracked file\(s\) \(b\.txt\)/);
+    clean();
+
+    // A file where the source puts a folder is in the way too (a stat under it throws ENOTDIR, which must not skip the guard).
+    sh('git checkout -q main && mkdir f && echo x > f/x.txt && git add f && git commit -qm f && git checkout -q ticket/9');
+    writeFileSync(join(wt, 'f'), 'a file of mine\n');
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    assert.match(at('git checkout main -- .') ?? '', /untracked file\(s\) \(f\/x\.txt\)/);
+    clean();
+    // From the index or HEAD too: an untracked folder where the index has a file, or a file where it has a folder.
+    rmSync(join(wt, 'b.txt'));
+    mkdirSync(join(wt, 'b.txt'));
+    writeFileSync(join(wt, 'b.txt/inner'), 'mine\n');
+    for (const no of ['git checkout -- .', 'git checkout -- b.txt', 'git restore b.txt', 'git checkout HEAD -- .', 'git restore -s HEAD -W b.txt']) assert.match(at(no) ?? '', /untracked file\(s\) \(b\.txt\)/, no);
+    rmSync(join(wt, 'b.txt'), { recursive: true });
+    rmSync(join(wt, 'sub'), { recursive: true });
+    writeFileSync(join(wt, 'sub'), 'a file of mine\n');
+    assert.match(at('git checkout -- sub') ?? '', /untracked file\(s\) \(sub\/c\.txt\)/);
+    rmSync(join(wt, 'sub'));
+    clean();
+    // Options come before `--`: a file named like one (`-S`) is a path, so both files' edits are saved.
+    writeFileSync(join(wt, '-S'), 's\n');
+    sh('git add -- -S && git commit -qm s');
+    writeFileSync(join(wt, '-S'), 'mine\n');
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    const queued: Save[] = [];
+    assert.equal(tripwire({ tool_name: 'Bash', tool_input: { command: 'git restore -- -S a.txt' }, cwd: wt }, c, queued)?.reason ?? null, null);
+    assert.deepEqual(
+      queued.map((q) => q.paths),
+      [['-S', 'a.txt']],
+    );
+    clean();
+    // An open conflict's markers make no patch: a checkout from a commit over one is refused; picking a side passes (#485).
+    sh('git checkout -q -b theirs && echo theirs > b.txt && git commit -qam t && git checkout -q ticket/9 && echo ours > b.txt && git commit -qam o');
+    sh('git merge -q theirs || true');
+    writeFileSync(join(wt, 'b.txt'), 'half fixed by hand\n');
+    for (const no of ['git checkout main -- b.txt', 'git checkout HEAD -- .', 'git restore --source=main b.txt']) assert.match(at(no) ?? '', /open conflict in b\.txt/, no);
+    assert.equal(at('git checkout --ours -- b.txt'), null);
+    sh('git merge --abort');
+    clean();
+
+    // Still refused: patterns, sources it can't read or name, -f, -p, --overlay, and a branch switch over the edits.
+    dirty();
+    for (const no of [
+      "git checkout main -- 'sub/*.txt'",
+      'git checkout "$R" -- a.txt',
+      'git checkout no-such-ref -- a.txt',
+      'git restore --source="$R" a.txt',
+      'git restore --source=no-such-ref a.txt',
+      'git checkout -f main -- a.txt',
+      'git checkout -p main -- a.txt',
+      'git checkout --no-overlay main -- sub',
+      'git restore --overlay --source=main sub',
+      'git checkout main',
+      'git checkout main --',
+      'git checkout -f',
+    ])
+      assert.ok(at(no), no);
   } finally {
     rmSync(tmp, { recursive: true, force: true }); // timing-ok: own temp dir
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { procsUnder, tempRoot, until } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
@@ -297,4 +297,101 @@ test('citadel-test killed outright leaves no watcher holding its output open', a
       } catch {}
     }
   }
+});
+
+// #1925: the limit grows with the files it runs, and a run that hits it reruns only the files it hadn't finished.
+const knobs = { CITADEL_TEST_LIMIT_BASE: '20', CITADEL_TEST_LIMIT_FREE: '2', CITADEL_TEST_LIMIT_PER_FILE: '5', CITADEL_TEST_LIMIT_CAP: '40' };
+const quick = (n: string) => file(`lim-${n}.test.ts`, `test('ok', () => {});`);
+
+test('the time limit is the base up to the free files, then grows a step per file, up to the cap', async () => {
+  const two = await run([quick('a'), quick('b')], noList, knobs);
+  assert.doesNotMatch(two.out, /time limit:/, 'the base limit is not worth a line');
+  const five = await run([quick('a'), quick('b'), quick('c'), quick('d'), quick('e')], noList, knobs);
+  assert.match(five.out, /time limit: 35 s for 5 files/);
+  const nine = await run(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(quick), noList, knobs);
+  assert.match(nine.out, /time limit: 40 s for 9 files/);
+  assert.equal(nine.code, 0, nine.out);
+});
+
+test('the repo-wide files count toward the size', async () => {
+  const list = join(tmp, 'one.txt');
+  writeFileSync(list, `${relative(repo, quick('w'))}\n`);
+  const counted = await run([quick('a'), quick('b'), quick('c')], list, knobs);
+  assert.match(counted.out, /time limit: 30 s for 4 files/);
+});
+
+const marker = (name: string) => join(tmp, `${name}.marker`);
+
+/** A file that hangs on its first run and passes on the next (`always`: hangs every time), saying so in `.hung`. */
+function hangs(name: string, always = false): string {
+  rmSync(marker(name), { force: true });
+  rmSync(`${marker(name)}.hung`, { force: true });
+  const skip = always ? 'false' : `existsSync(${JSON.stringify(marker(name))})`;
+  return file(
+    `${name}.test.ts`,
+    `import { existsSync, writeFileSync } from 'node:fs';\ntest('maybe hangs', () => {\n  if (${skip}) return;\n  writeFileSync(${JSON.stringify(marker(name))}, '');\n  writeFileSync(${JSON.stringify(`${marker(name)}.hung`)}, '');\n  return new Promise(() => setInterval(() => {}, 1000));\n});`,
+  );
+}
+
+// Never reached: each stop is the test's own SIGALRM, what timeout's timer sends, once the files are where it wants them.
+const far = { CITADEL_TEST_LIMIT_BASE: '600', CITADEL_TEST_LOADAVG: join(tmp, 'none.txt') };
+
+/** Runs citadel-test and fires its limit once per entry of `stops`, each when that hanging file has started. With two
+ *  workers a third file starts only once a second one is done and the runner knows it, however loaded the box is. */
+async function stopped(args: string[], stops: string[], always = noList, env: Record<string, string> = {}) {
+  const r = run(args, always, { ...far, CITADEL_TEST_CONCURRENCY: '2', ...env });
+  const fired = new Set<number>();
+  for (const name of stops) {
+    await until(`${name} to hang`, () => existsSync(`${marker(name)}.hung`));
+    const [pid] = await until('the time limit', () => [...procsUnder([repo])].find(([p, cmd]) => !fired.has(p) && cmd.startsWith('timeout --foreground') && cmd.includes(`${basename(tmp)}/${name}.test.ts`)));
+    fired.add(pid);
+    rmSync(`${marker(name)}.hung`);
+    process.kill(pid, 'SIGALRM');
+  }
+  return r;
+}
+
+test('--timeout is the whole limit: one run, no rerun', async () => {
+  const r = await run([quick('t'), hangs('stop-explicit', true), '--timeout', '3'], noList, knobs);
+  assert.equal(r.code, 124, r.out);
+  assert.match(r.out, /stopped at the time limit, 3 s/);
+  assert.doesNotMatch(r.out, /rerunning|time limit: /);
+});
+
+test('a run stopped at the limit reruns only the files it had not finished, and passes when they do', async () => {
+  // The hanging file sorts first, so node holds the later files' results back: they still count as finished.
+  const slow = hangs('s1-a');
+  const r = await stopped([slow, quick('s1-b'), hangs('s1-c')], ['s1-c']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /stopped at the time limit, 600 s: 1 of 3 files finished; rerunning only: .*s1-a\.test\.ts .*s1-c\.test\.ts/);
+  assert.match(r.out, /stopped before the end \(1 passed, 0 failed by then\)/);
+  assert.match(r.out, /both parts: ✔ 3 passed, 0 failed \(3 files\)/);
+});
+
+test('failures in files that finished behind a hung one are shown and keep the run red', async () => {
+  const bad = file('s2-b.test.ts', `test('fails', () => { assert.equal(1, 2); });`);
+  const exit = file('s2-c.test.ts', `test('ok', () => {});\nprocess.exitCode = 1;`);
+  const hook = file('s2-d.test.ts', `import { after } from 'node:test';\ntest('ok', () => {});\nafter(() => { throw new Error('after hook'); });`);
+  const r = await stopped([hangs('s2-a'), bad, exit, hook, hangs('s2-e')], ['s2-e']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /s2-b\.test\.ts[^\n]*fails\n {2}.*(1 !== 2|equal)/);
+  assert.match(r.out, /3 of 5 files finished/);
+  assert.match(r.out, /both parts: ✖ 4 passed, 3 failed \(5 files\)/);
+});
+
+test('a file that hits the limit twice is the only one reported unfinished, and the run exits 124', async () => {
+  const never = hangs('s3-b', true);
+  // One worker, so s3-a is done before s3-b starts in the rerun.
+  const r = await stopped([hangs('s3-a'), never], ['s3-a', 's3-b'], noList, { CITADEL_TEST_CONCURRENCY: '1' });
+  assert.equal(r.code, 124, r.out);
+  assert.match(r.out, /not finished after two limits: [^ \n]*s3-b\.test\.ts\n/);
+  assert.doesNotMatch(r.out, /Before chasing/);
+});
+
+test('the --name pass for the repo-wide files follows the same rule', async () => {
+  const list = join(tmp, 'wide.txt');
+  writeFileSync(list, `${relative(repo, hangs('s4-wide'))}\n`);
+  const r = await stopped([quick('s4-named'), '--name', 'ok|hangs'], ['s4-wide'], list);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /rerunning only: .*s4-wide/);
 });

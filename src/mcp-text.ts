@@ -406,3 +406,15 @@ export function scheduleLine(s: ScheduleInfo): string {
   const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
   return `[${s.id}] ${s.name}${s.category ? ` (${s.category})` : ''}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${trigger}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
+
+/** What copy_app_data (src/app-copy.ts) hands back. */
+export interface CopyResult {
+  databases: { name: string; bytes: number }[];
+  files: number;
+  left_out: string[];
+}
+export function copyText(app: string, r: CopyResult & { dir: string }): string {
+  const list = r.databases.map((d) => `${d.name} (${Math.max(0.1, d.bytes / 1024 ** 2).toFixed(1)} MB)`).join(', ');
+  const out = r.left_out.slice(0, 20).join(', ') + (r.left_out.length > 20 ? ` and ${r.left_out.length - 20} more` : '');
+  return `A private copy of ${app}'s live data is in ${r.dir}: ${list || 'no databases'}${r.files ? `, and ${r.files} other file${r.files > 1 ? 's' : ''}` : ''}.${out ? ` It left out ${out}.` : ''} Run your check on it (for the app's own code, DATA_DIR=${r.dir}), not on the live folder. It is deleted when this turn ends, so anything to keep goes in your reply; it holds everyone's rows, so print counts and checks, never the rows, and copy none of it elsewhere.`;
+}

@@ -37,8 +37,8 @@ test('seeds global keys for every scheme and Delve keys only for Delve', () => {
   const s = freshStore();
   const delve = s.props.list(1).map((k) => k.key);
   const citadel = s.props.list(2).map((k) => k.key);
-  assert.deepEqual(citadel, ['type', 'stage', 'requestedBy', 'assigned', 'effortName']);
-  assert.deepEqual(delve, ['type', 'stage', 'requestedBy', 'assigned', 'effortName', 'playerClass', 'assetType', 'area', 'build']);
+  assert.deepEqual(citadel, ['type', 'stage', 'requestedBy', 'assigned', 'effortName', 'closedAs']);
+  assert.deepEqual(delve, ['type', 'stage', 'requestedBy', 'assigned', 'effortName', 'closedAs', 'playerClass', 'assetType', 'area', 'build']);
   const classes = s.props.list(1).find((k) => k.key === 'playerClass')!.values;
   assert.equal(classes.length, 23);
   assert.ok(!classes.some((v) => v.value === 'Untrained'));

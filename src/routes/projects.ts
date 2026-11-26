@@ -421,6 +421,7 @@ export function claimView(app: App, c: Claim, now = Date.now()) {
     holder_number: t?.number ?? null,
     holder_title: t?.title ?? '',
     holder_name,
+    beside_number: c.beside ? (store.getTicket(c.beside)?.number ?? null) : null,
     since_text: `since ${pacific(c.since)}`,
     ...holderStage(app, t),
     queue,

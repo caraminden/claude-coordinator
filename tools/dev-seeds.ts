@@ -26,6 +26,7 @@ import { templateBlobs } from '../src/kit-sync.ts';
 import { addMention } from '../src/mentions.ts';
 import { heldPlan, settingsOverlaps } from '../src/instructions-save.ts';
 import { lendAfter, lendLines, type LendChange } from '../src/machine-lend.ts';
+import { flowSeed } from './dev-seeds-flow.ts';
 
 export interface SeedCtx {
   store: Store;
@@ -2101,4 +2102,5 @@ mock.boards('#takes', { boards: [
       return `#/p/${c.project.id}/status`;
     },
   },
+  flow: flowSeed,
 };

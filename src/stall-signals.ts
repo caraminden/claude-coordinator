@@ -1,17 +1,34 @@
 // The server notices a stall (#1139, G5 from #1092; Josh picked it 2026-11-19). Three signals, counted per minion from what
-// its turns stream: the same test red three times, the same file edited after four failed checks in a row, two failed ships.
+// its turns stream: the same test red three times, the same file edited after four failed checks in a row, two failed ships (not counting
+// the refusals in NOT_THE_MODELS).
 // On a signal the minion's Taskmaster gets one message with the evidence and the step-up the model table names
 // (nextStep in public/model-table.js). It suggests; it changes nothing. One suggestion per minion per tier.
 // The parsing half (testCommand, checkCommand, failingTests, editedFiles) is pure and shared: the third-fix flag (B4) reads
 // the same signals across minions.
 import type { Store, Ticket } from './db.ts';
 import { nextStep, tierLabel } from '../public/model-table.js';
+import { classifyLandFailure, NO_CODE } from './land.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 
 /** Thresholds, from the handoff (starting values: the two-week read says whether they hold). */
 export const RED_TIMES = 3;
 export const CHURN_ROUNDS = 4;
 export const SHIP_FAILS = 2;
+/** Refusals the minion couldn't help, so they say nothing about its model and don't count (#2047, Josh, 2026-11-25). */
+const NOT_THE_MODELS = new Set(['conflict', 'passed-alone', 'boot-copy', 'cut-off', 'ci', 'no-answer']);
+
+/**
+ * A failed ship's kind: classifyLandFailure's, or `no-answer` for exit 75 (CI gave no verdict), or `cut-off` for a run that
+ * ended with no exit code, whatever it printed first (as the ship trail reads it).
+ */
+export function refusalKind(output: string, code: number | null = null): string | null {
+  // A ship the minion ran itself says its exit code only in the text.
+  if (code === 75 || /^(tools\/land\.sh exited|Exit code) 75\b/.test(output)) return 'no-answer';
+  if (output.trimEnd().endsWith(NO_CODE.trim())) return 'cut-off';
+  // A conflict the recorded fix resolved (land.sh's rerere_on) didn't refuse the ship: read the rest.
+  const read = output.includes("resolved the rebase's conflicts") ? output.replace(/^CONFLICT \(.*$/gm, '') : output;
+  return classifyLandFailure(read)?.kind ?? null;
+}
 
 // A tool name only counts as the command a segment runs (at the start, or after ;, &, |, a bracket or a newline), past any
 // VAR=value, cd, timeout or wrapper (citadel-heavy, npx), and as a whole word: `cat $TMPDIR/citadel-test.log` and
@@ -113,7 +130,7 @@ export function observe(s: StallState, ev: ClaudeEvent): { signals: Signal[]; ch
       changed = true;
       const out = typeof b.content === 'string' ? b.content : '';
       if (cmd === SHIP) {
-        if (b.is_error || /^tools\/land\.sh exited [1-9]/.test(out)) signals.push(...shipFailed(s, 'land.sh run by the minion'));
+        if (b.is_error || /^tools\/land\.sh exited [1-9]/.test(out)) signals.push(...shipFailed(s, refusalKind(out) ?? 'land.sh run by the minion'));
         continue;
       }
       const names = testCommand(cmd) ? failingTests(out) : [];
@@ -138,7 +155,9 @@ export function observe(s: StallState, ev: ClaudeEvent): { signals: Signal[]; ch
 
 /** A failed ship (src/land.ts settle, a land.sh run in the minion's own turn, or red CI on a PR scheme's PR); `kind` is classifyLandFailure's, or what failed. */
 export function shipFailed(s: StallState, kind: string): Signal[] {
-  s.ships.push(kind);
+  if (NOT_THE_MODELS.has(kind)) return [];
+  // Filtered again: a count saved before #2047 can hold kinds that no longer count.
+  s.ships = [...s.ships.filter((k) => !NOT_THE_MODELS.has(k)), kind];
   return s.ships.length === SHIP_FAILS ? [{ kind: 'failed-ships', what: `${SHIP_FAILS} failed ships`, evidence: [`kinds: ${s.ships.join(', ')}`] }] : [];
 }
 

@@ -42,6 +42,7 @@ export const READER_ROUTES: readonly string[] = [
   '/api/tickets/:ticket/commands',
   '/api/tickets/:ticket/ship-risk',
   '/api/tickets/:ticket/time-log',
+  '/api/projects/:project/day-strips',
   '/api/ship-lines',
   '/api/app/instructions',
   '/api/app/instructions/history',
@@ -431,6 +432,8 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const readers = new Set<Reader>();
   const asks = new Set<Ask>();
   let nextId = 1;
+  // When the first reader of this process was ready; 0 until then.
+  let upAt = 0;
   let failures = 0;
   let stopping = false;
   let released = false; // a warm handover's: every request goes to the main thread, which passes it on
@@ -470,6 +473,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
       r.late = r.silent = false;
       if (m.ready) {
         r.ready = true;
+        upAt ||= Date.now();
         started_up();
         failures = 0;
         if (again) console.log('Reader thread started again: ready.');
@@ -565,10 +569,19 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     r.open.set(id, { a, done });
     r.worker.postMessage({ id, method: a.req.method, url: a.req.url, headers: a.req.headers });
   };
+  // After a start on a busy box the first reader takes longer than that to load: a read waits for it (or, once none can be
+  // hoped for, goes to the main thread), since callers that aren't the page don't ask again.
+  const tooLong = (a: Ask) => {
+    // One that came up meanwhile gets the whole wait to answer, counted from then.
+    const left = upAt ? upAt + 4 * answerMs - Date.now() : answerMs;
+    if (left <= 0) return settle(a, () => busy(a.res));
+    a.timer = setTimeout(() => tooLong(a), left);
+    give(a);
+  };
   const ask = (req: IncomingMessage, res: ServerResponse) => {
     // So every change main posted reaches the reader before the request does.
     if (!caughtUp()) return pass(req, res);
-    const a: Ask = { req, res, asked: new Set(), timer: setTimeout(() => settle(a, () => busy(res)), 4 * answerMs) };
+    const a: Ask = { req, res, asked: new Set(), timer: setTimeout(() => tooLong(a), 4 * answerMs) };
     asks.add(a);
     res.once('close', () => settle(a, () => {}));
     give(a);

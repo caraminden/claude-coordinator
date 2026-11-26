@@ -115,7 +115,7 @@ test("a handed-over snapshot that doesn't read leaves the server to build its ow
     sweepMs: 3_600_000,
   } as unknown as LiveDeps);
   try {
-    assert.deepEqual(posts, [], 'nothing posted, and not ready, until its own pass');
+    assert.equal(posts.length, 0, 'nothing posted, and not ready, until its own pass');
     await live.ready;
     assert.deepEqual(
       posts.flatMap((d) => (d.live ? [d.live] : [])),

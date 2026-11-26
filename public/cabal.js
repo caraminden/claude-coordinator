@@ -3,7 +3,7 @@
 // first and a blocking ask pinned on top, a red-run bar when the lead set one, and "Roster of N, nobody started yet"
 // before anyone starts. It only reads: src/cabal-board.ts builds the board, and people answer by writing in the lead's chat.
 import { api, h, icon, threadHref, view } from './base.js';
-import { emptyCard, toneChip } from './look.js';
+import { emptyCard, schemeTag, toneChip } from './look.js';
 import { loadingLine } from './ui/state.js';
 
 /**
@@ -105,10 +105,11 @@ function table(rows, b, s, projectId, redraw) {
             m.label ? h('b', {}, m.label, ' ') : null,
             m.title,
             ' ',
-            h('span', { class: 'num' }, `${m.scheme ? `${m.scheme} ` : ''}${m.number ? `#${m.number}` : 'roster'}`),
+            m.scheme ? [schemeTag(m.scheme), ' '] : null,
+            h('span', { class: 'num' }, m.number ? `#${m.number}` : 'roster'),
             m.doubled.length ? h('span', { class: 'cabal-doubled', title: `Another member lists ${m.doubled.join(', ')}` }, ' ⚠ shared file') : null,
           ),
-          h('td', {}, toneChip(TONE[m.state], m.word)),
+          h('td', {}, toneChip(m.state === 'roster' && m.word.startsWith('asked ') ? 'warn' : TONE[m.state], m.word)), // asked of another scheme: waiting on its Taskmaster
           h('td', { class: 'cabal-note-col cabal-note' }, noteOf(m)),
           h('td', { class: 'num' }, m.spend ? money(m.spend) : '–'),
         );
@@ -126,8 +127,8 @@ function table(rows, b, s, projectId, redraw) {
           m.risk ? h('div', {}, `Risk ${m.risk}.`) : null,
           m.note && m.note_at ? h('div', {}, `Note set ${clock(m.note_at)}.`) : null,
           ask ? h('div', { class: 'cabal-ask-line' }, h('b', {}, ask.blocking ? 'Ask, blocking: ' : 'Ask: '), ask.text) : null,
-          m.number && m.open !== false ? h('a', { href: `#/p/${m.project_id ?? projectId}/t/${m.number}` }, `Open ${m.scheme ? `${m.scheme} ` : ''}#${m.number}'s chat →`) : null,
           m.scheme ? h('div', {}, `Runs and ships in ${m.scheme}${b.kind === 'build' ? `, never into ${b.name}` : ''}.`) : null,
+          m.number && m.open !== false ? h('a', { href: `#/p/${m.project_id ?? projectId}/t/${m.number}` }, `Open ${m.scheme ? `${m.scheme} ` : ''}#${m.number}'s chat →`) : null,
         );
         return [tr, h('tr', { class: 'cabal-det-row' }, h('td', {}), det)];
       }),

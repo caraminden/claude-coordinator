@@ -153,7 +153,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
       lane: r.lane,
       role: r.role,
       state,
-      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : state === 'roster' && r.asked_at != null ? `asked ${scheme}'s Taskmaster` : state === 'roster' && r.next_at != null ? 'next up' : state === 'roster' && r.approved_at != null ? 'approved' : STATE_WORD[state],
+      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : state === 'roster' && r.asked_at != null ? `asked ${scheme}` : state === 'roster' && r.next_at != null ? 'next up' : state === 'roster' && r.approved_at != null ? 'approved' : STATE_WORD[state],
       plan: t ? '' : [r.handoff, r.model && tierLabel(r.model, r.effort), r.cost != null && money(r.cost), r.approved_at != null && `approved by ${r.approved_by}`].filter(Boolean).join(' · '),
       after: (t && afterOf(store, t)) || r.after || null,
       note: r.note,

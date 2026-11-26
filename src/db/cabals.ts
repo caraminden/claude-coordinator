@@ -145,7 +145,7 @@ export const cabalQueries = {
     const open = this.cabalRows(leadId).filter((r) => r.ticket_id == null && (r.project_id ?? projectId) === memberProject);
     const planned = open.find((r) => r.id === rowId) ?? open.find((r) => r.title.trim().toLowerCase() === title.trim().toLowerCase());
     if (planned) {
-      this.updateCabalRow(planned.id, { ticket_id: ticketId, asked_at: null, ...(own?.note && !planned.note ? { note: own.note, note_at: own.note_at } : {}) });
+      this.updateCabalRow(planned.id, { ticket_id: ticketId, asked_at: null, next_at: null, ...(own?.note && !planned.note ? { note: own.note, note_at: own.note_at } : {}) });
       return planned.id;
     }
     return this.addCabalRow(leadId, { ticket_id: ticketId, title: '', note: own?.note ?? '', note_at: own?.note_at ?? null }, at);

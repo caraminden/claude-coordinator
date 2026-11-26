@@ -6,24 +6,44 @@ import { toneChip } from './look.js';
 import { showRail } from './rail.js';
 import { optimistic } from './ui/optimistic.js';
 
+/** @import { View } from './types.js' */
+/** @typedef {{ load?: string, active: string, enabled?: string }} Unit */
+/** @typedef {Unit & { unit: string, path: string, why: string }} HandUnit */
+/** @typedef {{ installed: boolean, unit: string, service: Unit, timers: (Unit & { unit: string })[], manifestError?: string, hand: HandUnit[] }} ServiceStatus */
+/** @typedef {{ by: string, state: string, to?: string, said: string[], todo?: string[], tail?: string }} DeployState */
+/** @typedef {{ action: string, at: number, by: string, risk: string, ok: boolean }} ServiceRun */
+/** @typedef {{ data_bytes: number | null, warn_gb: number | null, measured_at: number }} DiskUse */
+/** A contraption as src/routes/contraptions.ts lists it: the fields this page reads (`wasOpen` and `wasSettingsOpen` carry a redrawn card's open state). */
+/** @typedef {{ name: string, title: string, port: number, icon?: string | null, home_scheme?: number | null, default_model?: string | null, turn_cap?: number | null, open_paths: string[], relay_paths: string[], restart_risk?: string, restart_note?: string, repo?: string, branch?: string, folder?: string, keys_dir: string, keys_at: number, people: number[], runs?: ServiceRun[], disk?: DiskUse | null, wasOpen?: boolean, wasSettingsOpen?: boolean }} Contraption */
+/** @typedef {{ id: number, name: string, disabled?: boolean }} Person */
+
+/** @param {Error} err */
 const fail = (err) => alert(err.message);
+/** @param {number} ms */
 const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
 /** What Restart and Stop risk (#1682): its words, chip tone and the sentence a confirm opens with. */
+/** @type {Record<string, [string, string]>} */
 const RISKS = {
   unassessed: ['Not assessed', 'neutral'],
   safe: ['Safe', 'ok'],
   interrupts: ['Interrupts users', 'warn'],
   loses_data: ['May lose data', 'danger'],
 };
-const riskWords = (c) => `${RISKS[c.restart_risk]?.[0] ?? 'Not assessed'}${c.restart_note ? `: ${c.restart_note}` : ''}`;
+/** @param {Contraption} c */
+const riskWords = (c) => `${RISKS[/** @type {string} */ (c.restart_risk)]?.[0] ?? 'Not assessed'}${c.restart_note ? `: ${c.restart_note}` : ''}`;
 
 /** A unit's state in a few words. */
+/** @param {Unit} u */
 const unitState = (u) => (u.load === 'not-found' ? 'not installed' : `${u.active}${u.enabled ? `, ${u.enabled}` : ''}`);
 
 /**
  * Its systemd user service, which Citadel writes and runs (#266): state, the buttons, and the journal on ask.
  * Fetched once the card is drawn; a boot check or preview answers 409 and the panel says why.
+ */
+/**
+ * @param {Contraption} c
+ * @param {(state: string) => void} [summary]
  */
 export function servicePanel(c, summary = () => {}) {
   const line = h('span', { class: 'small' }, 'Service: checking…');
@@ -31,15 +51,22 @@ export function servicePanel(c, summary = () => {}) {
   const log = h('pre', { hidden: true });
   const status = h('span', { class: 'muted small', role: 'status' });
   const buttons = h('span', { class: 'row service-buttons' });
-  const [riskText, riskTone] = RISKS[c.restart_risk] ?? RISKS.unassessed;
+  const [riskText, riskTone] = RISKS[/** @type {string} */ (c.restart_risk)] ?? RISKS.unassessed;
   const run = c.runs?.[0];
   const lastRun = h('div', { class: 'small muted' }, run ? `Last ${run.action}: ${when(run.at)} by ${run.by} · risk ${(RISKS[run.risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${run.ok ? 'worked' : 'failed'}` : '');
   const base = `api/contraptions/${c.name}/service`;
+  /** @param {ServiceStatus} s */
   const show = (s) => {
     summary(s.installed ? s.service.active : 'not installed');
     line.textContent = `Service ${s.unit}: ${s.installed ? unitState(s.service) : 'not installed'}` + (s.timers.length ? ` · timers ${s.timers.map((t) => `${t.unit.replace(/^citadel-app-/, '')} ${unitState(t)}`).join(', ')}` : '');
     notes.replaceChildren(...(s.manifestError ? [h('div', {}, s.manifestError)] : []), ...s.hand.map((u) => h('div', {}, `Hand-installed ${u.path}: ${unitState(u)} (${u.why}).`)));
-    const live = s.hand.some((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
+    const live = s.hand.some((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(/** @type {string} */ (u.enabled)));
+    /**
+     * @param {string} label
+     * @param {string} action
+     * @param {Record<string, unknown>} [extra]
+     * @param {string} [ask]
+     */
     const btn = (label, action, extra = {}, ask) => {
       const b = h('button', { type: 'button', class: 'secondary small', title: action === 'stop' || action === 'restart' ? `Risk: ${riskWords(c)}` : undefined }, label);
       b.onclick = async () => {
@@ -53,6 +80,7 @@ export function servicePanel(c, summary = () => {}) {
         } else if (ask && !confirm(ask)) return;
         // The click shows at once ("Restarting…", buttons held); a failure rolls that back with a toast and a Retry.
         const before = status.textContent;
+        /** @param {boolean} on */
         const hold = (on) => {
           for (const x of buttons.querySelectorAll('button')) x.disabled = on;
         };
@@ -70,7 +98,7 @@ export function servicePanel(c, summary = () => {}) {
           label: `${label.toLowerCase()} ${c.title}`,
         }).then(
           (r) => {
-            if (action === 'stop' || action === 'restart') lastRun.textContent = `Last ${action}: just now · risk ${(RISKS[c.restart_risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${r.said.at(-1)}`;
+            if (action === 'stop' || action === 'restart') lastRun.textContent = `Last ${action}: just now · risk ${(RISKS[/** @type {string} */ (c.restart_risk)] ?? RISKS.unassessed)[0].toLowerCase()} · ${r.said.at(-1)}`;
             status.textContent = r.said.join(' ');
             show(r.status);
           },
@@ -86,7 +114,7 @@ export function servicePanel(c, summary = () => {}) {
         log.textContent = (await api(`${base}/logs?lines=100`)).log || 'No journal lines.';
         log.hidden = false;
       } catch (err) {
-        status.textContent = err.message;
+        status.textContent = /** @type {Error} */ (err).message;
       }
     };
     buttons.replaceChildren(
@@ -100,6 +128,7 @@ export function servicePanel(c, summary = () => {}) {
   const deployTodo = h('ul', { class: 'small', 'aria-label': 'Still to do after its deploy' });
   const deployLog = h('pre', { hidden: true });
   const deployBtn = h('button', { type: 'button', class: 'secondary small', hidden: !c.repo, title: c.repo ? `Fetch ${c.repo} ${c.branch || 'main'}, build, restart; rolls back if it fails` : '' }, 'Deploy');
+  /** @param {DeployState | null | undefined} d */
   const showDeploy = (d) => {
     deployBtn.disabled = d?.state === 'running';
     if (!d) return;
@@ -136,7 +165,7 @@ export function servicePanel(c, summary = () => {}) {
   api(base)
     .then(show)
     .catch((err) => {
-      line.textContent = `Service: ${err.message}`;
+      line.textContent = `Service: ${/** @type {Error} */ (err).message}`;
       summary('service unknown');
     });
   if (c.repo)
@@ -158,9 +187,11 @@ export function servicePanel(c, summary = () => {}) {
   );
 }
 
+/** @param {number} b */
 const size = (b) => (b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(b < 1e11 ? 1 : 0)} GB`);
 
 /** Its DATA_DIR size from the server's last background measure (#847), and its manifest's disk_warn_gb line. */
+/** @param {Contraption} c */
 function diskLine(c) {
   const d = c.disk;
   const dir = `~/.local/share/${c.name}`;
@@ -179,10 +210,13 @@ function diskLine(c) {
 // Split so src/icons.ts doesn't take it for Citadel's own icon and append ?v=<hash>.
 const ICON_HINT = '/icon' + '.svg';
 
+/** @param {Contraption} c */
 const riskSelect = (c) => h('select', { name: 'restart_risk' }, ...Object.entries(RISKS).map(([v, [label]]) => h('option', { value: v, selected: v === (c.restart_risk ?? 'unassessed') }, label)));
 
 /** The PATCH body for the fields of the form that changed (`v`), in the shapes the server takes. */
+/** @param {Record<string, string>} v */
 function contraptionPatch(v) {
+  /** @type {Record<string, unknown>} */
   const body = { ...v };
   if ('port' in v) body.port = Number(v.port);
   if ('home_scheme' in v) body.home_scheme = v.home_scheme ? Number(v.home_scheme) : null;
@@ -191,9 +225,17 @@ function contraptionPatch(v) {
 }
 
 /** One contraption as a row that opens (#997): who it's enabled for, its settings, its service and its keys. */
+/**
+ * @param {Contraption} c
+ * @param {Person[]} people
+ * @param {(next: Contraption) => void} replace
+ * @returns {HTMLDetailsElement}
+ */
 function card(c, people, replace) {
+  /** @param {string} label @param {string} name @param {unknown} value @param {Record<string, unknown>} [attrs] */
   const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label, h('input', { name, value: value ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, wide: undefined }));
-  const scheme = h('select', { name: 'home_scheme' }, h('option', { value: '' }, 'None'), ...(view.projects ?? []).map((p) => h('option', { value: p.id, selected: p.id === c.home_scheme }, p.name)));
+  const projects = /** @type {View} */ (view).projects ?? [];
+  const scheme = h('select', { name: 'home_scheme' }, h('option', { value: '' }, 'None'), ...projects.map((p) => h('option', { value: p.id, selected: p.id === c.home_scheme }, p.name)));
   const status = h('span', { class: 'muted small', role: 'status' });
   const form = h(
     'form',
@@ -229,7 +271,7 @@ function card(c, people, replace) {
       send: () =>
         api(`api/contraptions/${c.name}`, {
           method: 'PATCH',
-          body: contraptionPatch(v),
+          body: contraptionPatch(/** @type {Record<string, string>} */ (v)),
         }),
       undo: () => {
         status.textContent = 'Not saved.';
@@ -253,8 +295,8 @@ function card(c, people, replace) {
       { class: 'contraption-people', role: 'group', 'aria-label': `Who ${c.title} is enabled for` },
       h('span', { class: 'small' }, 'Enabled for'),
       ...people
-        .filter((u) => !u.disabled)
-        .map((u) =>
+        .filter((/** @type {Person} */ u) => !u.disabled)
+        .map((/** @type {Person} */ u) =>
           h(
             'label',
             { class: 'small turns-toggle' },
@@ -263,12 +305,13 @@ function card(c, people, replace) {
               checked: enabled.has(u.id),
               // The box shows it at once (and c.people, for a redraw meanwhile); a refusal unticks (or ticks) it
               // again, unless a later click changed it. No redraw after: the box already shows what the server has.
-              onchange: (e) => {
-                const box = e.target;
+              onchange: (/** @type {Event} */ e) => {
+                const box = /** @type {HTMLInputElement} */ (e.target);
                 const on = box.checked;
+                /** @param {boolean} yes */
                 const show = (yes) => {
                   box.checked = yes;
-                  c.people = yes ? [...new Set([...c.people, u.id])] : c.people.filter((id) => id !== u.id);
+                  c.people = yes ? [...new Set([...c.people, u.id])] : c.people.filter((/** @type {number} */ id) => id !== u.id);
                 };
                 optimistic({
                   key: `contraption-people:${c.name}:${u.id}`,
@@ -289,7 +332,7 @@ function card(c, people, replace) {
         ),
     ),
     diskLine(c),
-    servicePanel(c, (state) => {
+    servicePanel(c, (/** @type {string} */ state) => {
       sum.textContent = `${base} · ${state}`;
       row.dataset.hue = state === 'active' ? 'running' : 'muted';
     }),
@@ -302,15 +345,21 @@ function card(c, people, replace) {
 /** Main panel, admins only: every contraption, with a form to register another. */
 export function contraptionsPage() {
   const list = h('div', { class: 'contraption-list settings-rows' });
+  /** @type {Person[]} */
   let people = [];
+  /** @type {Contraption[]} */
   let all = [];
   // A save or a key rotation redraws only its own card (keeping its Settings open), so typing in the others survives.
+  /**
+   * @param {Contraption} c
+   * @returns {HTMLDetailsElement}
+   */
   const cardFor = (c) => {
     const el = card(c, people, (next) => {
       all = all.map((x) => (x.name === next.name ? next : x));
       if (!el.isConnected) return render();
       // Both the row and its inner Settings stay as they were.
-      const fresh = cardFor({ ...next, wasOpen: el.open, wasSettingsOpen: el.querySelector('.contraption-settings').open });
+      const fresh = cardFor({ ...next, wasOpen: el.open, wasSettingsOpen: /** @type {HTMLDetailsElement} */ (el.querySelector('.contraption-settings')).open });
       el.replaceWith(fresh);
     });
     return el;
@@ -333,7 +382,7 @@ export function contraptionsPage() {
       status.textContent = c.icon ? '' : `Registered without an icon: the rail shows "${c.title[0]}" until you set one or a deploy fills it from its web manifest.`;
       render();
     } catch (err) {
-      status.textContent = err.message;
+      status.textContent = /** @type {Error} */ (err).message;
     }
   };
   Promise.all([api('api/contraptions'), api('api/people')])
@@ -349,7 +398,7 @@ export function contraptionsPage() {
     h(
       'div',
       { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Personal apps with their own service, reached through Citadel. Each opens only for the people it is enabled for here.'),
     ),

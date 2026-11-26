@@ -164,3 +164,54 @@ test('the baseline names only test files that exist, with a positive count of a 
     }
   }
 });
+
+// #1999: citadel-test's time limit TERMs the run's group, and a file killed by a signal never reaches its own count. A
+// land.sh started in a group of its own (landAsync) outlived such a run by 15 hours.
+for (const [how, signal, group] of [
+  ['its group is ended by SIGTERM', 'SIGTERM', true],
+  ['its group is ended by SIGKILL', 'SIGKILL', true],
+  ['its runner alone is killed', 'SIGKILL', false],
+] as const)
+  test(`a ship script a file started goes when ${how}, and another run's is left alone`, { timeout: 60_000 }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'killedrun-'));
+    const out = join(dir, 'out.json');
+    let pids: number[] = [];
+    // Not the nested file's: it carries this file's id, not that one's, and names no folder of its.
+    const other = spawn('bash', ['-c', 'sleep 60; :', 'land.sh'], { detached: true, stdio: 'ignore' });
+    try {
+      // Stand-ins as in the real leak: land.sh in a session of its own, waiting on a deploy.sh that polls for a gate.
+      writeFileSync(
+        join(dir, 'hung.test.mjs'),
+        `import { test } from 'node:test';
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+test('is still running when the run is ended', async () => {
+  const deploy = join(tmpdir(), 'deploy.sh');
+  writeFileSync(deploy, 'echo "$$"; while :; do sleep 0.05; done\\n');
+  writeFileSync(join(tmpdir(), 'land.sh'), 'bash "$1"; :\\n');
+  const land = spawn('bash', [join(tmpdir(), 'land.sh'), deploy], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const inner = await new Promise((r) => land.stdout.once('data', (d) => r(Number(d))));
+  writeFileSync(process.env.LEAKFIX_OUT, JSON.stringify({ pids: [land.pid, inner], dir: tmpdir() }));
+  await new Promise((r) => setTimeout(r, 50_000)); // timing-ok: hangs until the run is killed
+});
+`,
+      );
+      // The nested run's scratch goes under `dir`: a killed runner never removes its own.
+      const env: NodeJS.ProcessEnv = { ...process.env, LEAKFIX_OUT: out, TMPDIR: dir };
+      delete env.NODE_TEST_CONTEXT;
+      delete env.COORDINATOR_SHARED_DIR;
+      const run = spawn(process.execPath, ['--test', `--test-global-setup=${GUARD}`, 'hung.test.mjs'], { cwd: dir, env, detached: true, stdio: 'ignore' });
+      const started = await until('the stand-ins to start', () => existsSync(out) && (JSON.parse(readFileSync(out, 'utf8') || 'null') as { pids: number[]; dir: string } | null));
+      pids = started.pids;
+      process.kill(group ? -run.pid! : run.pid!, signal);
+      await until('land.sh and deploy.sh to be gone', () => !pids.some(alive));
+      await until("the file's temp folder to be removed", () => !existsSync(started.dir));
+      assert.ok(alive(other.pid!), "another run's script is left alone (#1223)");
+    } finally {
+      for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
+      process.kill(-other.pid!, 'SIGKILL');
+      rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+    }
+  });

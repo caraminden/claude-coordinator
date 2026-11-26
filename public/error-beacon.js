@@ -5,11 +5,17 @@
   const seen = new Set();
   // A restart's dropped connections aren't the code's fault, and would be blamed on every deploy that restarts.
   const NETWORK = /Failed to fetch|NetworkError|Load failed|network error|AbortError|aborted/i;
+  /**
+   * @param {string} kind
+   * @param {unknown} message
+   * @param {unknown} source
+   * @param {unknown} line
+   */
   const send = (kind, message, source, line) => {
     try {
       message = String(message ?? '').slice(0, 300);
       const key = `${kind}|${message}|${source}|${line}`;
-      if (!message || message === 'Script error.' || NETWORK.test(message) || seen.size >= 10 || seen.has(key)) return;
+      if (!message || message === 'Script error.' || NETWORK.test(/** @type {string} */ (message)) || seen.size >= 10 || seen.has(key)) return;
       seen.add(key);
       const body = JSON.stringify({ kind, message, source: String(source ?? '').slice(0, 300), line: Number(line) || 0 });
       fetch('api/client-errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});

@@ -5,8 +5,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { turnPlace } from '../src/access.ts';
-import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMountsAsync, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
-import { Containers, runArgs, specHash, unitProps, type RunCmd } from '../src/containers.ts';
+import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMountsAsync, ClaudeLink, CONTAINER_MEMORY, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TASKMASTER_MEMORY, TOOL_DIRS } from '../src/claude-link.ts';
+import { Containers, runArgs, specHash, unitProps, type CmdResult, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
@@ -404,6 +404,78 @@ test('podman run arguments: keep-id, host network, a :U volume, binds at their o
   assert.ok(args.includes('type=bind,src=/opt/claude,dst=/opt/claude,ro'));
   assert.ok(args.includes(`citadel.spec=${specHash(spec)}`));
   assert.deepEqual(args.slice(-3), ['localhost/citadel-claude:abc', 'sleep', 'infinity']);
+});
+
+/** A `systemctl` that holds units' limits as systemd does: `show` prints them in bytes, `set-property` changes them. */
+function fakeUnits(units: Record<string, { active?: boolean; high: string; max: string; swap: string }>, over: { set?: CmdResult; show?: CmdResult } = {}) {
+  const sets: string[][] = [];
+  const bytes = (v: string) => (/^\d+G$/.test(v) ? String(parseInt(v) * 1024 ** 3) : v);
+  const run: RunCmd = async (cmd, args) => {
+    assert.equal(cmd, 'systemctl', `nothing but systemctl is run: ${cmd} ${args.join(' ')}`);
+    assert.equal(args[0], '--user');
+    if (args[1] === 'show') {
+      if (over.show) return over.show;
+      const blocks = args
+        .filter((a) => a.endsWith('.service'))
+        // systemd answers for a unit it doesn't know too: inactive, its limits infinity.
+        .map((id) => {
+          const u = units[id.replace('.service', '')];
+          return `Id=${id}\nActiveState=${u && u.active !== false ? 'active' : 'inactive'}\nMemoryHigh=${bytes(u?.high ?? 'infinity')}\nMemoryMax=${bytes(u?.max ?? 'infinity')}\nMemorySwapMax=${bytes(u?.swap ?? 'infinity')}`;
+        });
+      return { code: 0, stdout: blocks.join('\n\n') + '\n', stderr: '' };
+    }
+    sets.push(args.slice(1));
+    return over.set ?? { code: 0, stdout: '', stderr: '' };
+  };
+  return { run, sets };
+}
+const limits = { high: '12G', max: '14G', swap: '4G' };
+
+test('raiseLimits raises a running container to the limits asked for, all three at once, and touches nothing else (#2004)', async () => {
+  const f = fakeUnits({ 'c-2': { high: '10G', max: '12G', swap: '4G' }, 'c-4': { high: '12G', max: '14G', swap: '4G' }, 'c-5': { active: false, high: '10G', max: '12G', swap: '4G' } });
+  const done = await new Containers(f.run).raiseLimits(['c-2', 'c-4', 'c-5', 'c-gone'].map((name) => ({ name, memory: limits })));
+  assert.deepEqual(f.sets, [['set-property', '--runtime', 'c-2.service', 'MemoryHigh=12G', 'MemoryMax=14G', 'MemorySwapMax=4G']], 'c-4 is right already, c-5 and c-gone do not run');
+  assert.deepEqual(
+    done.map((d) => [d.name, d.did]),
+    [['c-2', 'raised']],
+  );
+});
+
+test('raiseLimits never lowers a running container, not even one limit of three (#2004)', async () => {
+  const f = fakeUnits({
+    'lower-high': { high: '13G', max: '14G', swap: '4G' },
+    'lower-swap': { high: '10G', max: '12G', swap: '6G' },
+    'no-limit': { high: 'infinity', max: 'infinity', swap: 'infinity' },
+    unreadable: { high: '[not set]', max: '12G', swap: '4G' },
+    'no-swap-cap': { high: '10G', max: '12G', swap: 'infinity' },
+  });
+  const done = await new Containers(f.run).raiseLimits(['lower-high', 'lower-swap', 'no-limit', 'unreadable', 'no-swap-cap'].map((name) => ({ name, memory: limits })));
+  assert.deepEqual(f.sets, []);
+  assert.deepEqual(new Set(done.map((d) => d.did)), new Set(['waits']));
+  assert.equal(done.length, 5);
+});
+
+test('ClaudeLink.raiseLimits asks for each person and Taskmaster container, and a failed set or read is logged, never thrown (#2004)', async (t) => {
+  const errs: string[] = [];
+  t.mock.method(console, 'error', (l: string) => void errs.push(l));
+  t.mock.method(console, 'log', () => {});
+  const link = (run: RunCmd) => new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(run), 'citadel-claude-lim-');
+  const mine = `citadel-claude-lim-${josh.id}`;
+  const old = { [mine]: { high: '10G', max: '12G', swap: '4G' }, [`${mine}-tm`]: { high: '2G', max: '3G', swap: '2G' } };
+  const ok = fakeUnits(old);
+  await link(ok.run).raiseLimits();
+  assert.deepEqual(ok.sets, [
+    ['set-property', '--runtime', `${mine}.service`, `MemoryHigh=${CONTAINER_MEMORY.high}`, `MemoryMax=${CONTAINER_MEMORY.max}`, `MemorySwapMax=${CONTAINER_MEMORY.swap}`],
+    ['set-property', '--runtime', `${mine}-tm.service`, `MemoryHigh=${TASKMASTER_MEMORY.high}`, `MemoryMax=${TASKMASTER_MEMORY.max}`, `MemorySwapMax=${TASKMASTER_MEMORY.swap}`],
+  ]);
+  assert.deepEqual(errs, []);
+  const refused = fakeUnits(old, { set: { code: 1, stdout: '', stderr: 'Failed to set unit properties: Access denied' } });
+  await link(refused.run).raiseLimits();
+  assert.equal(refused.sets.length, 2, "one container's failure doesn't stop the next");
+  assert.equal(errs.length, 2);
+  assert.match(errs[0], /Access denied/);
+  await link(fakeUnits(old, { show: { code: 1, stdout: '', stderr: 'Failed to connect to bus' } }).run).raiseLimits();
+  assert.match(errs[2], /Failed to connect to bus/);
 });
 
 test("ClaudeLink: never mounts a login, a key or the database; turns go where the person's link says", async () => {

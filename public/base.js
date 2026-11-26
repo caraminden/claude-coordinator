@@ -4,10 +4,12 @@
 import { setAvatars } from './avatars.js';
 import { iconSrc } from './schemes.js';
 
+/** @type {Record<string, string>} */
 const STATUS_LABEL = { running: 'Running', idle: 'Idle', new: 'Starting', error: 'Error', closed: 'Dismissed' };
 // Thread naming and the threads list follow Delve's Custom view: threads are grouped by their `type`
 // property, and each is one compact row of number + short ask, a state, and a terse note.
 // In the list's order; `other` has no header word, as a minion of no particular kind.
+/** @type {Record<string, { label?: string, section: string }>} */
 export const TYPES = {
   feature: { label: 'Feature', section: 'Features' },
   bug: { label: 'Bug', section: 'Bugs' },
@@ -18,7 +20,7 @@ export const TYPES = {
   other: { section: 'Other' },
   ideation: { label: 'Idea', section: 'Ideas' },
 };
-/** A scheme's promoted list groups, "key: value" each (#253). */
+/** A scheme's promoted list groups, "key: value" each (#253). @param {{ list_groups?: string | null } | null | undefined} p @returns {string[]} */
 export function listGroupsOf(p) {
   try {
     return JSON.parse(p?.list_groups || '[]');
@@ -37,16 +39,27 @@ export const STATES = {
   limited: { label: 'Hit the usage limit; waiting for it to reset' },
 };
 
-export let me = null;
-/** The signed-in person as api/me gives it: { name, login, admin, turns }. */
-export let account = null;
-export let view = null; // { kind, id, ... } for the current screen
+/** @import { Account, Ticket, View } from './types.js' */
 
-// Other modules read `view` live but can't assign it, so they replace it through this.
+/** A thread as the pages name it: a minion or a Taskmaster, or the parts of one that a file or a row carries. @typedef {{ kind: string, id: number, project_id: number | null, number?: number | null, title?: string, properties?: Ticket['properties'] }} ThreadRef */
+
+/** The signed-in person's name, or null. @type {string | null} */
+export let me = null;
+/** The signed-in person as api/me gives it. @type {Account | null} */
+export let account = null;
+/** What is on screen (types.d.ts View), or null between screens. @type {View | null} */
+export let view = null;
+
+/** Other modules read `view` live but can't assign it, so they replace it through this. @param {View | null} next */
 export function setView(next) {
   view = next;
 }
-/** Signing in or out: `who` as api/me gives it, or null. */
+/** `view` for code that only runs while a page is open: throws, as reading a field of null did, when none is. */
+export function openView() {
+  if (!view) throw new TypeError('no view is open');
+  return view;
+}
+/** Signing in or out: `who` as api/me gives it, or null. @param {Account | null} who */
 export function setAccount(who) {
   account = who;
   me = who?.name ?? null;
@@ -55,6 +68,7 @@ export function setAccount(who) {
 }
 // The shell's login page (core.js renderLogin), shown when the server says you're signed out.
 let showLogin = () => {};
+/** @param {() => void} fn */
 export function setShowLogin(fn) {
   showLogin = fn;
 }
@@ -74,7 +88,7 @@ const inflight = new Map();
 /** The stream brought news: GETs from here on go to the server afresh (core.js connectStream). */
 export const newsArrived = () => inflight.clear();
 
-/** Run `fn` now, or once the tab is next shown while it's hidden: a hidden tab's polls ask for nothing (#1528). */
+/** Run `fn` now, or once the tab is next shown while it's hidden: a hidden tab's polls ask for nothing (#1528). @param {() => unknown} fn */
 export function whenShown(fn) {
   const doc = globalThis.document;
   if (!doc?.hidden) return void fn();
@@ -87,17 +101,21 @@ export function whenShown(fn) {
 /**
  * Run `build`, which replaces nodes inside `root`, then give the keyboard focus and each inner scroll back to the node in the
  * same place of the new tree (#1922 WP14): a timed redraw otherwise drops them to the body.
+ * @param {Element} root @param {() => void} build
  */
 export function keepView(root, build) {
+  /** @param {Element | null} n @returns {number[] | null} */
   const place = (n) => {
+    /** @type {number[]} */
     const path = [];
-    for (; n && n !== root; n = n.parentNode) path.unshift([...n.parentNode.children].indexOf(n));
+    for (; n && n !== root; n = /** @type {Element | null} */ (n.parentNode)) path.unshift([.../** @type {Element} */ (n.parentNode).children].indexOf(n)); // a node under root always has a parent
     return n === root ? path : null;
   };
-  const at = (path) => path.reduce((n, i) => n?.children[i], root);
-  const a = document.activeElement;
+  /** @param {number[]} path @returns {HTMLElement | null | undefined} */
+  const at = (path) => /** @type {HTMLElement | null | undefined} */ (path.reduce((/** @type {Element | null | undefined} */ n, i) => n?.children[i], root)); // the nodes this walks are the page's own elements
+  const a = /** @type {HTMLElement | null} */ (document.activeElement);
   const focus = a && a !== root && root.contains(a) ? { path: place(a), tag: a.tagName } : null;
-  const scrolls = [...root.querySelectorAll('*')].filter((n) => n.scrollTop || n.scrollLeft).map((n) => [place(n), n.scrollTop, n.scrollLeft, n.tagName]);
+  const scrolls = [.../** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll('*'))].filter((n) => n.scrollTop || n.scrollLeft).map((n) => /** @type {[number[] | null, number, number, string]} */ ([place(n), n.scrollTop, n.scrollLeft, n.tagName]));
   build();
   for (const [path, top, left, tag] of scrolls) {
     const n = path && at(path);
@@ -115,8 +133,10 @@ export function keepView(root, build) {
  * is shown (whenShown), never twice at once. A read that returns `false` stops the loop (its element or chips are gone);
  * a throw is the read's own business (catch inside it). `now()` starts a read at once unless one is running or due, so
  * whoever joins while a read runs takes its answer: no second read (#1610).
+ * @param {() => unknown} read @param {number} every
  */
 export function poller(read, every) {
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let timer = null,
     busy = false;
   const tick = async () => {
@@ -141,15 +161,18 @@ export function poller(read, every) {
  * Whether a tab coming back may have missed stream news, so must resync (#1528): it was hidden a minute or more, the
  * browser froze it meanwhile, or the stream said nothing while it was hidden (`heardAt`, its last message: a dead
  * stream can still read OPEN).
+ * @param {number} hiddenAt @param {number} heardAt @param {number} now @param {boolean} frozen
  */
 export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hiddenAt >= 60_000 || heardAt < hiddenAt;
 
 /** A read not answered in this long fails, so the page shows its retry instead of loading forever (#2003). */
 const GET_MS = 60_000;
 // Each request is timed for the slow-load recorder (public/slow-moments.js, #1752), its answer read whole first.
+/** @typedef {{ method?: string, body?: unknown }} ApiOpts */
+/** @param {string} path @param {ApiOpts} opts */
 const send = async (path, opts) => {
   const start = performance.now(),
-    timed = (res) => globalThis.citadelSlow?.request(opts.method, path, start, res);
+    timed = (/** @type {Response | null} */ res) => /** @type {{ citadelSlow?: { request(method: string | undefined, path: string, start: number, res: Response | null): void } }} */ (globalThis).citadelSlow?.request(opts.method, path, start, res);
   const signal = opts.method && opts.method !== 'GET' ? undefined : AbortSignal.timeout(GET_MS);
   try {
     for (;;) {
@@ -175,6 +198,7 @@ const send = async (path, opts) => {
   }
 };
 
+/** @param {string} path @param {ApiOpts} [opts] */
 export async function api(path, opts = {}) {
   const get = !opts.method || opts.method === 'GET';
   if (replay && get) {
@@ -228,11 +252,14 @@ export const KEPT_EVENTS = 80;
 const answers = new Map();
 const ANSWERS_MAX = 200;
 /** Only these can be part of a chat's opening: a search or a filtered list never is. */
+/** @param {string} path */
 const replayable = (path) => !/\?/.test(path) || /\?tickets=(open|closed)$/.test(path);
+/** @type {{ answers: Record<string, string> } | null} */
 let replay = null;
 
-/** The answers a cold open of chat `ticketId` in scheme `projectId` asks for, from this session's. */
+/** The answers a cold open of chat `ticketId` in scheme `projectId` asks for, from this session's. @param {number} projectId @param {number} ticketId */
 export function keptAnswers(projectId, ticketId) {
+  /** @type {Record<string, string>} */
   const out = {};
   for (const [path, text] of answers) {
     if (!replayable(path)) continue;
@@ -244,7 +271,7 @@ export function keptAnswers(projectId, ticketId) {
   return out;
 }
 
-/** Keep the chat at `hash` with its history (`history`: { path: text }); one too big to keep forgets the last instead. */
+/** Keep the chat at `hash` with its history (`history`: { path: text }); one too big to keep forgets the last instead. @param {string} hash @param {number} projectId @param {number} ticketId @param {Record<string, string>} history */
 export function keepChat(hash, projectId, ticketId, history) {
   if (!account) return;
   const kept = JSON.stringify({ login: account.login, hash, at: Date.now(), me: account, answers: { ...keptAnswers(projectId, ticketId), ...history } });
@@ -256,10 +283,10 @@ export function keepChat(hash, projectId, ticketId, history) {
   }
 }
 
-/** The kept chat, if this launch (`hash`) opens it: its own address, or the app's start with none. */
+/** The kept chat, if this launch (`hash`) opens it: its own address, or the app's start with none. @param {string} hash */
 export function keptChat(hash) {
   try {
-    const kept = JSON.parse(localStorage.getItem(KEPT));
+    const kept = JSON.parse(/** @type {string} */ (localStorage.getItem(KEPT))); // JSON.parse(null) is null, as before
     // The app's start opens Home for someone in two or more schemes (#1140), so a kept chat only reopens at its own address then.
     if (kept?.me && kept.answers && (hash === kept.hash || ((hash === '' || hash === '#/') && !homeFirst()))) return kept;
   } catch {}
@@ -299,24 +326,48 @@ export function forgetKept() {
   } catch {}
 }
 
-/** While on, GETs answer from the kept chat's answers only (null turns it off). */
+/** While on, GETs answer from the kept chat's answers only (null turns it off). @param {{ answers: Record<string, string> } | null} kept */
 export function replayKept(kept) {
   replay = kept;
 }
 
+/** A child h() appends: an element or text, nested lists of them, and null, undefined or false for none. @typedef {Node | string | number | boolean | null | undefined | readonly Child[]} Child */
+/**
+ * An element: `attrs` are attributes (true for a bare one, null or false for none), `class`, and `on<event>` listeners.
+ * @template {keyof HTMLElementTagNameMap} K
+ * @overload
+ * @param {K} tag
+ * @param {Record<string, unknown> | null} [attrs]
+ * @param {...Child[]} children
+ * @returns {HTMLElementTagNameMap[K]}
+ */
+/**
+ * @overload
+ * @param {string} tag
+ * @param {Record<string, unknown> | null} [attrs]
+ * @param {...Child[]} children
+ * @returns {HTMLElement}
+ */
+/**
+ * @param {string} tag
+ * @param {Record<string, unknown> | null} [attrs]
+ * @param {...Child} children
+ */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
+  for (const [k, v] of Object.entries(attrs ?? {})) {
     if (v == null || v === false) continue;
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'class') el.className = v;
-    else el.setAttribute(k, v === true ? '' : v);
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), /** @type {EventListener} */ (v));
+    else if (k === 'class') el.className = String(v);
+    else el.setAttribute(k, v === true ? '' : String(v));
   }
-  for (const c of children.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
+  for (const c of /** @type {unknown[]} */ (children).flat(Infinity)) // Child's own nesting makes flat's type recurse without end, so it is flattened as unknown
+    if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;
 }
 
 /** Puts `el`'s looping animation (`ms` per turn) at the page's shared clock, so a redrawn element rejoins its phase instead of restarting (#1532). Set through the CSSOM: the page's CSP blocks a style attribute. */
+/** @template {HTMLElement | SVGElement} E @param {E} el @param {number} ms @returns {E} */
 export const phase = (el, ms) => {
   el.style.animationDelay = `-${Date.now() % ms}ms`;
   return el;
@@ -329,7 +380,9 @@ export const phase = (el, ms) => {
  * A redraw calls this first and returns when it says true; the held ones run once the click has gone through.
  */
 let pressedAt = 0;
+/** @type {Set<() => void>} */
 const held = new Set();
+/** @param {() => void} redraw */
 export function heldWhilePressed(redraw) {
   if (!pressedAt || performance.now() - pressedAt > 5000) return false; // a press whose release never came holds nothing
   held.add(redraw);
@@ -360,13 +413,16 @@ globalThis.addEventListener?.('blur', release); // the window's own, not capture
  * landed in Find in chat unasked). Chromium's address autofill and the managers ignore autocomplete=off, so the
  * token is one nothing recognises (a password field gets new-password, which stops a saved login being filled), the name is neutral, and each manager's own opt-out is set.
  */
+/** @param {string} name @param {string} [token] */
 export const noAutofill = (name, token = 'nope') => ({ autocomplete: token, name, 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': 'true', 'data-form-type': 'other' });
 
 /**
  * A scheme's favicon (#222), only ever as an <img> (an SVG there can't run scripts); hidden when it has
  * none, so refreshSchemeCounts can swap it in once a merge brings one.
+ * @param {(Parameters<typeof iconSrc>[0] & { id: number }) | null} scheme Never null at runtime: its callers check first (releases.js iconOf looks the scheme up twice, so tsc can't see it).
  */
-export function schemeIcon(p) {
+export function schemeIcon(scheme) {
+  const p = /** @type {Parameters<typeof iconSrc>[0] & { id: number }} */ (scheme);
   const src = iconSrc(p);
   const img = h('img', {
     class: 'scheme-icon',
@@ -411,14 +467,14 @@ const ICONS = {
   vault: 'M2 2.5h12v11h-12zM5.6 8a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0M8 5.6V4.4M10.4 8h1.2',
   check: 'm3 8.5 3.2 3L13 4.5',
 };
-/** A line icon in the text colour. Drawn on its own centre, so it sits dead centre in its button, as a font's glyph doesn't. */
+/** A line icon in the text colour. Drawn on its own centre, so it sits dead centre in its button, as a font's glyph doesn't. @param {string | undefined} name */
 export function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('class', 'icon');
   svg.setAttribute('aria-hidden', 'true');
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', ICONS[name]);
+  path.setAttribute('d', /** @type {Record<string, string>} */ (ICONS)[/** @type {string} */ (name)]);
   svg.append(path);
   return svg;
 }
@@ -429,36 +485,41 @@ export function icon(name) {
  * A canvas pixel turns any CSS colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
  * `over`, a modal's backdrop (#772), is laid over the colour, so the controls dim with the page under it.
  */
+/** @type {CanvasRenderingContext2D | null} */
 let pixel = null;
+/** @param {string | null | undefined} color @param {string} [over] */
 export function tintTitleBar(color, over) {
-  for (const m of document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')) {
+  for (const m of /** @type {NodeListOf<HTMLMetaElement>} */ (document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]'))) {
     m.dataset.base ??= m.content;
     if (!color || !matchMedia(m.media).matches) {
       m.content = m.dataset.base;
       continue;
     }
-    pixel ??= h('canvas', { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
+    pixel ??= /** @type {CanvasRenderingContext2D} */ (h('canvas', { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true })); // a canvas always has a 2d context
+    /** @param {string} c */
     const fill = (c) => {
-      pixel.fillStyle = 'transparent';
-      pixel.fillStyle = c;
-      pixel.fillRect(0, 0, 1, 1);
+      const px = /** @type {CanvasRenderingContext2D} */ (pixel); // set above before this runs
+      px.fillStyle = 'transparent';
+      px.fillStyle = c;
+      px.fillRect(0, 0, 1, 1);
     };
     pixel.clearRect(0, 0, 1, 1);
     fill(color);
-    if (pixel.getImageData(0, 0, 1, 1).data[3] < 255) fill(m.dataset.base);
+    if (pixel.getImageData(0, 0, 1, 1).data[3] < 255) fill(/** @type {string} */ (m.dataset.base));
     if (over) fill(over);
     const [r, g, b] = pixel.getImageData(0, 0, 1, 1).data;
     m.content = `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
   }
 }
 
-/** A cost at API prices, marked as an estimate: "≈ $0.42", "≈ $12". Not a bill on a subscription. */
+/** A cost at API prices, marked as an estimate: "≈ $0.42", "≈ $12". Not a bill on a subscription. @param {number} usd */
 export function costText(usd) {
   return `≈ $${usd >= 10 ? Math.round(usd) : usd.toFixed(2)}`;
 }
 
+/** @param {number | null | undefined} ms */
 export function ago(ms) {
-  const s = Math.round((Date.now() - ms) / 1000);
+  const s = Math.round((Date.now() - /** @type {number} */ (ms)) / 1000);
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
@@ -468,10 +529,13 @@ export function ago(ms) {
 /**
  * When a minion was dismissed (#1072), in Pacific: "2:14 PM PST" today, "Nov 17" before today; `full` is the date and time for a tooltip.
  * Null when the time isn't known (dismissed before it was kept, and no close note to read it from).
+ * @param {number | null | undefined} ms
  */
 export function dismissedWhen(ms) {
   if (!ms) return null;
+  /** @param {number} t */
   const day = (t) => DAY.format(t);
+  /** @param {number} t */
   const year = (t) => day(t).slice(0, 4);
   return {
     short: day(ms) === day(Date.now()) ? TIME.format(ms) : (year(ms) !== year(Date.now()) ? DATE_YEAR : DATE).format(ms),
@@ -490,16 +554,22 @@ const FULL = new Intl.DateTimeFormat('en-US', { ...PT, weekday: 'short', month: 
 
 // The one home of Pacific formats on the front end (test/one-pacific.test.ts keeps it that way). Each variant keeps the look its page had.
 /** `ms` as its Pacific day, "2026-11-16". */
+/** @param {number} ms */
 export const pacificIso = (ms) => DAY.format(ms);
 /** `ms` as "Nov 16" (a "YYYY-MM-DD" string is read as noon UTC, so it keeps its own day). */
-export const pacificDate = (ms) => (typeof ms === 'string' ? new Date(`${ms}T12:00:00Z`) : new Date(ms)).toLocaleDateString('en-US', { ...PT, month: 'short', day: 'numeric' });
+/** @param {number | string | null} ms */
+export const pacificDate = (ms) => (typeof ms === 'string' ? new Date(`${ms}T12:00:00Z`) : new Date(/** @type {number} */ (ms))).toLocaleDateString('en-US', { ...PT, month: 'short', day: 'numeric' });
 /** `ms` as "Nov 16, 11:00 PM PST". */
+/** @param {number | string} ms */
 export const pacificStamp = (ms) => new Date(ms).toLocaleString('en-US', { ...PT, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 /** `ms` as "11:00 PM PST". */
+/** @param {number} ms */
 export const pacificClock = (ms) => new Date(ms).toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 /** `ms` as "11:00 PM", the zone left off for a list whose header names it. */
+/** @param {number} ms */
 export const pacificClockBare = (ms) => new Date(ms).toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit' });
 /** `ms` as "Mon, 11:30 PM PST". */
+/** @param {number} ms */
 export const pacificWeekdayClock = (ms) => new Date(ms).toLocaleString('en-US', { ...PT, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 /** The zone's short name right now, "PST" or "PDT". */
 export const pacificZone = () =>
@@ -507,10 +577,10 @@ export const pacificZone = () =>
     .toLocaleTimeString('en-US', { ...PT, timeZoneName: 'short' })
     .split(' ')
     .pop();
-/** Pacific minutes since midnight at `ms`. */
+/** Pacific minutes since midnight at `ms`. @param {number} ms */
 export function pacificMinutes(ms) {
   const p = new Intl.DateTimeFormat('en-US', { ...PT, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
-  return Number(p.find((x) => x.type === 'hour').value) * 60 + Number(p.find((x) => x.type === 'minute').value);
+  return Number(/** @type {Intl.DateTimeFormatPart} */ (p.find((x) => x.type === 'hour')).value) * 60 + Number(/** @type {Intl.DateTimeFormatPart} */ (p.find((x) => x.type === 'minute')).value);
 }
 
 // ---------- files threads show ----------
@@ -552,23 +622,34 @@ const FILE_KINDS = {
   xpi: 'download',
   crx: 'download',
 };
-export const fileKind = (path) => FILE_KINDS[(path.split(/[?#]/)[0].split('.').pop() || '').toLowerCase()] ?? null;
+/** @param {string} path */
+export const fileKind = (path) => /** @type {Record<string, string | undefined>} */ (FILE_KINDS)[(path.split(/[?#]/)[0].split('.').pop() || '').toLowerCase()] ?? null;
+/** @param {string} path */
 export const baseName = (path) => path.split('/').filter(Boolean).pop() ?? path;
-export const fileExt = (path) => (baseName(path).includes('.') ? baseName(path).split('.').pop().slice(0, 5).toUpperCase() : 'FILE');
+/** @param {string} path */
+export const fileExt = (path) => (baseName(path).includes('.') ? /** @type {string} */ (baseName(path).split('.').pop()).slice(0, 5).toUpperCase() : 'FILE');
 /** A link target that is a path on disk, not a URL, a fragment or a mail address. */
+/** @param {string} href */
 export const isLocalPath = (href) => !/^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(href);
-export const fileUrl = (ticketId, path) => `api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
+/** @param {number | string | undefined} ticketId @param {string | undefined} path (String() writes undefined as encodeURIComponent always did) */
+export const fileUrl = (ticketId, path) => `api/tickets/${ticketId}/file?path=${encodeURIComponent(String(path))}`;
+/** @param {number | string} ticketId @param {string} path */
 export const fileHref = (ticketId, path) => `#/f/${ticketId}/${encodeURIComponent(path)}`;
 /** A file people attached to a message, by its name in the thread's uploads folder. */
+/** @param {number | string} ticketId @param {string} name */
 export const uploadUrl = (ticketId, name) => `api/tickets/${ticketId}/uploads/${encodeURIComponent(name)}`;
+/** @param {number} n */
 export function formatSize(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+/** @param {number | string} projectId @param {string} path */
 export const sharedUrl = (projectId, path) => `api/projects/${projectId}/shared/file?path=${encodeURIComponent(path)}`;
+/** @param {number | string} projectId @param {string} path */
 export const sharedHref = (projectId, path) => `#/s/${projectId}/${encodeURIComponent(path)}`;
 /** A linked path short enough for a card: a thread's shared folder by name, other absolute paths by their tail. */
+/** @param {string} path */
 export function shortPath(path) {
   const projectShared = /\/shared\/project\/(.+)$/.exec(path);
   if (projectShared) return `scheme shared/${projectShared[1]}`;
@@ -577,7 +658,7 @@ export function shortPath(path) {
   return path.startsWith('/') ? `…/${path.split('/').slice(-2).join('/')}` : path;
 }
 
-/** Resolve `rel` against the folder `dir` (both "/"-separated), as a document's relative links are. */
+/** Resolve `rel` against the folder `dir` (both "/"-separated), as a document's relative links are. @param {string} dir @param {string} rel */
 export function joinPath(dir, rel) {
   if (rel.startsWith('/')) return rel;
   const parts = dir ? dir.split('/') : [];
@@ -590,13 +671,15 @@ export function joinPath(dir, rel) {
 }
 
 /** Which side panels (artifacts shelf, threads list) are open on wide screens. */
+/** @returns {Record<string, boolean | undefined>} */
 export function loadPanelState() {
   try {
-    return JSON.parse(localStorage.getItem('cc-panels')) ?? {};
+    return JSON.parse(/** @type {string} */ (localStorage.getItem('cc-panels'))) ?? {};
   } catch {
     return {};
   }
 }
+/** @param {Record<string, boolean | undefined>} state */
 export function savePanelState(state) {
   try {
     localStorage.setItem('cc-panels', JSON.stringify(state));
@@ -604,10 +687,16 @@ export function savePanelState(state) {
 }
 
 /** A thread you have opened since it last changed. */
-export const isSeen = (t) => (view.seen?.[t.id] ?? 0) >= t.updated_at;
+/** @param {Pick<Ticket, 'id' | 'updated_at'>} t */
+export const isSeen = (t) => {
+  const { seen } = /** @type {View} */ (view); // only asked with a scheme open, as before
+  return (seen?.[t.id] ?? 0) >= t.updated_at;
+};
 
-export const isCoordinator = (t) => t.kind === 'coordinator';
+/** @param {{ kind: string } | null | undefined} t a chat, never null here at runtime: a null throws, as it always did */
+export const isCoordinator = (t) => /** @type {{ kind: string }} */ (t).kind === 'coordinator';
 
+/** @param {Pick<Ticket, 'kind' | 'status'>} t */
 export function statusLabel(t) {
   if (isCoordinator(t) && t.status === 'new') return 'Ready';
   return STATUS_LABEL[t.status];
@@ -617,41 +706,51 @@ export function statusLabel(t) {
  * Threads are numbered per project and live at #/p/<project>/t/<number>. A server from before
  * per-project numbers sends no number, so fall back to the global id there.
  */
+/** @param {ThreadRef} t */
 export const threadHref = (t) => (isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`);
 
 /** A link that opens `t`'s chat scrolled to one thing in it (threadrefs.js jumpParts). */
-export const jumpHref = (t, target) => `${threadHref(t)}?e=${target}`;
+/** @param {ThreadRef | null} t never null at runtime (only asked with a chat open) @param {string | number} target */
+export const jumpHref = (t, target) => `${threadHref(/** @type {ThreadRef} */ (t))}?e=${target}`;
 
 /** A scheme's Taskmaster goes by the scheme's name: "Delve Taskmaster". */
+/** @param {number | null | undefined} [projectId] */
 export function taskmasterName(projectId = view?.projectId) {
-  const p = view?.projects?.find((x) => x.id === projectId) ?? (view?.project?.id === projectId ? view.project : null);
+  const p = view?.projects?.find((x) => x.id === projectId) ?? (view?.project?.id === projectId ? /** @type {View} */ (view).project : null);
   return p?.name ? `${p.name} Taskmaster` : 'Taskmaster';
 }
 /** taskmasterName in a span that follows renames of the scheme. */
+/** @param {number | null | undefined} [projectId] */
 export const taskmasterLabel = (projectId = view?.projectId) => h('span', { 'data-taskmaster-name': projectId }, taskmasterName(projectId));
+/** @param {ThreadRef} t */
 export const threadLabel = (t) => (isCoordinator(t) ? taskmasterName(t.project_id) : `#${t.number ?? t.id} ${t.title}`);
 /** The full name: "12 FEATURE: Usage bar". No type or state emoji (Josh, 2026-11-13: "leftover from a bygone era"). */
+/** @param {ThreadRef} t */
 export function threadFullName(t) {
   if (isCoordinator(t)) return taskmasterName(t.project_id);
-  const type = TYPES[t.properties?.type];
+  const type = TYPES[/** @type {string} */ (t.properties?.type)];
   return `${t.number ?? t.id} ${type?.label ? `${type.label.toUpperCase()}: ${t.title}` : t.title}`;
 }
 
 /** threadFullName in parts; phones hide the type word for room (the properties chip has it). */
+/** @param {ThreadRef} t */
 export function threadTitleParts(t) {
   if (isCoordinator(t)) return taskmasterLabel(t.project_id);
-  const type = TYPES[t.properties?.type];
+  const type = TYPES[/** @type {string} */ (t.properties?.type)];
   return [`${t.number ?? t.id} `, type?.label ? h('span', { class: 'wide-only' }, `${type.label.toUpperCase()}: `) : '', t.title];
 }
 
 /** Wrap matches of the text inside el in <mark>, returning the marks in document order. */
+/** @param {Element} el @param {string | null | undefined} text */
 export function highlight(el, text) {
+  /** @type {HTMLElement[]} */
   const marks = [];
   if (!text) return marks;
   const needle = text.toLowerCase();
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  /** @type {Text[]} */
   const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
+  while (walker.nextNode()) nodes.push(/** @type {Text} */ (walker.currentNode)); // SHOW_TEXT yields only text nodes
   for (let node of nodes) {
     let i;
     while ((i = node.data.toLowerCase().indexOf(needle)) >= 0) {
@@ -666,6 +765,7 @@ export function highlight(el, text) {
   return marks;
 }
 
+/** @param {Element} el */
 export function clearHighlights(el) {
   for (const mark of el.querySelectorAll('mark.find')) mark.replaceWith(...mark.childNodes);
   el.normalize();

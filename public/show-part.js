@@ -4,11 +4,14 @@ import { toast } from './ui/status.js';
 
 const OUTLINE_MS = 3000;
 const WAIT_MS = 8000; // a settings page loads its rows behind the route
+/** @type {object | null} */
 let pending = null;
 
 /**
  * Wait for `name` to appear on the page the route opens, then show it. `ready()` says the route has finished (core.js's
  * routeSeq moved on and nothing is navigating), so a twin on the page being left isn't the one outlined.
+ * @param {string} name
+ * @param {() => boolean} ready
  */
 export function showPart(name, ready) {
   const mine = (pending = {});
@@ -21,13 +24,16 @@ export function showPart(name, ready) {
   let opened = false;
   const tick = () => {
     if (pending !== mine) return; // another show link took over
-    const el = ready() && document.querySelector(`[data-part="${name}"]`);
+    const el = ready() && /** @type {HTMLElement | null} */ (document.querySelector(`[data-part="${name}"]`));
     if (el) {
       // A row that opens (settingsRow) opens, and so does any closed section around the part.
-      for (let d = el.closest('details:not([open])'); d; d = d.parentElement?.closest('details:not([open])')) d.open = true;
+      for (let /** @type {HTMLDetailsElement | null | undefined} */ d = /** @type {HTMLDetailsElement | null} */ (el.closest('details:not([open])')); d; d = /** @type {HTMLDetailsElement | null | undefined} */ (d.parentElement?.closest('details:not([open])'))) d.open = true;
       // Behind a phone's drawer or ⋯ menu: open that once, then look again.
       const btn = !opened && !el.getClientRects().length && opener(el);
-      if (btn) opened = !void btn.click();
+      if (btn) {
+        btn.click();
+        opened = true;
+      }
       const target = !btn && onScreen(el);
       if (target) {
         pending = null;
@@ -41,23 +47,32 @@ export function showPart(name, ready) {
   setTimeout(tick, 0);
 }
 
-/** The button that shows a hidden part on a phone: its panel's drawer handle, or the menu named by data-part-opener. */
+/**
+ * The button that shows a hidden part on a phone: its panel's drawer handle, or the menu named by data-part-opener.
+ * @param {HTMLElement} el
+ * @returns {HTMLElement | null}
+ */
 function opener(el) {
   const side = el.closest('.panels > .shelf') ? 'left' : el.closest('.panels > .sidebar') ? 'right' : null;
-  const via = el.closest('[data-part-opener]')?.dataset.partOpener;
-  const btn = side ? document.querySelector(`.citadel-drawer-handle.${side}`) : via ? document.querySelector(`[data-part="${via}"]`) : null;
+  const via = /** @type {HTMLElement | null} */ (el.closest('[data-part-opener]'))?.dataset.partOpener;
+  const btn = /** @type {HTMLElement | null} */ (side ? document.querySelector(`.citadel-drawer-handle.${side}`) : via ? document.querySelector(`[data-part="${via}"]`) : null);
   return btn?.getClientRects().length ? btn : null;
 }
 
-/** The part, or while it's hidden the small thing on screen that holds it (a phone's ⚙ for its model picker); null if only the page does. */
+/** The part, or while it's hidden the small thing on screen that holds it (a phone's ⚙ for its model picker); null if only the page does.
+ * @param {HTMLElement} el
+ * @returns {HTMLElement | null}
+ */
 function onScreen(el) {
   if (el.getClientRects().length) return el;
+  /** @type {HTMLElement | null} */
   let target = el;
   while (target && !target.getClientRects().length) target = target.parentElement;
   const r = target?.getBoundingClientRect();
   return r && r.width * r.height < (innerWidth * innerHeight) / 4 ? target : null;
 }
 
+/** @param {HTMLElement} target */
 function outline(target) {
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
   target.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' });
@@ -68,7 +83,9 @@ function outline(target) {
   setTimeout(() => target.classList.remove('part-show', 'part-show-in'), OUTLINE_MS);
 }
 
-/** Whether a box around `el` that hides its overflow would cut off an outline drawn outside it (10 px: offset and pulse). */
+/** Whether a box around `el` that hides its overflow would cut off an outline drawn outside it (10 px: offset and pulse).
+ * @param {HTMLElement} el
+ */
 function clipped(el) {
   const r = el.getBoundingClientRect();
   for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {

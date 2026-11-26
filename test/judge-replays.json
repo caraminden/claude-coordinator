@@ -18,22 +18,22 @@
     "summary": "0 as before, 0 new, 0 gone"
   },
   "ci-hold": {
-    "hash": "9103aa8a389213ff",
+    "hash": "cf113827ba5503cc",
     "at": "2026-11-26",
     "days": 3,
-    "inputs": "564 CI runs of caraminden/claude-coordinator (gh, read-only); 185 runs held, waits median 83 min, longest 1409 min",
-    "hits": 234,
+    "inputs": "577 CI runs of caraminden/claude-coordinator (gh, read-only); 181 runs held, waits median 57 min, longest 510 min",
+    "hits": 219,
     "real": 0,
-    "summary": "0 as before, 234 new, 0 gone"
+    "summary": "0 as before, 219 new, 0 gone"
   },
   "ci-red": {
-    "hash": "0567173957833657",
-    "at": "2026-11-25",
+    "hash": "6f2496ff21f7baf6",
+    "at": "2026-11-26",
     "days": 3,
-    "inputs": "1 schemes' runs on main (gh, read-only) and their minions' chats",
-    "hits": 1,
-    "real": 2,
-    "summary": "1 as before, 0 new, 1 gone"
+    "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",
+    "hits": 6,
+    "real": 9,
+    "summary": "6 as before, 0 new, 3 gone"
   },
   "compactions": {
     "hash": "e28af654e204f3a9",
@@ -63,22 +63,31 @@
     "summary": "7 as before, 0 new, 3 gone"
   },
   "effort-retros": {
-    "hash": "89116e3ad924b941",
-    "at": "2026-11-24",
+    "hash": "c15635bead1aaeee",
+    "at": "2026-11-26",
     "days": 3,
-    "inputs": "2 named or chained efforts in 15 schemes, checked hourly over 3 days",
-    "hits": 0,
-    "real": 0,
-    "summary": "0 as before, 0 new, 0 gone"
+    "inputs": "35 named or chained efforts in 15 schemes, checked hourly over 3 days",
+    "hits": 5,
+    "real": 5,
+    "summary": "5 as before, 0 new, 0 gone"
   },
   "flake-counter": {
-    "hash": "7722e626f28f0e55",
-    "at": "2026-11-25",
-    "days": 3,
-    "inputs": "288 passes over 1 schemes: their retro logs, land-recorded flakes and minions",
-    "hits": 22,
-    "real": 23,
-    "summary": "22 as before, 0 new, 0 gone"
+    "hash": "239c587ebe72b8bb",
+    "at": "2026-11-26",
+    "days": 1,
+    "inputs": "96 passes over 15 schemes: their retro logs, land-recorded flakes and minions",
+    "hits": 10,
+    "real": 12,
+    "summary": "10 as before, 0 new, 0 gone"
+  },
+  "main-rollbacks": {
+    "hash": "9cfa20214aab5bfc",
+    "at": "2026-11-26",
+    "days": 6,
+    "inputs": "6 resets of main that dropped commits in 1 schemes over 6 days",
+    "hits": 13,
+    "real": 0,
+    "summary": "0 as before, 13 new, 0 gone"
   },
   "seen-guard": {
     "hash": "cab90620e70a296f",

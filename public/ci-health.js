@@ -1,6 +1,7 @@
 // The CI page's Test health tab (#1063, Josh 2026-11-19: "Add a button to start a minion to fix up flaky tests"): fast mode's state and
 // its known reds for the scheme, and its flakiest test files of the last 14 days (src/flakes.ts counts them from the events land.sh
 // and fast mode's runs leave). Each file offers "Start a minion to fix it", which shows the brief first and starts a bug minion.
+/** @import { FastModeView, FlakeFile, FlakeFix, LandReds, LandRedCause, TestHealth, ReadFailed } from './types.js' */
 import { ago, api, h, pacificStamp } from './base.js';
 import { emptyCard, hueRow, meter, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -8,6 +9,7 @@ import { openDialog } from './ui/dialog.js';
 
 const when = pacificStamp;
 // state -> [tone, closed word, hue, why]
+/** @type {Record<string, [string, string, string, string]>} */
 const FAST = {
   running: ['info', 'Running', 'running', 'The full check is running on main now.'],
   pinning: ['info', 'Finding the culprit', 'running', 'A red covers several ships; each commit is being checked oldest first to find whose change broke it.'],
@@ -15,8 +17,18 @@ const FAST = {
   stuck: ['warn', 'Stuck', 'waiting', "The last run gave no verdict (CI never answered); it isn't retried until main moves."],
   idle: ['neutral', 'Waiting', 'held', 'Fast mode has not run its check on main yet.'],
 };
+/**
+ * @param {string} title
+ * @param {string} hue
+ * @param {Node} row
+ */
 const block = (title, hue, row) => h('section', { class: 'ci-block' }, h('h3', { class: 'settings-section', 'data-hue': hue }, title), h('div', { class: 'settings-rows' }, row));
 
+/**
+ * @param {{ id: number }} s
+ * @param {FastModeView | null} fast
+ * @param {number} now
+ */
 function fastBlock(s, fast, now) {
   if (!fast) {
     const [row] = settingsRow({ key: `health-fast-${s.id}`, icon: 'spark', hue: 'held', title: 'Fast mode', summary: [toneChip('neutral', 'Off'), 'every ship waits for the full tests'] }, h('p', { class: 'look-prose' }, 'Fast mode is off here: every ship waits for the full tests before it goes live.'));
@@ -45,13 +57,18 @@ function fastBlock(s, fast, now) {
 }
 
 /** The brief, read first, then a Start button: a person confirms before the minion exists. */
+/**
+ * @param {number} projectId
+ * @param {FlakeFile} f
+ * @param {() => void} refresh
+ */
 async function startFix(projectId, f, refresh) {
   const err = h('p', { class: 'error', hidden: true });
   let brief;
   try {
     brief = await api(`api/projects/${projectId}/flake-brief?file=${encodeURIComponent(f.file)}`);
   } catch (ex) {
-    alert(ex.message);
+    alert(/** @type {Error} */ (ex).message);
     return;
   }
   const btn = h('button', { type: 'submit' }, 'Start minion');
@@ -74,7 +91,7 @@ async function startFix(projectId, f, refresh) {
       dialog.close();
       refresh();
     } catch (ex) {
-      err.textContent = ex.message;
+      err.textContent = /** @type {Error} */ (ex).message;
       err.hidden = false;
       btn.disabled = false;
       btn.textContent = 'Start minion';
@@ -83,15 +100,22 @@ async function startFix(projectId, f, refresh) {
 }
 
 /** A file's top error messages with counts and class (#1438); sightings that kept none say so. */
+/** @param {FlakeFile} f */
 function errorLines(f) {
   const lines = (f.messages ?? []).map((m) => h('span', { class: 'ci-detail-line muted', title: m.message }, `${m.count}× ${m.cls || 'other'}: ${m.message.split('\n')[0].slice(0, 140)}`));
   if (f.none) lines.push(h('span', { class: 'ci-detail-line muted' }, `${f.none} no message kept`));
   return lines;
 }
 
+/**
+ * @param {{ id: number }} s
+ * @param {FlakeFile[]} flakes
+ * @param {() => void} refresh
+ */
 function flakeBlock(s, flakes, refresh) {
   const total = flakes.reduce((n, f) => n + f.count, 0);
   // The fix (#1120): owner and age, and the clean runs of the 50 (5 batches of 10 copies at once, #1443) the desktop needs before it counts as held.
+  /** @param {FlakeFix} fx */
   const fixLine = (fx) => {
     const owner = fx.owner ? `${fx.owner}'s ` : '';
     const age = ago(fx.startedAt);
@@ -99,6 +123,7 @@ function flakeBlock(s, flakes, refresh) {
     if (fx.state === 'held') return `fix held: ${fx.cleanRuns}/${fx.need} clean runs on the desktop, ${ago(fx.heldAt)}`;
     return `${fx.reopened ? 'reopened, ' : ''}${owner}fix started ${age}: ${fx.cleanRuns}/${fx.need} clean runs on the desktop`;
   };
+  /** @param {FlakeFile} f */
   const item = (f) =>
     hueRow(
       {
@@ -127,14 +152,23 @@ function flakeBlock(s, flakes, refresh) {
 
 // Land runs' reds by cause (#1607, src/land-reds.ts): the raw red rate, and the part a ship's own change caused.
 // cause -> [hue, word, what it means]
+/** @type {Record<string, [string, string, string]>} */
 const CAUSE = {
   change: ['danger', 'change', "pinned on a ship's change, or refused at CI"],
   flaky: ['waiting', 'flaky', 'passed alone, a burn-in race or a known flake'],
   main: ['held', "main's red", 'main was red on the same test'],
   unknown: ['muted', 'unknown', 'nothing in the retro log (a time-out)'],
 };
+/**
+ * @param {number} n
+ * @param {number} of
+ */
 const pct = (n, of) => (of ? Math.round((100 * n) / of) : 0);
 
+/**
+ * @param {{ id: number }} s
+ * @param {LandReds | null} lr
+ */
 function landRedsBlock(s, lr) {
   const key = `health-landreds-${s.id}`;
   const title = 'Land runs, last 24 hours';
@@ -149,7 +183,7 @@ function landRedsBlock(s, lr) {
   const unread = lr.causes.unknown * 2 >= lr.red && lr.red > 0;
   const tone = unread ? 'neutral' : own >= 25 ? 'danger' : own > 0 ? 'warn' : 'ok';
   const hue = { danger: 'danger', warn: 'waiting', ok: 'done', neutral: 'muted' }[tone];
-  const causes = Object.keys(CAUSE)
+  const causes = /** @type {LandRedCause[]} */ (Object.keys(CAUSE))
     .filter((c) => lr.causes[c])
     .map((c) => {
       const [h2, word, why] = CAUSE[c];
@@ -177,10 +211,19 @@ function landRedsBlock(s, lr) {
 }
 
 /** The tab's sections for scheme `s`; `data` is its /test-health read, null until it arrives. */
+/**
+ * @param {{ id: number }} s
+ * @param {TestHealth | ReadFailed | null} data
+ * @param {() => void} refresh
+ */
 export function testHealth(s, data, refresh) {
   if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. ", h('button', { type: 'button', class: 'secondary small', onclick: () => refresh() }, 'Try again'))];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
   return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh)];
 }
 
+/**
+ * @param {number} id
+ * @returns {Promise<TestHealth>}
+ */
 export const readHealth = (id) => api(`api/projects/${id}/test-health`);

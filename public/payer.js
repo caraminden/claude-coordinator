@@ -1,40 +1,49 @@
 // Whose Claude plan a minion's turns run on (#219, take A): a line over the composer only when your
 // message would switch it, or the payer's limit is hit. The head's chip went (Josh, 2026-11-13).
+/** @import { Ticket } from './types.js' */
+/** @typedef {(text: string) => unknown} SendText */
 import { account, api, h, me } from './base.js';
 import { usage } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 
 /** What re-reading the minion's context costs a new payer, at $8 per million tokens (the handoff's rate). */
-const loadCost = (t) => (t.context_tokens ? `~$${((t.context_tokens * 8) / 1e6).toFixed(2)}` : null);
+const loadCost = (/** @type {Ticket} */ t) => (t.context_tokens ? `~$${((t.context_tokens * 8) / 1e6).toFixed(2)}` : null);
 /** "4:03 PM" today, "Sun 4:03 PM" on another day, with the date too six days or more out (a weekly limit). */
-const time = (ms, now = Date.now()) => {
+const time = (/** @type {number} */ ms, now = Date.now()) => {
   const at = new Date(ms);
   const clock = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   if (at.toDateString() === new Date(now).toDateString()) return clock;
-  return `${at.toLocaleDateString([], { weekday: 'short', ...(ms - now >= 6 * 86_400_000 && { month: 'short', day: 'numeric' }) })} ${clock}`;
+  return `${at.toLocaleDateString([], { weekday: 'short', ...(ms - now >= 6 * 86_400_000 && { month: /** @type {const} */ ('short'), day: /** @type {const} */ ('numeric') }) })} ${clock}`;
 };
-const mine = (t) => !!t.payer && !!account && t.payer.id === account.payer;
+const mine = (/** @type {Ticket} */ t) => !!t.payer && !!account && t.payer.id === account.payer;
 /** Your own week, as your meter shows it; only your own plan's is shown to you. */
 const myWeek = () => (usage?.weekly ? `wk ${Math.round(Math.min(1, Math.max(0, usage.weekly.utilization)) * 100)}%` : null);
 
-/** Whom the minion belongs to (`assigned`, #690) when that's someone other than you; null for yours, nobody's or the Taskmaster. */
+/**
+ * Whom the minion belongs to (`assigned`, #690) when that's someone other than you; null for yours, nobody's or the Taskmaster.
+ * @param {Pick<Ticket, 'kind' | 'properties'>} t
+ */
 export function otherOwner(t) {
   const owner = t.kind === 'ticket' ? String(t.properties?.assigned ?? '') : '';
   return owner && owner.toLowerCase() !== me?.toLowerCase() ? owner : null;
 }
 
-/** Make the minion yours: shown at once, put back if the server refuses. Its notes say so in both chats. */
+/**
+ * Make the minion yours: shown at once, put back if the server refuses. Its notes say so in both chats.
+ * @param {Ticket} t
+ * @param {(done: boolean) => void} [shown] told true once it shows as yours, false if that is put back
+ */
 export function takeOver(t, shown = () => {}) {
   const was = t.properties?.assigned ?? null;
   return optimistic({
     sets: `assign:${t.id}`,
     apply: () => {
-      t.properties = { ...t.properties, assigned: me };
+      t.properties = /** @type {Ticket['properties']} */ ({ ...t.properties, assigned: me });
       shown(true);
     },
     send: () => api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: me } } }),
     undo: () => {
-      t.properties = { ...t.properties, assigned: was };
+      t.properties = /** @type {Ticket['properties']} */ ({ ...t.properties, assigned: was });
       shown(false);
     },
     label: 'take it over',
@@ -45,7 +54,7 @@ export function takeOver(t, shown = () => {}) {
  * The visit line (#690): in a minion someone else owns, who owns it and a way to take it over, so a visitor who keeps
  * working there stops switching its login (sender pays stays). Appended to `line`, or a line of its own.
  */
-function withVisit(t, line, own) {
+function withVisit(/** @type {Ticket} */ t, /** @type {HTMLElement | null} */ line, /** @type {boolean} */ own) {
   const owner = account?.turns && t.status !== 'closed' && otherOwner(t);
   if (!owner) return line;
   const part = h(
@@ -72,13 +81,17 @@ function withVisit(t, line, own) {
   return el;
 }
 
-/** Over the composer: the payer's limit is hit, you haven't linked a plan, or your message would switch the payer; and the visit line. Null when none applies. */
+/**
+ * Over the composer: the payer's limit is hit, you haven't linked a plan, or your message would switch the payer; and the visit line. Null when none applies.
+ * @param {Ticket} t
+ * @param {SendText} sendText
+ */
 export function payerLine(t, sendText) {
   const line = basePayerLine(t, sendText);
   return withVisit(t, line, !line);
 }
 
-function basePayerLine(t, sendText) {
+function basePayerLine(/** @type {Ticket} */ t, /** @type {SendText} */ sendText) {
   if (!account || t.status === 'closed') return coldLine(t);
   const cost = loadCost(t);
   if (t.state === 'limited' && t.payer) {
@@ -91,8 +104,8 @@ function basePayerLine(t, sendText) {
         {
           type: 'button',
           class: 'small',
-          onclick: (e) => {
-            const form = e.target.closest('.composer');
+          onclick: (/** @type {Event} */ e) => {
+            const form = /** @type {HTMLFormElement | null} */ (/** @type {Element} */ (e.target).closest('.composer'));
             const box = form?.querySelector('textarea');
             if (!form || !box) return sendText('Carry on.');
             if (!box.value.trim()) box.value = 'Carry on.';
@@ -103,7 +116,7 @@ function basePayerLine(t, sendText) {
       );
     // Sender pays: any message from another plan carries on now, so the cost is said for Send too.
     // Several accounts, all limited (#819): say which one is out until when, not one plan "hit its limit".
-    const accs = t.limit_accounts?.length > 1 && t.limit_resume_at ? t.limit_accounts : null;
+    const accs = /** @type {number} */ (t.limit_accounts?.length) > 1 && t.limit_resume_at ? t.limit_accounts : null;
     const owner = mine(t) ? 'Your' : `${t.payer.name}'s`;
     const lead = accs
       ? `${owner} Claude accounts are all at their limit: ${[...accs]
@@ -131,25 +144,26 @@ function basePayerLine(t, sendText) {
 
 /** Idle this long, its prompt cache (1 hour) has lapsed and the next turn re-reads its whole context. */
 const COLD_MS = 60 * 60_000;
-const idleText = (ms) => (ms < 2 * 3_600_000 ? `${Math.round(ms / 60_000)} min` : ms < 48 * 3_600_000 ? `${Math.round(ms / 3_600_000)}h` : `${Math.round(ms / 86_400_000)} days`);
+const idleText = (/** @type {number} */ ms) => (ms < 2 * 3_600_000 ? `${Math.round(ms / 60_000)} min` : ms < 48 * 3_600_000 ? `${Math.round(ms / 3_600_000)}h` : `${Math.round(ms / 86_400_000)} days`);
 
 /** A quiet hint on a cold minion or Taskmaster (#413), so people can batch what they say. Only a hint: it never blocks the send. */
-export function coldLine(t, now = Date.now()) {
+export function coldLine(/** @type {Ticket} */ t, now = Date.now()) {
   const idle = t.last_turn_end ? now - t.last_turn_end : 0;
   if (t.status === 'running' || !t.session_id || !t.context_tokens || idle <= COLD_MS) return null;
   return h(
     'div',
     { class: 'payer-line cold', title: 'Its prompt cache lasts an hour, so the next turn re-reads its whole context. Held mail rides along with your message.' },
-    `Cold, idle ${idleText(idle)}: replying re-reads its ${Math.round(t.context_tokens / 1000)}k context, about ${loadCost(t).replace('~', '')}. Say it all in one message.`,
+    `Cold, idle ${idleText(idle)}: replying re-reads its ${Math.round(t.context_tokens / 1000)}k context, about ${/** @type {string} */ (loadCost(t)).replace('~', '')}. Say it all in one message.`,
   );
 }
 
 /**
  * What a side question (#932) costs to load when its copy can't read the minion's prompt cache: the minion is idle past
  * the cache's hour, or last ran on someone else's plan (the copy runs on yours). Null when it is warm for you.
+ * @param {Ticket} t
  */
 export function sideColdCost(t, now = Date.now()) {
   if (!t.session_id || !t.context_tokens) return null;
   const idle = t.status !== 'running' && t.last_turn_end && now - t.last_turn_end > COLD_MS;
-  return idle || (t.payer && !mine(t)) ? { cost: loadCost(t).replace('~', ''), k: Math.round(t.context_tokens / 1000), idle: !!idle } : null;
+  return idle || (t.payer && !mine(t)) ? { cost: /** @type {string} */ (loadCost(t)).replace('~', ''), k: Math.round(t.context_tokens / 1000), idle: !!idle } : null;
 }

@@ -111,8 +111,10 @@ permission as an upload:
   name, per scheme), the unit the letters (or `%`, `/`) after the value. `--file bench.txt` reads
   one a line as `name value [unit]`, `#` for a comment, for a bench that writes its own file.
 - The commit, run, workflow and branch come from the run token, as for an upload. Each branch is its
-  own line (a ship's `land/…` run counts as main's); the chart shows, and the flag watches, the
+  own line (a ship's `land/…` run counts as main's, unless it ships from a build); the chart shows, and the flag watches, the
   branch most runs are on (the default branch, in practice).
+- A `suite-time` or `suite-time-pipeline` in `s` is not kept when the Windows side of the PC running the repo's runners
+  averaged over 80% CPU while it ran: load, not the code.
 - A re-run attempt of the same run replaces its numbers. A number that can't be sent warns and never
   fails the job; a GitHub-hosted runner skips.
 - Limits: at most 50 numbers a run, 100 series a scheme (a new series past that is refused, an old

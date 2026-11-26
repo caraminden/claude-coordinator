@@ -1,6 +1,9 @@
 // "#12" in any text the UI shows becomes a link to thread 12 of the current project.
 // Pure string work, so it can be tested without a browser.
 
+/** @typedef {{ hash?: string, url?: string, title: string }} PrTarget Where a PR mention goes (prNumberRoute). */
+/** @typedef {{ projectId: number, scheme: string, repo: string, prs: Record<number, { number: number, title: string }>, pulls?: number[], issues?: number[] }} PrRepo One entry of GET api/prs. */
+
 /** Between the numbers of a list: "#1, #2 and #3", "#1/#2", "#1 &amp; #2". */
 const LIST_SEP = String.raw`(?:\s*(?:,|\/|&amp;)\s*|,?\s+(?:and|or)\s+)`;
 /**
@@ -14,8 +17,10 @@ const ISSUE_LIST = String.raw`\b[Ii]ssues?\s#\d{1,6}(?:${LIST_SEP}#\d{1,6})*`;
 const REF = String.raw`(?<![\w&/#.:?=+-])#(?<n>\d{1,6})(?![\w#/-])`;
 
 /** Scheme names as the HTML has them, compared without case or spacing: "delve two" -> id. */
+/** @param {string} name */
 const nameKey = (name) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 /** A regex matching `name` in any case, with any run of spaces where it has one. */
+/** @param {string} name */
 const namePattern = (name) =>
   [...name]
     .map((c) => {
@@ -26,6 +31,7 @@ const namePattern = (name) =>
     .join('');
 
 /** Where thread `number` of project `projectId` lives (see threadHref in app.js). */
+/** @param {number | string | undefined} projectId @param {number | undefined} number */
 export const threadNumberHref = (projectId, number) => `#/p/${projectId}/t/${number}`;
 
 /** "minion #5" or "minions #5 and #6". */
@@ -47,6 +53,11 @@ const POSSESSIVE = String.raw`(?:&#39;|'|\u2019)s`;
  * With `prRoute(projectId, n)` (see prNumberRoute), "PR #186" and "Delve's PR #186" link to the minion
  * owning that PR, or to GitHub, saying no minion owns it, when none does. One it can't place becomes a `span.pr-ref` carrying the scheme and number, for
  * linkPrRefs to link once a fresher PR list has it; without `prRoute` PR mentions stay plain text.
+ * @param {string} html
+ * @param {number | null} projectId
+ * @param {(n: number) => string | null} [titleOf]
+ * @param {{ id: number, name: string }[]} [schemes]
+ * @param {((projectId: number, n: number) => PrTarget | null) | null} [prRoute]
  */
 export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = [], prRoute = null) {
   if (projectId == null || !(html.includes('#') || (prRoute && /\b(?:PR|[Pp]ull [Rr]equest)\s\d/.test(html)))) return html;
@@ -58,18 +69,21 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
     .join('|');
   const scheme = names ? String.raw`(?<![\p{L}\p{N}_])(?<name>${names})(?:${POSSESSIVE})?\s+(?:(?<spr>${PR_LIST})|(?<sm>${SCHEME_MINIONS}))|` + String.raw`(?<tm>${MINION_LIST})\s+in\s+(?<tname>${names})(?![\p{L}\p{N}_])|` : '';
   const refs = new RegExp(`(?<issue>${ISSUE_LIST})|(?<pr>${PR_LIST})|${scheme}${REF}`, 'gu');
-  const threadLink = (p) => (number, text) => {
+  /** @param {number} p */
+  const threadLink = (p) => (/** @type {number} */ number, /** @type {string} */ text) => {
     const title = p === projectId ? titleOf(number) : null;
     return `<a class="thread-ref" href="${threadNumberHref(p, number)}"${title ? ` title="${escapeAttr(title)}"` : ''}>${text}</a>`;
   };
-  const prLink = (p) => (number, text) => prRefHtml(p, number, text, prRoute(p, number));
+  /** @param {number} p */
+  const prLink = (p) => (/** @type {number} */ number, /** @type {string} */ text) => prRefHtml(p, number, text, /** @type {NonNullable<typeof prRoute>} */ (prRoute)(p, number));
   return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => {
     if (tag) return all;
-    return text.replace(refs, (ref, ...args) => {
-      const { issue, pr, name, spr, sm, tm, tname, n } = args.at(-1);
+    return text.replace(refs, (/** @type {string} */ ref, /** @type {unknown[]} */ ...args) => {
+      const { issue, pr, name, spr, sm, tm, tname, n } = /** @type {Record<string, string | undefined>} */ (args.at(-1));
       if (issue) return ref;
-      const p = name || tname ? ids.get(nameKey(name ?? tname)) : projectId;
-      if (pr || spr) return prRoute ? linkList(pr ?? spr, ref.slice(0, ref.length - (pr ?? spr).length), prLink(p)) : ref;
+      // shortcut: a name the regex matched is always in `ids`, so this is a number
+      const p = /** @type {number} */ (name || tname ? ids.get(nameKey(/** @type {string} */ (name ?? tname))) : projectId);
+      if (pr || spr) return prRoute ? linkList(/** @type {string} */ (pr ?? spr), ref.slice(0, ref.length - /** @type {string} */ (pr ?? spr).length), prLink(p)) : ref;
       if (sm) return linkList(sm, ref.slice(0, ref.length - sm.length), threadLink(p));
       if (tm) return linkList(tm, '', threadLink(p)) + ref.slice(tm.length);
       if (!prRoute || p !== projectId || titleOf(Number(n))) return threadLink(p)(Number(n), ref);
@@ -79,18 +93,22 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
 }
 
 /** Each number of a list linked by `link(number, text)`: the first with its words ("Delve PR #186"), the rest alone ("#187"). */
-const linkList = (list, lead, link) => list.replace(/^\D*\d{1,6}|#\d{1,6}/g, (m, at) => link(Number(/\d+$/.exec(m)[0]), at ? m : lead + m));
+/** @param {string} list @param {string} lead @param {(n: number, text: string) => string} link */
+const linkList = (list, lead, link) => list.replace(/^\D*\d{1,6}|#\d{1,6}/g, (m, at) => link(Number(/** @type {RegExpExecArray} */ (/\d+$/.exec(m))[0]), at ? m : lead + m));
 
 /** A PR mention as a link to `to` (from prNumberRoute), or a plain-looking span linkPrRefs can link later. */
+/** @param {number} projectId @param {number} number @param {string} text @param {PrTarget | null} to */
 const prRefHtml = (projectId, number, text, to) =>
   to?.hash ? `<a class="thread-ref" href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}">${text}</a>` : to?.url ? `<a href="${escapeAttr(to.url)}" target="_blank" rel="noopener" title="${escapeAttr(to.title)}">${text}</a>` : `<span class="pr-ref" data-project="${projectId}" data-pr="${number}">${text}</span>`;
 
-const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/** @param {unknown} s */
+const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => /** @type {Record<string, string>} */ ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 /**
  * A chat address that asks to open scrolled to one thing in it (#236): the chat's own address plus
  * `?e=<event id>`, or `?e=latest` for the minion's latest reply. Gives { hash, target }, or null.
  */
+/** @param {string | null | undefined} hash */
 export function jumpParts(hash) {
   const m = /^(#\/(?:home\/)?p\/\d+(?:\/t\/\d+)?|#\/t\/\d+)\?e=(\d+|latest)$/.exec(hash ?? '');
   return m ? { hash: m[1], target: m[2] } : null;
@@ -100,6 +118,7 @@ export function jumpParts(hash) {
  * A "show me where" address (#1122): any page's address plus `?show=<part>`, a name from src/show-parts.ts that sits on
  * an element as data-part. Gives { hash, name } (the page's plain address and the part), or null.
  */
+/** @param {string | null | undefined} hash */
 export function showParts(hash) {
   const m = /^(#\/[^?]*)\?show=([a-z0-9-]{1,40})$/.exec(hash ?? '');
   return m ? { hash: m[1] === '#/' ? '#/' : m[1].replace(/\/$/, ''), name: m[2] } : null;
@@ -110,6 +129,7 @@ export function showParts(hash) {
  * or an absolute URL on this page (same origin and path) whose hash is a route. Null otherwise,
  * so links elsewhere keep opening in a new tab.
  */
+/** @param {string} href @param {{ href: string, origin: string, pathname: string, search: string }} here */
 export function inAppHash(href, here) {
   if (/^#\//.test(href)) return href;
   let url;
@@ -123,6 +143,7 @@ export function inAppHash(href, here) {
 }
 
 /** A GitHub pull request's own page ("https://github.com/o/r/pull/12"), as { repo: "o/r", number }. */
+/** @param {string | null | undefined} href */
 export function prUrlParts(href) {
   const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)\/?$/i.exec(href ?? '');
   return m ? { repo: `${m[1]}/${m[2]}`.toLowerCase(), number: Number(m[3]) } : null;
@@ -132,8 +153,11 @@ export function prUrlParts(href) {
 const BARE_URL = /(?<![\w/])https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000])+/gi;
 
 /** A URL without the punctuation that ends the sentence around it; a ")" or "]" stays when it closes one in the URL. */
+/** @param {string} url */
 function trimUrl(url) {
+  /** @type {Record<string, number>} */
   const opens = { ')': url.split('(').length, ']': url.split('[').length };
+  /** @type {Record<string, number>} */
   const closes = { ')': url.split(')').length, ']': url.split(']').length };
   let end = url.length;
   for (;;) {
@@ -151,12 +175,13 @@ function trimUrl(url) {
  * does). A URL into this app (see inAppHash, against `here`) switches view in place; a PR's goes to
  * the minion owning it when `prRoute(url)` (see prOwnerRoute) knows one; others open a new tab.
  */
+/** @param {string} html @param {Parameters<typeof inAppHash>[1] | null} [here] @param {((url: string) => PrTarget | null) | null} [prRoute] */
 export function linkUrls(html, here = null, prRoute = null) {
   if (!/https?:\/\//i.test(html)) return html;
   return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) =>
     tag
       ? all
-      : text.replace(BARE_URL, (match) => {
+      : text.replace(BARE_URL, (/** @type {string} */ match) => {
           const url = trimUrl(match);
           if (/^https?:\/\/$/i.test(url)) return match;
           const route = here && inAppHash(url.replace(/&amp;/g, '&'), here);
@@ -170,11 +195,13 @@ export function linkUrls(html, here = null, prRoute = null) {
  * The opening tag of a link to GitHub PR `url` (escaped HTML) that goes to its owner `to` (from
  * prOwnerRoute) instead, keeping the GitHub address for copying; null when there's no owner.
  */
+/** @param {string} url @param {PrTarget | null | undefined} to */
 export function prLinkOpen(url, to) {
   return to ? `<a href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}" data-pr-url="${url}">` : null;
 }
 
 /** Where PR `number` of `repo` (one entry of GET api/prs) should go: its owner, even the minion on screen (#272). */
+/** @param {PrRepo | undefined} repo @param {number} number */
 function ownerRoute(repo, number) {
   const owner = repo?.prs[number];
   if (!owner) return null;
@@ -185,6 +212,7 @@ function ownerRoute(repo, number) {
  * Where a link to a PR should go instead: the minion that owns it, from `repos` (GET api/prs as a
  * Map by repo). Null for other links and PRs no minion owns.
  */
+/** @param {Map<string, PrRepo> | undefined} repos @param {string} href */
 export function prOwnerRoute(repos, href) {
   const pr = prUrlParts(href);
   return pr ? ownerRoute(repos?.get(pr.repo), pr.number) : null;
@@ -196,6 +224,7 @@ export function prOwnerRoute(repos, href) {
  * issue on GitHub as { url, title }. Null when the repo has no such number (yet), the scheme no GitHub
  * repo, or `repos` (any list of api/prs entries) hasn't loaded.
  */
+/** @param {Map<string, PrRepo> | PrRepo[] | undefined} repos @param {number} projectId @param {number} number */
 export function prNumberRoute(repos, projectId, number) {
   for (const repo of repos?.values() ?? []) {
     if (repo.projectId !== projectId) continue;

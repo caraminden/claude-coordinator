@@ -39,7 +39,7 @@ export type ReaderData = {
   memorySchemes: number[] | null;
   /** DATA_DIR, where the Status page reads backups from. */
   dataDir: string;
-  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang`, `=stall-<ms>` or `=slow` in a query ends, hangs, stalls or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
+  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang`, `=wedge`, `=stall-<ms>` or `=slow` in a query ends, hangs, stops answering (the thread alive), stalls or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
   testHooks?: boolean;
   /** A test server's (CITADEL_READER_BOOT_WAIT): a path this thread waits for while it starts, so a test can stop the server while a reader still is (#1625). */
   bootWait?: string;
@@ -160,6 +160,64 @@ export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms =
     if (left <= 0 || Atomics.load(shared, 1) !== 1n) return null;
     Atomics.wait(shared, 3, closed, left);
   }
+}
+
+/**
+ * Runs a request's read in a read transaction at a whole step (atWholeStep). The requests running at once share one;
+ * one that needs a newer step (main opened one since) waits for them to finish. Null: the main thread answers.
+ * `pin` is atWholeStep, a test's own to open a step at a moment it picks.
+ */
+export function wholeSteps(db: DatabaseSync, shared: BigInt64Array | null, pin = atWholeStep) {
+  let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
+  return async <T>(run: () => Promise<T>): Promise<T | null> => {
+    const start = Date.now();
+    for (let wait = READ_WAIT_MS; !tx || tx.at < stepsOpened(shared); wait = 0) {
+      // The front thread answered it long since (four times READER_ANSWER_MS): a writer far behind must not pile these up here.
+      if (Date.now() - start > 5 * READER_ANSWER_MS) return null;
+      if (tx) {
+        await tx.done;
+        continue;
+      }
+      const at = pin(db, shared, wait);
+      if (at === null) {
+        // No write worker: the main thread answers.
+        if (!writerUp(shared)) return null;
+        await sleep(20);
+        continue;
+      }
+      let end!: () => void;
+      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
+      // Pinned after this request came, so new enough for it whatever opened since: no second check against the steps
+      // opened. With one, a step that opened in this instant sent the request to wait for a transaction nobody holds,
+      // which never ends, and every later request on this thread behind it (#2086: every page read a 503 for 30 minutes, Nov 25).
+      break;
+    }
+    const mine = tx;
+    mine.refs++;
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      if (--mine.refs === 0) {
+        if (tx === mine) tx = null;
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* already ended */
+        }
+        mine.end();
+      }
+    };
+    // A slow one (a memory search waits on its embedding) lets go after a while, so it doesn't keep everyone else at an
+    // old step: its answer, null here, goes to the main thread's.
+    const free = freeFor(READER_ANSWER_MS);
+    try {
+      return await Promise.race([run(), free.done]);
+    } finally {
+      free.stop();
+      release();
+    }
+  };
 }
 
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
@@ -312,60 +370,17 @@ if (workerData?.reader) {
   // A history page or one event reads only the minion's row, which the route loads through view(): the row as it is
   // stands in, so these answer before main's first snapshot, as they did in slice 1.
   const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;
-  // The requests running at once share one read transaction at a whole step; one that needs a newer step (main opened
-  // one since) waits for them to finish.
-  let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
-  const inWholeStep = async <T>(run: () => Promise<T>): Promise<T | null> => {
-    const start = Date.now();
-    for (let wait = READ_WAIT_MS; !tx || tx.at < stepsOpened(data.shared); wait = 0) {
-      // The front thread answered it long since (four times READER_ANSWER_MS): a writer far behind must not pile these up here.
-      if (Date.now() - start > 5 * READER_ANSWER_MS) return null;
-      if (tx) {
-        await tx.done;
-        continue;
-      }
-      const at = atWholeStep(store.db, data.shared, wait);
-      if (at === null) {
-        // No write worker: the main thread answers.
-        if (!writerUp(data.shared)) return null;
-        await sleep(20);
-        continue;
-      }
-      let end!: () => void;
-      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
-    }
-    const mine = tx;
-    mine.refs++;
-    let held = true;
-    const release = () => {
-      if (!held) return;
-      held = false;
-      if (--mine.refs === 0) {
-        if (tx === mine) tx = null;
-        try {
-          store.db.exec('ROLLBACK');
-        } catch {
-          /* already ended */
-        }
-        mine.end();
-      }
-    };
-    // A slow one (a memory search waits on its embedding) lets go after a while, so it doesn't keep everyone else at an
-    // old step: its answer, null here, goes to the main thread's.
-    const free = freeFor(READER_ANSWER_MS);
-    try {
-      return await Promise.race([run(), free.done]);
-    } finally {
-      free.stop();
-      release();
-    }
-  };
+  const inWholeStep = wholeSteps(store.db, data.shared);
+  let wedged = false; // a test's: no request is answered from here on
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
     if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;
     if (data.testHooks && /[?&]citadel-test-reader=main\b/.test(m.url)) return parentPort!.postMessage({ id: m.id, answer: null });
     if (data.testHooks && /[?&]citadel-test-reader=exit\b/.test(m.url)) process.exit(1);
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    // Alive, and this request never answered (#2086).
+    if (data.testHooks && /[?&]citadel-test-reader=wedge\b/.test(m.url)) (wedged = true), console.log('Reader test hook: wedged');
+    if (wedged) return;
     // A disk that answers nothing for that many ms.
     const stall = data.testHooks && /[?&]citadel-test-reader=stall-(\d+)/.exec(m.url);
     if (stall) console.log('Reader test hook: stalled');

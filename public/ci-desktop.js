@@ -1,26 +1,52 @@
 // The CI desktop cards on the CI page's Overview, behind its CI desktop load toggle (#534, moved there from Machines by #968, onto Overview by #1019): each PC that hosts CI runners, as src/ci-load.ts sees it: a
 // verdict, what it is doing now, the last 24 hours, and each pool of runners with its queue (public/ci.js reads them).
+/** @import { PcView, PcBrief } from './types.js' */
 import { ago, h } from './base.js';
 
 const GB = 1024 ** 3;
 // Hyper-V lists WSL's own VM under an id, not a name.
 const VM_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+/** @type {Record<string, string>} */
 const DOT = { fine: 'ready', more: 'fix', full: 'fix', over: 'down', crash: 'down', none: 'asleep' };
+/** @param {number} ms */
 const mins = (ms) => (ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`);
 /** An element with its style set through the CSSOM: the page's CSP refuses style attributes. */
+/**
+ * @template {HTMLElement} E
+ * @param {E} el
+ * @param {Partial<CSSStyleDeclaration>} props
+ */
 const styled = (el, props) => Object.assign(el.style, props) && el;
+/** @param {number} t */
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** A bar filled to `pct`, with its number and what it is beside it. */
 /** The bar's warming hue (#1037): blue to amber at 70%, red at 90%. */
+/** @param {number} pct */
 const level = (pct) => (pct >= 90 ? 'hot' : pct >= 70 ? 'warm' : 'ok');
+/**
+ * @param {string} label
+ * @param {number} pct
+ */
 const barOf = (label, pct) => h('span', { class: 'ci-meter-bar', role: 'img', 'data-level': level(pct), title: `${label} ${Math.round(pct)}%`, 'aria-label': `${label} ${Math.round(pct)}%` }, styled(h('span'), { width: `${Math.min(100, Math.max(0, pct))}%` }));
 
+/**
+ * @param {string} label
+ * @param {number} pct
+ * @param {string} detail
+ */
 function meter(label, pct, detail) {
   return h('div', { class: 'ci-meter' }, h('span', { class: 'ci-meter-label' }, label), barOf(label, pct), h('span', { class: 'ci-meter-value' }, `${Math.round(pct)}%`), h('span', { class: 'ci-meter-detail muted' }, detail));
 }
 
 /** One small chart over the 24 hours: `lines` are { key, label, values, step }, sharing one y axis up to `max`. */
+/**
+ * @param {PcView} pc
+ * @param {string} title
+ * @param {{ key: string; label: string; values: (number | null)[]; step?: boolean }[]} lines
+ * @param {number} max
+ * @param {string} unit
+ */
 function chart(pc, title, lines, max, unit) {
   const W = 600,
     H = 96,
@@ -28,9 +54,9 @@ function chart(pc, title, lines, max, unit) {
     B = 16,
     T = 4;
   const n = pc.series.length;
-  const x = (i) => L + (i / (n - 1)) * (W - L - 2);
-  const y = (v) => T + (1 - v / max) * (H - T - B);
-  const path = (values, step) => {
+  const x = (/** @type {number} */ i) => L + (i / (n - 1)) * (W - L - 2);
+  const y = (/** @type {number} */ v) => T + (1 - v / max) * (H - T - B);
+  const path = (/** @type {(number | null)[]} */ values, /** @type {boolean | undefined} */ step) => {
     let d = '';
     let pen = false;
     values.forEach((v, i) => {
@@ -45,7 +71,8 @@ function chart(pc, title, lines, max, unit) {
   };
   const t0 = pc.series[0][0],
     t1 = pc.series[n - 1][0];
-  const xt = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - 2);
+  const xt = (/** @type {number} */ t) => L + ((t - t0) / (t1 - t0)) * (W - L - 2);
+  /** @type {number[]} */
   const hours = [];
   // A label too near the right edge would run off the chart.
   for (let t = Math.ceil(t0 / 21_600_000) * 21_600_000; t <= t1 - 3_600_000; t += 21_600_000) hours.push(t);
@@ -60,16 +87,16 @@ function chart(pc, title, lines, max, unit) {
     ${lines.map((l) => `<path class="line ${l.key}" d="${path(l.values, l.step)}"/>`).join('')}
     <line class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
   </svg>`;
-  const svg = el.firstElementChild;
+  const svg = /** @type {SVGSVGElement} */ (el.firstElementChild); // the innerHTML just set
   svg.setAttribute('aria-label', `${title}, last 24 hours`);
   const axis = h('div', { class: 'ci-axis muted', 'aria-hidden': 'true' }, ...[max, max / 2, 0].map((v, i) => styled(h('span', { class: 'y' }, `${v}${i === 0 ? unit : ''}`), { top: `${(y(v) / H) * 100}%` })), ...hours.map((t) => styled(h('span', { class: 'x' }, clock(t)), { left: `${(xt(t) / W) * 100}%` })));
   const tip = h('div', { class: 'ci-tip', hidden: true });
-  const cross = svg.querySelector('.cross');
-  const show = (ev) => {
+  const cross = /** @type {SVGLineElement} */ (svg.querySelector('.cross'));
+  const show = (/** @type {PointerEvent} */ ev) => {
     const box = svg.getBoundingClientRect();
     const i = Math.min(n - 1, Math.max(0, Math.round(((((ev.clientX - box.left) / box.width) * W - L) / (W - L - 2)) * (n - 1))));
-    cross.setAttribute('x1', x(i));
-    cross.setAttribute('x2', x(i));
+    cross.setAttribute('x1', String(x(i)));
+    cross.setAttribute('x2', String(x(i)));
     cross.setAttribute('visibility', 'visible');
     tip.hidden = false;
     tip.replaceChildren(h('strong', {}, clock(pc.series[i][0])), ...lines.map((l) => h('span', {}, h('i', { class: `key ${l.key}` }), `${l.label} ${l.values[i] === null ? '–' : `${l.values[i]}${unit}`}`)));
@@ -97,9 +124,10 @@ function chart(pc, title, lines, max, unit) {
   );
 }
 
+/** @param {PcView} pc */
 function pools(pc) {
   if (!pc.pools.length) return h('p', { class: 'muted small' }, 'No CI jobs read from GitHub for this PC yet: CI health reads them every 5 minutes.');
-  const cell = (text, cls = '') => h('td', { class: cls }, text);
+  const cell = (/** @type {string} */ text, cls = '') => h('td', { class: cls }, text);
   return h(
     'div',
     { class: 'ci-pools-wrap' },
@@ -128,6 +156,7 @@ function pools(pc) {
   );
 }
 
+/** @param {PcView} pc */
 export function pcCard(pc) {
   const now = pc.now;
   const shares = now ? [`CI runners ${Math.round(now.runners)}%`, now.wsl === null ? '' : `WSL ${Math.round(now.wsl)}%`, ...Object.entries(now.vms).map(([name, pct]) => `${VM_ID.test(name) ? 'WSL VM' : name} ${Math.round(pct)}%`)].filter(Boolean).join(' · ') : '';
@@ -180,18 +209,24 @@ export function pcCard(pc) {
 }
 
 /** What the CI chip warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */
+/** @param {PcBrief} pc */
 export function trouble(pc) {
   if (pc.verdict.kind === 'over') return 'CI is overloading its desktop';
   if (pc.verdict.kind === 'crash') return 'CI desktop crashed under load';
   // The Status page sends `seen` in place of the series (#1273: it threw here and the page never drew).
-  if (pc.verdict.kind === 'none' && (pc.seen ?? pc.series.some((s) => s[1] !== null))) return 'CI desktop is offline';
+  if (pc.verdict.kind === 'none' && (pc.seen ?? /** @type {PcView['series']} */ (pc.series).some((s) => s[1] !== null))) return 'CI desktop is offline';
   return '';
 }
 
 /** The one line the chip's tooltip and the page's reason row both say for a PC in trouble. */
+/** @param {PcBrief} pc */
 export const troubleLine = (pc) => `${pc.host}: ${trouble(pc)}`;
 
 /** A PC's toned word for the CI page's list: the trouble kinds first, then busy (CPU or memory at 70%), else fine. */
+/**
+ * @param {PcBrief} pc
+ * @returns {[string, string]}
+ */
 export function pcWord(pc) {
   const v = pc.verdict.kind;
   if (v === 'over') return ['warn', 'Overloading'];

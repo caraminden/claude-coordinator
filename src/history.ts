@@ -53,7 +53,7 @@ export function historyPage(store: Store, ticketId: number, opts: { before?: num
 }
 
 /** The plan before a page: its steps, and where it is among them (#1923). */
-type PagePlan = { tasks: unknown[]; plan?: ReturnType<typeof planPlace> };
+type PagePlan = { tasks: Progress['tasks']; plan?: ReturnType<typeof planPlace> };
 
 function planBefore(store: Store, ticketId: number, eventId: number): PagePlan {
   const plans = plansByStore.get(store) ?? new Map<string, PagePlan>();

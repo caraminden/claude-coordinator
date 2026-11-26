@@ -8,11 +8,13 @@ import { mountDialogs } from './ui/dialog.js';
 import { wcoHint } from './wco-hint.js';
 import './context-menu.js'; // Citadel's right-click menu (#1663)
 
+/** @import { Account } from './types.js' */
+
 // ---------- boot ----------
 
 // Sticky elements sit just below the top bar, whose height changes with wrapping and safe areas.
 // On wider screens it is a rail down the left edge instead, and nothing needs to clear it.
-const topbar = document.querySelector('.topbar');
+const topbar = /** @type {HTMLElement} */ (document.querySelector('.topbar'));
 // Use the exact height: at fractional display scaling (e.g. 175%) a rounded one leaves a sliver
 // where scrolled chat text shows through.
 new ResizeObserver(() => {
@@ -31,16 +33,16 @@ initDrawers({
 // Phones: a refresh button at the top of the screen, since an installed app has no browser reload.
 // It lives in the top bar and, on pages that hide the top bar, in the first thread bar: just before
 // ‹ › × where it has them, else after the title. Thread bars are rebuilt often, so it is put back after each change.
-document.querySelector('.topbar .refresh-btn').addEventListener('click', reloadNow);
+/** @type {HTMLElement} */ (document.querySelector('.topbar .refresh-btn')).addEventListener('click', reloadNow);
 new MutationObserver(() => {
-  const row = app.querySelector('.ticket-head > .row');
-  const head = row?.parentElement;
+  const row = /** @type {HTMLElement} */ (app).querySelector('.ticket-head > .row');
+  const head = /** @type {HTMLElement} */ (row?.parentElement);
   if (!row || head.querySelector('.refresh-btn')) return;
   const btn = h('button', { type: 'button', class: 'refresh-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: reloadNow }, '↻');
   const nav = head.querySelector('.head-nav');
   if (nav) nav.prepend(btn);
   else row.insertBefore(btn, row.querySelector(':scope > h2')?.nextSibling ?? row.firstChild);
-}).observe(app, { childList: true, subtree: true });
+}).observe(/** @type {HTMLElement} */ (app), { childList: true, subtree: true });
 // Keep relative times honest: the usage readout, and the minions list's waits and usage-reset countdowns.
 setInterval(() => {
   if (usage) renderUsage();
@@ -61,14 +63,18 @@ function boot() {
   if (!kept) {
     return live.then(start).catch((err) => {
       if (err.message === 'Not logged in') return;
-      app.replaceChildren(h('p', { class: 'error' }, `Couldn't open Citadel: ${err.message}`), h('button', { type: 'button', onclick: boot }, 'Try again'));
+      /** @type {HTMLElement} */ (app).replaceChildren(h('p', { class: 'error' }, `Couldn't open Citadel: ${err.message}`), h('button', { type: 'button', onclick: boot }, 'Try again'));
     });
   }
   if (location.hash !== kept.hash) history.replaceState(history.state, '', kept.hash); // no hashchange: startKept routes; navstack.js's mark stays (Back)
   startKept(kept).then(() => catchUp(live, kept.login));
 }
 
-/** Swap the kept chat for the live one once the server answers; offline, try again when the device is back online. */
+/**
+ * Swap the kept chat for the live one once the server answers; offline, try again when the device is back online.
+ * @param {Promise<Account>} live
+ * @param {string | null} login
+ */
 function catchUp(live, login) {
   live
     .then((who) => {
@@ -97,7 +103,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 // Only in the installed app, so browser tabs behave as before: on Android shrink the page when the keyboard opens so
 // the composer stays in view. The title bar's colour is index.html's theme-color metas.
 if (matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches) {
-  const viewport = document.querySelector('meta[name=viewport]');
+  const viewport = /** @type {HTMLMetaElement} */ (document.querySelector('meta[name=viewport]'));
   viewport.content += ', interactive-widget=resizes-content';
 }
 // Once, in the installed app with its title bar showing: where the ⌃ that hides it is.

@@ -2,6 +2,7 @@
 // deploy's dismissal, the queue and rows a dismissed one leaves, its claims passing on, and a reopen's worktree.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `ClosingDeps`.
 import { clip } from './minion-relay.ts';
+import { armedKey, proofKey } from './db-keys.ts';
 import { askerKey, pagePlanKey, planKey, type EventRow, type Project, type Store, type Ticket } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import type { Claim } from './claims.ts';
@@ -59,6 +60,8 @@ export interface ClosingDeps {
   cardLinks: (ticket: Ticket) => CardLink[];
   ciHold: (ticketId: number) => string | null | undefined;
   probeHold: (ticketId: number) => boolean | undefined;
+  /** A claim passed to `ticketId`: ship its armed hand-off (#2046, fireArmed); true when it had one, and `fallback` wakes it if that is ruled out. */
+  armed: (ticketId: number, claim: string, fallback: (why: string) => void) => boolean;
 }
 
 export class Closing {
@@ -129,11 +132,15 @@ export class Closing {
         this.d.emit(next.id, 'note', { text: `It holds the ${to!.name} claim now: ${why}.` });
       } else if (next && next.status !== 'closed') {
         const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when your change is live, or you are dismissed. More than one piece to ship? Before the first ships, ask your Taskmaster (message_coordinator, need: ask) to keep it for you (claim's keep).${to!.name === SHIP_LANE ? ` Hand off within ${SKIP_AFTER_MS / 60_000} min: past that, one that is ready goes first and you are next after it.` : ''}`;
-        if (this.d.heldFor(next.id)) this.d.send(next.id, APP_NAME, line, [], { hold: true });
-        else {
-          if (next.state === 'parked') this.d.store.updateTicket(next.id, { state: null });
-          this.d.send(next.id, APP_NAME, line, [], {}, this.d.isRunning(next.id));
-        }
+        const tell = (extra = '') => {
+          if (this.d.heldFor(next.id)) this.d.send(next.id, APP_NAME, line + extra, [], { hold: true });
+          else {
+            if (this.d.store.getTicket(next.id)?.state === 'parked') this.d.store.updateTicket(next.id, { state: null });
+            this.d.send(next.id, APP_NAME, line + extra, [], {}, this.d.isRunning(next.id));
+          }
+        };
+        // An armed hand-off (#2046) ships now with no turn; the line goes only if that is ruled out, saying why.
+        if (!this.d.armed(next.id, to!.name, (no) => tell(`\n\nYour armed hand-off didn't ship by itself: ${no}. Hand it off again once it's ready.`))) tell();
       }
       if (keeper && keeper.id !== to?.holder) {
         this.d.leaveMail(keeper.id, author, `(nothing to do unless something waits on it) ${(from ?? to)!.name} ${next ? `passed to #${next.number} ${next.title}, next in its queue` : 'is free'}: ${why}.`);
@@ -155,6 +162,9 @@ export class Closing {
     this.d.store.deleteSetting(closeCancelledKey(ticketId));
     // Nor wait on its start card (#1674): a person's reopen is its start.
     this.d.store.deleteSetting(startHoldKey(ticketId));
+    // Nor ship an armed hand-off (#2046) once the lane comes.
+    this.d.store.deleteSetting(armedKey(ticketId));
+    this.d.store.deleteSetting(proofKey(ticketId));
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.d.store.getTicket(ticketId)?.replies) this.d.store.updateTicket(ticketId, { replies: null });
     this.d.setStatus(ticketId, 'closed');

@@ -335,13 +335,18 @@ test('a host is named by its machine or its hostname; list and remove with none 
 
 test("a member's own CI host runs CI only for the schemes they lent it to and are in (#1933)", async () => {
   const w = world();
-  // Josh, no admin, adds his own PC: it acts for no scheme until he lends it, and Peek Auras isn't Citadel.
+  // Josh, no admin, adds his own PC. Its runner agent joining switches its CI on for every scheme he is in, and no other
+  // (Build 7 M2b; Josh, 2026-11-25, "Every scheme you're in"): Peek Auras's CI may use it, the other scheme's may not.
   const pc = w.store.createMachine('josh-pc', 'x', 'Josh', w.josh.id);
   const agent = stream();
   w.relay.connectAgent(pc, agent, { host: 'JOSH-PC', command: 'citadel runner agent', runners: true, os: 'linux' });
   const add = () => w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'linux' });
   // The same rule holds for the token its own scripts ask for; without a mint, nothing goes to GitHub.
   const token = () => w.tokens.issue(w.store.getMachine(pc.id)!, w.scheme.id, false);
+  assert.equal((await token()).label, 'peek-auras-ci');
+  await assert.rejects(w.tokens.issue(w.store.getMachine(pc.id)!, w.other.id, false), { status: 404 });
+  // Unticked, it acts for no scheme.
+  w.store.setMachineProjects(pc.id, []);
   await assert.rejects(token(), { status: 404 });
   await assert.rejects(add(), { status: 409 });
   // Lent to a scheme he is not in: still nothing for it.

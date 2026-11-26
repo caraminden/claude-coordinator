@@ -26,7 +26,29 @@ const tmp = tempRoot('land-verdicts-');
 after(() => tmp.teardown());
 
 // The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
-const BENCHED = ['cut_off', 'flake_only', 'skipped_tests', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on', 'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone'];
+const BENCHED = [
+  'cut_off',
+  'flake_only',
+  'skipped_tests',
+  'burn_lines',
+  'train_labels',
+  'train_real',
+  'train_failing',
+  'train_main_red',
+  'train_suspects_of',
+  'rule_on',
+  'rule_would',
+  'train_guess',
+  'train_imports',
+  'train_hub',
+  'train_label',
+  'train_at',
+  'known_flakes',
+  'train_pin',
+  'train_alone',
+  'burn_new',
+  'has_case',
+];
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
   train_tail: "cuts a red's log for the rider it refuses",
@@ -270,6 +292,35 @@ test('F: a red of flakes only that skipped a test is no flake (run 45549200030)'
   assert.equal(run({ script: `${none}\nskipped_tests || flake_only` }).out, 'test/machine-lend-cards.test.ts\n');
   // Perigee's own log has no CI prefix: its suite always skips the Biome tests, and that is not CI's skip.
   assert.equal(run({ script: `failed='ℹ skipped 2'\nskipped_tests || echo none` }).out, 'none\n');
+});
+
+// G: runs 45714335003 and 45711395598 (Nov 25 14:34 and 14:13 PST, #2019), the stuck train led by #2003. The first was
+// red on a case #2003's follow-up added: it is #2003's. The second was red on a case main had since #1563, in a file
+// rider #1991 had edited: nobody adds it, so nobody is refused for adding it.
+test('G: a burn-in red names the ship that adds the failing case (run 45714335003), and nobody for a case on main (run 45711395598)', () => {
+  const t = (run: string) => `${log(run)}\nburn_red=1 old=5cc2a7667 own=4ed8f4fef train_n=(2) train_tip=(4ed8f4fef)`;
+  // The follow-up was not on main yet, so which commits have its case is told here.
+  const added = `has_case() { [ "$1" != "$old" ] && [ "$2" = test/reader-stall.test.ts ]; }`;
+  assert.equal(run({ script: `${t('45714335003')}\n${added}\nburn_new` }).out, '0 test/reader-stall.test.ts\n');
+  // Real git: main's front.test.ts already has the case.
+  assert.equal(run({ script: `${t('45711395598')}\nburn_new` }).out, '');
+  // The log's case was read: had main not had it, the front would be named.
+  assert.equal(run({ script: `${t('45711395598')}\nhas_case() { [ "$1" != "$old" ]; }\nburn_new` }).out, '0 test/front.test.ts\n');
+});
+
+// A repo of its own: main, ship A adding a case at the top of a large test file, then ship B editing that file.
+test("G2: a case is found in a large test file, and one a later ship edits is nobody's for certain (#2019)", () => {
+  const t = `cd "$OUT" && command git init -q r && cd r && export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+save() { command git add -A && command git commit -qm "$1" && command git rev-parse HEAD; }
+echo main >x && old=$(save main)
+{ echo "test('a racy case', f);"; awk 'BEGIN { for (i = 0; i < 20000; i++) print "// padding padding padding" }'; } >big.test.ts && own=$(save A)
+echo '// B' >>big.test.ts && b=$(save B)
+burn_red=1 failed=$(printf 'test at big.test.ts:1:1\\n✖ a racy case (1ms)\\nburn-in: big.test.ts: failed in 1 of 10 copies at once')`;
+  assert.equal(run({ script: `${t}\nhas_case "$own" big.test.ts 'a racy case' && echo found\nhas_case "$old" big.test.ts 'a racy case' || echo absent` }).out, 'found\nabsent\n');
+  assert.equal(run({ script: `${t}\ntrain_n=() train_tip=()\nburn_new` }).out, '0 big.test.ts\n');
+  assert.equal(run({ script: `${t}\ntrain_n=(2) train_tip=("$b")\nburn_new` }).out, '');
+  // A bisect step tested no further than this ship, so the later edit is not in what went red.
+  assert.equal(run({ script: `${t}\ntrain_n=(2) train_tip=("$b")\nburn_new 0` }).out, '0 big.test.ts\n');
 });
 
 // The guard: a function that reads CI's log decides something about the red, so it is benched or says why not.

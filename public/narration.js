@@ -14,6 +14,7 @@ const STRUCTURE = /^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||```|~~~|>)/m;
  * more work follows it: one plain paragraph, short, with no Markdown structure. Answers, lists,
  * tables and reports never are.
  */
+/** @param {string} text */
 export function isNarration(text) {
   const t = text.trim();
   return t.length < NARRATION_MAX && !/\n\s*\n/.test(t) && !STRUCTURE.test(t);
@@ -24,6 +25,7 @@ export function isNarration(text) {
 const BOOKKEEPING = new Set(['mcp__thread__set_thread_status', 'mcp__thread__set_properties', 'mcp__thread__settle_question', 'mcp__thread__strike_text', 'mcp__thread__close_self', 'mcp__thread__plan', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ToolSearch']);
 
 /** Whether a tool call is bookkeeping rather than work, by its name. */
+/** @param {string} name */
 export function isBookkeeping(name) {
   return BOOKKEEPING.has(name);
 }
@@ -36,9 +38,12 @@ const CARDS = new Set(['mcp__thread__ask_question', 'mcp__thread__propose_plan']
  * settles as `{ text, fate }`: 'fold' (narration followed by work), 'keep', or 'clamp' (kept, long).
  * Words followed by nothing but bookkeeping before the next words, or by a card, are kept. The
  * turn's last words are never settled, so they always stay whole.
+ * @template {{ text: string }} [T={ text: string }] what a caller hands in with its words, returned as is
  */
 export function narrationSorter() {
+  /** @type {T | null} */
   let pending = null;
+  /** @param {boolean} work */
   const settle = (work) => {
     const text = pending;
     pending = null;
@@ -46,12 +51,13 @@ export function narrationSorter() {
     return [{ text, fate: work && isNarration(text.text) ? 'fold' : text.text.length > CLAMP_OVER ? 'clamp' : 'keep' }];
   };
   return {
-    /** `text` is any object with the words as its `text`. */
+    /** `text` is any object with the words as its `text`. @param {T} text */
     text(text) {
       const out = settle(false);
       pending = text;
       return out;
     },
+    /** @param {string} name */
     tool(name) {
       return isBookkeeping(name) ? [] : settle(!CARDS.has(name));
     },

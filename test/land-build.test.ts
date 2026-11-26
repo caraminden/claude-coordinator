@@ -2,7 +2,7 @@
 // build minion takes main in with --into build/<n> --full and lands the build with --build, and a plain land refuses
 // a branch that carries a build's commits.
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
@@ -160,6 +160,63 @@ test('--full refuses on red CI, and when build/<n> moved since the merge, with t
   assert.match(res.stderr, /build\/3 has commits this branch doesn't: run git merge build\/3/);
   assert.equal(tipOf(r, 'build/3'), before);
   assert.match(c.run({}, ['--into', 'build/3', '--full', OK], bwt).stderr, /--full runs the whole suite/);
+});
+
+// #2067: schema-compat in small. A stand-in citadel-test (the smoke check's and the guards') fails as the real test's
+// stale-base check does when the schema at what it compares with (LAND_BUILD_BASE, else the last release: main here)
+// is past this commit's, and logs which it compared with.
+function schemaSetup() {
+  const r = setup();
+  const c = ci(r);
+  writeFileSync(
+    join(r.source, 'tools', 'citadel-test'),
+    `#!/usr/bin/env bash
+base=\${LAND_BUILD_BASE:-main}
+echo "\${LAND_BUILD_BASE:+build base }$(git rev-parse --short "$base")" >>"$GUARD_ARGS"
+have=$(cat schema) was=$(git show "$base:schema")
+[ "$was" -le "$have" ] || { echo "✖ test/schema-compat.test.ts:36 › this branch's schema is $have, older than $was"; exit 1; }
+`,
+  );
+  chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
+  const guard = ['schema-compat', 'test.ts'].join('.'); // built, not quoted: see guardSetup in land.test.ts
+  writeFileSync(join(r.source, 'tools', 'always-tests.txt'), `test/${guard}\n`);
+  writeFileSync(join(r.source, 'test', guard), '');
+  writeFileSync(join(r.source, 'schema'), '1\n');
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'schema 1');
+  build(r);
+  const args = join(r.dir, 'guard-args');
+  const ran = () => (existsSync(args) ? readFileSync(args, 'utf8').trim().split('\n') : []);
+  const ship = (argv: string[], cwd: string, extra: Record<string, string> = {}) => c.run({ GUARD_ARGS: args, ...extra }, argv, cwd);
+  return { ...r, c, ran, ship };
+}
+
+test("--full compares the schema with the main the build took in, so main shipping a newer schema while it waits doesn't refuse it (#2067)", () => {
+  const r = schemaSetup();
+  const bwt = worktree(r, 'ticket/9-build');
+  takeMain(r, bwt);
+  const took = tipOf(r, 'main');
+  // While the build waits in line, main ships schema 2 (the last release moves past the build's base).
+  r.commit(r.source, 'schema', '2\n');
+  const res = r.ship(['--into', 'build/3', '--full'], bwt);
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /older than/);
+  const short = git(r.source, 'rev-parse', '--short', took);
+  assert.deepEqual(r.ran(), [`build base ${short}`, `build base ${short}`], "the smoke check and the guards both compare with the build's merge-base with main");
+  assert.equal(tipOf(r, 'build/3'), git(bwt, 'rev-parse', 'HEAD'));
+});
+
+test('--build still compares the schema with the last release, and refuses a schema older than it (#2067)', () => {
+  const r = schemaSetup();
+  const bwt = worktree(r, 'ticket/9-build');
+  r.commit(bwt, 'schema', '0\n'); // the build lowers the schema: a real mismatch with the last release
+  git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
+  r.commit(r.source, 'm.txt', 'on main\n');
+  const res = r.ship(['--build'], bwt, { LAND_SMOKE: '0' });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /this branch's schema is 0, older than 1/);
+  assert.deepEqual(r.ran(), [git(r.source, 'rev-parse', '--short', 'main')], 'the guards ran against the last release, not a build base');
+  assert.equal(r.note(), null, 'no deploy');
 });
 
 test('--build lands the build by merging main: merge commits intact, feeder hashes unchanged, one deploy, branch deleted', () => {

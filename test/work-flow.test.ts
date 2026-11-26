@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { layout, rows } from '../public/flowmath.js';
 import { Store } from '../src/db.ts';
-import { dayStart, namedBy, rangeOf, readApart, settle, WorkFlow, type FlowAsk, type FlowMinion } from '../src/work-flow.ts';
+import { dayStart, namedBy, rangeOf, readApart, settle, WorkFlow, type End, type FlowAsk, type FlowMinion } from '../src/work-flow.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'work-flow-'));
 const db = join(root, 'x.db');
@@ -297,10 +297,10 @@ test('a ship with no refusals on record and no note of its own is never a first 
 });
 
 test('nodes that cost nothing: their ribbons stay inside them in dollars', () => {
-  const free = (end: string) => ({ id: 1, why: null, number: 1, title: 'x', kind: 'feature', path: 'never', end, cost: 0, refused: 0, said: '' });
+  const free = (end: End): FlowMinion => ({ id: 1, why: null, number: 1, title: 'x', kind: 'feature', path: 'never', end, cost: 0, refused: 0, said: '' });
   for (const ms of [
     [free('open'), free('nothing')],
-    [free('open'), free('nothing'), { ...free('live'), kind: 'bug', path: 'shipped', cost: 5 }],
+    [free('open'), free('nothing'), { ...free('live'), kind: 'bug' as const, path: 'shipped' as const, cost: 5 }],
   ]) {
     const { links } = layout(ms, 'cost', 300);
     for (const l of links) assert.ok(l.a1 <= l.from.at + l.from.size + 1e-6 && l.b1 <= l.to.at + l.to.size + 1e-6, `${l.from.key} > ${l.to.key}`);

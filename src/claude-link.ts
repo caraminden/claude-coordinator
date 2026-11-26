@@ -567,6 +567,26 @@ export class ClaudeLink {
     void this.containers.pruneImages(IMAGE_REPO, spec.image);
   }
 
+  /**
+   * Give containers already running the limits this server asks for, where that raises them (#2004; Josh, 2026-11-25, "Apply it
+   * while running"): a busy container never gets an idle restart. Run once as the server starts; a failure is logged, nothing more.
+   */
+  async raiseLimits(): Promise<void> {
+    const want = this.store.listUsers().flatMap((u) => [
+      { name: this.name(u.id), memory: CONTAINER_MEMORY },
+      { name: this.taskmasterName(u.id), memory: TASKMASTER_MEMORY },
+    ]);
+    try {
+      for (const c of await this.containers.raiseLimits(want)) {
+        if (c.did === 'failed') console.error(`container limits: could not raise ${c.name} from ${c.from} to ${c.to}: ${c.error}`);
+        else if (c.did === 'waits') console.log(`container limits: ${c.name} keeps ${c.from} until its idle restart; ${c.to} would lower it under running work`);
+        else console.log(`container limits: raised ${c.name} from ${c.from} to ${c.to}`);
+      }
+    } catch (err) {
+      console.error(`container limits: could not read them, so none was raised: ${(err as Error).message}`);
+    }
+  }
+
   /** The server is shutting down: from now on, running containers are left as they are. */
   close() {
     this.closing = true;

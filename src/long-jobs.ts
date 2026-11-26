@@ -25,7 +25,7 @@ export interface LongJob {
   who: string;
   queued_at: number;
   state: LongState;
-  /** #1902: an ordinary heavy job a ship held off CI. It starts once the line is empty, by day too, under its usual limit. */
+  /** #1902: an ordinary heavy job a ship held off CI. It starts once the line is empty (or at the hold's cap), by day too, under its usual limit. */
   quiet?: boolean;
   /** When ships first held it (src/ci-hold.ts). */
   held_at?: number;

@@ -88,7 +88,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    `test/`, set its source folders and file extensions, and list each file already over the line limit at its current size with a
    one-line reason, so files can shrink but not grow (Citadel's is `test/size-budget.test.ts`). The template skips the files the kit syncs in (`KIT_SYNCED`: land.sh, guard.sh, pre-push, ponytail.md): never list them in ALLOWED.
    A repo with TypeScript also gets the type check: copy `templates/typecheck.ts` to `tools/typecheck.ts`, set its
-   config block (baseline path, tsconfigs; none counts `any` only), add `typescript` as a devDependency, run
+   config block (baseline path, tsconfigs, none counting `any` only; and `SCRIPTS`, the front-end `.js` a tsconfig checks with `checkJs`, whose JSDoc `any` and `@ts-` comments then count too), add `typescript` as a devDependency, run
    `node tools/typecheck.ts --init`, and make `node tools/typecheck.ts` (exit 1 when a file gains a type error, an
    explicit `any` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
    `--update` after lowering counts (Cara, 2026-11-24: "don't cheat and use 'any'"; Citadel's is `test/typecheck.test.ts`).

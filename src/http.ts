@@ -169,7 +169,32 @@ export function json(res: ServerResponse, status: number, body: unknown, headers
   send(res, status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers }, JSON.stringify(body));
 }
 
-export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<any> {
+/**
+ * JSON for work that may outlast a fetch's patience (undici: 5 minutes for the headers, and 5 between pieces of the body):
+ * once it runs past `beatMs`, a 200 goes out with a space every beat, which JSON.parse skips, and the value follows.
+ * Past the first beat the status can't change, so work that fails then cuts the answer off.
+ */
+export async function slowJson(res: ServerResponse, work: Promise<unknown>, beatMs = 60_000) {
+  const beat = setInterval(() => {
+    if (!res.headersSent) res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.write(' ');
+  }, beatMs);
+  try {
+    const value = await work;
+    if (res.headersSent) res.end(JSON.stringify(value));
+    else json(res, 200, value);
+  } catch (err) {
+    if (!res.headersSent) throw err;
+    res.destroy();
+  } finally {
+    clearInterval(beat);
+  }
+}
+
+/** A request's JSON body: always an object, so a route reads its fields and narrows each one it uses. */
+export type JsonBody = Record<string, unknown>;
+
+export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<JsonBody> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new HttpError(415, 'Expected application/json');
   }
@@ -187,7 +212,7 @@ export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Prom
     throw new HttpError(400, 'Invalid JSON');
   }
   // Every route reads fields off it: `null` would be a TypeError there, answered as a 500.
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object');
+  if (!isRecord(body)) throw new HttpError(400, 'Expected a JSON object');
   return body;
 }
 
@@ -250,6 +275,16 @@ export function oneOf(v: unknown, allowed: readonly string[], field: string): st
   if (v === null || v === '') return null;
   if (typeof v !== 'string' || !allowed.includes(v)) throw new HttpError(400, `${field} must be one of: ${allowed.join(', ')}`);
   return v;
+}
+
+/** A JSON object (not an array or null), its fields read as unknown. */
+export function isRecord(v: unknown): v is JsonBody {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** `Number.isInteger` as a type guard, for a body's field. */
+export function isInt(v: unknown): v is number {
+  return Number.isInteger(v);
 }
 
 export function buildNumber(v: unknown): number | null {

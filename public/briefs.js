@@ -5,11 +5,17 @@
 // public/ui/markdown.js's FENCE (not exported there): keep the two the same. A ```code``` line is inline code, not a fence.
 const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
 
-/** The headings markdownDoc renders at the top level, in order, with the line each is on. */
+/**
+ * The headings markdownDoc renders at the top level, in order, with the line each is on.
+ * @param {string[]} lines
+ */
 function headings(lines) {
+  /** @type {{ line: number, level: number, text: string }[]} */
   const out = [];
+  /** @type {RegExp | null} */
   let fence = null; // the open code fence's closing line, as public/ui/markdown.js closes it
   lines.forEach((l, line) => {
+    /** @type {RegExpExecArray | null} */
     let f;
     if (fence) {
       if (fence.test(l)) fence = null;
@@ -22,7 +28,10 @@ function headings(lines) {
   return out;
 }
 
-/** "Page the chat history (feature/perf, M)" → its title and the type its brackets open with. */
+/**
+ * "Page the chat history (feature/perf, M)" → its title and the type its brackets open with.
+ * @param {string} text
+ */
 function titleAndType(text) {
   const m = /\s*\(([^)]*)\)\s*$/.exec(text);
   return {
@@ -40,6 +49,9 @@ function titleAndType(text) {
  * Every brief in `src`, a file named `name`: `heading` is the heading as written (its key; '' for a
  * whole handoff file), `index` which top-level heading it hangs on (-1: the top of the file), and
  * `body` the section verbatim.
+ * @param {string} src
+ * @param {string} [name]
+ * @returns {{ index: number, heading: string, title: string, typeHint: string, body: string }[]}
  */
 export function findBriefs(src, name = '') {
   // markdownDoc drops comments before it renders, so line up with what it shows.
@@ -62,13 +74,21 @@ export function findBriefs(src, name = '') {
   return briefs;
 }
 
-/** The registered type a hint like "feature", "process" or "fix" names (by value or alias), or ''. */
+/**
+ * The registered type a hint like "feature", "process" or "fix" names (by value or alias), or ''.
+ * @param {string} hint
+ * @param {{ value: string, aliases?: string[] }[]} types
+ */
 export function matchType(hint, types) {
   if (!hint) return '';
   return types.find((t) => t.value === hint || t.aliases?.includes(hint))?.value ?? '';
 }
 
-/** The new minion's first message: the brief verbatim, then where it came from, to read the rest. */
+/**
+ * The new minion's first message: the brief verbatim, then where it came from, to read the rest.
+ * @param {{ heading: string, body: string }} brief
+ * @param {string} filePath
+ */
 export function briefMessage(brief, filePath) {
   return brief.heading ? `${brief.body}\n\n(Brief from ${filePath}; read the whole file for its context.)` : `${brief.body}\n\n(Handoff file: ${filePath})`;
 }

@@ -497,3 +497,22 @@ test("loading a scheme's decisions makes no synchronous file call on the server'
   for (const r of ['One', 'Two', 'Three']) assert.ok(rules.includes(r), r);
   assert.deepEqual(await syncCallsUnder(join(import.meta.dirname, '..', 'kit'), load), []);
 });
+
+test("the units check reads deploy/ and the install folder with no synchronous file call on the server's thread (#2081)", async () => {
+  const { checkUnits } = await import('../src/unit-drift.ts');
+  const units = join(root, 'units');
+  const deploy = join(units, 'deploy');
+  const inst = join(units, 'inst');
+  mkdirSync(join(deploy, 'a.service.d'), { recursive: true });
+  mkdirSync(inst, { recursive: true });
+  writeFileSync(join(deploy, 'a.service'), 'A');
+  writeFileSync(join(deploy, 'a.service.d', 'w.conf'), 'W');
+  writeFileSync(join(deploy, 'not-installed.txt'), '# none\n');
+  writeFileSync(join(inst, 'a.service'), 'old');
+  let states: string[] = [];
+  const seen = await syncCallsUnder(units, async () => {
+    states = (await checkUnits(deploy, inst, root)).map((r) => `${r.name}:${r.state}`);
+  });
+  assert.deepEqual(states, ['a.service:different', 'a.service.d/w.conf:missing']);
+  assert.deepEqual(seen, []);
+});

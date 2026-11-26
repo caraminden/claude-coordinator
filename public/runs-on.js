@@ -1,15 +1,19 @@
 // Where a minion's turns run (Build 7 T4; src/runs-on.ts): anywhere, at perigee only, or on one computer of the
 // person's own. Opened from the minion's right-click menu.
+/** @import { RunsOnChoice, Ticket } from './types.js' */
 import { ago, api, h, view } from './base.js';
 import { renderSidebar } from './sidebar.js';
 import { renderTyping } from './thread.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 
-const objects = (id) => new Set([view?.tickets?.get(id), view?.ticket?.id === id && view.ticket].filter(Boolean));
+/** @param {number} id */
+const objects = (id) => new Set(/** @type {Ticket[]} */ ([view?.tickets?.get(id), view?.ticket?.id === id && view.ticket].filter(Boolean)));
 
+/** @param {Pick<Ticket, 'id' | 'number'>} t @param {string} on */
 function setRunsOn(t, on) {
   const was = new Map([...objects(t.id)].map((o) => [o, o.runs_on ?? null]));
+  /** @param {(o: Ticket) => Ticket['runs_on']} of */
   const show = (of) => {
     for (const o of objects(t.id)) o.runs_on = of(o);
     renderSidebar();
@@ -26,11 +30,15 @@ function setRunsOn(t, on) {
     .catch(() => {});
 }
 
+/** @param {Pick<Ticket, 'id' | 'number' | 'runs_on'>} t */
 export function openRunsOn(t) {
   const now = t.runs_on?.on ?? 'anywhere';
+  /** @type {RunsOnChoice[] | null} */
   let machines = null; // not read yet
+  /** @type {string | null} */
   let failed = null;
   const list = h('div', { class: 'hue-rows', role: 'radiogroup', 'aria-label': 'Runs on' });
+  /** @param {string} value @param {string} name @param {string} line @param {unknown} [off] */
   const option = (value, name, line, off) =>
     h(
       'label',

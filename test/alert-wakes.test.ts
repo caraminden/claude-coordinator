@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { AlertWakes, BATCH_MS, MAX_WAIT_MS, quietUntil, type AlertWakeDeps } from '../src/alert-wakes.ts';
 import { Store } from '../src/db.ts';
 import { Outbox, type OutboxRunner } from '../src/outbox.ts';
+import { deliveriesOf } from '../src/outbox.ts';
 
 // A Mandate alert also wakes the Taskmaster it's about, to explain it unasked (#869; Cara, 2026-11-17: "there should be
 // some callback to the relevant taskmaster so it can explain to me what happened without me asking").
@@ -200,7 +201,7 @@ test('an alert that clears trims its row, and the last one out drops it', async 
   w.wakes.raise({ from: peek, key: 'a', title: 'A failed', link: '/l', person: 'Cara' }, NOON);
   w.wakes.raise({ from: peek, key: 'b', title: 'B failed', link: '/l', person: 'Cara' }, NOON + SEC);
   w.wakes.clear(peek, 'a');
-  const [row] = w.store.listDeliveries({ kind: 'alert', states: ['waiting'] });
+  const [row] = deliveriesOf(w.store, 'alert', { states: ['waiting'] });
   assert.deepEqual(Object.keys(row.payload.alerts), ['4:b']);
   w.wakes.clear(peek, 'b');
   assert.deepEqual(w.store.listDeliveries({ kind: 'alert', states: ['waiting'] }), []);
@@ -259,7 +260,7 @@ test('an old key written after boot (the dual read) merges into the waiting row'
   w.wakes.raise({ from: peek, key: 'b', title: 'B failed', link: '/l', person: 'Cara' }, NOON);
   w.store.setSetting('alert-wakes', { told: { '4:a': ['4:a'] }, batches: { '4': { first: NOON - 20 * SEC, last: NOON - 20 * SEC, alerts: { '4:a': { sender: 'Peek Auras', title: 'A failed', link: '/l', to: ['Cara'], parts: null } } } } });
   await w.tick(NOON + 10 * SEC);
-  const rows = w.store.listDeliveries({ kind: 'alert', states: ['waiting'] });
+  const rows = deliveriesOf(w.store, 'alert', { states: ['waiting'] });
   assert.equal(rows.length, 1);
   assert.deepEqual(Object.keys(rows[0].payload.alerts).sort(), ['4:a', '4:b']);
   assert.equal(rows[0].due, NOON + BATCH_MS, 'the earlier of 60 s after the last and 5 min after the first');
@@ -278,7 +279,7 @@ test('a row due at 01:59 that a late boot reaches at 02:00 waits until 09:00, an
   const nine = Date.UTC(2026, 10, 18, 17, 0);
   const again = await server(w.store, w.deps, { now: two });
   assert.deepEqual(w.woken, []);
-  const [row] = w.store.listDeliveries({ kind: 'alert', states: ['waiting'] });
+  const [row] = deliveriesOf(w.store, 'alert', { states: ['waiting'] });
   assert.equal(row.due, nine);
   // An alert in the hold merges into it rather than making a second row.
   again.wakes.raise({ from: peek, key: 'b', title: 'B failed', link: '/l', person: 'Cara' }, two + MIN);

@@ -4,11 +4,13 @@
 // by start_after followers and parent starts (effortFor), and `chain from #N` for a start_after chain nobody named.
 // docs/adr/0031-effort-retros.md has the picks.
 import { buildOwnerKey, type Project, type Store, type Ticket } from './db.ts';
+import { movedKey } from './properties.ts';
 import type { Runner } from './runner.ts';
 import { pickFor } from '../public/model-table.js';
 import { pacific } from './schedules.ts';
 import { judge, judged, type JudgeMode } from './judges.ts';
 import { budgetKey, family, type BudgetState } from './minion-budget.ts';
+import { thrown } from './thrown.ts';
 
 export const EFFORT_KEY = 'effortName';
 /** A named effort needs this many minions; an unnamed chain one more (a 3-minion chain is often only ordering). */
@@ -17,6 +19,32 @@ export const CHAIN_FLOOR = 4;
 /** How long an effort stays closed before its retro starts, so a follow-up the Taskmaster starts joins it instead. */
 export const QUIET_MS = 6 * 3_600_000;
 const AUTO = /^chain from #\d+$/;
+/**
+ * Records where a closing minion's ask went (none: forgets what an earlier close said), and answers the effort that minion
+ * joins. The hand-over itself happens as the minion closes (Registry.statusChanged); one already closed hands over now.
+ */
+export function moveEffort(store: Store, from: Pick<Ticket, 'id' | 'status'>, into: Pick<Ticket, 'id'> | null): string | null {
+  if (!into) {
+    store.deleteSetting(movedKey(from.id));
+    return null;
+  }
+  store.setSetting(movedKey(from.id), into.id);
+  const name = store.props.effortToJoin(from.id, into.id);
+  if (from.status === 'closed') store.props.joinEffort(from.id, into.id);
+  return name;
+}
+
+/** Every minion `t`'s ask moved into, one hop after another. */
+export function movedTo(store: Store, t: Ticket): Ticket[] {
+  const seen = new Set([t.id]);
+  const out: Ticket[] = [];
+  for (let id = store.getSetting<number>(movedKey(t.id)); id != null && !seen.has(id); id = store.getSetting<number>(movedKey(id))) {
+    seen.add(id);
+    const next = store.getTicket(id);
+    if (next) out.push(next);
+  }
+  return out;
+}
 
 export const doneKey = (projectId: number, name: string) => `effort-retro:${projectId}:${name}`;
 
@@ -47,9 +75,10 @@ export const TRIES = 3;
  * The efforts of one scheme that are ready for a verdict: big enough, all closed and quiet for QUIET_MS, not yet done.
  * `since(name)` is when that name last got a verdict (undefined: never); only minions made after it count, so a name the
  * Taskmaster reuses for a later goal gets its own retro. `majorBuild(n)` says Build n has its own build minion, whose
- * retro covers its feeders: a bare build number (Delve's "found in" build on a bug) doesn't.
+ * retro covers its feeders: a bare build number (Delve's "found in" build on a bug) doesn't. `movedInto(t)` is where t's ask
+ * went: those must be closed and quiet too, in the effort or not.
  */
-export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean): EffortVerdict[] {
+export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => []): EffortVerdict[] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
     const name = effortOf.get(t.id);
@@ -62,10 +91,11 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
     const members = cut === undefined ? all : all.filter((t) => t.created_at > cut);
     const floor = AUTO.test(name) ? CHAIN_FLOOR : NAMED_FLOOR;
     if (members.length < floor) continue;
-    if (members.some((t) => t.status !== 'closed')) continue;
-    const last = Math.max(...members.map((t) => t.closed_at ?? t.updated_at));
+    const waited = [...members, ...members.flatMap(movedInto)];
+    if (waited.some((t) => t.status !== 'closed')) continue;
+    const last = Math.max(...waited.map((t) => t.closed_at ?? t.updated_at));
     if (now - last < QUIET_MS) continue;
-    members.sort((a, b) => a.number - b.number);
+    members.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
     // A major build's retro (citadel:retro, the build minion's step 5) already covers an effort that is mostly that build.
     const builds = new Map<number, number>();
     for (const t of members) if (t.build != null && majorBuild(t.build)) builds.set(t.build, (builds.get(t.build) ?? 0) + 1);
@@ -151,7 +181,14 @@ export class EffortRetros {
       const effortOf = new Map(rows.map((r) => [r.id, r.value]));
       const tickets = rows.map((r) => store.getTicket(r.id)).filter((t): t is Ticket => !!t);
       const majorBuild = (n: number) => store.getSetting(buildOwnerKey(project.id, n)) != null;
-      for (const v of effortsDue(tickets, effortOf, (name) => since(project.id, name), now, majorBuild)) {
+      for (const v of effortsDue(
+        tickets,
+        effortOf,
+        (name) => since(project.id, name),
+        now,
+        majorBuild,
+        (t) => movedTo(store, t),
+      )) {
         const before = store.getSetting<Marker>(doneKey(project.id, v.name));
         // Marked before the start: a crash between the two loses one retro rather than starting it twice.
         store.setSetting(doneKey(project.id, v.name), { act: v.act, why: v.why, at: now });
@@ -161,12 +198,12 @@ export class EffortRetros {
         }
         try {
           said.push(`${project.name} "${v.name}": ${await start(project, v)}`);
-        } catch (err: any) {
+        } catch (err) {
           console.error(`Effort retro for ${project.name} "${v.name}" didn't start:`, err);
           // Its minion was made (the marker has its number): leave it. Else try again next tick, TRIES in all.
           if (store.getSetting<Marker>(doneKey(project.id, v.name))?.ticket == null) {
             const tries = (before?.act === 'failed' ? (before.tries ?? 1) : 0) + 1;
-            store.setSetting(doneKey(project.id, v.name), { act: 'failed', why: String(err?.message ?? err).slice(0, 300), at: now, tries });
+            store.setSetting(doneKey(project.id, v.name), { act: 'failed', why: String(thrown(err).message ?? err).slice(0, 300), at: now, tries });
           }
         }
       }
@@ -294,12 +331,12 @@ export class TroubleRetros {
           // Marked before the start: a crash between the two loses one post-mortem rather than starting it twice.
           for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: now });
           said.push(`${project.name} #${t.number}: ${await start(project, v)}`);
-        } catch (err: any) {
+        } catch (err) {
           console.error(`Post-mortem of #${t.number} in ${project.name} didn't start:`, err);
           // Its minion was made: leave it. Else mark the failure and try again next tick, TRIES in all.
           if (store.getSetting<Marker>(troubleKey(t.id, kinds[0]))?.ticket == null) {
             const tries = (before?.act === 'failed' ? (before.tries ?? 1) : 0) + 1;
-            for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'failed', why: String(err?.message ?? err).slice(0, 300), at: now, tries });
+            for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'failed', why: String(thrown(err).message ?? err).slice(0, 300), at: now, tries });
           }
         }
       }

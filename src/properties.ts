@@ -8,6 +8,9 @@ import { HttpError } from './http.ts';
 import { inScope, scoped, warm } from './read-scope.ts';
 
 /** The scheme whose Taskmaster owns the global keys (Citadel itself). */
+/** The setting holding the ticket id a closed minion's ask moved into (close_ticket's and close_self's `into`). */
+export const movedKey = (ticketId: number) => `moved-into:${ticketId}`;
+
 export const GLOBAL_OWNER = 2;
 
 export const VALUE_KINDS = ['enum', 'integer', 'user', 'text'] as const;
@@ -435,6 +438,18 @@ export class Registry {
     if (build !== null) this.db.prepare('INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)').run('minion', ticketId, k.id, String(build), by, Date.now());
   }
 
+  /** The effort `into` takes from `from`: from's, when into has none (#2080; Josh, 2026-11-25, "Effort follows moved asks"). */
+  effortToJoin(from: number, into: number): string | null {
+    const name = this.forTarget('minion', from).effortName;
+    return typeof name === 'string' && !this.forTarget('minion', into).effortName ? name : null;
+  }
+
+  joinEffort(from: number, into: number) {
+    const name = this.effortToJoin(from, into);
+    const row = this.db.prepare('SELECT project_id FROM tickets WHERE id = ?').get(into) as { project_id: number } | undefined;
+    if (name && row) this.set('minion', into, row.project_id, { effortName: name }, 'Citadel');
+  }
+
   /** A new minion's starting stage, unless one was given: idea for ideation, otherwise in-progress. */
   startStage(ticketId: number) {
     const stage = this.globalKey('stage');
@@ -446,8 +461,14 @@ export class Registry {
 
   /** Dismissing a minion moves it to done; reopening a done minion moves it back to in-progress. One that is open again, or stays open after a close that didn't happen, isn't closed as anything. */
   statusChanged(ticketId: number, before: string, after: string) {
+    // The hand-over waits for the close itself: one called off, or ending in an error, hands nothing on (#2080).
+    if (before !== after && after === 'closed') {
+      const moved = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(movedKey(ticketId)) as { value: string } | undefined;
+      if (moved) this.joinEffort(ticketId, Number(moved.value));
+    }
     if (before !== after && after !== 'closed') {
       this.db.prepare("DELETE FROM properties WHERE target_type = 'minion' AND target_id = ? AND key_id = (SELECT id FROM property_keys WHERE scope IS NULL AND key = 'closedAs')").run(ticketId);
+      this.db.prepare('DELETE FROM settings WHERE key = ?').run(movedKey(ticketId)); // where its ask went goes with the word
     }
     const stage = this.globalKey('stage');
     if (!stage || before === after) return;

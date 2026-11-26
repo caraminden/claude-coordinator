@@ -44,6 +44,7 @@ export const ASK_QUESTION = () => ({
                     description: 'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail; pictured options show as a gallery.',
                   },
                   recommended: { type: 'boolean', description: 'true on the option you recommend, listed first; the card labels it "(Recommended)". Leave the words out of the label.' },
+                  start: { type: 'object', description: 'A pick starts a minion: {handoff, title, type, model?, effort?, start_after?, build?}' },
                 },
                 required: ['label'],
               },
@@ -326,9 +327,13 @@ export async function runCardsTool(name: string, args: Record<string, unknown>):
         merged,
       } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.not_duplicate === true ? { not_duplicate: true } : {}), ...(args.kind ? { kind: args.kind } : {}), ...(args.hand_off !== undefined ? { hand_off: args.hand_off } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
+      // A card whose options carry starts (#2050) says once what a pick does, here rather than in the always-loaded schema.
+      const starts = (args.questions as { options?: { start?: unknown }[] }[]).some((q) => q.options?.some((o) => o.start))
+        ? ' A pick of options with start (no typed words) starts those minions by itself: when that was the whole answer and all started, you and your Taskmaster get it as held mail; else you are woken with what started and what refused. A pick with typed words starts nothing and wakes you as usual.'
+        : '';
       if (merged)
-        return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href}), "below" this turn, "above" later). End your turn now with a short reply; the answers will come as the next message.`;
-      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn, while this one is still unanswered, joins it (up to 8 questions in all), so people see one card with one Send.'}`;
+        return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href}), "below" this turn, "above" later). End your turn now with a short reply; the answers will come as the next message.${starts}`;
+      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn, while this one is still unanswered, joins it (up to 8 questions in all), so people see one card with one Send.'}${starts}`;
     }
     case 'settle_question': {
       const { settled } = await call<{ settled: unknown[] }>('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });

@@ -10,5 +10,10 @@ export const planKey = (ticketId: number) => `plan:${ticketId}`;
 /** A minion's task-list state just before the furthest chat page start read, so a restart's first open replays only what came since (#613; src/history.ts planBefore). */
 export const pagePlanKey = (ticketId: number) => `plan:${ticketId}:page`;
 
+/** A minion's armed hand-off (#2046, src/armed-handoff.ts): hand_off_land's arguments, kept for the pipeline lane. */
+export const armedKey = (ticketId: number) => `armed-handoff:${ticketId}`;
+/** A minion's newest finished flake-proof run (#2089): its commit and conclusion, so a hand-off armed after a green proof ships at once. */
+export const proofKey = (ticketId: number) => `proof-seen:${ticketId}`;
+
 /** When the wait records began (#1992, src/db/wait-records.ts), ms. */
 export const WAITS_SINCE_KEY = 'wait_records_since';

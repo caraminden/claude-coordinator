@@ -8,7 +8,11 @@ const ADMIN_ONLY = new Set(PAGES.filter((p) => p.admin).map((p) => p.kind));
 const KEEP = new Set(['artifacts', 'shared', 'settings', ...PAGES.map((p) => p.kind)]);
 const ITEM_PAGES = new Set(PAGES.filter((p) => p.item).map((p) => p.kind));
 
-/** The hash to open for scheme `id` when you click it while on `hash`. `isAdmin` gates the admin Settings tabs. */
+/** The hash to open for scheme `id` when you click it while on `hash`. `isAdmin` gates the admin Settings tabs.
+ * @param {string | null | undefined} hash
+ * @param {number} id
+ * @param {boolean} [isAdmin]
+ */
 export function schemeSwitchHash(hash, id, isAdmin = false) {
   const m = /^#\/p\/\d+\/([a-z-]+)(?:\/(.*))?$/.exec(hash ?? '');
   const home = `#/p/${id}`;

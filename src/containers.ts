@@ -80,6 +80,23 @@ export function unitProps(spec: ContainerSpec): string[] {
   return m ? ['-p', `MemoryHigh=${m.high}`, '-p', `MemoryMax=${m.max}`, '-p', `MemorySwapMax=${m.swap}`] : [];
 }
 
+/** A systemd size as bytes: `12G`, the plain bytes `systemctl show` prints, or `infinity`. NaN for anything else (`[not set]`). */
+function sizeBytes(v: string): number {
+  if (v === 'infinity') return Infinity;
+  const m = v.match(/^(\d+)([KMGT]?)$/);
+  return m ? Number(m[1]) * 1024 ** ' KMGT'.indexOf(m[2] || ' ') : NaN;
+}
+
+/** What raiseLimits did with one running container. */
+export interface LimitChange {
+  name: string;
+  /** `waits`: a limit would go down, which under running work is a reclaim storm, so it stays until its idle restart. */
+  did: 'raised' | 'waits' | 'failed';
+  from: string;
+  to: string;
+  error?: string;
+}
+
 /** podman run's arguments for a spec, after `run`. */
 export function runArgs(spec: ContainerSpec): string[] {
   const args = ['--rm', '--replace', '--name', spec.name, '--init', '--userns=keep-id', '--network=host', '--cgroups=split', `--pids-limit=${PIDS_LIMIT}`, '--label', `${SPEC_LABEL}=${specHash(spec)}`];
@@ -144,6 +161,46 @@ export class Containers {
         .at(-1)
         ?.trim();
     throw new Error(`${spec.name} didn't start${why ? `: ${why.slice(0, 300)}` : ''}`);
+  }
+
+  /**
+   * Raise the memory limits of containers already running to what's asked (#2004): the unit's cgroup holds conmon and the payload,
+   * so no process in it stops or restarts. Only up, and all three together: one that would go down leaves them all (LimitChange `waits`).
+   * The container keeps the spec label it started with, so it still restarts at its next idle moment. Returns what changed or
+   * couldn't, nothing for a container not running or already right.
+   */
+  async raiseLimits(want: { name: string; memory: { high: string; max: string; swap: string } }[]): Promise<LimitChange[]> {
+    if (!want.length) return [];
+    const r = await this.run('systemctl', ['--user', 'show', '-p', 'Id', '-p', 'ActiveState', '-p', 'MemoryHigh', '-p', 'MemoryMax', '-p', 'MemorySwapMax', ...want.map((w) => `${w.name}.service`)]);
+    if (r.code !== 0) throw new Error(r.stderr.trim() || `systemctl show exited ${r.code}`);
+    // One block of key=value lines for each unit, in any order.
+    const shown = new Map(
+      r.stdout.split(/\n\n+/).map((block) => {
+        const props = Object.fromEntries(block.split('\n').map((l): [string, string] => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
+        return [props.Id ?? '', props] as const;
+      }),
+    );
+    const done: LimitChange[] = [];
+    for (const w of want) {
+      const now = shown.get(`${w.name}.service`);
+      if (now?.ActiveState !== 'active') continue;
+      const keys = [
+        ['MemoryHigh', w.memory.high],
+        ['MemoryMax', w.memory.max],
+        ['MemorySwapMax', w.memory.swap],
+      ] as const;
+      const pairs = keys.map(([k, to]) => ({ is: sizeBytes(now[k] ?? ''), to: sizeBytes(to) }));
+      if (pairs.every((p) => p.is === p.to)) continue;
+      const change = { name: w.name, from: keys.map(([k]) => `${k}=${now[k]}`).join(' '), to: keys.map(([k, to]) => `${k}=${to}`).join(' ') };
+      // A size it can't read counts as lower: never change what can't be compared.
+      if (!pairs.every((p) => p.is <= p.to)) {
+        done.push({ ...change, did: 'waits' });
+        continue;
+      }
+      const set = await this.run('systemctl', ['--user', 'set-property', '--runtime', `${w.name}.service`, ...keys.map(([k, to]) => `${k}=${to}`)]);
+      done.push(set.code === 0 ? { ...change, did: 'raised' } : { ...change, did: 'failed', error: set.stderr.trim() || `systemctl exited ${set.code}` });
+    }
+    return done;
   }
 
   /** Stop and remove the container (its unit ends with it). */

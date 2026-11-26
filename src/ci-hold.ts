@@ -7,10 +7,13 @@
 //    the ship running ends and the next ones wait off Citadel's runners till main's run is over (Josh, 2026-11-25, picked
 //    "After 4 h, ships wait"; mainAlone, server.ts's mainCap).
 //  - A ship's run (land/) is never touched.
+//  - A heavy job or hand-started suite held OWN_CAP_MS runs beside ships and is not stopped for them again (Josh,
+//    2026-11-25, picked "2 hours"). Main's run stops it
+//    only once main can go itself, as it stops a proof, and it still takes the one-job slot.
 // One job at a time (#1906; Josh, 2026-11-24, picked "One Citadel job, one Peek build": "Citadel never runs two heavy jobs at
 // once"): the runs of Citadel's own repo go one by one, in the order ship, main's full run, a ship's own check (check/, a
 // light check's heavy job) or the early next train (early/), then optional work. A run takes the slot when it asks and is let
-// in. A ship stops whatever holds it. A check or early run starts only when nothing else of Citadel's runs or is queued (a
+// in. A ship stops whatever holds it, but for a job past OWN_CAP_MS (above). A check or early run starts only when nothing else of Citadel's runs or is queued (a
 // ship in line with no run doesn't count: that is when it is worth running), is never waited for, and comes back only while
 // its branch is there (land.sh deletes it when its ship goes on). A job that ran SLOT_HOLD_MS
 // keeps no other waiting, and none waits behind lower ones past SLOT_WAIT_MS.
@@ -41,6 +44,8 @@ export const MAIN_WAIT_MS = 4 * 3600_000;
 export const MAIN_SETTLE_MS = 2 * 60_000;
 /** The most another scheme's job waits (a starting value). */
 export const OTHERS_CAP_MS = 4 * 3600_000;
+/** Citadel's own heavy job or suite held this long stops yielding to ships (Josh, 2026-11-25, picked "2 hours"); main's run and the one-job slot still come first. */
+export const OWN_CAP_MS = 2 * 3600_000;
 /** A starting value: a job that has run this long keeps no other waiting, so a hung one can't hold the line. */
 export const SLOT_HOLD_MS = 4 * 3600_000;
 /** A starting value: the most a job waits behind lower jobs of Citadel's, from the first time it did (ships still go first): a long queue can't hold it for ever. */
@@ -330,9 +335,12 @@ export class CiHold {
   /** Why optional work of this repo may not start now, or null; a repo with no runners on that PC is never held. */
   why(repo: string, since?: number, now = Date.now()): string | null {
     const r = repo.toLowerCase();
-    if (!this.repos().includes(r) || this.capped(r, since, now)) return null;
-    const { why, busy } = this.state(now);
-    return why ?? (r === this.d.own()?.toLowerCase() && !(since !== undefined && now - since >= SLOT_WAIT_MS) ? busy : null);
+    const mine = r === this.d.own()?.toLowerCase();
+    const capped = this.capped(r, since, now);
+    if (!this.repos().includes(r) || (capped && !mine)) return null;
+    const { why, busy, off } = this.state(now);
+    const first = capped && !off ? this.shipsFirst('heavy', undefined, true, now, since) : why;
+    return first ?? (mine && !(since !== undefined && now - since >= SLOT_WAIT_MS) ? busy : null);
   }
 
   private repos(): string[] {
@@ -412,14 +420,15 @@ export class CiHold {
   }
 
   /** Why this run must not be running now for a ship's or main's sake, or null. `start`: optional work also waits the settle time. */
-  private shipsFirst(kind: HoldKind, h: HeldRun | undefined, start: boolean, now: number): string | null {
+  private shipsFirst(kind: HoldKind, h: HeldRun | undefined, start: boolean, now: number, since = h?.since): string | null {
     if (kind === 'main') {
       // Past its wait it goes before ships (Josh, 2026-11-25, "After 4 h, ships wait"): only one already running holds it, never the line.
       if (this.mainPast(h, now)) return start && h?.phase === 'held' && this.fresh(now) && this.ships.length ? "a ship's tests are running" : null;
       return this.shipWhy(now) ?? (start && h && !this.gap(now) ? 'the ship line only just emptied' : null);
     }
     // No ship stops a proof; main's run does, as it stops any lower job, once it may go itself.
-    if (kind === 'proof') return this.mainMay(now) && (start || this.seen.main || this.gap(now) || this.mainDue(now)) ? this.mainWhy(now) : null;
+    // A job past its cap is no longer stopped for ships either, so main stops it as it does a proof.
+    if (kind === 'proof' || (!sideRun(kind) && this.capped(this.d.own()!.toLowerCase(), since, now))) return this.mainMay(now) && (start || this.seen.main || this.gap(now) || this.mainDue(now)) ? this.mainWhy(now) : null;
     if (!sideRun(kind)) return start ? this.gate(now, h?.stops) : this.stopWhy(now);
     if (!this.fresh(now)) return null;
     // While main's run waits for ships it keeps no ship's own check or early run from starting (hours, at most).
@@ -452,9 +461,9 @@ export class CiHold {
     return now - this.quietSince >= settle * Math.min(MAX_BACKOFF, 2 ** Math.max(0, stops - 1)) ? null : 'the ship line only just emptied';
   }
 
-  /** Another scheme's job held this long goes ahead whatever the line does: a hung line can't hold it for ever (Josh, 2026-11-24). */
+  /** An optional job held this long goes ahead whatever the ship line does: a hung line can't hold it for ever (Josh, 2026-11-24). */
   private capped(repo: string, since: number | undefined, now: number) {
-    return since !== undefined && repo !== this.d.own()?.toLowerCase() && now - since >= OTHERS_CAP_MS;
+    return since !== undefined && now - since >= (repo === this.d.own()?.toLowerCase() ? OWN_CAP_MS : OTHERS_CAP_MS);
   }
 
   private mainPast(h: HeldRun | undefined, now: number) {
@@ -535,7 +544,7 @@ export class CiHold {
         const runs = a.run.status === 'in_progress';
         if (a.repo === own) {
           // A queued check or early run takes no runner's time: it asks when it starts. Main's running one yields to a ship (#1906).
-          const first = a.kind !== 'main' && a.kind !== 'proof' && !sideRun(a.kind) ? why : runs || a.kind === 'proof' || a.kind === 'main' ? this.shipsFirst(a.kind, h, false, now) : null;
+          const first = runs || !sideRun(a.kind) ? this.shipsFirst(a.kind, h, false, now, this.since(h, a.kind, a.run)) : null;
           if (first) await this.hold(a.repo, a.run, a.kind, first, now);
           else if (runs && !this.has(a.run.id) && this.unasked(a.run.id, now) && !this.slotPast(h, now)) {
             const taken = this.taken(a.kind, a.run.id, now);
@@ -667,7 +676,8 @@ export class CiHold {
         h.why = hours;
         this.save();
       }
-      const clear = sideRun(h.kind) || h.kind === 'proof' || h.kind === 'main' ? !this.shipsFirst(h.kind, h, true, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
+      const free = h.repo === this.d.own()?.toLowerCase() ? !this.shipsFirst(h.kind, h, true, now) : !this.gate(now, h.stops) || this.capped(h.repo, h.since, now);
+      const clear = free && (id === null || (this.d.mayResume?.(id) ?? true));
       if ((!off && !clear) || (group && groups.has(group)) || (h.misses && now - h.at < RECANCEL_MS)) return;
       const { status } = await post('rerun');
       if (status >= 200 && status < 300) {
@@ -745,12 +755,13 @@ export class CiHold {
     this.letIn.delete(run.id);
     this.save();
     await this.publish(now); // before the cancel: citadel-heavy must never see the cancelled run without its hold
+    const mine = repo === this.d.own()?.toLowerCase();
     if (!had && h.ticket !== null && !sideRun(kind))
       this.d.tell(
         h.ticket,
-        taken || kind === 'proof'
+        taken || kind === 'proof' || this.capped(repo, h.since, now)
           ? `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why}. Citadel starts it again by itself${kind === 'proof' ? ', its clean runs counted from zero,' : ' from the start'} once that has ended. Nothing to do; don't start it again, and the cancelled run isn't a failure.`
-          : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself from the start once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again). Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
+          : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself from the start once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again)${kind === 'heavy' || kind === 'suite' ? `, or once it has been held ${(mine ? OWN_CAP_MS : OTHERS_CAP_MS) / 3600_000} hours, ships or not` : ''}. Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
       );
     await (this.d.post ?? ghPost)(`repos/${repo}/actions/runs/${run.id}/cancel`, this.d.as(repo) ?? {}).catch((err) => this.say(`CI hold: cancel of run ${run.id}: ${err?.message ?? err}`));
   }
@@ -774,7 +785,7 @@ export class CiHold {
     if (h?.phase === 'stopping') return { go: false, why: h.why };
     const mine = repo.toLowerCase() === own;
     // Another scheme's job asks about ships alone; one that came back asks again without the settle time.
-    const first = mine ? this.shipsFirst(kind, h, h?.phase !== 'resumed', now) : this.capped(repo.toLowerCase(), this.since(h, kind, run), now) ? null : h?.phase === 'resumed' ? this.stopWhy(now) : this.gate(now);
+    const first = mine ? this.shipsFirst(kind, h, h?.phase !== 'resumed', now, this.since(h, kind, run)) : this.capped(repo.toLowerCase(), this.since(h, kind, run), now) ? null : h?.phase === 'resumed' ? this.stopWhy(now) : this.gate(now);
     const retry = mine && kind === 'proof' && !first ? await this.retryWhy(as) : null;
     const taken = first || !mine || this.slotPast(h, now) ? null : (this.slotWhy(kind, runId, now) ?? retry);
     if (!first && !taken) {
@@ -818,7 +829,8 @@ export class CiHold {
       });
     }
     for (const j of this.d.waiting?.() ?? []) {
-      if (j.reported || now - j.since < REPORT_MS || this.d.closed(j.ticket)) continue;
+      // Citadel's own is free to start at OWN_CAP_MS, which equals REPORT_MS: give the long-job pump (a minute) its turn first.
+      if (j.reported || now - j.since < REPORT_MS + (j.repo.toLowerCase() === this.d.own()?.toLowerCase() ? 2 * 60_000 : 0) || this.d.closed(j.ticket)) continue;
       add(j.repo, { since: j.since, ticket: j.ticket, name: `${NAMES.heavy} (${j.what})`, why: j.why, mark: () => this.d.told?.(j.id) });
     }
     if (!due.size) return;

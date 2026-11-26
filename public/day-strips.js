@@ -6,7 +6,14 @@ import { shortDuration } from './chattext.js';
 import { emptyCard } from './look.js';
 import { mountTips } from './ui/tip.js';
 
+/** @import { Strip, StripPartName } from './types.js' */
+/** @typedef {Record<StripPartName, number>} Totals */
 const SVG = 'http://www.w3.org/2000/svg';
+/**
+ * @param {string} tag
+ * @param {Record<string, string | number | null | undefined>} [attrs]
+ * @param {...(Node | string)} kids
+ */
 const svg = (tag, attrs = {}, ...kids) => {
   const el = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, String(v));
@@ -14,6 +21,7 @@ const svg = (tag, attrs = {}, ...kids) => {
   return el;
 };
 /** The parts, in src/day-strips.ts's order, with the words people read. */
+/** @type {[StripPartName, string][]} */
 export const PARTS = [
   ['work', 'Working'],
   ['person', 'Waiting on a person'],
@@ -23,20 +31,24 @@ export const PARTS = [
   ['other', 'Other waits'],
   ['none', 'Nothing recorded'],
 ];
+/** @type {Partial<Record<StripPartName, string>>} */
 const WHY = {
   other: 'Sealed on another minion, held, at a usage limit, waiting for a job or a worker',
   none: 'No record says what this time was. Waits between turns were written down only from late November 2026, so older days have more of it.',
 };
+/** @type {[string, string][]} */
 const TYPES = [
   ['all', 'All'],
   ['feature', 'Features'],
   ['bug', 'Bug fixes'],
   ['chore', 'Chores'],
 ];
+/** @type {[string, string][]} */
 const SORTS = [
   ['short', 'Shortest first'],
   ['wait', 'Most waiting first'],
 ];
+/** @type {[string, string][]} */
 const LOOKS = [
   ['chart', 'Chart'],
   ['table', 'Table'],
@@ -44,24 +56,27 @@ const LOOKS = [
 /** How long a read of the same scheme stands before showing the tab again reads it again (the server keeps today's 2 min). */
 const FRESH_MS = 120_000;
 const TICKS = [5, 15, 30, 60, 120, 240, 480, 960, 1440, 2880, 5760, 11520].map((m) => m * 60_000);
-const tickWord = (ms) => (ms < 3_600_000 ? `${ms / 60_000} min` : ms < 86_400_000 ? `${ms / 3_600_000} h` : `${ms / 86_400_000} d`);
-const dur = (ms) => (ms >= 86_400_000 ? `${Math.floor(ms / 86_400_000)}d ${shortDuration(ms % 86_400_000)}` : shortDuration(ms));
-const pct = (v, all) => `${Math.round((v / (all || 1)) * 100)}%`;
-const median = (xs) => {
+const tickWord = (/** @type {number} */ ms) => (ms < 3_600_000 ? `${ms / 60_000} min` : ms < 86_400_000 ? `${ms / 3_600_000} h` : `${ms / 86_400_000} d`);
+const dur = (/** @type {number} */ ms) => (ms >= 86_400_000 ? `${Math.floor(ms / 86_400_000)}d ${shortDuration(ms % 86_400_000)}` : shortDuration(ms));
+const pct = (/** @type {number} */ v, /** @type {number} */ all) => `${Math.round((v / (all || 1)) * 100)}%`;
+const median = (/** @type {number[]} */ xs) => {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : 0;
 };
-const shiftDay = (day, by) => {
+const shiftDay = (/** @type {string} */ day, /** @type {number} */ by) => {
   const [y, m, d] = day.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + by)).toISOString().slice(0, 10);
 };
-const dayWords = (day) => `${new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short' })}, ${pacificDate(day)}`;
+const dayWords = (/** @type {string} */ day) => `${new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short' })}, ${pacificDate(day)}`;
 /** A time in the table: the clock alone on `day`, with its date on any other. */
-const clock = (ms, day) => (pacificIso(ms) === day ? pacificClockBare(ms) : `${pacificDate(ms)}, ${pacificClockBare(ms)}`);
-const name = (s) => `${s.number != null ? `#${s.number} ` : ''}${s.title}`;
-const typeOf = (s) => (s.type === 'feature' || s.type === 'bug' || s.type === 'chore' ? s.type : 'other');
+const clock = (/** @type {number} */ ms, /** @type {string} */ day) => (pacificIso(ms) === day ? pacificClockBare(ms) : `${pacificDate(ms)}, ${pacificClockBare(ms)}`);
+const name = (/** @type {Strip} */ s) => `${s.number != null ? `#${s.number} ` : ''}${s.title}`;
+const typeOf = (/** @type {Strip} */ s) => (s.type === 'feature' || s.type === 'bug' || s.type === 'chore' ? s.type : 'other');
 
-/** A strip's tip: its name, its times, and where its time went. */
+/**
+ * A strip's tip: its name, its times, and where its time went.
+ * @param {Strip} s
+ */
 export function stripTip(s) {
   const len = s.live - s.start;
   const lines = [name(s), `Started ${pacificStamp(s.start)}, live ${pacificStamp(s.live)}`, `Start to live: ${dur(len)}`];
@@ -69,16 +84,22 @@ export function stripTip(s) {
   return lines.join('\n');
 }
 
-/** The strips shown: the filter's type, in the picked order. */
+/**
+ * The strips shown: the filter's type, in the picked order.
+ * @param {Strip[]} strips
+ * @param {string} type
+ * @param {string} sort
+ */
 export function shown(strips, type, sort) {
   const of = type === 'all' ? strips : strips.filter((s) => typeOf(s) === type);
-  const len = (s) => s.live - s.start;
+  const len = (/** @type {Strip} */ s) => s.live - s.start;
   return [...of].sort(sort === 'wait' ? (a, b) => b.totals.person - a.totals.person || len(a) - len(b) : (a, b) => len(a) - len(b) || a.start - b.start);
 }
 
+/** @type {import('./ui/tip.js').Tips | null} */
 let tips = null;
-const tipBody = (el) => {
-  const text = el.dataset.tip;
+const tipBody = (/** @type {Element} */ el) => {
+  const text = /** @type {HTMLElement | SVGElement} */ (el).dataset.tip;
   if (!text) return null;
   const [head, ...rest] = text.split('\n');
   return h('span', { class: 'cui-tip-text ds-tip' }, h('b', {}, head), ...rest.map((l) => h('span', {}, l)));
@@ -86,19 +107,23 @@ const tipBody = (el) => {
 
 /** The panel; `show(scheme)` points it at a scheme's id ('all': none picked). */
 export function dayStripsPanel() {
+  /** @type {number | 'all' | null} */
   let scheme = null;
   let day = pacificIso(Date.now());
   let type = 'all';
   let sort = 'short';
   let look = 'chart';
-  let data = null; // { scheme, day, strips } once read
+  /** @type {{ scheme: number, day: string, strips: Strip[] } | null} */
+  let data = null; // once read
   let failed = '';
   let asked = 0;
   let width = 0;
+  /** @type {number | null} */
   let picked = null;
   let readAt = 0;
 
-  const chips = (label, options, now, set) => h('div', { class: 'chips ds-chips', role: 'group', 'aria-label': label }, ...options.map(([k, words]) => h('button', { type: 'button', class: `chip${k === now ? ' on' : ''}`, 'aria-pressed': String(k === now), onclick: () => set(k) }, words)));
+  const chips = (/** @type {string} */ label, /** @type {[string, string][]} */ options, /** @type {string} */ now, /** @type {(k: string) => void} */ set) =>
+    h('div', { class: 'chips ds-chips', role: 'group', 'aria-label': label }, ...options.map(([k, words]) => h('button', { type: 'button', class: `chip${k === now ? ' on' : ''}`, 'aria-pressed': String(k === now), onclick: () => set(k) }, words)));
   const dateInput = h('input', {
     type: 'date',
     class: 'ds-date',
@@ -107,7 +132,7 @@ export function dayStripsPanel() {
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput.value)) go(dateInput.value);
     },
   });
-  const step = (by, words, label) => h('button', { type: 'button', class: 'secondary ds-step', 'aria-label': label, onclick: () => go(shiftDay(day, by)) }, words);
+  const step = (/** @type {number} */ by, /** @type {string} */ words, /** @type {string} */ label) => h('button', { type: 'button', class: 'secondary ds-step', 'aria-label': label, onclick: () => go(shiftDay(day, by)) }, words);
   const before = step(-1, '‹', 'The day before');
   const next = step(1, '›', 'The day after');
   const controls = h('div', { class: 'ds-controls' });
@@ -122,7 +147,7 @@ export function dayStripsPanel() {
   });
   resize.observe(body);
 
-  const go = (to) => {
+  const go = (/** @type {string} */ to) => {
     if (to > pacificIso(Date.now())) to = pacificIso(Date.now());
     day = to;
     picked = null;
@@ -145,7 +170,7 @@ export function dayStripsPanel() {
       data = { ...want, strips: got.strips };
     } catch (err) {
       if (ask !== asked) return;
-      failed = err.message;
+      failed = /** @type {Error} */ (err).message;
     }
     drawBody();
   };
@@ -183,8 +208,8 @@ export function dayStripsPanel() {
     if (!data) return body.replaceChildren(h('p', { class: 'muted ds-reading' }, `Reading ${dayWords(day)}…`));
     const rows = shown(data.strips, type, sort);
     if (!data.strips.length) return body.replaceChildren(emptyCard(`Nothing went live on ${dayWords(day)}`, 'A minion shows here once its ship is live. Try the day before.', { mark: '○', hue: 'neutral' }));
-    if (!rows.length) return body.replaceChildren(emptyCard(`No ${TYPES.find(([k]) => k === type)[1].toLowerCase()} went live on ${dayWords(day)}`, `${data.strips.length} other minion${data.strips.length === 1 ? '' : 's'} did: pick All.`, { mark: '○', hue: 'neutral' }));
-    const tot = Object.fromEntries(PARTS.map(([k]) => [k, rows.reduce((n, s) => n + s.totals[k], 0)]));
+    if (!rows.length) return body.replaceChildren(emptyCard(`No ${/** @type {[string, string]} */ (TYPES.find(([k]) => k === type))[1].toLowerCase()} went live on ${dayWords(day)}`, `${data.strips.length} other minion${data.strips.length === 1 ? '' : 's'} did: pick All.`, { mark: '○', hue: 'neutral' }));
+    const tot = /** @type {Totals} */ (Object.fromEntries(PARTS.map(([k]) => [k, rows.reduce((n, s) => n + s.totals[k], 0)])));
     const all = Object.values(tot).reduce((a, b) => a + b, 0);
     const summary = h(
       'p',
@@ -212,7 +237,7 @@ export function dayStripsPanel() {
   };
 
   /** The whole day's time, split by part: the bar on top. */
-  const sumBar = (tot, all) => {
+  const sumBar = (/** @type {Totals} */ tot, /** @type {number} */ all) => {
     const w = Math.max(200, width || 600);
     const g = svg('svg', { class: 'ds-bar', width: w, height: 22, viewBox: `0 0 ${w} 22`, role: 'img', 'aria-label': PARTS.map(([k, words]) => `${words} ${pct(tot[k], all)}`).join(', ') });
     let x = 0;
@@ -226,14 +251,14 @@ export function dayStripsPanel() {
     return g;
   };
 
-  const chart = (rows) => {
+  const chart = (/** @type {Strip[]} */ rows) => {
     const phone = (width || 600) < 560;
     const w = Math.max(200, width || 600);
     const rh = phone ? 7 : 6;
     const top = 18;
     const H = top + rows.length * rh + 4;
     const longest = Math.max(...rows.map((s) => s.live - s.start), 60_000);
-    const X = (ms) => (Math.sqrt(Math.max(0, ms)) / Math.sqrt(longest)) * (w - 2);
+    const X = (/** @type {number} */ ms) => (Math.sqrt(Math.max(0, ms)) / Math.sqrt(longest)) * (w - 2);
     const g = svg('svg', { class: 'ds-chart', width: w, height: H, viewBox: `0 0 ${w} ${H}`, role: 'list', 'aria-label': `${rows.length} start-to-live strips` });
     let lastX = -Infinity;
     for (const t of TICKS) {
@@ -254,8 +279,9 @@ export function dayStripsPanel() {
       }
       g.append(row);
     });
-    const at = (e) => rows.find((s) => String(s.id) === e.target.closest?.('.ds-strip')?.dataset.id);
-    const open = (s) => {
+    const stripOf = (/** @type {Event} */ e) => /** @type {Element} */ (e.target).closest?.('.ds-strip');
+    const at = (/** @type {Event} */ e) => rows.find((s) => String(s.id) === /** @type {SVGElement | null | undefined} */ (stripOf(e))?.dataset.id);
+    const open = (/** @type {Strip} */ s) => {
       location.hash = `#/p/${scheme}/t/${s.number}`;
     };
     // A strip is a few px tall, too small to tap twice with confidence: a tap picks it and names it in a line under the chart, with a full-size button that opens it.
@@ -271,24 +297,24 @@ export function dayStripsPanel() {
     };
     showPick();
     // A mouse click opens the minion; a tap picks it (above).
-    g.addEventListener('click', (e) => {
+    g.addEventListener('click', (/** @type {Event} */ e) => {
       const s = at(e);
       if (!s) return;
-      if (e.pointerType !== 'touch') return open(s);
+      if (/** @type {PointerEvent} */ (e).pointerType !== 'touch') return open(s);
       picked = s.id;
       for (const r of g.querySelectorAll('.ds-strip.on')) r.classList.remove('on');
-      e.target.closest('.ds-strip').classList.add('on');
+      /** @type {Element} */ (stripOf(e)).classList.add('on');
       showPick();
     });
     g.addEventListener('keydown', (e) => {
-      const s = e.key === 'Enter' && at(e);
+      const s = /** @type {KeyboardEvent} */ (e).key === 'Enter' && at(e);
       if (s) open(s);
     });
     return h('div', { class: 'ds-strips' }, g, pickLine);
   };
 
   /** The strips as rows: the length and the parts that have any time first, the clock times (one zone, in the caption) last. */
-  const table = (rows) => {
+  const table = (/** @type {Strip[]} */ rows) => {
     const cols = PARTS.filter(([k]) => rows.some((s) => s.totals[k] >= 1000));
     return h(
       'div',
@@ -304,7 +330,7 @@ export function dayStripsPanel() {
   };
 
   /** Point it at scheme `to` (an id, or 'all'). The list redraws often, so the same scheme is read again only once its read is old. */
-  el.show = (to) => {
+  const show = (/** @type {number | 'all'} */ to) => {
     if (to !== scheme) {
       scheme = to;
       data = null;
@@ -313,5 +339,5 @@ export function dayStripsPanel() {
     readAt = Date.now();
     read();
   };
-  return el;
+  return Object.assign(el, { show });
 }

@@ -11,6 +11,10 @@
 //
 import { openDialog } from './dialog.js';
 
+/** @import { Scrubber, ScrubberOptions, PanDirection, LightboxItem, LightboxOptions } from './media.js' */
+/** @typedef {{ b: HTMLButtonElement, small: HTMLCanvasElement, big: HTMLCanvasElement, label: HTMLSpanElement }} Cell  One frame of the scrubber's strip. */
+/** @typedef {{ toggle?(): void, destroy?(): void } | null} Shown  What an item on show gave back. */
+
 // The parts store nothing: pins come in as numbers (ms) and go out through callbacks, and the app saves them.
 
 const CSS = `
@@ -134,32 +138,54 @@ function adoptStyles() {
 }
 
 const SVG = 'http://www.w3.org/2000/svg';
+/**
+ * @template {keyof HTMLElementTagNameMap} T
+ * @param {T} tag
+ * @param {Record<string, unknown>} [attrs]
+ * @param {(string | Node)[]} kids
+ * @returns {HTMLElementTagNameMap[T]}
+ */
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
-    if (k === 'text') e.textContent = v;
+    if (k === 'text') e.textContent = String(v);
     else e.setAttribute(k, v === true ? '' : String(v));
   }
   e.append(...kids);
   return e;
 }
+/**
+ * @template {keyof SVGElementTagNameMap} T
+ * @param {T} tag
+ * @param {Record<string, unknown>} [attrs]
+ * @returns {SVGElementTagNameMap[T]}
+ */
 function svg(tag, attrs = {}) {
   const e = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
   return e;
 }
-/** A 16 px line icon in currentColor; filled paths come after the line ones' d. */
+/**
+ * A 16 px line icon in currentColor; filled paths come after the line ones' d.
+ * @param {string} d
+ * @param {string} [fill]
+ */
 function icon(d, fill = '') {
   const e = svg('svg', { class: 'cui-media-icon', viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' });
   if (d) e.append(svg('path', { d }));
   if (fill) e.append(svg('path', { d: fill, fill: 'currentColor', stroke: 'none' }));
   return e;
 }
+/** @param {boolean} muted */
 const speaker = (muted) => icon(muted ? 'M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM11 6l4 4M15 6l-4 4' : 'M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.5a6.5 6.5 0 0 1 0 9');
+/** @param {boolean} playing */
 const playIcon = (playing) => icon('', playing ? 'M4 3h3v10H4zM9 3h3v10H9z' : 'M5 2.5v11l9-5.5z');
 
-/** A time as m:ss, as the parts write it. */
+/**
+ * A time as m:ss, as the parts write it.
+ * @type {typeof import('./media.js').clock}
+ */
 export function clock(sec) {
   const s = Math.max(0, Math.floor(Number.isFinite(sec) ? sec : 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -167,7 +193,8 @@ export function clock(sec) {
 
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** A key press inside a field (or a control that takes the key itself) is the field's, not the part's. */
-const typing = (t) => !!t?.closest?.('textarea, input:not([type=range]), select, [contenteditable=""], [contenteditable="true"]');
+/** @param {EventTarget | null} t */
+const typing = (t) => !!(/** @type {Element | null} */ (t)?.closest?.('textarea, input:not([type=range]), select, [contenteditable=""], [contenteditable="true"]'));
 
 // ———————————————————————————————————————————————————————— the scrubber
 
@@ -175,12 +202,15 @@ const typing = (t) => !!t?.closest?.('textarea, input:not([type=range]), select,
  * A video's controls under it: play, a strip of frames to hover and drag along, a seek bar (arrows step a second,
  * , and . a frame), the time, and Start/End pins when the app passes onStart/onEnd. The video itself stays where the
  * app put it; a click on it plays or pauses. A file that won't play shows why, with Try again.
+ * @type {typeof import('./media.js').scrubber}
  */
 export function scrubber(video, opts = {}) {
   adoptStyles();
   const n = opts.frames ?? 10;
   const pins = { start: opts.start ?? null, end: opts.end ?? null };
+  /** @type {{ start?: string | null, end?: string | null }} */
   const keys = opts.pinKeys === false ? {} : { start: 's', end: 'e', ...opts.pinKeys }; // a key given as null (or left out of false) is no key
+  /** @param {'start' | 'end'} which */
   const keyTip = (which) => (keys[which] ? ` (${keys[which].toUpperCase()})` : '');
   const stopAtEnd = opts.stopAtEnd !== false;
   let dur = Number.isFinite(video.duration) ? video.duration : (opts.duration ?? 0);
@@ -191,6 +221,7 @@ export function scrubber(video, opts = {}) {
   const play = el('button', { type: 'button', class: 'cui-scrub-play', 'aria-label': 'Play', 'data-tip': 'Play or pause (Space)' }, playIcon(false));
   const mute = el('button', { type: 'button', class: 'cui-btn cui-ghost cui-small cui-icon cui-scrub-mute', 'aria-label': 'Unmute', 'aria-pressed': 'false', 'data-tip': 'Sound on or off (M)' });
   const frames = el('div', { class: 'cui-scrub-frames', role: 'group', 'aria-label': 'Frames' });
+  /** @type {Cell[]} */
   const cells = [];
   for (let i = 0; i < n; i++) {
     const small = el('canvas', { width: 160, height: 90, 'aria-hidden': 'true' });
@@ -205,6 +236,10 @@ export function scrubber(video, opts = {}) {
   const main = el('div', { class: 'cui-scrub-main' }, n ? frames : '', range, marks);
   const time = el('span', { class: 'cui-scrub-time', 'aria-hidden': 'true' });
   const acts = el('div', { class: 'cui-scrub-acts' }, time, mute);
+  /**
+   * @param {'start' | 'end'} which
+   * @param {string} name
+   */
   const pinButton = (which, name) => el('button', { type: 'button', class: 'cui-btn cui-small cui-scrub-pin', 'data-tip': `Pin the ${name} here; the file is never trimmed` }, `⚑ ${name} here`);
   const clearButton = el('button', { type: 'button', class: 'cui-btn cui-small cui-ghost', 'data-tip': 'Take the pins off' }, 'Clear');
   const startBtn = opts.onStart ? pinButton('start', 'Start') : null;
@@ -216,7 +251,9 @@ export function scrubber(video, opts = {}) {
   const fail = el('div', { class: 'cui-notice cui-scrub-fail', 'data-tone': 'danger', role: 'alert', hidden: true }, "This video won't play here: this browser can't decode it, or the file is missing. ", retry);
   const root = el('div', { class: 'cui-scrubber' }, play, main, acts, fail);
 
+  /** @param {number} frac */
   const at = (frac) => frac * dur;
+  /** @param {number} s */
   const ms = (s) => Math.round(s * 1000);
   let held = false;
   function draw() {
@@ -248,15 +285,16 @@ export function scrubber(video, opts = {}) {
   function drawPins() {
     marks.replaceChildren();
     if (!dur) return;
+    /** @param {number} v */
     const pct = (v) => `${(Math.min(1, Math.max(0, v / 1000 / dur)) * 100).toFixed(3)}%`;
     const top = 0;
     const band = n ? frames.offsetHeight : 0; // 34 px, 40 on a phone
     if (pins.start != null && band) marks.append(svg('rect', { x: 0, y: top, width: pct(pins.start), height: band }));
     if (pins.end != null && band) marks.append(svg('rect', { x: pct(pins.end), y: top, width: `${100 - parseFloat(pct(pins.end))}%`, height: band }));
-    for (const [which, name] of [
+    for (const [which, name] of /** @type {['start' | 'end', string][]} */ ([
       ['start', 'Start'],
       ['end', 'End'],
-    ]) {
+    ])) {
       const v = pins[which];
       if (v == null) continue;
       const x = pct(v);
@@ -274,6 +312,10 @@ export function scrubber(video, opts = {}) {
   }
 
   // user: a person's own move (the bar, the strip, keys), which onUser hears of; the methods the app calls are quiet.
+  /**
+   * @param {number} sec
+   * @param {boolean} [user]
+   */
   function seek(sec, user = false) {
     if (broken) return;
     const t = Math.min(Math.max(0, sec), dur || sec);
@@ -281,6 +323,7 @@ export function scrubber(video, opts = {}) {
     draw();
     if (user) opts.onUser?.('seek', t);
   }
+  /** @param {boolean} [user] */
   function toggle(user = false) {
     if (broken) return;
     if (!video.paused && !video.ended) {
@@ -300,7 +343,12 @@ export function scrubber(video, opts = {}) {
     }); // AbortError: a pause cut it short
     if (user) opts.onUser?.('play');
   }
+  /**
+   * @param {number} sec
+   * @param {boolean} [user]
+   */
   const step = (sec, user = false) => seek((video.currentTime || 0) + sec, user);
+  /** @param {'start' | 'end'} which */
   function setPin(which) {
     const v = ms(video.currentTime || 0);
     const other = which === 'start' ? 'end' : 'start';
@@ -328,7 +376,15 @@ export function scrubber(video, opts = {}) {
   }
 
   // Frames: from the app's sprite (one strip of n frames side by side), or read from the clip itself.
+  /**
+   * @param {CanvasImageSource} source
+   * @param {number} sx
+   * @param {number} sy
+   * @param {number} sw
+   * @param {number} sh
+   */
   function paint(source, sx, sy, sw, sh) {
+    /** @param {Cell} c */
     return (c) => {
       for (const cv of [c.small, c.big]) {
         cv.width = Math.max(1, Math.round(90 * (sw / sh)));
@@ -339,6 +395,7 @@ export function scrubber(video, opts = {}) {
       }
     };
   }
+  /** @type {HTMLVideoElement | null} */
   let capture = null;
   function loadFrames() {
     if (!n) return;
@@ -353,24 +410,24 @@ export function scrubber(video, opts = {}) {
     }
     const src = video.currentSrc || video.src;
     if (!src || capture) return;
-    capture = document.createElement('video');
-    capture.muted = true;
-    capture.preload = 'auto';
-    capture.playsInline = true;
-    if (video.crossOrigin != null) capture.crossOrigin = video.crossOrigin;
+    const cap = (capture = document.createElement('video'));
+    cap.muted = true;
+    cap.preload = 'auto';
+    cap.playsInline = true;
+    if (video.crossOrigin != null) cap.crossOrigin = video.crossOrigin;
     let i = 0;
     const next = () => {
-      if (i >= n || (!root.isConnected && i > 0)) return void capture.removeAttribute('src');
-      if (!Number.isFinite(capture.duration)) return; // a live stream has no length to cut frames from
-      capture.currentTime = Math.min(capture.duration - 0.05, ((i + 0.5) * capture.duration) / n);
+      if (i >= n || (!root.isConnected && i > 0)) return void cap.removeAttribute('src');
+      if (!Number.isFinite(cap.duration)) return; // a live stream has no length to cut frames from
+      cap.currentTime = Math.min(cap.duration - 0.05, ((i + 0.5) * cap.duration) / n);
     };
-    capture.addEventListener('loadeddata', next, { once: true });
-    capture.addEventListener('seeked', () => {
+    cap.addEventListener('loadeddata', next, { once: true });
+    cap.addEventListener('seeked', () => {
       const c = cells[i++];
-      if (c && capture.videoWidth) paint(capture, 0, 0, capture.videoWidth, capture.videoHeight)(c);
+      if (c && cap.videoWidth) paint(cap, 0, 0, cap.videoWidth, cap.videoHeight)(c);
       next();
     });
-    capture.src = src;
+    cap.src = src;
   }
 
   const onMeta = () => {
@@ -392,6 +449,7 @@ export function scrubber(video, opts = {}) {
     draw();
   };
   const onClick = () => toggle(true);
+  /** @type {[string, () => void][]} */
   const listeners = [
     ['loadedmetadata', onMeta],
     ['durationchange', onMeta],
@@ -438,6 +496,7 @@ export function scrubber(video, opts = {}) {
   clearButton.addEventListener('click', clear);
   // The strip: a press and drag seeks to the pointer; a frame pressed from the keyboard goes to its own time.
   let dragging = false;
+  /** @param {PointerEvent} e */
   const toPointer = (e) => {
     const r = frames.getBoundingClientRect();
     if (r.width) seek(at(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))), true);
@@ -464,7 +523,7 @@ export function scrubber(video, opts = {}) {
   // Keys while focus is in the bar: Space plays, , and . step a frame, M mutes, S and E (pinKeys) pin.
   root.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
-    const onButton = e.target.closest?.('button');
+    const onButton = /** @type {Element} */ (e.target).closest?.('button');
     if (e.key === ' ' && !onButton) toggle(true);
     else if (e.key === ',' || e.key === '.') step(e.key === ',' ? -1 / 30 : 1 / 30, true);
     else if (e.key === 'm' || e.key === 'M') video.muted = !video.muted;
@@ -484,6 +543,7 @@ export function scrubber(video, opts = {}) {
     toggle: () => toggle(),
     seek: (sec) => seek(sec),
     step: (sec) => step(sec),
+    /** @param {{ start?: number | null, end?: number | null }} [next] */
     update(next = {}) {
       if ('start' in next) pins.start = next.start ?? null;
       if ('end' in next) pins.end = next.end ?? null;
@@ -502,6 +562,7 @@ export function scrubber(video, opts = {}) {
 
 // ———————————————————————————————————————————————————————— the panner
 
+/** @type {[PanDirection, string][]} */
 const DIRS = [
   ['auto', 'Pan: there and back'],
   ['ltr', 'Pan: left to right'],
@@ -513,9 +574,11 @@ const DIRS = [
  * A panorama in its box: it pans end to end and back (16 s a way), with a mini-map of the window, Pause, a
  * look-around slider, and a direction menu when the app passes onPan. Reduced motion, a swipe or a scroll pause it.
  * A picture that fits its box shows whole, without the bar. The img moves into the part, which takes its place.
+ * @type {typeof import('./media.js').panner}
  */
 export function panner(img, opts = {}) {
   adoptStyles();
+  /** @type {PanDirection} */
   let dir = opts.pan ?? 'auto';
   const ms = opts.duration ?? 16_000;
   let paused = dir === 'off' || reduceMotion();
@@ -545,6 +608,7 @@ export function panner(img, opts = {}) {
   const sync = () => pic.setAttribute('href', img.currentSrc || img.src);
   let fits = false;
   let barH = 0;
+  /** @type {boolean | null} */
   let told = null; // the last fits the app heard
   function fit() {
     const w = img.naturalWidth || 4;
@@ -560,6 +624,7 @@ export function panner(img, opts = {}) {
     win.setAttribute('width', String(Math.max(4, f * 1000)));
   }
   let set = -1; // the scrollLeft this part last set, so a person's own scroll can be told apart
+  /** @param {number} pos */
   function place(pos) {
     const room = view.scrollWidth - view.clientWidth;
     if (room > 0) {
@@ -583,6 +648,10 @@ export function panner(img, opts = {}) {
     pause.setAttribute('aria-label', paused ? 'Pan' : 'Pause the pan');
   }
   // person: a press, scroll or tap of the person's own, which onPause hears of when it changes the state.
+  /**
+   * @param {boolean} p
+   * @param {boolean} [person]
+   */
   function setPaused(p, person = false) {
     const was = paused;
     paused = p;
@@ -590,6 +659,10 @@ export function panner(img, opts = {}) {
     if (person && was !== p) opts.onPause?.(p);
   }
   // Look at a spot (0 left … 1 right): it pauses, and a pan from here starts from here.
+  /**
+   * @param {number} v
+   * @param {boolean} [person]
+   */
   function lookAt(v, person = false) {
     setPaused(true, person);
     phase = Math.acos(1 - 2 * Math.min(1, Math.max(0, v))) / Math.PI;
@@ -600,6 +673,7 @@ export function panner(img, opts = {}) {
   let last = 0;
   let seen = false;
   let legs = 0;
+  /** @param {number} now */
   function tick(now) {
     if (!root.isConnected) {
       if (seen) return;
@@ -639,6 +713,7 @@ export function panner(img, opts = {}) {
   pause.addEventListener('click', () => setPaused(!paused, true));
   look.addEventListener('input', () => lookAt(Number(look.value) / 1000, true));
   let dragging = false;
+  /** @param {PointerEvent} e */
   const toPointer = (e) => {
     const r = map.getBoundingClientRect();
     const w = Number(win.getAttribute('width')) / 1000;
@@ -659,16 +734,16 @@ export function panner(img, opts = {}) {
     dragging = false;
   });
   pick?.addEventListener('change', () => {
-    dir = pick.value;
+    dir = /** @type {PanDirection} */ (pick.value);
     if (dir === 'off') lookAt(0.5);
     else {
       phase = dir === 'rtl' ? 1 : 0;
       setPaused(reduceMotion());
     }
-    opts.onPan(dir);
+    opts.onPan?.(dir);
   });
   root.addEventListener('keydown', (e) => {
-    if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || e.target.closest?.('button, select')) return;
+    if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || /** @type {Element} */ (e.target).closest?.('button, select')) return;
     e.preventDefault();
     setPaused(!paused, true);
   });
@@ -696,9 +771,16 @@ export function panner(img, opts = {}) {
 
 // ———————————————————————————————————————————————————————— the lightbox
 
+/** @param {LightboxItem} item */
 const kindOf = (item) => item.kind ?? (/\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(item.src) ? 'video' : 'image');
 
 /** What the lightbox shows for an item unless the app passes render: a picture (whole; panned when wide and the app opted in) or a clip with the scrubber. */
+/**
+ * @param {LightboxItem} item
+ * @param {HTMLElement} stage
+ * @param {LightboxOptions} opts
+ * @returns {Shown}
+ */
 function show(item, stage, opts) {
   if (kindOf(item) === 'video') {
     const auto = !!opts.autoplay;
@@ -726,10 +808,12 @@ function show(item, stage, opts) {
 /**
  * Pictures and clips one at a time: ‹ › on the edges, a filmstrip with the count, ←/→ and a swipe to step, Space to
  * play the clip or pause the pan. With `into` it draws inside that element; without, it opens in the kit dialog.
+ * @type {typeof import('./media.js').lightbox}
  */
 export function lightbox(items, opts = {}) {
   adoptStyles();
   let at = Math.min(Math.max(0, opts.at ?? 0), Math.max(0, items.length - 1));
+  /** @type {Shown} */
   let current = null;
   const stage = el('div', { class: 'cui-lb-stage' });
   const prev = el('button', { type: 'button', class: 'cui-lb-step cui-lb-prev', 'aria-label': 'Previous', 'data-tip': 'Previous (←)' }, icon('M10 3L5 8l5 5'));
@@ -747,7 +831,9 @@ export function lightbox(items, opts = {}) {
   });
   const foot = el('div', { class: 'cui-lb-foot' }, count, strip);
   const root = el('div', { class: `cui-lb${items.length < 2 ? ' cui-lb-one' : ''}` }, stage, foot);
+  /** @type {HTMLElement | null} */
   let title = null;
+  /** @type {HTMLDialogElement | null} */
   let dialog = null;
   if (opts.into) opts.into.append(root);
   else {
@@ -769,6 +855,7 @@ export function lightbox(items, opts = {}) {
     current?.destroy?.();
     current = null;
   }
+  /** @param {number} i */
   function go(i) {
     if (!items.length) return;
     i = (i + items.length) % items.length;
@@ -787,6 +874,7 @@ export function lightbox(items, opts = {}) {
     if (title) title.textContent = [item.caption ?? (n ? null : item.alt), n].filter(Boolean).join(' · ') || 'Picture';
   }
   // A person's move: the app hears of it (to update its URL, say). go() from the app stays quiet.
+  /** @param {number} i */
   function move(i) {
     if (items.length < 2) return;
     go(i);
@@ -795,17 +883,18 @@ export function lightbox(items, opts = {}) {
   prev.addEventListener('click', () => move(at - 1));
   next.addEventListener('click', () => move(at + 1));
 
+  /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     if (!root.isConnected) return void removeEventListener('keydown', onKey);
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
     // Inside another dialog than this one's own (the app's), the keys aren't ours.
-    const modal = e.target.closest?.('dialog');
+    const modal = /** @type {Element} */ (e.target).closest?.('dialog');
     if (modal && !modal.contains(root)) return;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      if (e.target.closest?.('input[type=range]')) return;
+      if (/** @type {Element} */ (e.target).closest?.('input[type=range]')) return;
       e.preventDefault();
       move(at + (e.key === 'ArrowLeft' ? -1 : 1));
-    } else if (e.key === ' ' && current?.toggle && !e.target.closest?.('button, input, select, a')) {
+    } else if (e.key === ' ' && current?.toggle && !(/** @type {Element} */ (e.target).closest?.('button, input, select, a'))) {
       e.preventDefault();
       current.toggle();
     }
@@ -814,10 +903,11 @@ export function lightbox(items, opts = {}) {
 
   // A swipe across the stage on a touch screen steps; the panner's own swipe looks around instead. A second finger
   // is a pinch, and one finger on a zoomed-in page pans it.
+  /** @type {{ id: number, x: number, y: number } | null} */
   let swipe = null;
   stage.addEventListener('pointerdown', (e) => {
     const zoomed = (window.visualViewport?.scale ?? 1) > 1.01; // a page at rest can report a hair over 1
-    swipe = e.pointerType === 'touch' && e.isPrimary && !zoomed && !e.target.closest?.('.cui-pan-view, .cui-scrubber') ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+    swipe = e.pointerType === 'touch' && e.isPrimary && !zoomed && !(/** @type {Element} */ (e.target).closest?.('.cui-pan-view, .cui-scrubber')) ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
   });
   stage.addEventListener('pointercancel', () => {
     swipe = null;

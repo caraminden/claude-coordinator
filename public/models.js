@@ -7,13 +7,16 @@ import { settingsRow } from './settings.js';
 import { advisorTrialEnd, BY_TYPE, FALLBACK, tierLabel, tierRows } from './model-table.js';
 
 /** The Fable bar `pct` wide of its cap (capped at 100), in Citadel's meter; red once over. Its width goes through the CSSOM (the CSP refuses style attributes). */
+/** @param {number} pct @param {boolean} over */
 function meterBar(pct, over) {
   const words = `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}% of cap`;
   return h('div', { class: 'fable-bar', 'data-hue': over ? 'danger' : 'running' }, meter(Math.min(1, Math.max(0, pct / 100)), words));
 }
 
+/** @param {number} n */
 const pctText = (n) => (n && n < 0.1 ? '<0.1%' : `${n < 10 ? n.toFixed(1) : Math.round(n)}%`);
 
+/** @type {[RegExp, string][]} */
 const FAMILY_HUE = [
   [/fable/i, 'accent'],
   [/opus/i, 'held'],
@@ -46,11 +49,15 @@ export function modelTable() {
  * The Fable meter as a row that opens: you (% of your weekly plan) or the whole Citadel (API dollars), against the cap.
  * Its closed line says where you stand; the chip, tiles and bar redraw with each pick and each saved cap.
  */
+/**
+ * @param {{ weekUsd: number | null, models: { name: string, usd: number }[], fable: { over: boolean, capPct: number, capUsd: number | null, usd: number, weekUsd: number | null } }} w
+ */
 export function fableMeterView(w) {
   const f = w.fable;
   const slot = h('div', { class: 'fable-slot' });
   const tilesSlot = h('div', { class: 'fable-tiles' });
   let who = 'you';
+  /** @type {HTMLSpanElement | null} */
   let sum = null;
   const draw = () => {
     const mine = w.models.filter((m) => m.name.startsWith('Fable')).reduce((a, m) => a + m.usd, 0);
@@ -85,7 +92,7 @@ export function fableMeterView(w) {
           'aria-pressed': String(key === who),
           onclick: () => {
             who = key;
-            for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.who === key));
+            for (const b of pick.children) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.who === key));
             draw();
           },
         },
@@ -112,7 +119,7 @@ export function fableMeterView(w) {
           f.over = f.capUsd !== null && f.usd >= f.capUsd;
           draw();
         } catch (err) {
-          status.textContent = `Couldn't save: ${err.message}`;
+          status.textContent = `Couldn't save: ${/** @type {Error} */ (err).message}`;
         }
       },
     },
@@ -138,16 +145,19 @@ export function fableMeterView(w) {
 }
 
 /** The meter's row when its data could not load: a card saying so, in the same box. */
+/** @param {string} message */
 const meterError = (message) => emptyCard('Couldn’t load the Fable meter', message, { mark: '!', hue: 'danger' });
 
 /** The whole Models section: the Fable cap row, then the table's row, in one box of rows. */
+/** @param {HTMLElement} into */
 export async function modelsSection(into) {
   const [tiers] = settingsRow({ key: 'models-tiers-row', icon: 'branch', hue: 'teal', title: 'Which model, and why', summary: [toneChip('info', `${tierRows().length} tiers`), 'by kind of work, and what each stall steps up to'] }, modelTable());
+  /** @type {HTMLElement} */
   let first;
   try {
     first = fableMeterView(await api('api/costs/mine'));
   } catch (err) {
-    first = meterError(err.message);
+    first = meterError(/** @type {Error} */ (err).message);
   }
   into.replaceChildren(h('div', { class: 'settings-rows models-rows' }, first, tiers));
   into.classList.remove('loading');

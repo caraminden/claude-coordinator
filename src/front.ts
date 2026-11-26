@@ -84,6 +84,8 @@ export const READER_ANSWER_MS = 2000;
  * none heard from for six times this, requests go to the main thread.
  */
 export const READER_STUCK_MS = 10_000;
+/** How often, at most, the front thread records page reads going wrong, per kind (reader-stuck, reader-busy). */
+const READER_NOTE_MS = 60_000;
 
 /**
  * Citadel's own pages live under /c/ (manifest scope and start_url), so its installed app doesn't claim
@@ -248,7 +250,7 @@ export function socketBase(env = process.env, tmp = tmpdir()) {
  * once its reader threads have gone, which the exit waits for (#1625).
  * `publish()` posts a change to the readers' snapshot (Snapshot); `statics()` the front end's files, which it serves (Statics).
  */
-export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void }) {
+export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void; health: (kind: string, text: string) => void }) {
   // A private folder (0700) for the socket: only this account can reach it, so only the front thread sets the peer header.
   const dir = mkdtempSync(join(socketBase(), 'citadel-'));
   const sock = join(dir, 'main.sock');
@@ -285,12 +287,13 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     const held = early!;
     early = null;
     for (const m of held) post(m);
-    front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; stopped?: true; quiet?: true }) => {
+    front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; health?: [string, string]; stopped?: true; quiet?: true }) => {
       if (m.stopped) stopped();
       if (m.quiet) quieted();
       if (m.listening !== undefined) on.listening(m.listening);
       for (const args of m.usage ?? []) on.usage(args);
       if (m.setting) on.setting(m.setting[0], m.setting[1]);
+      if (m.health) on.health(m.health[0], m.health[1]);
     });
     front.on('error', (err) => console.error(`Front thread failed: ${thrown(err).stack ?? err}`));
     // It holds the port: without it nothing answers, so the server exits and systemd starts it again, the socket holding requests meanwhile.
@@ -423,10 +426,12 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   // late: it missed an answer's deadline and gets no more requests until it posts something again.
   // silent: it was silent for stuckMs and another was started in its place; it stays until that is ready, or it is heard
   // again (one that was only slow on disk, #2003). ended: terminated here.
+  // stuck: its thread is alive but a read it was asked 2 x stuckMs ago has no answer (#2086); replaced like a silent
+  // one, and nothing takes it back: what it holds is lost to it.
   // starting: resolves when the thread has said it is ready, or has died. A thread that hasn't is still evaluating its
   // module (it opens the database and hashes the sign-in keys there), and killing one then aborts the whole process:
   // V8's "Check failed: !is_null()", SIGTRAP, so the server dies on a signal instead of exiting 0 (#1625).
-  type Reader = { worker: Worker; ready: boolean; late: boolean; silent: boolean; ended: boolean; heard: number; open: Map<number, { a: Ask; done: (got: Answer | null) => void }>; starting: Promise<void> };
+  type Reader = { worker: Worker; ready: boolean; late: boolean; silent: boolean; stuck: boolean; ended: boolean; heard: number; open: Map<number, { a: Ask; at: number; done: (got: Answer | null) => void }>; starting: Promise<void> };
   // A page read, and the readers asked for it so far.
   type Ask = { req: IncomingMessage; res: ServerResponse; asked: Set<Reader>; timer: NodeJS.Timeout };
   const readers = new Set<Reader>();
@@ -460,6 +465,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
       ready: false,
       late: false,
       silent: false,
+      stuck: false,
       ended: false,
       heard: Date.now(),
       open: new Map(),
@@ -468,9 +474,9 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     readers.add(r);
     const started = Date.now();
     r.worker.on('message', (m: { ready?: true; alive?: true; id?: number; answer?: Answer | null; usage?: unknown[][]; setting?: [string, unknown] }) => {
-      const back = r.late || r.silent || m.ready;
+      const back = !r.stuck && (r.late || r.silent || m.ready);
       r.heard = Date.now();
-      r.late = r.silent = false;
+      if (!r.stuck) r.late = r.silent = false;
       if (m.ready) {
         r.ready = true;
         upAt ||= Date.now();
@@ -515,6 +521,15 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   // A reader whose thread stopped answering (a read that never ends, or a swamped disk) is replaced.
   setInterval(() => {
     for (const r of readers) {
+      // Alive, and a read it was asked long ago still has no answer: every read gets one within 6 x answerMs (src/reader.ts,
+      // wholeSteps: null at 5, let go after 1 more), so its requests are waiting on something that never comes (#2086).
+      const oldest = r.open.values().next().value;
+      if (r.ready && !r.silent && !r.ended && oldest && Date.now() - oldest.at > 2 * stuckMs) {
+        r.stuck = r.silent = r.late = true;
+        note('reader-stuck', `a reader thread is alive but hasn't answered a page read it was asked ${Math.round((Date.now() - oldest.at) / 1000)} s ago: replacing it once another is ready`);
+        fill();
+        continue;
+      }
       if (r.silent || r.ended || Date.now() - r.heard <= stuckMs) continue;
       r.silent = r.late = true; // said once
       // One that has never said it is ready is still evaluating its module, and terminating it then aborts the whole
@@ -566,7 +581,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
         a.res.end(got.body);
       });
     };
-    r.open.set(id, { a, done });
+    r.open.set(id, { a, at: Date.now(), done });
     r.worker.postMessage({ id, method: a.req.method, url: a.req.url, headers: a.req.headers });
   };
   // After a start on a busy box the first reader takes longer than that to load: a read waits for it (or, once none can be
@@ -586,8 +601,28 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     res.once('close', () => settle(a, () => {}));
     give(a);
   };
+  // Loud (#2086: 30 minutes of 503s left nothing in the journal): one journal line and one health_events row per kind a
+  // minute at most, like db-read-stale, with what the readers were waiting on.
+  const noted = new Map<string, number>();
+  let busied = 0;
+  const note = (kind: string, what: string) => {
+    if (Date.now() - (noted.get(kind) ?? 0) < READER_NOTE_MS) return;
+    noted.set(kind, Date.now());
+    const s = opts.reader.shared as BigInt64Array | null | undefined;
+    const steps = s ? `steps opened ${Atomics.load(s, 4)}, closed ${Atomics.load(s, 3)}, ${Atomics.load(s, 2) - Atomics.load(s, 0)} queued DB writes` : 'no write worker';
+    const open = [...readers].map((r) => `${r.open.size}${r.ended ? ' (ended)' : r.stuck ? ' (stuck)' : r.silent ? ' (silent)' : r.late ? ' (late)' : ''}`).join(', ');
+    const text = `${what}; ${busied} page reads told to retry (503) since the last record; ${steps}; readers' unanswered asks: ${open || 'no readers'}`;
+    busied = 0;
+    console.error(`Page reads: ${text}.`);
+    parentPort!.postMessage({ health: [kind, text] });
+  };
   // No reader in time: the page asks again (public/base.js).
-  const busy = (res: ServerResponse) => res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '1', 'X-Citadel-Answered': 'front' }).end(JSON.stringify({ error: 'The server is waiting for its disk: try again in a moment', retry: true }));
+  const busy = (res: ServerResponse) => {
+    busied++;
+    note('reader-busy', 'no reader answered a page read in time');
+    return busyAnswer(res);
+  };
+  const busyAnswer = (res: ServerResponse) => res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '1', 'X-Citadel-Answered': 'front' }).end(JSON.stringify({ error: 'The server is waiting for its disk: try again in a moment', retry: true }));
 
   // The front end's files (#1628), as main last loaded them; a test's `citadel-test-reader=main` asks main for the reference.
   const testHooks = !!opts.reader.testHooks;

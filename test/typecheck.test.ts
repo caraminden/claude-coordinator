@@ -1,5 +1,6 @@
-// The type check's ratchet (#1789): tsc over server.ts, src/, tools/, test/ and kit/ (tsconfig.json), plus a count of
-// explicit `any` types and @ts-ignore-style comments in every tracked TypeScript file. A file whose count goes above
+// The type check's ratchet (#1789): tsc over server.ts, src/, tools/, test/ and kit/ (tsconfig.json) and the front end
+// (#2010: tsconfig.public.json, tsconfig.sw.json), plus a count of explicit `any` types and @ts-ignore-style comments in
+// every tracked TypeScript file and front-end script. A file whose count goes above
 // test/typecheck-baseline.json fails the ship; lower counts pass, and `node tools/typecheck.ts --update` records them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { holds } from './holds.ts';
-import { ROOT, compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, tscErrors, upMessage } from '../tools/typecheck.ts';
+import { PROJECTS, ROOT, SCRIPTS, compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, scriptEscapes, tscErrors, tscFiles, tsFiles, upMessage } from '../tools/typecheck.ts';
 
 test('no file has more type errors or escapes than its baseline', async () => {
   const { table, errors } = await measure();
@@ -72,7 +73,7 @@ test('tsc runs and its errors are read per file', async () => {
     writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, include: ['*.ts'] }));
     writeFileSync(join(dir, 'ok.ts'), 'export const n: number = 1;\n');
     writeFileSync(join(dir, 'bad.ts'), 'export const n: number = "one";\nexport function f(a) { return a; }\n');
-    const errors = await tscErrors(dir);
+    const errors = await tscErrors(dir, ['tsconfig.json']);
     assert.deepEqual(
       errors.map((e) => `${e.file}:${e.line} ${e.code}`),
       ['bad.ts:1 TS2322', 'bad.ts:2 TS7006'],
@@ -249,6 +250,119 @@ test('a type check does not wait on CI, in a heavy job, with the limit off, or w
     } finally {
       holder.kill();
     }
+  } finally {
+    done();
+  }
+});
+
+test("every front-end script is in the front end's check, with the page's globals and none of the server (#2010)", async () => {
+  for (const p of ['tsconfig.public.json', 'tsconfig.sw.json']) assert.ok(PROJECTS.includes(p), p);
+  const scripts = execFileSync('git', ['ls-files', '--', 'public'], { cwd: ROOT, encoding: 'utf8' })
+    .split('\n')
+    .filter((f) => /\.(?:[cm]?jsx?|tsx|[cm]ts|ts)$/.test(f) && !f.endsWith('.d.ts'));
+  // The agents are Node programs people download, not pages: the two agents, and the worker's (Build 7) that run beside them on a person's PC.
+  const agents = ['public/machine-agent.mjs', 'public/runner-agent.mjs', 'public/machine-sync.mjs', 'public/machine-worker.mjs', 'public/role-setup-agent.mjs', 'public/worker-agent.mjs'];
+  const pages = scripts.filter((f) => !agents.includes(f));
+  const ours = (files: Iterable<string>) => [...files].filter((f) => !f.startsWith('node_modules/'));
+  const page = ours(await tscFiles(ROOT, ['tsconfig.public.json']));
+  const worker = ours(await tscFiles(ROOT, ['tsconfig.sw.json']));
+  assert.deepEqual(
+    pages.filter((f) => !page.includes(f) && !worker.includes(f)),
+    [],
+    'front-end scripts tsc does not check',
+  );
+  assert.deepEqual(
+    [...page, ...worker].filter((f) => !f.startsWith('public/')),
+    [],
+    'a front-end file imports a type from outside public/: declare it in public/ (the server would be checked as a page, and its errors counted twice)',
+  );
+  const counted = await tsFiles();
+  assert.deepEqual(
+    pages.filter((f) => !counted.includes(f)),
+    [],
+    `front-end scripts whose escapes are not counted (SCRIPTS: ${SCRIPTS})`,
+  );
+});
+
+test("a page's type errors are found with the real configs, a .d.ts beside it or not; a service worker has a worker's globals (#2010)", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'typecheck-')));
+  try {
+    mkdirSync(join(dir, 'public'));
+    for (const f of ['tsconfig.json', 'tsconfig.public.json', 'tsconfig.sw.json']) copyFileSync(join(ROOT, f), join(dir, f));
+    writeFileSync(join(dir, 'package.json'), '{"type":"module"}');
+    const put = (f: string, text: string) => writeFileSync(join(dir, 'public', f), text);
+    // A wrong field, a missing argument, a Node global, another script's name with no import.
+    put('page.js', "const o = { a: 1 };\no.b;\ndocument.getElementById();\nprocess.exit();\nelsewhere;\nimport { twin } from './twin.js';\ntwin(1);\n");
+    put('script.js', 'const elsewhere = 1;\n');
+    put('twin.js', "export const twin = () => 1;\nconst n = 'x'.nope;\n");
+    put('twin.d.ts', 'export function twin(a: string): number;\n');
+    put('sw.js', "self.importScripts('x.js');\ndocument.title;\n");
+    const errors = await tscErrors(dir, ['tsconfig.public.json', 'tsconfig.sw.json']);
+    assert.deepEqual(errors.map((e) => `${e.file}:${e.line} ${e.code}`).sort(), [
+      'public/page.js:2 TS2339',
+      'public/page.js:3 TS2554',
+      'public/page.js:4 TS2591',
+      'public/page.js:5 TS2304',
+      'public/page.js:7 TS2345', // an importer sees the .d.ts ...
+      'public/sw.js:2 TS2584',
+      'public/twin.js:2 TS2339', // ... and the script beside it is checked all the same
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a script's JSDoc any and @ts- comments count, in every form tsc honours (#2010)", () => {
+  const one = [
+    '/** @type {any} */',
+    '/** @type any */',
+    '/** @this any */',
+    '/** @type {*} */',
+    '/*** @type {any} */',
+    '/** @type\n * {any} */',
+    '/** @param x {any} */',
+    '/** @param {...any} x */',
+    '/** @param {Object<string, any>} x the rest */',
+    '/** @typedef {{ a: any }} T */',
+    '/** @typedef {{\n *   a: { b: string },\n *   c: any,\n * }} T */',
+    '/** @callback F @param {number} x @returns {any} */',
+    '/** @template T, {any} U */',
+    '/** @type Map<string, any> */',
+    "/** @type {'}' | any} */",
+    '/** @type {"{" | \'x\'} and @type {any} */',
+    "/** It's @type {any} but doesn't */",
+    '// @ts-nocheck',
+    '//@ts-nocheck',
+    '/// @ts-nocheck',
+    '// @TS-NOCHECK',
+    '#!/usr/bin/env node\n// @ts-nocheck',
+    'let a = 1; // @ts-ignore',
+    'let a = 1; /* @ts-ignore */',
+    '/* hi\n * @ts-ignore */',
+    '/** @ts-expect-error */',
+    '//// @ts-ignore: why',
+    "const s = '/**'; /** @type {any} */ let b = 1;",
+    'const r = /[\'"`]/; /** @type {any} */ let b = 1;',
+    '/** @type {"a\\"}" | any} */',
+    "/** @type {'it\\'s }' | any} */",
+    '/** @type {T extends string ? any : never} */',
+    '/** @type {{ any: string, b: any }} */',
+  ];
+  for (const code of one) assert.equal(scriptEscapes(`${code}\nexport let x = 1;\n`), 1, code);
+  assert.equal(scriptEscapes('/**\n * @param {any} a\n * @param {any} b\n * @returns {Promise<any>}\n */\nfunction f(a, b) {}\n'), 3);
+  const none = ['/** any kind, {any} of them */', '/**\n * Any caller.\n * @param {string} x any of them * twice\n */', '/** @type {\'any\' | "any" | `any`} */', '/** @param {string} x see {@link any} */', '/* @type {any} */', '// any\nconst any = { any: 1 }; any.any;', '/** @type {unknown} */'];
+  for (const code of none) assert.equal(scriptEscapes(`${code}\nexport let x = 1;\n`), 0, code);
+});
+
+test("a tracked script's escapes are in the table only when SCRIPTS names it, and take it past its baseline (#2010)", async () => {
+  const { dir, done } = scratch({ 'ok.ts': 'export {};\n' });
+  try {
+    mkdirSync(join(dir, 'public'));
+    writeFileSync(join(dir, 'public', 'a.js'), '// @ts-nocheck\nexport const a = 1;\n');
+    execFileSync('git', ['add', 'public'], { cwd: dir });
+    assert.deepEqual((await measure(dir, [], ['public/*.js'])).table, { 'public/a.js': { errors: 0, escapes: 1 } });
+    assert.deepEqual((await measure(dir, [], [])).table, {});
+    assert.deepEqual(compare({ 'public/a.js': { errors: 9, escapes: 0 } }, { 'public/a.js': { errors: 0, escapes: 1 } }).up.map(describe), ['public/a.js: escapes 0 → 1']);
   } finally {
     done();
   }

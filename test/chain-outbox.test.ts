@@ -13,6 +13,7 @@ import { Lanes } from '../src/lanes.ts';
 import { HOLD_MS, Outbox, type OutboxRunner } from '../src/outbox.ts';
 import { type Chain, chainedStep, LiveWaiters, startChained } from '../src/wake.ts';
 import { testPins } from './helpers.ts';
+import { deliveriesOf } from '../src/outbox.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'chain-outbox-'));
@@ -96,7 +97,7 @@ async function chain(w: LiveWaiters, leader: number, when: Chain['when'] = 'merg
   w.chain({ ticket: follower.id, after: leader, when, message: 'build part two', from: 'Taskmaster', base: f.base, since: f.since });
   return follower;
 }
-const rows = (id?: number) => store.listDeliveries({ kind: 'chain', ...(id != null ? { to: id } : {}) });
+const rows = (id?: number) => deliveriesOf(store, 'chain', id != null ? { to: id } : {});
 
 test("a chain is a row: met once the leader's work is in, and the outbox starts the follower with its brief, caught up", async () => {
   const s = server();

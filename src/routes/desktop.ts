@@ -3,7 +3,7 @@
 // Publishing takes a scheme's minion, Taskmaster or member.
 import { lstat } from 'node:fs/promises';
 import { DesktopError, DesktopFeeds, type PublishAsk } from '../desktop-feed.ts';
-import { HttpError, json, publicOrigin, readJson, sendFile, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, isInt, json, publicOrigin, readJson, sendFile, type App, type Ctx, type Route } from '../http.ts';
 import { resolveTicketFile } from './files.ts';
 
 function desktop(app: App) {
@@ -82,7 +82,7 @@ export const desktopRoutes: Route[] = [
       let commit = str('commit');
       let source: string | undefined;
       if (b?.ci_file != null) {
-        const f = Number.isInteger(b.ci_file) ? app.store.getCiFile(b.ci_file) : undefined;
+        const f = isInt(b.ci_file) ? app.store.getCiFile(b.ci_file) : undefined;
         if (!f || f.project_id !== project.id) throw new HttpError(404, `No file ${b.ci_file} in this scheme's CI store`);
         file = await app.ciStore.plain(f).catch(() => null);
         commit ??= f.sha;

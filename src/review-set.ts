@@ -242,6 +242,7 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
       ['error-handling', 'Error handling', 'a try/catch, a default, an HTTP status or error message in the diff'],
       ['comments', 'Comments', 'a comment or doc that describes code, added or edited'],
       ['tests', 'Tests', 'logic changed, or tests added or changed'],
+      ['fix-proofs', 'Fix proofs', 'a proof list in its brief: the change fixes findings the minion was handed'],
       ['new-types', 'New types', 'a new type, class, table or JSON format'],
       ['access-and-secrets', 'Access and secrets', 'auth or access-control files, or code that reads a secret'],
       ['smells', 'Smells', 'a new module, or over about 100 new lines of logic'],
@@ -684,7 +685,7 @@ export class ReviewSet {
    * Save `patch` over the entry as a new version. `expect` is the version the editor started from: a save over a newer
    * one is refused (409 at the route), so two people editing at once can't silently drop each other's words.
    */
-  save(projectId: number, slug: string, patch: Partial<EntryFields>, by: string, note: string, expect?: number, at = Date.now()): ReviewEntry {
+  save(projectId: number, slug: string, patch: Partial<EntryFields>, by: string, note: string, expect?: unknown, at = Date.now()): ReviewEntry {
     check(patch);
     const was = this.get(projectId, slug);
     if (!was) throw new ReviewError(`No entry named ${slug}`);
@@ -823,19 +824,20 @@ export class ReviewSet {
    * off trial: most notes hit and no false alarms ("rely on it"). Anything less keeps it on trial; it never puts a
    * calibrated entry back on.
    */
-  calibrate(projectId: number, slug: string, r: { hits: number; notes: number; false_alarms: number; controls: number; model?: string | null }, by: string, at = Date.now()): ReviewEntry {
-    const n = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10_000;
-    if (![r.hits, r.notes, r.false_alarms, r.controls].every(n) || r.hits > r.notes || r.false_alarms > r.controls || !r.notes) {
+  calibrate(projectId: number, slug: string, r: { hits?: unknown; notes?: unknown; false_alarms?: unknown; controls?: unknown; model?: unknown }, by: string, at = Date.now()): ReviewEntry {
+    const n = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 10_000;
+    const { hits, notes, false_alarms, controls, model } = r;
+    if (!n(hits) || !n(notes) || !n(false_alarms) || !n(controls) || hits > notes || false_alarms > controls || !notes) {
       throw new ReviewError('A calibration is whole numbers: hits out of notes (at least 1), and false_alarms out of controls');
     }
-    if (r.model != null && (typeof r.model !== 'string' || r.model.length > 60)) throw new ReviewError('model names the model the critic ran on');
+    if (model != null && (typeof model !== 'string' || model.length > 60)) throw new ReviewError('model names the model the critic ran on');
     const was = this.get(projectId, slug);
     if (!was) throw new ReviewError(`No entry named ${slug}`);
     // Controls catch a critic that fails everything (calibrate.md), so a run with none can't take it off trial.
-    const passes = r.hits * 2 > r.notes && r.false_alarms === 0 && r.controls > 0;
-    const calibration: Calibration = { at, by, model: r.model ?? undefined, hits: r.hits, notes: r.notes, false_alarms: r.false_alarms, controls: r.controls };
+    const passes = hits * 2 > notes && false_alarms === 0 && controls > 0;
+    const calibration: Calibration = { at, by, model: model ?? undefined, hits, notes, false_alarms, controls };
     const trial = was.trial && !passes;
-    return this.save(projectId, slug, { calibration, trial }, by, `Calibrated: ${r.hits}/${r.notes} hits, ${r.false_alarms}/${r.controls} false alarms${was.trial ? (passes ? ', off trial' : ', stays on trial') : ''}`, undefined, at);
+    return this.save(projectId, slug, { calibration, trial }, by, `Calibrated: ${hits}/${notes} hits, ${false_alarms}/${controls} false alarms${was.trial ? (passes ? ', off trial' : ', stays on trial') : ''}`, undefined, at);
   }
 
   /** An on_fail step that names another entry needs one in this scheme, and not the entry itself. */
@@ -862,11 +864,11 @@ export class ReviewSet {
   }
 
   /** Record one run of an entry (Q4): which minion, which round, and its verdict. */
-  recordRun(projectId: number, slug: string, r: { ticketId: number | null; minion: string; round: number; verdict: string }, at = Date.now()): Run {
+  recordRun(projectId: number, slug: string, r: { ticketId: number | null; minion: string; round: unknown; verdict: unknown }, at = Date.now()): Run {
     const e = this.get(projectId, slug);
     if (!e) throw new ReviewError(`No entry named ${slug} in this scheme's review set`);
-    if (!(VERDICTS as readonly string[]).includes(r.verdict)) throw new ReviewError(`verdict is ${VERDICTS.join(', ')}`);
-    if (!Number.isInteger(r.round) || r.round < 1 || r.round > 50) throw new ReviewError('round is a whole number from 1');
+    if (typeof r.verdict !== 'string' || !(VERDICTS as readonly string[]).includes(r.verdict)) throw new ReviewError(`verdict is ${VERDICTS.join(', ')}`);
+    if (typeof r.round !== 'number' || !Number.isInteger(r.round) || r.round < 1 || r.round > 50) throw new ReviewError('round is a whole number from 1');
     const { lastInsertRowid } = this.db.prepare('INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at) VALUES (?, ?, ?, ?, ?, ?)').run(e.id, r.ticketId, r.minion, r.round, r.verdict, at);
     return { id: Number(lastInsertRowid), minion: r.minion, round: r.round, verdict: r.verdict, disagreed: false, at };
   }
@@ -875,7 +877,7 @@ export class ReviewSet {
    * Record a person's disagreement with an entry's verdict (Q13: only the minion records it): their words quoted, who and
    * when. That minion's latest run of the entry turns amber on the page.
    */
-  recordVerdict(projectId: number, slug: string, v: { person: string; words: string; ticketId: number | null; minion: string }, at = Date.now()): Verdict {
+  recordVerdict(projectId: number, slug: string, v: { person: unknown; words: unknown; ticketId: number | null; minion: string }, at = Date.now()): Verdict {
     const e = this.get(projectId, slug);
     if (!e) throw new ReviewError(`No entry named ${slug} in this scheme's review set`);
     if (typeof v.person !== 'string' || !v.person.trim() || v.person.length > 80) throw new ReviewError('person is who disagreed, 1 to 80 characters');
@@ -910,10 +912,10 @@ export class ReviewSet {
    * Record the findings the finding checker refuted on a minion's review (#1158), on the pre-ship review's entry (made
    * here when the scheme never opened its page). Each is a kind of mistake and why it was wrong; lessons() counts them.
    */
-  recordRefutes(projectId: number, r: { ticketId: number | null; minion: string; refuted: { kind: string; why: string }[] }, at = Date.now()): Lesson[] {
+  recordRefutes(projectId: number, r: { ticketId: number | null; minion: string; refuted: unknown }, at = Date.now()): Lesson[] {
     if (!Array.isArray(r.refuted) || !r.refuted.length || r.refuted.length > 25) throw new ReviewError('refuted is a list of 1 to 25 {kind, why}, one per refuted finding');
     const rows = r.refuted
-      .map((x) => {
+      .map((x: { kind?: unknown; why?: unknown } | null | undefined) => {
         const kind = refuteKind(x?.kind);
         const why = typeof x?.why === 'string' ? x.why.replace(/\s+/g, ' ').trim() : '';
         if (kind.length < 3 || kind.length > 80) throw new ReviewError('kind is the kind of mistake in a few words, 3 to 80 characters, like "missing build step"');

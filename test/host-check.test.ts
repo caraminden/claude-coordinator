@@ -1,12 +1,19 @@
 // The host_check tool's checks (#621): the database with its secrets masked, and a user unit's journal and status.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { SECRET } from '../src/db-view.ts';
 import { hostCheck } from '../src/host-check.ts';
+import { slowJson } from '../src/http.ts';
+import { runShipTool } from '../src/mcp-ship.ts';
+import { turnStore } from '../src/pool-context.ts';
+import { judge } from '../src/judges.ts';
+import { judgeHash } from '../tools/judge-replays/pins.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'host-check-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -83,4 +90,89 @@ test('journal, status and units run the fixed commands; bad arguments say what t
       JSON.stringify(body),
     );
   }
+});
+
+// A minion's worktree as judge-replay sees it: its own copy of the tool and record, the repo's src and replays.
+const REPO = join(import.meta.dirname, '..');
+const wt = join(root, 'wt');
+mkdirSync(join(wt, 'tools'), { recursive: true });
+mkdirSync(join(wt, 'test'));
+copyFileSync(join(REPO, 'tools/judge-replay.ts'), join(wt, 'tools/judge-replay.ts'));
+mkdirSync(join(wt, 'tools/judge-replays'));
+for (const f of readdirSync(join(REPO, 'tools/judge-replays'))) symlinkSync(join(REPO, 'tools/judge-replays', f), join(wt, 'tools/judge-replays', f));
+// A replay file for a judge src/judges.ts doesn't register: judge-replay itself refuses it.
+writeFileSync(join(wt, 'tools/judge-replays/unregistered.ts'), 'export {};\n');
+symlinkSync(join(REPO, 'src'), join(wt, 'src'));
+writeFileSync(join(wt, 'test/judge-replays.json'), '{"other": {"hash": "kept"}}\n');
+const worktree = { cwd: wt, env: { PATH: process.env.PATH ?? '', HOME: root } };
+
+test("judge_replay runs the worktree's judge-replay --record over the database, and the record lands where judges.test.ts reads it", async () => {
+  const out = await hostCheck({ ...opts, worktree }, { what: 'judge_replay', judge: 'container-relief', days: 2 });
+  assert.match(out, /the last 2 days: read 0 container memory storms/);
+  assert.match(out, /Recorded in test\/judge-replays\.json/);
+  const recs = JSON.parse(readFileSync(join(wt, 'test/judge-replays.json'), 'utf8'));
+  assert.deepEqual(recs.other, { hash: 'kept' }, "another judge's record is left alone");
+  assert.equal(recs['container-relief'].hash, judgeHash(judge('container-relief')!, REPO));
+  assert.equal(recs['container-relief'].days, 2);
+  const refused = await hostCheck({ ...opts, worktree }, { what: 'judge_replay', judge: 'unregistered' });
+  assert.match(refused, /No judge unregistered/);
+  assert.equal(JSON.parse(readFileSync(join(wt, 'test/judge-replays.json'), 'utf8')).unregistered, undefined, 'an unregistered judge records nothing');
+});
+
+test('judge_replay refuses a bad judge, days or scheme, a judge with no replay, and a caller with no worktree', async () => {
+  for (const [body, why] of [
+    [{ what: 'judge_replay' }, /judge must be/],
+    [{ what: 'judge_replay', judge: '../src/x' }, /judge must be/],
+    [{ what: 'judge_replay', judge: 'container-relief', days: 0 }, /days must be/],
+    [{ what: 'judge_replay', judge: 'container-relief', scheme: 'all' }, /scheme must be/],
+    [{ what: 'judge_replay', judge: 'no-such-judge' }, /No replay for a judge no-such-judge/],
+  ] as const) {
+    await assert.rejects(hostCheck({ ...opts, worktree }, body), (err: Error & { status: number }) => err.status === 400 && why.test(err.message), JSON.stringify(body));
+  }
+  await assert.rejects(hostCheck(opts, { what: 'judge_replay', judge: 'container-relief' }), (err: Error & { status: number }) => err.status === 400 && /worktree has none/.test(err.message));
+});
+
+test('judge_replay waits for a slow judge: the flake counter’s 3 days take about 600 s (#2100)', async () => {
+  // A stand-in replay that prints its parent, coreutils `timeout`, whose third argument is the limit it runs under.
+  const slow = join(root, 'slow');
+  mkdirSync(join(slow, 'tools/judge-replays'), { recursive: true });
+  writeFileSync(join(slow, 'tools/judge-replay.ts'), "import { readFileSync } from 'node:fs';\nconsole.log(readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').split('\\0')[3]);\n");
+  writeFileSync(join(slow, 'tools/judge-replays/flake-counter.ts'), '');
+  const out = await hostCheck({ ...opts, worktree: { cwd: slow, env: worktree.env } }, { what: 'judge_replay', judge: 'flake-counter' });
+  // #2075 measured 201 s a day; at least 40% spare for a busy box.
+  assert.ok(Number(out) >= 1.4 * 3 * 201, `stopped after ${out} s`);
+});
+
+test('a slow answer sends its headers before the work ends, so the caller’s fetch does not give up (#2100)', async (t) => {
+  let finish!: (v: object) => void;
+  const server = createServer((_req, res) => void slowJson(res, new Promise<object>((ok) => (finish = ok)), 10));
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  t.after(() => server.close());
+  const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
+  finish({ output: 'done' });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { output: 'done' });
+});
+
+test('host_check says so when its answer is cut off, as by a restart mid-replay (#2100)', async (t) => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.write(' ', () => res.destroy());
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  t.after(() => server.close());
+  const env = { COORDINATOR_API: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+  await assert.rejects(
+    turnStore.run({ env, cwd: root }, () => runShipTool('host_check', { what: 'judge_replay', judge: 'flake-counter' })),
+    /cut off/,
+  );
+});
+
+test('a replay killed by a signal says so under what it had printed, as when a restart stops both (#2100)', async () => {
+  const killed = join(root, 'killed');
+  mkdirSync(join(killed, 'tools/judge-replays'), { recursive: true });
+  writeFileSync(join(killed, 'tools/judge-replay.ts'), "process.stdout.write('replay begins\\n', () => process.kill(process.pid, 'SIGTERM'));\n");
+  writeFileSync(join(killed, 'tools/judge-replays/flake-counter.ts'), '');
+  const out = await hostCheck({ ...opts, worktree: { cwd: killed, env: worktree.env } }, { what: 'judge_replay', judge: 'flake-counter' });
+  assert.match(out, /^replay begins\n\(cut off by SIGTERM.*run it again\)$/);
 });

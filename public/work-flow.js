@@ -6,11 +6,19 @@ import { COLS, dayBefore, layout, money, nodesOf, ribbon, rows, value } from './
 import { emptyCard, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
 
-const num = (n) => n.toLocaleString('en-US');
-const plural = (n, one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
-const amount = (v, unit) => (unit === 'cost' ? money(v) : num(v));
-const SHORT = Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names.map(([key, name, short = name]) => [key, short]))]));
-const NAME = Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names.map(([key, name]) => [key, name]))]));
+/** @import { FlowMinion, FlowView } from './types.js' */
+/** @import { FlowCol, FlowUnit, FlowNode, FlowLink } from './flowmath.js' */
+/** @typedef {FlowView & { asked: number, key: string, error?: undefined }} FlowOk */
+/** A read that failed: ours names its range, ci.js's own does not. @typedef {{ error: string | true, key?: string, asked?: undefined, minions?: undefined, unread?: undefined, repo?: undefined }} FlowFail */
+/** @typedef {FlowOk | FlowFail} FlowRead */
+/** @typedef {{ col: FlowCol, key: string }} FlowPick */
+
+const num = (/** @type {number} */ n) => n.toLocaleString('en-US');
+const plural = (/** @type {number} */ n, /** @type {string} */ one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
+const amount = (/** @type {number} */ v, /** @type {FlowUnit} */ unit) => (unit === 'cost' ? money(v) : num(v));
+const SHORT = /** @type {Record<FlowCol, Record<string, string>>} */ (Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names.map(([key, name, short = name]) => [key, short]))])));
+const NAME = /** @type {Record<FlowCol, Record<string, string>>} */ (Object.fromEntries(COLS.map(([col, names]) => [col, Object.fromEntries(names.map(([key, name]) => [key, name]))])));
+/** @type {[number, string][]} */
 const PRESETS = [
   [7, '1 week'],
   [14, '2 weeks'],
@@ -19,37 +27,44 @@ const PRESETS = [
 ];
 const NS = 'http://www.w3.org/2000/svg';
 /** A name and its shorter one: the page's width shows one (ci.css). */
-const both = (name, short) => [h('span', { class: 'full' }, name), h('span', { class: 'short' }, short)];
-const svgEl = (tag, attrs) => {
+const both = (/** @type {string} */ name, /** @type {string} */ short) => [h('span', { class: 'full' }, name), h('span', { class: 'short' }, short)];
+const svgEl = (/** @type {string} */ tag, /** @type {Record<string, string | number>} */ attrs) => {
   const el = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   return el;
 };
+/**
+ * @template {HTMLElement | SVGElement} E
+ * @param {E} el
+ * @param {Record<string, string>} props
+ */
 const put = (el, props) => {
   for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
   return el;
 };
-const dayWords = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const dayWords = (/** @type {string} */ day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 // ---------- what is asked for ----------
 
 /** What the tab shows, for every scheme: kept while the page is open. `days` 0 is a range of picked dates. */
-const st = { days: 14, from: '', to: '', unit: 'n', table: false, pick: { col: 'end', key: 'nothing' } };
-const setDays = (days) => Object.assign(st, { days, from: dayBefore(today(), days - 1), to: today() });
+const st = { days: 14, from: '', to: '', unit: /** @type {FlowUnit} */ ('n'), table: false, pick: /** @type {FlowPick} */ ({ col: 'end', key: 'nothing' }) };
+const setDays = (/** @type {number} */ days) => Object.assign(st, { days, from: dayBefore(today(), days - 1), to: today() });
 setDays(14);
 const rangeKey = () => `${st.from}..${st.to}`;
+/** @type {Map<number, FlowRead>} */
 const kept = new Map(); // scheme id -> the newest read of the range that was picked when it came
 
 /** The scheme's read of the range now picked; its `key` says which that was. One that lands after another was picked is dropped. */
-export async function readFlow(id) {
+export async function readFlow(/** @type {number} */ id) {
   if (st.days) setDays(st.days);
   const key = rangeKey();
   const asked = Date.now();
+  /** @type {FlowRead} */
   let data;
   try {
     data = { asked, ...(await api(`api/projects/${id}/flow?from=${st.from}&to=${st.to}`)), key };
   } catch (err) {
-    data = { error: err.message || true, key };
+    data = { error: /** @type {Error} */ (err).message || true, key };
   }
   if (key === rangeKey()) kept.set(id, data);
   return kept.get(id) ?? data;
@@ -58,34 +73,48 @@ export async function readFlow(id) {
 // ---------- why one closed ----------
 
 const WHY = ['done', 'replaced', 'dropped'];
+/** @type {Map<number, { why: string | null, saved: number | null }>} */
 const words = new Map(); // minion id -> { why, saved }: what was clicked here, and when the server had it; null until it has
+/** @type {Map<number, string | null>} */
 const had = new Map(); // minion id -> the word the server last had
+/** @type {Set<number>} */
 let moved = new Set(); // minions whose click took them out of the list they were clicked in: they stay in it until another is picked
 
 /** A read that set out before the server had a click doesn't undo it. */
-function withWords(data) {
+function withWords(/** @type {FlowRead | null} */ data) {
   for (const m of data?.minions ?? []) {
     const w = words.get(m.id);
     if (!w) continue;
-    if (w.saved === null || data.asked <= w.saved) setWhy(m, w.why, data.repo);
+    const read = /** @type {FlowOk} */ (data); // it has minions
+    if (w.saved === null || read.asked <= w.saved) setWhy(m, w.why, read.repo);
     else had.set(m.id, m.why); // someone else's, since
   }
 }
+/**
+ * @param {FlowMinion} m
+ * @param {string | null} why
+ * @param {boolean} repo
+ */
 function setWhy(m, why, repo) {
   m.why = why;
   if (['nothing', 'why', 'norepo'].includes(m.end)) m.end = why ? 'why' : repo ? 'nothing' : 'norepo';
 }
 
 /** Save why minion `m` closed, or that it isn't recorded (null): shown at once, put back if it didn't save. */
+/**
+ * @param {FlowMinion} m
+ * @param {string | null} why
+ */
 function mark(m, why) {
   if (!had.has(m.id)) had.set(m.id, m.why);
-  const show = (w) => {
+  const show = (/** @type {{ why: string | null, saved: number | null }} */ w) => {
     words.set(m.id, w);
     moved.add(m.id);
     const now = last?.data?.minions?.find((x) => x.id === m.id);
-    if (now) setWhy(now, w.why, last.data.repo);
+    if (now) setWhy(now, w.why, /** @type {FlowOk} */ (/** @type {NonNullable<typeof last>} */ (last).data).repo);
     last?.show();
   };
+  /** @type {{ why: string | null, saved: number | null }} */
   const w = { why, saved: null };
   optimistic({
     key: `closedAs:${m.id}`,
@@ -96,7 +125,7 @@ function mark(m, why) {
       w.saved = Date.now();
       had.set(m.id, why);
     },
-    undo: () => words.get(m.id) === w && show({ why: had.get(m.id), saved: Date.now() }),
+    undo: () => words.get(m.id) === w && show({ why: /** @type {string | null} */ (had.get(m.id)), saved: Date.now() }),
     label: why ? `mark #${m.number} ${why}` : `clear why #${m.number} closed`,
   });
 }
@@ -104,13 +133,17 @@ function mark(m, why) {
 // ---------- the river ----------
 
 const THICK = 14;
-/** The drawing; `on.pick` is told which node was clicked, `draw` shows what `st` says now. */
+/**
+ * The drawing; `on.pick` is told which node was clicked, `draw` shows what `st` says now.
+ * @param {FlowMinion[]} minions
+ * @param {{ pick: (p: FlowPick) => void }} on
+ */
 function river(minions, on) {
   const el = h('div', { class: 'flow-river' });
   const tip = h('div', { class: 'ci-tip flow-tip', hidden: true });
   let width = 0;
 
-  const showTip = (ev, title, lines) => {
+  const showTip = (/** @type {PointerEvent} */ ev, /** @type {string} */ title, /** @type {string[]} */ lines) => {
     tip.replaceChildren(h('strong', {}, title), ...lines.map((t) => h('span', {}, t)));
     tip.hidden = false;
     const b = el.getBoundingClientRect();
@@ -127,12 +160,22 @@ function river(minions, on) {
   svg.append(layers.ribbon, layers.thread, layers.node);
   el.append(svg, tip);
   // One element per ribbon, thread and node, kept between draws so a change of unit moves them rather than swapping them.
+  /** @typedef {{ layer: keyof typeof layers, el: SVGElement, now: unknown, used?: boolean }} Part */
+  /** @type {Map<string, Part>} */
   const pool = new Map(); // key -> { el, now }
+  /**
+   * @template T
+   * @param {keyof typeof layers} layer
+   * @param {string} key
+   * @param {T} now
+   * @param {(now: () => T) => SVGElement} make
+   */
   const part = (layer, key, now, make) => {
     let p = pool.get(`${layer} ${key}`);
     if (!p) {
-      p = { layer };
-      p.el = make(() => p.now);
+      const added = /** @type {Part} */ ({ layer });
+      p = added;
+      p.el = make(() => /** @type {T} */ (added.now));
       pool.set(`${layer} ${key}`, p);
       layers[layer].append(p.el);
     }
@@ -140,14 +183,14 @@ function river(minions, on) {
     p.used = true;
     return p.el;
   };
-  const about = (ms) => [`${plural(ms.length, 'minion')} · ${money(value(ms, 'cost'))}`];
-  const makeRibbon = (now) => {
+  const about = (/** @type {FlowMinion[]} */ ms) => [`${plural(ms.length, 'minion')} · ${money(value(ms, 'cost'))}`];
+  const makeRibbon = (/** @type {() => FlowLink} */ now) => {
     const p = svgEl('path', { class: 'ribbon' });
     p.addEventListener('pointermove', (ev) => showTip(ev, `${now().from.name} → ${now().to.name}`, about(now().ms)));
     p.addEventListener('pointerleave', hideTip);
     return p;
   };
-  const makeNode = (now) => {
+  const makeNode = (/** @type {() => FlowNode} */ now) => {
     const g = svgEl('g', { role: 'button', tabindex: 0 });
     const t = svgEl('text', {});
     t.append(svgEl('tspan', { class: 'name' }), svgEl('tspan', { class: 'v' }));
@@ -163,8 +206,8 @@ function river(minions, on) {
     g.addEventListener('pointerleave', hideTip);
     return g;
   };
-  const attrs = (node, o) => {
-    for (const [k, v] of Object.entries(o)) node.setAttribute(k, v);
+  const attrs = (/** @type {Element} */ node, /** @type {Record<string, string | number>} */ o) => {
+    for (const [k, v] of Object.entries(o)) node.setAttribute(k, String(v));
   };
 
   function draw() {
@@ -177,11 +220,11 @@ function river(minions, on) {
     const across = down ? 430 : W - pad;
     const H = down ? across : along;
     const { cols, links } = layout(minions, st.unit, along, { gap: down ? 8 : 14, least: down ? 3 : 2 });
-    const depth = (i) => (i / 2) * (across - THICK);
+    const depth = (/** @type {number} */ i) => (i / 2) * (across - THICK);
     attrs(svg, { viewBox: `0 0 ${W} ${H}`, width: W, height: H, 'aria-label': `${plural(minions.length, 'minion')} from kind, through how they got to main, to how they ended. The table shows the same numbers.` });
     for (const p of pool.values()) p.used = false;
-    const colIndex = (n) => COLS.findIndex(([c]) => c === n.col);
-    const chosen = (m) => m[st.pick.col] === st.pick.key;
+    const colIndex = (/** @type {FlowNode} */ n) => COLS.findIndex(([c]) => c === n.col);
+    const chosen = (/** @type {FlowMinion} */ m) => m[st.pick.col] === st.pick.key;
     for (const l of links) {
       const i = colIndex(l.from);
       const [d0, d1] = [depth(i) + THICK, depth(i + 1)];
@@ -191,7 +234,7 @@ function river(minions, on) {
       const some = l.ms.filter(chosen);
       if (!some.length) continue;
       const share = l.v ? value(some, st.unit) / l.v : some.length / l.ms.length;
-      const thin = (x0, x1) => Math.max(x0 + 1, x0 + (x1 - x0) * share);
+      const thin = (/** @type {number} */ x0, /** @type {number} */ x1) => Math.max(x0 + 1, x0 + (x1 - x0) * share);
       attrs(
         part('thread', key, l, () => svgEl('path', { class: 'thread' })),
         { d: ribbon({ a0: l.a0, a1: thin(l.a0, l.a1), b0: l.b0, b1: thin(l.b0, l.b1) }, d0, d1, down), 'data-hue': `${st.pick.col}-${st.pick.key}` },
@@ -204,7 +247,7 @@ function river(minions, on) {
         const picked = n.col === st.pick.col && n.key === st.pick.key;
         const g = part('node', `${n.col}-${n.key}`, n, makeNode);
         attrs(g, { class: `flow-node${picked ? ' on' : ''}`, 'data-hue': `${n.col}-${n.key}`, 'aria-pressed': String(picked), 'aria-label': `${n.name}: ${plural(n.ms.length, 'minion')}, ${money(value(n.ms, 'cost'))}. List them` });
-        const [hit, bar, lead, text] = g.children;
+        const [hit, bar, lead, text] = /** @type {HTMLCollectionOf<SVGElement>} */ (g.children);
         attrs(bar, { ...(down ? { x: n.at, y: d, width: n.size, height: THICK } : { x: d, y: n.at, width: THICK, height: n.size }), rx: Math.min(3, n.size / 2) });
         const tall = Math.max(24, n.size + 12);
         attrs(hit, down ? { x: n.at - 3, y: d - 14, width: n.size + 6, height: THICK + 28 } : { x: d - 8, y: n.at + n.size / 2 - tall / 2, width: i === 2 ? pad : THICK + 16, height: tall });
@@ -246,10 +289,18 @@ function river(minions, on) {
 
 // ---------- the tab ----------
 
+/** @type {{ id: number, el: HTMLDivElement, data?: FlowRead | null, show: () => unknown, redraw: () => void } | null} */
 let last = null; // { id, data, el, redraw }: a poll's draw with the same read moves nothing
-let again = null; // the timer of a read that still lacks some chats
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let again; // the timer of a read that still lacks some chats
 
-/** The Flow tab for scheme `id`: `data` is its read, null while it's on its way. `retry` reads again. */
+/**
+ * The Flow tab for scheme `id`: `data` is its read, null while it's on its way. `retry` reads again.
+ * @param {number} id
+ * @param {string} name
+ * @param {FlowRead | null} data
+ * @param {() => unknown} retry
+ */
 export function flowTab(id, name, data, retry) {
   if (last?.id !== id) {
     moved = new Set();
@@ -259,12 +310,13 @@ export function flowTab(id, name, data, retry) {
       el,
       show: () => {},
       redraw() {
-        const at = el.contains(document.activeElement) ? (document.activeElement.closest('[aria-label]')?.getAttribute('aria-label') ?? null) : null;
-        const word = at && document.activeElement.textContent;
+        const active = /** @type {Element} */ (document.activeElement); // read only where `el` holds it
+        const at = el.contains(document.activeElement) ? (active.closest('[aria-label]')?.getAttribute('aria-label') ?? null) : null;
+        const word = at && active.textContent;
         el.replaceChildren(...build(id, name, this.data, retry, () => this.redraw()));
         if (!at) return;
         const now = el.querySelector(`[aria-label="${CSS.escape(at)}"]`);
-        (now?.matches('[role=group]') ? ([...now.querySelectorAll('button')].find((b) => b.textContent === word) ?? now.querySelector('.on')) : now)?.focus({ preventScroll: true });
+        /** @type {HTMLElement | null | undefined} */ (now?.matches('[role=group]') ? ([...now.querySelectorAll('button')].find((b) => b.textContent === word) ?? now.querySelector('.on')) : now)?.focus({ preventScroll: true });
       },
     };
   } else if (last.data === data) return last.el;
@@ -272,16 +324,23 @@ export function flowTab(id, name, data, retry) {
   withWords(data);
   last.redraw();
   clearTimeout(again);
-  if (data?.unread) again = setTimeout(() => last.el.isConnected && retry(), 4000);
+  if (data?.unread) again = setTimeout(() => /** @type {NonNullable<typeof last>} */ (last).el.isConnected && retry(), 4000);
   return last.el;
 }
 
+/**
+ * @param {number} id
+ * @param {string} name
+ * @param {FlowRead | null | undefined} data
+ * @param {() => unknown} retry
+ * @param {() => void} redraw
+ */
 function build(id, name, data, retry, redraw) {
   const fresh = data?.key === rangeKey() ? data : null;
   const stale = !fresh && data?.minions ? data : null; // the last range's, dimmed while the new one is read
-  const shown = fresh ?? stale;
-  const chip = (words, on, act) => h('button', { type: 'button', class: `chip${on ? ' on' : ''}`, 'aria-pressed': String(on), onclick: act }, words);
-  const choose = (act) => {
+  const shown = /** @type {FlowOk | null} */ (fresh ?? stale); // a failed one returns below before `shown` is read
+  const chip = (/** @type {string} */ words, /** @type {boolean} */ on, /** @type {(ev: Event) => unknown} */ act) => h('button', { type: 'button', class: `chip${on ? ' on' : ''}`, 'aria-pressed': String(on), onclick: act }, words);
+  const choose = (/** @type {() => unknown} */ act) => {
     act();
     moved = new Set();
     redraw();
@@ -295,10 +354,10 @@ function build(id, name, data, retry, redraw) {
       h('input', {
         type: 'date',
         'aria-label': k === 'from' ? 'First day' : 'Last day',
-        value: st[k],
+        value: st[/** @type {'from' | 'to'} */ (k)],
         max: today(),
-        onchange: (ev) => {
-          const v = ev.target.value;
+        onchange: (/** @type {Event} */ ev) => {
+          const v = /** @type {HTMLInputElement} */ (ev.target).value;
           if (!v) return;
           // The other end follows, so a range is never backwards.
           choose(() => Object.assign(st, { days: 0, [k]: v }, st.from > v && k === 'to' ? { from: v } : st.to < v && k === 'from' ? { to: v } : {}));
@@ -306,9 +365,11 @@ function build(id, name, data, retry, redraw) {
       }),
     ]),
   );
+  /** @type {ReturnType<typeof river> | null} */
   let map = null;
   let show = redraw;
-  last.show = redraw;
+  const tab = /** @type {NonNullable<typeof last>} */ (last); // flowTab made it before building
+  tab.show = redraw;
   const controls = h(
     'div',
     { class: 'code-ctl flow-ctl' },
@@ -333,10 +394,10 @@ function build(id, name, data, retry, redraw) {
           ['cost', 'Dollars'],
         ].map(([u, words]) =>
           chip(words, st.unit === u, (ev) => {
-            st.unit = u;
+            st.unit = /** @type {FlowUnit} */ (u);
             if (!map) return redraw();
             // Moved in place, so the river flows from one count to the other.
-            for (const c of ev.currentTarget.parentElement.children) {
+            for (const c of /** @type {Element} */ (/** @type {Element} */ (ev.currentTarget).parentElement).children) {
               const on = c === ev.currentTarget;
               c.classList.toggle('on', on);
               c.setAttribute('aria-pressed', String(on));
@@ -352,8 +413,8 @@ function build(id, name, data, retry, redraw) {
           [false, 'Chart'],
           [true, 'Table'],
         ].map(([t, words]) =>
-          chip(words, st.table === t, () => {
-            st.table = t;
+          chip(/** @type {string} */ (words), st.table === t, () => {
+            st.table = /** @type {boolean} */ (t);
             redraw();
           }),
         ),
@@ -374,16 +435,18 @@ function build(id, name, data, retry, redraw) {
   const body = h('section', { class: `ci-block code-block flow-block${stale ? ' stale' : ''}${st.table ? ' table' : ''}`, 'data-hue': 'accent', 'aria-busy': String(!!stale) });
   const listBox = h('div', { class: 'flow-list' });
   const legend = h('div', { class: 'flow-names' });
-  const has = (p) => ms.some((m) => m[p.col] === p.key);
+  const has = (/** @type {FlowPick} */ p) => ms.some((m) => m[p.col] === p.key);
   if (!has(st.pick) && !ms.some((m) => moved.has(m.id))) {
     const first = ['nothing', 'why', 'norepo', 'late', 'live', 'main', 'answer', 'open', 'build'].find((key) => has({ col: 'end', key }));
-    st.pick = { col: 'end', key: first };
+    st.pick = { col: 'end', key: /** @type {string} */ (first) }; // every ending is in the list above
   }
   const drawList = () => {
     const some = ms.filter((m) => m[st.pick.col] === st.pick.key);
     const listed = ms.filter((m) => some.includes(m) || moved.has(m.id)).sort((a, b) => b.cost - a.cost || b.number - a.number);
-    const at = listBox.contains(document.activeElement) ? (document.activeElement.closest('.flow-why')?.dataset.id ?? null) : null;
-    const word = at && document.activeElement.textContent;
+    const active = /** @type {Element} */ (document.activeElement); // read only where `listBox` holds it
+    const row = /** @type {HTMLElement | null | undefined} */ (active?.closest('.flow-why'));
+    const at = listBox.contains(document.activeElement) ? (row?.dataset.id ?? null) : null;
+    const word = at && active.textContent;
     const cost = value(some, 'cost');
     listBox.replaceChildren(
       h('h4', { 'data-hue': `${st.pick.col}-${st.pick.key}` }, h('i', { class: 'flow-key', 'aria-hidden': 'true' }), NAME[st.pick.col][st.pick.key], h('span', { class: 'muted' }, `${plural(some.length, 'minion')} · ${money(cost)}`)),
@@ -396,15 +459,15 @@ function build(id, name, data, retry, redraw) {
         wrap: (xs) => h('ol', { class: 'flow-rows' }, ...xs),
       }),
     );
-    if (at) [...listBox.querySelectorAll(`.flow-why[data-id="${at}"] button`)].find((b) => b.textContent === word)?.focus({ preventScroll: true });
+    if (at) [.../** @type {NodeListOf<HTMLButtonElement>} */ (listBox.querySelectorAll(`.flow-why[data-id="${at}"] button`))].find((b) => b.textContent === word)?.focus({ preventScroll: true });
   };
-  const pick = (p) => {
+  const pick = (/** @type {FlowPick} */ p) => {
     st.pick = p;
     moved = new Set();
     show();
   };
   const drawLegend = () => {
-    const at = legend.contains(document.activeElement) ? document.activeElement.dataset.hue : null;
+    const at = legend.contains(document.activeElement) ? /** @type {HTMLElement} */ (document.activeElement).dataset.hue : null;
     legend.replaceChildren(
       ...nodesOf(ms).map((col, i) =>
         h(
@@ -424,7 +487,7 @@ function build(id, name, data, retry, redraw) {
         ),
       ),
     );
-    if (at) legend.querySelector(`[data-hue="${at}"]`)?.focus({ preventScroll: true });
+    if (at) /** @type {HTMLElement | null} */ (legend.querySelector(`[data-hue="${at}"]`))?.focus({ preventScroll: true });
   };
   const sum = h('p', { class: 'flow-words' }, ...summary(ms, shown.early));
   const stage = h('div', { class: 'flow-stage' });
@@ -455,19 +518,24 @@ function build(id, name, data, retry, redraw) {
   }
   show = () => {
     if (st.table) return redraw();
-    map.draw();
+    /** @type {NonNullable<typeof map>} */ (map).draw();
     drawLegend();
     drawList();
     sum.replaceChildren(...summary(ms, shown.early));
   };
-  last.show = () => show();
+  tab.show = () => show();
   drawLegend();
   drawList();
   body.append(h('div', { class: 'code-sum flow-sum' }, h('span', { class: 'settings-tile' }, icon('chart')), sum), stage, legend, listBox);
   return [head, controls, ...notes, body, how(shown)];
 }
 
-/** One minion in the list, opening its chat. */
+/**
+ * One minion in the list, opening its chat.
+ * @param {number} id
+ * @param {FlowMinion} m
+ * @param {number} most
+ */
 function rowOf(id, m, most) {
   const bar = put(h('i', {}), { '--pct': `${most ? ((m.cost / most) * 100).toFixed(1) : 0}%` });
   const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', ['nothing', 'why', 'norepo', 'answer'].includes(m.end) ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
@@ -487,11 +555,14 @@ function rowOf(id, m, most) {
 }
 
 /** The three words, and any other a scheme gave the property that these have. */
-const wordsOf = (ms) => [...new Set([...WHY, ...ms.flatMap((m) => m.why ?? [])])];
+const wordsOf = (/** @type {FlowMinion[]} */ ms) => [...new Set([...WHY, ...ms.flatMap((m) => m.why ?? [])])];
 
-const listWords = (xs) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} or ${xs.at(-1)}`);
+const listWords = (/** @type {string[]} */ xs) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} or ${xs.at(-1)}`);
 
-/** Why one closed, and the three words to say it with; the one on takes itself back. */
+/**
+ * Why one closed, and the three words to say it with; the one on takes itself back.
+ * @param {FlowMinion} m
+ */
 function whyOf(m) {
   return h(
     'div',
@@ -501,7 +572,11 @@ function whyOf(m) {
   );
 }
 
-/** The sentence over the river. */
+/**
+ * The sentence over the river.
+ * @param {FlowMinion[]} ms
+ * @param {boolean} early
+ */
 function summary(ms, early) {
   const refused = ms.filter((m) => m.path === 'refused'),
     there = refused.filter((m) => m.end === 'late'),
@@ -519,7 +594,7 @@ function summary(ms, early) {
   ];
 }
 
-const how = (data) =>
+const how = (/** @type {FlowOk} */ data) =>
   h(
     'details',
     { class: 'code-how' },

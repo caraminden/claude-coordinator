@@ -18,31 +18,76 @@ after(() => rmSync(root, { recursive: true, force: true }));
 // left from long ago, which would test a rollback to a release no deploy goes back to (#1169).
 const live = process.env.DEPLOY_LIVE || join(homedir(), 'claude-coordinator');
 const resolves = (dir: string, ref: string) => spawnSync('git', ['-C', dir, 'rev-parse', '-q', '--verify', `${ref}^{commit}`]).status === 0;
-const [prevRepo, prev] = (
+const release = (
   [
     [live, 'last-good'],
     [repo, 'last-good'],
     [repo, 'origin/main'],
   ] as const
-).find(([dir, ref]) => resolves(dir, ref)) ?? [repo, undefined];
+).find(([dir, ref]) => resolves(dir, ref));
+// A build's merge of main (tools/land.sh --into build/<n> --full) ships nothing and waits in the lands' line, where main
+// may ship a newer schema past the main it took in (#2067). When the last release isn't under HEAD and this is that run,
+// it is checked against the main it took in: land.sh's LAND_BUILD_BASE, or on CI (GITHUB_REF_NAME land/<branch>) where
+// HEAD meets the main land.sh pushed beside it (land-base/<branch>). Any other run, --build (which merges main in)
+// included, meets the last release as before, and a stale branch still hears to rebase.
+const git = (dir: string, ...args: string[]) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+function buildBase(dir: string, releaseSha: string | undefined, env: NodeJS.ProcessEnv): string | undefined {
+  if (releaseSha && git(dir, 'merge-base', '--is-ancestor', releaseSha, 'HEAD').status === 0) return undefined;
+  if (env.LAND_BUILD_BASE) return env.LAND_BUILD_BASE;
+  const name = env.GITHUB_REF_NAME ?? '';
+  if (!name.startsWith('land/')) return undefined;
+  const r = git(dir, 'merge-base', 'HEAD', `origin/land-base/${name.slice('land/'.length)}`);
+  return r.status === 0 ? r.stdout.trim() : undefined;
+}
+const base = release && buildBase(repo, git(release[0], 'rev-parse', `${release[1]}^{commit}`).stdout.trim(), process.env);
+const [prevRepo, prev] = base ? ([repo, resolves(repo, base) ? base : undefined] as const) : (release ?? [repo, undefined]);
 const prevDir = join(root, 'prev');
 mkdirSync(prevDir);
 if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', prevRepo, prev, prevDir]);
 // A branch whose base is older than the last release has a lower SCHEMA_VERSION; shipping that would be
 // wrong, and the failures that follow look like the change broke compatibility. Say the real cause.
-const staleBase = (ref: string | undefined, releaseVersion: number, branchVersion: number) => (releaseVersion > branchVersion ? `this branch's schema is ${branchVersion}, older than the last release's ${releaseVersion} (${ref}): its base is behind. Rebase onto main.` : undefined);
+const staleBase = (ref: string | undefined, releaseVersion: number, branchVersion: number, build = false) =>
+  releaseVersion > branchVersion
+    ? build
+      ? `this branch's schema is ${branchVersion}, older than the ${releaseVersion} of the main its build took in (${ref}): it lowers the schema.`
+      : `this branch's schema is ${branchVersion}, older than the last release's ${releaseVersion} (${ref}): its base is behind. Rebase onto main.`
+    : undefined;
 const loadPrev = async () => {
+  assert.ok(!base || resolves(repo, base), `the build's base ${base} is not a commit in ${repo}`);
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
   const mod = await import(join(prevDir, 'src', 'db.ts'));
-  const stale = staleBase(prev, mod.SCHEMA_VERSION ?? 0, SCHEMA_VERSION);
+  const stale = staleBase(prev, mod.SCHEMA_VERSION ?? 0, SCHEMA_VERSION, !!base);
   assert.ok(!stale, stale!);
   return mod;
 };
+
+test("a build's merge of main is checked against the main it took in only when the last release isn't under it: land.sh's word, or on CI where HEAD meets land-base (#2067)", () => {
+  const dir = join(root, 'base-repo');
+  mkdirSync(dir);
+  const g = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  g('init', '-q', '-b', 'main');
+  const commit = (m: string) => (g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', m), g('rev-parse', 'HEAD'));
+  const took = commit('the main the build took in');
+  const moved = commit('main ships a newer schema: the last release');
+  g('checkout', '-q', '-b', 'ticket/9-build', took);
+  commit("the build's own");
+  const ci = { GITHUB_REF_NAME: 'land/ticket/9-build' };
+  assert.equal(buildBase(dir, moved, { LAND_BUILD_BASE: took }), took, "the release moved past the build: land.sh's word");
+  assert.equal(buildBase(dir, moved, ci), undefined, 'on CI with no land-base pushed: the last release (a stale branch hears to rebase)');
+  g('update-ref', 'refs/remotes/origin/land-base/ticket/9-build', moved);
+  assert.equal(buildBase(dir, moved, ci), took, "on CI, land-base at main's tip: where HEAD meets it");
+  g('update-ref', 'refs/remotes/origin/land-base/ticket/9-build', took);
+  assert.equal(buildBase(dir, moved, ci), took, 'land-base at the merge-base (the kit core pushes that): the same commit');
+  assert.equal(buildBase(dir, moved, {}), undefined, 'not a land run, nor land.sh: the last release');
+  assert.equal(buildBase(dir, moved, { GITHUB_REF_NAME: 'check/ticket/9-build' }), undefined);
+  assert.equal(buildBase(dir, took, { ...ci, LAND_BUILD_BASE: took }), undefined, 'the last release under HEAD (every ship, --build too): the last release');
+});
 
 test('a base older than the last release says to rebase, with both schema numbers', () => {
   assert.equal(staleBase('last-good', 111, 110), "this branch's schema is 110, older than the last release's 111 (last-good): its base is behind. Rebase onto main.");
   assert.equal(staleBase('last-good', 110, 110), undefined);
   assert.equal(staleBase('last-good', 109, 110), undefined);
+  assert.equal(staleBase('abc123', 111, 110, true), "this branch's schema is 110, older than the 111 of the main its build took in (abc123): it lowers the schema.");
 });
 
 // The shape a Store gives a new database: every table and index, as SQLite stores them.

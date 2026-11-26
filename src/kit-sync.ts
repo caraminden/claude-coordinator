@@ -12,9 +12,9 @@
  * Taskmaster. This file holds the git side; KitSync (below) runs the rounds.
  */
 import { execFile, execFileSync } from 'node:child_process';
-import { rm } from 'node:fs/promises';
+import { access, rm } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostJobs } from './host-job.ts';
@@ -66,6 +66,22 @@ export function blobAt(dir: string, rev: string, path: string): string | null {
 export function templateBlobs(kitDir: string, rev: string): Record<string, string | null> {
   return Object.fromEntries(KIT_FILES.map((f) => [f.template, blobAt(kitDir, rev, f.template)]));
 }
+
+/** templateBlobs with each git run off the server's thread. */
+export async function templateBlobsA(kitDir: string, rev: string): Promise<Record<string, string | null>> {
+  const blob = (path: string) =>
+    gitAsync(kitDir, ['rev-parse', '--verify', '--quiet', `${rev}:${path}`]).then(
+      (out) => out.trim() || null,
+      () => null,
+    );
+  return Object.fromEntries(await Promise.all(KIT_FILES.map(async (f) => [f.template, await blob(f.template)] as const)));
+}
+
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 /** Every version a template has had up to `rev`, newest first: the commit that made it and its blob. */
 export function templateHistory(kitDir: string, rev: string, template: string): { commit: string; blob: string }[] {
@@ -402,10 +418,12 @@ export class KitSync {
   poll(): Promise<void> {
     return this.serial(async () => {
       // deploy.sh moves the checkout before its tests and boot check, and marks that window; its kit may yet be rolled back.
-      if (existsSync(join(git(this.d.kitDir, ['rev-parse', '--absolute-git-dir']).trim(), 'cc-deploy', 'unchecked'))) return;
+      // The look runs off the server's thread (#2111): it was 6 blocking gits every 10 minutes, each a process start on a busy box.
+      const gitDir = (await gitAsync(this.d.kitDir, ['rev-parse', '--absolute-git-dir'])).trim();
+      if (await exists(join(gitDir, 'cc-deploy', 'unchecked'))) return;
       let s = this.d.load();
-      const head = git(this.d.kitDir, ['rev-parse', 'HEAD']).trim();
-      const blobs = templateBlobs(this.d.kitDir, head);
+      const head = (await gitAsync(this.d.kitDir, ['rev-parse', 'HEAD'])).trim();
+      const blobs = await templateBlobsA(this.d.kitDir, head);
       // A running check or ship keeps its round: superseding would leave its job writing into the next round's folder.
       const shipping = s?.round?.schemes.some((x) => x.state === 'checking' || x.state === 'queued' || x.state === 'shipping');
       if (JSON.stringify(blobs) !== JSON.stringify(s?.blobs) && !shipping) {
@@ -480,8 +498,11 @@ export class KitSync {
       this.d.jobs.start({
         dir: this.jobDir(project, 'check'),
         cwd: this.worktree(project),
-        argv: ['bash', '-c', CHECK_SCRIPT],
-        env: { ...this.d.env(null), KIT_SYNC_GUARD: guard ? '1' : '0' },
+        // In a heavy slot like every other heavy job (#2112): a round with many schemes behind checks a few at a time. CHECK_TIMEOUT
+        // is inside the script, so it times the run and not the wait; the card shows 'checking' while it waits. --here: it needs
+        // this worktree. A ship isn't wrapped: land.sh refuses under citadel-heavy and takes its own slot for its suite.
+        argv: [join(import.meta.dirname, '../tools/citadel-heavy'), '--here', '--heavy', 'bash', '-c', CHECK_SCRIPT],
+        env: { ...this.d.env(null), CITADEL_HEAVY_WHO: `kit sync ${name}`, KIT_SYNC_GUARD: guard ? '1' : '0' },
         unit: `citadel-kit-sync-check-${project}-${Date.now()}`,
         description: `Kit sync check for ${name}`,
         ticketId: 0,

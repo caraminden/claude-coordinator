@@ -9,7 +9,7 @@ import { Approvals, mcpMerge, mergeGo, mergeTarget, plainMerge, type Go, type Go
 import { Store } from '../src/db.ts';
 import { parseMerge, type PrInfo } from '../src/merge-card.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, REPO, stopProcs, stopTurns, turnSaved, until, testPins } from './helpers.ts';
+import { agentToken, bootServer, fakeClaude, REPO, stopProcs, stopTurns, turnSaved, until, testPins } from './helpers.ts';
 testPins();
 import { json, type ApiEvent } from './typed.ts';
 
@@ -448,21 +448,7 @@ test('a merge the go covers, run chained or without --repo, is sent back once wi
 
 // ---------- the runner records what people type ----------
 
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-const { existsSync } = require('node:fs');
-process.stdin.resume();
-const t = setInterval(() => {
-  if (!existsSync(${JSON.stringify(join(root, 'release'))})) return;
-  clearInterval(t);
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-}, 20);
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root, { release: join(root, 'release') });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 test('a typed go is recorded for the scheme when sent, steered or not; a relay never; the turn end and a restart keep it', async () => {

@@ -617,7 +617,7 @@ export class CitadelServer implements Reader {
  * The commits in prev..head (sha → commit time, ms), and the scheme's minions whose branch tip is one of them: land.sh
  * rebases a branch and fast-forwards main to it, so a landed branch's tip is on main. A batch member under the kit's
  * core land.sh moves its branch only once the head's deploy ends, so until then refs/shipping/<branch> names it
- * (tools/land.local.sh's land_deploy, #1323). A tip committed before its minion started is where a new branch began,
+ * (#1323). A tip committed before its minion started is where a new branch began,
  * not its work. Null when git failed.
  */
 export async function landedIn(store: Store, p: Project, prev: string, head: string) {

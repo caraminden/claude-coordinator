@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { systemPrompt } from '../src/prompts.ts';
-import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 import { json } from './typed.ts';
 
 // The Citadel-wide instructions (#148): one app-wide text with history, in every prompt right before
@@ -54,25 +54,8 @@ type McpResult = { tools: { name: string }[]; isError?: boolean; content: { text
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`'s Taskmaster. */
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, appTools: boolean): Promise<McpResult> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: 'coordinator',
-      COORDINATOR_APP_INSTRUCTIONS: appTools ? '1' : undefined,
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<{ result: McpResult }>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
+  const env = agentEnv(srv.base, tokens.agentToken(ticket.id), ticket, 'coordinator', { COORDINATOR_APP_INSTRUCTIONS: appTools ? '1' : undefined });
+  return mcpOnce(env, method, params, tmp.track);
 }
 
 test('empty text adds no section; set, it comes right before the scheme instructions', () => {

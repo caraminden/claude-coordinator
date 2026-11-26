@@ -497,7 +497,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     // Pulled off a red train on a guess: it waits for the verdict on the train without it, and fills no train's count.
     const off = pulledOf(t.phase);
     if (off) {
-      const text = `pulled off ${name(off.front)}'s train on a guess (${off.tests} failed): the train runs again without it, and that decides whether it goes back to its minion`;
+      const text = `pulled off ${name(off.front)}'s train on a guess (${off.tests} failed): the train runs again without it, then it goes back in line`;
       out.set(t.label, { kind: 'land', stage: 'line', label: 'Pulled', chip: 'line · pulled', text, brief: `pulled off ${name(off.front)}'s train on a guess`, since: t.mtime, usual: null, train: { role: 'waiting', label: 'Pulled' } });
       return;
     }
@@ -729,7 +729,7 @@ export interface WaitDeps {
   /** Whether a minion's ship counted a CI run started early on its train (#1566, land-news's earlyCi). */
   early?: (ticketId: number) => boolean;
   /** Why the ship ahead (its minion) threw away the early run it stacked for `next`, from its landing's log (#1905); null when unknown. */
-  earlyWhy?: (headTicketId: number, next: string) => string | null;
+  earlyWhy?: (headTicketId: number, next: string) => string | null | Promise<string | null>;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
@@ -741,6 +741,8 @@ export class Waits {
   private earlyNow = new Map<number, { head: string; next: string }>();
   /** Waiting ships whose early run was thrown away, by minion: what to say, until they leave the line or are stacked again. */
   private earlyDropped = new Map<number, string>();
+  /** The read of the reason each dropped note waits on (#2111), by minion. */
+  private earlyAsked = new Map<number, Promise<string | null>>();
   private d: WaitDeps;
   constructor(d: WaitDeps) {
     this.d = d;
@@ -883,10 +885,12 @@ export class Waits {
     const was = this.earlyNow;
     this.earlyNow = new Map();
     if (off) this.earlyDropped.clear();
+    if (off) this.earlyAsked.clear();
     const watch = new Map<number, { branch: string; top: string; since: number }>();
     if (file && nextId != null) {
       this.earlyNow.set(nextId, { head: file.head, next: file.next });
       this.earlyDropped.delete(nextId);
+      this.earlyAsked.delete(nextId);
       watch.set(nextId, { branch: file.next, top: file.top, since: file.at * 1000 });
     }
     for (const [id, e] of was) {
@@ -895,8 +899,15 @@ export class Waits {
       const headId = this.ticketFor(e.head);
       const why = headId != null ? this.d.earlyWhy?.(headId, e.next) : null;
       const ahead = this.name(e.head);
-      const text = !why ? `Early test dropped: ${ahead} ahead of it changed` : /went red/.test(why) ? `Early test dropped: ${ahead} ahead of it failed` : /built again/.test(why) ? `Early test dropped: ${ahead}'s train was built again, so the run no longer matches` : `Early test dropped: ${why}`;
-      this.earlyDropped.set(id, text);
+      const say = (why: string | null | undefined) =>
+        this.earlyDropped.set(id, !why ? `Early test dropped: ${ahead} ahead of it changed` : /went red/.test(why) ? `Early test dropped: ${ahead} ahead of it failed` : /built again/.test(why) ? `Early test dropped: ${ahead}'s train was built again, so the run no longer matches` : `Early test dropped: ${why}`);
+      // The reason is in the head's log, read off the server's thread (#2111): the plain words show until it is in.
+      if (why instanceof Promise) {
+        say(null);
+        // Only this drop's read fills it in: an older one that ends late belongs to a run dropped before.
+        this.earlyAsked.set(id, why);
+        void why.then((w) => void (w && this.earlyAsked.get(id) === why && this.earlyDropped.has(id) && say(w))).catch(() => {});
+      } else say(why);
     }
     // A dropped note goes once its ship is no longer waiting in the line.
     for (const id of [...this.earlyDropped.keys()]) {

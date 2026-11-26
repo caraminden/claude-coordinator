@@ -11,7 +11,10 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
 
 ## The eight parts
 
-1. **Goal**, one line: what changes, for whom.
+1. **Goal**, one line: what changes, for whom. Two asks that can each ship and be used alone get two
+   minions (a chain only when the second needs the first's code), above all when only one waits on a
+   person's card: a read-only Flow tab and a saved closing word whose word list a person picks were
+   one brief, and should have been two.
 2. **Their words**: the person's own words that asked for it, in quotation marks, with who and the
    date: `Josh, 2026-11-19: "Go on A1"`. Quote the ask itself, not your summary of it, and each
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.
@@ -48,7 +51,7 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    model (the budget part of list_tickets' lines, or the Budget line at the top of your own turns) times
    how many minions' worth of work the brief holds; a port, a migration or many files weighs more, a
    one-line fix less. create_ticket reads the line (or takes `expected_cost`), and the minion's budget
-   alarms count from it. A brief over $30 waits for a person's start card (Start, or Split first) before it
+   alarms count from it. A brief over $50 waits for a person's start card (Start, or Split first) before it
    runs: give the honest number, and say in the brief where the work could split, so the person can pick.
    The tiers, read from the table when this skill loaded (a scheme with Fable off gets them without
    Fable):

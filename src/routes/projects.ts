@@ -15,7 +15,7 @@ import { AGENT_NAME, type Session } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type TicketFields, type User } from '../db.ts';
 import { setClaimQueue } from '../armed-handoff.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { homeBuckets, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { readScope } from '../read-scope.ts';
 import { isShipping, isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
@@ -64,8 +64,6 @@ import { cabalLead, putOnCabal } from './cabals.ts';
 import { afterAllWrites, buildNumber, HttpError, isRecord, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
-/** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
-const homeBuckets = new HomeBucketCache();
 /** Each scheme's chains, kept 5 s: every chat open asks for them (#1679). */
 const chainCache = new Map<number, { at: number; chains: ChainView[] }>();
 
@@ -257,8 +255,8 @@ function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string |
 }
 
 // A new minion, from a person (`caller` null) or a Taskmaster (`caller` its ticket). `picked` (#2050): a person's pick on
-// minion `caller`'s card: the agent's checks run, but the minion is the picker's (`session`) and runs on their login.
-export async function createMinion(app: App, project: Project, body: Awaited<ReturnType<typeof readJson>>, session: Session, caller: Ticket | null, picked = false): Promise<TicketView & { notes: string[] }> {
+// minion `caller`'s card: the agent's checks run, but the minion is the picker's (`session`) and runs on their login. `cabal` (#2091): cabal_start's row and the dollars its forming card approved (no start card up to them).
+export async function createMinion(app: App, project: Project, body: Awaited<ReturnType<typeof readJson>>, session: Session, caller: Ticket | null, picked = false, cabal?: { row: number; usd: number | null }): Promise<TicketView & { notes: string[] }> {
   if (app.preview) throw new HttpError(403, "A preview can't start minions");
   const { store, runner, waiters } = app;
   // Every new minion gets a git worktree in the scheme's real repo.
@@ -374,7 +372,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   store.addPick(id, model, effort, pickBy, because);
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
   await ownWrites(); // its build owner and the reply read the row back (#1244)
-  if (body.cabal != null) putOnCabal(app, { id, project_id: project.id, title }, body.cabal, session.name);
+  if (body.cabal != null) putOnCabal(app, { id, project_id: project.id, title }, body.cabal, session.name, cabal?.row);
   const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
   if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
   // And it is that turn's asker's ask (#255), so its messages back count as theirs.
@@ -395,9 +393,9 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
     store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
   }
   if (estimate) store.setSetting(budgetKey(id), { estimate } satisfies BudgetState);
-  // Over $30, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
+  // Over START_CARD_USD, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
   // to it is held meanwhile (runner.send), a chained one's brief too.
-  if (caller && estimate && estimate > START_CARD_USD) {
+  if (caller && estimate && estimate > START_CARD_USD && !(cabal?.usd && estimate <= cabal.usd)) {
     const t = store.getTicket(id)!;
     const owner = store.minionOwner(t);
     const to = owner != null ? store.getUser(owner)?.name : undefined;
@@ -1001,7 +999,7 @@ export const projectRoutes: Route[] = [
       const all_tms = app.store.listCoordinators(project.id);
       const own = !caller && all_tms.length > 1 ? (app.store.coordinatorFor(project.id, session.uid!) ?? coordinator) : coordinator;
       const taskmasters = all_tms.length > 1 ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : (app.store.getUser(t.coordinator_of)?.name ?? null), updated_at: t.updated_at, status: t.status, ...queueMarks(app, t) })) : [];
-      return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
+      return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews, cabals: app.cabals?.get(project.id) ?? [] });
     },
   },
   {

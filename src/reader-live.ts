@@ -10,6 +10,7 @@ import type { StatusPage } from './status-page.ts';
 import type { DiskUse } from './app-services.ts';
 import { jobList } from './every.ts';
 import { cores } from './host-signals.ts';
+import type { CabalCard } from './cabal-cards.ts';
 
 /** How often the running minions and the Status inputs are posted again, and every open minion every SWEEP_ALL of those. */
 export const SWEEP_MS = 3000;
@@ -25,6 +26,7 @@ export type LiveDeps = {
   store: Store;
   runner: Runner;
   builds: (projectId: number) => unknown;
+  cabals: (projectId: number) => CabalCard[];
   ownScheme: () => number | null;
   /** Whether this server makes build previews (none in a preview server). */
   previews: boolean;
@@ -85,7 +87,7 @@ export function publishLive(d: LiveDeps) {
       jobs: jobList(),
     };
     const projects = store.listProjects();
-    const delta: SnapDelta = { status, ships: d.ships(), builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), ownScheme: d.ownScheme(), previews: d.previews };
+    const delta: SnapDelta = { status, ships: d.ships(), builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), cabals: Object.fromEntries(projects.map((p) => [p.id, d.cabals(p.id)])), ownScheme: d.ownScheme(), previews: d.previews };
     const json = JSON.stringify(delta);
     if (json !== lastOther) d.publish(delta);
     lastOther = json;

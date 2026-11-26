@@ -1,4 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
+import { fillFor } from './src/cabal-start.ts';
 import './src/host-signals.ts'; // first: a test server's fixed zone (TZ) is set before any module reads the clock (#1485)
 import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
@@ -151,6 +152,7 @@ import { FrozenShips } from './src/frozen-ships.ts';
 import { AppShots, killRun, runAlive, startRun } from './src/app-shots.ts';
 import { ErrorDigest, RESTART_WINDOW_MS } from './src/contraption-errors.ts';
 import { ensureCoordinatorFor } from './src/routes/projects.ts';
+import { warmHome } from './src/inbox.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { MinionIndexer } from './src/minion-index.ts';
@@ -161,11 +163,12 @@ import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
 import { Builds } from './src/builds.ts';
+import { CabalCards } from './src/cabal-cards.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
-import { earlyCi, earlyDroppedWhy, landNews, readTail } from './src/land-news.ts';
+import { earlyCi, earlyDroppedWhy, landNews, readTailA, tailNow } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
@@ -495,6 +498,7 @@ if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
   void runner.warmCards();
+  void warmHome(store).catch((err) => console.error("Reading Home's ship notes failed:", err));
   runner.recover();
 }
 if (runner.units && !BOOT_CHECK) {
@@ -1157,6 +1161,8 @@ if (!BOOT_CHECK) {
     // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
     waiters.prs.forget?.();
     void waiters.check().catch((err) => console.error('Checking waiters after a dismissal failed:', err));
+    // A cabal member's dismissal frees a place in its cabal's width: its next-up rows start (#2091).
+    fillFor(app, ticketId);
     // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);
@@ -1379,6 +1385,8 @@ const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters
 const ticketBranch = ships.branch;
 // Each build branch's header in the minions list (src/builds.ts): feeders folded in and open, commits behind main.
 const builds = new Builds({ store, broadcast });
+// Each open cabal's card in the minions list (src/cabal-cards.ts), polled with the build headers.
+const cabals = new CabalCards({ store, broadcast, parked: (t) => runner.parked(t) });
 runner.ship = ships.ship;
 
 // What each minion waits on (#544): the land line in this checkout's git dir (tools/deploy-queue.sh), the heavy slots.
@@ -1404,8 +1412,8 @@ const waits = new Waits({
   ciSlug: () => liveSlug,
   // The land gate's alarm (#561), under the scheme whose repo the live checkout is.
   // Not before the live repo is known: a guess of no scheme would clear the alarm, and a restart would ring it again.
-  early: (id) => earlyCi(readTail(landings.log(id))),
-  earlyWhy: (id, next) => earlyDroppedWhy(readTail(landings.log(id)), next),
+  early: (id) => earlyCi(tailNow(landings.log(id))),
+  earlyWhy: async (id, next) => earlyDroppedWhy(await readTailA(landings.log(id)), next),
   landLine: (seen, now) => {
     const live = liveSlug && store.listProjects().find((p) => repoSlug(p.repo_url) === liveSlug);
     if (live) ciHealth.land(live.id, seen, now).catch((err) => console.error(`Land alarm: ${err?.message ?? err}`));
@@ -1424,7 +1432,7 @@ const citadelServer = new CitadelServer({
   usual: waits.usual,
   interruptible: () => runner.interruptible(),
   ciQueued: (id) => ciRuns.view(id)?.stage === 'queued',
-  news: (id, name) => landNews(readTail(landings.log(id)), name),
+  news: (id, name) => landNews(tailNow(landings.log(id)), name),
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
@@ -1747,6 +1755,7 @@ if (!BOOT_CHECK || PREVIEW) {
   void safely('branch sweep', () => ships.sweep());
   every('ship poll', SHIP_POLL_MS, () => ships.poll());
   every('builds', 2 * SHIP_POLL_MS, () => builds.poll(), 0);
+  every('cabals', 2 * SHIP_POLL_MS, () => cabals.poll(), 0);
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
   every('waits', 2_000, async () => {
     await waits.poll();
@@ -2357,7 +2366,10 @@ const appShots = new AppShots(store, {
 if (!BOOT_CHECK && !PREVIEW && !services.opts.off) appShots.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
-runner.onTurnEnd = (ticketId) => github.poke(ticketId);
+runner.onTurnEnd = (ticketId) => {
+  github.poke(ticketId);
+  fillFor(app, ticketId); // a member's turn may have sealed it or shipped it (#2091)
+};
 // A merged PR catches its scheme's main up, and chains and commit waiters look again.
 github.onMerged = (repoDir, ticket, base) => {
   // Into a build branch isn't shipped yet.
@@ -2626,6 +2638,7 @@ const app: App = {
   startChained: startChain,
   ticketBranch,
   builds,
+  cabals,
   sharedFiles: artifacts.sharedFiles,
   sharedDir,
   registryChanged,
@@ -2926,6 +2939,7 @@ if (config.front) {
     store,
     runner,
     builds: (id) => builds.get(id),
+    cabals: (id) => cabals.get(id),
     ownScheme: () => ownScheme()?.id ?? null,
     previews: !!previews,
     status,

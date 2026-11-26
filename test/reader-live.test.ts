@@ -17,6 +17,7 @@ test('a changed live state is announced at once, and published once, counted, fo
     store: { listProjects: none, listContraptions: none, listTickets: none },
     runner,
     builds: none,
+    cabals: () => [],
     ownScheme: () => null,
     previews: false,
     status: { unitRows: async () => [] },

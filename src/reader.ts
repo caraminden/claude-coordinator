@@ -339,6 +339,7 @@ if (workerData?.reader) {
     runner: readerRunner(store, snap),
     memory: { embed: llamaEmbed(data.embedUrl), model: data.embedModel, indexed: (id: number) => !schemes || schemes.includes(id) },
     builds: { get: (id: number) => snap.builds[id] ?? [] },
+    cabals: { get: (id: number) => snap.cabals[id] ?? [] },
     // The ship lines' (/api/ship-lines): main's queue folder and releases, the queue's files read here.
     releases: { view: (visible: (id: number) => boolean) => ships().releases.filter((s) => visible(s.projectId)) },
     waits: {

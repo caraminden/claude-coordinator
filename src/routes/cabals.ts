@@ -3,9 +3,11 @@
 // note and files, its asks). An ask is held mail to the lead unless it is blocking, which wakes it.
 import { type Board, boardText, readBoard } from '../cabal-board.ts';
 import type { Store } from '../db.ts';
+import { APPROVED_FIELDS, cabalStart, handoffPath, memberAction, postForming } from '../cabal-start.ts';
+import { EFFORTS, MODELS } from '../db.ts';
 import type { CabalRowFields } from '../db/cabals.ts';
 import type { Ticket } from '../db-rows.ts';
-import { type App, HttpError, json, readJson, type Route } from '../http.ts';
+import { type App, HttpError, json, oneOf, readJson, type Route } from '../http.ts';
 
 /** The lead of the board a minion is on or leads, or null. */
 export function cabalLeadOf(store: Store, ticketId: number): number | null {
@@ -44,29 +46,33 @@ export function cabalLead(store: Store, projectId: number, cabal: unknown, self:
  * create_ticket's and update_ticket's cabal (#2090): put a minion on the board of the lead #N in its own scheme (a roster
  * row with its title becomes its row), or take it off with null. A lead can't be a member, nor a member a lead.
  */
-export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'title'>, cabal: unknown, by: string) {
+export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'title'>, cabal: unknown, by: string, rowId?: number) {
   const { store, runner } = app;
   const was = store.cabalRowOf(t.id)?.lead_id ?? null;
   if (cabal === null) {
     store.leaveCabal(t.id);
     if (was != null) {
       runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
-      app.broadcast({ type: 'cabal', projectId: t.project_id, lead: was });
+      changed(app, t, was);
     }
     return;
   }
   const lead = cabalLead(store, t.project_id, cabal, t.id);
   if (was === lead.id) return;
-  store.joinCabal(t.id, lead.id, t.project_id, t.title);
+  store.joinCabal(t.id, lead.id, t.project_id, t.title, Date.now(), rowId);
   runner.emit(t.id, 'note', { text: `${by} put this minion on #${lead.number}'s cabal board.` });
-  for (const l of new Set([was, lead.id])) if (l != null) app.broadcast({ type: 'cabal', projectId: t.project_id, lead: l });
+  for (const l of new Set([was, lead.id])) if (l != null) changed(app, t, l);
 }
 
 export async function boardFor(app: App, leadId: number): Promise<Board | null> {
   return readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) });
 }
 
-const changed = (app: App, t: Pick<Ticket, 'project_id'>, lead: number) => app.broadcast({ type: 'cabal', projectId: t.project_id, lead });
+/** A board was written: its open panels read it again, and the minions list's cards are read again. */
+const changed = (app: App, t: Pick<Ticket, 'project_id'>, lead: number) => {
+  app.broadcast({ type: 'cabal', projectId: t.project_id, lead });
+  void app.cabals.refresh(t.project_id).catch(() => {});
+};
 
 export const cabalRoutes: Route[] = [
   {
@@ -110,6 +116,7 @@ export const cabalRoutes: Route[] = [
       const leadOnly = () => {
         if (own && !leads) throw new HttpError(403, `Only the cabal's lead does ${action}: ask it instead (action ask)`);
         if (!leads && ['answer', 'row', 'log', 'red'].includes(action)) store.ensureCabal(ticket.id, ticket.project_id);
+        if (action === 'form' && !leads) throw new HttpError(409, 'Lay out your roster first (action row), then post it with form');
       };
       if (action === 'note' || action === 'ask') {
         if (!own) throw new HttpError(409, leads ? `You lead this cabal: ${action === 'ask' ? 'answer asks, and log decisions with action log' : 'set notes on rows with action row'}` : 'You are not on a cabal board');
@@ -157,6 +164,15 @@ export const cabalRoutes: Route[] = [
         }
         if (fields.note !== undefined) fields.note_at = Date.now();
         if (body.files !== undefined) fields.files = body.files === null ? '' : files(body.files);
+        // What a start needs (#2091): its handoff, model, effort and expected dollars, shown on the forming card.
+        if (body.handoff !== undefined) fields.handoff = body.handoff === null || body.handoff === '' ? '' : await handoffPath(app, ticket.project_id, body.handoff);
+        if (body.model !== undefined) fields.model = body.model === null ? '' : String(oneOf(body.model, MODELS, 'model'));
+        if (body.effort !== undefined) fields.effort = body.effort === null ? '' : String(oneOf(body.effort, EFFORTS, 'effort'));
+        if (body.cost !== undefined) {
+          const c = body.cost === null ? null : Number(body.cost);
+          if (c != null && !(Number.isFinite(c) && c > 0 && c <= 10_000)) throw new HttpError(400, 'cost is dollars, more than 0');
+          fields.cost = c;
+        }
         if (body.minion !== undefined) {
           const t = body.minion === null ? null : store.getTicketByNumber(ticket.project_id, Number(body.minion));
           if (body.minion !== null && (!t || t.kind === 'coordinator')) throw new HttpError(404, `No minion #${String(body.minion).slice(0, 20)} in this scheme`);
@@ -175,8 +191,15 @@ export const cabalRoutes: Route[] = [
         }
         const row = store.cabalRow(Number(body.row));
         if (!row || row.lead_id !== ticket.id) throw new HttpError(404, `No row ${String(body.row).slice(0, 20)} on your board`);
+        // A member the lead started stays on its row while open: the row is what makes it the lead's own, and it counts in the width.
+        const member = row.approved_at != null && row.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;
+        if (member && member.status !== 'closed' && (body.remove === true || (fields.ticket_id !== undefined && fields.ticket_id !== row.ticket_id))) throw new HttpError(409, `#${member.number} is open: its row stays on the board until it is dismissed`);
         if (body.remove === true) store.deleteCabalRow(row.id);
-        else store.updateCabalRow(row.id, fields);
+        else {
+          // A change to what the forming card showed takes back its go: a changed row needs a new card.
+          if (row.approved_at != null && row.ticket_id == null && APPROVED_FIELDS.some((k) => fields[k] !== undefined && fields[k] !== row[k])) Object.assign(fields, { approved_by: null, approved_at: null, next_at: null });
+          store.updateCabalRow(row.id, fields);
+        }
         changed(app, ticket, ticket.id);
         return json(res, 200, { row: row.id, removed: body.remove === true });
       }
@@ -185,12 +208,38 @@ export const cabalRoutes: Route[] = [
         changed(app, ticket, ticket.id);
         return json(res, 200, { log: id });
       }
+      if (action === 'form') {
+        const r = await postForming(app, store.getTicket(ticket.id)!, body.width);
+        return json(res, 200, r);
+      }
       if (action === 'red') {
         store.setCabalRed(ticket.id, body.text == null || body.text === '' ? null : line(body.text, 'Red-run line', 500));
         changed(app, ticket, ticket.id);
         return json(res, 200, { ok: true });
       }
-      throw new HttpError(400, 'action must be read, note, ask, answer, row, log or red');
+      throw new HttpError(400, 'action must be read, note, ask, answer, row, log, red or form');
+    },
+  },
+  {
+    // cabal_start (#2091): the lead starts a row its forming card approved, or it waits as next up past the width.
+    method: 'POST',
+    path: '/api/tickets/:ticket/cabal/start',
+    who: ['minion'],
+    refuse: "Only a cabal's lead starts its members",
+    async handler({ req, res, app, ticket }) {
+      const body = await readJson(req);
+      return json(res, 200, await cabalStart(app, app.store.getTicket(ticket.id)!, body.row, body.text));
+    },
+  },
+  {
+    // cabal_member (#2091): the lead unseals, stops or reseals one of its own members.
+    method: 'POST',
+    path: '/api/tickets/:ticket/cabal/member',
+    who: ['minion'],
+    refuse: "Only a cabal's lead acts on its members",
+    async handler({ req, res, app, ticket }) {
+      const body = await readJson(req);
+      return json(res, 200, { text: await memberAction(app, app.store.getTicket(ticket.id)!, body.action, body.minion) });
     },
   },
 ];

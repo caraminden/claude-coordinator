@@ -253,6 +253,21 @@ export interface BuildHeader {
   behind: number;
 }
 
+/** An open cabal's card in the minions list (src/cabal-cards.ts). */
+export interface CabalCard {
+  lead: number;
+  number: number | null;
+  title: string;
+  overseer: string;
+  build: number | null;
+  done: 'merged' | 'shipped';
+  members: { id: number | null; number: number | null; label: string; title: string; state: string; word: string }[];
+  finished: number;
+  next: number;
+  asks: number;
+  spend: number;
+}
+
 /** A file a minion showed (src/routes/files.ts artifactView). */
 export interface ArtifactFile {
   id: number;
@@ -516,6 +531,7 @@ export type View = Omit<ReturnType<typeof chatView>, keyof SessionState | 'sendi
     personNotes: Record<number, { text: string; by: string; at: number }>;
     pins: number[];
     builds: BuildHeader[];
+    cabals: CabalCard[];
     buildPreviews: boolean;
     artifacts: ArtifactFile[] | null;
     shared: SharedFile[] | null;

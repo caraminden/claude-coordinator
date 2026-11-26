@@ -59,7 +59,7 @@ test('a placed turn is offered to its own machine until the agent holds it, and 
   assert.deepEqual((await syncTurns(2, { turns: [{ dir, append: { 'stream.jsonl': { at: 0, data: b64('forged\n') } } }] })).turns[dir], { gone: true }, "another machine's turn is not this one's");
   assert.equal(text(dir, 'stream.jsonl'), '');
   // One stopped before the agent took it has ended here: there is nothing to start.
-  new MachineTurn(dir, placedAt(dir)!).endStart();
+  await new MachineTurn(dir, placedAt(dir)!).endStart();
   assert.deepEqual(
     (await syncTurns(1, {})).start.filter((s) => s.dir === dir),
     [],
@@ -90,13 +90,13 @@ test('steers and signals go down past what the agent has, and a turn ended here 
   assert.equal((await one(1, { dir, steer: 16 })).steer, undefined);
   const turn = runningTurn({ dir, unit: null, container: null });
   assert.ok(turn instanceof MachineTurn, 'a folder with a machine file is a machine turn');
-  turn.signal('SIGINT');
-  turn.signal('SIGTERM');
+  void turn.signal('SIGINT');
+  await turn.signal('SIGTERM'); // sent back to back, they reach the file in order
   assert.deepEqual((await one(1, { dir, signals: 0 })).signals, ['SIGINT', 'SIGTERM']);
   assert.deepEqual((await one(1, { dir, signals: 1 })).signals, ['SIGTERM']);
   assert.deepEqual((await one(1, { dir, signals: 2 })).signals, []);
   // Stopped before it started: the end written here stands, whatever the machine sends after.
-  turn.endStart();
+  await turn.endStart();
   await one(1, { dir, append: { 'stream.jsonl': { at: 0, data: b64('late\n') } }, put: { 'exit.json': '{"code":0,"signal":null}' } });
   assert.equal(text(dir, 'stream.jsonl'), '');
   assert.deepEqual(JSON.parse(text(dir, 'exit.json')), { code: null, signal: null, stopped: true });
@@ -124,7 +124,7 @@ test('alive by its syncs while the agent is connected; away is not gone, and a s
   online = false;
   assert.equal(wrapperAlive(dir), true, 'its machine away: still counted as running');
   const turn = runningTurn({ dir, unit: null, container: null });
-  turn.signal('SIGINT');
+  void turn.signal('SIGINT');
   await until("a person's stop frees the minion without waiting for its machine", () => existsSync(join(dir, 'exit.json')));
   const end = JSON.parse(text(dir, 'exit.json'));
   assert.deepEqual({ ...end, away: { ...end.away, since: 0 } }, { code: null, signal: 'SIGINT', away: { name: 'box-1', since: 0, checkpoint: null, home: true } });

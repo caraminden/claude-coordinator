@@ -35,7 +35,7 @@ test('a failing test whose own output says SyntaxError is not a parse error (#19
   assert.equal(kind(out), 'own-test');
   // a real parse refusal from either script still reads as parse
   assert.equal(kind('land: smoke: src/mcp.ts:812: SyntaxError: x\nland: smoke: a .ts file does not parse, before the line'), 'parse');
-  assert.equal(kind('src/mcp.ts:812: SyntaxError: x\na .ts file does not parse'), 'parse'); // land.local.sh's citadel_smoke_fail
+  assert.equal(kind('src/mcp.ts:812: SyntaxError: x\na .ts file does not parse'), 'parse'); // unprefixed, as a smoke hook may print it
 });
 
 test('a skipped test beside files that passed alone is the ship to fix, not one to hand off again (#1914)', () => {

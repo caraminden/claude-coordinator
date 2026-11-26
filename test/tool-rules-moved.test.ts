@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { closeSelfResult, handOffResult } from '../src/mcp.ts';
 import { untaggedFence } from '../src/routes/tickets.ts';
-import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 
 // #1575 (moves 9 to 12 of #1277's prompt ablation; Cara, 2026-11-22, "Moving"): ask_question, message_coordinator,
 // hand_off_land and close_self keep only their first sentence up front, and each other rule moved to the result or
@@ -35,26 +35,9 @@ after(async () => {
 type ToolDef = { name: string; description: string; inputSchema: { properties: Record<string, { description: string; items: { properties: { options: { items: { properties: Record<string, { description: string }> } } } } }> } };
 
 async function tool(ticket: { id: number }, name: string, args: object): Promise<{ isError?: boolean; text: string }> {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      COORDINATOR_API: srv.base,
-      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(Citadel.id),
-      COORDINATOR_TICKET: String(ticket.id),
-      COORDINATOR_ROLE: 'thread',
-      COORDINATOR_APP_INSTRUCTIONS: '1',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<{ result: { isError?: boolean; content: { text: string }[] } }>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    const r = (await reply).result;
-    return { isError: r.isError, text: r.content[0].text };
-  } finally {
-    child.kill();
-  }
+  const env = agentEnv(srv.base, tokens.agentToken(ticket.id), { id: ticket.id, project_id: Citadel.id }, 'thread', { COORDINATOR_APP_INSTRUCTIONS: '1' });
+  const r = await mcpOnce(env, 'tools/call', { name, arguments: args }, tmp.track);
+  return { isError: r.isError, text: r.content[0].text };
 }
 
 const refused = (r: { isError?: boolean; text: string }, re: RegExp) => {

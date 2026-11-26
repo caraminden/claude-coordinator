@@ -4,7 +4,7 @@
  * failing tests, CI's reruns of the failed files alone (#1374), a run cut off (#1377), flakes run once more, the bisect, the ship it refused and the ones that went back in line, the CI fallback.
  * Train membership is #1303's (the line and change rows); failed tries after the fact are #1375's (Previous releases).
  */
-import { openSync, readSync, closeSync, statSync } from 'node:fs';
+import { open, stat } from 'node:fs/promises';
 import { failureDetail } from './ship-failures.ts';
 
 export interface NewsItem {
@@ -112,6 +112,10 @@ export function landNews(output: string, name: (branch: string) => string): News
       });
     } else if ((m = s.match(/^(\S+) goes back in line: the train was red again on (.+?) without it, so the guess was wrong/))) {
       news.push({ tone: 'warn', text: `${m[1]} is back in line: the train was red again on ${list(m[2].split(', ').map(short))} without it, so the guess was wrong` });
+    } else if ((m = s.match(/^(\S+) goes back in line to ship alone: it was pulled on a guess, and the train without it passed (.+?), but /))) {
+      news.push({ tone: 'warn', text: `${m[1]} is back in line to ship alone: the train without it passed ${list(m[2].split(', ').map(short))}, but nothing proved it the cause` });
+    } else if ((m = s.match(/^(\S+) goes back in line to ship alone: (.+?) flaked on other ships, so the train passing without it proves nothing/))) {
+      news.push({ tone: 'warn', text: `${m[1]} is back in line to ship alone: ${list(m[2].split(', ').map(short))} flaked on other ships, so the pass without it proves nothing` });
     } else if ((m = s.match(/^(\S+) is refused: it was pulled on a guess, no ship pulled for (.+?) failed it alone, and the train without it passed it/))) {
       news.push({ tone: 'bad', text: `${m[1]} is sent back: the train without it passed ${list(m[2].split(', ').map(short))}, and no pulled ship failed it alone` });
     } else if ((m = s.match(/^(\S+) steps aside: /))) {
@@ -142,8 +146,6 @@ export function landNews(output: string, name: (branch: string) => string): News
   return news.slice(-SHOWN);
 }
 
-let cache: { path: string; size: number; mtime: number; output: string } | null = null;
-
 /** Whether CI's run on this landing's train was started early, during the train ahead's deploy, and counted for it (land.sh's early_gate, #1366). It's the latest try's: a line before its last rebase belongs to an earlier one. */
 export function earlyCi(output: string): boolean {
   const all = output.split('\n');
@@ -161,25 +163,62 @@ export function earlyDroppedWhy(output: string, next: string): string | null {
   return null;
 }
 
-/** A landing log's end, read again only when it changed (Releases reads it at every poll). */
-export function readTail(path: string): string {
+/** Each landing log's end as last read: a few ships at most are under way at once. */
+const tails = new Map<string, { size: number; mtime: number; output: string }>();
+const reading = new Map<string, Promise<unknown>>();
+const TAILS_KEPT = 16;
+
+/** A landing log's end, read off the server's thread (#2111) and again only when the file changed. */
+export async function readTailA(path: string): Promise<string> {
   let st;
   try {
-    st = statSync(path);
+    st = await stat(path);
   } catch {
+    tails.delete(path);
     return '';
   }
-  if (cache?.path === path && cache.size === st.size && cache.mtime === st.mtimeMs) return cache.output;
+  const was = tails.get(path);
+  if (was && was.size === st.size && was.mtime === st.mtimeMs) return was.output;
   const len = Math.min(st.size, TAIL);
   const buf = Buffer.alloc(len);
-  const fd = openSync(path, 'r');
+  let fh;
+  let got = 0;
   try {
-    readSync(fd, buf, 0, len, st.size - len);
+    fh = await open(path, 'r');
+    got = (await fh.read(buf, 0, len, st.size - len)).bytesRead;
+  } catch {
+    return was?.output ?? '';
   } finally {
-    closeSync(fd);
+    await fh?.close();
   }
+  // The log was cut between the stat and the read (a ship starting again): what was read is not that size's end.
+  if (got < len) return was?.output ?? '';
   const text = buf.toString('utf8');
   const output = st.size > len ? text.slice(text.indexOf('\n') + 1) : text; // a cut first line is dropped
-  cache = { path, size: st.size, mtime: st.mtimeMs, output };
+  tails.delete(path);
+  tails.set(path, { size: st.size, mtime: st.mtimeMs, output });
+  for (const old of tails.keys()) {
+    if (tails.size <= TAILS_KEPT) break;
+    tails.delete(old);
+  }
   return output;
 }
+
+/**
+ * A landing log's end as the last read found it, for what asks at every poll and can't wait (Releases' Next bar, a
+ * wait's "CI started early"): it answers at once and starts the next read, so an answer is one poll old, and the first
+ * is empty. What is asked once uses readTailA.
+ */
+export function tailNow(path: string): string {
+  if (!reading.has(path))
+    reading.set(
+      path,
+      readTailA(path)
+        .catch(() => '')
+        .finally(() => reading.delete(path)),
+    );
+  return tails.get(path)?.output ?? '';
+}
+
+/** Every read tailNow started has ended (tests wait on it). */
+export const tailsRead = async (): Promise<void> => void (await Promise.all(reading.values()));

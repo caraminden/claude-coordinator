@@ -3,6 +3,7 @@
 // on btrfs for up to 2 s while minions' tests and ships wrote to the same disk, and nobody was answered meanwhile.
 import assert from 'node:assert/strict';
 import fs, { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,9 @@ import { memoryDir } from '../src/memory-files.ts';
 import { LandsInFlight } from '../src/release-readers.ts';
 import { Releases } from '../src/releases.ts';
 import { moveShip } from '../src/ship-line.ts';
-import { stopShip } from '../src/ship-stop.ts';
+import { shipLines, stopShip } from '../src/ship-stop.ts';
+import * as landNewsFile from '../src/land-news.ts';
+import { KitSync, templateBlobs, type KitSyncState } from '../src/kit-sync.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { Waits } from '../src/waits.ts';
 import { Runner } from '../src/runner.ts';
@@ -39,6 +42,14 @@ async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise
   const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'realpathSync', 'readlinkSync', 'utimesSync'] as const;
   const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
   const seen: string[] = [];
+  // A blocking process start holds the thread the same way, wherever it runs (#2111).
+  const starts = ['execFileSync', 'execSync', 'spawnSync'] as const;
+  const realStarts = Object.fromEntries(starts.map((n) => [n, childProcess[n]]));
+  for (const n of starts)
+    (childProcess as Record<string, unknown>)[n] = (cmd: unknown, ...rest: unknown[]) => {
+      seen.push(`${n} ${String(cmd)}`);
+      return (realStarts[n] as (...args: unknown[]) => unknown)(cmd, ...rest);
+    };
   for (const n of names)
     (fs as Record<string, unknown>)[n] = (p: unknown, ...rest: unknown[]) => {
       if (typeof p === 'string' && p.startsWith(dir)) seen.push(`${n} ${p.slice(dir.length)}`);
@@ -49,6 +60,7 @@ async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise
     await fn();
   } finally {
     for (const n of names) (fs as Record<string, unknown>)[n] = real[n];
+    for (const n of starts) (childProcess as Record<string, unknown>)[n] = realStarts[n];
     syncBuiltinESMExports();
   }
   return seen;
@@ -377,7 +389,8 @@ test('what acts on the ship line reads it fresh, never the snapshot of the last 
   await w.releases.pollA();
   rmSync(join(w.q, '0000000001'));
   assert.throws(() => stopShip(fake<App>(app), w.p.id, 1, 'Cara'), /not|longer|left|isn't/);
-  assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'src', 'ship-stop.ts'), 'utf8'), /readQueueA|LandsInFlight/);
+  // The Status panel's shipLines reads the line fresh too, with readQueueA (off the thread, #2111); the snapshot is what stays out.
+  assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'src', 'ship-stop.ts'), 'utf8'), /LandsInFlight/);
 });
 
 test('a poll already reading the line never puts an older line over the one an action just read (#1980)', async () => {
@@ -515,4 +528,52 @@ test("the units check reads deploy/ and the install folder with no synchronous f
   });
   assert.deepEqual(states, ['a.service:different', 'a.service.d/w.conf:missing']);
   assert.deepEqual(seen, []);
+});
+
+test("the Status page's ship lines are read with no synchronous file call on the server's thread (#2111)", async () => {
+  const w = shipLine('status-lines', 3);
+  await w.releases.pollA();
+  const app = { store: w.store, releases: w.releases, waits: undefined };
+  let lines: Awaited<ReturnType<typeof shipLines>> = [];
+  // The panel asks every 3 s for as long as it is open.
+  assert.deepEqual(await syncCallsUnder(w.repo, async () => void (lines = await shipLines(app, () => true))), []);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].rows.length, 3);
+  // Read afresh each time: a ship that left since the last answer is gone from the next.
+  rmSync(join(w.q, '0000000003'));
+  assert.equal((await shipLines(app, () => true))[0].rows.length, 2);
+});
+
+test("a landing log's end reaches the release poll with no synchronous file call on the server's thread (#2111)", async () => {
+  const dir = mkdtempSync(join(root, 'tail-'));
+  const f = join(dir, 'output.log');
+  writeFileSync(f, 'land: early next train: CI started on this train at abc\n');
+  // Releases' Next bar and the waits poll read it every 2 s while a ship holds the line.
+  const { tailNow, tailsRead, readTailA } = landNewsFile as unknown as { tailNow: (p: string) => string; tailsRead: () => Promise<void>; readTailA: (p: string) => Promise<string> };
+  let first = 'unread',
+    second = '',
+    whole = '';
+  const calls = await syncCallsUnder(dir, async () => {
+    first = tailNow(f);
+    await tailsRead();
+    second = tailNow(f);
+    whole = await readTailA(f);
+  });
+  assert.deepEqual(calls, []);
+  // The poll gets what the last read found and starts the next read: the first look is empty, the next has the log.
+  assert.equal(first, '');
+  assert.match(second, /CI started on this train/);
+  assert.equal(whole, second);
+});
+
+test("kit sync's look at the templates starts no blocking git and makes no synchronous file call (#2111)", async () => {
+  const kit = join(import.meta.dirname, '..');
+  const dir = mkdtempSync(join(root, 'kit-look-'));
+  // Nothing changed since the last round: the look every 10 minutes that finds no work.
+  const head = childProcess.execFileSync('git', ['rev-parse', 'HEAD'], { cwd: kit, encoding: 'utf8' }).trim();
+  let saved: KitSyncState | undefined = { blobs: templateBlobs(kit, head) };
+  const deps = fake<ConstructorParameters<typeof KitSync>[0]>({ kitDir: kit, projectsDir: dir, runDir: dir, load: () => saved, save: (s: KitSyncState) => (saved = s), projects: () => [], home: () => 2 });
+  const calls = await syncCallsUnder(kit, () => new KitSync(deps).poll());
+  assert.deepEqual(calls, []);
+  assert.equal(saved?.round, undefined);
 });

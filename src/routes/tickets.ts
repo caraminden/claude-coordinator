@@ -1,7 +1,7 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { azureSpeech } from '../azure-speech.ts';
-import { CARD_STOP, money, SPLIT, START, START_CARD_USD, startHoldKey } from '../minion-budget.ts';
+import { CARD_STOP, money, SPLIT, splitCeiling, START, startHoldKey } from '../minion-budget.ts';
 import { parseSpend } from '../outside-spend.ts';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -58,6 +58,7 @@ import type { ContentBlock } from '../claude-events.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 import { stopMinionShip } from '../ship-stop.ts';
+import { approveRoster, FORM_GO } from '../cabal-start.ts';
 import { cabalLead, putOnCabal } from './cabals.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
@@ -321,7 +322,7 @@ function movedInto(app: App, ticket: Ticket | TicketView, body: Record<string, u
 }
 
 /** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
-function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
+export function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
   const stopped = app.runner.stop(ticket.id);
   // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
   const followed = app.machines.minionStopped(ticket.id);
@@ -366,7 +367,7 @@ export function deliverAnswer(app: App, ticketId: number, author: string, text: 
 export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: string, author: string, quiet = false): Promise<void> {
   if (ticket.kind === 'coordinator') throw new HttpError(400, `The ${AGENT_NAME} is never sealed`);
   if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
-  // A brief expected over $30 (#1674) starts on a person's OK: a person's Unseal (`author` is their name) is one and
+  // A brief expected over START_CARD_USD (#1674) starts on a person's OK: a person's Unseal (`author` is their name) is one and
   // settles its start card; the Taskmaster's or a minion's isn't.
   const hold = app.store.getSetting<{ usd: number; card: string }>(startHoldKey(ticket.id));
   if (hold) {
@@ -1180,7 +1181,7 @@ export const ticketRoutes: Route[] = [
           await tellTaskmaster(
             app,
             ticket,
-            `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(START_CARD_USD)} or less each, with an "Expected cost" line in each, and start those.`,
+            `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(splitCeiling(data.startCost))} or less each, with an "Expected cost" line in each, and start those.`,
             false,
             true,
             'ask',
@@ -1209,7 +1210,8 @@ export const ticketRoutes: Route[] = [
           const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
           return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
         })
-        .join('\n\n');
+        .join('\n\n')
+        .concat(data.cabalForm && answers[0]?.selected[0] === FORM_GO ? `\n\n${approveRoster(app, data.cabalForm, session.name)}` : ''); // a cabal's forming card (#2091): its go approves the rows it showed, and the lead reads which
       const answer = { answer: { questionId: body.questionId, answers } };
       const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
       // Held from here, before the first wait: a second answer while this one saves its pictures or a ship is checked is refused.

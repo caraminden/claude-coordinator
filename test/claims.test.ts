@@ -1,7 +1,6 @@
 // Claims (#921): the pipeline lane and any other single-holder duty, as rows any Taskmaster reads and takes.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
@@ -9,6 +8,7 @@ import { Claims, claimName } from '../src/claims.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { agentToken, bootServer, tempRoot, until, zoneLabel, type Booted } from './helpers.ts';
+import { agentEnv, mcpAgent } from './mcp-agent.ts';
 
 /** Claims on a bare database with schemes 1 and 2 (its rows reference projects). */
 function bare() {
@@ -517,22 +517,8 @@ test("the Taskmaster's claim, release and list_claims tools, and list_tickets sh
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tools' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: m } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'fix land.sh', title: 'Fix land.sh', properties: { type: 'chore' } } });
-  const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
-    env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: String(page.coordinator.id) },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  const replies = new Map<number, (r: { result: { content: { text: string }[] } }) => void>();
-  createInterface({ input: mcp.stdout! }).on('line', (l) => {
-    const r = JSON.parse(l);
-    replies.get(r.id)?.(r);
-  });
-  let next = 1;
-  const tool = (name: string, args: object = {}) =>
-    new Promise<string>((resolve) => {
-      const id = next++;
-      replies.set(id, (r) => resolve(r.result.content[0].text));
-      mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    });
+  const mcp = mcpAgent(agentEnv(base, agentToken(join(root, 'data'), page.coordinator.id), { id: page.coordinator.id, project_id: p.id }, 'coordinator'), tmp.track);
+  const tool = async (name: string, args: object = {}) => (await mcp.tool(name, args)).text;
   assert.equal(await tool('list_claims'), 'No claims: every duty is free.');
   assert.match(await tool('claim', { name: 'pipeline-lane', minion: m.number, note: 'land retry' }), new RegExp(`^Claimed: pipeline-lane: #${m.number} .*since .* ${RegExp.escape(zoneLabel(srv.zone))} \\(land retry\\)$`)); // the server's zone (#1536)
   assert.match(await tool('claim', { name: 'pipeline-lane' }), /^Error: pipeline-lane is held by #/);

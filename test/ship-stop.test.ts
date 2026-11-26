@@ -180,11 +180,11 @@ function fakeApp() {
   return { app, own, kit, head, landing, stopped, notes, put, signalled: [] as number[] };
 }
 
-test("shipLines reads each scheme's line, names minions only in their own scheme, and stopShip says who stopped it", () => {
+test("shipLines reads each scheme's line, names minions only in their own scheme, and stopShip says who stopped it", async () => {
   const f = fakeApp();
   f.put(f.own, 3, ['1700000000', 'ticket/11-own', 'waiting for CI since 12:01', 'order']);
   f.put(f.own, 4, ['0', 'ticket/21-kit', 'waiting', 'order']); // scheme 2's minion's branch name, in Citadel's line
-  const lines = shipLines(f.app, () => true);
+  const lines = await shipLines(f.app, () => true);
   assert.deepEqual(
     lines.map((l) => [l.scheme, l.rows.map((r) => [r.name, r.ticketId])]),
     [
@@ -197,11 +197,7 @@ test("shipLines reads each scheme's line, names minions only in their own scheme
       ],
     ],
   );
-  assert.deepEqual(
-    shipLines(f.app, (id) => id === 2),
-    [],
-    "a scheme you can't see is left out",
-  );
+  assert.deepEqual(await shipLines(f.app, (id) => id === 2), [], "a scheme you can't see is left out");
   f.landing[11] = { output: '', code: null };
   const sig: number[] = [];
   assert.equal(stopShip(f.app, 1, 3, 'Josh', (pid) => sig.push(pid)).name, '#7');

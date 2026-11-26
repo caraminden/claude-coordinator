@@ -17,6 +17,7 @@ import { thrown } from './thrown.ts';
 export const WRITES = [
   'setCabalName',
   'setCabalRed',
+  'setCabalWidth',
   'updateCabalRow',
   'deleteCabalRow',
   'answerCabalAsk',

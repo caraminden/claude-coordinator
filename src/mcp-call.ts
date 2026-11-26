@@ -39,7 +39,9 @@ function config(env: NodeJS.ProcessEnv) {
     /** Search by meaning over the scheme's chats (#331): offered only where the server indexes them. */
     MEMORY: env.COORDINATOR_MEMORY === '1',
     /** A minion on a cabal board or leading one (#2090): offered cabal_board. */
-    CABAL: env.COORDINATOR_CABAL === '1',
+    CABAL: env.COORDINATOR_CABAL === '1' || env.COORDINATOR_CABAL === 'lead',
+    /** A cabal's lead (#2091): offered cabal_start and cabal_member too. */
+    CABAL_LEAD: env.COORDINATOR_CABAL === 'lead',
     SHARED_DIR: env.COORDINATOR_SHARED_DIR?.replace(/\/+$/, ''),
     APP_TURNS_RUN: env.COORDINATOR_APP_TURNS_RUN === '1',
     /** Images and sound through the person's own OpenRouter key (#717): listed for every minion, refused on a turn whose person hasn't connected one (#878). */

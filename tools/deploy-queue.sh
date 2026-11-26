@@ -115,13 +115,6 @@ queue_phase() {
   local t=${DEPLOY_QUEUE_TICKET:-} l
   [ -n "$t" ] && [ -e "$t" ] || return 0
   mapfile -t l 2>/dev/null <"$t" || return 0
-  # The kit's core land.sh's ticket (eight lines, "order" last: tools/land.local.sh's land_deploy hands it to
-  # deploy.sh, #1323): only its phase changes, so the core's commit and verdict lines stay.
-  if [ "${l[7]:-}" = order ]; then
-    l[3]=$1
-    { printf '%s\n' "${l[@]}" >"$t.tmp$$" && mv -f "$t.tmp$$" "$t"; } 2>/dev/null || true
-    return 0
-  fi
   queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "$1" 2>/dev/null || true
 }
 

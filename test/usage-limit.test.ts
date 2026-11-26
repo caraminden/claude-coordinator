@@ -115,6 +115,18 @@ test('a usage limit waits quietly: limited, no error, no push, the resume time o
   store.deleteSetting('usage');
 });
 
+test('with both windows spent it waits for the later reset: the earlier one still leaves the week out', async () => {
+  const session = Date.now() + 2 * 60 * 60 * 1000;
+  const weekly = Date.now() + 30 * 60 * 60 * 1000;
+  store.setSetting('usage', { session: { utilization: 1, resetsAt: session, status: 'rejected' }, weekly: { utilization: 1, resetsAt: weekly, status: 'rejected' }, updatedAt: Date.now() });
+  const id = minion();
+  const t = await turn(id, LIMIT);
+  assert.equal(t.state, 'limited');
+  assert.equal(runner.view(t).limit_resume_at, weekly);
+  assert.equal(runner.stop(id), true);
+  store.deleteSetting('usage');
+});
+
 test('pending-deploy outlasts a limit', async () => {
   const id = minion('pending-deploy');
   assert.equal((await turn(id, LIMIT)).state, 'pending-deploy');

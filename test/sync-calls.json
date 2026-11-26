@@ -1,112 +1,511 @@
 {
- "server.ts": 7,
- "src/apk-build.ts": 19,
- "src/apk-release.ts": 3,
- "src/app-services.ts": 10,
- "src/app-snapshots.ts": 4,
- "src/approvals.ts": 1,
- "src/artifact-data.ts": 2,
- "src/artifact-scan.ts": 1,
- "src/backup-freshness.ts": 5,
- "src/brief-lint.ts": 4,
- "src/build-cache.ts": 5,
- "src/build-output.ts": 1,
- "src/catalogue.ts": 2,
- "src/checkpoint.ts": 5,
- "src/claude-link.ts": 18,
- "src/codex-link.ts": 1,
- "src/codex-lock.ts": 13,
- "src/codex-review.ts": 29,
- "src/codex-turn.ts": 31,
- "src/codex.ts": 3,
- "src/container-relief.ts": 4,
- "src/contraption-agent-cap.ts": 5,
- "src/contraption-asks.ts": 6,
- "src/contraption-errors.ts": 3,
- "src/contraption-media.ts": 19,
- "src/contraption-turns.ts": 36,
- "src/contraptions.ts": 7,
- "src/credentials.ts": 1,
- "src/db-nocow.ts": 32,
- "src/db-warmer.ts": 4,
- "src/decisions-load.ts": 5,
- "src/dismissed-cleanup.ts": 4,
- "src/emulator-lease.ts": 4,
- "src/events-db.ts": 1,
- "src/exec.ts": 3,
- "src/fast-mode.ts": 4,
- "src/fcm.ts": 2,
- "src/flake-fixes.ts": 4,
- "src/front.ts": 2,
- "src/github-link.ts": 1,
- "src/handoff-tidy.ts": 8,
- "src/history.ts": 1,
- "src/hook-run.ts": 1,
- "src/host-job.ts": 21,
- "src/host-load.ts": 3,
- "src/host-signals.ts": 2,
- "src/host-tool-ship.ts": 1,
- "src/host-tools.ts": 3,
- "src/ideas.ts": 6,
- "src/keepalive.ts": 8,
- "src/kit-sync.ts": 7,
- "src/land-news.ts": 4,
- "src/land.ts": 18,
- "src/link-check.ts": 11,
- "src/long-jobs.ts": 10,
- "src/loop-lag.ts": 4,
- "src/make-app.ts": 4,
- "src/mcp-minions.ts": 1,
- "src/mcp-pool.ts": 10,
- "src/memory-curator.ts": 6,
- "src/memory-files.ts": 20,
- "src/openrouter.ts": 7,
- "src/pin-spares.ts": 5,
- "src/png-matte.ts": 2,
- "src/pool-machine.ts": 5,
- "src/pre-tool-hook.ts": 3,
- "src/previews.ts": 14,
- "src/prompts.ts": 1,
- "src/push.ts": 7,
- "src/quiet.ts": 4,
- "src/reader.ts": 1,
- "src/reaper.ts": 1,
- "src/release-key.ts": 2,
- "src/release-readers.ts": 1,
- "src/release-targets.ts": 1,
- "src/replay-keep.ts": 11,
- "src/replay.ts": 17,
- "src/review-describe.ts": 1,
- "src/review-set.ts": 16,
- "src/routes/contraptions.ts": 3,
- "src/routes/projects.ts": 1,
- "src/routes/reviews.ts": 1,
- "src/routes/tickets.ts": 2,
- "src/rule-overlap.ts": 4,
- "src/runner.ts": 71,
- "src/machine-turn.ts": 7,
- "src/running-turn.ts": 11,
- "src/schedules.ts": 2,
- "src/scheme-refs.ts": 1,
- "src/sd-watchdog.ts": 5,
- "src/sessions.ts": 29,
- "src/shell.ts": 1,
- "src/ship-stop.ts": 5,
- "src/side-ask.ts": 6,
- "src/side-guard.ts": 1,
- "src/skills.ts": 3,
- "src/slash-commands.ts": 2,
- "src/standing-checks.ts": 5,
- "src/supervisor-client.ts": 12,
- "src/taskmaster-files.ts": 8,
- "src/tripwire-git.ts": 5,
- "src/tripwire.ts": 17,
- "src/turn-launch.ts": 46,
- "src/turn-tmp.ts": 6,
- "src/ultrareview.ts": 10,
- "src/waits.ts": 5,
- "src/wake.ts": 1,
- "src/watchdog.ts": 1,
- "src/workspace.ts": 14,
- "src/worktree-sweep.ts": 4
+ "server.ts": {
+  "checkoutHead": ["rare",1,"SIGHUP deploy handler (server.ts:2929, also boot consts)"],
+  "(module)": ["boot",1,"review-backfill.json read at module load before listen"],
+  "deployState": ["boot",1,"IIFE at module load, git rev-parse (server.ts:1248)"],
+  "rollback": ["rare",1,"Rollback citadelRollingBack d.clear() when roll back job ended; Releases read"],
+  "incidents": ["owed",3,"sync-disk-polls-and-timers.md: every incidents 60 s -> Incidents.tick writes timeline when incident quiet"]
+ },
+ "src/apk-build.ts": {
+  "capacitorApp": ["rare",4,"ApkBuilds.check after app deploy, startup 60 s timer, make key"],
+  "ApkBuilds.keyless": ["owed",1,"sync-disk-polls-and-timers.md: Releases.read via every waits 2 s (pollA) for contraption targets"],
+  "ApkBuilds.makeKey": ["rare",1,"make_release_key card approve / POST make release key"],
+  "ApkBuilds.check": ["rare",13,"after an app deploy goes live or startup 60 s sweep; APK build"]
+ },
+ "src/apk-release.ts": {
+  "apksigner": ["rare",2,"APK build/publish/verify of signers"],
+  "install": ["rare",1,"APK publish into feed on build or release run"]
+ },
+ "src/app-services.ts": {
+  "manifestOn": ["owed",1,"sync-disk-polls-and-timers.md: every ship landed (land.ts d.apps via shipDeploys.apps), git cat-file per subdir app; also make_app"],
+  "AppServices.installNow": ["rare",1,"POST contraption install or deploy; existsSync data dir"],
+  "AppServices.deployNow": ["rare",8,"contraption deploy (button, ship, auto-deploy tick on new main)"]
+ },
+ "src/app-snapshots.ts": {
+  "newId": ["rare",2,"deploy data step takeSnapshot/restoreSnapshot"],
+  "takeSnapshot": ["rare",1,"contraption deploy data step before migration"],
+  "restoreSnapshot": ["rare",1,"contraption roll back / failed deploy data restore"]
+ },
+ "src/approvals.ts": {
+  "pluginDirArgs": ["owed",1,"sync-disk-turn-start-end.md: turn-launch on every turn start (statSync per plugin dir)"]
+ },
+ "src/artifact-data.ts": {
+  "bridgeSource": ["owed",2,"sync-disk-requests.md: injectBridge on every artifact page served (routes/files.ts)"]
+ },
+ "src/artifact-scan.ts": {
+  "ArtifactScanner.scan": ["owed",1,"sync-disk-turn-start-end.md: ScanTimers after each reply/turn end per ticket; startup sweep"]
+ },
+ "src/brief-lint.ts": {
+  "namedFiles": ["owed",4,"sync-disk-requests.md: create minion route (routes/projects.ts) per new minion brief"]
+ },
+ "src/build-cache.ts": {
+  "ensureGradleInit": ["owed",4,"sync-disk-turn-start-end.md: ClaudeLink.start per container turn start; also boot"],
+  "trimCache": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep in server.ts"]
+ },
+ "src/build-output.ts": {
+  "findBuildOutput": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep; also minion dismissal"]
+ },
+ "src/catalogue.ts": {
+  "itemsIn": ["rare",2,"GET /api/catalogue (MCP catalogue lookup)"]
+ },
+ "src/checkpoint.ts": {
+  "walFrames": ["boot",2,"WAL checkpoint worker thread only"],
+  "(module)": ["boot",3,"WAL checkpoint worker thread only"]
+ },
+ "src/claude-link.ts": {
+  "androidEnv": ["owed",2,"sync-disk-turn-start-end.md: turn-launch on every turn start"],
+  "resolveClaude": ["owed",3,"sync-disk-turn-start-end.md: turn-launch on every turn start (also login/status)"],
+  "ClaudeLink.spec": ["owed",3,"sync-disk-turn-start-end.md: ClaudeLink.start via ensure() on every container turn launch"],
+  "ClaudeLink.start": ["owed",5,"sync-disk-turn-start-end.md: Runner.spawnInContainer place.ensure() on every container turn"],
+  "ClaudeLink.hostFolder": ["rare",4,"account sign-in/status/unlink for server login"],
+  "ClaudeLink.unlinkOne": ["rare",1,"Settings unlink one Claude account"]
+ },
+ "src/codex-link.ts": {
+  "CodexLink.status": ["owed",1,"sync-disk-turn-start-end.md: Runner.codexWhy at Codex turn start; Settings GET codex state"]
+ },
+ "src/codex-lock.ts": {
+  "startTime": ["proc",1,"reads /proc/<pid>/stat; only in codex turn child / review CLI"],
+  "tokenLife": ["boot",1,"codex-turn child process / review CLI only"],
+  "codexLock": ["boot",11,"codex-turn child process / review CLI only"]
+ },
+ "src/codex-review.ts": {
+  "hooked": ["boot",1,"citadel-codex-review CLI process only"],
+  "notReady": ["boot",2,"citadel-codex-review CLI process only"],
+  "images": ["boot",2,"citadel-codex-review CLI process only"],
+  "outPath": ["boot",5,"citadel-codex-review CLI process only"],
+  "reviewNow": ["boot",1,"citadel-codex-review CLI process only"],
+  "imageConfig": ["boot",2,"citadel-codex-review CLI process only"],
+  "turnConfig": ["boot",1,"citadel-codex-review CLI process only"],
+  "runnerConfig": ["boot",2,"citadel-codex-review CLI process only"],
+  "copyPinned": ["rare",3,"contraption generate_image_codex (codexImage); otherwise CLI"],
+  "inContainer": ["boot",9,"citadel-codex-review CLI process only (spawnSync in the CLI)"],
+  "(module)": ["boot",1,"readFileSync inside CLI main guard (argv[1] check), not run in server"]
+ },
+ "src/codex.ts": {
+  "saveGenerated": ["boot",3,"codex-turn child process / review CLI only"]
+ },
+ "src/container-relief.ts": {
+  "text": ["proc",1,"cgroup/proc pseudo-file read in container-relief worker thread"],
+  "processes": ["proc",1,"cgroup dir listing in container-relief worker thread"],
+  "ContainerRelief.tick": ["proc",2,"cgroup dir listing, worker thread setInterval (RELIEF.everyMs)"]
+ },
+ "src/contraption-asks.ts": {
+  "saveAskFiles": ["rare",1,"POST contraption ask with files (routes/contraptions.ts)"],
+  "noteInbox": ["rare",5,"first ask file save only (inbox folder just created)"]
+ },
+ "src/contraption-errors.ts": {
+  "ErrorDigest.write": ["owed",3,"sync-disk-turn-start-end.md: every contraption errors 10 min tick writes changed days"]
+ },
+ "src/contraption-media.ts": {
+  "mediaFile": ["owed",1,"sync-disk-requests.md: GET /api/contraptions/media/:path (app media serve)"],
+  "listMedia": ["owed",2,"sync-disk-requests.md: GET /api/contraptions/media (app media list)"],
+  "sweepMedia": ["owed",3,"sync-disk-polls-and-timers.md: every contraption media sweep 24 h"],
+  "readPng": ["rare",4,"contraption generate_image_codex tool call"],
+  "codexImage": ["rare",6,"contraption generate_image_codex tool call (spawnSync)"],
+  "runMediaTool": ["rare",3,"contraption media MCP tool call (image generation)"]
+ },
+ "src/contraption-turns.ts": {
+  "AGENT_CAP": ["boot",1,"module-level constant read at import"],
+  "MACHINE_MCP": ["boot",1,"module-level constant read at import"],
+  "CODEX_FILES": ["boot",1,"module-level constant read at import"],
+  "ContraptionTurns.constructor": ["boot",1,"constructor, once at boot (drops leftover turn folder)"],
+  "ContraptionTurns.dropCodex": ["owed",1,"sync-disk-turn-start-end.md: contraption turn start with fresh, or session delete"],
+  "ContraptionTurns.dropBlind": ["owed",3,"sync-disk-turn-start-end.md: end of every blind contraption turn (spawnSync podman exec rm)"],
+  "ContraptionTurns.dropTranscript": ["owed",2,"sync-disk-turn-start-end.md: contraption turn start when not resuming; session delete"],
+  "ContraptionTurns.run": ["owed",3,"sync-disk-turn-start-end.md: every contraption turn start and end"],
+  "ContraptionTurns.turn": ["owed",22,"sync-disk-turn-start-end.md: every contraption agent turn"],
+  "ContraptionTurns.stop": ["rare",1,"contraption turn timeout or cancel (reads pid file in container)"]
+ },
+ "src/contraptions.ts": {
+  "writeSecret": ["rare",4,"register/rotate a contraption's keys (make_app, Rotate)"],
+  "Contraptions.newKeys": ["rare",3,"register/rotate a contraption's keys (make_app, Rotate)"]
+ },
+ "src/credentials.ts": {
+  "sealKey": ["proc",1,"hkdfSync crypto, no I/O; constructors at boot"]
+ },
+ "src/db-nocow.ts": {
+  "hostOps": ["boot",6,"moveToNoCow, once at boot before database opens (server.ts:308)"],
+  "fsyncPath": ["boot",3,"moveToNoCow, once at boot before database opens"],
+  "move": ["boot",19,"moveToNoCow, once at boot before database opens"],
+  "dropTmp": ["boot",2,"moveToNoCow, once at boot before database opens"],
+  "walNoCow": ["boot",2,"moveToNoCow, once at boot before database opens"]
+ },
+ "src/db-warmer.ts": {
+  "readThrough": ["boot",1,"db-warmer worker thread only"],
+  "(module)": ["boot",3,"db-warmer worker thread only"]
+ },
+ "src/dismissed-cleanup.ts": {
+  "DismissedCleanup.clearBuild": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep (also on minion dismissal)"],
+  "DismissedCleanup.sweepWorktrees": ["owed",3,"sync-disk-polls-and-timers.md: daily 24 h build output sweep, per scheme repo"]
+ },
+ "src/emulator-lease.ts": {
+  "readEmulatorLease": ["owed",1,"sync-disk-turn-start-end.md: every turn end (releaseEmulatorLease) and GET /api/emulator-lease"],
+  "releaseEmulatorLease": ["owed",3,"sync-disk-turn-start-end.md: Runner turn end, every turn (runner.ts:3797)"]
+ },
+ "src/events-db.ts": {
+  "attachEventsIfThere": ["boot",1,"worker threads and db-view child process only"]
+ },
+ "src/exec.ts": {
+  "runLogged": ["rare",3,"contraption deploy build steps and APK builds"]
+ },
+ "src/fast-mode.ts": {
+  "FastMode.start": ["owed",3,"sync-disk-polls-and-timers.md: every fast mode 30 s tick, when a new main commit needs verifying"]
+ },
+ "src/fcm.ts": {
+  "Fcm.account": ["owed",2,"sync-disk-requests.md: each push send; reads key once then cached, existsSync while unset"]
+ },
+ "src/front.ts": {
+  "listenThroughFront": ["boot",2,"once at startup, before listening (server.ts:2722)"]
+ },
+ "src/github-link.ts": {
+  "noLogin": ["owed",1,"sync-disk-turn-start-end.md: heavyEnv mkdirSync at every turn end and land env; GitHub pollers"]
+ },
+ "src/handoff-tidy.ts": {
+  "whyKeep": ["owed",1,"sync-disk-polls-and-timers.md: every minion index 60 s, via onClosed tidy of closed minions"],
+  "moveFile": ["owed",4,"sync-disk-polls-and-timers.md: every minion index 60 s, via onClosed tidy of closed minions"],
+  "tidyForClosed": ["owed",2,"sync-disk-polls-and-timers.md: every minion index 60 s, MinionIndexer.run indexClosed"],
+  "reconcileMoved": ["owed",1,"sync-disk-polls-and-timers.md: every minion index 60 s; existsSync only if no listing passed"]
+ },
+ "src/history.ts": {
+  "PLAN_RULES": ["boot",1,"module-level constant read at import"]
+ },
+ "src/hook-run.ts": {
+  "(module)": ["boot",1,"PreToolUse hook child process only (argv[1] guard)"]
+ },
+ "src/host-job.ts": {
+  "heardLost": ["rare",1,"job that ended with no exit code (once per lost job)"],
+  "moveAside": ["owed",1,"sync-disk-polls-and-timers.md: HostJobs.start on every land/ship start; fast mode worktree reset"],
+  "HostJobs.start": ["owed",7,"sync-disk-polls-and-timers.md: every ship land start; also kit sync, ultra review, fast mode"],
+  "HostJobs.child": ["rare",2,"systemd-run failed fallback or spawn error only"],
+  "HostJobs.state": ["owed",1,"sync-disk-polls-and-timers.md: landings.get on ticket pages, release reads, ship-stop; 2 s waits poll"],
+  "HostJobs.alive": ["owed",3,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"],
+  "lost": ["rare",1,"job ended with no code, noted once; reached from HostJobs.state/look"],
+  "readCode": ["owed",1,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"],
+  "tail": ["owed",4,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"]
+ },
+ "src/host-load.ts": {
+  "slotCount": ["owed",1,"sync-disk-requests.md: GET /api/host-load, polled by the CI page; reads slots file"],
+  "readPressure": ["proc",1,"reads /proc/pressure/cpu (PSI)"],
+  "hostLoad": ["owed",1,"sync-disk-requests.md: GET /api/host-load polled by CI page; reads slots and history files"]
+ },
+ "src/host-signals.ts": {
+  "hostTextSync": ["proc",1,"reads /proc, /sys PSI, loadavg, cgroup files only"],
+  "runnable": ["proc",1,"reads /proc/loadavg; used by boot-check step limits"]
+ },
+ "src/host-tool-ship.ts": {
+  "approveHostTool": ["rare",1,"host-tool proposal card approved by a person"]
+ },
+ "src/host-tools.ts": {
+  "readManifest": ["rare",2,"host-tool propose route and card approval"],
+  "miseBin": ["rare",1,"installing an approved host tool via mise"]
+ },
+ "src/ideas.ts": {
+  "handoffFiles": ["owed",2,"sync-disk-requests.md: Ideas page view sync, create-ticket linkHandoff, hourly ideas timer"],
+  "Ideas.fromHandoff": ["owed",2,"sync-disk-requests.md: create-ticket with a handoff brief; Ideas page sync"],
+  "Ideas.readPage": ["owed",2,"sync-disk-requests.md: Ideas page sync, files route PUT, hourly 'ideas ledger' 60 min"]
+ },
+ "src/keepalive.ts": {
+  "treeHash": ["owed",3,"sync-disk-turn-start-end.md: Runner turn launch fingerprint; walks pinned files once per process"],
+  "claudeStamp": ["owed",4,"sync-disk-turn-start-end.md: Runner turn launch fingerprint on every minion turn start"]
+ },
+ "src/kit-sync.ts": {
+  "git": ["owed",1,"sync-disk-polls-and-timers.md: execFileSync git in 'kit sync' every 20 s, template look 10 min"],
+  "merge3": ["owed",4,"sync-disk-polls-and-timers.md: kit-sync round: mkdtemp, writeFileSync, git; 'kit sync' every 20 s"],
+  "KitSync.branch": ["owed",1,"sync-disk-polls-and-timers.md: kit-sync round writes files in worktree; 'kit sync' 20 s"]
+ },
+ "src/land.ts": {
+  "landArgs": ["rare",3,"ship hand-off or land route checks test files exist"],
+  "Landings.start": ["rare",1,"POST land route starts land.sh"],
+  "Landings.handOff": ["rare",2,"ship hand-off (hand_off_land tool)"],
+  "Landings.hasHandoff": ["owed",1,"sync-disk-polls-and-timers.md: turn start serverWork, status trailer, in-flight list"],
+  "Landings.settled": ["owed",1,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s reporter settles an ended landing"],
+  "Landings.talked": ["owed",1,"sync-disk-polls-and-timers.md: runner.onMessage on every message sent to a minion"],
+  "Landings.wasTalked": ["owed",1,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s land reporter poll"],
+  "Landings.prepNew": ["owed",3,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s tellPrep for ships in line"],
+  "Landings.markStopped": ["rare",1,"person or Stop stops a minion's ship"],
+  "Landings.stopped": ["owed",1,"sync-disk-polls-and-timers.md: ship trail poll inside 'land hand-offs' 5 s"],
+  "Landings.landPid": ["rare",3,"stopping a minion's ship (Stop button)"]
+ },
+ "src/link-check.ts": {
+  "pageText": ["boot",4,"Stop hook child process (pinned copy), not the server"],
+  "cardlessChoices": ["boot",1,"Stop hook child process (pinned copy), not the server"],
+  "postedCard": ["boot",1,"Stop hook child process (pinned copy), not the server"],
+  "closeSelfOk": ["boot",1,"Stop hook child process (pinned copy), not the server"],
+  "readMarker": ["boot",1,"Stop hook child process (pinned copy), not the server"],
+  "check": ["boot",2,"Stop hook child process (pinned copy), not the server"],
+  "(module)": ["boot",1,"Stop hook child process (pinned copy), not the server"]
+ },
+ "src/long-jobs.ts": {
+  "readLongJobs": ["boot",2,"never on the server: hostLoad's default argument, and the one route passes its own async read"]
+ },
+ "src/loop-lag.ts": {
+  "ioStalledUs": ["proc",1,"setInterval 100 ms loop-lag watch reads PSI"],
+  "cgroupOf": ["proc",1,"loop-lag reading, cached once; /proc/self/cgroup"],
+  "pressureUs": ["proc",1,"loop-lag watch every 100 ms reads cgroup pressure files"],
+  "read": ["proc",1,"loop-lag worker thread reads /proc thread state"]
+ },
+ "src/machine-turn.ts": {
+  "placedAt": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1); every runningTurn() of a turn folder"],
+  "MachineTurn.alive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1); a machine turn's beat"]
+ },
+ "src/make-app.ts": {
+  "schemeRunner": ["rare",3,"POST make-app contraption route"],
+  "makeApp": ["rare",1,"POST make-app contraption route (existsSync of target folder)"]
+ },
+ "src/memory-curator.ts": {
+  "writeIndex": ["rare",1,"memory tidy apply or restore routes"],
+  "readIndex": ["rare",1,"memory tidy apply, check and restore routes"],
+  "readNote": ["rare",1,"memory tidy apply, check and restore routes"],
+  "restoreSaved": ["rare",3,"memory tidy Put back route"]
+ },
+ "src/memory-files.ts": {
+  "plain": ["owed",1,"sync-disk-requests.md: lstat inside readFolder; schedules runDue 30 s when memory-curator schedule due"],
+  "readFolder": ["owed",5,"sync-disk-requests.md: schedules runDue 30 s memoryTarget when curator schedule due; memory page"],
+  "writeAtomic": ["owed",6,"sync-disk-requests.md: every finished chunked upload record; memory note saves"],
+  "saveNote": ["rare",1,"PUT memory note on the Memory page"],
+  "indexNote": ["rare",4,"PUT memory note with index: true"],
+  "deleteNote": ["rare",2,"DELETE memory note, or curator apply"]
+ },
+ "src/openrouter.ts": {
+  "outPath": ["rare",4,"generate_image, generate_audio, generate_speech MCP tools"],
+  "target": ["rare",1,"generate_image, generate_audio, generate_speech MCP tools"],
+  "writeOutput": ["rare",2,"generate_image, generate_audio, generate_speech MCP tools"]
+ },
+ "src/pin-spares.ts": {
+  "pinSparesAt": ["rare",3,"pin copy at boot and re-pin on kit-only deploy SIGHUP"]
+ },
+ "src/png-matte.ts": {
+  "decode": ["proc",1,"zlib inflateSync, no file I/O"],
+  "encodePng": ["proc",1,"zlib deflateSync, no file I/O"]
+ },
+ "src/pool-client.mjs": {
+  "poolAlive": ["boot",1,"turn wrapper and mcp-pool child processes, not the server"],
+  "readPool": ["boot",1,"turn wrapper and mcp-pool child processes, not the server"],
+  "ensurePool": ["boot",6,"turn wrapper child process, not the server"]
+ },
+ "src/pre-tool-hook.ts": {
+  "readSent": ["boot",1,"PreToolUse hook child process, not the server"],
+  "saveSent": ["boot",1,"PreToolUse hook child process, not the server"],
+  "runHook": ["boot",1,"PreToolUse hook child process, not the server"]
+ },
+ "src/previews.ts": {
+  "git": ["owed",1,"sync-disk-polls-and-timers.md: execFileSync git: previews sweep every 5 min (buildTip), preview start"],
+  "Previews.constructor": ["boot",1,"constructor, once at boot (rmSync of previews root)"],
+  "Previews.start": ["rare",1,"POST preview start for a minion"],
+  "Previews.halt": ["owed",1,"sync-disk-polls-and-timers.md: idle sweep every 5 min; also minion close with a preview"],
+  "Previews.sweep": ["owed",2,"sync-disk-polls-and-timers.md: setInterval 'previews sweep' every 5 min"],
+  "Previews.dropBuild": ["owed",2,"sync-disk-polls-and-timers.md: previews sweep every 5 min drops landed builds"],
+  "Previews.spawnPreview": ["rare",3,"preview boot (person opens a preview)"],
+  "Previews.proxyBuild": ["rare",3,"person opens a build preview page"]
+ },
+ "src/prompts.ts": {
+  "promptMessage": ["owed",1,"sync-disk-turn-start-end.md: Runner.send steer into a live turn reads attached images"]
+ },
+ "src/push.ts": {
+  "loadVapidKeys": ["boot",4,"server.ts startup, before listen"],
+  "encryptPayload": ["proc",3,"node:crypto hkdfSync for web push"]
+ },
+ "src/quiet.ts": {
+  "procs": ["proc",2,"reads /proc stat, cmdline; quiet check every 40 polls"],
+  "uptimeTicks": ["proc",1,"reads /proc/uptime only"],
+  "cmdline": ["proc",1,"reads /proc/<pid>/cmdline only"]
+ },
+ "src/reaper.ts": {
+  "Reaper.constructor": ["boot",1,"constructor, once at boot (server.ts:1012)"]
+ },
+ "src/release-key.ts": {
+  "hasKey": ["owed",1,"sync-disk-polls-and-timers.md: Releases read every 2 s via keyless; apk build checks"],
+  "makeReleaseKey": ["rare",1,"make_release_key card Approve"]
+ },
+ "src/release-readers.ts": {
+  "LandsInFlight.attach": ["rare",1,"ship-line and Releases actions (fresh read); timers read async"]
+ },
+ "src/release-targets.ts": {
+  "TargetFinder.facts": ["owed",1,"sync-disk-polls-and-timers.md: release targets rescan every 5 min (scanAll)"]
+ },
+ "src/replay-keep.ts": {
+  "turnsIn": ["owed",1,"sync-disk-turn-start-end.md: contraption chat turn start (wantsKeep) and end (keepTurn)"],
+  "keepTurn": ["owed",2,"sync-disk-turn-start-end.md: contraption chat turn end keeps its record"],
+  "prune": ["owed",4,"sync-disk-turn-start-end.md: via keepTurn on each kept contraption turn; daily sweep"],
+  "dropMatching": ["rare",3,"fresh start of an app chat or person's replay opt-out"],
+  "keptDirs": ["owed",1,"sync-disk-turn-start-end.md: daily 'kept chats sweep' 24 h; opt-out route"]
+ },
+ "src/review-describe.ts": {
+  "runOneShot": ["rare",1,"time-log, review describe, Settings repeat check routes"]
+ },
+ "src/review-set.ts": {
+  "readAgentFiles": ["owed",2,"sync-disk-turn-start-end.md: Runner turn launch review set; reviews routes"],
+  "loadStarters": ["rare",3,"Reviews page GET"],
+  "put": ["boot",1,"never on the server: the runner passes an out map, so no file is written; only a CLI and tests write"],
+  "renderSet": ["boot",2,"never on the server: the runner passes an out map, so no file is written; only a CLI and tests write"],
+  "repoRubrics": ["boot",5,"importAllRubrics once per database at startup"],
+  "kitLine": ["boot",2,"never on the server: the runner passes an out map, so no file is written; only a CLI and tests write"]
+ },
+ "src/routes/contraptions.ts": {
+  "contraptionRoutes": ["rare",3,"contraption media GET and DELETE routes"]
+ },
+ "src/routes/projects.ts": {
+  "ideaRow": ["owed",1,"sync-disk-requests.md: Ideas page rows (existsSync per handoff)"]
+ },
+ "src/routes/reviews.ts": {
+  "kitAgent": ["rare",1,"Reviews page GET"]
+ },
+ "src/routes/tickets.ts": {
+  "ticketRoutes": ["rare",1,"POST land route checks tools/land.sh"]
+ },
+ "src/rule-overlap.ts": {
+  "mdFiles": ["rare",2,"Settings instructions save overlap check"],
+  "readIn": ["rare",2,"Settings instructions save overlap check"]
+ },
+ "src/runner.ts": {
+  "argInProc": ["proc",2,"reads /proc cmdlines only (rescue)"],
+  "unsentSteers": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on every turn end"],
+  "Runner.waitStray": ["owed",1,"sync-disk-turn-stream.md: setTimeout loop every 5 s while a stray turn survives restart"],
+  "Runner.noteStrays": ["boot",3,"Runner.recover at startup"],
+  "Runner.recover": ["boot",7,"runner.recover() at startup, server.ts:488"],
+  "Runner.rescue": ["owed",4,"sync-disk-turn-stream.md: Runner.poll every 250 ms tick, reads only when restart armed"],
+  "Runner.gone": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s); also reattach at boot"],
+  "Runner.send": ["owed",3,"sync-disk-turn-start-end.md: every message sent to a minion (steer into live turn)"],
+  "Runner.endLive": ["owed",1,"sync-disk-turn-stream.md: endCardWaits on 10 s pool tick; Stop and pause"],
+  "Runner.spawnWrapper": ["rare",1,"writeFileSync only if the wrapper spawn errors; turn start path"],
+  "Runner.poll": ["owed",4,"sync-disk-turn-stream.md: setInterval 250 ms per running turn (pollMs)"],
+  "Runner.dirChanged": ["owed",1,"sync-disk-turn-stream.md: setInterval 250 ms per running turn, fstat on kept fd"],
+  "Runner.readStream": ["owed",3,"sync-disk-turn-stream.md: setInterval 250 ms per running turn, reads stream.jsonl"],
+  "Runner.wrapUp": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on every turn end (reads stderr.log)"],
+  "Runner.steerSystem": ["owed",2,"sync-disk-turn-start-end.md: checkBudget on turn result events when ask mark passes"],
+  "Runner.keepCodexLog": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on Codex turn end"],
+  "Runner.writeRefs": ["owed",2,"sync-disk-turn-start-end.md: card posted by a turn writes its own snapshot at once"],
+  "Runner.writeSchemeRefs": ["owed",1,"sync-disk-turn-start-end.md: card posted or settled: refreshRefs for the scheme's turns"]
+ },
+ "src/running-turn.ts": {
+  "wrapperAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
+  "pids": ["rare",1,"POST /api/tickets/:ticket/check \"still going?\" chip, via ChildTurn.look"],
+  "ChildTurn.look": ["proc",1,"reads /proc children only (\"still going?\" chip)"],
+  "ContainerTurn.endStart": ["owed",1,"sync-disk-turn-start-end.md: a Stop before a container turn's claude started (Runner stop path)"],
+  "ContainerTurn.reattachable": ["boot",1,"Runner.recover re-attach at startup"],
+  "hostAlive": ["owed",3,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
+  "containerAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
+  "wrapperInProc": ["proc",2,"reads /proc cmdlines only (stale heartbeat)"]
+ },
+ "src/schedules.ts": {
+  "loadTemplates": ["rare",2,"scheme create, ship lesson queued, GET schedule-audits; also once at boot"]
+ },
+ "src/scheme-refs.ts": {
+  "readRefs": ["boot",1,"PreToolUse/Stop hook child process, not the server"]
+ },
+ "src/sd-watchdog.ts": {
+  "markExit": ["boot",1,"ExecStopPost CLI tools/watchdog-exit.ts"],
+  "takeMark": ["boot",2,"server.ts module load, once before listen"],
+  "markStop": ["rare",1,"handover quiesce during a deploy"],
+  "readStop": ["boot",1,"recordBoot once at startup"]
+ },
+ "src/sessions.ts": {
+  "mergeMemory": ["rare",14,"Taskmaster turn start, only while old memory folder exists"],
+  "saveSession": ["owed",2,"sync-disk-turn-start-end.md: Runner after each turn ends (saveSession), per minion"],
+  "writeBack": ["boot",6,"session worker thread only"],
+  "(module)": ["boot",2,"session worker thread only"],
+  "lastEffort": ["owed",4,"sync-disk-turn-start-end.md: Runner turn end; startup sweep for threads lacking effort"]
+ },
+ "src/shell.ts": {
+  "shellOff": ["owed",1,"sync-disk-requests.md: every sw.js request in front.ts"]
+ },
+ "src/ship-stop.ts": {
+  "descendants": ["proc",2,"walks /proc/<pid>/stat for signalling a ship"],
+  "stopInLine": ["rare",1,"stop-ship from Status page or stopping a minion with a ship"],
+  "kitMoved": ["rare",2,"stop-ship check on the kit land line (git merge-base)"]
+ },
+ "src/side-ask.ts": {
+  "SideAsks.recover": ["boot",1,"SideAsks.recover once at boot (server.ts:781)"],
+  "SideAsks.poll": ["owed",1,"sync-disk-turn-stream.md: setInterval 500 ms in SideAsks.tick while a side ask runs"],
+  "SideAsks.read": ["owed",1,"sync-disk-turn-stream.md: setInterval 500 ms side-ask poll reads stream"],
+  "SideAsks.finish": ["owed",2,"sync-disk-turn-stream.md: side-ask poll on exit or limit, 500 ms timer"],
+  "SideAsks.dropFork": ["owed",1,"sync-disk-turn-stream.md: finish from 500 ms side-ask poll; recover at boot"]
+ },
+ "src/side-guard.ts": {
+  "(module)": ["boot",1,"hook child process (readFileSync stdin)"]
+ },
+ "src/skills.ts": {
+  "read": ["rare",1,"Skills page, review page, usage list (listSkills)"],
+  "itemsIn": ["rare",1,"Skills page, review page, usage list (listSkills)"]
+ },
+ "src/slash-commands.ts": {
+  "fileDescription": ["owed",2,"sync-disk-requests.md: chatCommands on every chat open (tickets route), stat per command"]
+ },
+ "src/standing-checks.ts": {
+  "CHECKS": ["boot",1,"runs in the hourly standing-check worker thread"],
+  "isDir": ["boot",1,"runs in the hourly standing-check worker thread"],
+  "isFile": ["boot",1,"runs in the hourly standing-check worker thread"],
+  "mtime": ["boot",1,"runs in the hourly standing-check worker thread"],
+  "readText": ["boot",1,"runs in the hourly standing-check worker thread"]
+ },
+ "src/supervisor-client.ts": {
+  "supervisorAlive": ["proc",1,"reads /proc/<pid>/cmdline"],
+  "readSupervisor": ["owed",1,"sync-disk-turn-start-end.md: handTurn on every turn start reads supervisor.json"],
+  "ensureSupervisor": ["rare",7,"only when no supervisor runs: boot, deploy, crash"],
+  "pruneOld": ["rare",3,"called only from ensureSupervisor when starting one"]
+ },
+ "src/taskmaster-files.ts": {
+  "relayFile": ["rare",8,"POST relay file between schemes (projects route)"]
+ },
+ "src/tripwire-git.ts": {
+  "git": ["owed",1,"sync-disk-requests.md: tripwire ask (POST /api/tickets/:id/approvals card), spawnSync git up to 3 s"],
+  "midMerge": ["rare",1,"tripwire ask on git checkout --ours/--theirs only"],
+  "gitHabitReason": ["owed",1,"sync-disk-requests.md: tripwire ask for git commands (approvals card path)"],
+  "inTheWay": ["rare",1,"tripwire ask on file checkout/restore only"],
+  "writeSaves": ["boot",1,"hook child process only; server passes throwaway saves"]
+ },
+ "src/tripwire.ts": {
+  "hasDeployScript": ["rare",1,"tripwire ask message on blocked deploy writes only"],
+  "envBelow": ["rare",6,"tripwire ask on grep-for-.env commands only"],
+  "globRoot": ["rare",5,"tripwire ask on globbed .env searches only"],
+  "realPath": ["owed",2,"sync-disk-requests.md: tripwire ask path resolution on every approvals card"],
+  "segmentReason": ["owed",2,"sync-disk-requests.md: tripwire ask on every approvals card (Bash segments)"],
+  "(module)": ["boot",1,"hook child process CLI branch (stdin read)"]
+ },
+ "src/turn-launch.ts": {
+  "pinTurnFiles": ["rare",39,"boot, plus re-pin on SIGHUP after a kit/tools deploy"],
+  "coordinatorAccess": ["rare",1,"readdirSync fallback only if openTickets unset; runner always sets it"]
+ },
+ "src/turn-run.mjs": {
+  "put": ["boot",2,"wrapper/supervisor child process, not the server"],
+  "takeSpec": ["boot",3,"wrapper/supervisor child process, not the server"],
+  "claimSpec": ["boot",1,"wrapper/supervisor child process, not the server"],
+  "prepare": ["boot",4,"wrapper/supervisor child process, not the server"],
+  "feeder": ["boot",6,"wrapper/supervisor child process, not the server"]
+ },
+ "src/turn-tmp.ts": {
+  "makeTmpDir": ["owed",3,"sync-disk-turn-start-end.md: Runner.startTurn on every turn start"],
+  "clearTmpDir": ["boot",1,"only via sweepTmpDirs in Runner.recover at boot"],
+  "sweepTmpDirs": ["boot",1,"Runner.recover once at boot"],
+  "dropTurnDir": ["owed",1,"sync-disk-turn-start-end.md: turn end, renameSync in Runner and keepalive-run"]
+ },
+ "src/ultrareview.ts": {
+  "UltraReviews.ghRun": ["owed",1,"sync-disk-polls-and-timers.md: via viaPr/cleanUp from 2 s review check timer; also prep action"],
+  "UltraReviews.openPr": ["owed",1,"sync-disk-polls-and-timers.md: viaPr from 2 s UltraReviews.check timer"],
+  "UltraReviews.cleanUp": ["owed",1,"sync-disk-polls-and-timers.md: finish from 2 s review check timer; also close"],
+  "UltraReviews.run": ["rare",1,"person starts an ultra review"],
+  "UltraReviews.viaPr": ["owed",2,"sync-disk-polls-and-timers.md: viaPr from 2 s UltraReviews.check timer"],
+  "UltraReviews.finish": ["owed",2,"sync-disk-polls-and-timers.md: finish from 2 s UltraReviews.check timer"],
+  "writeFindings": ["owed",2,"sync-disk-polls-and-timers.md: finish from 2 s UltraReviews.check timer"]
+ },
+ "src/waits.ts": {
+  "read": ["owed",1,"sync-disk-polls-and-timers.md: the sync readQueue and readLandLine: auto-deploy's `shipping` check, Waits' sync apply, stop or move a ship; `read` also serves /proc/<pid>/stat"],
+  "stat": ["owed",1,"sync-disk-polls-and-timers.md: the sync readQueue and readLandLine: auto-deploy's `shipping` check, Waits' sync apply, stop or move a ship; `read` also serves /proc/<pid>/stat"],
+  "files": ["owed",1,"sync-disk-polls-and-timers.md: the sync readQueue and readLandLine: auto-deploy's `shipping` check, Waits' sync apply, stop or move a ship; `read` also serves /proc/<pid>/stat"],
+  "writeOrder": ["rare",2,"person reorders the ship line"]
+ },
+ "src/wake.ts": {
+  "runsRepo": ["owed",1,"sync-disk-turn-start-end.md: Runner.startTurn runsRepo each turn until sticky true"]
+ },
+ "src/workspace.ts": {
+  "surveyReports": ["rare",1,"Taskmaster turn start while onboarding open"],
+  "buildBranch": ["owed",1,"sync-disk-turn-start-end.md: Runner turn start for minions in a build; card route"],
+  "landsBuilds": ["owed",1,"sync-disk-turn-start-end.md: Runner turn start reads land.sh every turn"],
+  "recoverTicketDir": ["rare",8,"only when a minion has no worktree on record"],
+  "restoreTicketDir": ["owed",3,"sync-disk-turn-start-end.md: Runner.startTurn restoreDir existsSync every turn"]
+ },
+ "src/worktree-sweep.ts": {
+  "removeWorktree": ["owed",3,"sync-disk-polls-and-timers.md: daily build output sweep timer, 24 h"],
+  "restoreSaved": ["rare",1,"restoreTicketDir only when worktree folder is gone"]
+ }
 }

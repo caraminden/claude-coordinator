@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One test file run alone, for the ship scripts' questions about a red (#1863): tools/land.sh, tools/own-check.sh and
-# tools/land.local.sh. Niced, with the checkout's packages (tools/test-deps.sh), stopped at LAND_PIN_LIMIT s (120).
+# One test file run alone, for the ship scripts' questions about a red (#1863): tools/land.sh and
+# tools/own-check.sh. Niced, with the checkout's packages (tools/test-deps.sh), stopped at LAND_PIN_LIMIT s (120).
 #   test-alone.sh run <checkout> <test file>     its output; 0 when it passes or the checkout hasn't got it, 1 when it
 #                                                fails, anything else is no answer: stopped, or it could not run here
 #                                                (its packages, or a module of them, are missing).

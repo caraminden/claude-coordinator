@@ -1323,6 +1323,7 @@ test("landPhase reads the phase from land.sh's newest phase line", () => {
   assert.equal(landPhase("queue: 2nd in line (ahead: #12)\nland: riding in ticket/12-usage-bar's ship train: waiting for CI on the train\n"), "landing: riding in #12's train");
   assert.equal(landPhase("queue: 3rd in line\nland: riding in build/3's ship train: waiting for CI on the train\n"), "landing: riding in build/3's train");
   assert.equal(landPhase("land: riding in ticket/12-x's ship train: waiting\nland: back in line on its own: the ship train went without ticket/7-x\n"), 'landing: in line');
+  assert.equal(landPhase("land: pulled off ticket/12-x's ship train on a guess, red in test/a.test.ts: waiting\nland: back in line to ship alone: ticket/12-x's ship train was red in test/a.test.ts\n"), 'landing: in line', 'a guess sent back to ship alone (#2098)');
 });
 
 const SMOKE_RED = 'land: smoke: checking ticket/1-x before it queues\nland: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again\n';

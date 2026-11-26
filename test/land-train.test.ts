@@ -108,29 +108,32 @@ test("a ship stopped during its train's bisect cancels the step's run, whose id 
 
 // Suspects first (#1346): a real failure (the fake's log says test/real.test.ts failed again alone) is pinned on the ships
 // whose change touched that test or what it imports. Here the test passes alone on perigee (only CI's machine fails it),
-// so they are a guess: they wait off the train, and are refused once it is green without them (#1403). Nobody from the
-// line takes their seats (#1918).
-test('a red train whose real failure maps to one ship: only it is refused, nobody from the line takes its seat, and the rest ship on one more CI run', async () => {
+// so they are a guess: they wait off the train, and once it is green without them they go back in line to ship alone, so
+// their own run is the proof (#2098; before, the green alone refused them). Nobody from the line takes their seats (#1918).
+test('a red train whose real failure maps to one ship: only it is pulled, nobody from the line takes its seat, the rest ship on one more CI run, and its own run alone refuses it', async () => {
   const l = await line([{}, {}, {}, { change: ['test/real.test.ts', '// red\n'] }, {}, {}, {}], { FAKE_RED_PATH: 'test/real.test.ts', LAND_TRAIN_MAX: '3' });
   const done = await l.go();
   assert.equal(done[3].status, 1, done[3].stderr);
   assert.match(
     done[3].stderr,
-    /land: tests failed in CI on ticket\/2-x's ship train \(https:\/\/ci\/\d+\) in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed\. It was pulled off the train on that guess: run alone on perigee it did not stay red with ticket\/4-x by itself on main\. No ship pulled for it failed it by itself on main, and the train without them passed/,
+    /land: back in line to ship alone: ticket\/2-x's ship train was red in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed\. It was pulled off the train on that guess: run alone on perigee it did not stay red with ticket\/4-x by itself on main\. The train without it passed, but no ship pulled for it failed it by itself on main, so that proves nothing, and its own CI run decides/,
   );
+  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI \(https:\/\/ci\/\d+\)/, 'refused by its own run alone, the proof');
+  assert.doesNotMatch(done[3].stderr, /tests failed in CI on ticket\/2-x's ship train/, 'never refused for the guess');
   assert.doesNotMatch(done[3].stderr, /so it is (likely )?the cause/);
   assert.match(done[3].stderr, /pulled off ticket\/2-x's ship train on a guess, red in test\/real\.test\.ts: waiting for CI on the train without it/, 'it says why it waits');
   assert.match(done[3].stderr, /not ok 1 - the red test's output/, 'the failure, on its own stderr');
-  assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'the suspect is as it was');
+  assert.equal(git(l.r.source, 'show', 'ticket/4-x:test/real.test.ts'), '// red', 'the suspect keeps its change (rebased by its own run, as any refused ship)');
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts; a guess: waits for the verdict\): CI is red .* #4: not red alone here, so the files are only a guess/);
   assert.match(done[1].stderr, /ship train: ticket\/2-x takes the 2 ships waiting behind it \(ticket\/3-x ticket\/5-x\)/, 'ship 6 stays in line');
-  assert.match(done[1].stderr, /#4 is refused: it was pulled on a guess, no ship pulled for test\/real\.test\.ts failed it alone, and the train without it passed it/);
+  assert.match(done[1].stderr, /#4 goes back in line to ship alone: it was pulled on a guess, and the train without it passed test\/real\.test\.ts, but no ship pulled for it failed it alone, so its own CI run decides/);
+  assert.doesNotMatch(done[1].stderr, /is refused/);
   assert.doesNotMatch(done[1].stderr, /bisect/);
   for (const i of [1, 2, 3, 5, 6, 7]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   for (const i of [3, 5]) shipped(l, done[i - 1], i, 2, 3);
   shipped(l, done[6], 7, 6, 2);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5', 'f6.txt: 6', 'f7.txt: 7']);
-  assert.equal(l.runs(), 4, "ship 1's, the red train's, what is left of it, and the next train's");
+  assert.equal(l.runs(), 7, "ship 1's, the red train's, what is left of it, #4's own, the next train's, and the two early runs of it #4's red dropped");
   assert.equal(l.deployed().length, 3);
   l.done();
 });
@@ -139,13 +142,14 @@ test('a red train whose real failure maps to one ship: only it is refused, nobod
 // way (split, so test/pipeline-files.test.ts doesn't read it as this file importing the fixture).
 const importIf = (file: string) => `import { existsSync } from 'node:fs'; if (existsSync(new URL('../${file}', import.meta.url))) await imp` + `ort('../${file}');`;
 const importX = importIf('x.ts');
-test('a suspect found through what the failing test imports is refused, and a ship stacked on it stays off what is left rather than bring its change back', async () => {
+test('a suspect found through what the failing test imports is pulled, and a ship stacked on it stays off what is left rather than bring its change back', async () => {
   // Ship 1 adds the test, importing x.ts once it exists (so it passes on main, #1430); ship 4 adds x.ts, which turns CI red;
   // ship 5 starts from ship 4's branch. x.ts passes run alone (CI's red is the fake's), so the files decide, not perigee.
   const l = await line([{ change: ['test/real.test.ts', `${importX}\n`] }, {}, {}, { change: ['x.ts', 'export {};\n'] }, { on: 4 }, {}, {}], { FAKE_RED_PATH: 'x.ts', LAND_TRAIN_MAX: '3' });
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts; a guess/);
-  assert.match(done[3].stderr, /in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed\. It was pulled off the train on that guess.*Look into it: fix it if it is yours, re-test, commit, then run this again/s);
+  assert.match(done[3].stderr, /back in line to ship alone: ticket\/2-x's ship train was red in test\/real\.test\.ts, which ticket\/4-x changed or which imports what it changed\. It was pulled off the train on that guess/);
+  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/, 'its own run alone refuses it');
   assert.match(done[1].stderr, /ship train: ticket\/5-x stays in line \(it sits on a ship this train holds off as a likely cause\)/);
   assert.match(done[1].stderr, /ship train: ticket\/2-x takes the 1 ships waiting behind it \(ticket\/3-x\)/);
   assert.match(done[4].stderr, /back in line on its own/, 'ship 5 is blamed for nothing on that train');

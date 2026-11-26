@@ -1,20 +1,18 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { landArgs } from '../src/land.ts';
 import { addReview, agentToken, bootServer, REPO, until } from './helpers.ts';
+import { mcpAgent, mcpOnce } from './mcp-agent.ts';
 import { json } from './typed.ts';
 
 // The parts of the API's and the tool's answers these tests read.
 type Landing = { code: number | null; output: string };
-type ToolReply = { result: { isError?: boolean; tools: { name: string }[]; content: { text: string }[] } };
 
 // The land tool (src/land.ts) for a container turn: the server runs the minion's tools/land.sh on the
 // host. A stand-in land.sh prints the token it was given.
@@ -104,19 +102,7 @@ test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAN
 });
 
 test('a container turn of any scheme is offered the land tool; a host turn is not', async () => {
-  const tools = (extra: Record<string, string>) =>
-    new Promise<string[]>((resolve, reject) => {
-      const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-        env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: undefined, COORDINATOR_CONTAINER: undefined, ...extra },
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
-      child.once('exit', (code) => reject(new Error(`mcp.ts ended (${code}) before it listed its tools`)));
-      createInterface({ input: child.stdout! }).once('line', (l) => {
-        child.kill();
-        resolve((JSON.parse(l) as ToolReply).result.tools.map((t) => t.name));
-      });
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
-    });
+  const tools = async (extra: Record<string, string>) => (await mcpOnce({ COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', ...extra }, 'tools/list')).tools.map((t) => t.name);
   assert.ok((await tools({ COORDINATOR_CONTAINER: '1' })).includes('land'));
   assert.ok(!(await tools({})).includes('land'));
 });
@@ -129,29 +115,13 @@ test('the land tool says the server restarted when the landing it started is no 
     send(404, { error: 'No landing has started for this minion' });
   });
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      MACHINES_URL: undefined,
-      COORDINATOR_API: `http://127.0.0.1:${(api.address() as AddressInfo).port}`,
-      COORDINATOR_TOKEN: '7.sig',
-      COORDINATOR_PROJECT: '1',
-      COORDINATOR_TICKET: '7',
-      COORDINATOR_ROLE: 'thread',
-      COORDINATOR_DEPLOYS: '1',
-      COORDINATOR_CONTAINER: '1',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
+  const env = { COORDINATOR_API: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: '1', COORDINATOR_CONTAINER: '1' };
   try {
-    const reply = new Promise<ToolReply>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'land', arguments: {} } }) + '\n');
-    const { result } = await reply;
+    const result = await mcpOnce(env, 'tools/call', { name: 'land', arguments: {} });
     assert.equal(result.isError, undefined, result.content[0].text);
     assert.match(result.content[0].text, /restarted/);
     assert.match(result.content[0].text, /git log main/);
   } finally {
-    child.kill();
     api.close();
   }
 });
@@ -317,26 +287,10 @@ test('the land tool sends into, files, full and build on to the server, and noth
     });
   });
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
-  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-    env: {
-      ...process.env,
-      MACHINES_URL: undefined,
-      COORDINATOR_API: `http://127.0.0.1:${(api.address() as AddressInfo).port}`,
-      COORDINATOR_TOKEN: '7.sig',
-      COORDINATOR_PROJECT: '1',
-      COORDINATOR_TICKET: '7',
-      COORDINATOR_ROLE: 'thread',
-      COORDINATOR_DEPLOYS: '1',
-      COORDINATOR_CONTAINER: '1',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
+  const child = mcpAgent({ COORDINATOR_API: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: '1', COORDINATOR_CONTAINER: '1' });
   try {
-    const replies = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
-    let id = 0;
     const land = async (args: object) => {
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name: 'land', arguments: args } }) + '\n');
-      const { result } = JSON.parse((await replies.next()).value!) as ToolReply;
+      const result = await child.call('tools/call', { name: 'land', arguments: args });
       assert.match(result.content[0].text, /exited 0/);
     };
     await land({});
@@ -346,7 +300,7 @@ test('the land tool sends into, files, full and build on to the server, and noth
     await land({ build: true, fix: true });
     assert.deepEqual(bodies, [{}, {}, { into: 'build/3', files: ['test/a.test.ts', 'test/b.test.ts'] }, { into: 'build/3', full: true }, { build: true, fix: true }]);
   } finally {
-    child.kill();
+    child.close();
     api.close();
   }
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SQLInputValue } from 'node:sqlite';
@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner } from '../src/runner.ts';
 import { TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/prompts.ts';
-import { agentToken, bootServer, until, stopProcs, stopTurns, testPins, ok, type Booted } from './helpers.ts';
+import { agentToken, bootServer, fakeClaude, until, stopProcs, stopTurns, testPins, ok, type Booted } from './helpers.ts';
 import type { ApiEvent } from './typed.ts';
 testPins();
 
@@ -25,17 +25,7 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root);
 
 /** A Runner in this process. Nothing here waits for its turns, so the teardown stops it from starting more. */
 const inProcess = (store: Store) => {

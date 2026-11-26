@@ -215,6 +215,15 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'restart_note', "ALTER TABLE contraptions ADD COLUMN restart_note TEXT NOT NULL DEFAULT ''"],
   ['push_subscriptions', 'only_pinned', 'ALTER TABLE push_subscriptions ADD COLUMN only_pinned INTEGER NOT NULL DEFAULT 0'],
   ['push_subscriptions', 'everything', "ALTER TABLE push_subscriptions ADD COLUMN everything TEXT NOT NULL DEFAULT '[]'"],
+  // A cabal's roster as its forming card approves it, and its width (#2091, src/cabal-start.ts).
+  ['cabals', 'width', 'ALTER TABLE cabals ADD COLUMN width INTEGER NOT NULL DEFAULT 4'],
+  ['cabal_rows', 'handoff', "ALTER TABLE cabal_rows ADD COLUMN handoff TEXT NOT NULL DEFAULT ''"],
+  ['cabal_rows', 'model', "ALTER TABLE cabal_rows ADD COLUMN model TEXT NOT NULL DEFAULT ''"],
+  ['cabal_rows', 'effort', "ALTER TABLE cabal_rows ADD COLUMN effort TEXT NOT NULL DEFAULT ''"],
+  ['cabal_rows', 'cost', 'ALTER TABLE cabal_rows ADD COLUMN cost REAL'],
+  ['cabal_rows', 'approved_by', 'ALTER TABLE cabal_rows ADD COLUMN approved_by TEXT'],
+  ['cabal_rows', 'approved_at', 'ALTER TABLE cabal_rows ADD COLUMN approved_at INTEGER'],
+  ['cabal_rows', 'next_at', 'ALTER TABLE cabal_rows ADD COLUMN next_at INTEGER'],
 ];
 
 /**
@@ -343,9 +352,10 @@ export const SCHEMA_HISTORY = [
   [119, 'claims.handed, beside, beside_since, beside_handed, beside_landed, claim_queue.ready (#1985)'],
   [120, 'time_log_explains (#1994)'],
   [121, 'cabals, cabal_rows, cabal_asks, cabal_log (#2090)'],
-  [122, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
-  [123, 'machine_joins, machines.report (Build 7 M2, #2053)'],
-  [124, 'machines.priority (Build 7 M6, #2056)'],
+  [122, 'cabals.width; cabal_rows handoff, model, effort, cost, approved_by, approved_at, next_at (#2091)'],
+  [123, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
+  [124, 'machine_joins, machines.report (Build 7 M2, #2053)'],
+  [125, 'machines.priority (Build 7 M6, #2056)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

@@ -146,6 +146,21 @@ test('a dismissed minion is refused and stays dismissed', async () => {
   assert.equal(events(GONE.id, 'user_message').length, 0);
 });
 
+test('a minion messaging itself is refused, so it never starts a loop of its own', async () => {
+  const before = events(M4.id, 'user_message').length;
+  const r = await tool(M4.id, 'message_minion', { ticket_id: M4.number, text: 'note to self', wake: false });
+  assert.equal(r.error, true);
+  assert.match(r.text, /That is you/);
+  assert.equal(events(M4.id, 'user_message').length, before);
+});
+
+test('close_self outside a turn is refused, not promised: nothing would ever close it', async () => {
+  const r = await tool(M4.id, 'close_self', { reason: 'all done' });
+  assert.equal(r.error, true);
+  assert.match(r.text, /not mid-turn/);
+  assert.notEqual(store.getTicket(M4.id)!.status, 'closed');
+});
+
 test('a pair of minions is held after 6 either way in 10 minutes; their Taskmaster loops are apart', async () => {
   for (let i = 0; i < 6; i++) {
     const [from, to] = i % 2 ? [M4, M1] : [M1, M4];

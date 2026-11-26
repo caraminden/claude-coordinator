@@ -1,7 +1,7 @@
 // A pick on a card starts the minion (#2050; Josh, 2026-11-25, picked "Start" on #2031's choices page; docs/adr/0038).
 // A minion's ask_question option can carry `start`: the handoff it starts from and its title, type, model and effort. A
 // person's plain pick makes that minion with no Taskmaster turn, through the Taskmaster's own create path (createMinion:
-// the duplicate-handoff check, the start card over $30, the worker pool), as the person who picked. A pick that comes with
+// the duplicate-handoff check, the start card over START_CARD_USD, the worker pool), as the person who picked. A pick that comes with
 // typed words or a picture starts nothing: the words may change the brief, so the card's owner is woken, as before.
 // Every scheme's cards get this. Choices pages don't yet: their Send still goes to the minion, which passes the picks on.
 import { realpath, stat } from 'node:fs/promises';
@@ -10,7 +10,7 @@ import type { Session } from './auth.ts';
 import { tellTaskmaster } from './ci-armed.ts';
 import { EFFORTS, MODELS, type Ticket } from './db.ts';
 import { buildNumber, HttpError, oneOf, str, type App } from './http.ts';
-import { startHoldKey } from './minion-budget.ts';
+import { money, START_CARD_USD, startHoldKey } from './minion-budget.ts';
 import { createMinion } from './routes/projects.ts';
 import { thrown } from './thrown.ts';
 import { projectSharedDir } from './workspace.ts';
@@ -124,7 +124,7 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
         owner,
         true,
       );
-      const waits = store.getSetting(startHoldKey(t.id)) ? ', waiting for its start card (its brief expects over $30)' : t.state === 'parked' ? `, sealed until #${s.start_after}'s work is in` : '';
+      const waits = store.getSetting(startHoldKey(t.id)) ? `, waiting for its start card (its brief expects over ${money(START_CARD_USD)})` : t.state === 'parked' ? `, sealed until #${s.start_after}'s work is in` : '';
       started.push(`#${t.number} ${t.title} (${t.model ?? ''} ${t.effort ?? ''}, from ${s.handoff}${waits})`.replace(/\( +/, '('));
     } catch (err) {
       refused.push(`${s.title}: ${thrown(err).message}`);

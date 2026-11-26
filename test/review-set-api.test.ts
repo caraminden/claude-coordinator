@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, mintedAgentToken, REPO, tempRoot, type Booted } from './helpers.ts';
+import { agentToken, bootServer, mintedAgentToken, tempRoot, type Booted } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
 import { until } from './wait.ts';
 
 const tmp = tempRoot('review-set-api-');
@@ -102,18 +102,8 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
 
   // The minion's tool: list, read one, save what it learned.
   const tool = async (args: Record<string, unknown>, name = 'review_set', as: { id: number } = minion) => {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), as.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(as.id), COORDINATOR_ROLE: 'thread' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-      const { result } = await reply;
-      return { error: !!result.isError, text: result.content[0].text as string };
-    } finally {
-      child.kill();
-    }
+    const { content, isError } = await mcpOnce(agentEnv(base, agentToken(join(root, 'data'), as.id), { id: as.id, project_id: p.id }, 'thread'), 'tools/call', { name, arguments: args }, tmp.track);
+    return { error: !!isError, text: content[0].text };
   };
   assert.match((await tool({})).text, /^pre-ship-review \(reviewer, on, kit\): Every change, before it ships\n[^]*\nui-screenshots \(critic, on, trial, on kit ui-screenshots\): diff: public\/\*\*, .*\nclaims \(critic, on, trial\): schedule: monthly$/);
   assert.match((await tool({ slug: 'claims' })).text, /^claims, version 1 \(.+ saved it\)\. As the critic reads it:\n\n---\nname: claims\nwhen: "schedule: monthly"\ntrial: true\n---\n\n# Claims\n/);
@@ -363,18 +353,8 @@ test("a Taskmaster's review_set tool adds a teacher and sets a critic's model, e
   await mintedAgentToken(join(root, 'data'), minion.id);
   const url = `/api/projects/${p.id}/reviews`;
   const tool = async (as: number, args: Record<string, unknown>) => {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), as), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(as), COORDINATOR_ROLE: 'thread' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'review_set', arguments: args } }) + '\n');
-      const { result } = await reply;
-      return { error: !!result.isError, text: result.content[0].text as string };
-    } finally {
-      child.kill();
-    }
+    const { content, isError } = await mcpOnce(agentEnv(base, agentToken(join(root, 'data'), as), { id: as, project_id: p.id }, 'thread'), 'tools/call', { name: 'review_set', arguments: args }, tmp.track);
+    return { error: !!isError, text: content[0].text };
   };
   const tm = page.coordinator.id;
   const one = async (slug: string) => (await call(url)).data.entries.find((e: any) => e.slug === slug);
@@ -494,17 +474,8 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
   // The review_set tool names it as the file's, and reads out the file's text with the scheme's additions.
   const tm = (await call(`/api/projects/${p.id}`)).data.coordinator.id;
   const tool = async (args: Record<string, unknown>) => {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(p.id), COORDINATOR_TICKET: String(tm), COORDINATOR_ROLE: 'thread' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'review_set', arguments: args } }) + '\n');
-      return (await reply).result.content[0].text as string;
-    } finally {
-      child.kill();
-    }
+    const { content } = await mcpOnce(agentEnv(base, agentToken(join(root, 'data'), tm), { id: tm, project_id: p.id }, 'thread'), 'tools/call', { name: 'review_set', arguments: args }, tmp.track);
+    return content[0].text;
   };
   assert.match(await tool({}), /^art-critic \(critic, on, agent_file \.claude\/agents\/art-critic\.md/m);
   assert.match(await tool({ slug: 'art-critic' }), /agent_file \.claude\/agents\/art-critic\.md \(on here\): Judges new art.*\n\nYou judge art\.[\s\S]*what a save replaces:\n\nPixel art at whole scales\./);

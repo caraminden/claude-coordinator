@@ -18,7 +18,7 @@ import { loadingLine } from './ui/state.js';
 /** @type {Record<MemberState, string>} the chip's tone (public/ui/base.css) */
 const TONE = { roster: 'neutral', sealed: 'neutral', running: 'info', idle: 'warn', blocked: 'danger', merged: 'ok', shipped: 'ok', closed: 'neutral' };
 const DONE = new Set(['merged', 'shipped', 'closed']);
-const money = (/** @type {number} */ n) => `$${n < 100 ? n.toFixed(2) : n.toFixed(0)}`;
+export const money = (/** @type {number} */ n) => `$${n < 100 ? n.toFixed(2) : n.toFixed(0)}`;
 const clock = (/** @type {number} */ ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /** @param {number} projectId @param {number | null} number the lead's #N */

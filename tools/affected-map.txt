@@ -212,7 +212,9 @@ src/routes/machines.ts: test/off-thread-fs.test.ts
 public/manifest.webmanifest: test/own-path.test.ts
 deploy/claude-coordinator-prune.service: test/prune.test.ts
 src/mcp-scheme.ts: test/schedule-templates.test.ts
-tools/land.local.sh: test/ship-core-parity.test.ts
+tools/deploy-queue.sh: test/ship-core-parity.test.ts
+kit/skills/scheme-setup/templates/land.sh: test/ship-core-parity.test.ts
+.github/workflows/tests.yml: test/ship-core-parity.test.ts
 public/slow-moments.js: test/slow-recorder-browser.test.ts
 kit/skills/skills-survey/survey.workflow.js: test/survey-workflow.test.ts
 kit/.claude-plugin/plugin.json: test/turn-setup.test.ts

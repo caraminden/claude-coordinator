@@ -11,6 +11,7 @@ import { EFFORT_KEY } from './effort-retros.ts';
 import { gitOut } from './git.ts';
 import { deliveriesOf } from './outbox.ts';
 import { pacificClock } from './pacific.ts';
+import { tierLabel } from '../public/model-table.js';
 import { parseShipNote, type Risk } from './ship-risk.ts';
 
 export type MemberState = 'roster' | 'sealed' | 'running' | 'idle' | 'blocked' | 'merged' | 'shipped' | 'closed';
@@ -28,6 +29,8 @@ export const STATE_WORD: Record<MemberState, string> = {
 /** Open ones first, the blocked on top (the picked ledger's order). */
 const ORDER: Record<MemberState, number> = { blocked: 0, running: 1, idle: 2, sealed: 3, roster: 4, merged: 5, shipped: 6, closed: 7 };
 const DONE = new Set<MemberState>(['merged', 'shipped', 'closed']);
+/** At work: what a cabal's width counts (#2091). */
+const AT_WORK = new Set<MemberState>(['running', 'idle', 'blocked']);
 
 export interface BoardAsk {
   id: number;
@@ -59,6 +62,8 @@ export interface BoardMember {
   files: string[];
   /** Its listed files another member lists too. */
   doubled: string[];
+  /** Not started yet (#2091): its handoff, tier and cost, and who approved it on the forming card; '' once started. */
+  plan: string;
 }
 
 export interface Board {
@@ -71,7 +76,9 @@ export interface Board {
   asks: BoardAsk[];
   log: CabalLogLine[];
   red: { text: string; at: number } | null;
-  counts: { members: number; started: number; merged: number; open: number; running: number; spend: number };
+  counts: { members: number; started: number; merged: number; open: number; working: number; running: number; spend: number };
+  /** How many members may be at work at once (#2091). */
+  width: number;
 }
 
 /** "#4: a.ts b/" lines of build-claims.md, read as land.sh's claims_check does: a list mark, backticks and commas are spaces. */
@@ -132,7 +139,8 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
       lane: r.lane,
       role: r.role,
       state,
-      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : STATE_WORD[state],
+      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : state === 'roster' && r.next_at != null ? 'next up' : state === 'roster' && r.approved_at != null ? 'approved' : STATE_WORD[state],
+      plan: t ? '' : [r.handoff, r.model && tierLabel(r.model, r.effort), r.cost != null && money(r.cost), r.approved_at != null && `approved by ${r.approved_by}`].filter(Boolean).join(' · '),
       after: (t && afterOf(store, t)) || r.after || null,
       note: r.note,
       note_at: r.note_at,
@@ -148,19 +156,20 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   const leadSpend = store.ticketCost(leadId);
   return {
     lead: { id: lead.id, number: lead.number, title: lead.title, spend: leadSpend },
-    // A build's cabal is always "Build 7" (Josh, 2026-11-25: "Build 7's Overseer"); a name only names a goal cabal.
-    name: lead.build != null ? `Build ${lead.build}` : cabal.name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title,
+    name: cabalName(store, lead, cabal.name),
     kind: ref ? 'build' : 'goal',
     build: ref ? lead.build : null,
     members,
     asks: asks.map((a) => askOf(a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
     log: store.cabalLog(leadId),
     red: cabal.red ? { text: cabal.red, at: cabal.red_at ?? cabal.created_at } : null,
+    width: cabal.width,
     counts: {
       members: members.length,
       started: members.filter((m) => m.state !== 'roster').length,
       merged: members.filter((m) => m.state === 'merged' || m.state === 'shipped').length,
       open: members.filter((m) => !DONE.has(m.state)).length,
+      working: members.filter((m) => AT_WORK.has(m.state)).length,
       running: members.filter((m) => m.state === 'running').length,
       spend: members.reduce((s, m) => s + m.spend, leadSpend),
     },
@@ -194,6 +203,9 @@ const askOf = (a: CabalAsk, row: CabalMemberRow | undefined, t: Ticket | undefin
   opened_at: a.opened_at,
 });
 
+/** A build's cabal is always "Build 7" (Josh, 2026-11-25: "Build 7's Overseer"); a name only names a goal cabal. */
+export const cabalName = (store: Store, lead: Ticket, name: string) => (lead.build != null ? `Build ${lead.build}` : name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title);
+
 /** People's name for the lead: "Build 7's Overseer", "Worker machines' Overseer". */
 export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}${/s$/i.test(board.name) ? "'" : "'s"} Overseer`;
 
@@ -202,7 +214,9 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 /** The board as compact text, for cabal_board's read: what an agent needs, a line a member. */
 export function boardText(b: Board, me: number | null = null): string {
   const c = b.counts;
-  const out = [`${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.running} building · ${money(c.spend)} spent`];
+  const out = [
+    `${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
+  ];
   if (b.red) out.push(`RED (${pacificClock(b.red.at)}): ${b.red.text}`);
   out.push(b.asks.length ? `Open asks (${b.asks.length}):` : 'No open asks.');
   for (const a of b.asks) out.push(`- ask ${a.id}${a.blocking ? ' BLOCKING' : ''} from ${a.from}${a.number != null ? ` #${a.number}` : ''} (${pacificClock(a.opened_at)}): ${a.text}`);
@@ -219,6 +233,7 @@ export function boardText(b: Board, me: number | null = null): string {
       m.risk ? `risk ${m.risk}` : '',
       files,
       m.doubled.length ? `DOUBLED: ${m.doubled.join(' ')}` : '',
+      m.plan,
     ];
     out.push(cells.filter(Boolean).join(' | '));
   }

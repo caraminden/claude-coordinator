@@ -25,7 +25,6 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const quiet = quietProc(join(root, 'proc'));
 export const env = {
   ...scriptEnv(),
-  LAND_CORE: process.env.CITADEL_TEST_LAND_CORE,
   COORDINATOR_CONTAINER: undefined,
   COORDINATOR_SHARED_DIR: undefined,
   CITADEL_HEAVY_DIR: join(root, 'heavy'),
@@ -318,8 +317,9 @@ case "$*" in
     fi
     [ "$3" = 7 ] || [ -z "\${FAKE_LOG_RERUN:-}" ] || FAKE_LOG=\$FAKE_LOG_RERUN
     [ "$3" = 7 ] || [ -z "\${FAKE_SKIP_RERUN:-}" ] || FAKE_SKIP=\$FAKE_SKIP_RERUN
-    if [ -n "\${FAKE_REAL:-}" ]; then # each test file whose path the run's commit has failed for real (#1564)
-      rl=''; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && [[ "$rl " != *" \${e%%=*} "* ]] && rl="$rl \${e%%=*}"; done
+    # each test file whose path the run's commit has failed for real (#1564); a red with none of them (another knob's) logs as below (#2098)
+    rl=''; for e in \${FAKE_REAL:-}; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && [[ "$rl " != *" \${e%%=*} "* ]] && rl="$rl \${e%%=*}"; done
+    if [ -n "$rl" ]; then
       [ -z "\${FAKE_REAL_FIRST:-}" ] || rl=" \$(cut -d' ' -f2 <<<"$rl")"
       echo "not ok 1 - the red test's output (run $3)"
       [ -z "\${FAKE_LOG_WHOLE:-}" ] || ! git -C "${hub}" cat-file -e "$sha:$FAKE_LOG_WHOLE" 2>/dev/null || exit 0

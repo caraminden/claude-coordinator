@@ -103,7 +103,7 @@ test('a build cabal: each column comes from facts', async () => {
       ['Host folders', false],
     ],
   );
-  assert.deepEqual(b.counts, { members: 6, started: 5, merged: 1, open: 4, running: 1, spend: 34.62 });
+  assert.deepEqual(b.counts, { members: 6, started: 5, merged: 1, open: 4, working: 2, running: 1, spend: 34.62 }, 'at work: the blocked and the building; the sealed, merged and dismissed hold no place');
   const text = boardText(b, blocked.number);
   assert.match(text, /^Build 7 cabal \(build\/7\) · Build 7's Overseer #\d+/);
   assert.match(text, /ask \d+ BLOCKING from M1 #\d+ .*Lend src\/machines\.ts/);

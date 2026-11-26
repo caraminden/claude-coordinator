@@ -9,7 +9,7 @@
 // agent needs to start it. Its `signals` file is every signal asked of it, one a line; the agent applies those past the
 // count it has applied, so a stop asked while the machine is away is applied when it returns.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { appendFile, readFile, rename, stat, utimes, writeFile } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
@@ -129,7 +129,7 @@ export async function endAway(dir: string, since: number | null, home: boolean, 
     if (await exists(join(dir, 'exit.json'))) return;
     const checkpoint = Number(await readFile(join(dir, 'checkpoint'), 'utf8').catch(() => '')) || null;
     const away: AwayEnd = { name: at.name, since: since ?? (await awaySince(at.id, dir)), checkpoint, home };
-    put(dir, 'exit.json', JSON.stringify({ code: null, signal, away }));
+    await put(dir, 'exit.json', JSON.stringify({ code: null, signal, away }));
     machineAway.left(at.id, dir, away, signal);
   } finally {
     ending.delete(dir);
@@ -242,9 +242,8 @@ export class MachineTurn implements RunningTurn {
   }
 
   /** Recorded, then applied by the agent in order; the runner keeps its clock (SIGINT, SIGTERM, SIGKILL), as for every kind. */
-  signal(sig: NodeJS.Signals) {
-    if (!existsSync(this.dir)) return;
-    appendFileSync(join(this.dir, 'signals'), `${sig}\n`);
+  async signal(sig: NodeJS.Signals) {
+    if (!(await appendInOrder(this.dir, 'signals', `${sig}\n`))) return; // its folder is gone
     machineLink.poke(this.machine);
     // A stop wins at once (spec section 6): with its machine away nothing will write the turn's end, so the stop does.
     // When the machine is back the turn there is stopped and what it did comes home aside (src/machine-away.ts).
@@ -252,8 +251,15 @@ export class MachineTurn implements RunningTurn {
   }
 
   /** Stopped before its claude started, as far as this copy knows: ended here, and the agent drops the start (it has its SIGTERM). */
-  endStart() {
-    put(this.dir, 'exit.json', JSON.stringify({ code: null, signal: null, stopped: true }));
+  async endStart() {
+    // The runner doesn't wait on it (its next poll reads the end); a folder gone meanwhile has nothing left to end.
+    if (
+      !(await put(this.dir, 'exit.json', JSON.stringify({ code: null, signal: null, stopped: true })).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return;
     if (!machineLink.online(this.machine)) machineAway.left(this.machine, this.dir);
   }
 
@@ -290,10 +296,26 @@ export class MachineTurn implements RunningTurn {
   }
 }
 
-/** Write a file the runner may read at any moment: renamed into place. */
-function put(dir: string, name: string, data: string) {
-  writeFileSync(join(dir, `${name}.tmp`), data);
-  renameSync(join(dir, `${name}.tmp`), join(dir, name));
+/** Write a file the runner may read at any moment: renamed into place. Off the server's thread (test/sync-calls.test.ts). */
+async function put(dir: string, name: string, data: string) {
+  await writeFile(join(dir, `${name}.tmp`), data);
+  await rename(join(dir, `${name}.tmp`), join(dir, name));
+}
+
+/** Appends still on their way to a turn folder, so a SIGINT, SIGTERM, SIGKILL sent back to back reach the file in that order. */
+const appending = new Map<string, Promise<boolean>>();
+
+/** Append to a file in a turn folder after any append already on its way there; false once the folder is gone. */
+function appendInOrder(dir: string, name: string, data: string): Promise<boolean> {
+  const next = (appending.get(dir) ?? Promise.resolve(true)).then(() =>
+    appendFile(join(dir, name), data).then(
+      () => true,
+      () => false,
+    ),
+  );
+  appending.set(dir, next);
+  void next.then(() => appending.get(dir) === next && appending.delete(dir));
+  return next;
 }
 
 /** One turn's part of an agent's sync. */

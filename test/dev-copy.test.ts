@@ -132,7 +132,7 @@ test('every seed scenario applies to a fresh store, twice over', async () => {
   for (let i = 0; i < 2; i++) {
     const ctx = seedScheme(s, dir, 'robin');
     // welcome-no-scheme's person is in no scheme, so it opens the app's start (#1151); every other seed opens in Seeded.
-    for (const [name, sc] of Object.entries(SCENARIOS)) assert.match(sc.seed(ctx), name === 'welcome-no-scheme' ? /^#\/$/ : new RegExp(`^#/p/${ctx.project.id}(/t/\\d+)?`), name);
+    for (const [name, sc] of Object.entries(SCENARIOS)) assert.match(await sc.seed(ctx), name === 'welcome-no-scheme' ? /^#\/$/ : new RegExp(`^#/p/${ctx.project.id}(/t/\\d+)?`), name);
   }
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }), head, 'no seed commits into the repo the tests run in');
   assert.equal(tree(), before, 'no seed writes into the repo the tests run in');

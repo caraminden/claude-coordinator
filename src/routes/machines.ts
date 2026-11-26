@@ -442,7 +442,7 @@ export const machineRoutes: Route[] = [
       // What runs from which minion, and what closed minions left that was stopped this week (#1365, src/reaper.ts).
       const minions = app.reaper ? byMinion(await app.reaper.running(), app.store, canSee) : [];
       const reaped = reapedRows(app.store.healthEventsSince([REAPED], Date.now() - 7 * 24 * 3600_000), app.store, canSee);
-      const load = hostLoad(app.heavyDir, await readHeavyA(app.heavyDir), Date.now(), undefined, owners, await readLongJobsA(app.heavyDir).catch(() => []));
+      const load = await hostLoad(app.heavyDir, await readHeavyA(app.heavyDir), Date.now(), undefined, owners, await readLongJobsA(app.heavyDir).catch(() => []));
       const long = load.long.map((j) => {
         const t = app.store.getTicket(j.ticket);
         return t && canSee(t.project_id) ? { ...j, number: t.number, schemeId: t.project_id } : j;

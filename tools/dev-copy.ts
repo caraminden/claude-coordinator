@@ -238,7 +238,7 @@ async function seed(names: string[]) {
     const ctx = seedScheme(store, s!.data, s!.login);
     // The route is what tools/ui-shot.ts takes; the URL opens it in a browser.
     for (const n of names) {
-      const route = SCENARIOS[n].seed(ctx);
+      const route = await SCENARIOS[n].seed(ctx);
       say(`${n}: ${route}   ${s!.url}${route}`);
     }
   } finally {

@@ -29,14 +29,8 @@
  "src/approvals.ts": {
   "pluginDirArgs": ["owed",1,"sync-disk-turn-start-end.md: turn-launch on every turn start (statSync per plugin dir)"]
  },
- "src/artifact-data.ts": {
-  "bridgeSource": ["owed",2,"sync-disk-requests.md: injectBridge on every artifact page served (routes/files.ts)"]
- },
  "src/artifact-scan.ts": {
   "ArtifactScanner.scan": ["owed",1,"sync-disk-turn-start-end.md: ScanTimers after each reply/turn end per ticket; startup sweep"]
- },
- "src/brief-lint.ts": {
-  "namedFiles": ["owed",4,"sync-disk-requests.md: create minion route (routes/projects.ts) per new minion brief"]
  },
  "src/build-cache.ts": {
   "ensureGradleInit": ["owed",4,"sync-disk-turn-start-end.md: ClaudeLink.start per container turn start; also boot"],
@@ -97,8 +91,6 @@
   "ErrorDigest.write": ["owed",3,"sync-disk-turn-start-end.md: every contraption errors 10 min tick writes changed days"]
  },
  "src/contraption-media.ts": {
-  "mediaFile": ["owed",1,"sync-disk-requests.md: GET /api/contraptions/media/:path (app media serve)"],
-  "listMedia": ["owed",2,"sync-disk-requests.md: GET /api/contraptions/media (app media list)"],
   "sweepMedia": ["owed",3,"sync-disk-polls-and-timers.md: every contraption media sweep 24 h"],
   "readPng": ["rare",4,"contraption generate_image_codex tool call"],
   "codexImage": ["rare",6,"contraption generate_image_codex tool call (spawnSync)"],
@@ -151,9 +143,6 @@
  "src/fast-mode.ts": {
   "FastMode.start": ["owed",3,"sync-disk-polls-and-timers.md: every fast mode 30 s tick, when a new main commit needs verifying"]
  },
- "src/fcm.ts": {
-  "Fcm.account": ["owed",2,"sync-disk-requests.md: each push send; reads key once then cached, existsSync while unset"]
- },
  "src/front.ts": {
   "listenThroughFront": ["boot",2,"once at startup, before listening (server.ts:2722)"]
  },
@@ -184,9 +173,7 @@
   "tail": ["owed",4,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"]
  },
  "src/host-load.ts": {
-  "slotCount": ["owed",1,"sync-disk-requests.md: GET /api/host-load, polled by the CI page; reads slots file"],
-  "readPressure": ["proc",1,"reads /proc/pressure/cpu (PSI)"],
-  "hostLoad": ["owed",1,"sync-disk-requests.md: GET /api/host-load polled by CI page; reads slots and history files"]
+  "readPressure": ["proc",1,"reads /proc/pressure/cpu (PSI)"]
  },
  "src/host-signals.ts": {
   "hostTextSync": ["proc",1,"reads /proc, /sys PSI, loadavg, cgroup files only"],
@@ -198,11 +185,6 @@
  "src/host-tools.ts": {
   "readManifest": ["rare",2,"host-tool propose route and card approval"],
   "miseBin": ["rare",1,"installing an approved host tool via mise"]
- },
- "src/ideas.ts": {
-  "handoffFiles": ["owed",2,"sync-disk-requests.md: Ideas page view sync, create-ticket linkHandoff, hourly ideas timer"],
-  "Ideas.fromHandoff": ["owed",2,"sync-disk-requests.md: create-ticket with a handoff brief; Ideas page sync"],
-  "Ideas.readPage": ["owed",2,"sync-disk-requests.md: Ideas page sync, files route PUT, hourly 'ideas ledger' 60 min"]
  },
  "src/keepalive.ts": {
   "treeHash": ["owed",3,"sync-disk-turn-start-end.md: Runner turn launch fingerprint; walks pinned files once per process"],
@@ -255,11 +237,8 @@
   "restoreSaved": ["rare",3,"memory tidy Put back route"]
  },
  "src/memory-files.ts": {
-  "plain": ["owed",1,"sync-disk-requests.md: lstat inside readFolder; schedules runDue 30 s when memory-curator schedule due"],
-  "readFolder": ["owed",5,"sync-disk-requests.md: schedules runDue 30 s memoryTarget when curator schedule due; memory page"],
-  "writeAtomic": ["owed",6,"sync-disk-requests.md: every finished chunked upload record; memory note saves"],
-  "saveNote": ["rare",1,"PUT memory note on the Memory page"],
-  "indexNote": ["rare",4,"PUT memory note with index: true"],
+  "plain": ["rare",1,"memory tidy apply, check and Put back, and a DELETE note on the Memory page (readFolder lstats for itself)"],
+  "writeAtomic": ["rare",6,"a member approving or putting back a memory tidy, or deleting a note (note saves and upload records use writeAtomicOff)"],
   "deleteNote": ["rare",2,"DELETE memory note, or curator apply"]
  },
  "src/openrouter.ts": {
@@ -337,12 +316,6 @@
   "repoRubrics": ["boot",5,"importAllRubrics once per database at startup"],
   "kitLine": ["boot",2,"never on the server: the runner passes an out map, so no file is written; only a CLI and tests write"]
  },
- "src/routes/contraptions.ts": {
-  "contraptionRoutes": ["rare",3,"contraption media GET and DELETE routes"]
- },
- "src/routes/projects.ts": {
-  "ideaRow": ["owed",1,"sync-disk-requests.md: Ideas page rows (existsSync per handoff)"]
- },
  "src/routes/reviews.ts": {
   "kitAgent": ["rare",1,"Reviews page GET"]
  },
@@ -398,9 +371,6 @@
   "(module)": ["boot",2,"session worker thread only"],
   "lastEffort": ["owed",4,"sync-disk-turn-start-end.md: Runner turn end; startup sweep for threads lacking effort"]
  },
- "src/shell.ts": {
-  "shellOff": ["owed",1,"sync-disk-requests.md: every sw.js request in front.ts"]
- },
  "src/ship-stop.ts": {
   "descendants": ["proc",2,"walks /proc/<pid>/stat for signalling a ship"],
   "stopInLine": ["rare",1,"stop-ship from Status page or stopping a minion with a ship"],
@@ -419,9 +389,6 @@
  "src/skills.ts": {
   "read": ["rare",1,"Skills page, review page, usage list (listSkills)"],
   "itemsIn": ["rare",1,"Skills page, review page, usage list (listSkills)"]
- },
- "src/slash-commands.ts": {
-  "fileDescription": ["owed",2,"sync-disk-requests.md: chatCommands on every chat open (tickets route), stat per command"]
  },
  "src/standing-checks.ts": {
   "CHECKS": ["boot",1,"runs in the hourly standing-check worker thread"],

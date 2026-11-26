@@ -198,7 +198,7 @@ function firstDay(c: SeedCtx, done: 1 | 3 | 5) {
   return `#/p/${c.project.id}`;
 }
 
-export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => string }> = {
+export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => string | Promise<string> }> = {
   'welcome-new': { about: "you on your first day: the welcome over Seeded's Taskmaster chat, only the password ticked (#1151)", seed: (c) => firstDay(c, 1) },
   'welcome-half': { about: 'you halfway through the welcome: password, Claude and phone ticked (#1151)', seed: (c) => firstDay(c, 3) },
   'welcome-no-scheme': {
@@ -1416,11 +1416,11 @@ mock.boards('#takes', { boards: [
   },
   'memory-tidy': {
     about: 'Orders → Memory, Curator (#1111): the memory scenario plus an open memory tidy from a curator run (an edit, an index line, a delete, a flag) and an applied one that Put back can still undo',
-    seed(c) {
+    async seed(c) {
       SCENARIOS.memory.seed(c);
       const repo = c.store.getProject(c.project.id)!.repo_dir!;
       const folder = memoryFolders(repo, [{ label: 'server', configDir: join(c.dataDir, 'claude') }])[0];
-      const view = readFolder(folder, () => false);
+      const view = await readFolder(folder, () => false);
       const old = c.store.memoryProposals.create(
         { project_id: c.project.id, ticket_id: null, folder: folder.id, changes: checkChanges(view, [{ action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax', reason: 'Not in the index, so no session finds it' }]) },
         Date.now() - 6 * 86_400_000,

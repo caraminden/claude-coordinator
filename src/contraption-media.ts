@@ -6,6 +6,7 @@
 // their own ChatGPT login, run in their container by codexImage() below.
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, constants, copyFileSync, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { resolveFile } from './artifacts.ts';
 import { copyPinned } from './codex-review.ts';
@@ -34,7 +35,7 @@ export const MEDIA_TYPE: Record<string, string> = {
 export const mediaDir = (dataDir: string, contraption: string, person: number) => join(dataDir, 'contraption-media', contraption, String(person));
 
 /** A file inside `dir` from a path the app sent, or a 400/404. */
-export function mediaFile(dir: string, path: string): string {
+export async function mediaFile(dir: string, path: string): Promise<string> {
   let rel: string;
   try {
     rel = decodeURIComponent(path);
@@ -45,7 +46,7 @@ export function mediaFile(dir: string, path: string): string {
   if (rel.includes('\0') || !file.startsWith(resolve(dir) + sep)) throw new HttpError(400, 'Not a file path inside the media folder');
   let st;
   try {
-    st = statSync(file);
+    st = await stat(file);
   } catch {
     throw new HttpError(404, 'No such file');
   }
@@ -54,17 +55,17 @@ export function mediaFile(dir: string, path: string): string {
 }
 
 /** The files in a media folder, newest first, their `.json` notes left out. */
-export function listMedia(dir: string): { path: string; bytes: number; modified: number }[] {
+export async function listMedia(dir: string): Promise<{ path: string; bytes: number; modified: number }[]> {
   let names: string[];
   try {
-    names = readdirSync(dir, { recursive: true }) as string[];
+    names = (await readdir(dir, { recursive: true })) as string[];
   } catch {
     return [];
   }
   const files = [];
   for (const name of names) {
     if (name.endsWith('.json')) continue;
-    const st = statSync(join(dir, name), { throwIfNoEntry: false });
+    const st = await stat(join(dir, name)).catch(() => null);
     if (st?.isFile()) files.push({ path: name.split(sep).join('/'), bytes: st.size, modified: st.mtimeMs });
   }
   return files.sort((a, b) => b.modified - a.modified);

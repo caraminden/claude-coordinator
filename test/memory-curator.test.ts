@@ -26,9 +26,9 @@ const setup = () => {
 const view = (dir: string) => readFolder({ label: 'x', dir, id: 'x', rel: 'r' }, () => false);
 const snapshot = (dir: string) => ['a.md', 'b.md', 'c.md', 'd.md', 'MEMORY.md'].map((f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null));
 
-test('checkChanges refuses bad changes and keeps what each note was', () => {
+test('checkChanges refuses bad changes and keeps what each note was', async () => {
   const dir = setup();
-  const v = view(dir);
+  const v = await view(dir);
   const bad: [unknown, RegExp][] = [
     [[], /at least one/],
     [[{ action: 'zap', file: 'a.md', reason: 'r' }], /action/],
@@ -71,10 +71,10 @@ test('withLine replaces in place, drops duplicates, appends or removes', () => {
   assert.equal(withLine('', 'a.md', '- [A](a.md)'), '- [A](a.md)\n');
 });
 
-test('nothing changes until approve, and only the ticked changes apply', () => {
+test('nothing changes until approve, and only the ticked changes apply', async () => {
   const dir = setup();
   const before = snapshot(dir);
-  const changes = checkChanges(view(dir), [
+  const changes = checkChanges(await view(dir), [
     { action: 'edit', file: 'a.md', text: 'merged a+b', line: '- [A](a.md) — a and b', reason: 'merge' },
     { action: 'delete', file: 'b.md', reason: 'merged into a' },
     { action: 'index', file: 'c.md', line: '- [C](c.md) — unindexed', reason: 'unindexed' },
@@ -101,10 +101,10 @@ test('nothing changes until approve, and only the ticked changes apply', () => {
   assert.deepEqual(gone, ['d.md']);
 });
 
-test('a delete removes the note and its line, and put back brings both back', () => {
+test('a delete removes the note and its line, and put back brings both back', async () => {
   const dir = setup();
   const before = snapshot(dir);
-  const changes = checkChanges(view(dir), [{ action: 'delete', file: 'b.md', reason: 'stale' }]);
+  const changes = checkChanges(await view(dir), [{ action: 'delete', file: 'b.md', reason: 'stale' }]);
   const gone: string[] = [];
   const { backup } = applyChanges(dir, changes, new Set([1]), (f) => gone.push(f));
   assert.equal(existsSync(join(dir, 'b.md')), false);
@@ -114,10 +114,10 @@ test('a delete removes the note and its line, and put back brings both back', ()
   assert.deepEqual(snapshot(dir), before);
 });
 
-test('put back into a full MEMORY.md leaves that note out and says so, and works once there is room', () => {
+test('put back into a full MEMORY.md leaves that note out and says so, and works once there is room', async () => {
   const dir = setup();
   const before = snapshot(dir);
-  const { backup } = applyChanges(dir, checkChanges(view(dir), [{ action: 'delete', file: 'b.md', reason: 'stale' }]), new Set([1]));
+  const { backup } = applyChanges(dir, checkChanges(await view(dir), [{ action: 'delete', file: 'b.md', reason: 'stale' }]), new Set([1]));
   const full = `- [A](a.md) — first\n${Array.from({ length: 199 }, (_, i) => `- line ${i}`).join('\n')}\n`;
   writeFileSync(join(dir, 'MEMORY.md'), full);
   const r = restoreSaved(dir, backup);
@@ -130,12 +130,12 @@ test('put back into a full MEMORY.md leaves that note out and says so, and works
   assert.deepEqual(snapshot(dir), before);
 });
 
-test('an index already over the cap can be shortened, and Put back works while it stays over (2ME3)', () => {
+test('an index already over the cap can be shortened, and Put back works while it stays over (2ME3)', async () => {
   const dir = setup();
   const filler = '- filler line that is long enough to count\n'.repeat(210);
   writeFileSync(join(dir, 'MEMORY.md'), `- [A](a.md) — first\n- [B](b.md) — second\n${filler}`);
   const before = snapshot(dir);
-  const changes = checkChanges(view(dir), [
+  const changes = checkChanges(await view(dir), [
     { action: 'index', file: 'a.md', line: '- [A](a.md) — 1st', reason: 'shorter' },
     { action: 'edit', file: 'b.md', text: 'tidier b', line: '- [B](b.md) — 2nd', reason: 'shorter' },
   ]);
@@ -147,13 +147,13 @@ test('an index already over the cap can be shortened, and Put back works while i
   assert.deepEqual(restoreSaved(dir, backup), { restored: 2, failed: [] });
   assert.deepEqual(snapshot(dir), before);
   // Growing it further still refuses.
-  const grow = checkChanges(view(dir), [{ action: 'add', file: 'd.md', text: 'new', line: '- [D](d.md)', reason: 'r' }]);
+  const grow = checkChanges(await view(dir), [{ action: 'add', file: 'd.md', text: 'new', line: '- [D](d.md)', reason: 'r' }]);
   assert.match(applyChanges(dir, grow, new Set([1])).changes[0].outcome!, /^failed: MEMORY.md would pass/);
 });
 
-test('a note changed since the proposal is skipped, and the page sees it first', () => {
+test('a note changed since the proposal is skipped, and the page sees it first', async () => {
   const dir = setup();
-  const changes = checkChanges(view(dir), [
+  const changes = checkChanges(await view(dir), [
     { action: 'edit', file: 'a.md', text: 'curated', reason: 'r' },
     { action: 'index', file: 'c.md', line: '- [C](c.md) — x', reason: 'r' },
     { action: 'add', file: 'd.md', text: 'new', line: '- [D](d.md)', reason: 'r' },
@@ -176,10 +176,10 @@ test('a note changed since the proposal is skipped, and the page sees it first',
   assert.deepEqual(backup, []);
 });
 
-test('a full MEMORY.md fails that change before its note is touched, and the rest go on', () => {
+test('a full MEMORY.md fails that change before its note is touched, and the rest go on', async () => {
   const dir = setup();
   writeFileSync(join(dir, 'MEMORY.md'), `- [A](a.md) — first\n- [B](b.md) — second\n${'- filler\n'.repeat(198)}`);
-  const changes = checkChanges(view(dir), [
+  const changes = checkChanges(await view(dir), [
     { action: 'add', file: 'd.md', text: 'new', line: '- [D](d.md)', reason: 'r' },
     { action: 'edit', file: 'b.md', text: 'tidier b', reason: 'r' },
   ]);
@@ -221,13 +221,13 @@ test('the store supersedes an open proposal, decides once, and drops old notes a
   assert.deepEqual(s.kept(1), []);
 });
 
-test('a change that fails after its first write still keeps its old copy for Put back (ME6)', () => {
+test('a change that fails after its first write still keeps its old copy for Put back (ME6)', async () => {
   const dir = setup();
   // A name so long that the temp file beside it can't be made: the line goes in, then the note's write fails.
   const long = `${'n'.repeat(240)}.md`;
   writeFileSync(join(dir, long), 'old long\n');
   writeFileSync(join(dir, 'MEMORY.md'), `- [A](a.md) — first\n- [L](${long}) — long\n`);
-  const changes = checkChanges(view(dir), [{ action: 'edit', file: long, text: 'new long', line: `- [L](${long}) — short`, reason: 'r' }]);
+  const changes = checkChanges(await view(dir), [{ action: 'edit', file: long, text: 'new long', line: `- [L](${long}) — short`, reason: 'r' }]);
   const { changes: out, backup } = applyChanges(dir, changes, new Set([1]));
   assert.match(out[0].outcome!, /^failed/);
   assert.deepEqual(backup, [{ file: long, text: 'old long\n', line: `- [L](${long}) — long` }]);
@@ -235,9 +235,9 @@ test('a change that fails after its first write still keeps its old copy for Put
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), `- [A](a.md) — first\n- [L](${long}) — long\n`);
 });
 
-test('copies stored before the writes survive a kill, and the store keeps them off the kept list until the tidy is decided (2ME7)', () => {
+test('copies stored before the writes survive a kill, and the store keeps them off the kept list until the tidy is decided (2ME7)', async () => {
   const dir = setup();
-  const changes = checkChanges(view(dir), [
+  const changes = checkChanges(await view(dir), [
     { action: 'edit', file: 'a.md', text: 'tidied a', reason: 'r' },
     { action: 'edit', file: 'b.md', text: 'tidied b', reason: 'r' },
   ]);

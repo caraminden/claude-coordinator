@@ -20,7 +20,7 @@ import { randomBytes } from 'node:crypto';
 import { copyFile, mkdir, open, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HttpError } from './http.ts';
-import { writeAtomic } from './memory-files.ts';
+import { writeAtomicOff } from './memory-files.ts';
 import { claimName, safeFileName, uploadFolder } from './uploads.ts';
 import { projectSharedDir } from './workspace.ts';
 
@@ -224,7 +224,7 @@ export class ChunkedUploads {
   private async keep(rec: Finished) {
     try {
       await mkdir(this.doneDir, { recursive: true, mode: 0o700 });
-      writeAtomic(this.donePath(rec.meta.id), JSON.stringify(rec));
+      await writeAtomicOff(this.donePath(rec.meta.id), JSON.stringify(rec));
     } catch (err) {
       console.error(`Upload ${rec.meta.id}: its finished record was not written`, err);
     }

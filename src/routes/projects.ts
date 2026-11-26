@@ -2,7 +2,7 @@
 // search, and one Taskmaster writing to another's.
 import { checkAsk, formatAsk } from '../ask-form.ts';
 import { cleanMsgSettings, cleanNeverHold } from '../msg-settings.ts';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { checkNeed } from '../needs.ts';
 import { basename, join, relative, sep } from 'node:path';
@@ -271,7 +271,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
   // Its expected cost (#1674): the larger of create_ticket's expected_cost and the brief's (or its handoff's) "Expected cost: $N" line,
   // so a low param can't slip a big brief past its start card.
-  const briefText = `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`;
+  const briefText = `${message}\n${await namedFiles(message, projectSharedDir(app.dataDir, project.id))}`;
   const givenCost = body.expected_cost == null ? null : Number(body.expected_cost);
   if (givenCost != null && !(Number.isFinite(givenCost) && givenCost > 0 && givenCost <= 100_000)) throw new HttpError(400, 'expected_cost must be dollars, more than 0');
   const lineCost = expectedCost(briefText);
@@ -378,7 +378,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   try {
     const shared = projectSharedDir(app.dataDir, project.id);
     const rel = handoffIn(message, shared);
-    if (rel) store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
+    if (rel) await store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
   } catch (e) {
     console.error(`ideas: linking #${id}: ${(e as Error).message}`);
   }
@@ -1578,17 +1578,17 @@ export const projectRoutes: Route[] = [
             deleteNote(folder.dir, file);
             // The saved copy of it too, or the next turn's restore puts the note back (sessions.ts writeBack).
             app.store.deleteClaudeState(join(folder.rel, file));
-          } else if (body.index === true) indexNote(folder.dir, file);
+          } else if (body.index === true) await indexNote(folder.dir, file);
           else {
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
-            saveNote(folder.dir, file, body.text, typeof body.was === 'string' ? body.was : undefined);
+            await saveNote(folder.dir, file, body.text, typeof body.was === 'string' ? body.was : undefined);
           }
         } catch (err) {
           if (err instanceof HttpError) throw err;
           throw new HttpError(thrown(err).status ?? 404, thrown(err).message!);
         }
       }
-      return json(res, 200, { folders: folders.map((f) => readFolder(f, closed)) });
+      return json(res, 200, { folders: await Promise.all(folders.map((f) => readFolder(f, closed))) });
     },
   },
   // The CI page's Test health tab (#1063): fast mode's state and known reds, and the flakiest test files of the last 14 days, each with the open minion on it.
@@ -1669,7 +1669,7 @@ export const projectRoutes: Route[] = [
       }
       const by = caller ? (caller.kind === 'coordinator' ? 'Taskmaster' : `#${caller.number}`) : session.name;
       const updated = app.store.ideas.edit(row.id, by, change);
-      json(res, 200, { idea: ideaRow(app, project, updated) });
+      json(res, 200, { idea: await ideaRow(app, project, updated) });
     },
   },
   // Every dated decision this scheme can see, parsed live from where it is written (the Orders → Decisions page and
@@ -2081,17 +2081,18 @@ export const projectRoutes: Route[] = [
 ];
 
 /** One ledger row as the page shows it: links to its page, handoff and minion, made here so they always open. */
-function ideaRow(app: App, project: Project, r: Idea) {
+async function ideaRow(app: App, project: Project, r: Idea) {
   const shared = projectSharedDir(app.dataDir, project.id);
   const inShared = (abs: string) => (abs.startsWith(shared + sep) ? relative(shared, abs).split(sep).join('/') : null);
   const pageRel = r.page ? inShared(r.page) : null;
   const pageArt = r.page && !pageRel ? app.store.latestArtifact(project.id, [r.page]) : undefined;
   const t = r.ticket_id ? app.store.getTicket(r.ticket_id) : undefined;
+  const there = r.handoff && (await stat(join(shared, r.handoff)).catch(() => null));
   return {
     ...r,
     page_label: r.page ? (pageRel ?? basename(r.page)) : null,
     page_href: pageRel ? `#/s/${project.id}/${encodeURIComponent(pageRel)}` : pageArt ? `#/a/${pageArt.id}` : null,
-    handoff_href: r.handoff && existsSync(join(shared, r.handoff)) ? `#/s/${project.id}/${encodeURIComponent(r.handoff)}` : null,
+    handoff_href: there ? `#/s/${project.id}/${encodeURIComponent(r.handoff!)}` : null,
     minion: t ? { number: t.number, title: t.title, status: t.status } : r.number ? { number: r.number, title: null, status: null } : null,
   };
 }
@@ -2117,5 +2118,5 @@ export async function ideasView(app: App, project: Project, status: string | nul
   const rows = all.filter((r) => (!status || r.status === status) && hit(r));
   const cutoff = Date.now() - LATER_STALE_MS;
   const waiting = all.filter((r) => r.status === 'later' && (r.decided_at ?? r.created_at) < cutoff).map((r) => r.id);
-  return { ideas: rows.map((r) => ideaRow(app, project, r)), counts, total: all.length, waiting };
+  return { ideas: await Promise.all(rows.map((r) => ideaRow(app, project, r))), counts, total: all.length, waiting };
 }

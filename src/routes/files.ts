@@ -169,7 +169,7 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: A
   let { size } = found;
   let body: Buffer | null = null;
   if (bridge && app && type.kind === 'html' && !download && size <= MAX_BRIDGED_BYTES) {
-    body = injectBridge(await readFile(file), { page: bridge.page, entries: entriesView(app.store.artifactData(bridge.projectId, file)) });
+    body = await injectBridge(await readFile(file), { page: bridge.page, entries: entriesView(app.store.artifactData(bridge.projectId, file)) });
     size = body.length;
   }
   const headers: Record<string, string | number> = {
@@ -731,7 +731,7 @@ export const fileRoutes: Route[] = [
         app.runner.startNow.touch(to.id, session.uid);
         // The ideas ledger (#1150): a Later-style pick bar's items become rows now, with the titles the page sent.
         try {
-          app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));
+          await app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));
           app.store.ideas.restatus(project.id);
         } catch (e) {
           console.error(`ideas: ${file}: ${(e as Error).message}`);

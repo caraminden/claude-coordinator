@@ -151,10 +151,10 @@ export function staticName(url: string, onAppHost: boolean): string | null {
 }
 
 /** The answer to a GET or HEAD for front-end file `name`, or null when there is no such file. One copy for both threads. */
-export function staticAnswer(s: Statics, name: string, req: IncomingHttpHeaders): { status: number; headers: Record<string, string>; body: Uint8Array } | null {
+export function staticAnswer(s: Statics, name: string, req: IncomingHttpHeaders, off = false): { status: number; headers: Record<string, string>; body: Uint8Array } | null {
   if (!Object.hasOwn(s.files, name)) return null;
   let f = s.files[name];
-  if (name === 'sw.js' && shellOff(s.dataDir)) f = s.swOff;
+  if (name === 'sw.js' && off) f = s.swOff;
   if (name === 'manifest.webmanifest' && /dark/.test(String(req['sec-ch-prefers-color-scheme'] ?? ''))) f = s.darkManifest;
   const headers = f.headers;
   const asked = String(req['if-none-match'] ?? '')
@@ -631,10 +631,16 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const serveStatic = (req: IncomingMessage, res: ServerResponse) => {
     if ((req.method !== 'GET' && req.method !== 'HEAD') || req.headers.upgrade || (testHooks && /[?&]citadel-test-reader=main\b/.test(req.url ?? ''))) return false;
     const file = staticName(req.url ?? '/', appHost(req, opts.appsDomain) !== null);
-    const a = file && caughtUp() && statics && staticAnswer(statics, file, req.headers);
-    if (!a) return false;
-    res.writeHead(a.status, { ...a.headers, 'X-Citadel-Answered': 'front' });
-    res.end(a.body);
+    const held = statics;
+    if (!file || !caughtUp() || !held || !Object.hasOwn(held.files, file)) return false;
+    const answer = (off: boolean) => {
+      const a = staticAnswer(held, file, req.headers, off)!;
+      res.writeHead(a.status, { ...a.headers, 'X-Citadel-Answered': 'front' });
+      res.end(a.body);
+    };
+    // Only the service worker looks at the disk, for its off switch (src/shell.ts), and not on this thread.
+    if (file === 'sw.js') void shellOff(held.dataDir).then(answer);
+    else answer(false);
     return true;
   };
 

@@ -3,7 +3,7 @@
 // `window.storage` and a working `localStorage`. The page reaches the server only through the viewer
 // that framed it (public/bridge-host.js), with the signed-in person's session.
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { linkifyHtml } from '../public/ui/markdown.js';
 import type { ArtifactDatum, Store } from './db.ts';
@@ -59,11 +59,11 @@ export function writeStore(store: Store, projectId: number, file: string, entrie
 // The page's half of the bridge, read fresh when it changes so a front-end reload picks it up.
 const BRIDGE_FILE = join(import.meta.dirname, '..', 'public', 'artifact-bridge.js');
 let bridge = { mtime: -1, src: '' };
-function bridgeSource(): string {
-  const mtime = statSync(BRIDGE_FILE).mtimeMs;
+async function bridgeSource(): Promise<string> {
+  const mtime = (await stat(BRIDGE_FILE)).mtimeMs;
   if (mtime !== bridge.mtime) {
     // The function alone: its header comment needn't ride along in every page.
-    const src = readFileSync(BRIDGE_FILE, 'utf8');
+    const src = await readFile(BRIDGE_FILE, 'utf8');
     bridge = { mtime, src: src.slice(src.indexOf('(function (cfg)')).trim().replace(/;$/, '') }; // the formatter ends the file with a semicolon; the call's brackets follow it
   }
   return bridge.src;
@@ -100,9 +100,9 @@ export function linkPageText(html: string): string {
  * any comments or whitespace before it, else at the very start. `page` is the token path the page was
  * served under, which the viewer passes on so the server can check the frame still shows the file it opened.
  */
-export function injectBridge(html: Buffer, cfg: { page: string; entries: ReturnType<typeof entriesView> }): Buffer {
+export async function injectBridge(html: Buffer, cfg: { page: string; entries: ReturnType<typeof entriesView> }): Promise<Buffer> {
   const text = linkPageText(html.toString('utf8'));
   const lead = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*(?:<!doctype[^>]*>)?/i.exec(text)![0];
-  const script = `<script>${bridgeSource()}(${scriptJson(cfg)});</script>`;
+  const script = `<script>${await bridgeSource()}(${scriptJson(cfg)});</script>`;
   return Buffer.from(lead + script + text.slice(lead.length));
 }

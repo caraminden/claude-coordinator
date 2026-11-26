@@ -100,14 +100,11 @@ export const memoryCuratorRoutes: Route[] = [
     refuse: 'Only the curator run itself can propose a memory tidy in its chat',
     async handler({ req, res, app, ticket }) {
       const project = app.store.getProject(ticket.project_id)!;
-      const t = curatorTarget(project.repo_dir, memoryLogins(app));
+      const t = await curatorTarget(project.repo_dir, memoryLogins(app));
       if (!t) throw new HttpError(404, 'This scheme has no memory folder Citadel can reach, so there is nothing to tidy: say so in one line and close yourself');
       const body = await readJson(req);
       if (Array.isArray(body.changes) && !body.changes.length) throw new HttpError(400, 'Nothing to propose: say so in one line and close yourself with close_self');
-      const changes = checkChanges(
-        readFolder(t.folder, () => false),
-        body.changes,
-      );
+      const changes = checkChanges(await readFolder(t.folder, () => false), body.changes);
       const { proposal, superseded } = app.store.memoryProposals.create({ project_id: project.id, ticket_id: ticket.id, folder: t.folder.id, changes });
       // The run's own earlier proposal is settled but not told: "close yourself" would withdraw the card it just made (2ME2).
       for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', old.ticket_id === ticket.id ? null : `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);

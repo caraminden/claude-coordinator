@@ -215,7 +215,7 @@ test('a machine being removed goes once its copies are cleared or kept, or after
   const dropped: number[] = [];
   const app = {
     machineCopies: copies,
-    store: { getMachine: (id: number) => ({ id, name: `box-${id}` }), deleteMachine: (id: number) => void dropped.push(id) },
+    store: { getMachine: (id: number) => ({ id, name: `box-${id}` }), deleteMachine: (id: number) => void dropped.push(id), getSetting: () => null, setSetting: () => {}, deleteSetting: () => {} }, // the settings calls: Pause all's forget (M3)
     jobs: { drop() {} },
     runner: { turnLine: { forget() {} } },
     ciLoad: { forget() {} },

@@ -6,6 +6,7 @@
 import { account, api, h, view } from './base.js';
 import { toneChip } from './look.js';
 import { WORKER_LIMITS } from './machine-setup.js';
+import { removing } from './machine-remove.js';
 import { heldCaps, workerSection, workerState } from './machine-worker-row.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
@@ -57,7 +58,7 @@ function changeRole(m, role, fields, label, redraw, shown = fields) {
 /** Why a role can't be used on this PC, when it can't (shown greyed while off); null when it can. */
 function cannot(m, r) {
   if (r.on) return null;
-  if (m.removing) return 'It is being removed: nothing new starts there.';
+  if (removing(m)) return 'It is being removed: nothing new starts there.';
   if (!m.runners && r.role === 'ci') return 'CI runners come from a CI runner host for now: add one with "Add a CI runner host" below.';
   if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this PC runs Linux.';
   if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';
@@ -207,7 +208,8 @@ function roleCard(m, r, redraw, extra) {
   return h(
     'div',
     { class: 'role-card', 'data-role': r.role, 'data-on': String(r.on), 'aria-disabled': String(!!why) },
-    h('div', { class: 'role-card-head' }, sw, h('b', {}, r.name), h('span', { class: 'role-card-state' }, toneChip(st.tone, st.text))),
+    // A machine being removed takes nothing new (spec section 4): no switch to turn a role back on, as T5's row did.
+    h('div', { class: 'role-card-head' }, removing(m) ? null : sw, h('b', {}, r.name), h('span', { class: 'role-card-state' }, toneChip(st.tone, st.text))),
     why ? h('p', { class: 'muted small' }, why) : null,
     r.on && !why ? schemeChips(m, r, redraw) : null,
     r.on && !why && CAPS[r.role] ? capsLine(m, r, redraw) : null,

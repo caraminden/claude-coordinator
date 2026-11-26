@@ -7,12 +7,17 @@
 // browsers see a new worker, which keeps the new files and drops the old ones. With the server's off switch on, SHELL
 // stays null: this worker then drops every kept file, reloads the windows it served from them, and caches nothing.
 const SHELL = null; // filled in by the server (src/shell.ts)
-const CACHE = SHELL && `shell-${SHELL.version}`;
-const KEPT = new Set(SHELL?.urls ?? []);
+/** @typedef {{ version: string, urls: string[], hashes: Record<string, string> }} Shell */
+/** SHELL as the server may fill it in (a cast, so tsc doesn't read it as always null). */
+const shell = /** @type {Shell | null} */ (SHELL);
+const CACHE = shell && `shell-${shell.version}`;
+const KEPT = new Set(shell?.urls ?? []);
+/** This file runs as a service worker. tsconfig.sw.json's worker lib types `self` as any worker's scope, so this says which. */
+const worker = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
 
-self.addEventListener('install', (event) => {
-  self.skipWaiting();
-  if (SHELL) event.waitUntil(keep());
+worker.addEventListener('install', (event) => {
+  worker.skipWaiting();
+  if (shell) event.waitUntil(keep(shell));
 });
 
 /**
@@ -20,40 +25,42 @@ self.addEventListener('install', (event) => {
  * worker. A file whose content hash (X-Front-Hash) is the one an older version's cache already holds is copied from it,
  * not fetched again (#1331); the rest come from the network and must be of this very version and hash. Nothing is put
  * in the new cache until every file is in hand, so a tab never sees half old, half new.
+ *
+ * @param {Shell} shell
  */
-async function keep() {
+async function keep(shell) {
   const olds = await Promise.all((await caches.keys()).filter((k) => k.startsWith('shell-') && k !== CACHE).map((k) => caches.open(k)));
   const answers = await Promise.all(
-    SHELL.urls.map(async (url) => {
-      const want = SHELL.hashes[url];
+    shell.urls.map(async (url) => {
+      const want = shell.hashes[url];
       for (const old of olds) {
         const hit = await old.match(url);
-        if (hit && want && hit.headers.get('X-Front-Hash') === want) return [url, hit];
+        if (hit && want && hit.headers.get('X-Front-Hash') === want) return /** @type {const} */ ([url, hit]);
       }
       const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-      if (!res.ok || res.headers.get('X-Front-Version') !== SHELL.version || res.headers.get('X-Front-Hash') !== want) throw new Error(`${url} is not front end ${SHELL.version}`);
-      return [url, res];
+      if (!res.ok || res.headers.get('X-Front-Version') !== shell.version || res.headers.get('X-Front-Hash') !== want) throw new Error(`${url} is not front end ${shell.version}`);
+      return /** @type {const} */ ([url, res]);
     }),
   );
-  const cache = await caches.open(CACHE);
+  const cache = await caches.open(`shell-${shell.version}`);
   await Promise.all(answers.map(([url, res]) => cache.put(url, res)));
 }
 
-self.addEventListener('activate', (event) =>
+worker.addEventListener('activate', (event) =>
   event.waitUntil(
     (async () => {
       const old = (await caches.keys()).filter((k) => k.startsWith('shell-') && k !== CACHE);
       await Promise.all(old.map((k) => caches.delete(k)));
-      await self.clients.claim();
+      await worker.clients.claim();
       // The off switch: windows opened from kept files load again from the network.
-      if (!SHELL && old.length) {
-        for (const w of await self.clients.matchAll({ type: 'window' })) if (new URL(w.url).pathname.startsWith('/c/')) w.navigate(w.url).catch(() => {});
+      if (!shell && old.length) {
+        for (const w of await worker.clients.matchAll({ type: 'window' })) if (new URL(w.url).pathname.startsWith('/c/')) w.navigate(w.url).catch(() => {});
       }
     })(),
   ),
 );
 
-self.addEventListener('fetch', (event) => {
+worker.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const path = url.pathname;
   // Contraptions under /apps/ bring their own worker, if any (src/apps.ts); this one keeps out of them.
@@ -61,8 +68,8 @@ self.addEventListener('fetch', (event) => {
   // Nor the backup chat (src/backup.html), which must load however broken the app's own files are.
   if (path === '/backup' || path.startsWith('/backup/')) return;
   const page = event.request.mode === 'navigate';
-  const key = page ? (path === '/c/' || path === '/c/index.html') && '/c/' : path;
-  if (CACHE && event.request.method === 'GET' && url.origin === self.location.origin && KEPT.has(key)) {
+  const key = page ? (path === '/c/' || path === '/c/index.html' ? '/c/' : null) : path;
+  if (CACHE && event.request.method === 'GET' && url.origin === worker.location.origin && key !== null && KEPT.has(key)) {
     // A kept file at once; a missing one (evicted, or not kept yet) from the network as usual.
     return event.respondWith(
       caches
@@ -74,7 +81,12 @@ self.addEventListener('fetch', (event) => {
   if (page) event.respondWith(load(event.request, path));
 });
 
-/** A page load from the network: a restart's or a lost connection's own page when that is all there is. */
+/**
+ * A page load from the network: a restart's or a lost connection's own page when that is all there is.
+ *
+ * @param {Request} request
+ * @param {string} path
+ */
 const load = (request, path) =>
   fetch(request).then(
     // Caddy's bare 502 when nothing serves the port: a restart that outlasted systemd's socket, or a failed one (#493).
@@ -99,35 +111,36 @@ const restarting = () =>
 
 // A question card, a failed turn, or a thread that is ready or blocked (src/push.ts). One
 // notification per thread: a newer one replaces the last, and still alerts unless it's silent (an all-clear).
-self.addEventListener('push', (event) => {
+worker.addEventListener('push', (event) => {
+  /** @type {{ title?: string, body?: string, tag?: string, silent?: boolean, url?: string }} */
   let msg = {};
   try {
     msg = event.data?.json() ?? {};
   } catch {}
-  event.waitUntil(
-    self.registration.showNotification(msg.title || '%APP_NAME%', {
-      body: msg.body || '',
-      tag: msg.tag,
-      renotify: !!msg.tag && !msg.silent,
-      silent: !!msg.silent,
-      icon: '/icon-192.png',
-      data: { url: msg.url || '/c/' },
-    }),
-  );
+  // renotify is in browsers but not in TypeScript's NotificationOptions, so the options are built apart from the call.
+  const options = {
+    body: msg.body || '',
+    tag: msg.tag,
+    renotify: !!msg.tag && !msg.silent,
+    silent: !!msg.silent,
+    icon: '/icon-192.png',
+    data: { url: msg.url || '/c/' },
+  };
+  event.waitUntil(worker.registration.showNotification(msg.title || '%APP_NAME%', options));
 });
 
 // Open the thread: in a window the app already has (focused, and told where to go), else a new one.
-self.addEventListener('notificationclick', (event) => {
+worker.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || '/c/', self.location.origin).href;
+  const url = new URL(event.notification.data?.url || '/c/', worker.location.origin).href;
   event.waitUntil(
     (async () => {
       // Citadel's own page only (the url's, /c/): a contraption's window (its own installed app since #274)
       // can't show a thread, a preview's runs on a database copy, and the backup page has no listener.
       const page = new URL(url).pathname;
-      const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter((w) => new URL(w.url).pathname === page);
+      const windows = (await worker.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter((w) => new URL(w.url).pathname === page);
       const win = windows.find((w) => w.focused) ?? windows[0];
-      if (!win) return self.clients.openWindow(url);
+      if (!win) return worker.clients.openWindow(url);
       win.postMessage({ type: 'open', url });
       // Browsers only let a notification click bring a window forward; elsewhere this throws.
       await win.focus().catch(() => {});
@@ -136,11 +149,11 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 // The browser replaced this device's subscription (keys expire); register the new one.
-self.addEventListener('pushsubscriptionchange', (event) => {
+worker.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     (async () => {
       const key = event.oldSubscription?.options?.applicationServerKey;
-      const sub = event.newSubscription ?? (key && (await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })));
+      const sub = event.newSubscription ?? (key && (await worker.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })));
       if (!sub) return;
       await fetch('/api/push/subscription', {
         method: 'PUT',

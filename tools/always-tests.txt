@@ -28,3 +28,10 @@ test/ui-contract.test.ts
 test/config.test.ts
 test/raw-log-read.test.ts
 test/ship-core-parity.test.ts
+# The pinning tests (#2037, Josh 2026-11-25 "Always-run list plus smoke"): each reads source text and goes red for an edit
+# that never touched it, and #1928's narrow pick left them to the train's CI. Together about 2.5 CPU-s. The slow ones that
+# pin the same code (list-reads, boot-check, the route test) are its @pinned tests, run by path.
+test/runner-turn-maps.test.ts
+test/db-areas.test.ts
+test/db-writer-lists.test.ts
+test/pinned-tests.test.ts

@@ -173,3 +173,32 @@ tools/review-escapes/**: test/reviewer-benchmark.test.ts
 # The answer-time probe and the per-turn cost budget (#1559).
 src/answer-time.ts: test/answer-time.test.ts test/turn-cost.test.ts test/status-page.test.ts
 test/turn-cost.json: test/turn-cost.test.ts
+
+# Tests that read a source file's text, so an edit to it alone can turn them red (#2037): test/pinned-tests.test.ts finds them.
+tools/land.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
+tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts
+public/sw.js: test/backup.test.ts test/shell.test.ts
+tools/deploy-queue.sh: test/ci-runner-choice.test.ts
+deploy/claude-container/Containerfile: test/claude-container.test.ts
+server.ts: test/deploy.test.ts test/off-thread-fs.test.ts test/one-home.test.ts
+kit/skills/scheme-setup/templates/biome.config.json: test/format.test.ts
+deploy/citadel-heavy.slice: test/heavy-unit.test.ts
+kit/skills/writing-for-agents/HOOKS.md: test/kit-hooks.test.ts
+src/turn-launch.ts: test/kit-hooks.test.ts
+src/db.ts: test/land-numbers.test.ts
+public/sidebar.js: test/land-train.test.ts
+kit/skills/scheme-setup/templates/land.sh: test/land.test.ts test/scheme-setup-land-build.test.ts
+public/style.css: test/media-browser.test.ts
+public/composer.js: test/model-effort.test.ts
+src/routes/machines.ts: test/off-thread-fs.test.ts
+public/manifest.webmanifest: test/own-path.test.ts
+deploy/claude-coordinator-prune.service: test/prune.test.ts
+src/mcp-scheme.ts: test/schedule-templates.test.ts
+tools/land.local.sh: test/ship-core-parity.test.ts
+public/slow-moments.js: test/slow-recorder-browser.test.ts
+kit/skills/skills-survey/survey.workflow.js: test/survey-workflow.test.ts
+kit/.claude-plugin/plugin.json: test/turn-setup.test.ts
+tools/citadel-heavy: test/turn-setup.test.ts
+tools/citadel-wait: test/turn-setup.test.ts
+tools/citadel-dev-copy: test/turn-setup.test.ts
+tools/ci-failures: test/turn-setup.test.ts

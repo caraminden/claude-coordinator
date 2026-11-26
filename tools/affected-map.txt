@@ -202,6 +202,7 @@ deploy/claude-container/Containerfile: test/claude-container.test.ts test/worker
 tools/worker/citadel-worker: test/host-reach.test.ts
 server.ts: test/deploy.test.ts test/off-thread-fs.test.ts test/one-home.test.ts test/flake-start-model.test.ts test/held-starts.test.ts
 kit/skills/scheme-setup/templates/biome.config.json: test/format.test.ts
+kit/skills/scheme-setup/templates/typecheck.ts: test/scheme-setup-land-fast.test.ts
 deploy/citadel-heavy.slice: test/heavy-unit.test.ts
 kit/skills/writing-for-agents/HOOKS.md: test/kit-hooks.test.ts
 src/turn-launch.ts: test/kit-hooks.test.ts

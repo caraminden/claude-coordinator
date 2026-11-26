@@ -336,3 +336,36 @@ test("fast mode: a path in PIPELINE_FILES' list (main's copy) keeps the full gat
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /fast mode is on, but deploy\/run\.sh takes the full gate/);
 });
+
+// #2157 (Peek Auras #977): fast mode turned the early check off, so a fast land ran SMOKE_CMD alone and a new `any` went live.
+test('fast mode: the kit type check a fresh scheme has runs on the rebase and refuses a new any; FAST_CHECK replaces it', () => {
+  const r = setup('false', { SMOKE_CMD: 'true' });
+  const kit = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', 'scheme-setup', 'templates', 'typecheck.ts'), 'utf8');
+  writeFileSync(join(r.main, 'tools', 'typecheck.ts'), kit.replace(/^export const PROJECTS = .*$/m, 'export const PROJECTS: string[] = [];'));
+  writeFileSync(join(r.main, 'a.ts'), 'export const a = 1;\n');
+  git(r.main, 'add', '-A'); // it counts tracked files
+  assert.equal(spawnSync('node', ['tools/typecheck.ts', '--init'], { cwd: r.main, env }).status, 0);
+  git(r.main, 'add', '-A');
+  git(r.main, 'commit', '-qm', 'the type check');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.ts', 'export const b: any = 1;');
+  const before = git(r.main, 'rev-parse', 'main');
+  const bad = r.run({ LAND_FAST: '1' });
+  assert.equal(bad.status, 1, bad.stderr);
+  assert.match(bad.stderr, /smoke: running node tools\/typecheck\.ts on ticket\/1-x rebased onto main/);
+  assert.match(bad.stderr, /b\.ts: escapes 0 → 1\n[^]*smoke: the check failed on the rebased branch/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before, 'nothing shipped');
+  r.commit(r.wt, 'b.ts', 'export const b: number = 1;');
+  const good = r.run({ LAND_FAST: '1' });
+  assert.equal(good.status, 0, good.stderr);
+  assert.match(good.stderr, /smoke: the check passed on the rebased branch/);
+  assert.doesNotMatch(good.stderr, /running false/, 'still no full check');
+
+  // FAST_CHECK set in land.local.sh runs instead, on the rebase: red only once main's change is under the branch.
+  const s = setup('false', { SMOKE_CMD: 'true' }, "FAST_CHECK='test ! -e red'\n");
+  s.commit(s.main, 'red', 'main broke it\n');
+  s.commit(s.wt, 'b.txt', 'b\n');
+  const own = s.run({ LAND_FAST: '1' });
+  assert.equal(own.status, 1, own.stderr);
+  assert.match(own.stderr, /smoke: running test ! -e red on ticket\/1-x rebased onto main/);
+});

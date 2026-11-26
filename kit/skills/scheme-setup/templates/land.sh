@@ -43,6 +43,7 @@
 #    fixing it>" each ("#41 is fixing it"). A smoke, check or CI red whose failures (land_failures) are all known reds
 #    doesn't refuse; a file's id stands for every test in it. A check that timed out, or a CI workflow still running,
 #    is never waived. With no SMOKE_CMD (or LAND_SMOKE=0) fast mode is off: a land with no check at all takes the gate.
+#    A fast land still runs FAST_CHECK, the quick gates (the type check, the size budget), on its rebase, in step 0.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
 #    main would conflict (git merge-tree), commit titles, then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
 #    CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the line too. A fail says
@@ -105,6 +106,12 @@ SMOKE_TIMEOUT=${LAND_SMOKE_TIMEOUT:-300}
 # that checked commit lands as it is and the check doesn't run again; when it has, it runs again on the new main. 0
 # off: worth it when main moves under most landings, which then pay the light check twice for each land that passes.
 EARLY_CHECK=${LAND_EARLY_CHECK:-1}
+# FAST_CHECK (#2157): the quick gates a fast land (no check, no CI: the header's "Fast mode") still runs, in the early
+# check's place, on the branch rebased onto main, so a gate that answers in seconds holds there too (Peek Auras,
+# 2026-11-25: a new file's anys, an import cycle and a file over the size budget reached main on fast lands in one day).
+# While unset, the kit's own quick gates the repo has, joined by &&: node tools/typecheck.ts, node --test
+# test/size-budget.test.ts. '' none. Only what takes seconds (a fast land waits on it alone, SMOKE_TIMEOUT at most),
+# and nothing SMOKE_CMD runs already.
 # The scheme's main branch.
 BRANCH=main
 # The file whose Project facts may have a "Numbered things" line.
@@ -1447,6 +1454,13 @@ pipeline_change() {
 }
 # Fast mode (the header): the first such path, or one FAST_FULL names, keeps the full gate.
 fast_full() { pipeline_change $FAST_FULL; }
+# FAST_CHECK while unset: the kit's quick gates this repo has (the settings).
+fast_check() {
+  [ -z "${FAST_CHECK+set}" ] || return 0
+  FAST_CHECK=''
+  [ ! -f tools/typecheck.ts ] || FAST_CHECK='node tools/typecheck.ts'
+  [ ! -f test/size-budget.test.ts ] || FAST_CHECK+="${FAST_CHECK:+ && }node --test test/size-budget.test.ts"
+}
 FAST='' UNRUN=- # UNRUN: its ticket's verdict before CI has run
 [ "$mode" = land ] || LAND_FAST='' # a whole build takes the full gate, and a merge into one isn't in the line
 if [ "${LAND_FAST:-}" = 1 ]; then
@@ -1457,6 +1471,7 @@ if [ "${LAND_FAST:-}" = 1 ]; then
     # Its ticket says "old" (a land.sh older than batches), so the batches of the gated landings around it never take
     # it in: it lands alone, with no CI run of theirs to wait for.
     say "fast mode: this lands on the smoke check alone; the full suite runs on $BRANCH behind it"
+    fast_check
   else
     say "fast mode is on, but $why takes the full gate"
   fi
@@ -2574,10 +2589,11 @@ leave() {
 
 # The early check (EARLY_CHECK, the header's step 0): CHECK_LIGHT as early_cmd, or '' none: off, not a plain land, a
 # fast land, no CHECK_LIGHT, or a lane whose check is neither CHECK nor CHECK_LIGHT (none, or a CHECK_<LANE> of its
-# own). A merge into a build and a build itself never run it.
+# own). A merge into a build and a build itself never run it. A fast land runs FAST_CHECK there instead, EARLY_CHECK or not.
 early_cmd='' early_on='' early_tree='' early_tip='' early_bare=''
 early_plan() {
   local lane=full why v chk=$CHECK
+  if [ -n "$FAST" ]; then early_cmd=$FAST_CHECK && return 0; fi
   [ "$EARLY_CHECK" = 1 ] && [ "$mode" = land ] && [ -z "$FAST" ] && [ -n "$CHECK_LIGHT" ] || return 0
   if [ -n "$LANES" ]; then
     read -r lane why <<<"$(lane_of "refs/heads/$BRANCH" "$pre" "refs/heads/$BRANCH")"
@@ -2600,10 +2616,12 @@ early_back() {
 
 # early_check <smoke's start>: early_cmd on the branch rebased onto $BRANCH, in this worktree as in line (land-branch
 # puts it back if this is killed), under the check lock and its limits. Red refuses before the line, with the check's
-# last lines as a red at the front shows them. Green sets early_on, early_tree and early_tip, which build() takes as
-# its build when it rebases onto early_on again: the check then runs once. 1 when it neither passed nor refused.
+# last lines as a red at the front shows them; a fast land's (FAST_CHECK) takes no lock and SMOKE_TIMEOUT. Green sets
+# early_on, early_tree and early_tip, which build() takes as its build when it rebases onto early_on again: the check
+# then runs once. 1 when it neither passed nor refused.
 early_check() {
-  local t0=$1 t1=$SECONDS want rb log rc=0
+  local t0=$1 t1=$SECONDS want rb log rc=0 limit=$CHECK_LIMIT
+  [ -z "$FAST" ] || limit=$SMOKE_TIMEOUT
   want=$(git rev-parse "refs/heads/$BRANCH")
   say "smoke: running $early_cmd on $branch rebased onto $BRANCH ($(git log -1 --format=%h "$want"))"
   note_branch "$pre"
@@ -2625,8 +2643,8 @@ early_check() {
   rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
   # One early check at a time waits for the check lock, so the head of the line waits behind at most one (EARLY_AHEAD).
   (
-    flock -w "$CHECK_WAIT" 8 && flock -w "$CHECK_WAIT" 7 || exit 1
-    timeout -k 30 "$CHECK_LIMIT" bash -c "$early_cmd" >"$log" 2>&1 9>&- 8>&- 7>&- 6>&-
+    [ -n "$FAST" ] || { flock -w "$CHECK_WAIT" 8 && flock -w "$CHECK_WAIT" 7; } || exit 1
+    timeout -k 30 "$limit" bash -c "$early_cmd" >"$log" 2>&1 9>&- 8>&- 7>&- 6>&-
   ) 8>"$state/land-early.lock" 7>"$state/land-check.lock" 9>&- 6>&- || rc=$?
   if [ "$rc" = 0 ]; then
     early_on=$want early_tree=$(git rev-parse "$rb^{tree}") early_tip=$(git rev-parse HEAD) early_bare=$bare
@@ -2640,7 +2658,7 @@ early_check() {
     return 1
   fi
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-    echo "land: the check ran past ${CHECK_LIMIT}s and was stopped: something in it hung" >>"$log" # the tail below shows it
+    echo "land: the check ran past ${limit}s and was stopped: something in it hung" >>"$log" # the tail below shows it
   elif known_red "smoke: the check" <"$log"; then
     early_back
     return 1

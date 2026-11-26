@@ -150,7 +150,7 @@ export function ciSetup(branches: number, { stack = '', batch = '', check = 'tru
     { mode: 0o755 },
   );
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_LATE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
+  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
   type L = ReturnType<typeof land>;

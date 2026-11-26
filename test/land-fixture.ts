@@ -34,7 +34,7 @@ export const env = {
   DEPLOY_TEST_PSI_CPU: join(quiet, 'pressure', 'cpu'), // deploy.sh's starved-box hold reads these, never the box's (#1833)
   DEPLOY_TEST_PSI_MEMORY: join(quiet, 'pressure', 'memory'),
   DEPLOY_TEST_CPU_WEIGHT: '',
-  LAND_CI_LATE: '0', // a stop's wait for a run GitHub hasn't listed (#1894): a test of that look sets its own (#2083)
+  LAND_CI_LATE: '0', // the wait (a stop's, early_gate's) for a run GitHub hasn't listed (#1894): a test of that look sets its own (#2083)
   NODE_TEST_CONTEXT: undefined,
   COORDINATOR_TICKET: undefined,
   COORDINATOR_TOKEN: undefined,

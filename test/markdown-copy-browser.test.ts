@@ -117,3 +117,24 @@ test('the button keeps clear of the first line, and a streamed redraw keeps the 
   await page.eval('(window.first = md.querySelector("pre"), updateMarkdown(md, src + "\\n\\nmore", { breaks: true }))');
   assert.equal(await page.eval('md.querySelector("pre") === window.first'), true, 'an unchanged block, button and all, is kept');
 });
+
+test('a command block scrolled under a sticky bar after it (the composer) keeps its Copy button under the bar', { skip }, async () => {
+  for (const width of [390, 1440]) {
+    const page = await browser.page(base, { width, height: 700 });
+    // Citadel's composer: sticky at the bottom with no z-index of its own.
+    const onTop = await page.eval<string>(`(() => {
+      const bar = Object.assign(document.createElement('div'), { id: 'bar' });
+      bar.style.cssText = 'position:sticky;bottom:0;height:200px;background:var(--citadel-bg)';
+      const room = document.createElement('div');
+      room.style.height = '1500px';
+      document.body.append(room, bar);
+      out.before(room.cloneNode());
+      const button = md.querySelector('pre.cui-shell > .cui-copy');
+      scrollBy(0, button.getBoundingClientRect().top - bar.getBoundingClientRect().top - 40);
+      const b = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      return hit.id || hit.className;
+    })()`);
+    assert.equal(onTop, 'bar', `at ${width} px`);
+  }
+});

@@ -521,7 +521,7 @@ const CSS = `
 }
 :where(.cui-md .cui-marks-toggle > input) { margin: 0; accent-color: #e5383b; }
 :where(.cui-md :is(.cui-marks-toggle, .cui-marks-draw):hover) { border-color: var(--citadel-accent); }
-:where(.cui-md pre.cui-shell) { position: relative; padding-top: 0; border-left: 4px solid var(--cui-shell); }
+:where(.cui-md pre.cui-shell) { position: relative; isolation: isolate; padding-top: 0; border-left: 4px solid var(--cui-shell); }
 :where(.cui-md pre.cui-shell)::before {
   content: attr(data-label); display: block; margin: 0 -0.6rem 0.5rem -0.6rem; padding: 0.45rem 4.4rem 0.45rem 0.6rem;
   font: 600 var(--citadel-size-small) var(--citadel-font); line-height: 1.3; color: var(--cui-shell);

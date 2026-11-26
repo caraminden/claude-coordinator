@@ -2,9 +2,11 @@
 // so a slow boot passes it. The load is faked from a preload: the average stays quiet while the runnable count turns busy after the step's first look.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 
@@ -39,4 +41,32 @@ syncBuiltinESMExports();
   assert.doesNotMatch(run.stderr, /did not say which port/);
   assert.match(run.stderr, /boot-check: server start: \d/);
   assert.match(run.stderr, /The server exited during boot \(code 7\)/);
+});
+
+const cache = join(homedir(), '.cache', 'ms-playwright');
+const hasChromium = existsSync(cache) && readdirSync(cache).some((d) => /^chromium_headless_shell-\d+$/.test(d));
+
+// On a busy box the server answers a page read its readers are slow on with a 503 to ask again (#2003): the page, the
+// file viewer's details and the turn poll ask again, as the app does. Here the first ask of each read gets that 503.
+test("a server whose readers ask for a retry passes, the page's, the file details' and the turn poll's", { skip: !hasChromium && 'no headless Chromium (the boot check needs one)', timeout: 200_000 }, async () => {
+  const dir = join(root, 'retry');
+  const checkout = join(dir, 'checkout');
+  for (const part of ['server.ts', 'package.json', 'src', 'public', 'kit', 'tools']) cpSync(join(repo, part), join(checkout, part), { recursive: true });
+  const front = join(checkout, 'src', 'front.ts');
+  const from = '  const ask = (req: IncomingMessage, res: ServerResponse) => {\n';
+  const text = readFileSync(front, 'utf8');
+  assert.ok(text.includes(from), `src/front.ts no longer has the line this fixture changes: ${from}`);
+  writeFileSync(front, text.replace(from, `const asked = new Set<string>();\n${from}    if (!asked.has(req.url ?? '')) {\n      asked.add(req.url ?? '');\n      return busy(res);\n    }\n`));
+  const db = join(dir, 'coordinator.db');
+  const store = new Store(db);
+  store.createUser({ name: 'Boot', login: 'boot', admin: true, server_login: true });
+  const p = store.createProject('Retry', null);
+  store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'boot' });
+  store.db.close();
+  const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 190_000 }).then(
+    ({ stderr }) => ({ ok: true, out: `${stderr}` }),
+    (err) => ({ ok: false, out: `${err.stderr}` }),
+  );
+  assert.ok(run.ok, run.out.slice(0, 3000));
+  assert.match(run.out, /a minion turn started/);
 });

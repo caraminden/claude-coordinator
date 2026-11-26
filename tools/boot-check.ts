@@ -200,9 +200,18 @@ try {
   if (!login.ok || !cookie) fail(`Signing in answered ${login.status}`);
   begin('render in Chromium');
   await pageCheck(`${base}/`, cookie);
+  // A GET the server may answer with a retryable 503 while its readers are slow on a busy box (#2003): asked again, as the page does.
+  const get = async (path: string, limit = stepLimit()) => {
+    for (;;) {
+      const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
+      if (r.status !== 503 || limit.over(20_000)) return r;
+      await r.body?.cancel();
+      await new Promise((ok) => setTimeout(ok, 250));
+    }
+  };
   begin("file viewer's details");
   for (const { what, path } of fileChecks) {
-    const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
+    const r = await get(path);
     const body = await r.text();
     const name = (() => {
       try {
@@ -219,7 +228,6 @@ try {
   // failure is reported: the stop below ends the server, not a turn still running (each has its own 30 s, stretched by the load).
   const turns = await Promise.allSettled(
     turnChecks.map(async ({ what, id, dir }) => {
-      const ticket = async () => (await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } }).then((r) => r.json())).ticket;
       const sent = await fetch(`${base}/api/tickets/${id}/messages`, {
         method: 'POST',
         headers: { Cookie: cookie, 'Content-Type': 'application/json' },
@@ -229,7 +237,9 @@ try {
       const report = join(dir, 'report.json');
       const slow = stepLimit();
       for (; ; await new Promise((r) => setTimeout(r, 100))) {
-        const t = await ticket();
+        const got = await get(`/api/tickets/${id}`, slow);
+        if (!got.ok) fail(`Reading the ${what} answered ${got.status}: ${(await got.text()).slice(0, 300)}`);
+        const t = (await got.json()).ticket;
         if (t.status !== 'running' && t.status !== 'new') {
           if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
           const r = JSON.parse(readFileSync(report, 'utf8'));
@@ -306,7 +316,8 @@ async function pageCheck(url: string, cookie: string) {
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description).join(' ')}`);
     // The copy has the database but not the data folder's files (chat images): an API 404 (/api/ or the app's /c/api/) is that.
-    const missingData = (e: any) => / 404 /.test(e.text) && /^(?:\/c)?\/api\//.test(new URL(e.url ?? url, url).pathname);
+    // An API 503 is a slow reader's "ask again" on a busy box (#2003), which the page does.
+    const missingData = (e: any) => / (404|503) /.test(e.text) && /^(?:\/c)?\/api\//.test(new URL(e.url ?? url, url).pathname);
     if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !missingData(m.params.entry)) errors.push(`${m.params.entry.text}${m.params.entry.url ? ` (${m.params.entry.url})` : ''}`);
   };
   let buf = '';

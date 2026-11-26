@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts test/judges.test.ts test/db-areas.test.ts src/routes/all.ts public/machine-agent.mjs test/size-budget.test.ts src/db/machines.ts src/machines.ts
+shared: server.ts src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts test/judges.test.ts test/db-areas.test.ts src/routes/all.ts public/machine-agent.mjs test/size-budget.test.ts src/db/machines.ts src/machines.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -21,8 +21,8 @@ shared: src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt test/type
 #2057: (merged in)
 #2085: (merged in)
 #2061: src/machine-pools.ts test/machine-pools.test.ts src/machine-turn.ts public/machine-worker.mjs public/machines.css test/machine-turn.test.ts src/access.ts src/claude-link.ts test/claude-link.test.ts test/machine-accounts.test.ts src/runner.ts tools/worker/citadel-worker public/worker-agent.mjs src/worker-join.ts public/machine-worker-row.js
-#2105: src/machine-balancer.ts public/settings-machines.js public/runner-agent.mjs tools/ci-runner/keep-runners.ps1 test/runner-wake.test.ts src/routes/machines.ts
-#2064: src/ci-auto.ts test/ci-auto.test.ts src/ci-runner.ts src/ci-ships.ts src/role-setup.ts public/role-setup.js public/role-setup-card.js src/mcp-ship.ts test/ci-runner.test.ts test/role-setup.test.ts test/ci-ships.test.ts kit/skills/scheme-setup/ kit/skills/ci-store/SKILL.md tools/ci-runner/README.md README.md public/machine-role-cards.js public/machine-types.d.ts src/db/people.ts src/db/schemes.ts src/ci-load.ts server.ts
+#2105: src/machine-balancer.ts src/ci-load.ts public/settings-machines.js public/runner-agent.mjs tools/ci-runner/keep-runners.ps1 test/runner-wake.test.ts src/routes/machines.ts
+#2064: (merged in)
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
 
@@ -62,3 +62,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - M5 (#2057) merged in on 2026-11-26 (58fe984ea). src/routes/machines.ts goes to M6b (#2105), as planned. server.ts is shared again until #2061 or M6b asks for it just before merging: whichever asks first gets it lent. Its other files are unclaimed; README.md goes to #2064, as planned.
 - #2085 (page can raise worker caps) merged in on 2026-11-26 (dc9d7c88d). As planned, tools/worker/citadel-worker, public/worker-agent.mjs, src/worker-join.ts and public/machine-worker-row.js go to #2061, and public/machine-role-cards.js to #2064; its other files are unclaimed. #2064 also gets public/machine-types.d.ts (first written by #2085 among feeders) and src/db/people.ts (one call; #2052's line before) and src/db/schemes.ts. src/ci-load.ts goes to #2064 after #2105 merges; src/db/machines.ts and server.ts stay shared (added lines only) unless #2061 or #2105 asks first.
 - 2026-11-26 ~4:00 AM PST: lent to #2064 for its merge, while #2061 and #2105 wait on their gos: src/ci-load.ts (#2105's; #2064 adds one method) and server.ts (off shared; #2064 changes ShipWatch's `queued` line). After it merges, src/ci-load.ts goes back to #2105 and server.ts back to shared, until #2061 or #2105 asks for it.
+- #2064 (CI runners join schemes by themselves) merged in on 2026-11-26. src/ci-load.ts is back on #2105's line and server.ts back on shared; its other files are unclaimed. Its kit/skills/scheme-setup/templates/ edits are high by file and go on the go card. Still open: #2061 and #2105, each borrowing server.ts for its own merge, in the order of their gos.

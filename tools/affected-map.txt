@@ -190,7 +190,7 @@ test/turn-cost.json: test/turn-cost.test.ts
 
 # Tests that read a source file's text, so an edit to it alone can turn them red (#2037): test/pinned-tests.test.ts finds them.
 tools/land.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
-tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts
+tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts test/land.test.ts
 public/sw.js: test/backup.test.ts test/shell.test.ts
 tools/deploy-queue.sh: test/ci-runner-choice.test.ts
 deploy/claude-container/Containerfile: test/claude-container.test.ts

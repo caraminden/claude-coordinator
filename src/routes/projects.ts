@@ -59,7 +59,7 @@ import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { addArchitectureCheck, addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
-import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, isRecord, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
@@ -284,8 +284,8 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
     throw new HttpError(400, thrown(err).message!);
   }
   // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
-  const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
-  if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
+  const props = body.properties == null ? {} : body.properties;
+  if (!isRecord(props)) throw new HttpError(400, 'properties must be an object of key: value');
   // Spelled as the registry matches keys (src/properties.ts `loose`): effort_name is effortName.
   const loose = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   const given = (key: string) => Object.keys(props).some((k) => loose(k) === loose(key));
@@ -1654,8 +1654,9 @@ export const projectRoutes: Route[] = [
       if (!row || row.project_id !== project.id) throw new HttpError(404, 'No such idea in this scheme');
       const change: Parameters<typeof app.store.ideas.edit>[2] = {};
       if (body.status !== undefined) {
-        if (body.status !== null && !(IDEA_STATUSES as readonly string[]).includes(body.status)) throw new HttpError(400, `status is one of ${IDEA_STATUSES.join(', ')}, or null`);
-        change.status = body.status;
+        const status = IDEA_STATUSES.find((s) => s === body.status);
+        if (body.status !== null && !status) throw new HttpError(400, `status is one of ${IDEA_STATUSES.join(', ')}, or null`);
+        change.status = status ?? null;
       }
       if (body.ticket !== undefined) {
         if (body.ticket === null || body.ticket === 'auto') change.ticket = body.ticket;

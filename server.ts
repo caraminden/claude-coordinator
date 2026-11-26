@@ -2599,7 +2599,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
       // test/armed-handoff.test.ts: a finished run a minion dispatched, as CI health hands it on.
       if (SETTLED_ROUTE && req.url?.startsWith('/api/test/dispatched-run')) {
         const b = await readJson(req);
-        dispatchedRun(Number(b.ticket), String(b.text), !!b.fyi, b.run);
+        // GitHub's run as the test hands it: only an object is taken, as GitHub's own answers are.
+        dispatchedRun(Number(b.ticket), String(b.text), !!b.fyi, b.run && typeof b.run === 'object' ? (b.run as Run) : undefined);
         return json(res, 200, {});
       }
       // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.

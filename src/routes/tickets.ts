@@ -44,7 +44,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, overLimit, type BatchRow, 
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, isRecord, json, type JsonBody, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { deciding, postPlan } from '../plan-cards.ts';
@@ -218,8 +218,9 @@ interface RawQuestion {
 }
 
 /** A secret card's ask (#838): the name it saves under, whose it is (the answerer's own unless "scheme"), and why. */
-function secretAsk(raw: Record<string, unknown> | null | undefined): SecretAsk {
-  if (!raw || typeof raw !== 'object') throw new HttpError(400, 'secret must be an object with a name');
+function secretAsk(v: unknown): SecretAsk {
+  if (!v || typeof v !== 'object') throw new HttpError(400, 'secret must be an object with a name');
+  const raw: { scope?: unknown; name?: unknown; why?: unknown } = v;
   const scope = oneOf(raw.scope ?? 'person', ['person', 'scheme'], 'secret.scope') as SecretScope;
   return { name: secretName(raw.name), scope, ...(raw.why ? { why: str(raw.why, 'secret.why', 300) } : {}) };
 }
@@ -709,7 +710,7 @@ export const ticketRoutes: Route[] = [
       const { store } = app;
       // `left`: they've left it (navigated away, hid the tab). That records nothing new: a finished minion
       // they had open at its latest update closes (#811).
-      const body = await readJson(req).catch(() => ({}));
+      const body = await readJson(req).catch((): JsonBody => ({}));
       if (body?.left === true) return json(res, 200, { seen_at: store.seenAt(session.name, id), closed: app.runner.closeIfSeen(id, session.name) });
       clearMentions(store, session.name, id);
       return json(res, 200, { seen_at: await store.markSeen(session.name, id) });
@@ -913,7 +914,8 @@ export const ticketRoutes: Route[] = [
       const { runner } = app;
       // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
       const body = await readJson(req);
-      const found = typeof body.path === 'string' && (await resolveTicketFile(app, ticket, body.path));
+      if (typeof body.path !== 'string') throw new HttpError(404, 'That file is no longer there');
+      const found = await resolveTicketFile(app, ticket, body.path);
       if (!found) throw new HttpError(404, 'That file is no longer there');
       const quote = typeof body.quote === 'string' ? body.quote.slice(0, 2000) : '';
       // Named as the ticket would write it: relative to its working directory, else in full.
@@ -1656,7 +1658,7 @@ export const ticketRoutes: Route[] = [
       if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree makes media');
       const tool = oneOf(body.tool, MEDIA_TOOLS, 'tool') as MediaTool | null;
       if (!tool) throw new HttpError(400, `tool must be one of: ${MEDIA_TOOLS.join(', ')}`);
-      const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+      const args = isRecord(body.args) ? body.args : {};
       // provider "azure" (#842): any minion of the scheme spends the scheme's own key, with no per-person cap (the scheme's outside-spend cap only warns): raw SSML to Azure Speech on the scheme's own key, booked to the scheme as outside spend (#839), not OpenRouter.
       if (tool === 'generate_speech' && args.provider === 'azure') {
         return json(

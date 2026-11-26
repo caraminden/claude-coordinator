@@ -13,7 +13,7 @@ import { parseMerge, prInfo } from '../merge-card.ts';
 import { tripwireConfig } from '../turn-launch.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import { HttpError, json, ownWrites, readJson, str, ticketView, type Route } from '../http.ts';
+import { HttpError, isRecord, json, ownWrites, readJson, str, ticketView, type Route } from '../http.ts';
 import { homeApp, makeKey } from './app.ts';
 import { deciding, postPlan } from '../plan-cards.ts';
 import { saveInstructions, type HeldEdit } from '../instructions-save.ts';
@@ -343,7 +343,7 @@ export const proposalRoutes: Route[] = [
       if (!runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
       const body = await readJson(req);
       const tool = str(body.tool_name, 'Tool name', 300);
-      const input = body.input && typeof body.input === 'object' ? body.input : {};
+      const input = isRecord(body.input) ? body.input : {};
       const use = typeof body.tool_use_id === 'string' ? body.tool_use_id.slice(0, 200) : undefined;
       const project = store.getProject(ticket.project_id)!;
       const rules = lines(project.approval_rules).length > 0;

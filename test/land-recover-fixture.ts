@@ -16,6 +16,8 @@ export { git };
 // pipeline, with a boot check and a service that fail on request, and a queued restart that really runs
 // `deploy.sh restart`. A checkout holding BOOT_BAD fails the boot check; one holding RUN_BAD never comes up, and with
 // RUN_BAD_GATE set it goes down only once that file is there, so a test decides when its roll back can start.
+// With SETTLE_GATE set, a restart's settle (its sleep of DEPLOY_SETTLE s) ends only once that file is there, so a test
+// holds a restart unjudged for as long as it needs and no longer (#2148; give DEPLOY_SETTLE a value nothing else sleeps).
 export const tools = join(import.meta.dirname, '..', 'tools');
 const root = mkdtempSync(join(tmpdir(), 'land-recover-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -129,6 +131,18 @@ for a; do case $a in
   show) echo 100; exit 0 ;;
 esac; done
 exit 0
+`,
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    join(bin, 'sleep'),
+    `#!/bin/sh
+if [ -n "$SETTLE_GATE" ] && [ "$1" = "$DEPLOY_SETTLE" ]; then
+  i=0
+  while [ ! -e "$SETTLE_GATE" ] && [ -d "$PIPE" ] && [ $i -lt 2400 ]; do PATH=/usr/bin:/bin sleep 0.05; i=$((i + 1)); done
+  exit 0
+fi
+PATH=/usr/bin:/bin exec sleep "$@"
 `,
     { mode: 0o755 },
   );

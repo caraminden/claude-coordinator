@@ -304,6 +304,10 @@
   }
  },
  "land-overlap.test.ts": {
+  "sleep": {
+   "n": 0,
+   "ok": 1
+  },
   "elapsed": {
    "n": 1,
    "ok": 0

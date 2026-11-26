@@ -1,0 +1,15 @@
+# Paste into the workspace's root Cargo.toml: `unsafe` is denied unless a crate opts in, and every use says why it is
+# sound. In each member crate's Cargo.toml add:
+#
+#   [lints]
+#   workspace = true
+#
+# A crate that needs FFI (Win32, Direct3D, a C library) opts in with one line at the top of its lib.rs or main.rs:
+#   #![allow(unsafe_code)]
+# and keeps a `// SAFETY:` comment on every `unsafe` block and `unsafe impl`.
+
+[workspace.lints.rust]
+unsafe_code = "deny" # not "forbid": a crate could not opt in
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny" # a clippy lint: only `cargo clippy` enforces it

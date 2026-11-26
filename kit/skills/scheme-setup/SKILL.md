@@ -101,6 +101,17 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    the check commands (Cara, 2026-11-24, "Formatter everywhere"; Citadel's is `test/format.test.ts`). A Python repo uses ruff
    (`ruff format`, no lint rules beyond the default) the same way. If the repo's style differs from the template's (no semicolons,
    double quotes), change `quoteStyle` and `semicolons` first so the reformat stays small.
+   A Rust repo also gets `unsafe` denied by default, on a setup or a tune-up, whether or not the plan names it (Josh,
+   2026-11-26): paste `templates/rust-lints.toml` into the root `Cargo.toml` and give every member crate `[lints]` with
+   `workspace = true`. The opt-in rule goes in the repo's Rust rule or Working rules: *A crate that needs FFI opts in
+   with `#![allow(unsafe_code)]` at its crate root; every `unsafe` block and `unsafe impl` carries a `// SAFETY:`
+   comment.* Add `cargo clippy --workspace --all-targets` to the check commands, run for each target that has its own
+   code (Windows-only code is linted only on Windows). In an existing repo: a crate that already uses `unsafe` gets the
+   opt-in line and a comment on each block that says why it is really sound (one you can't justify goes in your done
+   note). A crate with its own `[lints.*]` tables keeps them and takes the template's two lint lines there instead of
+   `workspace = true` (Cargo refuses both, and moving its lints to the workspace would put them on every crate); a
+   `forbid` it already has stays. One crate with no workspace takes the same tables as `[lints.rust]` and
+   `[lints.clippy]`.
 2. **Working rules**: only this repo's own (its stack's traps, a file never to edit by hand).
    The Citadel-wide layer and the scheme instructions already reach every session, so nothing
    of theirs is repeated. A native-app scheme (the plan names a Real hardware part or the

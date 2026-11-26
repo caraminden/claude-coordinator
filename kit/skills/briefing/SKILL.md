@@ -19,6 +19,12 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    `git ls-files`, a report's per-file counts), never from name patterns: every file goes to exactly
    one brief, and the leftovers are a round of their own, named. When several of them add to one
    shared file at once, each brief names its own file or section in it.
+   **One slice first on a new gate.** When the gate or tool every slice depends on shipped in the last
+   day, start one slice alone, and start the rest only after it ships (in a build: merges into
+   `build/<n>`) and the gate faults it met are fixed; chained by `start_after` on that slice, they
+   would start before the fix. Its brief says to send you those faults as it hands off
+   (`message_coordinator`, need: start), which brings you back. With twelve slices at once behind a
+   day-old counter, two or three of them found each of its faults separately (Peek, 2026-11-26).
 2. **Their words**: the person's own words that asked for it, in quotation marks, with who and the
    date: `Josh, 2026-11-19: "Go on A1"`. Quote the ask itself, not your summary of it, and each
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.

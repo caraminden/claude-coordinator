@@ -24,7 +24,8 @@ test("the next landing rebases and tests while the restart ahead settles, and th
   p.commit(p.wts[1], 'b.txt', 'second\n');
   const mark = join(p.dir, 'b-tests');
   const gate = join(p.dir, 'b-go');
-  const { a, b } = await pair(p, { DEPLOY_SETTLE: '4' }, { TEST_MARK: mark, TEST_GATE: gate });
+  const settle = join(p.dir, 'settled');
+  const { a, b } = await pair(p, { DEPLOY_SETTLE: '4', SETTLE_GATE: settle }, { TEST_MARK: mark, TEST_GATE: gate });
   await until('the first to move main', () => git(p.source, 'rev-parse', 'main') === tipA);
   const moved = Date.now();
   await until("the second's test run to start", () => lines(mark) === 1, 10_000);
@@ -32,6 +33,7 @@ test("the next landing rebases and tests while the restart ahead settles, and th
   assert.equal(p.restartsDone(), 0, "the second's gate runs while the first's restart is still being judged");
   assert.equal(git(p.wts[1], 'merge-base', 'HEAD', tipA), tipA, 'and it runs on the commit the first landed');
   // The second's tests are held: the restart must go ahead and end without them.
+  writeFileSync(settle, '');
   assert.deepEqual(await p.restarts(1), ['0']);
   const first = await a.done;
   assert.equal(first.status, 0, first.stderr);
@@ -53,13 +55,19 @@ test('a landing whose gate ends while the restart ahead settles moves neither ma
   // The second's gate is held until the restart has begun: a real gate takes a minute, the stand-in's well under the
   // 2 s the restart looks for busy turns first.
   const gate = join(p.dir, 'b-go');
-  const { a, b } = await pair(p, { DEPLOY_SETTLE: '8' }, { TEST_GATE: gate });
+  const settle = join(p.dir, 'settled');
+  const { a, b } = await pair(p, { DEPLOY_SETTLE: '8', SETTLE_GATE: settle }, { TEST_GATE: gate });
   await until('the restart to begin', () => existsSync(join(p.state, 'restart')));
   writeFileSync(gate, '');
   await until('the second to wait for the restart', () => /waiting for the restart ahead/.test(b.stderr()));
   assert.equal(p.restartsDone(), 0);
   assert.equal(git(p.source, 'rev-parse', 'main'), tipA);
   assert.match(spawnSync('sh', ['-c', `cat ${JSON.stringify(join(p.state, 'queue'))}/[0-9]*`], { encoding: 'utf8' }).stdout, /waiting for the restart ahead: restarting citadel-test on .* since/, 'its place in line says so, with what the restart is doing');
+  // timing-ok: the time a landing that wrongly went on would have to move main while the restart is still held
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(git(p.source, 'rev-parse', 'main'), tipA, 'still not moved, with the restart held');
+  assert.equal(git(p.live, 'rev-parse', 'HEAD'), tipA);
+  writeFileSync(settle, '');
   await until('main or the checkout to move', () => git(p.source, 'rev-parse', 'main') !== tipA || git(p.live, 'rev-parse', 'HEAD') !== tipA);
   assert.equal(p.restartsDone(), 1, 'only once the restart ahead had ended');
   assert.equal((await a.done).status, 0);
@@ -160,7 +168,8 @@ test('a landing killed while it overlaps the restart ahead leaves main, the chec
       p.commit(p.wts[1], 'b.txt', 'second\n');
       const mark = join(p.dir, 'b-tests');
       const gate = join(p.dir, 'b-go');
-      const { a, b } = await pair(p, { DEPLOY_SETTLE: '6' }, { TEST_MARK: mark, TEST_GATE: gate });
+      const settle = join(p.dir, 'settled');
+      const { a, b } = await pair(p, { DEPLOY_SETTLE: '6', SETTLE_GATE: settle }, { TEST_MARK: mark, TEST_GATE: gate });
       await until("the second's test run to start", () => lines(mark) === 1);
       if (where === 'waiting for the restart') {
         await until('the restart to begin', () => existsSync(join(p.state, 'restart')));
@@ -173,6 +182,8 @@ test('a landing killed while it overlaps the restart ahead leaves main, the chec
       // Its test run sits under timeout's own process group, which the kill doesn't reach: let it end, or it waits out its
       // 120 s limit after this file is done (a leak the faster fixture of #1615 left in sight).
       writeFileSync(gate, '');
+      assert.equal(p.restartsDone(), 0, `${what}: the restart ahead was still unjudged when the landing died`);
+      writeFileSync(settle, '');
       assert.equal((await a.done).status, 0, what);
       assert.deepEqual(await p.restarts(1), ['0'], what);
       assert.equal(git(p.source, 'rev-parse', 'main'), tipA, what);

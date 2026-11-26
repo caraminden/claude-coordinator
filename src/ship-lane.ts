@@ -9,6 +9,11 @@ import type { Claims } from './claims.ts';
 import { gitOut } from './git.ts';
 
 export const SHIP_LANE = 'pipeline-lane';
+/** Whether it may ship a pipeline change now: it holds the lane, or was let in beside its holder. */
+export const holdsLane = (claims: Pick<Claims, 'get'>, t: Pick<Ticket, 'id' | 'project_id'>) => {
+  const lane = claims.get(t.project_id, SHIP_LANE);
+  return lane?.holder === t.id || lane?.beside === t.id;
+};
 /** How long a holder has to hand its change off before one that is ready goes first. */
 export const SKIP_AFTER_MS = 10 * 60_000;
 

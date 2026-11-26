@@ -299,6 +299,20 @@ test('a pipeline change ships from the click only for the lane holder; anyone el
   await until('it ships', () => holder.state().status === 'closed');
 });
 
+test("an armed Ship It ships with no turn once the lane passes to it: the press's own answer doesn't rule it out (#2046)", async () => {
+  store.claims.setQueue(projectId, 'pipeline-lane', [], 'Cara');
+  store.claims.release(projectId, 'pipeline-lane');
+  const someone = store.createTicket({ project_id: projectId, title: 'Holder', permission_mode: 'default', created_by: 'Cara' });
+  store.claims.take(projectId, 'pipeline-lane', someone.id, 'Cara');
+  const m = await minion({ file: 'src/pipe/deep/x.ts' });
+  assert.equal((await m.press(await m.card())).status, 202);
+  assert.equal(m.state().note, ARMED_NOTE);
+  await srv.call(`/api/tickets/${someone.id}/status`, { status: 'closed' });
+  await until('it ships, or is woken', () => m.state().status === 'closed' || m.texts().some((x) => x.includes("didn't ship by itself")));
+  assert.ok(m.texts().includes('The pipeline lane is yours, so Citadel started your armed hand-off with no turn.'), String(m.texts().at(-1)));
+  await until('it ships', () => m.state().status === 'closed');
+});
+
 test('a hand_off the ship would refuse is refused with the card, and so is one it has no place on', async () => {
   const m = await minion();
   const why = async (handOff: unknown, extra: object = {}) => {

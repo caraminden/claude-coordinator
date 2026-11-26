@@ -140,6 +140,16 @@ test('a person who wrote after it was armed stops it: the lane wakes the minion 
   await wokeWith(m, /a person wrote to you after you armed it/);
 });
 
+test("anyone's message after it was armed stops it, a Taskmaster's too: the lane wakes the minion with why", async () => {
+  const lane = laneHeld();
+  const m = await minion();
+  await armed(m);
+  // As message_minion or a Taskmaster's message lands; the turn it would start isn't what this is about.
+  store.addEvent(m.id, 'user_message', { author: 'Taskmaster', text: 'hold that', from: lane.id });
+  await lane.passOn();
+  await wokeWith(m, /Taskmaster wrote to you after you armed it/);
+});
+
 test('a sealed minion is woken, not shipped, when the lane comes', async () => {
   const lane = laneHeld();
   const m = await minion();
@@ -169,6 +179,18 @@ test('what needs no lane ships at once: a change outside the pipeline, and an ou
   assert.equal(o.data.armed, undefined, JSON.stringify(o.data));
   assert.ok(!store.claims.waiting(projectId, LANE).includes(outage.id));
   await until('both ship', () => plain.state().status === 'closed' && outage.state().status === 'closed');
+});
+
+test("another claim given to a minion with an armed hand-off doesn't fire it or wake it", async () => {
+  laneHeld();
+  const m = await minion();
+  await armed(m);
+  const turns = fake.turnsRun();
+  const r = await srv.call(`/api/projects/${projectId}/claims`, { name: 'other-claim', minion: m.number });
+  assert.ok(r.status < 300, JSON.stringify(r.data));
+  assert.ok(store.getSetting(armedKey(m.id)), 'still armed');
+  assert.ok(!m.texts().some((x) => x.startsWith('You hold the other-claim claim now')), 'no wake');
+  assert.equal(fake.turnsRun(), turns);
 });
 
 test('a Taskmaster giving the lane straight to an armed minion ships it', async () => {

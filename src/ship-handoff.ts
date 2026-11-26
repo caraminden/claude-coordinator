@@ -17,7 +17,7 @@ import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from './live-probe.
 import { pacificStamp } from './pacific.ts';
 import { reviewRefusal } from './review-gate.ts';
 import type { ChangeBy } from './db/wait-records.ts';
-import { pipelineChanges, sharedPipelineFiles, SHIP_LANE } from './ship-lane.ts';
+import { holdsLane, pipelineChanges, sharedPipelineFiles, SHIP_LANE } from './ship-lane.ts';
 import { defaultBranch } from './release-targets.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
@@ -302,8 +302,7 @@ export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, que
 
 /** Whether a change touches the ship pipeline (tools/pipeline-files.txt, where a repo has one) and so ships only from the `pipeline-lane` claim's holder; null when it may ship. */
 export async function laneRefusal(app: App, ticket: Ticket): Promise<string | null> {
-  const lane = app.store.claims.get(ticket.project_id, SHIP_LANE);
-  if (lane?.holder === ticket.id || lane?.beside === ticket.id) return null;
+  if (holdsLane(app.store.claims, ticket)) return null;
   const changed = await pipelineChanges(ticket.cwd!);
   if (changed === null) return "it couldn't tell whether the change needs the pipeline lane";
   return changed.length ? `${changed[0]} is a pipeline file and you don't hold the pipeline lane` : null;
@@ -367,6 +366,7 @@ export async function shipPrepared(app: App, ticket: Ticket, prepared: Prepared,
     const moved = async () => (await gitOut(['rev-parse', 'HEAD'], ticket.cwd!)) !== prepared.head && `your branch moved since ${o.what}`;
     const early = await moved();
     if (early) return early;
+    const held = holdsLane(app.store.claims, ticket);
     const lane = await laneRefusal(app, ticket);
     if (lane) return (await pipelineChanges(ticket.cwd!))?.length ? { lane } : lane;
     const ready = await checkHandoff(app, { ...ticket, person_id: o.person ?? ticket.person_id }, { ...prepared.args, ...(o.go && { go: o.go }) }, clear);
@@ -375,6 +375,7 @@ export async function shipPrepared(app: App, ticket: Ticket, prepared: Prepared,
     const late = await moved();
     if (late) return late;
     clear();
+    if (held && !holdsLane(app.store.claims, ticket)) return 'the pipeline lane moved on while the checks ran';
     if (!startHandoff(app, ticket, ready, o.by)) return 'a ship of yours already ran';
     // A ship that fails wakes it on that login, as the turn it stands in for would have run on it.
     if (o.person != null && o.person !== ticket.person_id) app.store.updateTicket(ticket.id, { person_id: o.person });
@@ -408,12 +409,15 @@ export async function shipOnClick(app: App, ticket: Ticket, card: { event: numbe
   const by = { kind: 'person', name: answer.by } as const;
   const ship = () => shipPrepared(app, ticket, prepared, { since: card.event, what: 'the card', person: answer.uid, by, go, still: unsettled });
   let why = await ship();
-  if (why && typeof why !== 'string' && takeFreeLane(app, ticket)) why = await ship();
+  if (why && typeof why !== 'string' && (holdsLane(app.store.claims, ticket) || takeFreeLane(app, ticket))) why = await ship();
   if (typeof why === 'string') return why;
   if (why) {
     // Not the lane's holder (#2046): the click's go waits in the lane's queue, and ships when the lane passes to it.
-    const where = armForLane(app, ticket, { ...prepared.args, go }, prepared.head, answer.uid, `${answer.by}'s Ship It`, by);
-    answer.record(`${answer.by} answered your ship card: Ship It. ${why.lane}, so ${APP_NAME} armed your hand-off as you prepared it, with their go. ${where} If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);
+    // The answer first: one written after the armed line would rule its own ship out.
+    answer.record(
+      `${answer.by} answered your ship card: Ship It. ${why.lane}, so ${APP_NAME} armed your hand-off as you prepared it, with their go: it waits in the lane's queue and ships when the lane passes to you, with no turn of yours. End your turn and don't hand off again; if something rules the ship out then, you are woken with why. If it has to go again and what they approved is unchanged, hand it off with go "${go}".`,
+    );
+    armForLane(app, ticket, { ...prepared.args, go }, prepared.head, answer.uid, `${answer.by}'s Ship It`, by);
     return null;
   }
   answer.record(`${answer.by} answered your ship card: Ship It. ${APP_NAME} handed your ship off as you prepared it, with no turn of yours. If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);

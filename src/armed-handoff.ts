@@ -10,7 +10,7 @@ import type { ChangeBy } from './db/wait-records.ts';
 import { gitOut } from './git.ts';
 import { HttpError, type App } from './http.ts';
 import { laneRefusal, shipPrepared } from './ship-handoff.ts';
-import { pipelineChanges, SHIP_LANE } from './ship-lane.ts';
+import { holdsLane, pipelineChanges, SHIP_LANE } from './ship-lane.ts';
 import { thrown } from './thrown.ts';
 
 const LANE = SHIP_LANE;
@@ -70,16 +70,18 @@ export function armForLane(app: App, ticket: Ticket, args: Record<string, unknow
 /**
  * hand_off_land's lane (#2046): a plain ship to main that changes a pipeline file, from a minion that doesn't hold the
  * lane, is armed instead of started (a free lane is taken). Null: ship now. Else what to tell the minion. An outage fix
- * and a rolled-back deploy's fix jump the line, as the lane's rule says; a merge into a build isn't a ship to main.
+ * and a rolled-back deploy's fix jump the line, as the lane's rule says; a merge into a build isn't a ship to main (a
+ * build's own ship to main is).
  */
 export async function laneHandoff(app: App, ticket: Ticket, body: Record<string, unknown>): Promise<string | null> {
-  if (body.into !== undefined || body.build === true || body.outage === true || body.fix === true) return null;
+  if (body.into !== undefined || body.outage === true || body.fix === true) return null;
   const why = await laneRefusal(app, ticket);
   // None, or git can't tell (no main to diff against): it ships, as such a hand-off always did.
   if (!why || !(await pipelineChanges(ticket.cwd!))?.length) return null;
-  if (takeFreeLane(app, ticket)) return null;
   const head = await gitOut(['rev-parse', 'HEAD'], ticket.cwd!);
   if (!head) throw new HttpError(409, "Not handed off: git couldn't read your worktree's commit");
+  // Read again after the git calls: the lane may have passed to it meanwhile, with nothing armed to fire.
+  if (holdsLane(app.store.claims, ticket) || takeFreeLane(app, ticket)) return null;
   return `Armed, not started: ${why}. ${armForLane(app, ticket, body, head, null, 'You', { kind: 'minion' })}`;
 }
 
@@ -98,7 +100,12 @@ export function fireArmed(app: App, ticketId: number, claim: string, fallback: (
     if (app.store.getTicket(ticketId)?.note === ARMED_NOTE) app.store.updateTicket(ticketId, { state: null, note: null }, { kind: 'server' });
     fallback(why);
   };
-  shipPrepared(app, ticket, armed, { since: armed.event, what: 'you armed it', person: armed.person, by: { kind: 'server' } }).then(
+  // Anyone at all, not only a person as for a Ship It press: a Taskmaster's "hold that" or a wake (a turn of its) counts.
+  const wrote = () => {
+    const e = app.store.eventsOfKinds(ticketId, ['user_message'], armed.event)[0];
+    return e ? `${JSON.parse(e.data).author} wrote to you after you armed it` : null;
+  };
+  shipPrepared(app, ticket, armed, { since: armed.event, what: 'you armed it', person: armed.person, by: { kind: 'server' }, still: wrote }).then(
     (why) => {
       if (why === null) app.runner.emit(ticketId, 'note', { text: started });
       else failed(typeof why === 'string' ? why : why.lane);

@@ -3,7 +3,7 @@
 // order per target, the crash rule (waiting → sending → sent, resend at boot), retries and the 3-day rule for a
 // dismissed target. Step 0 moves `wake_at` here (src/wake.ts TimedWakes); later steps add the other kinds.
 import type { Store, Ticket } from './db.ts';
-import type { Delivery, NewDelivery } from './db/deliveries.ts';
+import type { Delivery, DeliveryKind, NewDelivery } from './db/deliveries.ts';
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -40,24 +40,27 @@ export type DeliverCtx = {
   repeat(row: Delivery): boolean;
 };
 
-export type Kind = {
-  kind: string;
+export type Kind<K extends DeliveryKind = DeliveryKind> = {
+  kind: K;
   /** A condition row's test against an event (and on boot and add, against current state). `at` rows need none. */
-  ready?(row: Delivery, event: OutboxEvent): boolean;
+  ready?(row: Delivery<K>, event: OutboxEvent): boolean;
   /** Every row of this kind for one target that came due in one pass, in id order: one outcome per row. Runs on the
    * target's lane; a kind whose send awaits (a chain's catch-up) returns a promise, and the lane waits for it. */
-  deliver(rows: Delivery[], ctx: DeliverCtx): Outcome[] | Promise<Outcome[]>;
+  deliver(rows: Delivery<K>[], ctx: DeliverCtx): Outcome[] | Promise<Outcome[]>;
   /** A re-add with the same dedupe_key: the payload to keep. Without it the new payload replaces the old. */
-  merge?(row: Delivery, incoming: NewDelivery): unknown;
+  merge?(row: Delivery<K>, incoming: NewDelivery<K>): Delivery<K>['payload'] | undefined;
   /** When a row with this payload is due, on add and on every merge (alert batches: their wait moves with each alert). */
-  due?(payload: unknown): number | null;
+  due?(payload: Delivery<K>['payload'] | undefined): number | null;
   /** `deliver`: still sent to a dismissed minion (relays, as held mail). Default `hold`: the 3-day rule. */
   onDismiss?: 'hold' | 'deliver';
   /** The dual read (ADR 0021, "Steps"): move anything found in the kind's old settings key into the table. Runs every pass. */
   migrate?(): void;
   /** One line on what the row would have sent, for the setter's Taskmaster when it fails. */
-  describe?(row: Delivery): string;
+  describe?(row: Delivery<K>): string | undefined;
 };
+
+/** Any kind's handlers, as the outbox holds them: each row goes only to its own kind's. (Kind itself won't widen: tsc reads Kind<K> as invariant in K, though each member widens.) */
+type AnyKind = { [P in keyof Kind]: Kind[P] };
 
 export type OutboxRunner = {
   send(ticketId: number, author: string, text: string, images?: never[], extra?: { light?: boolean }): { event: { id: number } };
@@ -85,7 +88,7 @@ export function span(ms: number): string {
 }
 
 export class Outbox {
-  private kinds = new Map<string, Kind>();
+  private kinds = new Map<string, AnyKind>();
   /** Rows a killed server left `sending`, found again at each boot (the state is saved, so a second kill finds them too). */
   private leftover = new Set<number>();
   /** Events whose turn started while a deliverTarget was sending, one set per run: on an idle minion runner.send starts the turn before it returns, so before the row has its event_id. */
@@ -115,12 +118,12 @@ export class Outbox {
     return this.now();
   }
 
-  register(kind: Kind) {
+  register<K extends DeliveryKind>(kind: Kind<K>) {
     this.kinds.set(kind.kind, kind);
   }
 
   /** Save a row (a re-add with the same dedupe_key merges into the waiting one) and reconcile it at once. */
-  add(d: NewDelivery): Delivery {
+  add<K extends DeliveryKind>(d: NewDelivery<K> & { kind: K }): Delivery<K> {
     const kind = this.kinds.get(d.kind);
     if (!kind) throw new Error(`No outbox kind ${d.kind}`);
     const now = this.now();
@@ -132,7 +135,7 @@ export class Outbox {
       row = this.store.getDelivery(old.id)!;
     } else row = this.store.addDelivery(kind.due ? { ...d, due: kind.due(d.payload) } : d, now);
     void this.poke({ type: 'added', ticket: d.to_kind === 'minion' ? d.to_id : undefined });
-    return row;
+    return row as Delivery<K>; // a row of d's kind: added, or the waiting one it merged into
   }
 
   /** A condition row came true (its kind's own async check found it): merge `payload` into the row, make it due now, and run a pass. False if it is no longer waiting. */
@@ -374,7 +377,7 @@ export class Outbox {
   private sendTo(row: Delivery, text: string, repeat: boolean): Outcome {
     const tail = repeat ? `(The server restarted while sending this, so it may repeat delivery #${row.id}.)` : `(delivery #${row.id})`;
     try {
-      return { state: 'handed', event: this.runner.send(row.to_id, this.opts.author, `${text}\n\n${tail}`, [], row.payload?.light ? { light: true } : {}).event.id };
+      return { state: 'handed', event: this.runner.send(row.to_id, this.opts.author, `${text}\n\n${tail}`, [], 'light' in row.payload && row.payload.light ? { light: true } : {}).event.id };
     } catch (err) {
       return { state: 'retry', reason: String((err as Error)?.message ?? err) }; // this row only: the others in its batch were sent
     }

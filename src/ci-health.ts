@@ -55,6 +55,7 @@ import { APP_NAME } from './appname.ts';
 import { runnerLabel, schemeLabels } from './ci-runner.ts';
 import type { Outbox } from './outbox.ts';
 import type { Project, Store, Ticket, User } from './db.ts';
+import { deliveriesOf } from './db/deliveries.ts';
 import type { GreenRun } from './last-green.ts';
 import { repoSlug } from './prlinks.ts';
 import type { GithubEnv } from './scheme-repo.ts';
@@ -1421,7 +1422,7 @@ ${text}`,
     const up = runners && onlineRunners(runners, p.name);
     if (up && !up.length) return;
     const names = up?.map((r) => r.name).join(', ');
-    for (const r of this.store.listDeliveries({ kind: 'runners_back', states: ['waiting'] })) {
+    for (const r of deliveriesOf(this.store, 'runners_back', { states: ['waiting'] })) {
       if (r.project_id !== p.id || r.met_at != null) continue;
       const reason = String(r.payload.reason).replace(/[.\s]+$/, '');
       const text = !up

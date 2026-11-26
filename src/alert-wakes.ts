@@ -7,7 +7,7 @@
 // scheme whose repo the live checkout is.
 // A scheme's batch is an `alert` row in the outbox (ADR 0021 step 6) that new alerts merge into, sent by the outbox's timer.
 import type { Store } from './db.ts';
-import type { Delivery } from './db/deliveries.ts';
+import { deliveriesOf, type Delivery } from './db/deliveries.ts';
 import type { Outbox } from './outbox.ts';
 import { ZONE } from './pacific.ts';
 
@@ -46,7 +46,7 @@ interface Queued {
   parts: AlertPart[] | null;
 }
 /** An `alert` row's payload. `note`: the line the waits readout shows. */
-interface Batch {
+export interface AlertBatch {
   first: number;
   last: number;
   alerts: Record<string, Queued>;
@@ -70,14 +70,14 @@ export function quietUntil(t: number): number | null {
 
 const names = (to: string[]) => (to.length > 1 ? `${to.slice(0, -1).join(', ')} and ${to.at(-1)}` : to[0]);
 /** The earlier of 60 s after the last alert and 5 min after the first, pushed past 2-9 AM Pacific. */
-const settled = (b: Batch) => Math.min(b.last + BATCH_MS, b.first + MAX_WAIT_MS);
-const dueOf = (b: Batch) => quietUntil(settled(b)) ?? settled(b);
-const noted = (b: Batch): Batch => {
+const settled = (b: AlertBatch) => Math.min(b.last + BATCH_MS, b.first + MAX_WAIT_MS);
+const dueOf = (b: AlertBatch) => quietUntil(settled(b)) ?? settled(b);
+const noted = (b: AlertBatch): AlertBatch => {
   const titles = Object.values(b.alerts).map((q) => q.title);
   return { ...b, note: `Explain ${titles.length === 1 ? 'a Mandate alert' : `${titles.length} Mandate alerts`}: ${titles.join('; ')}` };
 };
 /** Two batches for one scheme as one: the newer copy of an alert wins. */
-const fold = (a: Batch, b: Batch): Batch => noted({ first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), alerts: { ...a.alerts, ...b.alerts }, ...(a.held || b.held ? { held: true } : {}) });
+const fold = (a: AlertBatch, b: AlertBatch): AlertBatch => noted({ first: Math.min(a.first, b.first), last: Math.max(a.last, b.last), alerts: { ...a.alerts, ...b.alerts }, ...(a.held || b.held ? { held: true } : {}) });
 
 export class AlertWakes {
   private store: Store;
@@ -88,12 +88,12 @@ export class AlertWakes {
     outbox.register({
       kind: KIND,
       migrate: () => this.migrate(),
-      merge: (row, incoming) => fold(row.payload, incoming.payload as Batch),
+      merge: (row, incoming) => fold(row.payload, incoming.payload as AlertBatch),
       due: dueOf,
       describe: (r) => String(r.payload.note ?? 'alert wake'),
       deliver: (rows, ctx) =>
         rows.map((r) => {
-          const b = r.payload as Batch;
+          const b = r.payload as AlertBatch;
           // Due before 2 AM but sent inside the hold (a late boot, a retry, a resend after a kill): it waits for 9 too.
           const quiet = quietUntil(ctx.now);
           if (quiet !== null) {
@@ -114,16 +114,16 @@ export class AlertWakes {
     return this.store.getSetting<Told>(TOLD) ?? this.store.getSetting<{ told?: Told }>(OLD_KEY)?.told ?? {};
   }
 
-  private waiting(scheme: number): Delivery | undefined {
-    return this.store.listDeliveries({ kind: KIND, dedupe: String(scheme), states: ['waiting'] })[0];
+  private waiting(scheme: number): Delivery<typeof KIND> | undefined {
+    return deliveriesOf(this.store, KIND, { dedupe: String(scheme), states: ['waiting'] })[0];
   }
 
-  private add(scheme: number, b: Batch) {
+  private add(scheme: number, b: AlertBatch) {
     this.outbox.add({ project_id: scheme, kind: KIND, to_kind: 'taskmaster', to_id: scheme, when_kind: 'at', set_by: 'citadel', dedupe_key: String(scheme), payload: noted(b) });
   }
 
   /** Put a `sending` row back to wait until `until`, or fold it into the scheme's row that started waiting meanwhile. */
-  private hold(r: Delivery, until: number) {
+  private hold(r: Delivery<typeof KIND>, until: number) {
     const now = this.outbox.clock();
     this.store.deliveryTransaction(() => {
       const twin = this.waiting(r.to_id);
@@ -146,7 +146,7 @@ export class AlertWakes {
 
   /** Move the old key's batches into the table and its told into `TOLD`, emptying the key, all in one transaction. */
   private migrate() {
-    const old = this.store.getSetting<{ told?: Told; batches?: Record<string, Batch> }>(OLD_KEY);
+    const old = this.store.getSetting<{ told?: Told; batches?: Record<string, AlertBatch> }>(OLD_KEY);
     if (!old) return;
     this.store.deliveryTransaction(() => {
       this.store.setSetting(TOLD, { ...old.told, ...this.store.getSetting<Told>(TOLD) });
@@ -191,7 +191,7 @@ export class AlertWakes {
   }
 }
 
-function wakeText(b: Batch, held: boolean): string {
+function wakeText(b: AlertBatch, held: boolean): string {
   const alerts = Object.values(b.alerts);
   const lines = alerts.map((q) => {
     const news = q.parts?.length ? `\n  New in it: ${q.parts.map((p) => `${p.title}${p.facts ? ` (${p.facts})` : ''}`).join('; ')}` : '';

@@ -32,7 +32,7 @@ import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
 import { citadelSliceDir, MemoryStorms, stormDetail, stormPeople } from './src/memory-storms.ts';
 import { startContainerRelief, victimText } from './src/container-relief.ts';
 import { readGrowth } from './src/growth-alarm.ts';
-import type { Delivery } from './src/db/deliveries.ts';
+import { deliveriesOf, type Delivery } from './src/db/deliveries.ts';
 import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
@@ -963,7 +963,7 @@ runner.heldBrief = (id) => waiters.heldBrief(id);
 runner.chains = () => waiters.chains();
 runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
-  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? store.listDeliveries({ kind: 'runners_back', to: id, states: ['waiting'] })[0]?.payload.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
+  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? deliveriesOf(store, 'runners_back', { to: id, states: ['waiting'] })[0]?.payload.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
 };
 // The list chip's waits (src/waits-readout.ts): the outbox's rows, plus what the old keys still hold until their steps move.
 // A row added or changed re-sends its minion's view, so the chip never shows a wait that already went (a Taskmaster's waits have no chip).

@@ -260,7 +260,7 @@ test('two ships take a number at once: the second waits for the first to have it
 // that one the retrying ship, back in line meanwhile, keeps its place too.
 for (const [what, line, want] of [
   ['is kept', `[2, 3].map((seq) => ({ seq, got: 0, orders: true }))`, ['0000000003', '0000000002']],
-  ['leaves that ship its place', `() => readQueue(Q, 4)`, ['0000000003', '0000000001', '0000000002']],
+  ['leaves that ship its place', `() => readQueue(@Q, 4)`, ['0000000003', '0000000001', '0000000002']],
 ] as const)
   test(`a drag that lands while a ship goes back into line for its retry ${what}`, { timeout: 120_000 }, async () => {
     const dir = mkdtempSync(join(root, 'retry-')),
@@ -273,7 +273,7 @@ for (const [what, line, want] of [
     // The drag is the server's own writeOrder, started as the script is about to replace .order; the script goes on once
     // that write is done, or is waiting for the script's lock.
     const waits = resolve(import.meta.dirname, '../src/waits.ts');
-    writeFileSync(join(dir, 'drag.mjs'), `import { readQueue, writeOrder } from '${waits}';\nwriteOrder('${q}', ${line.replace('Q', `'${q}'`)}, [3, 2], 'Josh moved #3 to ship next', 3);\n`);
+    writeFileSync(join(dir, 'drag.mjs'), `import { readQueue, writeOrder } from '${waits}';\nwriteOrder('${q}', ${line.replace('@Q', `'${q}'`)}, [3, 2], 'Josh moved #3 to ship next', 3);\n`);
     const bin = command(
       dir,
       'mv',

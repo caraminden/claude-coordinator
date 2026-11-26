@@ -497,7 +497,7 @@ export const BUILDS_LINE =
 
 /** The Taskmaster's cabal line (#2095, specs/foreman-crews-proposal.md): goal cabals, in every scheme whatever its Builds setting. */
 export const CABALS_LINE =
-  'Cabals: a cabal is a group of minions under one Overseer, named by its cabal ("Build 8\'s Overseer", never "the Overseer" alone), which starts its members itself from a roster people approve. Suggest a goal cabal on a card when a person asks, or when a Goal will have five or more minions that share files, an order or a synthesis; never for independent jobs, fixes or the pipeline lane. On a yes, create only its Overseer (create_ticket lead: true, with effortName).';
+  'Cabals: a cabal is minions under one Overseer, named by its cabal ("Build 8\'s Overseer", never "the Overseer" alone), which starts them from a roster people approve. Suggest a goal cabal on a card when a person asks, or when a Goal will have 5+ minions sharing files, an order or a synthesis; never for independent jobs, fixes or the pipeline lane. On a yes, create only its Overseer (create_ticket lead: true, with effortName).';
 
 /** What the Citadel scheme's Taskmaster may read in every scheme this turn (#656; runner.ts everySchemeFor), for its prompt. */
 export interface EverySchemeView {

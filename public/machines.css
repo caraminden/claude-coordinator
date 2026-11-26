@@ -209,6 +209,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .role-card .chip:disabled { cursor: default; }
 .role-card p { margin: 0; }
 .role-caps-edit { display: grid; gap: 0.45rem; }
+.role-order { display: flex; align-items: center; gap: 0.4rem; }
+.role-order select { width: auto; min-height: var(--citadel-control-h); }
 .worker-bare { border: 0; padding: 0; background: none; }
 .machine-empty { display: grid; gap: 0.6rem; justify-items: start; }
 /* As the worker's own switch: the phone's tall-button rule would make it a blob; a wider hit area keeps it easy to tap. */

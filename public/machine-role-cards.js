@@ -131,6 +131,40 @@ function capsLine(m, r, redraw) {
   return [h('div', { class: 'small muted role-caps' }, h('span', {}, words), change ? ' · ' : '', change), editing.has(key) ? capsEditor(m, r, redraw) : null];
 }
 
+/**
+ * Its owner's order among their computers (Build 7 M6; Josh, 2026-11-25: "put work on machine 1 before using machine 2"):
+ * turns fill 1 before 2. Only its owner sets it, and only once they have two; shown read-only to others once set.
+ */
+function orderLine(m, redraw) {
+  const c = current(m);
+  const theirs = m.owner_id === null ? 0 : (view.machines ?? []).filter((x) => x.owner_id === m.owner_id && !x.runners).length;
+  if (c.priority == null && theirs < 2) return null;
+  const words = c.priority === 1 ? "First among its owner's computers" : `Order ${c.priority} among its owner's computers`;
+  if (m.owner_id !== account?.id) return c.priority == null ? null : h('div', { class: 'small muted role-caps' }, words);
+  const most = Math.max(theirs, c.priority ?? 0);
+  const pick = h(
+    'select',
+    {
+      'aria-label': `Order of ${m.name} among your computers`,
+      onchange: () => {
+        const was = current(m).priority ?? null;
+        const to = pick.value === '' ? null : Number(pick.value);
+        const set = (v) => ((current(m).priority = v), redraw());
+        optimistic({
+          key: `machine-order:${m.id}`,
+          apply: () => set(to),
+          send: () => api(`api/machines/${m.id}`, { method: 'PATCH', body: { priority: to } }),
+          undo: () => set(was),
+          label: `set the order of ${m.name}`,
+        });
+      },
+    },
+    h('option', { value: '', selected: c.priority == null }, 'No order'),
+    ...Array.from({ length: most }, (_, i) => h('option', { value: String(i + 1), selected: c.priority === i + 1 }, i === 0 ? '1, first' : String(i + 1))),
+  );
+  return h('label', { class: 'small muted role-caps role-order', title: 'Minion turns go to your first computer until it is full, then the next' }, 'Order ', pick);
+}
+
 /** A whole number in a cap's bounds, or null; blank is "that PC's own". */
 const capValue = (key, text) => {
   const t = text.trim();
@@ -219,6 +253,7 @@ function roleCard(m, r, redraw, extra) {
     why ? h('p', { class: 'muted small' }, why) : null,
     r.on && !why ? schemeChips(m, r, redraw) : null,
     r.on && !why && CAPS[r.role] ? capsLine(m, r, redraw) : null,
+    r.on && !why && r.role === 'turns' ? orderLine(m, redraw) : null,
     // Its set-up part (T5's) steps aside while the caps editor is open: one set of fields at a time.
     r.on && r.role === 'turns' && m.worker && !editing.has(`${m.id}:turns`) ? workerSection(m, redraw, { bare: true }) : null,
     r.on && extra ? extra : null,

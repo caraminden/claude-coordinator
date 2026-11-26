@@ -619,7 +619,7 @@ QUEUE_EXIT='land_timing $? || true; queue_done' # queue_lock's EXIT trap here (d
 #                                                here they passed on main and failed with it on main (#1403); new: it adds
 #                                                the case a burn-in failed (#2019); alone|joined|unrun: an older front's
 #                                                refusal on a guess (#1918, none since #2098); The failure's last lines follow
-#   alone <front> <tests>                        it was pulled on a guess and nothing proved it (#2098): back in line, to
+#   alone <front> <tests> <how>                  it was pulled on a guess and nothing proved it (#2098): back in line, to
 #                                                ship by itself, so its own CI run decides
 # No file: on no train. <held>: this holds the lock now, so a riding is what a front that was killed left, and so is a
 # moving whose front is gone. A moving whose front still runs is its restart being judged, after deploy.sh let go of
@@ -639,6 +639,16 @@ fi
 train_reporter() {
   [ -n "${COORDINATOR_API:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] && [ -n "${COORDINATOR_TICKET:-}" ] || return 0
   (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
+}
+# <how>: what is known of a ship pulled on a guess (train_solo), said after its failing tests.
+guess_how() {
+  local x
+  case $1 in
+    joined) x="run alone on perigee it passed on the train up to the ship before $branch and failed with $branch on it" ;;
+    unrun) x="it couldn't be run on perigee with $branch by itself on main" ;;
+    *) x="run alone on perigee it did not stay red with $branch by itself on main" ;;
+  esac
+  echo "$([ "$1" = joined ] || echo ", which $branch changed or which imports what it changed"). It was pulled off the train on that guess: $x"
 }
 train_verdict() {
   local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''
@@ -682,7 +692,7 @@ train_verdict() {
       riding=''
       queue_phase waiting
       rm -f "$f"
-      say "back in line to ship alone: $a's ship train passed ${b//,/, } without $branch, but nothing proved $branch the cause, so its own CI run decides"
+      say "back in line to ship alone: $a's ship train was red in ${b//,/, }$(guess_how "$c"). The train without it passed, but no ship pulled for it failed it by itself on main, so that proves nothing, and its own CI run decides"
       [ -z "$requeue" ] || queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
       return 0 ;;
     back)
@@ -728,12 +738,7 @@ train_verdict() {
       land_timing 1 || true
       # shellcheck disable=SC2086 # file names
       pulled_out ${d//,/ }
-      case $e in # <how>: what is known of this one of a guess (train_solo)
-        joined) x="run alone on perigee it passed on the train up to the ship before $branch and failed with $branch on it" ;;
-        unrun) x="it couldn't be run on perigee with $branch by itself on main" ;;
-        *) x="run alone on perigee it did not stay red with $branch by itself on main" ;;
-      esac
-      x="$([ "$e" = joined ] || echo ", which $branch changed or which imports what it changed"). It was pulled off the train on that guess: $x. No ship pulled for it failed it by itself on main, and the train without them passed"
+      x="$(guess_how "$e"). No ship pulled for it failed it by itself on main, and the train without them passed"
       [ "$c" != guard ] || refuse "the guard tests failed on $a's ship train in ${d//,/, } with $branch on it and passed on the train before it, so it is the cause, and it was taken off the train before any CI run on it (output above): nothing of it landed and $untouched; $branch is as it was. Run citadel-test on that file, fix it, commit, then run this again"
       [ "$c" != burn ] || refuse "a new or changed test failed its burn-in in CI on $a's ship train ($b): ${d//,/, }$(case $e in
         new) echo ", and $branch adds the test case that failed, which main and the ships ahead of it don't have, so it is the cause, and it was taken off the train" ;;
@@ -2514,7 +2519,7 @@ train_settle() {
     else
       say "$t goes back in line to ship alone: it was pulled on a guess, and the train without it passed ${fs[$i]//,/, }, but no ship pulled for it failed it alone, so its own CI run decides"
       retro_log "ship train verdict · $label · $t back in line to ship alone on a guess: the train without it passed, and nothing proves it · ${fs[$i]} · ${run[$i]}"
-      train_tell "${n[$i]}" "alone $branch ${fs[$i]}"
+      train_tell "${n[$i]}" "alone $branch ${fs[$i]} ${how[$i]}"
     fi
   done
 }

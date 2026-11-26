@@ -437,9 +437,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
                   : main.kind === 'chains'
                     ? chainsPage(projectId, main.focus)
                     : main.kind === 'artifact'
-                      ? artifactViewer(main.artifact)
+                      ? artifactViewer(/** @type {ArtifactFile} */ (main.artifact))
                       : main.kind === 'shared'
-                        ? sharedViewer(main.file)
+                        ? sharedViewer(/** @type {NonNullable<typeof main.file>} */ (main.file))
                         : chatSection(chatId, ticket);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share

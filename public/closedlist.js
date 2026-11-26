@@ -84,8 +84,8 @@ export function noteTicketChange(before, ticket) {
 /**
  * Which of two copies to keep when a fetch answers: `now` on the page, `before` on it as the fetch began. The newer; on a
  * tie the one the stream brought meanwhile, else the fetched one (some changes leave updated_at alone).
- * @param {Ticket | undefined} now
- * @param {Ticket | undefined} before
+ * @param {Ticket | null | undefined} now
+ * @param {Ticket | null | undefined} before
  * @param {Ticket} fetched
  * @returns {Ticket}
  */

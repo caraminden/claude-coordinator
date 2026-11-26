@@ -4,6 +4,7 @@
 import { view } from './base.js';
 import { REF_WORDS, refBucket, refTitle } from './threadstate.js';
 import { pendingRelease, releasesLoaded } from './releases.js';
+/** @import { Ticket } from './types.js' */
 
 const TARGET = 'a.thread-ref[href], a[data-pr-url][href]';
 const THREAD_HREF = /^#\/p\/(\d+)\/t\/(\d+)$/;
@@ -23,7 +24,7 @@ export function paintRefs(root = document) {
     const t = Number(m[1]) === view.projectId ? byNumber.get(Number(m[2])) : null;
     const release = t && t.status === 'closed' ? pendingRelease(t) : null;
     // A dismissed minion's release may still be on its way: until the releases are known, say nothing rather than guess green.
-    const bucket = t?.status === 'closed' && !releasesLoaded() ? 'neutral' : refBucket(release ? { ...t, release } : t);
+    const bucket = t?.status === 'closed' && !releasesLoaded() ? 'neutral' : refBucket(release ? { .../** @type {Ticket} */ (t), release } : t);
     if (a.dataset.baseTitle === undefined) a.dataset.baseTitle = a.getAttribute('title') ?? '';
     const word = /** @type {Record<string, string>} */ (REF_WORDS)[bucket];
     if (word) {

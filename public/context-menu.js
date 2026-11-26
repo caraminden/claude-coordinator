@@ -244,7 +244,7 @@ function fileMenu(a) {
 function cardMenu(card) {
   const ticket = view?.ticket ?? view?.coordinator;
   const id = card.dataset.cardEvent;
-  const linkItem = id && ticket && { label: 'Copy link to card', icon: '🔗', run: () => copy(abs(jumpHref(ticket, id)), 'Link') };
+  const linkItem = (id && ticket && { label: 'Copy link to card', icon: '🔗', run: () => copy(abs(jumpHref(ticket, id)), 'Link') }) || null; // the menu drops any falsy item, so '' and null are the same
   const title = /** @type {HTMLElement | null} */ (card.querySelector('.qtitle, .q'))?.innerText.split('\n')[0];
   /** @type {MenuItem[]} */
   let answers = [];

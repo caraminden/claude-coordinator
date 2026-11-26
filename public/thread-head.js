@@ -118,7 +118,7 @@ export function renderTicketHead() {
     const id = Number(b.dataset.tm);
     if (!id || id === t.id) return t;
     const tm = openView().taskmasters?.find((x) => x.id === id);
-    return openView().merged?.states.get(id)?.ticket ?? tm?.ticket ?? tm ?? t;
+    return openView().merged?.states.get(id)?.ticket ?? tm?.ticket ?? /** @type {Ticket | undefined} */ (/** @type {unknown} */ (tm)) ?? t; // a Taskmaster session row stands in for its ticket, as it always did
   };
   const lastHeldOf = new Map();
   for (const b of bubbles) if (b.heldData && ownerOf(b).held_ids?.includes(Number(b.dataset.event))) lastHeldOf.set(ownerOf(b).id, b);

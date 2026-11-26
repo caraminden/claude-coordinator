@@ -12,7 +12,7 @@ import { schedulePaintRefs } from './refstate.js';
 import { markSeen } from './seen.js';
 import { renderSidebar } from './sidebar.js';
 import { forgetOtherSchemes, refreshSchemeCounts } from './inbox.js';
-/** @import { ChatEvent, View } from './types.js' */
+/** @import { ChatEvent, Ticket, View } from './types.js' */
 
 /** The page's view, in a place that only runs with a scheme open (as before). */
 const cur = () => /** @type {View} */ (view);
@@ -96,7 +96,7 @@ async function refreshLists(v) {
   cur().pins = pins ?? cur().pins;
   cur().builds = builds ?? cur().builds;
   cur().buildPreviews = build_previews ?? cur().buildPreviews;
-  if (cur().id) markSeen(cur().id);
+  if (cur().id) markSeen(/** @type {number} */ (cur().id));
   renderSidebar();
   // Cards raised or settled while the stream was down, here or in other schemes (the counts fetch the inbox after them).
   forgetOtherSchemes();
@@ -105,7 +105,7 @@ async function refreshLists(v) {
   if (!chat) return;
   cur().ticket = freshest(cur().ticket, was.ticket, chat.ticket);
   renderTicketHead();
-  if (cur().ticket.branch) refreshBranch(cur().id);
+  if (/** @type {Ticket} */ (cur().ticket).branch) refreshBranch(cur().id);
 }
 
 /** Live events for the open chat, held while a catch-up fetches what came before them, or until one that failed has worked. */

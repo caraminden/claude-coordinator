@@ -467,8 +467,8 @@ narrow.addEventListener('change', () => {
 // its events is drawn, so its turns fold, hold cards and count actions on their own. Yours stays in `view`.
 /** @type {(keyof View)[]} */
 const SESSION_STATE = ['ticket', 'part', 'progress', 'actions', 'turnActions', 'lastPlan', 'heldCards', 'gruntStarts', 'sawInit', 'latestReply', 'turnNote', 'turnInitAt', 'narration', 'narrationEl', 'folds', 'pendingRequest', 'turnRequest'];
-/** @param {View} o */
-const sessionState = (o) => Object.fromEntries(SESSION_STATE.map((k) => [k, o[k]]));
+/** @param {View} o @returns {Partial<View>} */
+const sessionState = (o) => /** @type {Partial<View>} */ (Object.fromEntries(SESSION_STATE.map((k) => [k, o[k]])));
 
 /** @param {Merged['parts'][number]} part */
 function newSessionState(part) {
@@ -506,7 +506,7 @@ export function appendEvent(event, scroll = true) {
   if (!part) return;
   if (m.last !== id) {
     // Another session's items start here, so the last one's words don't run on or collapse across them.
-    const left = m.last === openView().id ? view : m.states.get(m.last);
+    const left = m.last === openView().id ? view : /** @type {View | undefined} */ (m.states.get(m.last)); // a saved session holds every SESSION_STATE field
     if (left?.folds.length) left.folds.push({ fate: 'break' });
     else if (left) left.narrationEl = null;
     if (left) left.heldCards = [];
@@ -856,12 +856,13 @@ function drawEvent(event, scroll) {
   // What a jump link (#236) finds it by.
   for (const n of nodes) n.dataset.eid = String(event.id);
   // Another session's items in Mine or Everyone (#920): the Overlord's on a purple band, each named by whose it is.
-  if (openView().part)
+  const part = openView().part;
+  if (part)
     for (const n of nodes) {
-      n.classList.toggle('ovl', !!openView().part.overlord);
-      n.dataset.session = openView().part.label;
+      n.classList.toggle('ovl', !!part.overlord);
+      n.dataset.session = part.label;
       n.dataset.tm = String(openView().ticket?.id); // whose queue marks it (thread-head.js)
-      if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${openView().part.label}`));
+      if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${part.label}`));
     }
   // A for-everyone card a person's Taskmaster asked through the Overlord (#921) says whose it was.
   const asker = data.asker && openView().taskmasters?.find((t) => t.id === data.asker);

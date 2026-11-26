@@ -3,7 +3,7 @@
 
 /** The few fields of a Taskmaster session this file reads (GET api/projects/:id `taskmasters`). @typedef {{ id: number, person_id: number | null, person_name: string | null }} TaskmasterBits */
 /** One session in a merged chat: yours, or another's (with its label, and whether it is the Overlord's). @typedef {{ id: number, mine: boolean, overlord?: boolean, label?: string }} MergedPart */
-/** A merged Taskmaster chat's description. @typedef {{ mode: 'mine' | 'everyone', src: string, parts: MergedPart[], states: Map<number, import('./types.js').SessionState>, last: number }} Merged */
+/** A merged Taskmaster chat's description. @typedef {{ mode: 'mine' | 'everyone', src: string, parts: MergedPart[], states: Map<number, Partial<import('./types.js').View>>, last: number }} Merged */
 
 /** Where this device keeps Mine or Everyone (#920): thread.js's switch, and a Needs-you row whose card only Everyone shows (#1400). */
 export const TM_VIEW = 'cc-tm-view';
@@ -24,7 +24,7 @@ export function inMine(event) {
  * scheme has one Taskmaster. `taskmasters` is the project payload's list; `mode` is 'mine' or 'everyone'.
  * Mine adds the Overlord's for-everyone items; Everyone adds every session whole (src/routes/projects.ts).
  * @param {number} projectId
- * @param {number} ownId
+ * @param {number | null} ownId null matches no Taskmaster, so it returns null
  * @param {TaskmasterBits[] | null | undefined} taskmasters
  * @param {string} mode
  * @returns {Merged | null}
@@ -38,7 +38,7 @@ export function mergedView(projectId, ownId, taskmasters, mode) {
     src: `api/projects/${projectId}/taskmaster-events?view=${everyone ? 'everyone' : 'mine'}`,
     // Someone who hasn't written yet has the Overlord as theirs (src/routes/projects.ts): Mine filters it too.
     parts: [
-      { id: ownId, mine: !everyone && /** @type {TaskmasterBits} */ (/** @type {TaskmasterBits[]} */ (taskmasters).find((t) => t.id === ownId)).person_id == null },
+      { id: /** @type {number} */ (ownId), mine: !everyone && /** @type {TaskmasterBits} */ (/** @type {TaskmasterBits[]} */ (taskmasters).find((t) => t.id === ownId)).person_id == null },
       ...others.map((t) => ({
         id: t.id,
         mine: !everyone,
@@ -47,7 +47,7 @@ export function mergedView(projectId, ownId, taskmasters, mode) {
       })),
     ],
     states: new Map(), // thread.js: each other session's drawing state
-    last: ownId, // the session the newest drawn event was in
+    last: /** @type {number} */ (ownId), // the session the newest drawn event was in
   };
 }
 

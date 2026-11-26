@@ -1,9 +1,8 @@
 {
-  "public/artifacts.js": [3, 0],
   "public/box-capacity.js": [94, 0],
   "public/cards.js": [1, 0],
   "public/codemath.js": [15, 0],
-  "public/core.js": [3, 0],
+  "public/core.js": [2, 0],
   "public/day-strips.js": [74, 0],
   "public/flowmath.js": [34, 0],
   "public/machine-setup.js": [15, 0],

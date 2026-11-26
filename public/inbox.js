@@ -7,7 +7,7 @@ import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 
-/** @import { ChatEvent, InboxItem, SchemeListed, Ticket, View } from './types.js' */
+/** @import { ChatEvent, InboxItem, ListedTicket, SchemeListed, Ticket, View } from './types.js' */
 /** @import { MinionLike, SeenHere } from './schemecounts.js' */
 /** What a row of the strip names its minion by: a whole minion, or the little the page knows of one. @typedef {Pick<Ticket, 'id' | 'project_id' | 'number' | 'kind' | 'title'>} RowTicket */
 
@@ -34,9 +34,10 @@ const faded = (item) => (item.kind === 'replies' && isSeen(/** @type {Pick<Ticke
  * @param {InboxItem[]} items
  */
 export function mentionMap(items) {
-  /** @type {Map<number, { by: string | undefined, at: number }>} */
+  /** @type {Map<number, { by: string, at: number }>} */
   const out = new Map();
-  for (const i of items) if (i.kind === 'mention' && !((out.get(i.ticketId)?.at ?? -Infinity) > i.at)) out.set(i.ticketId, { by: /** @type {NonNullable<InboxItem['card']>} */ (i.card).by, at: i.at });
+  // A mention's card always names who wrote it (src/inbox.ts).
+  for (const i of items) if (i.kind === 'mention' && !((out.get(i.ticketId)?.at ?? -Infinity) > i.at)) out.set(i.ticketId, { by: /** @type {string} */ (/** @type {NonNullable<InboxItem['card']>} */ (i.card).by), at: i.at });
   return out;
 }
 /** @param {Map<number, { at: number }>} map */
@@ -406,7 +407,7 @@ export function inboxRow(items) {
     const ask = i.kind === 'spend' ? `💸 Over $${/** @type {NonNullable<InboxItem['card']>} */ (i.card).stage}` : (ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind);
     // The chip's popover says why it's here (#906): the newest of its kind.
     const was = asks.get(ask);
-    asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, t), at: Math.max(was?.at ?? 0, i.at) });
+    asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, /** @type {ListedTicket} */ (t)), at: Math.max(was?.at ?? 0, i.at) });
   }
   // A tap on a chip opens its why, not the minion (tip.js tapOpens).
   inboxTips ??= mountTips(document.body, { selector: '.inbox-row .chip[data-tip]', tapOpens: true });

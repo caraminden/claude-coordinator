@@ -29,7 +29,7 @@ const swatch = (hex) => {
  * were placed on, and are scaled to the picture as it loads. onDone(canvas, marks) runs on Done, with the marked picture
  * (null when every mark was undone); the caller closes the lightbox.
  * @param {HTMLElement} stage
- * @param {string} src
+ * @param {string | undefined} src (an image without a url loads nothing, as before)
  * @param {{ marks?: Mark[], size?: { w: number, h: number } | null, onDone: (canvas: HTMLCanvasElement | null, marks: Mark[]) => unknown, doneLabel?: string }} opts
  */
 export function annotator(stage, src, { marks = [], size = null, onDone, doneLabel = 'Done' }) {
@@ -57,7 +57,7 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
     paint();
     sync();
   };
-  img.src = src;
+  img.src = /** @type {string} */ (src);
 
   /** @param {MouseEvent} e */
   const at = (e) => {

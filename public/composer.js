@@ -1059,7 +1059,7 @@ function createAttachments(chatId, onChange) {
       render: (_, stage) =>
         annotator(stage, clean.url, {
           marks: item.marks,
-          onDone: async (/** @type {HTMLCanvasElement | null} */ canvas, /** @type {never[]} */ marks) => {
+          onDone: async (/** @type {HTMLCanvasElement | null} */ canvas, /** @type {import('./ui/marks.js').Mark[]} */ marks) => {
             lb.close();
             const blob = canvas && (await encodeCanvas(canvas).catch(() => null));
             if (canvas && !blob) return alertNote('Could not save the marked image: it came out too large.');

@@ -693,8 +693,8 @@ export const isSeen = (t) => {
   return (seen?.[t.id] ?? 0) >= t.updated_at;
 };
 
-/** @param {{ kind: string }} t */
-export const isCoordinator = (t) => t.kind === 'coordinator';
+/** @param {{ kind: string } | null | undefined} t a chat, never null here at runtime: a null throws, as it always did */
+export const isCoordinator = (t) => /** @type {{ kind: string }} */ (t).kind === 'coordinator';
 
 /** @param {Pick<Ticket, 'kind' | 'status'>} t */
 export function statusLabel(t) {
@@ -710,8 +710,8 @@ export function statusLabel(t) {
 export const threadHref = (t) => (isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`);
 
 /** A link that opens `t`'s chat scrolled to one thing in it (threadrefs.js jumpParts). */
-/** @param {ThreadRef} t @param {string | number} target */
-export const jumpHref = (t, target) => `${threadHref(t)}?e=${target}`;
+/** @param {ThreadRef | null} t never null at runtime (only asked with a chat open) @param {string | number} target */
+export const jumpHref = (t, target) => `${threadHref(/** @type {ThreadRef} */ (t))}?e=${target}`;
 
 /** A scheme's Taskmaster goes by the scheme's name: "Delve Taskmaster". */
 /** @param {number | null | undefined} [projectId] */

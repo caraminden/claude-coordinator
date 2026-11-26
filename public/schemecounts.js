@@ -119,7 +119,7 @@ export function syncBadge(want, state, nav = globalThis.navigator) {
  * (`moved`) sees all of it; staying put, you see only what the chat you're on asks, and the rest is new to you.
  * @param {Set<string>} seen
  * @param {{ key: string, ticketId: number }[]} waiting
- * @param {number} chatId
+ * @param {number | null} chatId
  * @param {boolean} moved
  */
 export const seenInScheme = (seen, waiting, chatId, moved) => new Set(waiting.filter((i) => moved || seen.has(i.key) || i.ticketId === chatId).map((i) => i.key));

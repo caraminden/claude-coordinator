@@ -12,6 +12,7 @@ import { lendsRole } from '../src/access.ts';
 import { mayFetch } from '../src/ci-runner.ts';
 import { Store } from '../src/db.ts';
 import { MERGES_KEY, mergedCi, pickKept } from '../src/machine-merge.ts';
+import { pausedRoles, setPaused } from '../src/machine-pause.ts';
 import { MachineRelay, storedCheck } from '../src/machines.ts';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
@@ -63,6 +64,25 @@ test("a PC row's CI role goes on at the runner agent's first connection, lent to
     first.end();
     relay.connectAgent(pc, res(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
     assert.equal(ci().on, false);
+    assert.equal(mayFetch(store, store.getMachine(pc.id)!, vault), false);
+  } finally {
+    relay.disconnect(pc.id);
+  }
+});
+
+test("a paused PC's runner agent joining keeps its CI role off: Resume brings it back with the rest", () => {
+  const store = new Store(':memory:');
+  const relay = new MachineRelay(store, () => {});
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const vault = store.createProject('Vault', null, josh.id);
+  const pc = store.createMachine('desk', 'x', 'Josh', josh.id);
+  store.setMachineRole(pc.id, 'tools', { projects: [vault.id] });
+  setPaused(store, pc.id, ['tools']);
+  store.setMachineRole(pc.id, 'tools', { on: false });
+  relay.connectAgent(pc, res(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  try {
+    const ci = store.machineRoles(pc.id).find((r) => r.role === 'ci')!;
+    assert.deepEqual([ci.on, ci.setup?.runner_agent, pausedRoles(store, pc.id)], [false, true, ['tools', 'ci']]);
     assert.equal(mayFetch(store, store.getMachine(pc.id)!, vault), false);
   } finally {
     relay.disconnect(pc.id);

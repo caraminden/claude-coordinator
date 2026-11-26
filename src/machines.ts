@@ -29,7 +29,7 @@ import type { RoleSetups } from './role-setup.ts';
 import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
 import { mergeOf, merges } from './machine-merge.ts';
-import { pausedRoles } from './machine-pause.ts';
+import { pausedRoles, setPaused } from './machine-pause.ts';
 import { legacyFromRoles, ROLE_NAMES } from './machine-roles.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
@@ -660,7 +660,12 @@ export class MachineRelay {
     // As a role its owner switches on, it goes to every scheme they are in (Josh's pick, "Every scheme you're in"); a shared row's
     // to where the machine is. A merge into this row sets it in finishMerge instead, so the merge lends no scheme more CI.
     const ci = this.store.machineRoles(machine.id).find((r) => r.role === 'ci');
-    if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && !merges(this.store).some((m) => m.into === machine.id)) {
+    const paused = pausedRoles(this.store, machine.id);
+    if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && paused) {
+      // Paused (M3's Pause all): it stays off, and Resume brings it on with the rest.
+      setPaused(this.store, machine.id, [...paused, 'ci']);
+      this.store.setMachineRole(machine.id, 'ci', { setup: { ...ci.setup, runner_agent: true } });
+    } else if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && !merges(this.store).some((m) => m.into === machine.id)) {
       const owner = machine.owner_id === null ? null : this.store.getUser(machine.owner_id);
       const everyScheme = owner
         ? this.store

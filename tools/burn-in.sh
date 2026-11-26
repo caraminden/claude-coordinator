@@ -116,6 +116,22 @@ if [ "${1:-}" != --ship ]; then
   if [ -z "${RUNNER_TEMP:-}${CI:-}${GITHUB_ACTIONS:-}${BURN_IN_QUEUED:-}" ]; then
     [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: copies must be a whole number, not $n"; exit 1; }
     [ "$n" -le 4 ] || { echo "burn-in: $n copies at once is CI's; here it runs 4, queued for a heavy slot (re-run CI for $n)"; n=4; }
+    # The file's own concurrency multiplies its copies (#2073: 4 copies of boot-check's 8-way describe ran 32 boot checks
+    # in one slot and stalled the server on Nov 25), so copies x in-file concurrency stays within the slot's 4 CPUs.
+    # A file that reads CITADEL_TEST_CONCURRENCY gets 4 / copies; a fixed number runs fewer copies; a bare true is refused.
+    if grep -q CITADEL_TEST_CONCURRENCY "$file"; then
+      export CITADEL_TEST_CONCURRENCY=$((4 / n))
+    else
+      inner=$(grep -oE 'concurrency:[[:space:]]*(true|[0-9]+)' "$file" | awk '{ v = $NF; if (v == "true") t = 1; else if (v + 0 > m) m = v + 0 } END { print t ? "true" : m + 0 }')
+      if [ "$inner" = true ] || [ "$inner" -gt 4 ]; then
+        echo "burn-in: $file asks concurrency: $inner, more than the heavy slot's 4 at once; have it read CITADEL_TEST_CONCURRENCY (as test/boot-check.test.ts does) so the burn-in can cap it, or burn it in on CI"
+        exit 1
+      fi
+      if [ "$inner" -gt 1 ] && [ $((n * inner)) -gt 4 ]; then
+        echo "burn-in: $file runs concurrency $inner inside each copy, so here it runs $((4 / inner)) copies, not $n"
+        n=$((4 / inner))
+      fi
+    fi
     BURN_IN_QUEUED=1 BURN_IN_NICE=${BURN_IN_NICE:-nice -n 19} CITADEL_HEAVY_JUDGE=0 CITADEL_HEAVY_WHAT="burn-in $file x$n" \
       exec "$tools/citadel-heavy" --here bash "$tools/burn-in.sh" "$file" "$n"
   fi

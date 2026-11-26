@@ -96,8 +96,9 @@ test("a contraption whose service is down and whose keys don't open in the copy:
 
 // The smoke pass after the boot (#486): a database with a Taskmaster, a minion with a long chat and
 // scheme instructions; a copy of this checkout passes, and each copy with one of the historical breaks
-// put back fails, naming the call. Run together, each with its own server and Chromium.
-describe('the smoke pass through the turn tools, the file viewer and the launch arguments', { concurrency: true, skip: !hasChromium && 'no headless Chromium (the boot check needs one)' }, () => {
+// put back fails, naming the call. Run together, each with its own server and Chromium; a burn-in off CI caps how many
+// at once with CITADEL_TEST_CONCURRENCY (#2073).
+describe('the smoke pass through the turn tools, the file viewer and the launch arguments', { concurrency: Number(process.env.CITADEL_TEST_CONCURRENCY) || true, skip: !hasChromium && 'no headless Chromium (the boot check needs one)' }, () => {
   const dir = join(root, 'smoke');
   const db = join(dir, 'coordinator.db');
   mkdirSync(dir);

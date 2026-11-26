@@ -200,15 +200,6 @@ try {
   if (!login.ok || !cookie) fail(`Signing in answered ${login.status}`);
   begin('render in Chromium');
   await pageCheck(`${base}/`, cookie);
-  // A GET the server may answer with a retryable 503 while its readers are slow on a busy box (#2003): asked again, as the page does.
-  const get = async (path: string, limit: ReturnType<typeof stepLimit>) => {
-    for (;;) {
-      const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
-      if (r.status !== 503 || limit.over(20_000)) return r;
-      await r.body?.cancel();
-      await new Promise((ok) => setTimeout(ok, 250));
-    }
-  };
   begin("file viewer's details");
   for (const { what, path } of fileChecks) {
     const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
@@ -237,10 +228,12 @@ try {
       const report = join(dir, 'report.json');
       const slow = stepLimit();
       for (; ; await new Promise((r) => setTimeout(r, 100))) {
-        const got = await get(`/api/tickets/${id}`, slow);
-        if (!got.ok) fail(`Reading the ${what} answered ${got.status}: ${(await got.text()).slice(0, 300)}`);
-        const t = (await got.json()).ticket;
-        if (t.status !== 'running' && t.status !== 'new') {
+        const got = await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } });
+        // A slow reader's 503 on a busy box (#2003) means ask again, as the page does, within the turn's own limit.
+        if (got.status === 503) await got.body?.cancel();
+        else if (!got.ok) fail(`Reading the ${what} answered ${got.status}: ${(await got.text()).slice(0, 300)}`);
+        const t = got.ok ? (await got.json()).ticket : null;
+        if (t && t.status !== 'running' && t.status !== 'new') {
           if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
           const r = JSON.parse(readFileSync(report, 'utf8'));
           if (!r.ok) fail(`A ${what} turn started, but: ${r.error}`);

@@ -155,6 +155,16 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
     assert.match(run.out, new RegExp(`Taskmaster turn started \\(\\d+ tools; read_ticket #${long.number}; largest argument \\d+ bytes; settings.json \\d+ bytes, git rules for 79 folders\\)`));
   });
 
+  // #2003: on a busy box the server answers a read its readers are slow on with a 503 to ask again. The page and the turn
+  // poll ask again, as the app does; here the first ask of each read gets that 503.
+  test("a server whose readers ask for a retry passes, the page's reads and the turn poll's", { timeout: 200_000 }, async () => {
+    const from = '  const ask = (req: IncomingMessage, res: ServerResponse) => {\n';
+    const checkout = brokenCheckout('retry', 'src/front.ts', from, `const asked = new Set<string>();\n${from}    if (!asked.has(req.url ?? '')) {\n      asked.add(req.url ?? '');\n      return busy(res);\n    }\n`);
+    const run = await bootCheck(checkout);
+    assert.ok(run.ok, run.out.slice(0, 3000));
+    assert.match(run.out, /a Taskmaster turn started/);
+  });
+
   // #43: a new import the pinned copy of mcp.ts lacked (the pinner follows only `from './x'`), so every turn's tool server died on start.
   test('a tool server that dies on start fails it', { timeout: 200_000 }, async () => {
     const checkout = brokenCheckout('no-tool-server', 'src/mcp.ts', "import { createInterface } from 'node:readline';", "import { createInterface } from 'node:readline';\nimport './appname-extra.ts';");

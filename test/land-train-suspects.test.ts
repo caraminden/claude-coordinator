@@ -281,7 +281,10 @@ for (const [what, file] of [
 // refused because the train passed without them, 6 were innocent, 3 of those on flaky tests. Here CI fails test/real once
 // (the fake's one-off red, logged as a real failure) with ship 3, which test/real imports, on the train.
 const once = (d: string) => ({ FAKE_FLAKY_PATH: 'real3.ts', ...shared(d) });
-const verdicts = (l: Line) => retro(l).split('\n').filter((x) => x.includes('ship train verdict'));
+const verdicts = (l: Line) =>
+  retro(l)
+    .split('\n')
+    .filter((x) => x.includes('ship train verdict'));
 
 test('a ship pulled on a guess, not red alone, whose train passes without it, goes back in line and ships alone: nobody is refused on a guess', async () => {
   const l = await line(ships(6, { 3: guess('real', 3) }), once, tests('real'));
@@ -292,15 +295,22 @@ test('a ship pulled on a guess, not red alone, whose train passes without it, go
   guessed(done[2], 'test/real.test.ts', 'shipped');
   assert.equal(git(l.r.source, 'log', '-1', '--format=%s', 'main'), 'real3.ts: export const x = 3;', 'it shipped last, by itself');
   for (const d of done) assert.doesNotMatch(d.stderr, /is refused|tests failed in CI on/);
-  assert.deepEqual(verdicts(l).map((x) => x.replace(/^.*?ship train verdict · /, '').replace(/https:\/\/ci\/\d+/, 'ci')), ['ticket/2-x · #3 back in line to ship alone on a guess: the train without it passed, and nothing proves it · test/real.test.ts · ci']);
+  assert.deepEqual(
+    verdicts(l).map((x) => x.replace(/^.*?ship train verdict · /, '').replace(/https:\/\/ci\/\d+/, 'ci')),
+    ['ticket/2-x · #3 back in line to ship alone on a guess: the train without it passed, and nothing proves it · test/real.test.ts · ci'],
+  );
   clean(l);
 });
 
 test('a guess on a test that flaked on other ships: the train passing without it proves nothing, so the ship goes back in line and rides the next train', async () => {
-  const l = await line(ships(8, { 3: guess('real', 3) }), (d) => ({ ...once(d), LAND_TRAIN_MAX: '3' }), (r) => {
-    tests('real')(r);
-    seen(join(r.dir, 'shared'), ['test/real.test.ts']);
-  });
+  const l = await line(
+    ships(8, { 3: guess('real', 3) }),
+    (d) => ({ ...once(d), LAND_TRAIN_MAX: '3' }),
+    (r) => {
+      tests('real')(r);
+      seen(join(r.dir, 'shared'), ['test/real.test.ts']);
+    },
+  );
   const done = await l.go();
   back(done);
   assert.match(done[1].stderr, /#3 goes back in line: test\/real\.test\.ts flaked on other ships, so the train passing without it proves nothing/);
@@ -315,11 +325,7 @@ test('a guess on a test that flaked on other ships: the train passing without it
 // LB5 (the pipeline review): a ship pulled on a burn-in red, whose train without it is red in another file's burn-in. Its
 // test never ran without it (a burn-in runs only the train's new and changed tests), yet it was refused on that guess.
 test('LB5: a ship pulled on a burn-in guess is never refused by a burn-in red of another file without it; it ships alone, and its own run decides', async () => {
-  const l = await line(
-    ships(6, { 3: guess('a', 3), 5: guess('b', 5) }),
-    env(`${real('a', 'a3.ts')} ${real('b', 'b5.ts')}`, { FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn', FAKE_REAL_FIRST: '1' }),
-    tests('a', 'b'),
-  );
+  const l = await line(ships(6, { 3: guess('a', 3), 5: guess('b', 5) }), env(`${real('a', 'a3.ts')} ${real('b', 'b5.ts')}`, { FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn', FAKE_REAL_FIRST: '1' }), tests('a', 'b'));
   const done = await l.go();
   back(done, 3, 5);
   assert.match(done[2].stderr, /back in line to ship alone: ticket\/2-x's ship train was red in test\/a\.test\.ts, which ticket\/3-x changed/);

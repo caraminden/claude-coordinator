@@ -291,10 +291,10 @@ case $mode in
     label="$branch · into $build"
     [ "$mode" = into ] || label="$label, full"
     untouched="$build is untouched"
-    # The main this build took in, for checks that compare with the last release (test/schema-compat.test.ts): a --full
-    # run ships nothing, and main may ship a newer schema while it waits in line, which refused it each time (#2067).
-    # --build, the build's ship, merges main in and meets the last release as every ship does. Its smoke, guards and
-    # perigee's suite read it from here; CI finds the same commit from land-base/<branch> (schema-compat.test.ts).
+    # The main this build took in, for checks that compare with the last release (test/schema-compat.test.ts, when that
+    # release isn't under HEAD): a --full run ships nothing, and main may ship a newer schema while it waits in line, which
+    # refused it each time (#2067). --build merges main in and meets the last release as every ship does. Its smoke, guards
+    # and perigee's suite read it from here; CI finds the same commit from land-base/<branch> (schema-compat.test.ts).
     if [ "$mode" = full ]; then LAND_BUILD_BASE=$(git merge-base HEAD main) && export LAND_BUILD_BASE; fi
     [[ $branch != build/* ]] || refuse "run it from a feeder's branch or the build minion's own, not from a build branch"
     git show-ref -q --verify "refs/heads/$build" || refuse "$build doesn't exist: its build minion makes it (git branch $build main), so nothing merged"

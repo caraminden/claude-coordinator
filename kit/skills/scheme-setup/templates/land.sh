@@ -1293,9 +1293,9 @@ here=$(git rev-parse --show-toplevel)
 cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
-# For the scheme's checks (SMOKE_CMD, GUARD_CMD, CHECK, the fallback): in a --full run, the $BRANCH commit the build took
-# in. A check that compares with the last release (Citadel's schema-compat test) compares with this instead: the run ships
-# nothing, and $BRANCH may ship past it while it waits in line (#2067). --build meets the last release as every ship does.
+# For the scheme's own checks a --full run makes (its exported environment): the $BRANCH commit the build took in. A check
+# that compares with the last release (Citadel's schema-compat test) compares with this when that release isn't under
+# HEAD: the run ships nothing, and $BRANCH may ship past it while it waits in line (#2067). --build meets the last release.
 if [ "$mode" = full ]; then LAND_BUILD_BASE=$(git merge-base HEAD "refs/heads/$BRANCH") && export LAND_BUILD_BASE; fi
 [ -z "$verify" ] || branch=verify LAND_KNOWN_RED='' LAND_FAST='' # its scratch branch is land/verify; it judges, so nothing is known red
 if [ "$CONFLICT_PREP" = 1 ] && [ "$mode" = land ] && [ -z "$verify" ]; then

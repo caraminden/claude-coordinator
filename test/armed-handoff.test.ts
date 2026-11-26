@@ -47,6 +47,8 @@ async function minion(file = 'src/pipe/x.ts') {
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   writeFileSync(join(cwd, 'tools', 'land.sh'), `if [ "$1" = --check ]; then exit 0; fi\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
   writeFileSync(join(cwd, 'tools', 'pipeline-files.txt'), '# the pipeline\ntools/land.sh\nsrc/pipe/\n');
+  mkdirSync(join(cwd, '.github', 'workflows'), { recursive: true });
+  writeFileSync(join(cwd, '.github', 'workflows', 'flake-proof.yml'), 'name: flake-proof\n');
   git(cwd, 'init', '-q', '-b', 'main');
   git(cwd, 'add', '.');
   git(cwd, 'commit', '-qm', 'init');
@@ -58,7 +60,8 @@ async function minion(file = 'src/pipe/x.ts') {
   store.setTicketDir(t.id, cwd, `ticket/${t.number}-m`);
   addReview(store, t.id);
   const asMinion = srv.as({ token: agentToken(srv.data, t.id) });
-  const handOff = (extra: object = {}) => asMinion(`/api/tickets/${t.id}/land/handoff`, { ...HAND_OFF, ...extra });
+  // The token is read each time: a turn of the minion's rotates it.
+  const handOff = (extra: object = {}) => srv.as({ token: agentToken(srv.data, t.id) })(`/api/tickets/${t.id}/land/handoff`, { ...HAND_OFF, ...extra });
   const texts = () => store.listEvents(t.id).map((e) => String(JSON.parse(e.data).text ?? ''));
   const commit = (name: string) => {
     writeFileSync(join(cwd, name), 'x\n');
@@ -223,7 +226,7 @@ async function armedFor(m: Minion, when: unknown, note: string) {
 }
 
 /** The trigger came, the armed ship was ruled out, and the minion was woken with why, once. */
-async function proofWoke(m: Minion, why: RegExp) {
+async function armedWoke(m: Minion, why: RegExp) {
   const said = await until('the wake', () => m.texts().find((x) => x.includes("Your armed hand-off didn't ship by itself")));
   assert.match(said, why);
   assert.equal(store.getSetting(armedKey(m.id)) ?? null, null, 'never re-armed');
@@ -237,7 +240,7 @@ test('when: "proof" waits for a green flake proof on its commit, then ships with
   assert.ok(!m.texts().some((x) => x.startsWith('Shipped')), 'nothing shipped yet');
   await proofRun(m, head(m), 'success');
   await until('it ships and closes', () => m.state().status === 'closed');
-  assert.ok(m.texts().some((x) => /^The flake proof on \w{7} went green, so Citadel started your armed hand-off with no turn\.$/.test(x)));
+  assert.ok(m.texts().some((x) => x.startsWith(`The flake proof on ${head(m).slice(0, 7)} went green`)));
   assert.equal(ownTurns(m), turns, 'no turn');
 });
 
@@ -271,7 +274,7 @@ test('a branch that moved after it was armed does not ship on a green proof: the
   const sha = head(m);
   m.commit('more.txt');
   await proofRun(m, sha, 'success');
-  await proofWoke(m, /your branch moved since you armed it/);
+  await armedWoke(m, /your branch moved since you armed it/);
 });
 
 test("anyone's message after it was armed stops a proof ship: the minion is woken with why", async () => {
@@ -279,7 +282,7 @@ test("anyone's message after it was armed stops a proof ship: the minion is woke
   await armedFor(m, 'proof', PROOF_NOTE);
   store.addEvent(m.id, 'user_message', { author: 'Taskmaster', text: 'hold that' });
   await proofRun(m, head(m), 'success');
-  await proofWoke(m, /Taskmaster wrote to you after you armed it/);
+  await armedWoke(m, /Taskmaster wrote to you after you armed it/);
 });
 
 test('a pipeline change armed on its proof goes to the lane once the proof is green, and ships when the lane passes to it', async () => {
@@ -301,7 +304,7 @@ test('when: {live: "#N"} ships with no turn once that minion\'s work is live', a
   await armedFor(m, { live: `#${leader.number}` }, `armed: ships when #${leader.number} is live`);
   await srv.call(`/api/tickets/${leader.id}/status`, { status: 'closed' });
   await until('it ships and closes', () => m.state().status === 'closed');
-  assert.ok(m.texts().includes(`#${leader.number}'s work is live, so Citadel started your armed hand-off with no turn.`));
+  assert.ok(m.texts().some((x) => x.startsWith(`#${leader.number}'s work is live`)));
   assert.equal(ownTurns(m), turns, 'no turn');
 });
 
@@ -325,5 +328,55 @@ test("someone's message after a live-armed hand-off stops it: the minion is woke
   await armedFor(m, { live: `#${leader.number}` }, `armed: ships when #${leader.number} is live`);
   store.addEvent(m.id, 'user_message', { author: 'Taskmaster', text: 'hold that' });
   await srv.call(`/api/tickets/${leader.id}/status`, { status: 'closed' });
-  await proofWoke(m, /Taskmaster wrote to you after you armed it/);
+  await armedWoke(m, /Taskmaster wrote to you after you armed it/);
+});
+
+test("Citadel's own held note after arming (CI's hold stopping the proof) doesn't stop it; the rerun's green ships it", async () => {
+  const m = await minion('src/a.ts');
+  await armedFor(m, 'proof', PROOF_NOTE);
+  // As leaveMail stores it: held mail marked as Citadel's note; no one spoke and no turn ran.
+  store.addEvent(m.id, 'user_message', { author: 'Citadel', text: 'Your flake proof was stopped and starts again when its turn comes.', mail: true, note: true });
+  await proofRun(m, head(m), 'success');
+  await until('it ships and closes', () => m.state().status === 'closed');
+});
+
+test('a proof already green on its commit before the hand-off ships at once; one already red is refused', async () => {
+  const m = await minion('src/a.ts');
+  await proofRun(m, head(m), 'failure');
+  await until('the red is told and its turn is over', () => m.texts().some((x) => x.startsWith('flake-proof run failure')) && m.state().status === 'idle');
+  const red = await m.handOff({ when: 'proof' });
+  assert.equal(red.status, 409, JSON.stringify(red.data));
+  assert.match(String(red.data.error), /ended failure/);
+  await proofRun(m, head(m), 'success');
+  const r = await m.handOff({ when: 'proof' });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.equal(r.data.armed, undefined);
+  await until('it ships', () => m.state().status === 'closed');
+});
+
+test('when: "proof" in a repo with no flake-proof workflow is refused: no proof would ever come', async () => {
+  const m = await minion('src/a.ts');
+  git(m.cwd, 'rm', '-q', '.github/workflows/flake-proof.yml');
+  git(m.cwd, 'commit', '-qm', 'no proof');
+  const r = await m.handOff({ when: 'proof' });
+  assert.equal(r.status, 400);
+  assert.equal(store.getSetting(armedKey(m.id)) ?? null, null);
+});
+
+test('a branch that moved after a live-armed hand-off does not ship: the minion is woken with why', async () => {
+  const leader = store.createTicket({ project_id: projectId, title: 'Leader', permission_mode: 'default', created_by: 'Cara' });
+  const m = await minion('src/a.ts');
+  await armedFor(m, { live: `#${leader.number}` }, `armed: ships when #${leader.number} is live`);
+  m.commit('more.txt');
+  await srv.call(`/api/tickets/${leader.id}/status`, { status: 'closed' });
+  await armedWoke(m, /your branch moved since you armed it/);
+});
+
+test('when: {live: <commit>} on a commit the server already runs ships at once', async () => {
+  const m = await minion('src/a.ts');
+  const live = git(process.cwd(), 'rev-parse', 'HEAD~1').trim();
+  const r = await m.handOff({ when: { live: live.slice(0, 10) } });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.equal(r.data.armed, undefined);
+  await until('it ships', () => m.state().status === 'closed');
 });

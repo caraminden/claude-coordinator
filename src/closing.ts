@@ -2,7 +2,7 @@
 // deploy's dismissal, the queue and rows a dismissed one leaves, its claims passing on, and a reopen's worktree.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `ClosingDeps`.
 import { clip } from './minion-relay.ts';
-import { armedKey } from './db-keys.ts';
+import { armedKey, proofKey } from './db-keys.ts';
 import { askerKey, pagePlanKey, planKey, type EventRow, type Project, type Store, type Ticket } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import type { Claim } from './claims.ts';
@@ -162,6 +162,7 @@ export class Closing {
     this.d.store.deleteSetting(startHoldKey(ticketId));
     // Nor ship an armed hand-off (#2046) once the lane comes.
     this.d.store.deleteSetting(armedKey(ticketId));
+    this.d.store.deleteSetting(proofKey(ticketId));
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.d.store.getTicket(ticketId)?.replies) this.d.store.updateTicket(ticketId, { replies: null });
     this.d.setStatus(ticketId, 'closed');

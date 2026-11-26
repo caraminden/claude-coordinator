@@ -7,7 +7,7 @@
 // (CI health's wake for a run the minion dispatched, fireProof), and {live} once another minion's work or a commit is live,
 // as wake_when_live checks it (LiveWaiters' check, fireLive). Either one that meets the pipeline lane then waits there.
 import { APP_NAME } from './appname.ts';
-import { armedKey } from './db-keys.ts';
+import { armedKey, proofKey } from './db-keys.ts';
 import type { Ticket } from './db.ts';
 import type { ChangeBy } from './db/wait-records.ts';
 import type { Run } from './ci-health.ts';
@@ -17,6 +17,8 @@ import { HttpError, type App } from './http.ts';
 import { laneRefusal, shipPrepared } from './ship-handoff.ts';
 import { holdsLane, pipelineChanges, SHIP_LANE } from './ship-lane.ts';
 import { thrown } from './thrown.ts';
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 
 const LANE = SHIP_LANE;
 
@@ -142,9 +144,13 @@ function fire(app: App, ticketId: number, armed: Armed, started: string, fallbac
     fallback(why);
   };
   // Anyone at all, not only a person as for a Ship It press: a Taskmaster's "hold that" or a wake (a turn of its) counts.
+  // Not Citadel's own held notes (leaveMail): no one spoke and no turn ran (#2089: CI's hold stopping a proof leaves one).
   const wrote = () => {
-    const e = app.store.eventsOfKinds(ticketId, ['user_message'], armed.event)[0];
-    return e ? `${JSON.parse(e.data).author} wrote to you after you armed it` : null;
+    const e = app.store
+      .eventsOfKinds(ticketId, ['user_message'], armed.event)
+      .map((x) => JSON.parse(x.data) as { author: string; mail?: boolean; note?: boolean })
+      .find((d) => !(d.mail && d.note));
+    return e ? `${e.author} wrote to you after you armed it` : null;
   };
   const ship = () => shipPrepared(app, ticket, armed, { since: armed.event, what: 'you armed it', person: armed.person, by: { kind: 'server' }, still: wrote });
   (async () => {
@@ -180,7 +186,25 @@ export async function triggerHandoff(app: App, ticket: Ticket, body: Record<stri
   if (args.into !== undefined) throw new HttpError(400, 'Not handed off: a merge into a build goes at once, so leave out when');
   const head = await gitOut(['rev-parse', 'HEAD'], ticket.cwd!);
   if (!head) throw new HttpError(409, "Not handed off: git couldn't read your worktree's commit");
-  if (when === 'proof') return armFor(app, ticket, { when: 'proof', args, head }, PROOF_NOTE, `once the ${PROOF_WORKFLOW} run on \`${head.slice(0, 7)}\` goes green`);
+  if (when === 'proof') {
+    // Each a wait with no end: no such workflow here (every scheme may arm), a commit GitHub hasn't got, or a proof already told.
+    if (
+      !(await access(join(ticket.cwd!, '.github', 'workflows', PROOF_WORKFLOW)).then(
+        () => true,
+        () => false,
+      ))
+    )
+      throw new HttpError(400, `Not handed off: this repo has no .github/workflows/${PROOF_WORKFLOW}, so no proof would ever come; leave out when`);
+    const remote = (await gitOut(['remote'], ticket.cwd!))?.split('\n').includes('origin');
+    if (remote && (await gitOut(['rev-parse', '-q', '--verify', `refs/remotes/origin/${ticket.branch}`], ticket.cwd!)) !== head)
+      throw new HttpError(409, `Not handed off: origin's ${ticket.branch} isn't at your commit ${head.slice(0, 7)}, so no proof of it can run. Push it, dispatch ${PROOF_WORKFLOW} on it, then hand off`);
+    const seen = app.store.getSetting<{ head: string; conclusion: string | null }>(proofKey(ticket.id));
+    if (seen?.head === head) {
+      if (seen.conclusion === 'success') return null; // proven already: it ships now
+      throw new HttpError(409, `Not handed off: the ${PROOF_WORKFLOW} run on ${head.slice(0, 7)} ended ${seen.conclusion ?? 'without a result'}; fix it and prove it again`);
+    }
+    return armFor(app, ticket, { when: 'proof', args, head }, PROOF_NOTE, `once the ${PROOF_WORKFLOW} run on \`${head.slice(0, 7)}\` goes green`);
+  }
   const { store, waiters } = app;
   let on: NonNullable<Armed['live']>;
   const n = /^#?(\d+)$/.exec(String(live).trim());
@@ -199,7 +223,10 @@ export async function triggerHandoff(app: App, ticket: Ticket, body: Record<stri
     on = { commit };
     if ((await waiters.liveState(ticket.id, on)) === 'go') return null;
   }
-  return armFor(app, ticket, { when: 'live', args, head, live: on }, liveNote(liveWhat(on)), `once ${liveWhat(on)} is live`);
+  const said = armFor(app, ticket, { when: 'live', args, head, live: on }, liveNote(liveWhat(on)), `once ${liveWhat(on)} is live`);
+  // A deploy or dismissal whose check ran while this one read git found nothing armed: look again now.
+  void waiters.check().catch((err) => console.error(`Checking #${ticket.number}'s armed hand-off failed:`, err));
+  return said;
 }
 
 /** The newest live check (each deploy and dismissal, LiveWaiters.armed): ship each hand-off armed on what is live now. How many fired. */
@@ -235,8 +262,10 @@ export async function fireLive(app: App): Promise<number> {
  * took the run, so CI health's own wake isn't sent.
  */
 export function fireProof(app: App, ticketId: number, run: Pick<Run, 'path' | 'name' | 'head_sha' | 'conclusion'>, text: string): boolean {
+  if (workflowFile(run as Run) !== PROOF_WORKFLOW) return false;
+  app.store.setSetting(proofKey(ticketId), { head: run.head_sha, conclusion: run.conclusion });
   const armed = app.store.getSetting<Armed>(armedKey(ticketId));
-  if (armed?.when !== 'proof' || workflowFile(run as Run) !== PROOF_WORKFLOW) return false;
+  if (armed?.when !== 'proof') return false;
   const short = armed.head.slice(0, 7);
   if (run.head_sha !== armed.head) {
     app.runner.emit(ticketId, 'note', { text: `${text}\n\n(It ran on \`${String(run.head_sha).slice(0, 7)}\`, not \`${short}\`, the commit your armed hand-off waits on, so it changes nothing there.)` });

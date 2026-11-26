@@ -82,3 +82,37 @@ export function machineSetupRunnerAgentLinux(url, token) {
   // overwritten, even by root (fs.protected_regular), and curl fails with "(23) Failure writing output".
   return `u='${u}'; f=$(mktemp) && curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f" && CC_MACHINE_TOKEN='${token}' bash "$f" "$u"`;
 }
+
+/** What a worker's self-test checks, in the order its row shows (public/worker-agent.mjs runs them, src/worker-join.ts keeps them). */
+export const WORKER_CHECKS = {
+  image: 'Image built and starts',
+  folders: 'Folders reach the container',
+  sync: 'Scratch repo there and back',
+  process: 'Process started and stopped',
+  link: 'Link to Citadel',
+  tools: 'Host tools',
+  disk: 'Your disk is out of reach',
+  programs: "Windows programs can't start",
+};
+
+/** A worker's caps before its owner sets any (the Build 7 spec's starting values), and what each can be: tools/worker's scripts hold the same. */
+export const WORKER_CAPS = { workers: 6, threads: 8, memory_gb: 24, disk_gb: 60 };
+export const WORKER_LIMITS = { workers: [1, 64], threads: [1, 1024], memory_gb: [2, 4096], disk_gb: [20, 99999] };
+
+/** The line that makes a Windows PC a minion worker (tools/worker/install-worker.ps1), for its owner's normal PowerShell. */
+export function machineSetupWorkerWindows(url, token, caps) {
+  const u = url.replace(/\/$/, '');
+  return `$u = '${u}'; $env:CC_MACHINE_TOKEN = '${token}'; iwr "$u/worker-setup/install-worker.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-worker.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-worker.ps1" -Url $u -Workers ${caps.workers} -Threads ${caps.threads} -MemoryGB ${caps.memory_gb} -DiskGB ${caps.disk_gb}; $env:CC_MACHINE_TOKEN = $null`;
+}
+
+/** The same for a Linux PC (tools/worker/install-worker.sh), in a bash terminal. */
+export function machineSetupWorkerLinux(url, token, caps) {
+  const u = url.replace(/\/$/, '');
+  return `u='${u}'; f=$(mktemp) && curl -fsSL "$u/worker-setup/install-worker.sh" -o "$f" && sudo CC_MACHINE_TOKEN='${token}' bash "$f" "$u" ${capFlags(caps)}`;
+}
+
+const capFlags = (caps) => `--workers ${caps.workers} --threads ${caps.threads} --memory ${caps.memory_gb} --disk ${caps.disk_gb}`;
+
+/** A `citadel-worker` command on the worker's own PC: its sign-ins and its caps. */
+export const workerCommand = (wsl, rest) => (wsl ? `wsl -d citadel-workers -u root --exec /usr/local/bin/citadel-worker ${rest}` : `sudo citadel-worker ${rest}`);
+export const workerCapsCommand = (wsl, caps) => workerCommand(wsl, `caps ${capFlags(caps)}`);

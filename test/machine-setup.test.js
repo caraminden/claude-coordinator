@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from '../public/machine-setup.js';
+import { machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows, machineSetupWorkerLinux, machineSetupWorkerWindows, workerCapsCommand, workerCommand } from '../public/machine-setup.js';
 import { backgroundService, claudeServerNames, cmdLine, loadConfig } from '../public/machine-agent.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'machine-setup-'));
@@ -195,4 +195,25 @@ test('a server started through cmd.exe on Windows gets each argument quoted, so 
   // An npm shim under node_modules\.bin hands its arguments to cmd a second time, so they are escaped twice.
   assert.equal(cmdLine('C:\\p\\node_modules\\.bin\\srv.cmd', ['a b']), 'C:\\p\\node_modules\\.bin\\srv.cmd ^^^"a^^^ b^^^"');
   assert.equal(cmdLine('srv', []), 'srv');
+});
+
+test("a worker's install line hands over the token without putting it on the script's command line, and its caps (Build 7 T5)", () => {
+  const caps = { workers: 3, threads: 4, memory_gb: 10, disk_gb: 80 };
+  const line = machineSetupWorkerLinux('https://a/', 'ccm_tok', caps);
+  // Run as pasted: curl hands over a script that says what it got, sudo only runs it.
+  const bin = mkdtempSync(join(root, 'worker-'));
+  writeFileSync(join(bin, 'curl'), `#!/bin/bash\necho 'echo "token=$CC_MACHINE_TOKEN args=$*"' > "\${!#}"; echo "got $2" >&2\n`);
+  writeFileSync(join(bin, 'sudo'), '#!/bin/bash\nexec env "$@"\n');
+  for (const f of ['curl', 'sudo']) chmodSync(join(bin, f), 0o755);
+  const ran = spawnSync('bash', ['-c', line], { env: { PATH: `${bin}:${process.env.PATH}`, TMPDIR: bin }, encoding: 'utf8' });
+  assert.equal(ran.stdout, 'token=ccm_tok args=https://a --workers 3 --threads 4 --memory 10 --disk 80\n', ran.stderr);
+  assert.match(ran.stderr, /got https:\/\/a\/worker-setup\/install-worker\.sh/);
+  const win = machineSetupWorkerWindows('https://a/', 'ccm_tok', caps);
+  assert.match(win, /-File "\$env:TEMP\\install-worker\.ps1" -Url \$u -Workers 3 -Threads 4 -MemoryGB 10 -DiskGB 80; \$env:CC_MACHINE_TOKEN = \$null$/);
+  assert.equal(win.match(/ccm_tok/g).length, 1, 'only in the variable it clears');
+  // Its parameters are the script's own.
+  const params = readFileSync(join(import.meta.dirname, '..', 'tools', 'worker', 'install-worker.ps1'), 'utf8');
+  for (const p of ['Url', 'Workers', 'Threads', 'MemoryGB', 'DiskGB']) assert.match(params, new RegExp(`\\]\\$${p}\\b`));
+  assert.equal(workerCommand(false, 'signin'), 'sudo citadel-worker signin');
+  assert.match(workerCapsCommand(true, caps), /^wsl -d citadel-workers -u root --exec \/usr\/local\/bin\/citadel-worker caps --workers 3 --threads 4 --memory 10 --disk 80$/);
 });

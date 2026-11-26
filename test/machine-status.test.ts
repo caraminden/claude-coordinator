@@ -46,6 +46,9 @@ const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
   ['never connected, added 2 days ago', { online: false, lastSeenAt: null }, 'down', 'Never connected', 'remove'],
   ['never connected, a laptop: still Down', { online: false, alwaysOn: false, lastSeenAt: null }, 'down', 'Never connected', 'remove'],
   ['never connected, added 10 min ago', { online: false, lastSeenAt: null, createdAt: now - 10 * min }, 'asleep', 'Not connected yet', null],
+  ['a minion worker alone, its agent never there', { workerHere: true, online: false, lastSeenAt: null, offers: [], check: null }, 'ready', 'Runs minion turns', null],
+  ["a minion worker on a laptop whose agent isn't there", { workerHere: true, online: false, alwaysOn: false, offers: [], check: null }, 'ready', 'Runs minion turns', null],
+  ['a minion worker, its always-on agent gone 6 min', { workerHere: true, online: false, lastSeenAt: now - 6 * min, offers: [], check: null }, 'down', 'Offline', 'always_on'],
   ['CI runner host offline 10 min', { online: false, runners: true, lastSeenAt: now - 10 * min }, 'down', 'Offline', 'always_on'],
 ];
 

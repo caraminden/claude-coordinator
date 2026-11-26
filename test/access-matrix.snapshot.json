@@ -1059,6 +1059,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/machines/:m/self-test": {
+  "anon": "401 Not logged in",
+  "person": "403 Only its owner can run its self-test",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/machines/:m/session": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion's turn can use a machine",
@@ -1280,6 +1290,56 @@
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
  "POST /api/machines/upload": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/worker": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "GET /api/machines/worker/blob": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/worker/blob": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "GET /api/machines/worker/scratch": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/worker/scratch": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
   "member": "401 Unknown machine token; make a new one in the Machines panel",

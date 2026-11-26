@@ -50,6 +50,7 @@ import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { MachinePools } from './src/machine-pools.ts';
 import { machineLink, workerInfo } from './src/machine-turn.ts';
+import { imageFile, WorkerJoin } from './src/worker-join.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { shipsOn, ShipWatch } from './src/ci-ships.ts';
@@ -720,15 +721,21 @@ const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), c
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
-machineLink.online = (id) => machines.isOnline(id);
+const serverClaude = () => new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0])));
+const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });
+machines.workers = workers;
+if (!BOOT_CHECK) every('worker rows', 1000, () => workers.tick());
+// A worker's link is its own sync: that computer's agent, if it has one, is another program.
+machineLink.online = (id) => workers.here(id);
 machineLink.poke = (id) => machines.pokeWorker(id);
 runner.pools = new MachinePools({
   store,
-  online: (id) => machines.isOnline(id),
+  online: (id) => workers.here(id),
   lends: (m) => machines.lendsWorker(m),
   info: workerInfo,
-  ships: (id) => machines.shipsThere(id),
-  claude: () => new Promise((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0]))),
+  ships: (id) => machines.shipsAtWorker(id),
+  hold: (id) => workers.hold(id),
+  claude: serverClaude,
   changed: () => runner.turnLine.pump(),
   now: Date.now,
 });
@@ -2252,10 +2259,18 @@ const RUNNER_FILES = new Set([
 ]);
 // The same for the Android emulator's distro on that desktop (#533): deploy/desktop/android/setup.sh and what it downloads.
 const ANDROID_FILES: Record<string, string> = { 'setup.sh': 'deploy/desktop/android/setup.sh', 'citadel-android': 'tools/citadel-android', 'install-sdk.sh': 'tools/android/install-sdk.sh' };
-const SETUP_PATH = /^\/(ci-runner|android-desktop)\//;
+// And a minion worker's on a person's own PC (Build 7 T5): its installers, and the build files of its image.
+const WORKER_FILES = new Set(['install-worker.ps1', 'install-worker.sh', 'citadel-worker']);
+const SETUP_PATH = /^\/(ci-runner|android-desktop|worker-setup|worker-image)\//;
 async function serveRunnerFile(res: ServerResponse, path: string) {
   const name = path.replace(SETUP_PATH, '');
-  const file = path.startsWith('/ci-runner/') ? RUNNER_FILES.has(name) && join('tools', 'ci-runner', name) : Object.hasOwn(ANDROID_FILES, name) && ANDROID_FILES[name];
+  const file = path.startsWith('/ci-runner/')
+    ? RUNNER_FILES.has(name) && join('tools', 'ci-runner', name)
+    : path.startsWith('/worker-setup/')
+      ? WORKER_FILES.has(name) && join('tools', 'worker', name)
+      : path.startsWith('/worker-image/')
+        ? await imageFile(name)
+        : Object.hasOwn(ANDROID_FILES, name) && ANDROID_FILES[name];
   if (!file) throw new HttpError(404, 'Not found');
   const body = await readFile(join(import.meta.dirname, file));
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': body.length });
@@ -2885,7 +2900,7 @@ if (MACHINES_URL) {
       try {
         const url = requestUrl(req);
         if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
-        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/machine-worker.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
+        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/machine-worker.mjs' || url.pathname === '/worker-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
         else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
         else throw new HttpError(404, 'Not found');
       } catch (err) {

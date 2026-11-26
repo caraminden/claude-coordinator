@@ -58,6 +58,8 @@ export interface MachinePoolsDeps {
   info: (machineId: number) => WorkerInfo | null;
   /** A ship's tests run on that computer. */
   ships: (machineId: number) => boolean;
+  /** Why its worker takes no turns now (src/worker-join.ts), or null. */
+  hold?: (machineId: number) => string | null;
   /** `claude --version` here. */
   claude: () => Promise<string | null>;
   /** A machine may take turns it couldn't a moment ago. */
@@ -96,13 +98,16 @@ export class MachinePools {
       if (now - (this.seen[key] ?? 0) >= SEEN_MS) this.d.store.setSetting(SEEN, (this.seen = { ...this.seen, [key]: now }));
       return null;
     }
-    const last = Math.max(this.seen[key] ?? 0, m.last_seen_at ?? 0, info?.at ?? 0);
+    // The PC's other agent keeps its row's last_seen_at moving: it dates a worker only until that worker has synced once.
+    const last = Math.max(this.seen[key] ?? 0, info?.at ?? 0) || (m.last_seen_at ?? 0);
     return last && now - Math.max(info?.at ?? 0, this.began) < BACK_SOON_MS ? null : last;
   }
 
   private block(m: Machine, info: WorkerInfo | null, away: number | null): Block | null {
     if (!this.d.online(m.id)) return away === null ? { why: 'reconnecting' } : away ? { why: `away since ${pacificStamp(away)}`, since: away } : { why: 'it has not connected yet' };
     if (!info) return { why: 'its agent has not said it can run turns' };
+    const hold = this.d.hold?.(m.id);
+    if (hold) return { why: hold };
     const home = this.homeClaude();
     if (!sameClaude(home, info.claude)) return { why: home ? `its Claude is ${info.claude ?? 'not known'}, and this server's is ${home}` : 'checking its Claude' };
     return this.d.ships(m.id) ? { why: "a ship's tests are running there" } : null;

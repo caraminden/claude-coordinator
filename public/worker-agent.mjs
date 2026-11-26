@@ -1,0 +1,464 @@
+#!/usr/bin/env node
+// A minion worker's own program (Build 7 T5), on Linux or in a Windows PC's citadel-workers distro. tools/worker/install-worker.sh
+// makes it a service there. It runs the worker that syncs and starts turns (machine-worker.mjs, downloaded from the app), keeps
+// that worker's image current (the app's build files, with the app's own claude version on top), holds the owner's caps from
+// config.json, and runs the self-test the owner asks for on the Machines page. It is apart from machine-agent.mjs, and opens no
+// connection of its own, because that computer's agent holds the machine's one connection.
+//   node worker-agent.mjs <app url> <config.json>
+import { randomBytes } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
+import { dirname, isAbsolute, join, normalize } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+
+const REPORT_MS = 2_000;
+const DISK_MS = 5 * 60_000;
+const SIGN_IN_MS = 10_000;
+/** A failed image build is tried again after this long. */
+const BUILD_AGAIN_MS = 10 * 60_000;
+const BUILD_MS = 60 * 60_000;
+const IMAGE = 'localhost/citadel-worker';
+/** Before there is an image: never run, so podman doesn't go looking for it. */
+const NO_IMAGE = `${IMAGE}:none`;
+/** Exit status the service takes as "don't start me again" (RestartPreventExitStatus): a newer install has this machine's token. */
+const REPLACED = 64;
+/** Where the self-test's folders show inside its container. */
+const TEST_ROOT = '/citadel-self-test';
+
+/** @param {string} cmd @param {string[]} args @param {number} [timeout] @returns {Promise<{ code: number, out: string, err: string }>} */
+const run = (cmd, args, timeout = 60_000) => new Promise((done) => execFile(cmd, args, { timeout, maxBuffer: 8 << 20 }, (err, out, stderr) => done({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(stderr || err?.message || '') })));
+const lastLine = (/** @type {string} */ s) => s.trim().split('\n').pop()?.slice(0, 300) ?? '';
+
+/** The owner's config, checked; throws with what is wrong. @param {unknown} raw */
+export function agentConfig(raw) {
+  const c = /** @type {Record<string, unknown>} */ (raw ?? {});
+  const num = (/** @type {string} */ k, /** @type {number} */ max) => {
+    const n = Number(c[k]);
+    if (!Number.isFinite(n) || n < 1 || n > max) throw new Error(`${k} must be a number from 1 to ${max}`);
+    return Math.floor(n);
+  };
+  if (typeof c.root !== 'string' || !isAbsolute(c.root)) throw new Error('root must be a full path');
+  return {
+    root: c.root,
+    /** An image of the owner's own in place of Citadel's; they keep it current. */
+    image: typeof c.image === 'string' && c.image ? c.image : null,
+    podman: typeof c.podman === 'string' ? c.podman : 'podman',
+    caps: { workers: num('workers', 64), threads: num('threads', 1024), memory_gb: num('memory_gb', 4096), disk_gb: num('disk_gb', 100_000) },
+  };
+}
+
+export class WorkerAgent {
+  /** @param {{ config: unknown, appUrl: string, token: string, Worker: typeof import('./machine-worker.mjs').Worker, installed?: number, log?: (...a: unknown[]) => void, run?: typeof run, exit?: (code: number) => void }} o */
+  constructor(o) {
+    this.cfg = agentConfig(o.config);
+    this.appUrl = o.appUrl;
+    this.token = o.token;
+    this.Worker = o.Worker;
+    this.log = o.log ?? (() => {});
+    this.exec = o.run ?? run;
+    /** @type {typeof run} */
+    this.podman = (cmd, args, timeout) => (args.includes(NO_IMAGE) ? Promise.resolve({ code: 1, out: '', err: 'no image yet' }) : this.exec(cmd, args, timeout));
+    this.exit = o.exit ?? ((code) => process.exit(code));
+    this.boot = randomBytes(8).toString('hex');
+    this.installed = o.installed ?? 0;
+    /** Another program spoke for this machine a moment ago: it ends its turns first. */
+    this.wait = true;
+    // WSL2 says so in its kernel's name; the app then shows PowerShell commands.
+    this.wsl = /microsoft/i.test(safeRead('/proc/sys/kernel/osrelease'));
+    // No image yet: its claude is unknown, so the app places nothing here until it is.
+    this.worker = this.newWorker('citadel-worker', this.cfg.root, this.cfg.image ?? NO_IMAGE);
+    this.worker.cfg.max = 0;
+    /** @type {{ state: string, text: string } | null} */
+    this.image = this.cfg.image ? { state: 'own', text: this.cfg.image } : null;
+    this.building = false;
+    this.builtAt = 0;
+    /** @type {boolean | null} */
+    this.github = null;
+    /** @type {number | null} */
+    this.disk = null;
+    this.at = { disk: 0, signIn: 0, worker: 0 };
+    /** The agent code's hash as the app first gave it. @type {string | null} */
+    this.code = null;
+    /** @type {{ id: string, done: boolean, lines: { key: string, state: string, text: string }[] } | null} */
+    this.test = null;
+  }
+
+  /** @param {string} container @param {string} root @param {string} image */
+  newWorker(container, root, image) {
+    // No link of the agent's here: a start, steer or stop reaches it at its next sync (SYNC_MS, half a second). Machines.pokeWorker
+    // writes to the PC's other agent's stream, if it has one, whose worker is null without a worker block.
+    const w = new this.Worker({ config: { root, image, container, podman: this.cfg.podman, max: this.cfg.caps.workers, node: 'node', claude: 'claude' }, appUrl: this.appUrl, token: this.token, log: this.log, run: this.podman });
+    const call = w.call.bind(w);
+    // Its syncs say they are this program's: another worker with this token (an agent's worker block) is refused.
+    w.call = (path, init = {}) => call(path, { ...init, headers: { ...init.headers, 'X-Citadel-Worker': this.boot } });
+    return w;
+  }
+
+  async start() {
+    await this.worker.start();
+    this.fit();
+    this.log(`Minion turns: up to ${this.cfg.caps.workers} at once, in ${this.cfg.root}`);
+    for (;;) {
+      await this.report().catch((err) => this.quiet(`Could not reach the app (${err.message})`));
+      if (this.stopped) return;
+      await sleep(REPORT_MS);
+    }
+  }
+
+  stop() {
+    this.stopped = true;
+    this.worker.stop();
+  }
+
+  /** Log a trouble once until it changes. @param {string} text */
+  quiet(text) {
+    if (text !== this.said) this.log((this.said = text));
+  }
+
+  /** @param {string} path @param {RequestInit} [init] */
+  call(path, init = {}) {
+    return fetch(new URL(path, this.appUrl), { ...init, headers: { Authorization: `Bearer ${this.token}`, ...init.headers }, signal: init.signal ?? AbortSignal.timeout(30_000) });
+  }
+
+  /** @param {string} path @param {RequestInit} [init] */
+  async json(path, init) {
+    const res = await this.call(path, init);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.error ?? `it answered ${res.status}`);
+    return body;
+  }
+
+  full() {
+    return this.disk !== null && this.disk >= this.cfg.caps.disk_gb;
+  }
+
+  /** The owner's most workers, or none while there is no image, it has only just taken this machine over or the disk cap is reached: turns that run go on. */
+  fit() {
+    this.worker.cfg.max = this.wait || this.full() || !(this.image?.state === 'own' || this.image?.state === 'ready') ? 0 : this.cfg.caps.workers;
+  }
+
+  /** Tell the app how this worker stands, and do what it answers. */
+  async report() {
+    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test };
+    const reply = await this.json('/api/machines/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    this.said = null;
+    if (!this.code && !reply.replaced) this.log(`Connected to ${this.appUrl} as ${hostname()}`);
+    if (reply.replaced) {
+      this.log('Another worker has this machine: this one stops, and its turns with it. (Run the install command here again to move it back.)');
+      this.stop();
+      // The other one is handed these turns: they must not run on both.
+      await this.exec(this.cfg.podman, ['rm', '-f', '-t', '0', 'citadel-worker']);
+      this.worker.turns.clear();
+      this.worker.save();
+      return this.exit(REPLACED);
+    }
+    this.wait = reply.wait === true;
+    this.fit();
+    // Newer code at the app: the service starts this again, on it. Turns run on in the container, but a restart can wait for them.
+    this.code ??= reply.agent;
+    if (reply.agent !== this.code && !this.worker.turns.size && !this.building && !this.testing) {
+      this.log('The app has newer worker code: starting again on it.');
+      this.stop();
+      return this.exit(0);
+    }
+    // Ships go first: a build would slow the tests a ship is waiting on.
+    if (reply.ships && !this.building && !this.image) this.image = { state: 'building', text: "Waiting for a ship's tests on this PC to end." };
+    else if (reply.claude && reply.image && !reply.ships) void this.keepImage(String(reply.claude).split(' ')[0], reply.image);
+    void this.keepFacts();
+    if (reply.test && reply.test !== this.test?.id && !this.testing) void this.selfTest(reply.test);
+    else if (!reply.test && this.test?.done) this.test = null;
+  }
+
+  /** The disk it uses and which sign-ins are there. */
+  async keepFacts() {
+    const now = Date.now();
+    if (now - this.at.disk >= DISK_MS) {
+      this.at.disk = now;
+      // Inside podman's user namespace: an image's files belong to ids only that can read.
+      const du = await this.exec('nice', ['-n', '19', this.cfg.podman, 'unshare', 'du', '-skxc', this.cfg.root, join(homedir(), '.local/share/containers')], 10 * 60_000);
+      const kb = Number(du.out.trim().split('\n').pop()?.split('\t')[0]);
+      this.disk = Number.isFinite(kb) && kb > 0 ? Math.round(kb / 104858) / 10 : this.disk;
+      this.fit();
+      if (this.full()) this.quiet(`Disk cap reached (${this.disk} of ${this.cfg.caps.disk_gb} GB): no turn starts here.`);
+    }
+    if (now - this.at.signIn >= SIGN_IN_MS) {
+      this.at.signIn = now;
+      const vol = await this.exec(this.cfg.podman, ['volume', 'inspect', '--format', '{{.Mountpoint}}', 'citadel-worker-home']);
+      const has = (/** @type {string} */ file) => (vol.code ? (/no such volume/i.test(vol.err) ? false : null) : thereIn(vol.out.trim(), file));
+      this.github = has('.config/gh/hosts.yml');
+      // The worker looks for itself every few minutes; a sign-in just made there shows at once.
+      const claude = has('.claude/.credentials.json');
+      if (claude !== null && this.worker.signedIn.now !== claude) await this.worker.checkSignIn();
+    }
+  }
+
+  /** Have the image the app's build files and claude make, and use it. @param {string} claude @param {{ hash: string, files: string[] }} want */
+  async keepImage(claude, want) {
+    if (this.cfg.image) {
+      if (Date.now() - this.at.worker >= DISK_MS) {
+        this.at.worker = Date.now();
+        await this.worker.version(['run', '--rm', this.cfg.image]);
+      }
+      return;
+    }
+    if (!/^[\w.-]{1,40}$/.test(claude) || !/^[0-9a-f]{6,64}$/.test(want.hash)) return;
+    const tag = `${IMAGE}:${want.hash}-${claude}`;
+    if (this.building || (this.worker.cfg.image === tag && this.image?.state === 'ready')) return;
+    if (this.image?.state === 'failed' && Date.now() - this.builtAt < BUILD_AGAIN_MS) return;
+    this.building = true;
+    this.builtAt = Date.now();
+    try {
+      if ((await this.exec(this.cfg.podman, ['image', 'exists', tag])).code) await this.build(tag, claude, want);
+      const there = await this.exec(this.cfg.podman, ['container', 'inspect', '--format', '{{.ImageName}}', 'citadel-worker']);
+      const from = there.code ? '' : there.out.trim();
+      // Running turns keep the container they are in, and a turn started now would join them there: none is (fit), and the new image takes over when they end.
+      // With no container (a reboot), the turns' next checkpoint makes one from the new image.
+      if (this.worker.cfg.image !== tag && this.worker.turns.size && from && from !== tag) {
+        if (this.worker.cfg.image === NO_IMAGE) this.worker.cfg.image = from;
+        this.image = { state: 'building', text: 'Its new image is ready, and takes over when the turns running there end.' };
+        return;
+      }
+      this.worker.cfg.image = tag;
+      await this.worker.version(['run', '--rm', tag]);
+      if (!this.worker.claude) throw new Error('claude does not start in the image it built');
+      this.image = { state: 'ready', text: `claude ${claude}` };
+      // What `citadel-worker signin` runs.
+      writeFileSync(join(this.cfg.root, 'image-tag'), tag);
+      this.log(`Image ready: ${tag}`);
+      void this.prune(tag);
+    } catch (err) {
+      this.image = { state: 'failed', text: err.message.slice(0, 300) };
+      this.log(`The image could not be built: ${err.message}`);
+    } finally {
+      this.building = false;
+      this.fit();
+    }
+  }
+
+  /** @param {string} tag @param {string} claude @param {{ hash: string, files: string[] }} want */
+  async build(tag, claude, want) {
+    const { podman, root } = this.cfg;
+    const dir = join(root, 'image');
+    const base = `${IMAGE}-base:${want.hash}`;
+    const step = async (/** @type {string} */ text, /** @type {string[]} */ args) => {
+      this.image = { state: 'building', text };
+      this.log(text);
+      const r = await this.exec('nice', ['-n', '19', podman, 'build', ...args], BUILD_MS);
+      if (r.code) throw new Error(lastLine(r.err) || lastLine(r.out) || `podman build ended with ${r.code}`);
+    };
+    if ((await this.exec(podman, ['image', 'exists', base])).code) {
+      rmSync(dir, { recursive: true, force: true });
+      for (const f of want.files) {
+        const to = join(dir, f);
+        // Names come from the app; one that leaves the folder is never written.
+        if (normalize(f) !== f || isAbsolute(f) || f.startsWith('..')) throw new Error('the app named a build file outside its folder');
+        const res = await this.call(`/worker-image/${f}`);
+        if (!res.ok) throw new Error(`could not download ${f} (${res.status})`);
+        mkdirSync(dirname(to), { recursive: true });
+        writeFileSync(to, Buffer.from(await res.arrayBuffer()));
+      }
+      await step('Building its image (1 of 2): the tools turns use. The first build takes about 5 minutes.', ['-t', base, dir]);
+    }
+    const top = join(root, 'image-claude');
+    mkdirSync(top, { recursive: true });
+    writeFileSync(join(top, 'Containerfile'), `FROM ${base}\nRUN npm install -g --no-audit --no-fund @anthropic-ai/claude-code@${claude} && npm cache clean --force\n`);
+    await step(`Building its image (2 of 2): claude ${claude}`, ['-t', tag, top]);
+  }
+
+  /** Earlier images, but one a container still uses (podman refuses those). @param {string} tag */
+  async prune(tag) {
+    const { podman } = this.cfg;
+    const all = (await this.exec(podman, ['images', '--format', '{{.Repository}}:{{.Tag}}'])).out.split('\n').filter((t) => t.startsWith(`${IMAGE}:`) || t.startsWith(`${IMAGE}-base:`));
+    const base = `${IMAGE}-base:${tag.split(':')[1].split('-')[0]}`;
+    for (const old of all.filter((t) => t !== tag && t !== base)) await this.exec(podman, ['rmi', old]);
+    await this.exec(podman, ['image', 'prune', '-f']);
+  }
+
+  /**
+   * The self-test, in a container and folders of its own so no running turn feels it; each check is told as it ends.
+   * @param {string} id
+   */
+  async selfTest(id) {
+    this.testing = true;
+    /** @type {NonNullable<WorkerAgent['test']>} */
+    const test = (this.test = { id, done: false, lines: [] });
+    const root = join(this.cfg.root, 'self-test');
+    const container = 'citadel-worker-selftest';
+    const { podman } = this.cfg;
+    const line = (/** @type {string} */ key, /** @type {string} */ state, /** @type {string} */ text) => {
+      const has = test.lines.find((l) => l.key === key);
+      if (has) Object.assign(has, { state, text });
+      else test.lines.push({ key, state, text });
+    };
+    /** One check: its text when it passes; what it throws says why it didn't. @param {string} key @param {() => Promise<string>} what */
+    const check = async (key, what) => {
+      line(key, 'running', '');
+      try {
+        line(key, 'ok', await what());
+        return true;
+      } catch (err) {
+        line(key, 'fail', err.message.slice(0, 300));
+        return false;
+      }
+    };
+    const inside = (/** @type {string} */ sh, timeout = 60_000) => this.exec(podman, ['exec', container, 'sh', '-c', sh], timeout);
+    try {
+      line('image', 'running', 'Waiting for the image');
+      while (this.building) await sleep(500);
+      if (this.image?.state === 'failed') throw new Error(`its image is not built: ${this.image.text}`);
+      const w = this.newWorker(container, root, this.worker.cfg.image);
+      // It has this machine's token, and would be handed its turns.
+      w.poke = () => {};
+      // Left by a test cut short: its container would stand in for this one's.
+      await this.exec(podman, ['rm', '-f', '-t', '0', container]);
+      line('image', 'running', 'Starting a container from it');
+      const said = await w.selfTest({ wrapper: [], cwd: null, home: '/home/worker', roots: [TEST_ROOT] });
+      const of = (/** @type {string} */ name) => said.find((l) => l.name === name);
+      const image = of('container');
+      line('image', image?.ok ? 'ok' : 'fail', image?.ok ? `claude ${w.claude ?? 'not found'}` : (image?.text ?? 'it said nothing'));
+      if (!image?.ok) throw new Error('not tried: the container did not start');
+      await check('folders', async () => {
+        const l = of('folders');
+        if (!l?.ok) throw new Error(l?.text ?? 'it said nothing');
+        const mount = (await this.exec('findmnt', ['-no', 'PROPAGATION', '/'])).out.trim();
+        if (!mount.startsWith('shared')) throw new Error(`/ is mounted ${mount || 'unknown'}, not shared, so folders added later would not reach the container: run the install command again`);
+        return 'A file made on either side shows on the other';
+      });
+      line('disk', of('no host disk')?.ok ? 'ok' : 'fail', of('no host disk')?.text ?? 'it said nothing');
+      await check('programs', async () => {
+        const l = of('no Windows programs');
+        if (!l?.ok) throw new Error(l?.text ?? 'it said nothing');
+        if (!this.wsl) return l.text;
+        // With its drives off there is no Windows program here to try, so this reads what turns them off, and looks for a way round it.
+        if (!interopOff(safeRead('/etc/wsl.conf'))) throw new Error('Windows programs are not switched off in /etc/wsl.conf: run the install command again');
+        if ((await inside('test -e /run/WSL')).code === 0) throw new Error("the container can reach WSL's own sockets (/run/WSL)");
+        return 'Windows drives and programs are off in this distro';
+      });
+      const there = w.local(join(TEST_ROOT, 'scratch'));
+      const synced = await check('sync', async () => {
+        const began = performance.now();
+        const { bundle } = await this.json('/api/machines/worker/scratch');
+        mkdirSync(there, { recursive: true });
+        writeFileSync(join(there, 'in.bundle'), Buffer.from(bundle, 'base64'));
+        const git = await inside(`cd ${TEST_ROOT}/scratch && git clone -q -b scratch in.bundle repo && cd repo && printf '%s back' "$(cat nonce)" > answer && git add answer && git -c user.name=worker -c user.email=worker@localhost commit -q -m answer && git bundle create -q ../out.bundle scratch`);
+        if (git.code) throw new Error(`git there: ${lastLine(git.err) || `exit ${git.code}`}`);
+        const back = await this.json('/api/machines/worker/scratch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bundle: readFileSync(join(there, 'out.bundle')).toString('base64') }) });
+        if (!back.ok) throw new Error(back.why);
+        return `${((performance.now() - began) / 1000).toFixed(1)} s`;
+      });
+      await check('process', async () => {
+        const began = performance.now();
+        const file = join(TEST_ROOT, 'pid');
+        const r = await this.exec(podman, ['exec', '-d', container, 'sh', '-c', `echo $$ > ${file}; exec sleep 300`]);
+        if (r.code) throw new Error(`it did not start: ${lastLine(r.err)}`);
+        const pid = await until(() => Number(safeRead(w.local(file))) || 0);
+        if (!pid) throw new Error('it did not start');
+        if ((await inside(`kill -0 ${pid} && kill ${pid}`)).code) throw new Error('it was not running a moment after it started');
+        if (!(await until(async () => (await inside(`kill -0 ${pid}`)).code !== 0))) throw new Error('it did not stop');
+        return `${((performance.now() - began) / 1000).toFixed(1)} s`;
+      });
+      await check('link', () => this.link());
+      await check('tools', async () => {
+        if (!synced) throw new Error('not tried: the scratch repo did not arrive');
+        const r = await inside(`cd ${TEST_ROOT}/scratch/repo && node tools/host-tools.ts check`);
+        if (r.code) throw new Error(r.out.trim().split('\n').join('; ').slice(0, 300) || lastLine(r.err));
+        return lastLine(r.out);
+      });
+    } catch (err) {
+      // What stopped it is the first check's failure; the rest were never reached.
+      if (!test.lines.some((l) => l.state === 'fail')) line('image', 'fail', err.message);
+      for (const key of ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs']) {
+        const l = test.lines.find((t) => t.key === key);
+        if (!l || l.state === 'running') line(key, 'fail', 'Not tried: the check before it failed');
+      }
+    } finally {
+      await this.exec(podman, ['rm', '-f', '-t', '0', container]);
+      await this.exec(podman, ['volume', 'rm', '-f', `${container}-home`]);
+      rmSync(root, { recursive: true, force: true });
+      test.done = true;
+      this.testing = false;
+      this.log(`Self-test: ${test.lines.map((l) => `${l.key} ${l.state}`).join(', ')}`);
+    }
+  }
+
+  /** The link to the app, measured: a small round trip, and 16 MB each way. */
+  async link() {
+    const trips = [];
+    for (let i = 0; i < 6; i++) {
+      const began = performance.now();
+      const res = await this.call('/api/machines/worker/blob?bytes=0');
+      await res.arrayBuffer();
+      if (!res.ok) throw new Error(`the app answered ${res.status}`);
+      trips.push(performance.now() - began);
+    }
+    // The first opened the connection; the middle of the rest is the link.
+    const ms = trips.slice(1).sort((a, b) => a - b)[2];
+    const bytes = 16 * 1024 * 1024;
+    const mbit = (/** @type {number} */ began) => Math.round((bytes * 8) / 1000 / Math.max(1, performance.now() - began));
+    let began = performance.now();
+    const down = await this.call(`/api/machines/worker/blob?bytes=${bytes}`, { signal: AbortSignal.timeout(300_000) });
+    if (!down.ok || (await down.arrayBuffer()).byteLength !== bytes) throw new Error('the download did not arrive whole');
+    const speed = mbit(began);
+    began = performance.now();
+    const up = await this.json('/api/machines/worker/blob', { method: 'POST', body: Buffer.alloc(bytes), signal: AbortSignal.timeout(300_000) });
+    if (up.bytes !== bytes) throw new Error('the upload did not arrive whole');
+    return `${speed} Mbit/s down, ${mbit(began)} up, ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+  }
+}
+
+/** What `what` gives once it is truthy, within 10 s; else its last answer. @template T @param {() => T | Promise<T>} what */
+async function until(what) {
+  const end = Date.now() + 10_000;
+  for (;;) {
+    const got = await what();
+    if (got || Date.now() > end) return got;
+    await sleep(100);
+  }
+}
+
+/** Whether a wsl.conf turns Windows programs off. @param {string} conf */
+export function interopOff(conf) {
+  const part = conf.split(/^\s*\[/m).find((p) => /^interop\s*\]/i.test(p)) ?? '';
+  return /^\s*enabled\s*=\s*"?false\b/im.test(part);
+}
+
+/** @param {string} file */
+function safeRead(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/** Whether a folder holds a file with something in it; null when that can't be told. Never what is in it. @param {string} dir @param {string} file */
+function thereIn(dir, file) {
+  try {
+    return statSync(join(dir, file)).size > 0;
+  } catch (err) {
+    return err.code === 'ENOENT' ? (existsSync(dir) ? false : null) : null;
+  }
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [appUrl, file] = process.argv.slice(2);
+  const log = (/** @type {unknown[]} */ ...a) => console.log(...a);
+  try {
+    if (!appUrl || !file) throw new Error('usage: node worker-agent.mjs <app url> <config.json>');
+    const config = JSON.parse(readFileSync(file, 'utf8'));
+    const token = readFileSync(join(dirname(file), 'machine-token'), 'utf8').trim();
+    // The sync's code, taken again at each start so it never falls behind the app's side; the copy here serves when the app can't be reached.
+    const to = join(dirname(fileURLToPath(import.meta.url)), 'machine-worker.mjs');
+    const res = await fetch(new URL('/machine-worker.mjs', appUrl), { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    if (res?.ok) writeFileSync(to, await res.text());
+    else if (!existsSync(to)) throw new Error(`could not download machine-worker.mjs (${res?.status ?? 'no answer'})`);
+    const { Worker } = await import('./machine-worker.mjs');
+    const installed = Number(safeRead(join(dirname(file), 'installed'))) || 0;
+    await new WorkerAgent({ config, appUrl, token, installed, Worker, log }).start();
+  } catch (err) {
+    log(`This worker can't start: ${err.message}`);
+    process.exit(1);
+  }
+}

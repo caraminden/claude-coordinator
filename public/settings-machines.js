@@ -2,6 +2,7 @@
 import { account, ago, api, h, icon, view } from './base.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { machineJobsSection } from './jobs.js';
+import { forgetWorkerLink, workerReason, workerSection, workerWord } from './machine-worker-row.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -17,7 +18,7 @@ export function onMachinesUpdate(machines) {
 
 /** A machine's status line as the server words it (#437): "Asleep · seen 3h ago". */
 function machineStatusText(m) {
-  const reason = `${m.reason}${m.lend?.gpu_off ? ' · GPU jobs off' : ''}${m.screen ? ` · screen ${m.screen.holder ? 'busy' : 'free'}${m.screen.line.length ? `, ${m.screen.line.length} waiting` : ''}` : ''}`;
+  const reason = `${workerReason(m)}${m.lend?.gpu_off ? ' · GPU jobs off' : ''}${m.screen ? ` · screen ${m.screen.holder ? 'busy' : 'free'}${m.screen.line.length ? `, ${m.screen.line.length} waiting` : ''}` : ''}`;
   if (!m.when) return reason;
   return `${reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
 }
@@ -272,7 +273,13 @@ function renderMachineList() {
   const ours = view.machines.filter(oursHere);
   const others = view.machines.filter((m) => !m.runners && !ours.includes(m));
   const group = (title, list) => (list.length ? [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...list.map(machineLine))] : []);
+  // A field someone is typing in keeps its place over a redraw.
+  const at = el.contains(document.activeElement) && document.activeElement.id ? document.activeElement : null;
   el.replaceChildren(...group(`${scheme}'s minions get`, ours), ...group(ours.length ? 'Other machines' : 'Machines', others), ...group('CI runners', runners), view.machines.length ? '' : h('p', { class: 'muted small' }, 'No machines yet.'));
+  const back = at && document.getElementById(at.id);
+  if (!back || back === document.activeElement) return;
+  back.focus({ preventScroll: true });
+  if (at.selectionStart != null) back.setSelectionRange(at.selectionStart, at.selectionEnd);
 }
 
 /** Make a new token for a machine and show its install line. */
@@ -281,7 +288,7 @@ async function newMachineToken(m) {
   const old = !m.runners && m.managed !== true && !m.lend;
   if (
     !confirm(
-      `Make a new token for ${m.name}? Its current connection stops and it has to be installed again with the new line.${
+      `Make a new token for ${m.name}? Its current connection stops and it has to be installed again with the new line.${m.worker?.host ? ' Its minion worker stops too: run that command again as well (its row shows it).' : ''}${
         old ? '\n\nAfter that, what it lends is ticked here, from the MCP servers in that computer\'s Claude Code config and its machine-agent.json. If it runs a server from a command of its own, put that under "servers" in machine-agent.json there first.' : ''
       }`,
     )
@@ -290,6 +297,7 @@ async function newMachineToken(m) {
   const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
   if (!token) return;
   shownTokens.delete(m.id); // the old one stopped working
+  forgetWorkerLink(m.id);
   view.machineToken = setupFor(machine, token, agent_url);
   renderMachineSetup();
   document.getElementById('machine-setup')?.scrollIntoView({ block: 'nearest' });
@@ -454,7 +462,7 @@ function machineLends(m) {
       gpuSwitch(
         m.lend,
         m.workspace_tools ? workspaces : [],
-        (off) => ({ server: null, workspaces: [], before_ticks: true, ...(off ? { gpu_off: true } : {}) }),
+        (off) => ({ server: null, workspaces: [], before_ticks: true, ...(m.lend?.worker ? { worker: true } : {}), ...(off ? { gpu_off: true } : {}) }),
         (next) => patchMachine(m, { lend: next }, `switch GPU jobs for ${m.name}`, renderMachineList),
       ),
       h('p', { class: 'muted small' }, 'Set up before ticks: it lends what its own command line says. ', h('button', { type: 'button', class: 'link', onclick: () => newMachineToken(m) }, 'Reinstall to manage from here'), '.'),
@@ -526,10 +534,11 @@ function machineLine(m) {
     view.machineOpen.add(m.id);
     renderMachineList();
   };
-  const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
+  const [workWord, workHue] = workerWord(m) ?? [];
+  const word = workWord ?? { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
   const fix = fixButton(m, open);
-  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
+  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
   if (fix) sum.after(h('span', { class: 'machine-fix' }, fix));
   row.classList.add('machine-row', 'machine-line', m.status);
@@ -560,9 +569,10 @@ function machineBody(m) {
       m.runners ? kv('Runs CI for', m.owner_id === null && !m.scoped ? 'Every scheme an admin owns' : machineLending(m)) : kv('Who gets it', m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`), machineLending(m)),
       kv(
         'Computer',
-        h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
+        h('span', {}, [m.host ?? m.worker?.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : m.worker?.host ? 'runs only minion turns' : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on')),
       ),
+      m.worker ? h('div', { class: 'machine-wide' }, workerSection(m, renderMachineList)) : [],
       m.screen ? kv('Screen', machineScreen(m.screen)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : [],

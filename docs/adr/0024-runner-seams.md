@@ -172,3 +172,17 @@ no `podman exec`, no `/proc`. Five places asking "which kind" would become five 
 - A tool that reads the worktree here waits for a checkpoint in one place: `turnCall` in `src/routes/machines.ts`, by the
   path list in `readsDisk`: 'must' is refused without one, 'may' goes on. A new tool that reads a minion's files by path goes in it.
 - Not moved: ignored files, untracked keys and `.env` files, git repos inside the worktree, LFS contents, empty folders.
+
+## T5 (#2006): a worker of its own
+
+- A worker machine set up by the install command runs `public/worker-agent.mjs`, a program apart from the PC's machine agent,
+  as its own user (Linux) or in its own WSL distro (Windows). It has no link of the agent's: a start, steer or stop reaches it
+  at its next sync, every `SYNC_MS` (half a second). `Machines.pokeWorker` writes only to the agent's stream.
+- Away: a worker whose last sync is `HERE_MS` (10 s, `src/worker-join.ts`) old is away, a third of `BEAT_STALE_MS` (30 s), so
+  a machine is away well before its turns' beats go stale. `MachinePools.away()` dates it by the worker's own syncs once it has
+  synced; the row's `last_seen_at`, which the PC's other agent keeps moving, only before that.
+- One worker a machine, decided in `WorkerJoin.refuses`: while the program is here, a sync with the token that isn't its own
+  (an agent's `worker` block) is refused with a 409 that says to take the block out, and the row says "Two workers". Of two
+  programs with one token, the newest install has it (`installed`, kept over restarts); the older one ends its turns and stops.
+- No turn starts there until its self-test has passed, nor while the last one failed, its image is being built or its disk
+  cap is reached (`WorkerJoin.hold`, read by `MachinePools`).

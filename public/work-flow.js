@@ -1,7 +1,7 @@
 // The Releases page's Flow tab (#1989; Josh, 2026-11-25, "Flow A: A river with the leaks drawn in"): every minion started in a
 // range, from its kind, through how it got to main, to how it ended, by count or dollars. A click on any part lists its
 // minions, costliest first, and draws their way through the river. src/work-flow.ts decides each one's path and ending.
-import { api, h, icon } from './base.js';
+import { api, h, icon, todayPacific as today } from './base.js';
 import { COLS, dayBefore, layout, money, nodesOf, ribbon, rows, value } from './flowmath.js';
 import { emptyCard, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
@@ -29,7 +29,6 @@ const put = (el, props) => {
   for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
   return el;
 };
-const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(Date.now());
 const dayWords = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 // ---------- what is asked for ----------

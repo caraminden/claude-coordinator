@@ -9,7 +9,10 @@ const hex = () => Math.random().toString(16).slice(2, 14).padEnd(12, '0');
 export const flowSeed: { about: string; seed: (c: SeedCtx) => string } = {
   about: "the Releases page's Flow tab (#1989): a scheme with 120 minions over two weeks, of every kind, way to main and ending, with refused ships, closing notes, words why and costs",
   seed(c) {
-    const scheme = c.store.createProject('River Works', null);
+    const taken = new Set(c.store.listProjects().map((p) => p.name));
+    let n = 1;
+    while (taken.has(n === 1 ? 'River Works' : `River Works ${n}`)) n++;
+    const scheme = c.store.createProject(n === 1 ? 'River Works' : `River Works ${n}`, null);
     const repo = join(c.dataDir, `river-works-${scheme.id}`);
     mkdirSync(repo);
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });

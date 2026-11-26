@@ -41,7 +41,8 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       first: !!w.first,
       warm: w.heat === 0,
       fresh: w.heat === 2,
-      quick: !!w.quick,
+      // A turn marked for a machine never takes the quick lane (TurnLine.wait), so its row does not offer it.
+      quick: !!w.quick && !runner.turnLine.waitsForMachine(w.ticket),
       // Behind those with no computer of their own connected.
       after: !!w.own && ordered.some((x) => !x.own && !runner.turnLine.waitsForMachine(x.ticket)),
     })),

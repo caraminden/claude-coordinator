@@ -23,7 +23,7 @@
 #    its bisect get the same run (#1479: train_guards, train_bisect).
 # 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it
 #    (.github/workflows/tests.yml) and this waits for that run; when CI can't answer it says CI FALLBACK and runs
-#    the suite here (tools/run-tests.sh), but only once perigee is quiet (#1254: quiet() below), in citadel-heavy's
+#    the suite here (tools/run-tests.sh), but only once perigee is quiet (#1254: quiet(), tools/land/ci.sh), in citadel-heavy's
 #    slot at nice 19 and half concurrency. See "The gate" below. It waits for that slot only when quiet() saw it
 #    free: an hour's wait on a slot other schemes' builds held, while holding the lock, starved every landing (#499).
 # 3. Fast-forwards main in the scheme repo to the branch.
@@ -303,12 +303,6 @@ lost_title() { # <git log's range...>: what it reads, instead of everything from
   [ $# -gt 0 ] || set -- "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)"
   [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$@" 2>&1)
 }
-# <test file>...: what CI refused this ship for; its next hand-off's smoke check runs them too (#1899).
-pulled_out() {
-  [ $# -gt 0 ] && mkdir -p "$state/pulled" || return 0
-  find "$state/pulled" -type f -mtime +14 -delete 2>/dev/null || true # a branch that never came back
-  printf '%s\n' "$@" >"$state/pulled/${branch//\//-}"
-}
 formatted=''; [ -n "$resumed" ] || [ "$mode" = build ] || [ ! -x tools/fmt ] || [ ! -f "$tools/ship-format.sh" ] || { . "$tools/ship-format.sh"; format_ship; } # the ship's own files, in a commit of their own (#1885)
 [ -n "$resumed" ] || [ "$mode" = into ] || [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 quiet=$resumed
@@ -356,120 +350,7 @@ train_reporter() {
   [ -n "${COORDINATOR_API:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] && [ -n "${COORDINATOR_TICKET:-}" ] || return 0
   (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
 }
-# <how>: what is known of a ship pulled on a guess (train_solo), said after its failing tests.
-guess_how() {
-  local x
-  case $1 in
-    joined) x="run alone on perigee it passed on the train up to the ship before $branch and failed with $branch on it" ;;
-    unrun) x="it couldn't be run on perigee with $branch by itself on main" ;;
-    *) x="run alone on perigee it did not stay red with $branch by itself on main" ;;
-  esac
-  echo "$([ "$1" = joined ] || echo ", which $branch changed or which imports what it changed"). It was pulled off the train on that guess: $x"
-}
-train_verdict() {
-  local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''
-  # One read, no look first (#1914): the front may remove the file in between, and an unset v ended the ship under set -u.
-  [ -z "${DEPLOY_QUEUE_TICKET:-}" ] || read -r v a b c d e 2>/dev/null <"$f" || true
-  if [ -z "${v:-}" ]; then
-    [ -z "$riding" ] || { riding=''; queue_phase waiting; say "back in line on its own: the ship train went without $branch"; }
-    return 0
-  fi
-  at=$(git rev-parse HEAD)
-  if [ -n "${1:-}" ]; then
-    [ "$v" != riding ] || { rm -f "$f"; riding=''; return 0; }
-    if [ "$v" = moving ] && [ -n "$d" ] && [ "$(queue_proc "$d")" = "$d $e" ]; then
-      [ "$at" != "$c" ] || { train_reporter "$d" "$a"; git reset -q --keep "$a" || true; }
-      queue_done
-      flock -u 9
-      requeue=1
-      say "waiting outside the line for the restart of $b's ship train to be judged"
-      while read -r v a b c d e 2>/dev/null <"$f" && [ "$v" = moving ] && [ "$(queue_proc "$d")" = "$d $e" ]; do sleep 1; done
-      read -r v a b c d e 2>/dev/null <"$f" || v=''
-      at=$(git rev-parse HEAD)
-    fi
-    [ "$v" != moving ] || { v=back x=$b b=$c c=$x; }
-  fi
-  case $v in
-    riding)
-      x="riding in $a's ship train"
-      [ "$b" != pulled ] || x="pulled off $a's ship train on a guess, red in ${c//,/, }"
-      [ "$riding" = "$x" ] || { riding=$x; queue_phase "$x"; say "$x: waiting for CI on the train${b:+ without it}"; }
-      return 1 ;;
-    moving)
-      # Before its branch moves, which the front waits for: who its deploy's restart reports to too (#1865).
-      [ "$at" != "$c" ] || { train_reporter "$d" "$a"; git reset -q --keep "$a" || true; }
-      return 1 ;;
-    alone)
-      # Pulled on a guess that nothing proved (#2098): back in line, to ship by itself, so its own CI run decides. It
-      # rides no train and takes no riders, through a re-exec too (LAND_TRAIN), and its ticket says so before the
-      # verdict goes, so no front takes it in between.
-      export LAND_TRAIN=0
-      QUEUE_TRAIN=''
-      riding=''
-      queue_phase waiting
-      rm -f "$f"
-      say "back in line to ship alone: $a's ship train was red in ${b//,/, }$(guess_how "$c"). The train without it passed, but no ship pulled for it failed it by itself on main, so that proves nothing, and its own CI run decides"
-      [ -z "$requeue" ] || queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
-      return 0 ;;
-    back)
-      [ "$at" != "$a" ] || git reset -q --keep "$b" || true
-      rm -f "$f"
-      riding=''
-      say "back in line on its own: ${c:-the front}'s ship train went without $branch"
-      queue_phase waiting
-      [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
-      return 0 ;;
-    landed)
-      mapfile -t lines < <(sed -n '2,$p' "$f" 2>/dev/null) || true
-      rm -f "$f"
-      [ "$at" = "$a" ] || { [ "$at" = "$d" ] && git reset -q --keep "$a"; } ||
-        say "$branch moved after the train took it, so it stays as it is; what shipped of it is $(git rev-parse --short "$a")"
-      say "shipped in $c's ship train of $e ships, with one CI run and one deploy for them all"
-      say "main is now at $(git log -1 --format='%h "%s"' "$a"), in $c's ship train"
-      for x in "${lines[@]}"; do [ -z "$x" ] || say "$x"; done
-      land_mark lock
-      land_mark landed
-      if [ "$b" = live ]; then
-        echo "deploy: live now: $c's ship train went live with it" >&2
-        land_mark live
-      else
-        # An urgent fix riding the train lets the front's restart skip the starved-box hold (deploy.sh's hold, #1417),
-        # and a restart still held says when it expects to go.
-        # Only while that restart waits: it takes the mark as it starts, and one left after that would be the next restart's.
-        [ -z "${LAND_URGENT:-}${LAND_FIX:-}" ] || { [ ! -s "$state/hold" ] && { [ -n "$(queue_restart "$state")" ] || ! systemctl --user is-active -q "${DEPLOY_UNIT:-cc-restart-when-idle}" 2>/dev/null; }; } || touch "$state/urgent"
-        if [ -s "$state/hold" ] && read -r x d <"$state/hold" 2>/dev/null && [[ $x =~ ^[0-9]+$ ]]; then
-          echo "deploy: not live yet: the restart $c's ship train queued carries it; the box is starved ($d), so it waits for it to ease, live by about $(TZ=America/Los_Angeles date -d "@$((x + 60))" '+%H:%M %Z') at the latest, and reports here too" >&2
-        else
-          echo "deploy: not live yet: the restart $c's ship train queued carries it, and reports here too" >&2
-        fi
-      fi
-      queue_done
-      land_timing 0 || true
-      exit 0 ;;
-    refused)
-      mapfile -t lines <"$f" || true
-      queue_done # out of line before the verdict goes, so early_next never takes it for the next in line
-      rm -f "$f"
-      [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
-      land_timing 1 || true
-      # shellcheck disable=SC2086 # file names
-      pulled_out ${d//,/ }
-      x="$(guess_how "$e"). No ship pulled for it failed it by itself on main, and the train without them passed"
-      [ "$c" != guard ] || refuse "the guard tests failed on $a's ship train in ${d//,/, } with $branch on it and passed on the train before it, so it is the cause, and it was taken off the train before any CI run on it (output above): nothing of it landed and $untouched; $branch is as it was. Run citadel-test on that file, fix it, commit, then run this again"
-      [ "$c" != burn ] || refuse "a new or changed test failed its burn-in in CI on $a's ship train ($b): ${d//,/, }$(case $e in
-        new) echo ", and $branch adds the test case that failed, which main and the ships ahead of it don't have, so it is the cause, and it was taken off the train" ;;
-        pinned) echo ", and run alone on perigee it passed on main and failed with $branch by itself on main, so it is the cause, and it was taken off the train" ;;
-        *) echo "$x" ;;
-      esac): nothing of it landed and $untouched; $branch is as it was. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
-      [ "$c $e" != 'likely pinned' ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, and run alone on perigee it passed on main and failed with $branch by itself on main, so it is the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again"
-      [ "$c" != likely ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }$x: nothing of it landed and $untouched; $branch is as it was. Look into it: fix it if it is yours, re-test, commit, then run this again"
-      refuse "tests failed in CI on $a's ship train ($b), which was refused with $branch on it, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
-    *)
-      rm -f "$f"
-      [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; } ;;
-  esac
-}
-# Conflict prep's waiting side (#1366, above): while a train ahead of this one is tested (<state>/train-top, top_say
+# Conflict prep's waiting side (#1366, tools/land/prepare.sh): while a train ahead of this one is tested (<state>/train-top, top_say
 # below), whether this would still rebase once it ships, by git merge-tree, as against main. Once per train top, branch
 # tip and count of recorded fixes. A conflict the recorded fixes don't resolve says one "prep:" line, which the server
 # turns into a wake with the steps (src/land.ts), naming the ship on the train that brings it (the first train commit it
@@ -760,45 +641,6 @@ QUIET_LIMIT=${LAND_QUIET_LIMIT:-1800} QUIET_POLL=${LAND_QUIET_POLL:-30}
 heavy_dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
 busy='' busy_spent=0 busy_last='' busy_told=''
 no_verdicts=0 NO_VERDICT_MAX=${LAND_NO_VERDICT_MAX:-3}
-# 0 when perigee is quiet; else 1, with what is busy in $busy.
-quiet() {
-  local line load cores total avail
-  busy=''
-  cores=$(nproc 2>/dev/null || echo 2)
-  if ! { line=$(grep -m 1 '^some ' "$QUIET_PROC/pressure/cpu" 2>/dev/null) && [[ $line =~ avg60=([0-9]+) ]]; }; then busy+="no CPU pressure reading, "
-  elif [ "$((10#${BASH_REMATCH[1]}))" -ge "$QUIET_PSI" ]; then busy+="CPU pressure ${BASH_REMATCH[1]}% (quiet is under $QUIET_PSI%), "; fi
-  # In hundredths, so 2.75 on 5 cores is busy.
-  if ! { read -r load _ 2>/dev/null <"$QUIET_PROC/loadavg" && [[ $load =~ ^([0-9]+)\.([0-9]{2}) ]]; }; then busy+="no load reading, "
-  elif [ $((10#${BASH_REMATCH[1]}${BASH_REMATCH[2]} * 2)) -ge $((cores * 100)) ]; then busy+="load $load on $cores cores (quiet is under half), "; fi
-  total=$(sed -n 's/^MemTotal: *\([0-9]*\) kB/\1/p' "$QUIET_PROC/meminfo" 2>/dev/null) avail=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' "$QUIET_PROC/meminfo" 2>/dev/null)
-  if ! [[ $total =~ ^[0-9]+$ && $avail =~ ^[0-9]+$ ]] || [ "$total" -le 0 ]; then busy+="no memory reading, "
-  elif [ $((avail * 100 / total)) -lt "$QUIET_MEM" ]; then busy+="$((avail * 100 / total))% of memory free (quiet is $QUIET_MEM% or more), "; fi
-  # Only looked at, not held: a job that takes it before the run below makes that run wait, but no longer than the busy limit.
-  if [ -e "$heavy_dir/slot-0" ] && ! flock -n "$heavy_dir/slot-0" true 2>/dev/null; then busy+="perigee's heavy slot is taken ($(head -c 120 "$heavy_dir/slot-0.who" 2>/dev/null || echo '?')), "; fi
-  if [ -e "$heavy_dir/queue" ] && ! flock -n "$heavy_dir/queue" true 2>/dev/null; then busy+="jobs are in line for that slot, "; fi
-  busy=${busy%, }
-  [ -z "$busy" ]
-}
-# A refusal by the pipeline, not by the ship's own change (#1360, Cara 2026-11-20, "Refused ships keep their place"): CI
-# and perigee both busy, the heavy slot taken, or a perigee red of flakes only. Once per hand-off a plain land keeps its
-# ticket instead of refusing: it lets go of the lock, the next ship in line takes it (tools/deploy-queue.sh, QUEUE_YIELD)
-# and takes this one on its train as the first rider; with no train (a pipeline change, CI down) this goes right after
-# it. Back at the front, it starts over from its rebase. Only a fully green run ships it, as ever (ADR 0006).
-# <why>: returns when it can't (a second time, or not a plain land), and the caller refuses as before.
-# <why> flake: flake_keep's, which doesn't count as the one pipeline retry and says how many it has used.
-retry_in_place() {
-  [ -n "${2:-}" ] || [ -z "$retried" ] || { say "refused by the pipeline again ($1), after its one retry in place ($retried), so it is refused this time"; return 0; }
-  [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ] || return 0
-  if [ -n "${2:-}" ]; then
-    flake_kept=$((flake_kept + 1))
-    say "refused on flakes only ($1), not your change: keeping its place in line and riding the next train ($flake_kept of $FLAKE_KEEP_MAX)"
-    retro_log "flake keep · $branch · $1 · $flake_kept of $FLAKE_KEEP_MAX"
-  else
-    say "refused by the pipeline ($1), not your change: keeping its place in line and riding the next train, once"
-    retried=$1
-  fi
-  requeue "back at the front after its retry in place: starting over from the rebase"
-}
 # <what it says once back>: this ship lets go of the lock, keeps its ticket and lets the next one go first; back at the
 # front it starts over from its rebase.
 requeue() {
@@ -821,56 +663,10 @@ requeue() {
 # one or what it imports, the ship keeps its place (retry_in_place) instead of going back to its minion, at most
 # FLAKE_KEEP_MAX times a hand-off; past that it is refused as before, so a ship that really breaks something can't circle.
 FLAKE_KEEP_MAX=2
-flake_keep() {
-  local again f hits=() chg=()
-  again=$(flake_free) || return 0
-  train_chg
-  for f in ${again//, / }; do
-    mapfile -t hits < <(train_suspects_of "$f")
-    [ ${#hits[@]} = 0 ] || return 0
-  done
-  [ "$flake_kept" -lt "$FLAKE_KEEP_MAX" ] || { say "only flakes failed again ($again), but it has kept its place $flake_kept times already, so $([ ${#train_n[@]} = 0 ] && echo "it is refused this time" || echo "the bisect looks for the ship")"; return 0; }
-  retry_in_place "$reran, then $again on the fresh run" flake
-}
 # flake_only's answer, and nothing when leftover processes were in it too: those are no flake.
 flake_free() {
   ! grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed" || return 1
   flake_only
-}
-# Perigee is busy: say so (at first, then every 5 min) and refuse once it has been busy QUIET_LIMIT s. $1: why CI didn't answer.
-# The busy time adds up only from one call to the next (#1361): ci_gate clears busy_last while a runner is online and CI
-# hasn't given up on it, so time spent waiting on a merely busy desktop never counts towards the refusal. So runs lost
-# or cut off before they gave a verdict count apart: without that, a ship whose runs all end so held the lock for ever (#1864).
-busy_waited() { if [ -n "$busy_last" ]; then echo $((busy_spent + SECONDS - busy_last)); else echo "$busy_spent"; fi; }
-busy_wait() {
-  local waited over='' lost=''
-  waited=$(busy_waited)
-  busy_spent=$waited busy_last=$SECONDS
-  if [ "$no_verdicts" -ge "$NO_VERDICT_MAX" ]; then over="CI's runs were lost or cut off $no_verdicts times, and perigee is busy" lost=" (its runs were lost or cut off $no_verdicts times)"
-  elif [ "$waited" -ge "$QUIET_LIMIT" ]; then over="CI and perigee both busy for $((waited / 60)) min"; fi
-  [ -z "$over" ] || retry_in_place "$over"
-  [ -z "$over" ] || refuse "CI and perigee both busy, try again: CI: $1$lost; perigee for $((waited / 60)) min: $busy. So $untouched"
-  # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL (15 min).
-  if [ -z "$busy_told" ] || [ $((SECONDS - busy_told)) -ge 300 ]; then
-    say "waiting for CI or a quiet perigee: CI: $1, but perigee is busy ($busy), so this keeps asking CI and runs the suite here only once perigee is quiet (refused after $((QUIET_LIMIT / 60)) min, $((waited / 60)) min so far)"
-    queue_phase "waiting for CI or a quiet perigee, $((waited / 60)) min so far"
-    busy_told=$SECONDS
-  fi
-}
-# [<file>]: what gh or git said on stderr ($state/ci.err by default), as " (<its first lines>)" (git's "To <remote>" left out) for a reason (#553 F12d: a rate limit, a missing gh
-# and a rejected push all read alike). Nothing when it said nothing.
-ci_said() {
-  local s
-  s=$(grep -v -e '^[[:space:]]*$' -e '^To ' "${1:-$state/ci.err}" 2>/dev/null | head -n 4 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed ':a;N;$!ba;s/\n/; /g' | cut -c1-300) || true
-  [ -z "$s" ] || echo " ($s)"
-}
-# The newest run of the workflow on this commit, into ci_*; nothing when there is none. Fails when GitHub doesn't answer
-# with one (an error page is no answer).
-ci_run() {
-  local run
-  run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>"$state/ci.err") || return 1
-  [ -z "$run" ] || [[ $run =~ ^[0-9]+$'\t' ]] || { echo "it sent something that isn't a run: $(head -c 100 <<<"$run")" >"$state/ci.err"; return 1; }
-  read -r ci_id ci_status ci_result ci_url <<<"$run" || true
 }
 # The run this landing's push started, when no poll has read its id yet (#1894: a stop in the seconds after the push left
 # it running, and the next ship waited behind it). Only one of the pushed commit on this landing's own scratch branch.
@@ -883,47 +679,6 @@ ci_late() {
     sleep "$CI_LATE_POLL"
   done
 }
-# Leaves nothing behind on GitHub: a run nobody waits for is cancelled, and the scratch branch goes.
-ci_done() {
-  [ "$ci_id" != "$ci_stale" ] || ci_id='' # a stop between a poll's answer and ci_gate passing over the old run
-  [ -z "$ci_pushed" ] || [ -n "$ci_id" ] || ci_late
-  [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true
-  [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" ":refs/heads/$CI_BASE_REF" >/dev/null 2>&1 || true
-  ci_id='' ci_pushed='' ci_pushed_at='' ci_stale=''
-}
-# 0 when the run's full suite step failed and it has a rerun step (#1374), in any state: one already ended means the
-# run ended between the gate's look and this one, and the next look reads its verdict rather than falling back on a
-# red it already has. A first pass still going, a run with no rerun step, or GitHub not answering is no.
-ci_rerunning() {
-  local steps
-  steps=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_STEP\" or .name == \"$CI_RERUN_STEP\") | [.name, .status, .conclusion // \"-\"] | @tsv] | .[]" 2>/dev/null) || return 1
-  grep -qxF "$CI_STEP"$'\t'completed$'\t'failure <<<"$steps" || return 1
-  grep -q "^$CI_RERUN_STEP"$'\t' <<<"$steps"
-}
-# 0, with its seconds in $burned (CI_BURN at most, or CI_BURN while it still runs), when the run has a burn-in step that took
-# any time (#1443). One that skipped, a run without the step, or GitHub not answering is no. Timestamps go through date, which
-# reads GitHub's milliseconds and offsets.
-ci_burned() {
-  local st a b
-  read -r st a b < <(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_BURN_STEP\") | [.status, .started_at // \"-\", .completed_at // \"-\"] | @tsv][0] // empty" 2>/dev/null) || : # no answer leaves st empty
-  case $st in
-    in_progress) burned=$CI_BURN ;;
-    completed) a=$(date -d "$a" +%s 2>/dev/null) && b=$(date -d "$b" +%s 2>/dev/null) || return 1; burned=$((b - a)) ;;
-    *) return 1 ;;
-  esac
-  [ "$burned" -le "$CI_BURN" ] || burned=$CI_BURN
-  [ "$burned" -gt 0 ]
-}
-# Only when no runner is online, GitHub errors (#1361) or a runner's clock is off (#900): a late start or a slow run says
-# nothing about the next ship's.
-ci_down() { printf '%s %s\n' "$(date +%s)" "$why" >"$state/ci-down" 2>/dev/null || true; }
-# How many runners with the label are online. Its own query (the runners list, a page of 100), not the one before a push.
-ci_online() {
-  local n
-  n=$(hub gh api "repos/$ci_slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || return 1
-  [[ $n =~ ^[0-9]+$ ]] || { echo "it sent: $(head -c 100 <<<"$n")" >"$state/ci.err"; return 1; }
-  echo "$n"
-}
 # A finished red run's facts, from GitHub: a call it doesn't answer is asked three times, as no answer about a run says
 # nothing about a ship (#1864). Fails when it never answers.
 ci_fact() {
@@ -934,154 +689,7 @@ ci_fact() {
   done
   return 1
 }
-# 0: green on this commit. 1: red ($ci_lost: its runner was lost, so no verdict). 2: no answer, with the reason in $why.
-ci_gate() {
-  local url online='' online_at='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
-  ci_lost='' ci_step=''
-  [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
-  { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
-  ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
-  # A CI outage is paid once (#553): a landing that waited out a limit leaves a note, and those of the next minutes
-  # go straight to the run here instead of each waiting to learn the same thing.
-  local down_at='' down_why='' now
-  now=$(date +%s)
-  read -r down_at down_why 2>/dev/null <"$state/ci-down" || true
-  # While perigee is busy the note doesn't count: this landing asks CI itself rather than wait on perigee.
-  if [[ $down_at =~ ^[0-9]+$ ]] && [ $((now - down_at)) -lt "$CI_DOWN" ] && quiet; then
-    why="CI gave no answer to a landing $((now - down_at)) s ago ($down_why), so this one doesn't wait for it (it is asked again from $(date -d "@$((down_at + CI_DOWN))" +%H:%M))"
-    return 2
-  fi
-  # After the outage note (#553): a landing it sends straight to the run here doesn't ask GitHub even this.
-  ci_quota=$(gh_quota)
-  ci_stale=''
-  { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's figure (#1722)
-  ci_run || { why="GitHub didn't answer$(ci_said)"; return 2; }
-  # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
-  if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
-    ci_stale=$ci_id ci_id='' ci_status='' ci_result='' # its verdict isn't this run's, if GitHub misses the next ask (LB9)
-    # shortcut: with the repo variable CI_RUNNER=github (hosted runners) this finds no runner and falls back; look at the variable too if that is ever used for long.
-    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }
-    [[ $online =~ ^[0-9]+$ ]] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
-    [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
-    ci_pushed=$tip ci_pushed_at=$SECONDS # before the push: a stop can end it once GitHub has it
-    # Forced on purpose: land/<branch> and land-base/<branch> are scratch branches only this script writes and deletes, so
-    # there is no one's work to overwrite. Atomic, so the run never starts without the base its burn-in compares with.
-    hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; ci_pushed_at=''; return 2; }
-  fi
-  say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet). GitHub calls left this hour: $ci_quota"
-  queue_phase "waiting for CI since $(date +%H:%M)"
-  while :; do
-    # One missed answer is not a verdict: the limits below end the wait. But a run of them is: ci_status is then the last
-    # answer GitHub gave, maybe long ago, so the limits below say GitHub didn't answer instead of blaming CI (#1655).
-    if ci_run; then ci_fail_n=0; else ci_fail_n=$((ci_fail_n + 1)); [ "$ci_fail_n" -gt 1 ] || ci_fail_at=$(date +%H:%M); fi
-    [ "$ci_id" != "$ci_stale" ] || ci_id='' ci_status=''
-    if [ -z "$ci_taken" ] && { [ "$ci_status" = in_progress ] || [ "$ci_status" = completed ]; }; then # a runner took it
-      ci_taken=1 taken_at=$SECONDS
-      land_mark cirun
-      # Not `[ = completed ] ||`: a stop that lands in the $(date) after a failed test would read as a refusal (exit 1).
-      if [ "$ci_status" != completed ]; then queue_phase "waiting for CI: running since $(date +%H:%M)"; fi
-    fi
-    [ "$ci_status" != completed ] || break
-    waited=$((SECONDS - started))
-    # Past a limit the suite runs here, but only on a quiet perigee: until then this keeps waiting for the run (busy_wait).
-    why='' down=''
-    if [ -n "$ci_taken" ]; then
-      ran=$((SECONDS - taken_at))
-      if [ "$ran" -ge "$limit" ] && [ "$ci_fail_n" -gt 1 ]; then
-        why="GitHub didn't answer since $ci_fail_at ($ci_fail_n polls failed in a row)$(ci_said), so it isn't known whether CI finished${ci_url:+ ($ci_url)}" down=1
-      elif [ "$ran" -ge "$limit" ]; then
-        if [ -z "$burn_wait" ] && ci_burned; then
-          burn_wait=1 limit=$((limit + burned))
-          say "CI's burn-in of new and changed tests took ${burned}s before its full suite, so this waits that much more ($ci_url)"
-        elif [ -z "$rerun_wait" ] && ci_rerunning; then
-          rerun_wait=1 limit=$((ran + CI_RERUN))
-          say "CI's full run ended red and it is rerunning the failed files alone to tell flakes from real failures, so this waits up to $((CI_RERUN / 60)) min $((CI_RERUN % 60)) s more for them instead of falling back at ${CI_LIMIT}s ($ci_url)"
-          queue_phase "waiting for CI's reruns alone since $(date +%H:%M)"
-        else
-          why="CI didn't finish within ${limit}s of starting${rerun_wait:+, its reruns alone included}"
-        fi
-      fi
-    elif [ "$waited" -ge "$CI_START" ]; then
-      # Not started yet: is a runner online? Asked afresh past CI_START, then every CI_ONLINE_POLL s. A missed answer keeps
-      # the last one (the count before the push, at first); with none at all, GitHub errs.
-      if [ -z "$online_at" ] || [ $((SECONDS - online_at)) -ge "$CI_ONLINE_POLL" ]; then
-        if n=$(ci_online); then online=$n online_at=$SECONDS; fi
-      fi
-      if [ -z "$online" ]; then why="GitHub didn't say which runners are online$(ci_said)" down=1
-      elif [ "$online" = 0 ]; then why="no runner started the job within ${CI_START}s, and no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)" down=1
-      elif [ "$waited" -ge "$CI_START_ONLINE" ]; then why="no runner started the job within ${CI_START_ONLINE}s, though a $CI_LABEL runner is online"
-      elif [ -z "$told" ] || [ $((SECONDS - told)) -ge 300 ]; then
-        # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL (15 min).
-        say "a $CI_LABEL runner is online but hasn't started the job (busy with another run, most likely), so this waits for it: up to $((CI_START_ONLINE / 60)) min, $((waited / 60)) min so far"
-        queue_phase "waiting for CI: a busy runner, $((waited / 60)) min so far"
-        told=$SECONDS
-      fi
-    fi
-    nap=$CI_POLL
-    # GitHub failing: asking faster only spends what is left of the hour, so each failed poll in a row waits a poll longer, up to CI_BACKOFF s.
-    if [ "$ci_fail_n" -gt 0 ]; then nap=$(awk -v p="$CI_POLL" -v n="$ci_fail_n" -v m="$CI_BACKOFF" 'BEGIN { v = p * (1 + n); print (v > m ? (m > p ? m : p) : v) }'); fi
-    # On a busy perigee it asks CI and perigee again every QUIET_POLL s, not every CI_POLL s (Josh: "re-checking every 30 s").
-    if [ -n "$why" ]; then
-      if quiet; then [ -z "$down" ] || ci_down; return 2; fi
-      busy_wait "$why"
-      nap=$QUIET_POLL
-    else
-      busy_last='' # a runner is online and CI hasn't given up on it: this time isn't perigee's busy time (#1361)
-    fi
-    sleep "$nap"
-  done
-  case $ci_result in
-    success) rm -f "$state/ci-down"; say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
-    failure)
-      # Red only when the tests ran: a run that failed setting up (no user manager, a download) says nothing about this
-      # commit, nor does one whose runner went away: its job fails with no failed step (#1864), as in the kit's template.
-      ci_step=$(ci_fact api "repos/$ci_slug/actions/runs/$ci_id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // (if (.jobs | length) == 0 then "no jobs" else "no failed step" end)') || {
-        why="GitHub didn't say which step of the red CI run failed ($ci_url)$(ci_said), so it isn't known whether its tests are red"; return 2; }
-      [ "$ci_step" != 'no failed step' ] || { ci_lost=1; return 1; }
-      [ "$ci_step" != 'no jobs' ] || return 1 # a workflow file GitHub can't run, not a lost runner
-      # A skewed clock (#900) lasts hours, until the distro behind it stops: the note spares the next landings a run each.
-      [ "$ci_step" != "$CI_CLOCK_STEP" ] || { why="runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran ($ci_url); a systemd-timesyncd in a WSL distro on Cara's desktop must be masked (tools/ci-runner/README.md)"; ci_down; return 2; }
-      [ "$ci_step" != "$CI_BURN_STEP" ] || { burn_red=1; return 1; } # the ship's own red (#1443)
-      # It runs only after a green suite, and measures the PC: the tests passed (LB6). main's own daily run still goes red on it.
-      if [ "$ci_step" = "$CI_PORTS_STEP" ]; then
-        say "CI's full suite passed on $short, and then its check of the PC's own ports went red (\"$CI_PORTS_STEP\"), which says nothing about this ship: it counts as green ($ci_url). WSL is leaking Windows ports again: tools/ci-runner/README.md"
-        retro_log "CI ports red · $branch · counted as green · $ci_url"
-        return 0
-      fi
-      [ "$ci_step" = "$CI_STEP" ] || { why="the CI run failed in its setup step \"$ci_step\", before any test ran ($ci_url): the runner needs fixing"; return 2; }
-      return 1 ;;
-    timed_out) return 1 ;;
-    *) why="the CI run ended as $ci_result, not as a verdict on the tests"; return 2 ;;
-  esac
-}
 
-# A red run's failed log into $failed, its last lines on stderr, and run-tests.sh's flake labels into the retro log
-# (they can't reach it from the desktop, so they are written from its output here). Fails, with $why, when GitHub doesn't
-# send the log of a red suite: a flake, a cut-off run and a real failure can't be told apart without it (#1864).
-ci_failed() {
-  local f load
-  failed=''
-  [ -z "$ci_lost" ] || return 0
-  [ "$ci_step" != 'no jobs' ] || { failed="the CI run failed before any job started (a workflow file or account problem): $ci_url"; tail -n 40 <<<"$failed" >&2; return 0; }
-  if ! failed=$(ci_fact run view "$ci_id" --repo "$ci_slug" --log-failed); then
-    failed=''
-    [ -z "$burn_red" ] || return 0 # the burn-in step ran and failed: red whatever its log says
-    why="GitHub didn't send the red CI run's log ($ci_url)$(ci_said), so a flake, a cut-off run and a real failure can't be told apart"
-    return 1
-  fi
-  tail -n 40 <<<"$failed" >&2
-  [ -z "$burn_red" ] || return 0 # a burn-in's log may quote run-tests.sh's lines (test/land.test.ts does): no flakes from it
-  if f=$(skipped_tests); then
-    say "$(skipped_said "$f"). A skipped test is a real failure, never a flake: its check didn't run, so no flake excuses this run and it gets no fresh one. Make the test run in CI, or give the runner what it needs"
-    retro_log "skipped test · $branch${train_br[*]:+ · with ${train_br[*]}} · ${f//$'\n'/; } · $ci_url"
-  fi
-  while read -r f load; do
-    retro_log "flake · $f · load $load · $branch · in CI${train_br[*]:+ · with ${train_br[*]}}" # riders: one run (#1419)
-    say "flake: $f · in CI" # the server counts these (src/flakes.ts)
-  done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
-}
-# The burn-in's verdict in $failed (#1443): "<file>: failed in <n> of <N> copies at once" for each red file; nothing otherwise.
-burn_lines() { sed -n 's/.*burn-in: \([^ ]*: failed in [0-9]* of [0-9]* copies at once\).*/\1/p' <<<"$failed" | sort -u; }
 # The tests CI's suite skipped (#1914; Cara: "Never skip, loosen or delete a test to get green"): the count, then up to 5
 # names, a line each; fails when it skipped none. On Nov 24 #1885 and #1873 went live on red runs with a test skipped, since
 # tests.yml looked for one only on a green run. Only CI's own lines count ("<job>\t<step>\t<time> ℹ skipped 1": node's
@@ -1099,33 +707,6 @@ skipped_said() {
   local n=${1%%$'\n'*} names=''
   [ "$n" = "$1" ] || names=": $(sed '1d' <<<"$1" | paste -sd';' - | sed 's/;/; /g')"
   if [ "$n" = 1 ]; then echo "a test was skipped in CI ($ci_url)$names"; else echo "$n tests were skipped in CI ($ci_url)$names"; fi
-}
-# The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It
-# counts on run-tests.sh's own lines: "<n> test file(s) failed; rerunning each alone…" and then one label per file.
-# Without that line (more than its max_reruns files, a hang, a leak, a run that never got to the tests) it is no flake.
-# Only the labels after that line count: a test's own output can quote one (test/land.test.ts does). Nor is a run that
-# skipped a test (#1914).
-flake_only() {
-  local at n files
-  ! skipped_tests >/dev/null || return 1
-  at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
-  [[ $at =~ ^[0-9]+$ ]] || return 1
-  n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
-  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
-  files=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' | sort -u)
-  [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
-  sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
-}
-# Whether $failed is a run cut off from outside before any test failed (#1377): Node's test runner printed its
-# "Interrupted while running:" (a SIGINT or SIGTERM: run 44859457680 of Nov 20, at 55 s), no test failed, and run-tests.sh
-# didn't stop it as a hang (its timeout sends the same signal, and a hang is a real red). It says nothing about the commit.
-# #1393: so is a run killed from outside (exit 137, the desktop's out-of-memory killer): run-tests.sh's "were killed" line,
-# or only GitHub's exit 137 line when the whole step went. A SIGKILL leaves Node no summary, so "no test failed" there
-# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red.
-cut_off() {
-  ! grep -qF 'run-tests: the tests ran past' <<<"$failed" || return 1
-  if grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed"; then return 0; fi
-  grep -qE 'run-tests: the tests were killed \(exit [0-9]+\)|Process completed with exit code 137\.' <<<"$failed" && ! grep -qF '✖' <<<"$failed"
 }
 # Red on main too (#1430; Nov 21 00:00-01:30 PST main's own clock test refused #1356, #1378, #1414 and #1366): before a
 # red train's suspects or bisect, or a red ship alone's refusal, each real failure (train_real) runs alone here on main's tip ($old), niced, one file at
@@ -1222,21 +803,6 @@ train_main_red() {
 # undo guard against it.
 own=$tip train_tip=() train_br=() train_n=() train_was=() greens=' '
 declare -A known_by=() # #1419: <commit> -> the known flakes its green was let through on
-# <from> <to>: whether the change touches a path in tools/pipeline-files.txt (a path ending / is its folder).
-pipeline_touch() {
-  [ -f tools/pipeline-files.txt ] || return 1
-  awk 'NR == FNR { if ($0 !~ /^[[:space:]]*(#|$)/) p[++n] = $0; next }
-    { for (i = 1; i <= n; i++) if ($0 == p[i] || (p[i] ~ /\/$/ && index($0, p[i]) == 1)) { hit = 1; exit } }
-    END { exit !hit }' tools/pipeline-files.txt <(git diff --no-renames --name-only "$1" "$2")
-}
-# <rider index> <lines>: its verdict, by a rename, so it never reads half of one.
-train_say() { local n=${train_n[$1]}; shift; train_tell "$n" "$@"; }
-# <ticket> <lines>: the same, for a ship by its ticket (one held off the train, #1403).
-train_tell() {
-  local f=$train_dir/$1
-  shift
-  printf '%s\n' "$@" >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
-}
 # <a red run's log>: what a refused rider hears of it, its last 40 lines, after the test it skipped, if any: those lines
 # don't say so, and the wake's kind is read from it (#1914).
 train_tail() {
@@ -1244,44 +810,6 @@ train_tail() {
   ! f=$(skipped_tests) || echo "land: $(skipped_said "$f")"
   tail -n 40 <<<"$failed"
 }
-# [<index>]: the riders from there on (all by default) leave the train with no verdict: back in line as they were.
-train_drop() {
-  local i v x c
-  for ((i = ${1:-0}; i < ${#train_n[@]}; i++)); do
-    read -r v x c <"$train_dir/${train_n[$i]}" 2>/dev/null || continue
-    case $v in
-      riding) rm -f "$train_dir/${train_n[$i]}" ;;
-      moving) # ended after main moved: landed if main still holds it and the deploy got it live or its restart queued
-        if git -C "$SOURCE" merge-base --is-ancestor "${train_tip[$i]}" main 2>/dev/null && grep -qE '^(queued|live) ' "$times" 2>/dev/null; then
-          train_landed "$i"
-        else train_say "$i" "back ${train_tip[$i]} ${train_was[$i]} $branch"; fi ;;
-    esac
-  done
-  train_tip=("${train_tip[@]:0:${1:-0}}") train_br=("${train_br[@]:0:${1:-0}}") train_n=("${train_n[@]:0:${1:-0}}") train_was=("${train_was[@]:0:${1:-0}}")
-}
-train_landed() { # <rider index>
-  local kind=restart through=''
-  ! grep -q '^live ' "$times" 2>/dev/null || kind=live
-  [ -z "${through_by[$tip]:-}" ] || through="shipped through main's red on ${through_by[$tip]}" # (an apostrophe in a :+ word opens a quote)
-  train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))" "${known_by[$tip]:+shipped past known flakes ${known_by[$tip]}}" "$through"
-}
-# "<commit> <branch>" of each ship in the train but the top one, which is "$tip $train_owner": what came off main with
-# it when main goes back (taken-back), so each branch on its train commit leaves the others' commits behind.
-train_others() {
-  local i
-  [ ${#train_n[@]} -gt 0 ] || return 0
-  echo "$own $branch"
-  for ((i = 0; i + 1 < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done
-}
-# What the ships waiting behind test their conflict prep against (prep_check): <state>/train-top while this one's gate
-# runs, by a rename. Line 1: "<top> <this branch> <pid>"; then "<commit> <branch>" for each ship on it, this one first.
-# Only its own is removed (top_done): a front that let go of the line for its restart (#566) leaves the next one's.
-top_say() {
-  local i f=$state/train-top
-  [ ${#rr[@]} -gt 0 ] || return 0
-  { echo "$tip $branch $$"; echo "$own $branch"; for ((i = 0; i < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done; } >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
-}
-top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p" = $$ ] && rm -f "$state/train-top"; return 0; }
 # Early next train (#1366; Cara, 2026-11-20, picked "Also test next train early"; #1568: Cara, 2026-11-22, picked
 # "Low-priority run on a ship runner"). While this train's CI runs (top_gate), early_next stacks the ship next in line,
 # and the train it would take, on this train's top in a scratch worktree, and once this train's run has a runner and
@@ -1294,161 +822,6 @@ top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p
 # ships that joined the line since don't change it, and at its gate counts the run or cancels it (early_gate). Off:
 # LAND_EARLY=0, or <state>/early-off. With the hold on (no <state>/hold-off, #1902, #1906) it goes only at this train's deploy, on an idle desktop.
 early_ahead='' early_top='' early_pid='' train_only='' train_left='' # train_left: train_only is what is left of a red train (#1918)
-early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || return 1; url=${url#*github.com[:/]}; echo "${url%.git}"; }
-# [<what this train is doing>]: the words for the say line, at its deploy (default: while its CI runs, top_gate).
-early_next() {
-  local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n riders st skip='' waited=$SECONDS
-  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && { [ -e "$state/hold-off" ] || [ -n "${1:-}" ]; } && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
-  [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
-  ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
-  local -A QUEUE_RANK=()
-  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' QUEUE_PIN=0 regen_attrs='' # another ship's merges get no Regenerate files of this one's
-  queue_order "$q"
-  while read -r x t; do # the first in line that isn't on this train
-    [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
-    [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
-    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = riding || $x = moving || $x = refused ]] && continue # refused: on its way out
-    [ "${l[5]:-}" = train ] && [[ $(queue_state "${l[0]%% *}") != [Tt] ]] && nt=${t##*/} nb=${l[2]:-}
-    break
-  done < <(for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
-  [ -n "$nb" ] && [ "$nb" != "$branch" ] && [[ $nb != build/* ]] && r=$(git rev-parse -q --verify "refs/heads/$nb^{commit}") || return 0
-  while read -r x c; do # it would leave a commit that came off main behind: not the plain rebase stacked here
-    [ "$c" != "$nb" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null && ! git merge-base --is-ancestor "$x" main 2>/dev/null && return 0
-  done < <(cat "$state/taken-back" 2>/dev/null || true)
-  slug=$(early_slug) || return 0
-  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-early.XXXXXX") || return 0
-  if git worktree add -q --detach "$wt" "$r" >/dev/null 2>&1 && { numbers_git ours -C "$wt" "${rr[@]}" rebase -q "$tip" >/dev/null 2>&1 || { rerere_on "$wt" numbers_git ours && retro_log "train prep replayed · $nb onto $label's train ($(git rev-parse --short "$tip")), early"; }; }; then
-    # With what its own rebase will add (#1864, LA1): a stack without it would never be the commit it ships.
-    if train_steps "$wt" "$tip" "$nb" "$(git merge-base "$tip" "$r")" "$r" >/dev/null 2>&1; then own_e=$(git -C "$wt" rev-parse HEAD); else own_e=''; fi
-  else
-    git -C "$wt" "${rr[@]}" rebase --abort >/dev/null 2>&1 || true
-    own_e=''
-  fi
-  git worktree remove --force "$wt" >/dev/null 2>&1 || true
-  rmdir "$wt" 2>/dev/null || true
-  [ -n "$own_e" ] && [ "$own_e" != "$tip" ] || return 0 # a conflict is its own rebase's to report, after this ships
-  read -r lane_e _ < <(git diff --no-renames --name-only "$tip" "$own_e" | "$tools/lane.sh" "$tip") || lane_e=full
-  [ "$lane_e" != light ] || return 0 # it runs no CI
-  echo "$tip $r $own_e" >"$state/stacked.tmp$$"
-  # The train it would take, as train_build will build it once it has the line, with no verdicts said and nothing logged.
-  out=$(
-    early_memo=$state/stacked.tmp$$ branch=$nb own=$own_e old=$tip lane=$lane_e tip=$own_e DEPLOY_QUEUE_TICKET=$nt
-    train_n=() train_br=() train_tip=() train_was=() train_only='' train_held_tips=''
-    say() { :; }
-    retro_log() { :; }
-    train_say() { :; }
-    train_build >/dev/null 2>&1 || true
-    t=$(IFS=,; echo "${train_n[*]}")
-    echo "$tip ${#train_n[@]} ${t:--} ${train_br[*]}"
-  ) || out=''
-  read -r top n riders x <<<"$out" && [ -n "$top" ] || { rm -f "$state/stacked.tmp$$"; return 0; }
-  mv -f "$state/stacked.tmp$$" "$state/stacked"
-  # Not on a top the guard tests fail (#1479): its front's own train_guards refuses the ship that broke them.
-  guard_at "$top" || [ $? != 1 ] || { say "early next train: the guard tests fail on $nb's train, so its CI waits for its turn"; return 0; }
-  # Not before this train's own run has a runner, which it must not lose to this one (its deploy has had one); only on a free one.
-  while [ -z "${1:-}" ]; do
-    [ ! -e "$state/early-stop.$$" ] || return 0 # this train's gate ended without a green, or the landing is ending
-    st=$(hub gh api "repos/$slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status] | @tsv" 2>/dev/null) || st=''
-    read -r _ st _ <<<"$st" || true
-    [[ $st != in_progress && $st != completed ]] || break
-    [ $((SECONDS - waited)) -lt "${LAND_EARLY_WAIT:-600}" ] || { say "early next train: this train's run had no runner within ${LAND_EARLY_WAIT:-600} s, so $nb's CI waits for its turn"; return 0; }
-    sleep "$CI_POLL"
-  done
-  free=$(hub gh api "repos/$slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and .busy == false and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || free=''
-  ! ci_busy hub "$slug" || { say "early next train: another Citadel job is on the CI desktop or queued, so $nb's CI waits for its turn"; return 0; }
-  [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
-  [ ! -e "$state/early-stop.$$" ] || return 0
-  # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.
-  # Its record goes first: a stop that ends the push once GitHub has it still leaves the next landing the run to count or drop (#1894).
-  echo "$top $nb $(date +%s) $branch $tip $riders" >"$state/early"
-  hub git push -q --atomic "$REMOTE" "+$top:refs/heads/early/$nb" "+$tip:refs/heads/early-base/$nb" 2>"$state/early.err" || { rm -f "$state/early"; say "early next train: pushing $nb's train to GitHub failed$(ci_said "$state/early.err"), so its CI waits for its turn"; return 0; }
-  say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while ${1:-"this one's CI runs"} ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
-  retro_log "early train · $nb${x:+ + $n riders} onto $label's train ($(git rev-parse --short "$tip")) · pushed $(git rev-parse --short "$top")"
-}
-# Before this landing builds its train: one stacked early for it rides the riders it was stacked with, and only those.
-early_look() {
-  local top b at fb onto riders id st w slug
-  read -r top b at fb onto riders 2>/dev/null <"$state/early" && [ "$b" = "$branch" ] && [ -n "$riders" ] && [[ $at =~ ^[0-9]+$ ]] && slug=$(early_slug) || return 0
-  read -r id st w _ <<<"$(early_run "$slug" "$top")" || true
-  [[ $id =~ ^[0-9]+$ ]] && { [ "$st" != completed ] || [ "$w" = success ]; } || return 0 # one that won't count holds no one back
-  train_only=" ${riders//,/ } "
-  [ "$riders" != - ] || train_only=' '
-}
-# <slug> <commit>: the workflow's newest run on it, as "<id> <status> <conclusion or ->"; nothing when GitHub has none or doesn't answer.
-early_run() { hub gh api "repos/$1/actions/runs?head_sha=$2&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\"] | @tsv" 2>/dev/null || true; }
-# <top> <id> <its branch> <why>: an early run nobody will count is cancelled, and its scratch branches go, so a push of
-# the same commit later starts a fresh run.
-early_cancel() {
-  [[ ! $2 =~ ^[0-9]+$ ]] || hub gh api -X POST "repos/$(early_slug)/actions/runs/$2/cancel" >/dev/null 2>&1 || true
-  hub git push -q "$REMOTE" ":refs/heads/early/$3" ":refs/heads/early-base/$3" >/dev/null 2>&1 || true
-  say "early next train: dropped the early CI run on $3's train ($4)"
-  retro_log "early train · $label · discarded · $4"
-}
-# <the top to keep it on> <why>: this landing's early run stacked on any other top goes (a red, a train built again).
-early_drop() {
-  local top b at fb onto riders id
-  read -r top b at fb onto riders 2>/dev/null <"$state/early" && [ "$fb" = "$branch" ] && [ "$onto" != "$1" ] || return 0
-  rm -f "$state/early"
-  id=$(hub gh api "repos/$(early_slug)/actions/runs?head_sha=$top&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | select(.status != \"completed\") | .id" 2>/dev/null) || id=''
-  early_cancel "$top" "$id" "$b" "$2"
-}
-# 0 when this landing has an early run stacked on its train's top.
-early_kept() { local top b at fb onto; read -r top b at fb onto _ 2>/dev/null <"$state/early" && [ "$fb" = "$branch" ] && [ "$onto" = "$tip" ]; }
-# The gate on the train's top, with the next train's early run started beside it; a red ahead drops it, and the train
-# built again (train_suspects) stacks a new one on its new top. rc as gate's.
-top_gate() {
-  local x
-  early_drop "$tip" "the train ahead was built again"
-  rm -f "$state/early-stop.$$"
-  if ! early_kept; then
-    early_next </dev/null 9>&- 7>&- 6>&- & # not the lock's fds: a land.sh killed mid-gate mustn't leave it held
-    early_pid=$!
-  fi
-  rc=0
-  gate "$tip" || rc=$?
-  [ "$rc" = 0 ] || : >"$state/early-stop.$$" # no green: it pushes nothing more, and goes
-  [ -z "$early_pid" ] || wait "$early_pid" || { x=$?; say "early next train: it stopped part way (exit $x), so the next ship's CI waits for its turn"; }
-  early_pid=''
-  rm -f "$state/early-stop.$$"
-  [ "$rc" != 1 ] || early_drop '' "the train ahead went red"
-  return "$rc"
-}
-# On the way out: an early_next still going pushes nothing more, and is waited for (it may hold a scratch worktree).
-early_end() {
-  [ -n "$early_pid" ] || return 0
-  : >"$state/early-stop.$$"
-  wait "$early_pid" 2>/dev/null || true
-  rm -f "$state/early-stop.$$"
-}
-# At this landing's gate, with its train built: an early run on it counts (early_ahead: how long ago it started; its
-# scratch branches, early_top, are the first gate's run), and any other early run is cancelled.
-early_gate() {
-  local top b at fb onto riders slug id st w
-  train_only=''
-  read -r top b at fb onto riders 2>/dev/null <"$state/early" || return 0
-  [ "$fb" != "$branch" ] || return 0 # this landing's own, from a stopped gate it starts again: top_gate's to keep or drop
-  rm -f "$state/early"
-  [[ $at =~ ^[0-9]+$ ]] && slug=$(early_slug) || return 0
-  read -r id st w _ <<<"$(early_run "$slug" "$top")" || true
-  while [[ ! $id =~ ^[0-9]+$ ]] && [ $(($(date +%s) - at)) -lt "$CI_LATE" ]; do # pushed a moment ago: not listed yet (#1894)
-    sleep "$CI_LATE_POLL"
-    read -r id st w _ <<<"$(early_run "$slug" "$top")" || true
-  done
-  if [ "$b" = "$branch" ] && [ "$top" = "$tip" ] && [[ $id =~ ^[0-9]+$ ]] && { [ "$st" != completed ] || [ "$w" = success ]; }; then
-    early_ahead=$(($(date +%s) - at)) early_top=$top
-    say "early next train: CI started on this train at $(date -d "@$at" +%H:%M) beside $fb's, and it came out the same, so that run is its CI ($early_ahead s head start)"
-    retro_log "early train · $label · counted · ${early_ahead}s head start"
-    return 0
-  fi
-  if [ "$b" != "$branch" ]; then w="$b wasn't next in line after all"
-  elif [ "$top" != "$tip" ]; then w="its train came out different from the one stacked early"
-  elif [[ $id =~ ^[0-9]+$ ]]; then w="the early run failed, so it runs again" # as for a run on the same commit from a landing started again
-  else w="GitHub has no run of it"; fi
-  [ "$st" != completed ] || id=''
-  early_cancel "$top" "$id" "$b" "$w"
-}
-# <member>: the train's commit through that ship (0: this one's own, 1 on: its riders).
-train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
 # <worktree> <onto> <branch> <base> <tip>: what a ship at the front gets after its rebase (adr_commit, the prompt baseline,
 # the commit titles), for one rebased onto <onto> in a scratch worktree (#1864, LA1: two ADRs 0027 shipped in one train).
 # Fails with the reason in skip, the worktree put back clean.
@@ -1470,101 +843,6 @@ train_steps() {
   git -C "$1" reset -q --hard >/dev/null 2>&1 || true
   git -C "$1" clean -fdq >/dev/null 2>&1 || true
   return 1
-}
-# [<ticket>...]: those first, in that order, then the rest of the line in its order (what is left of a red train takes nobody else: train_only).
-train_build() {
-  local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x half
-  local -A tried=()
-  [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] && [ "${QUEUE_TRAIN:-}" != hold ] || return 0
-  [[ $max =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || return 0
-  [ ! -s "$state/bad" ] && [ ! -s "$state/refusing" ] || return 0
-  [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] && git remote get-url "$REMOTE" >/dev/null 2>&1 || return 0
-  read -r down_at down_why 2>/dev/null <"$state/ci-down" || true
-  ! [[ $down_at =~ ^[0-9]+$ ]] || [ $(($(date +%s) - down_at)) -ge "$CI_DOWN" ] || return 0
-  ! pipeline_touch "$old" "$own" || return 0
-  local -A QUEUE_RANK=()
-  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' QUEUE_PIN=0 regen_attrs='' # another ship's merges get no Regenerate files of this one's
-  queue_order "$q"
-  mkdir -p -m 700 "$train_dir"
-  find "$train_dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true # a killed rider's, or one never read
-  split_look
-  if [ -n "$split_of" ]; then # the part of the ships the red train is down to that train_bisect would test next
-    x=($split_rest)
-    half=0
-    [ ${#x[@]} = 0 ] || half=$(split_cut "$((${#x[@]} + 1))")
-    say "ship train: $branch is one of the $((${#x[@]} + 1)) ships $split_of's red train is down to, so this tests $([ "$half" -gt 0 ] && echo "the first $((half + 1))" || echo "it alone")"
-    [ "$half" -gt 0 ] || return 0
-    [ "$half" -ge "$max" ] || max=$half
-  fi
-  while read -r x t <&4; do # not on stdin, which git and perl below may read
-    [ ${#train_n[@]} -lt "$max" ] || break
-    [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && [ -z "${tried[${t##*/}]:-}" ] && mapfile -t l 2>/dev/null <"$t" || continue
-    tried[${t##*/}]=1
-    # A waiting ship that holds the line (QUEUE_TRAIN=hold): nobody behind it rides ahead of it.
-    { [ "${l[5]:-}" = hold ] || [ "${l[8]:-}" = hold ]; } && [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && break
-    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused || $x = alone ]] && continue # still on the train before this one, refused by this one, or sent to ship alone (#2098)
-    [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
-    [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has; train_suspects, pull_look: what is left of a red train
-    if [[ $split_rest == *" ${t##*/} "* ]]; then [ -n "$split_of" ] || continue; else [ -z "$split_of" ] || continue; fi # the split's ships ride together only
-    [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict
-    [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
-    [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
-    b=${l[2]:-}
-    [ -n "$b" ] && [ "$b" != "$branch" ] && [[ $b != build/* ]] && r=$(git rev-parse -q --verify "refs/heads/$b^{commit}") || continue
-    skip=''
-    base=$(git merge-base main "$r") || continue
-    [ -z "$(git rev-list --merges "$base..$r")" ] || skip="it has merge commits"
-    while read -r x c; do
-      [ -z "$skip" ] && [ "$c" != "$b" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null && ! git merge-base --is-ancestor "$x" main 2>/dev/null || continue
-      skip="it sits on a commit that came off main"
-    done < <(cat "$state/taken-back" 2>/dev/null || true)
-    for x in $train_refused_tips $train_held_tips; do
-      [ -z "$skip" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null || continue
-      skip="it sits on a ship this train just refused"
-      [[ " $train_held_tips " != *" $x "* ]] || skip="it sits on a ship this train holds off as a likely cause"
-    done
-    if [ -z "$skip" ]; then
-      if [ -z "$wt" ]; then
-        wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
-        regen_attrs=$(git -C "$wt" rev-parse --absolute-git-dir)/rider.attributes
-        grep ' rider$' "$tools/ship-numbers.attributes" >"$regen_attrs" || true # a SCHEMA_HISTORY or baseline conflict waits for that ship's own front, so only the size lists merge there
-      fi
-      # Stacked already by the early next train (early_next), else rebased here.
-      if { c=$(stacked_of "$cur" "$r") && git -C "$wt" checkout -q --detach "$c" 2>/dev/null; } ||
-        { git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { numbers_git ours -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" numbers_git ours && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; }; then
-        c=$(git -C "$wt" rev-parse HEAD)
-        if [ "$c" = "$cur" ]; then skip="main already has all of it"
-        elif ! train_steps "$wt" "$cur" "$b" "$base" "$r"; then :
-        elif c=$(git -C "$wt" rev-parse HEAD); pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"
-        elif ! (cd "$wt" && branch=$b && undo_guard "$cur") >/dev/null 2>&1; then skip="the undo guard stops it on the train"
-        fi
-      else
-        git -C "$wt" "${rr[@]}" rebase --abort >/dev/null 2>&1 || true
-        skip="it doesn't rebase cleanly onto the train"
-      fi
-    fi
-    if [ -n "$skip" ]; then say "ship train: $b stays in line ($skip)"; continue; fi
-    [ -z "${early_memo:-}" ] || echo "$cur $r $c" >>"$early_memo"
-    train_n+=("${t##*/}") train_br+=("$b") train_tip+=("$c") train_was+=("$r")
-    train_say $((${#train_n[@]} - 1)) "riding $branch"
-    cur=$c
-  done 4< <(for t in "$@"; do printf '%s %s\n' - "$q/$t"; done; for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
-  [ -z "$wt" ] || git worktree remove --force "$wt" >/dev/null 2>&1 || true
-  [ ${#train_n[@]} -gt 0 ] || return 0
-  tip=$cur short=$(git rev-parse --short "$cur")
-  say "ship train: $branch takes the $((${#train_n[@]})) ships waiting behind it (${train_br[*]}): CI runs once on all $((${#train_n[@]} + 1)), and they ship together"
-  retro_log "ship train · $label · ${#train_n[@]} riders: ${train_br[*]}"
-}
-# The guard tests on the train's top (#1479), as guards() ran them on this one: a rider's break with main or with the
-# ships before it is as cheap to catch here as this one's own was. Red: the train's prefixes are bisected with them (this
-# one passed), the first red rider is refused with their output before any CI run, and the train is built again
-# without it (the riders after it and the next in line), its new top checked the same way. Undecided, at the top or
-# at a step, names nobody: CI runs them.
-train_guards() {
-  [ ${#train_n[@]} -gt 0 ] || return 0
-  phase_ticker "running the guard tests on the train since $(date +%H:%M)"
-  train_guards_run
-  phase_ticker_end
 }
 train_guards_run() {
   local t0 lo hi mid i rc out files keep was t v k room ahead
@@ -1611,78 +889,6 @@ train_guards_run() {
   return 0 # the loop's last test can read a refused rider's verdict, and land.sh runs under set -e
 }
 
-# <commit>: the gate on it. 0: green, 1: red (its log in $failed, its run in $ci_url; $reran when it was the one fresh
-# run after a red of flakes only), 2: no answer ($why).
-gate() {
-  local rc=0
-  ci_done
-  ci_status='' # a run before this gate's says nothing of it, if GitHub doesn't answer its first ask
-  CI_REF=land/$branch CI_BASE_REF=land-base/$branch
-  # A counted early run is the first gate's, on its own scratch branches, which are this landing's to delete however it ends.
-  [ "$1" != "$early_top" ] || CI_REF=early/$branch CI_BASE_REF=early-base/$branch ci_pushed=$1
-  early_top=''
-  tip=$1 short=$(git rev-parse --short "$1") failed='' reran='' burn_red=''
-  ci_gate || rc=$?
-  # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
-  # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
-  # never read as the answer. A no-answer this time falls back to the run here, which must be green too. If the branch
-  # won't go, there is no fresh run: it stays a red, rather than a wait for a run never started read as CI being down.
-  # A run cut off before any test failed (#1377) gets the same one fresh run; cut off again, it is no answer. A red of
-  # known flakes only (#1419: known_flakes) needs no fresh run: it is a green.
-  local cut='' ended='' early_ref='' how='was cut off before any test failed'
-  [[ $CI_REF != early/* ]] || early_ref=1
-  if [ "$rc" = 1 ] && ! ci_failed; then rc=2; fi
-  if [ "$rc" = 1 ]; then
-    if [ -n "$burn_red" ]; then
-      retro_log "burn-in red · $branch${train_br[*]:+ · with ${train_br[*]}} · $(burn_lines | paste -sd';' -) · $ci_url"
-    elif [ -n "$ci_lost" ]; then
-      cut=$ci_url how='lost its runner before any step failed'
-    elif cut_off; then
-      cut=$ci_url
-    elif ! reran=$(flake_only); then
-      reran=''
-    elif known_flakes "$reran"; then
-      say "only known flakes failed in CI ($ci_url): $known_why, so this goes on as green, with no fresh run"
-      retro_log "known flake · $branch · $known_why · $ci_url"
-      known_by[$1]=$known_why reran='' rc=0
-    fi
-    if [ -z "$cut$reran" ]; then
-      :
-    elif ! hub git push -q "$REMOTE" ":refs/heads/$CI_REF" ${early_ref:+":refs/heads/$CI_BASE_REF"} 2>"$state/ci.err"; then
-      if [ -n "$cut" ]; then
-        why="the CI run $how ($cut), and deleting $CI_REF on GitHub to start a fresh run failed$(ci_said)"
-        retro_log "cut-off rerun · $branch · $cut · not started"
-        rc=2
-      else
-        say "failed in the full run but passed alone ($reran), but deleting $CI_REF on GitHub to start a fresh run failed$(ci_said), so this stays red"
-        retro_log "flake rerun · $branch · $reran · not started"
-        reran=''
-      fi
-    else
-      if [ -n "$cut" ]; then say "the CI run on $short $how ($cut), so it says nothing about this commit: running CI once more"
-      else say "failed in the full run but passed alone ($reran); running CI once more on $short, the land needs a fully green run"; fi
-      ci_id='' ci_status='' ci_pushed='' ci_pushed_at='' CI_REF=land/$branch CI_BASE_REF=land-base/$branch # a counted early run's fresh run goes with the lands'
-      rc=0
-      ci_gate || rc=$?
-      if [ "$rc" = 1 ] && ! ci_failed; then rc=2; fi
-      if [ "$rc" = 1 ] && [ -z "$burn_red" ]; then
-        if [ -n "$ci_lost" ]; then
-          rc=2 ended=1 why="CI's one fresh run lost its runner before any step failed ($ci_url), after one that $how ($cut)"
-          [ -n "$cut" ] || why="CI's one fresh run after a red of flakes only ($reran) lost its runner before any step failed ($ci_url)"
-        elif cut_off; then
-          rc=2 ended=1 why="CI was cut off twice before any test failed ($cut, $ci_url)"
-          [ -n "$cut" ] || why="CI's one fresh run after a red of flakes only ($reran) was cut off before any test failed ($ci_url)"
-        fi
-      fi
-      case $rc in 0) result=green ;; 1) result=red ;; *) result='no answer' ;; esac
-      if [ -n "$cut" ]; then retro_log "cut-off rerun · $branch · $cut · $result"; else retro_log "flake rerun · $branch · $reran · $result"; fi
-    fi
-  fi
-  [ "$rc" != 0 ] || greens="$greens$1 "
-  # Gates whose run was lost or cut off, up to the first with a verdict: past NO_VERDICT_MAX of them the wait is over.
-  if [ "$rc" != 2 ]; then no_verdicts=0; elif [ -n "$cut$ended" ]; then no_verdicts=$((no_verdicts + 1)); fi
-  return "$rc"
-}
 # Suspects first (#1346, Cara 2026-11-20: "we pull out the minions that touched the failing tests as they are vastly
 # more likely to be the culprit"): a red train's real failures (run-tests.sh's labels: not the flakes) are pinned on
 # ships. Each failing file first runs alone here on the train's prefixes (train_pin, #1403, Cara 2026-11-20, "Confirm
@@ -1916,57 +1122,9 @@ train_failing() {
   [[ $at =~ ^[0-9]+$ ]] || return 0
   tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\|killed (exit [0-9]*) when rerun alone\).*/\1/p' | sort -u
 }
-# The ships held off the train on a guess, now that the train without them has a verdict. <files>: every file it was
-# red on (train_failing). Nobody is refused here (#2098; Josh, 2026-11-26, "Have we not analyzed the guessing at all?"):
-# a held ship was not red alone, so the train passing without it is no proof (6 of the first 10 refused that way were
-# innocent, 3 on flaky tests). One with a test among <files> goes back in line (the guess was wrong). The rest go back
-# in line to ship alone (`alone`, train_verdict), so their own CI run is the proof, and a guess can't pull them off train
-# after train (a flaky test that CI's machine fails with one of them would, lap after lap); known flakes (train_flaky)
-# only change the words. No files: it was green. A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
-train_settle() {
-  local i f t red=" $* " again n=("${held_n[@]}") br=("${held_br[@]}") w=("${held_was[@]}") fs=("${held_files[@]}") run=("${held_run[@]}") kind=("${held_kind[@]}") how=("${held_how[@]}") log=("${held_log[@]}")
-  held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()
-  for ((i = 0; i < ${#n[@]}; i++)); do
-    again=''
-    for f in ${fs[$i]//,/ }; do [[ $red != *" $f "* ]] || again=1; done
-    t=${br[$i]}
-    [[ ! $t =~ ^ticket/([0-9]+)- ]] || t="#${BASH_REMATCH[1]}"
-    if [ -n "$again" ]; then
-      say "$t goes back in line: the train was red again on ${fs[$i]} without it, so the guess was wrong"
-      rm -f "$train_dir/${n[$i]}"
-    elif [ $# -gt 0 ] && [ -n "$burn_red" ] && [ "${kind[$i]}" != burn ]; then
-      train_hold "${n[$i]}" "${br[$i]}" "${w[$i]}" "${fs[$i]}" "${run[$i]}" "${kind[$i]}" "${how[$i]}" "${log[$i]}"
-    elif train_flaky "${fs[$i]}" "${br[$i]}"; then
-      say "$t goes back in line to ship alone: ${fs[$i]//,/, } flaked on other ships, so the train passing without it proves nothing, and its own CI run decides"
-      retro_log "ship train verdict · $label · $t back in line to ship alone on a guess: known flakes, so the pass without it proves nothing · ${fs[$i]} · ${run[$i]}"
-      train_tell "${n[$i]}" "alone $branch ${fs[$i]} ${how[$i]}"
-    else
-      say "$t goes back in line to ship alone: it was pulled on a guess, and the train without it passed ${fs[$i]//,/, }, but no ship pulled for it failed it alone, so its own CI run decides"
-      retro_log "ship train verdict · $label · $t back in line to ship alone on a guess: the train without it passed, and nothing proves it · ${fs[$i]} · ${run[$i]}"
-      train_tell "${n[$i]}" "alone $branch ${fs[$i]} ${how[$i]}"
-    fi
-  done
-}
-# <files, comma-separated> <the held ship's branch>: every one a known flake (tools/known-flakes.ts, as known_flakes reads
-# it: sightings on other branches in the retro log, or an open fix minion, and no broken test). A sighting from a run the
-# held ship was in doesn't count. Anything it can't tell is no flake: the ship ships alone.
-train_flaky() {
-  local files=()
-  [ -f "$tools/known-flakes.ts" ] || return 1
-  IFS=, read -ra files <<<"$1"
-  [ ${#files[@]} -gt 0 ] || return 1
-  LAND_FLAKE_DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} \
-    "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$2" "${files[@]}" >/dev/null 2>&1 </dev/null
-}
 # <ticket> <branch> <tip> <files> <run> <kind> <how> <log>: held off the train until the train without it has a verdict.
 train_hold() {
   held_n+=("$1") held_br+=("$2") held_was+=("$3") held_files+=("$4") held_run+=("$5") held_kind+=("$6") held_how+=("$7") held_log+=("$8")
-}
-# The held ships back in line as they were, with no verdict (and on any exit).
-train_release() {
-  local n v
-  for n in "${held_n[@]}"; do read -r v _ 2>/dev/null <"$train_dir/$n" && [ "$v" = riding ] && rm -f "$train_dir/$n"; done
-  held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()
 }
 # The train's last verdict: what becomes of the ships still held off it. One that ships past main's red or a known flake
 # was red on those files all the same.

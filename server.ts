@@ -22,6 +22,7 @@ import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from '.
 import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
+import { everyLine, ShipTrail } from './src/ship-trail.ts';
 import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
@@ -56,6 +57,7 @@ import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-job
 import { LongJobs } from './src/long-jobs.ts';
 import { gruntAtWork } from './src/live-state.ts';
 import { MinionJobs } from './src/minion-jobs.ts';
+import { CutOffs, jobCutOff } from './src/cut-offs.ts';
 import { CACHE_TTL_MS } from './src/keepalive.ts';
 import { tmpDirFor } from './src/turn-tmp.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
@@ -93,6 +95,7 @@ import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
+import { CodeCounts, countApart } from './src/code-counts.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
 import { Launchers } from './src/desktop-launcher.ts';
 import { CiStore } from './src/ci-store.ts';
@@ -106,7 +109,7 @@ import { OutsideSpend } from './src/outside-spend.ts';
 import { config, DEFAULT_DATA_DIR } from './src/config.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
-import { AppServices, serviceOptions, ServiceError } from './src/app-services.ts';
+import { AppServices, serviceOptions } from './src/app-services.ts';
 import { startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
@@ -147,12 +150,13 @@ import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
-import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
 import { earlyCi, earlyDroppedWhy, landNews, readTail } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
+import { rollbackStarters } from './src/rollback-starters.ts';
 import { HostJobs, jobLost } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
@@ -160,11 +164,11 @@ import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
 import { StallWatch } from './src/stall-signals.ts';
-import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
+import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
-import { TargetFinder, type Found } from './src/release-targets.ts';
+import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { apiRoutes } from './src/routes/all.ts';
 import { KIT_DIR, listSkills, warmUsage } from './src/skills.ts';
@@ -453,6 +457,14 @@ const stallWatch = new StallWatch({
   note: (id, text) => runner.emit(id, 'note', { text }),
 });
 if (!PREVIEW) runner.onStreamEvent = (id, ev) => stallWatch.observe(id, ev);
+const cutOffs = new CutOffs((id, cut) => store.addWaitRecord(id, 'cut', cut));
+runner.onRawEvent = (id, ev) => {
+  try {
+    cutOffs.observe(id, ev);
+  } catch (err) {
+    console.error(`[cut-offs] minion ${id}: ${thrown(err).message}`);
+  }
+};
 // Minions' branches served for people to try (src/previews.ts); a preview serves none of its own.
 const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
 if (previews) {
@@ -506,6 +518,7 @@ outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.p
 // Jobs that outlive a minion's turn (#1890): citadel-job starts them here, and their end wakes the minion.
 const minionJobs = new MinionJobs({
   store,
+  cutOff: (job) => store.addWaitRecord(job.ticket, 'cut', jobCutOff(job)),
   tmp: (id) => {
     const t = store.getTicket(id);
     return t && t.status !== 'closed' ? tmpDirFor(runner.tmpRoot(t.project_id), id) : null;
@@ -702,6 +715,9 @@ if (!BOOT_CHECK)
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
+const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
+// One scheme's git a tick, each once a day, after the boot's rush (#1988).
+if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 machineLink.online = (id) => machines.isOnline(id);
@@ -834,7 +850,6 @@ const longJobs = new LongJobs({
   },
   hold: (slug, since) => ciHold.why(slug, since),
   heldRun: (run) => ciHold.isHeld(run),
-  report: (slug, text) => tellHeld(slug, text),
 });
 // The pump's and CI's lookups read this, not the folder (#1980).
 if (!BOOT_CHECK) every('long jobs folder', 3_000, () => longJobs.refresh());
@@ -1395,25 +1410,7 @@ const apkReader = new ApkReader({
     if (pin) rollback.failed(t.projectId, t.id, pin.sha, why);
   },
 });
-/**
- * Publish release run `run`'s signed APK into `t`'s feed (src/apk-release.ts): the CI store's copy when it has one,
- * recorded (#663) and told to the scheme's Taskmaster. Throws publish()'s refusals (OldApk, OtherKey). Returns the code.
- */
-async function publishRun(t: Found, run: Run, current: number, main: { code: number; name: string | null }, by: string, uid: number | null): Promise<number> {
-  const p = store.getProject(t.projectId);
-  const slug = p && repoSlug(p.repo_url);
-  if (!p?.repo_dir || !slug || !t.contraption) throw new Error(`${t.name} has no repo or app to publish into`);
-  const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
-  // The signed APK the run put in the CI store (#658), when it did; else its GitHub artifact.
-  const stored = ciStore.releaseApk(p.id, run.id);
-  const code = await publish({ slug, runId: run.id, feedFile, current, main, as: githubOf(p.repo_dir), stored: (stored && (await ciStore.plain(stored))) ?? undefined });
-  if (stored) store.publishCiFile(stored.id, `${t.contraption}/android`);
-  // Who published what (#663): kept, and told to the scheme's Taskmaster.
-  store.recordApkPublish({ projectId: p.id, contraption: t.contraption, versionCode: code, runId: run.id, by, uid });
-  const who = uid != null && by.startsWith('#') ? `${by} (for ${store.getUser(uid)?.name ?? 'someone'})` : by;
-  tellHome(p.id, `${who} published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${run.id}${run.head_branch === ROLLBACK_BRANCH ? ` (last green, rolled back on ${ROLLBACK_BRANCH})` : ''}.`);
-  return code;
-}
+const publishRun = publisher({ store, ciStore, home: services.opts.home, githubOf, tellHome });
 // Each minion's PR as the PR watcher last saw it, for Main's next release (#627).
 const prs = new Map<number, PrSnapshot>();
 const prDeps = {
@@ -1444,23 +1441,7 @@ const testCopyReader = new TestCopyReader({
 // Roll back to last green (#1016, src/rollback.ts): each scheme's last green from CI health's reads, and the button on
 // a Releases card that can deploy a given commit: an app's two-slot deploy, or Citadel's own tools/deploy.sh --to.
 const lastGreen = new LastGreen(store);
-const rollbackJobs = new HostJobs(() => runner.units);
 const ROLLBACK_DIR = join(DATA_DIR, 'run', 'rollback');
-// deploy.sh's paths, only where this server was given them (a dev copy rolling back a scratch checkout): the live
-// server's defaults otherwise. Any other copy (another DATA_DIR, or one that doesn't deploy) without them can't roll
-// back, so it never touches the live checkout.
-const deployEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^DEPLOY_(LIVE|SOURCE|URL|DB|SERVICE|UNIT)$/.test(k) && v)) as Record<string, string>;
-/** Whether Citadel's own roll back still runs; once its job ended, say why if it didn't go live, and clear it for the next one. */
-function citadelRollingBack(current: string | null): boolean {
-  const job = rollbackJobs.state(ROLLBACK_DIR, 2000);
-  if (!job) return false;
-  if (job.code === null) return true;
-  const p = ownScheme();
-  const pin = p && lastGreen.pinned(p.id, CITADEL_TARGET);
-  if (p && pin && job.code !== 0 && current !== pin.sha) rollback.failed(p.id, CITADEL_TARGET, pin.sha, `tools/deploy.sh --to said: ${job.output.trim().split('\n').slice(-3).join(' ') || `exit ${job.code}`}`);
-  rmSync(ROLLBACK_DIR, { recursive: true, force: true });
-  return false;
-}
 const rollback = new Rollback({
   lastGreen,
   repoDir: (id) => store.getProject(id)?.repo_dir ?? null,
@@ -1468,59 +1449,25 @@ const rollback = new Rollback({
   changed: () => showReleases(),
   get: (k) => store.getSetting(k) ?? undefined,
   set: (k, v) => store.setSetting(k, v),
-  // An APK Citadel builds after each deploy (#837: a feed, no release workflow) rolls back with its app (ADR 0012).
-  follows: (tv) => {
-    const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
-    return t?.contraption && !t.workflow ? `app:${t.contraption}` : null;
-  },
-  published: (tv) => (tv.target.kind === 'apk' ? apkReader.published(tv.target.projectId, tv.target.id) : null),
-  running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : tv.target.kind === 'apk' ? apkReader.rollingBack(tv.target.projectId, tv.target.id) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
-  starters: {
-    contraption: (tv, to, by, uid) => {
-      const row = store.getContraption(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '');
-      if (!row || row.home_scheme !== tv.target.projectId) throw new HttpError(404, `${tv.target.name} isn't one of this scheme's apps`);
-      try {
-        startDeploy(app, row, by, null, uid, false, to);
-      } catch (err) {
-        if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
-        throw err;
-      }
-    },
-    // A CI package (ADR 0012, "Feed, no rebuild"): held at last green's existing build in the CI store, which its card
-    // shows as current and the CI store's pins hand to its app's updater. Nothing deploys.
-    ci: (tv) => {
-      const build = ciPackageReader.greenBuild(tv.target.projectId, tv.target.id);
-      if (!build) throw new HttpError(409, `${tv.target.name} has no build from last green or before it in Citadel's CI store, so there's nothing to hand out.`);
-      return { build };
-    },
-    // A CI-signed APK (ADR 0012, Q4 "Yes, now"): point citadel/rollback at last green and start its release workflow
-    // there numbered one past the published build; the APK reader publishes the run once it has signed.
-    apk: async (tv, to) => {
-      const t = targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id);
-      const p = store.getProject(tv.target.projectId);
-      if (!t?.contraption || !p?.repo_dir) throw new HttpError(409, `${tv.target.name} has no app or repo to roll back with`);
-      const code = await rollBackApk({ name: tv.target.name, workflow: t.workflow ?? null, slug: repoSlug(p.repo_url), current: tv.current?.number, copy: !!services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR, as: githubOf(p.repo_dir), branch: ROLLBACK_BRANCH }, to);
-      apkReader.started(t);
-      void releases.refresh();
-      return { code };
-    },
-    // Citadel's server (the every-scheme skill's §1: only the scheme whose repo this server runs has it): deploy.sh
-    // --to in a unit of its own, as a landing runs, since its restart ends this server. The next one reads how it went.
-    [CITADEL_TARGET]: (tv, to) => {
-      const p = store.getProject(tv.target.projectId);
-      if (!p?.repo_dir || p.id !== ownScheme()?.id) throw new HttpError(404, 'Only the scheme this server runs can roll it back');
-      if ((services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) && !config.deployLive) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
-      rollbackJobs.start({
-        dir: ROLLBACK_DIR,
-        cwd: p.repo_dir,
-        argv: ['bash', 'tools/deploy.sh', '--to', to],
-        env: { ...turnEnv(process.env), ...deployEnv() },
-        unit: `citadel-rollback-${Date.now()}`,
-        description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`,
-        ticketId: 0,
-      });
-    },
-  },
+  ...rollbackStarters({
+    store,
+    lastGreen,
+    finder: targetFinder,
+    ciPackages: ciPackageReader,
+    apk: apkReader,
+    services,
+    jobs: new HostJobs(() => runner.units),
+    dir: ROLLBACK_DIR,
+    clear: () => rmSync(ROLLBACK_DIR, { recursive: true, force: true }),
+    copy: !!services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR,
+    deployLive: config.deployLive,
+    env: process.env,
+    ownScheme,
+    githubOf,
+    startDeploy: (row, by, uid, to) => startDeploy(app, row, by, null, uid, false, to),
+    refresh: () => void releases.refresh(),
+    failed: (projectId, target, sha, why) => rollback.failed(projectId, target, sha, why),
+  }),
 });
 const releases = new Releases({
   store,
@@ -1581,44 +1528,7 @@ const autoDeploy = new AutoDeploy({
         startDeploy(app, row, by, null, uid);
       },
     },
-    // An Android app (src/apk-release.ts): a bumped version starts its release workflow, and a signed run is published.
-    apk: {
-      waits: (t) => !!apkReader.pending(t),
-      head: async (t) => {
-        const w = apkReader.pending(t);
-        return !w ? null : w.step === 'dispatch' ? `dispatch:${w.head}` : `publish:${w.run.id}`;
-      },
-      start: async (t, by, uid) => {
-        const w = apkReader.pending(t);
-        const p = store.getProject(t.projectId);
-        const slug = p && repoSlug(p.repo_url);
-        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption)
-          throw new HttpError(409, `${t.name} has nothing to release: no signed APK newer than the published build is waiting, or a release run is still going. The Releases page reads CI every few minutes, so a run that just finished shows a little later.`);
-        const as = githubOf(p.repo_dir);
-        const release = async () => {
-          await dispatch(slug, t.workflow!.replace(/^.*\//, ''), t.branch, as);
-          apkReader.started(t);
-        };
-        const started = `No signed APK newer than the published build yet: started a release run of ${t.branch} (${t.workflow}). Once it has signed one, publish again.`;
-        let said = started;
-        if (w.step === 'dispatch') await release();
-        else {
-          try {
-            const code = await publishRun(t, w.run, w.current, w.main, by, uid);
-            said = `Published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${w.run.id}: installed phones see the update now.`;
-          } catch (err) {
-            // A key the published APK wasn't signed with: refused, with nothing changed.
-            if (err instanceof OtherKey) throw new HttpError(409, err.message);
-            if (!(err instanceof OldApk)) throw err;
-            // Signed before main's version bump: sign main instead.
-            apkReader.tooOld(w.run.id);
-            await release();
-          }
-        }
-        void releases.refresh();
-        return said;
-      },
-    },
+    apk: apkDeployer({ store, apkReader, githubOf, publishRun, refresh: () => void releases.refresh() }),
   },
 });
 
@@ -1980,7 +1890,15 @@ const serverWork = serverWorkWatch(
 );
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
 runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : (serverWork.of(id) ?? minionJobs.work(id)));
-if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
+// Every ship line, for the time log's record of each ship (#1992): Citadel's as last polled, every other scheme's read now.
+const shipTrail = new ShipTrail({
+  store,
+  landings,
+  lines: () => everyLine({ store, own: ownScheme()?.id ?? null, line: waits.line, ticketFor: (label) => waits.ticketFor(label) }),
+});
+// Two seconds at most: a slow disk under one scheme's line must not hold up every scheme's ship reports.
+const trailPoll = () => Promise.race([shipTrail.poll().catch((err) => console.error(`[ship trail] ${thrown(err).message}`)), sleep(2000, undefined, { ref: false })]);
+if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await trailPoll(), await landHandoffs.poll(), serverWork.sync()));
 // Was a blocking scan at each start, before the listen (#1463).
 if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);
 if (!BOOT_CHECK) {
@@ -2105,9 +2023,15 @@ const ciHold = new CiHold({
   heldSince: (heavyId) => longJobs.heldSince(heavyId),
   tell: (id, text) => runner.leaveMail(id, APP_NAME, text),
   report: tellHeld,
+  number: (id) => store.getTicket(id)?.number ?? undefined,
+  changed: (id) => runner.broadcastTicket(id),
+  waiting: () => longJobs.list().flatMap((j) => (j.state === 'queued' && j.held_at && j.held_why ? [{ id: j.id, repo: j.slug.toLowerCase(), ticket: j.ticket, what: j.what, since: j.held_at, why: j.held_why, reported: !!j.reported }] : [])),
+  told: (heavyId) => void longJobs.told(heavyId).catch((e) => console.error(`CI hold: ${heavyId}: ${e?.message ?? e}`)),
+  heldTold: (heavyId) => longJobs.list().find((j) => j.id === heavyId)?.reported,
   store,
   publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
 });
+runner.heldLine = (id) => ciHold.noteFor(id);
 // After the first read of the long jobs: before it, a held one would look free to start again in the day.
 if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());
 // One Peek build while Citadel ships (#1902; Josh, 2026-11-25, "Yes, use labels"). His pick is for Peek alone.
@@ -2445,6 +2369,7 @@ const app: App = {
   ciHealth,
   ciStore,
   ciNumbers,
+  codeCounts,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
   runnerCap,
@@ -2607,6 +2532,9 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
         while (Date.now() < until);
         return json(res, 200, {});
       }
+      // test/reader-stall.test.ts: a page read that holds this thread, as one on a swamped disk does.
+      const held = SETTLED_ROUTE && /[?&]citadel-test-main-read=(\d+)/.exec(req.url ?? '');
+      if (held) for (const until = Date.now() + Number(held[1]); Date.now() < until; );
       // test/front.test.ts: one step of the main thread that writes, pauses, then writes again; no reader may see the half.
       if (SETTLED_ROUTE && req.url?.startsWith('/api/test/half-step')) {
         const q = requestUrl(req).searchParams,
@@ -2754,6 +2682,7 @@ if (config.front) {
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
     publish: throughFront.publish,
+    coming: throughFront.coming,
     store,
     runner,
     builds: (id) => builds.get(id),

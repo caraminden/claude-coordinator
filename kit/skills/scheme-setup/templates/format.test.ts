@@ -10,8 +10,20 @@ import { join } from 'node:path';
 const root = join(import.meta.dirname, '..');
 const bin = join(root, 'node_modules/.bin/biome');
 
-export const FIX =
-  "Run `tools/fmt` and commit the result. When a rebase onto main conflicts over formatting: format your branch first, `git rebase main`, settle each conflict by hand keeping both main's change and yours (never `-X theirs` or `-X ours`: one drops landed work without a word, the other yours), then `tools/fmt` again.";
+// The way onto main for a branch cut before the reformat (#2007): the same text in every kit copy. Only what the branch
+// changed from the formatted old code is replayed, so the reformat itself never conflicts.
+const REBASE = `
+git update-ref -d refs/worktree/reformat; git update-ref refs/worktree/reformat "$(for r in $(git show main:.git-blame-ignore-revs | grep '^[0-9a-f]'); do git merge-base --is-ancestor $r main && ! git merge-base --is-ancestor $r HEAD && git cat-file -e $r~1:tools/fmt && { echo $r; break; }; done 2>/dev/null)"
+git rebase refs/worktree/reformat~1        # your commits, up to just before the reformat
+tools/fmt && git commit -qam format --allow-empty
+git switch --detach refs/worktree/reformat~1 && tools/fmt && git commit -qam 'the old code, formatted' --allow-empty && git update-ref refs/worktree/old HEAD && git switch -
+git switch -C "$(git branch --show-current)" "$(git commit-tree 'HEAD^{tree}' -p refs/worktree/old -m "$(git log -1 --format=%s HEAD~1)")"   # one commit
+git rebase --onto refs/worktree/reformat refs/worktree/old
+git rebase main
+`;
+
+export const FIX = `Run \`tools/fmt\` and commit the result. A branch cut before the reformat commit that conflicts when it rebases onto main: commit everything, then run these in bash, one at a time (each line stands alone; stop if the first fails or the second knows no such revision: the list holds no reformat on main that this branch lacks), and where a rebase stops, settle each conflict by hand keeping both main's change and yours (never \`-X theirs\` or \`-X ours\`: one drops landed work without a word, the other yours), then \`git rebase --continue\`:
+${REBASE}Then \`tools/fmt\` again, and commit.`;
 
 test('every .ts, .js and .mjs file is formatted', { skip: !existsSync(bin) && !process.env.CI ? 'Biome is not installed here (run `npm ci`); CI runs this check' : false }, () => {
   assert.ok(existsSync(bin), 'Biome is missing: run `npm ci`');

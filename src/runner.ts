@@ -51,7 +51,6 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
-import { armOf, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial, trialLine } from './seam-trial.ts';
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
@@ -518,6 +517,8 @@ export class Runner {
   jobs: Pick<MinionJobs, 'stop' | 'running' | 'turnLine'> | null = null;
   /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
   onStreamEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
+  /** Each stream event of a turn as it arrived, the ones not stored too (the cut-off commands, #1992); never throws. */
+  onRawEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion sealed on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -1151,6 +1152,8 @@ export class Runner {
       wait: closed ? null : this.wait(ticket.id),
       // The server working for it while its own turn has ended (#727): the list and chat show it as working.
       server_work: closed ? null : this.serverWork(ticket.id),
+      // Its own CI run is held off the desktop (#1984): the list shows this in place of its note.
+      held_line: closed ? null : (this.heldLine?.(ticket.id) ?? null),
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
       context_live: this.turns.has(ticket.id) ? (this.contextSizes.get(ticket.id) ?? null) : null,
       running_cost: this.turns.has(ticket.id) ? (this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend?.usd ?? 0) : 0, // #1913: the running turn's estimate, not yet in `cost`
@@ -1188,6 +1191,8 @@ export class Runner {
       held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []),
       queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []),
       ...shown,
+      // Its note ("50-run proof running") is stale while the run is held.
+      ...(shown.held_line && { note: shown.held_line }),
       // The status from the live turn and the row together, never the row alone: the row's write waits in the queue
       // (src/db-writer.ts), so under load this called a minion idle whose turn had already started -- and a turn's
       // token, minted at that start, is the only one that still works, so anything acting on "idle, nothing queued"
@@ -1371,6 +1376,8 @@ export class Runner {
    * again), or null. Set by the server; CI health's ciGreen lets it go.
    */
   ciHold?: (ticketId: number) => string | null;
+  /** The list's line for a minion whose own CI run is held off the desktop (CiHold.noteFor); set by server.ts. */
+  heldLine?: (ticketId: number) => string | null;
 
   /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
   probeHold?: (ticketId: number) => boolean;
@@ -1971,12 +1978,12 @@ export class Runner {
     author: string,
     text: string,
     images: MessageImage[] = [],
-    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
+    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; quick?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
     steer = false,
     files: MessageFile[] = [],
   ): { event: EventRow; parked?: true } {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
-    const { asker: askedBy, fyi, light, hold, ...shown } = extra;
+    const { asker: askedBy, fyi, light, quick, hold, ...shown } = extra;
     extra = shown;
     if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
@@ -2034,6 +2041,7 @@ export class Runner {
       ...(extra.typed || 'answer' in extra ? { own: true } : {}),
       ...(fyi ? { fyi: true } : {}),
       ...(light ? { light: true as const } : {}),
+      ...(quick === undefined ? {} : { quick }),
       asker,
     };
     if (parked) {
@@ -2394,8 +2402,8 @@ export class Runner {
     return this.fresh.requestFresh(ticketId, why, auto);
   }
 
-  recordHandoff(ticketId: number, summary: string, carryOn = true): string | null {
-    return this.fresh.recordHandoff(ticketId, summary, carryOn);
+  recordHandoff(ticketId: number, summary: string): string | null {
+    return this.fresh.recordHandoff(ticketId, summary);
   }
 
   freshSweep(now = Date.now()) {
@@ -2635,7 +2643,7 @@ export class Runner {
       const waiting = this.waiting(ticketId);
       const payer = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via);
       const person = payer ?? 0;
-      const place = this.places.place(ticket, () => (this.codexTurn(ticket, project, payer) ? null : this.accountOf(ticket, payer)));
+      const place = this.places.place(ticket, () => (this.codexTurn(ticket, project, payer) ? null : this.accountOf(ticket, payer)), waiting.msgs);
       if (waiting.msgs.some((m) => m.own)) return { person, rank: 0, ...place };
       // A first turn a person or a minion asked for; a schedule's or Citadel's own has no asker.
       const asked = !ticket.session_id && waiting.msgs.some((m) => m.from || m.asker != null);
@@ -2753,7 +2761,7 @@ export class Runner {
     const shown = !this.noTurns && !args[2][0]?.keepalive && was !== undefined && was !== 'running';
     if (shown) this.setStatus(id, 'running');
     try {
-      return await this.launchTurn(...args);
+      return await track('turn launches', this.launchTurn(...args));
     } finally {
       this.launching.delete(id);
       if (!this.turns.has(id)) {
@@ -2878,7 +2886,6 @@ export class Runner {
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    if (!step && !keepalive && !codex) this.fresh.seamEnrol(ticket.id);
     // The place startPlace found a moment ago; one whose machine went since waits there for it. Codex turns, keepalives and fresh-session steps run here (turnAtHome).
     const at = codex || keepalive || step ? 0 : this.turnLine.placeOf(ticket.id);
     const worker = at ? { id: at, name: this.pools!.nameOf(at) } : null;
@@ -3308,10 +3315,6 @@ export class Runner {
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
-      // The seam trial's fresh group (#1129), while its context is past the mark: hand off at a seam it picks.
-      const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
-      const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
-      if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
       const jobs = this.jobs?.turnLine(ticket.id);
       if (jobs) parts.turn.jobs = [jobs];
       // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.
@@ -3389,7 +3392,6 @@ export class Runner {
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         jobMachines,
-        seamTrial: seamFresh,
         appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
         everyScheme,
         claudeBin: this.claudeBin,
@@ -4086,6 +4088,7 @@ export class Runner {
     // A process ended for its card says the call was rejected and the turn failed; the chat shows it still waiting.
     if (live?.card && ev.type === 'user') return;
     if (live?.card && ev.type === 'result') ev = { ...ev, is_error: false, result: '' };
+    this.onRawEvent(ticketId, ev);
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);

@@ -24,6 +24,7 @@ line: everything is on, as written here.
 - **A lens off:** write `Lenses: by the diff, except <names>` in the reviewer's brief.
 - **Finding checker off:** skip it on deep reviews.
 - **Fresh eyes off:** no `citadel:fresh-eyes` Grunt (`references/review-extras.md`, "Fresh eyes"). It is its own switch: with the pre-ship review off and fresh eyes on, a medium feature still gets it.
+- **Verifier on** (the line says "switched on: Verifier"; it is off otherwise), or the brief or a person asks for it on this change: open `references/review-extras.md`, "Verifier".
 - **Additions** (the scheme's own lines, people's verdicts, and the lessons its finding checker
   taught the reviewer): add `Also read <file>, this scheme's additions to the review` to the brief.
 
@@ -169,6 +170,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   (`Base check: 2 red, 1 passes on base (refactor's safety net), 0 skipped`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
 - **Fresh eyes (features), a common line, High route included:** one line under the Risk line: `Fresh eyes: <n> found, <n> fixed` with each unfixed one in "Not fixed", and the ready note says it ran. A feature that skipped it says why in the line: `Fresh eyes: skipped, small (2 files, 90 lines)`.
+- **Verifier, when it ran:** `Verifier: <n> found, <n> fixed, <n> wrong` under the Risk line; each wrong one with its reason goes in "Not fixed".
 - **Done lines (features):** when your first reply showed done lines, tick each in the ready note (`done 5/5`) and name any not met, with why, in the report line. Bugs, chores and research have none.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything

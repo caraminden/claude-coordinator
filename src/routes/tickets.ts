@@ -19,6 +19,7 @@ import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { unsealedBy } from '../held-mail.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
@@ -99,7 +100,7 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
       fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? (fields.model ?? null) : stored.model, 'effort' in fields ? (fields.effort ?? null) : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
       store.addPick(id, 'model' in fields ? (fields.model ?? null) : stored.model, 'effort' in fields ? (fields.effort ?? null) : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because!);
     }
-    store.updateTicket(id, fields);
+    store.updateTicket(id, fields, caller === id ? { kind: 'minion' } : { kind: caller === null ? 'person' : 'agent', name });
     if (fields.state === 'pending-deploy') runner.deployPending(id);
     if (fields.state) closeCancelled = runner.closeCancelled(id, caller !== id);
     if ('build' in fields) store.props.setBuild(id, fields.build ?? null, name);
@@ -326,7 +327,7 @@ const bearer = (req: Ctx['req']) => String(req.headers.authorization).replace(/^
  */
 export function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
   // A card's answer wakes a sealed minion too (#718): answering is as deliberate as Unseal.
-  app.runner.send(ticketId, author, text, images, extra, false, files);
+  app.runner.send(ticketId, author, text, images, { ...extra, quick: true }, false, files);
 }
 
 /**
@@ -352,14 +353,15 @@ export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: st
       return;
     }
   }
+  const who = unsealedBy(by, author);
   // A scheduled run or flaky-test fixer waiting for the box (#1302): Unseal is its "Start now", with no pressure check.
-  if (app.held?.release(ticket.id, `${by} unsealed it`)) return;
+  if (app.held?.release(ticket.id, `${by} unsealed it`, who)) return;
   if (app.runner.heldFor(ticket.id)) {
     const chained = app.waiters.claim(ticket.id); // released by startChained as it sends the brief
     if (!chained) throw new HttpError(409, `#${ticket.number} is starting already`);
     await app.startChained(chained, `${by} unsealed it before its leader's work was in`);
     // Its brief is sent: what comes next goes to that turn, not held (the turn clears the state as it starts).
-    if (!app.runner.heldFor(ticket.id) && app.store.getTicket(ticket.id)?.state === 'parked') app.store.updateTicket(ticket.id, { state: null });
+    if (!app.runner.heldFor(ticket.id) && app.store.getTicket(ticket.id)?.state === 'parked') app.store.updateTicket(ticket.id, { state: null }, who);
     await ownWrites();
     return;
   }
@@ -1359,8 +1361,7 @@ export const ticketRoutes: Route[] = [
       return json(res, 200, { muted: app.runner.muteSpend(ticket.id, session.name, Number((await readJson(req))?.turn)) });
     },
   },
-  // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session),
-  // as a minion in the seam trial's fresh group does (#1129).
+  // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session).
   {
     method: 'POST',
     path: '/api/tickets/:ticket/fresh-session',
@@ -1368,7 +1369,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
       const body = await readJson(req);
-      const why = caller ? app.runner.recordHandoff(ticket.id, str(body.summary, 'Summary', 20_000), body.carry_on !== false) : app.runner.requestFresh(ticket.id, `${session.name} asked for it`);
+      const why = caller ? app.runner.recordHandoff(ticket.id, str(body.summary, 'Summary', 20_000)) : app.runner.requestFresh(ticket.id, `${session.name} asked for it`);
       if (why) throw new HttpError(409, why);
       return json(res, 202, ticketView(app, ticket.id));
     },
@@ -1664,7 +1665,7 @@ export const ticketRoutes: Route[] = [
       const body = (await readJson(req)) ?? {};
       const mine = app.store.getTicket(ticket.id)!;
       const ready = await checkHandoff(app, mine, body, bearer(req));
-      if (!startHandoff(app, mine, ready)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
+      if (!startHandoff(app, mine, ready, { kind: 'minion' })) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },
   },

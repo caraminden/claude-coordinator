@@ -4,11 +4,11 @@
 // While a list names runners, the agents squeeze every other runner on the PC; a list that stops coming (2 minutes) lifts
 // it (runner-agent.mjs). Citadel's own ships go first (Cara, 2026-11-21, picked "Citadel's ship goes first" on #1268's
 // card): while one runs on a PC, other schemes' ships there are left off its list, so they are squeezed like any other runner.
-import { type GhGet, ghGet, RateLimited } from './gh-api.ts';
+import { type GhGet, ghGet, RateLimited, rateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { every, type Job } from './every.ts';
 import { thrown } from './thrown.ts';
-import type { GhErrorBody, GhJobsBody, GhRunsBody } from './gh-bodies.ts';
+import type { GhJobsBody, GhRunsBody } from './gh-bodies.ts';
 
 export const SHIP_POLL_MS = 15_000;
 const RATE_LIMITED_MS = 5 * 60_000;
@@ -147,7 +147,7 @@ export class ShipWatch {
       this.cache.set(path, { etag: r.etag, body: r.body });
       return r.body;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as GhErrorBody | null)?.message ?? '')))) throw new RateLimited();
+    if (rateLimited(r)) throw new RateLimited();
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

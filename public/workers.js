@@ -6,7 +6,7 @@ import { renderProgress } from './progress-ui.js';
 import { renderTyping } from './thread.js';
 import { tooCold, waitsLine } from './threadstate.js';
 import { optimistic } from './ui/optimistic.js';
-import { lineMoved, openLine } from './worker-line.js';
+import { lineMoved, openLine, quickLane } from './worker-line.js';
 
 const READ_MS = 3_000;
 const SIZES = Array.from({ length: 50 }, (_, i) => i + 1);
@@ -171,6 +171,7 @@ export function workersPanel(page) {
       h('b', { class: 'st-value' }, value),
       w.paused ? h('div', {}, toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`)) : '',
       h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : places ? 'Taskmasters always run' : `${size} · Taskmasters always run`),
+      h('div', { class: 'st-sub muted' }, quickLane(w.lane)),
       h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       places ?? '',
       h(
@@ -188,7 +189,7 @@ export function workersPanel(page) {
         { class: 'hue-rows st-line-rows' },
         ...w.people.map((p) =>
           hueRow(
-            { hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, [p.lent && `${p.lent} waiting on a card`, p.waiting && `${p.waiting} waiting`, p.stalled && 'held: container full'].filter(Boolean).join(' · ')) },
+            { hue: p.used || p.lane ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, [p.lane && `${p.lane} in the quick lane`, p.lent && `${p.lent} waiting on a card`, p.waiting && `${p.waiting} waiting`, p.stalled && 'held: container full'].filter(Boolean).join(' · ')) },
             p.name,
             h('span', { class: 'muted' }, p.used ? ' working' : ''),
           ),

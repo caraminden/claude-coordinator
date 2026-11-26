@@ -8,7 +8,6 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial } from '../src/seam-trial.ts';
 import { jsonLines, lines, settled, stopTurns, testPins, until, followed } from './helpers.ts';
 testPins();
 
@@ -127,7 +126,7 @@ test('only a chat with a session, and not a dismissed minion, can start fresh', 
   assert.match(runner.requestFresh(minion.id, 'test')!, /^A dismissed minion keeps its session/);
   // A minion has no fresh_session: its handoff is its reply (#937).
   store.updateTicket(minion.id, { status: 'idle' });
-  assert.match(runner.recordHandoff(minion.id, 'x')!, /^Only a Taskmaster, or a minion in the fresh-session trial's fresh group/);
+  assert.match(runner.recordHandoff(minion.id, 'x')!, /^Only a Taskmaster starts its own fresh session/);
   const id = taskmaster();
   store.updateTicket(id, { session_id: null });
   assert.equal(runner.requestFresh(id, 'test'), 'Its session is already fresh');
@@ -577,97 +576,5 @@ test('a failed handoff that leaves it big does not loop; the next real turn hand
     await waitIdle(id);
   } finally {
     contextSize(null);
-  }
-});
-
-// The seam trial (#1129): minions past the mark as their next turn starts are enrolled, groups taking turns; the fresh group is told
-// to hand off at a seam and carries straight on from its handoff and the server's facts sheet.
-test('seam trial: minions whose next turn starts past the mark are enrolled, fresh then control, and only the fresh one is told', async () => {
-  store.deleteSetting(SEAM_TRIAL_KEY);
-  const [a, b, small] = [taskmaster('old', null), taskmaster('old', null), taskmaster('old', null)];
-  try {
-    contextSize(SEAM_CONTEXT_TOKENS);
-    runner.send(small, 'Josh', 'hi');
-    await started(small);
-    await endTurn(small, 'ok');
-    await waitIdle(small);
-    contextSize(SEAM_CONTEXT_TOKENS + 1);
-    for (const id of [a, b]) {
-      runner.send(id, 'Josh', 'hi');
-      await started(id);
-      await endTurn(id, 'ok');
-      await waitIdle(id);
-    }
-    assert.equal(store.getSetting(SEAM_TRIAL_KEY), null, 'a turn that only ends past the mark enrols nobody');
-    const texts: [number, string][] = [];
-    for (const id of [small, a, b]) {
-      const count = callCount();
-      runner.send(id, 'Josh', 'next');
-      await started(id);
-      texts.push([id, promptText((await lastCall(count)).prompt)]);
-      await endTurn(id, 'ok');
-      await waitIdle(id);
-    }
-    const trial = store.getSetting<SeamTrial>(SEAM_TRIAL_KEY)!;
-    assert.deepEqual(
-      trial.fresh.map((e) => e.id),
-      [a],
-    );
-    assert.deepEqual(
-      trial.control.map((e) => e.id),
-      [b],
-    );
-    assert.equal(trial.fresh[0].context, SEAM_CONTEXT_TOKENS + 1);
-    for (const [id, text] of texts) assert.equal(/Fresh-session trial: you are in the group/.test(text), id === a, `minion ${id}`);
-    // A control minion can't hand off by itself.
-    assert.match(runner.recordHandoff(b, 'x') ?? '', /fresh-session trial's fresh group/);
-  } finally {
-    contextSize(null);
-  }
-});
-
-test('seam trial: a fresh-group minion that hands off starts its fresh session at once, from its handoff and a facts sheet', async () => {
-  const id = taskmaster('old', null);
-  store.setSetting(SEAM_TRIAL_KEY, { since: 0, fresh: [{ id, at: 0, context: 200_000 }], control: [] });
-  const before = callCount();
-  runner.send(id, 'Josh', 'Use tabs, not a list.');
-  await started(id);
-  await lastCall(before); // the handoff turn's own call is logged
-  const count = callCount();
-  assert.equal(runner.recordHandoff(id, 'Branch ticket/9 @ abc123, committed. Josh picked tabs on 2026-11-20.'), null);
-  await endTurn(id, 'ok');
-  await until('the fresh session to start', () => callCount() > count);
-  await started(id);
-  const first = await lastCall(count);
-  assert.ok(!first.args.includes('--resume'), 'a new session');
-  assert.match(promptText(first.prompt), /fresh Claude session[\s\S]*Josh picked tabs on 2026-11-20\.[\s\S]*Facts sheet built by the server[\s\S]*- Josh, [^\n]*: Use tabs, not a list\.[\s\S]*Carry on from your handoff/);
-  assert.deepEqual(
-    store
-      .listEvents(id)
-      .filter((e) => e.kind === 'fresh')
-      .map((e) => JSON.parse(e.data).why),
-    ['a seam the minion picked, in the fresh-session trial'],
-  );
-  await endTurn(id, 'ok');
-  await waitIdle(id);
-});
-
-test('seam trial: a handoff with carry_on false, or one whose minion waits on people, waits for the next message', async () => {
-  for (const wait of ['carry_on', 'state'] as const) {
-    const id = taskmaster('old', null);
-    store.setSetting(SEAM_TRIAL_KEY, { since: 0, fresh: [{ id, at: 0, context: 200_000 }], control: [] });
-    const before = callCount();
-    runner.send(id, 'Josh', 'go');
-    await started(id);
-    await lastCall(before);
-    const count = callCount();
-    assert.equal(runner.recordHandoff(id, "Waiting on Josh's pick.", wait !== 'carry_on'), null);
-    if (wait === 'state') store.updateTicket(id, { state: 'ready' });
-    await endTurn(id, 'ok');
-    await waitIdle(id);
-    await settled(); // its save, after which a fresh start would already have begun
-    assert.equal(store.getTicket(id)!.session_id, null, wait);
-    assert.equal(runner.isRunning(id), false, wait);
-    assert.equal(callCount(), count, wait);
   }
 });

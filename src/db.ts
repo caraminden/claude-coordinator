@@ -32,9 +32,10 @@ import { credentialQueries } from './db/credentials.ts';
 import { turnQueries } from './db/turns.ts';
 import { healthQueries } from './db/health.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
+import { waitRecordQueries } from './db/wait-records.ts';
 import { viewQueries } from './db/views.ts';
 
-import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from './db-keys.ts';
+import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey, WAITS_SINCE_KEY } from './db-keys.ts';
 import { scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey };
@@ -332,6 +333,7 @@ export const SCHEMA_HISTORY = [
   [115, "schedules.trigger_kind, trigger_count, trigger_gap_hours; standard audits' rows take their template's trigger (#1798)"],
   [116, 'machine_jobs.pause_failed (#1956)'],
   [117, 'claims.landed, keep (#1985)'],
+  [118, 'wait_records (#1992)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -591,6 +593,7 @@ export class Store {
     if (stored > SCHEMA_VERSION) {
       console.warn(`The database is at schema version ${stored}, newer than this code's ${SCHEMA_VERSION}: a newer release migrated it. If something fails to read, backups/pre-deploy-*.db holds it from before that deploy.`);
     } else if (stored < SCHEMA_VERSION) this.setSetting('schema_version', SCHEMA_VERSION);
+    if (this.getSetting(WAITS_SINCE_KEY) === null) this.setSetting(WAITS_SINCE_KEY, Date.now());
   }
 
   /**
@@ -810,6 +813,7 @@ const AREAS = [
   readWarmQueries,
   settingQueries,
   slowMomentQueries,
+  waitRecordQueries,
   viewQueries,
 ];
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
@@ -835,6 +839,7 @@ type Areas = typeof healthQueries &
   typeof readWarmQueries &
   typeof settingQueries &
   typeof slowMomentQueries &
+  typeof waitRecordQueries &
   typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };

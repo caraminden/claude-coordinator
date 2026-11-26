@@ -1833,6 +1833,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/projects/:p/code-counts": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "200"
+ },
  "GET /api/projects/:p/contraption-turns": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -3682,6 +3692,16 @@
   "m1": "400 Text is required",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/time-log": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/ultrareview": {
   "anon": "401 Not logged in",
   "person": "400 This scheme has no repo to review",
@@ -4589,6 +4609,16 @@
   "outsider": "403 Only a thread itself can strike its words",
   "tmA": "400 Text is required",
   "tmB": "403 Only a thread itself can strike its words",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/time-log": {
+  "anon": "401 Not logged in",
+  "person": "404 Only minions have a time log",
+  "member": "404 Only minions have a time log",
+  "outsider": "404 No such minion",
+  "tmA": "404 Only minions have a time log",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

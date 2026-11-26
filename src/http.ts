@@ -38,6 +38,7 @@ import type { RunnerCap } from './runner-cap.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiNumbers } from './ci-numbers.ts';
+import type { CodeCounts } from './code-counts.ts';
 import type { CiHold } from './ci-hold.ts';
 import type { CiStore } from './ci-store.ts';
 import type { Previews } from './previews.ts';
@@ -364,6 +365,8 @@ export interface App {
   runnerCap?: Pick<RunnerCap, 'text'>;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
+  /** Each scheme's files by size and by how many minions changed them, counted daily (src/code-counts.ts, #1988). */
+  codeCounts: CodeCounts;
   /** Jobs for the CI runner agent on a CI PC: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */

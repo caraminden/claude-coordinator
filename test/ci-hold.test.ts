@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, REPORT_GAP_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, type WaitingJob, withoutHeld } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -20,6 +20,8 @@ function world(now = DAY, saved: unknown = null) {
     posts: [] as string[],
     told: [] as { ticket: number; text: string }[],
     reports: [] as string[],
+    changed: [] as number[],
+    waiting: [] as WaitingJob[],
     closed: new Set<number>(),
     refs: new Set<string>(),
     /** Ships' runs whose failed tests run again alone now. */
@@ -62,6 +64,10 @@ function world(now = DAY, saved: unknown = null) {
     heldSince: () => w.since,
     tell: (ticket, text) => w.told.push({ ticket, text }),
     report: (_repo, text) => w.reports.push(text),
+    number: (t) => t + 100,
+    waiting: () => w.waiting,
+    told: (id) => w.waiting.filter((j) => j.id === id).forEach((j) => (j.reported = true)),
+    changed: (t) => void w.changed.push(t),
     store: { getSetting: <T>(k: string) => (w.settings.get(k) as T) ?? null, setSetting: (k, v) => w.settings.set(k, structuredClone(v)) },
     publish: (s) => void (w.published = s),
     log: () => {},
@@ -289,21 +295,145 @@ test('night: a ship still stops optional work, and the settle time is shorter', 
   assert.deepEqual(w.posts, ['cancel 1', 'rerun 1']);
 });
 
-test('a job held over 24 hours is reported once, not while it is under', async () => {
+test('a job held 2 hours is told once, with since when, why and who waits; at 1 hour nothing is', async () => {
   const w = world();
   w.line = 1;
   w.heavy();
   await w.tick();
-  await w.tick(REPORT_MS - MIN);
-  assert.equal(w.reports.length, 0);
+  await w.tick(3600_000);
+  assert.equal(w.reports.length, 0, 'held 1 hour');
+  await w.tick(3600_000 - MIN);
+  assert.equal(w.reports.length, 0, 'a minute short of 2 hours');
+  await w.tick(MIN);
   await w.for(10 * MIN);
   assert.equal(w.reports.length, 1);
-  assert.match(w.reports[0], /heavy h0-1-x.*a ship is in line.*once the line is empty/s);
+  assert.match(w.reports[0], /heavy job \(heavy h0-1-x, https:\/\/gh\/1\), first held Nov 24, 12:00 PM PST, #107 waits on it: a ship is in line\./);
   const again = world(w.now, w.settings.get('ci-hold'));
   again.runs = w.runs;
   again.line = 1;
   await again.for(5 * MIN);
   assert.equal(again.reports.length, 0, 'a restart does not say it again');
+});
+
+test('one note takes every job that fell due, and the next one waits an hour', async () => {
+  const w = world();
+  w.line = 1;
+  w.heavy();
+  w.heavy();
+  await w.tick();
+  await w.tick(10 * MIN);
+  w.heavy();
+  await w.tick();
+  await w.tick(REPORT_MS - 10 * MIN);
+  assert.equal(w.reports.length, 1);
+  assert.equal(w.reports[0].match(/^- /gm)?.length, 2);
+  await w.tick(15 * MIN);
+  assert.equal(w.reports.length, 1, 'the third is due, but a note just went');
+  await w.tick(REPORT_GAP_MS);
+  assert.equal(w.reports.length, 2);
+  assert.match(w.reports[1], /heavy h2-1-x/);
+  assert.doesNotMatch(w.reports[1], /heavy h0-1-x/);
+});
+
+test('a job started again and held again keeps its first start time', async () => {
+  const w = world();
+  w.line = 1;
+  const r = w.heavy();
+  await w.tick();
+  w.line = 0;
+  await w.for(SETTLE_DAY_MS + MIN);
+  assert.ok(w.posts.includes('rerun 1'));
+  r.status = 'in_progress';
+  w.line = 1;
+  await w.tick(REPORT_MS);
+  await w.tick();
+  assert.equal(w.reports.length, 1);
+  assert.match(w.reports[0], /first held Nov 24, 12:00 PM PST/);
+});
+
+test("another scheme's held job is noted apart, to its own repo", async () => {
+  const w = world();
+  const to = new Map<string, string>();
+  (w.hold as unknown as { d: { report: (repo: string, text: string) => void } }).d.report = (repo, text) => void to.set(repo, text);
+  w.line = 1;
+  w.heavy();
+  w.heavy({ repo: 'o/peek' });
+  await w.tick();
+  await w.tick(REPORT_MS);
+  assert.deepEqual([...to.keys()].sort(), [OWN, 'o/peek']);
+  assert.match(to.get(OWN)!, /heavy h0-1-x/);
+  assert.doesNotMatch(to.get(OWN)!, /heavy h1-1-x/);
+  assert.match(to.get('o/peek')!, /heavy h1-1-x/);
+  assert.doesNotMatch(to.get('o/peek')!, /heavy h0-1-x/);
+});
+
+test('a heavy job held before it has a run is told once, and shows on its minion', async () => {
+  const w = world();
+  w.waiting.push({ id: 'h1', repo: OWN, ticket: 7, what: 'burn-in', since: w.now, why: 'a ship is in line', reported: false });
+  await w.tick();
+  assert.equal(w.hold.noteFor(7, w.now), 'held off CI since 12:00 PM PST, ships first');
+  assert.deepEqual(w.changed, [7]);
+  await w.tick(REPORT_MS);
+  await w.tick(REPORT_GAP_MS);
+  assert.equal(w.reports.length, 1);
+  assert.match(w.reports[0], /heavy job \(burn-in\), first held Nov 24, 12:00 PM PST, #107 waits on it: a ship is in line/);
+  w.waiting.length = 0;
+  await w.tick();
+  assert.equal(w.hold.noteFor(7, w.now), null);
+});
+
+test('a hold saved before the change and already past 2 hours is told in the first note', async () => {
+  const saved = [{ repo: OWN, run: 1, kind: 'heavy', what: 'heavy old', url: 'https://gh/1', ticket: 7, since: DAY - 3 * 3600_000, why: 'a ship is in line', phase: 'held', at: DAY, attempt: 1 }];
+  const w = world(DAY, saved);
+  w.line = 1;
+  w.add('heavy old', { file: 'citadel-heavy.yml', status: 'completed', conclusion: 'cancelled' });
+  await w.tick();
+  await w.tick();
+  assert.equal(w.reports.length, 1);
+  assert.match(w.reports[0], /heavy old.*first held Nov 24, 9:00 AM PST/);
+});
+
+test("main's run is told only once its own limit has failed to start it", async () => {
+  const w = world();
+  w.line = 1;
+  w.main();
+  await w.tick();
+  w.down = true;
+  await w.tick(MAIN_WAIT_MS);
+  assert.deepEqual(w.reports, []);
+  await w.tick(REPORT_MS);
+  assert.match(w.reports[0], /main's full run/);
+});
+
+test('the list line of a held minion: since when and why, only while it is held', async () => {
+  const w = world();
+  w.line = 1;
+  const r = w.heavy();
+  await w.tick();
+  assert.equal(w.hold.noteFor(7, w.now), 'held off CI since 12:00 PM PST, ships first');
+  assert.deepEqual(w.changed, [7]);
+  await w.for(MIN);
+  assert.deepEqual(w.changed, [7], 'sent again only when it changes');
+  assert.equal(w.hold.noteFor(7, w.now + 24 * 3600_000), 'held off CI since Nov 24, 12:00 PM PST, ships first');
+  w.line = 0;
+  await w.for(SETTLE_DAY_MS + MIN);
+  assert.equal(r.status, 'queued');
+  assert.equal(w.hold.noteFor(7, w.now), null);
+  assert.deepEqual(w.changed, [7, 7]);
+});
+
+test('a proof waiting behind another proof is told as that, not as ships first', async () => {
+  const w = world();
+  const first = w.proof();
+  await w.tick();
+  assert.equal(await w.ask(first), true);
+  const second = w.add('flake-proof test/y.test.ts', { file: 'flake-proof.yml' });
+  assert.equal(await w.ask(second), false);
+  await w.tick();
+  assert.equal(w.hold.noteFor(7, w.now), 'held off CI since 12:00 PM PST, one at a time');
+  await w.tick(REPORT_MS);
+  assert.match(w.reports[0], /flake-proof test\/y\.test\.ts.*another flake proof is running/);
+  assert.doesNotMatch(w.reports[0], /ships? /);
 });
 
 test('the off switch: nothing is stopped or held, and what was held comes back at once', async () => {
@@ -532,13 +662,13 @@ test("another scheme's heavy job goes ahead after four hours of a line that neve
   assert.equal(w.hold.why('o/elsewhere', undefined, w.now), null, 'a repo with no runner there is never held');
 });
 
-test("CI health never reads a held run's cancel as a red, and reads everything else", async () => {
-  const body = { total_count: 2, workflow_runs: [{ id: 1 }, { id: 2 }] };
+test('CI health reads a held run as one that waits, never as a red, and everything else as it is', async () => {
+  const body = { total_count: 2, workflow_runs: [{ id: 1, status: 'completed', conclusion: 'cancelled' }, { id: 2 }] };
   const get = withoutHeld(
     async () => ({ status: 200, etag: 'e', body }),
     (run) => run === 1,
   );
-  assert.deepEqual(await get('runs', null, undefined as never), { status: 200, etag: 'e', body: { total_count: 2, workflow_runs: [{ id: 2 }] } });
+  assert.deepEqual(await get('runs', null, undefined as never), { status: 200, etag: 'e', body: { total_count: 2, workflow_runs: [{ id: 1, status: 'queued', conclusion: null }, { id: 2 }] } });
   const jobs = { status: 200, etag: 'e', body: { jobs: [] } };
   assert.equal(
     await withoutHeld(
@@ -1102,7 +1232,7 @@ test('a proof that waits for a runner keeps its turn, through a restart too', as
   assert.equal(await v.ask(v.proof()), false);
 });
 
-test('a proof held for a day is reported as waiting for its turn, not for ships', async () => {
+test('a proof held 2 hours is reported as waiting for its turn, not for ships', async () => {
   const w = world();
   w.line = 1;
   const [a, b] = proofs(w, 2);
@@ -1111,5 +1241,23 @@ test('a proof held for a day is reported as waiting for its turn, not for ships'
   Object.assign(w.hold.state(w.now).held[0], { since: w.now - REPORT_MS });
   await w.tick();
   assert.match(w.reports[0], /one at a time/);
-  assert.doesNotMatch(w.reports[0], /line is empty/);
+  assert.doesNotMatch(w.reports[0], /a ship is in line/);
+});
+
+test("a second main run held drops the first: one comes back, the newest, with the first's wait", async () => {
+  const w = world();
+  w.line = 1;
+  const a = w.main();
+  await w.tick();
+  await w.for(3 * 60 * MIN);
+  const b = w.main();
+  await w.for(2 * MIN);
+  assert.deepEqual(
+    w.hold.state(w.now).held.map((h) => h.run),
+    [b.id],
+    'the first tests older code, and one verdict is enough',
+  );
+  await w.for(60 * MIN);
+  assert.equal(b.status, 'queued', 'its 4 hours count from the first');
+  assert.ok(!w.posts.includes(`rerun ${a.id}`));
 });

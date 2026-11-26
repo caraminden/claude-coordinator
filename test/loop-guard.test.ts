@@ -16,7 +16,9 @@ testPins();
 // `claude -p` ends every turn at once.
 const root = mkdtempSync(join(tmpdir(), 'loop-guard-'));
 const procs: ChildProcess[] = [];
+const runners: Runner[] = [];
 after(async () => {
+  for (const r of runners) r.noTurns = true; // a queued message would start a turn in a folder already deleted (#1998)
   await stopProcs(procs);
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
@@ -35,6 +37,18 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 );
 chmodSync(fake, 0o755);
 
+/** A Runner in this process. Nothing here waits for its turns, so the teardown stops it from starting more. */
+const inProcess = (store: Store) => {
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
+  runners.push(runner);
+  return runner;
+};
+
 const said = (store: Store, id: number) =>
   store
     .listEvents(id)
@@ -52,12 +66,7 @@ test('6 go through, the 7th is held, Continue releases it and starts the count a
   const coordinator = store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   for (const t of [coordinator, minion]) store.setTicketDir(t.id, root, null);
-  let runner = new Runner(
-    store,
-    () => {},
-    () => ({}),
-    fake,
-  );
+  let runner = inProcess(store);
   let now = 1_000_000;
   runner.now = () => now;
 
@@ -78,12 +87,7 @@ test('6 go through, the 7th is held, Continue releases it and starts the count a
   assert.match(kinds(store, coordinator.id, 'loop_paused')[1].text, /^Also held: #1's message to the Taskmaster/);
 
   // Held messages outlive a restart: a new Runner on the same database still has them.
-  runner = new Runner(
-    store,
-    () => {},
-    () => ({}),
-    fake,
-  );
+  runner = inProcess(store);
   runner.now = () => now;
   assert.equal(runner.continueLoop(minion.id, 'Cara'), 2);
   assert.ok(said(store, minion.id).includes('seventh'));
@@ -104,12 +108,7 @@ test('a person writing to a Taskmaster continues every minion of the scheme with
   for (const t of [coordinator, ...minions]) store.setTicketDir(t.id, root, null);
   // Other settings rows, as the live table has thousands: a scan of them per minion held the loop for 0.4 s (#1029).
   for (let i = 0; i < 2000; i++) store.setSetting(`plan:${i}`, { i });
-  const runner = new Runner(
-    store,
-    () => {},
-    () => ({}),
-    fake,
-  );
+  const runner = inProcess(store);
   runner.now = () => 1_000_000;
   const held = minions[150];
   for (let i = 0; i < LOOP_LIMIT; i++) runner.relay(held.id, held.id, 'Taskmaster', `m${i}`);
@@ -198,12 +197,7 @@ test('the window rolls: messages older than the window stop counting', () => {
   const project = store.createProject('P', null);
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(minion.id, root, null);
-  const runner = new Runner(
-    store,
-    () => {},
-    () => ({}),
-    fake,
-  );
+  const runner = inProcess(store);
   let now = 1_000_000;
   runner.now = () => now;
   const relay = (text: string) => runner.relay(minion.id, minion.id, 'Taskmaster', text);
@@ -226,12 +220,7 @@ test('two Taskmasters share one burst count, both ways, and either one continuin
     store.setTicketDir(t.id, root, null);
     return t;
   });
-  const runner = new Runner(
-    store,
-    () => {},
-    () => ({}),
-    fake,
-  );
+  const runner = inProcess(store);
   let now = 1_000_000;
   runner.now = () => now;
 

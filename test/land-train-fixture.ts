@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ci, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
+import { ci, git, setup, landAsync, tickets, issued, stopShip } from './land-fixture.ts';
 import { until } from './wait.ts';
 
 export type Ship = { change?: [string, string]; also?: [string, string]; env?: Record<string, string>; on?: number; trailers?: string };
@@ -60,7 +60,17 @@ export async function line(ships: Ship[], extra: Record<string, string> | ((dir:
     assert.deepEqual(tickets(state), [], 'every ticket is gone');
     assert.deepEqual(existsSync(join(state, 'train')) ? readdirSync(join(state, 'train')) : [], [], 'no verdict is left');
   };
-  return { r, c, state, env, wts, was, out, go, runs, deployed, subjects, done };
+  // Ship i's land.sh and what it runs, as a person's Stop ends them (src/ship-stop.ts).
+  const stop = (i: number) => {
+    const at = tickets(state)
+      .map((t) => readFileSync(join(state, 'queue', t), 'utf8').split('\n'))
+      .find((t) => t[2] === `ticket/${i}-x`)!;
+    stopShip(Number(at[0].split(' ')[0]));
+  };
+  const cancelled = () => [...c.calls().matchAll(/-X POST repos\/\S+\/runs\/(\d+)\/cancel/g)].map((m) => m[1]);
+  // The subject of the commit a scratch branch on GitHub is at; '' when there is none.
+  const hubAt = (ref: string) => git(join(r.dir, 'hub.git'), 'for-each-ref', '--format=%(contents:subject)', `refs/heads/${ref}`);
+  return { r, c, state, env, wts, was, out, go, runs, deployed, subjects, done, stop, cancelled, hubAt };
 }
 // A rider's own shipped line: main at its own train commit, which its branch now points at, and how it went live.
 export function shipped(l: Awaited<ReturnType<typeof line>>, d: { status: number | null; stderr: string }, i: number, front: number, of: number) {

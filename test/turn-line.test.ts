@@ -101,7 +101,9 @@ const end = (id: number) => writeFileSync(join(root, `end-${id}`), '');
 const unend = (id: number) => rmSync(join(root, `end-${id}`), { force: true });
 const turnsOf = (id: number) => lines(prompts).filter((l) => l.startsWith(`${id} `));
 const started = (id: number) => until(`minion ${id} to start`, () => turnsOf(id).length > 0);
-const idle = (id: number) => until(`minion ${id} to finish`, () => !runner.isRunning(id) && store.getTicket(id)!.status !== 'running');
+/** No turn of its runs and its lane is free: the session save after a turn is over too, which is when its worker goes back (#1967). */
+const over = (id: number) => !runner.isRunning(id) && !(runner as unknown as { lanes: { busy(id: number): boolean } }).lanes.busy(id);
+const idle = (id: number) => until(`minion ${id} to finish`, () => over(id) && store.getTicket(id)!.status !== 'running');
 /** The line has nothing left to start: no pump due, no turn launching, and each worker's turn has its prompt. */
 const settle = () =>
   until('the line to settle', () => {
@@ -127,7 +129,7 @@ beforeEach(async () => {
     end(id);
     if (runner.approvals.waiting(id)) runner.stop(id);
   }
-  await until('the minions before to finish', () => made.every((id) => !runner.isRunning(id)) && runner.turnLine.waiting().length === 0);
+  await until('the minions before to finish', () => made.every(over) && runner.turnLine.waiting().length === 0);
   made.length = 0;
 });
 
@@ -912,6 +914,71 @@ async function workers(method: 'GET' | 'PUT', body?: unknown) {
   await route.handler({ req, res, app: { runner, store, minionJobs: { stats: () => waits } }, session: { name: 'Josh', uid: josh.id, exp: 0 } } as unknown as Parameters<typeof route.handler>[0]);
   return JSON.parse(out);
 }
+
+/** A minion that has had a turn: not a new one. */
+async function veteran() {
+  const id = minion();
+  await store.recordTurn(id, { session_id: 's', ended_at: Date.now(), session_cost_usd: 0 });
+  return id;
+}
+
+test("the quick lane takes people's own words and answers and the server's wake-ups; new minions, refused ships and other minions wait", async () => {
+  const id = await veteran();
+  const mate = minion();
+  runner.turnLine.setPause(true, 'Cara');
+  const kinds: [string, boolean, () => unknown][] = [
+    ["a person's message", true, () => say(id)],
+    ["a card's answer, or a Ship It handed back", true, () => runner.send(id, 'Cara', 'Ship It', [], { answer: {} })],
+    ['a comment on a file', true, () => runner.send(id, 'Cara', 'this one', [], { comment: { about: 'a file' } })],
+    ["an approval's answer", true, () => runner.queue.put(id, { author: 'System', text: 'approved', images: [], card: 'c1' }) ?? runner.turnLine.enter(id)],
+    ['a job or a wait that ended', true, () => runner.send(id, 'Citadel', 'your job ended')],
+    ['your ship went through', true, () => runner.send(id, 'Citadel', 'it went through', [], { light: true })],
+    ["a plan's answer", true, () => runner.send(id, 'Cara', 'Plan approved', [], Object.assign({ plan: {} }, { quick: true }))],
+    ['CI passed', true, () => runner.send(id, 'GitHub', 'CI passed', [], { fyi: true, light: true })],
+    ['red CI, or a remark on its PR', false, () => runner.send(id, 'GitHub', 'CI failed')],
+    ["a refused ship, or an agent's Unseal", false, () => runner.send(id, 'Citadel', "didn't go through", [], { quick: false })],
+    ["another minion's message", false, () => runner.send(id, 'a mate', 'fyi', [], { from: mate })],
+    ["a minion's message under a server name", false, () => runner.send(id, 'Citadel', 'fyi', [], { from: mate })],
+    ['a script', false, () => runner.send(id, 'Cara', 'from a script')],
+  ];
+  const quick = () => !!runner.turnLine.line().find((w) => w.ticket === id)?.quick;
+  for (const [what, yes, send] of kinds) {
+    send();
+    assert.equal(runner.turnLine.has(id), true, `${what} waits`);
+    assert.equal(quick(), yes, what);
+    runner.stop(id);
+  }
+  runner.send(id, 'Citadel', "didn't go through", [], { quick: false });
+  say(id, 'try this');
+  assert.equal(quick(), true, 'mail of another kind beside it holds nothing up');
+  runner.stop(id);
+  const fresh = minion();
+  say(fresh);
+  assert.equal(!!runner.turnLine.line()[0].quick, false, 'a new minion');
+  runner.stop(fresh);
+});
+
+test("the pool full, a person's message starts its minion in the quick lane at once, and the tile shows it apart", async () => {
+  const id = await veteran();
+  const [a, waits] = [minion(), minion(false, 'Josh')];
+  runner.turnLine.setSize(1, 'Cara');
+  say(a);
+  await started(a);
+  say(waits, 'hello', 'Josh');
+  say(id);
+  await started(id);
+  const tile = await workers('GET');
+  assert.deepEqual([tile.used, tile.size, tile.lane, tile.waiting], [1, 1, { used: 1, size: 2, moved: 0 }, 1]);
+  assert.equal(tile.people.find((p: { name: string }) => p.name === 'Cara').lane, 1);
+  assert.deepEqual(
+    runner.turnLine.laneTurns().map((t) => [t.ticket, t.person, t.moved]),
+    [[id, cara.id, false]],
+  );
+  end(id);
+  await idle(id);
+  assert.equal((await workers('GET')).lane.used, 0);
+  assert.equal(turnsOf(waits).length, 0, 'a new minion waits for the pool');
+});
 
 test('the Workers tile reads the pool, and a person sets its size and the pause', async () => {
   const [a, b] = [minion(), minion(false, 'Josh')];

@@ -129,6 +129,18 @@ export function landAsync(cwd: string, extra: Record<string, string>, limit: num
     });
   });
 }
+/** A person's Stop, as src/ship-stop.ts's signalTree does it: land.sh, then all it runs (its gh runs in a group of its own). */
+export function stopShip(pid: number) {
+  const kids = (p: number): number[] =>
+    spawnSync('pgrep', ['-P', String(p)], { encoding: 'utf8' })
+      .stdout.split('\n')
+      .filter(Boolean)
+      .flatMap((k) => [Number(k), ...kids(Number(k))]);
+  for (const p of [pid, ...kids(pid)])
+    try {
+      process.kill(p, 'SIGTERM');
+    } catch {} // ended by itself meanwhile
+}
 export const tickets = (state: string) =>
   existsSync(join(state, 'queue'))
     ? readdirSync(join(state, 'queue'))
@@ -164,6 +176,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask, or GitHub's runners
 // JSON, which the --jq filter is run on.
 // FAKE_CI_SLOW: a run's first ask finds it in progress; FAKE_RUNNERS_ODD: every second check before a push finds no runner online.
+// FAKE_UNLISTED="<path> <file> [<asks>]": past the first <asks> questions (default none), no run is listed for a commit whose own change is <path>
+// until that file exists, and it is in progress from then on (#1894); FAKE_RUN_BRANCH: the branch a run was started by, which an ask that names another branch doesn't get;
 // FAKE_CI_FILE: the run's state (as FAKE_CI) read from that file at each ask; FAKE_CI_DOWN_AT: GitHub doesn't answer for the
 // Nth commit it is asked about and any after it, until the file FAKE_CI_UP exists. The wait's own runner checks (runners?per_page=,
 // #1361) start no run, and answer FAKE_RUNNERS_WAIT when it is set, else as the check before a push.
@@ -209,6 +223,14 @@ case "$*" in
       esac
       exit 0
     fi
+    if [ -n "\${FAKE_UNLISTED:-}" ]; then
+      read -r up uf ua <<<"\$FAKE_UNLISTED"
+      if [ "$(grep -c "head_sha=$sha" "${calls}")" -gt "\${ua:-0}" ] && [ "$(git -C "${hub}" diff-tree --no-commit-id --name-only -r "$sha" 2>/dev/null)" = "$up" ]; then
+        [ -e "$uf" ] || exit 0
+        FAKE_CI_GATE=$uf.end
+      fi
+    fi
+    case "$*" in *'.head_branch == "'*) [ -z "\${FAKE_RUN_BRANCH:-}" ] || [[ "$*" = *".head_branch == \\"$FAKE_RUN_BRANCH\\""* ]] || exit 0 ;; esac
     [ -z "\${FAKE_CI_FILE:-}" ] || FAKE_CI=$(cat "\$FAKE_CI_FILE")
     [ "\${FAKE_CI:-}" != down ] || exit 1
     [ "\${FAKE_CI:-}" != rate ] || { echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2; exit 1; }
@@ -248,7 +270,8 @@ case "$*" in
         running) printf '%s\\tin_progress\\t-\\thttps://ci/%s\\n' $id $id ;;
       esac
     elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
-      set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
+      o=3; case "$*" in *'.head_branch == "'*) o=2 ;; esac # the commit's newest run from before is another branch's
+      set -- \$FAKE_OLD_RUN; printf '%s\\t%s\\t%s\\thttps://ci/%s\\n' $o "$2" "$3" $o
     fi ;;
   *citadel-ci-linux-check*) echo "\$FAKE_CHECK_RUNNERS" ;;
   *"/actions/runs?status="*) echo "\${FAKE_ACTIVE:-0}" ;;

@@ -224,11 +224,11 @@ export interface Calibration {
 }
 
 /**
- * The kit's own reviewers (Q1, Q9): on every scheme's page as entries, each switchable per scheme. Their text stays in
+ * The kit's own reviewers (Q1, Q9): on every scheme's page as entries, each switchable per scheme, on unless `off`. Their text stays in
  * the kit (`source` names where); an entry's body holds only the scheme's additions. The "Always" lenses are part of the
  * pre-ship review itself and go with it. The lenses' list must match references/lenses.md (test/review-set.test.ts).
  */
-export const BUILT_INS: { slug: string; name: string; kind: string; source: string; when: string; what: string }[] = [
+export const BUILT_INS: { slug: string; name: string; kind: string; source: string; when: string; what: string; off?: boolean }[] = [
   {
     slug: 'pre-ship-review',
     name: 'Pre-ship review',
@@ -252,6 +252,16 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
     ] as const
   ).map(([slug, name, when]) => ({ slug: `lens-${slug}`, name: `Lens: ${name}`, kind: 'reviewer', source: 'kit:citadel:self-review/references/lenses.md', when, what: `One of the pre-ship review's lenses: the reviewer Grunt reads the diff for ${name.toLowerCase()} when it has ${when}.` })),
   { slug: 'finding-checker', name: 'Finding checker', kind: 'checker', source: 'kit:citadel:finding-checker', when: 'Deep pre-ship reviews, after the reviewer', what: "Tries to prove each of the reviewer's findings wrong before the author acts on it." },
+  // Opt-in (#1740; Josh, 2026-11-25, "Opt-in on real ships"): off until a scheme switches it on.
+  {
+    slug: 'verifier',
+    name: 'Verifier',
+    kind: 'reviewer',
+    source: 'kit:citadel:self-review/references/verifier.md',
+    when: 'Once switched on: changes that matter at runtime (turns, limits, restarts, saved state, two people at once), before they ship',
+    what: 'Runs the change on a scratch copy the way a person would, sets up the states bugs hide in, and reports what it saw go wrong. Starts off in every scheme; about $1 and 10 minutes a change. In a small test it named 3 of 11 past bugs (the pre-ship review named 0 or 1) and raised findings on all 3 changes no bug was traced to.',
+    off: true,
+  },
   { slug: 'fresh-eyes', name: 'Fresh eyes', kind: 'reviewer', source: 'kit:citadel:fresh-eyes', when: 'Feature PRs, after the retro', what: "Reads the requester's own words against the PR and says what was built that they didn't ask for, and what they asked for that wasn't built." },
   // A teacher (#1089): it runs only when a critic hands it a stubborn fail, so the page hangs it under those critics.
   {
@@ -760,14 +770,14 @@ export class ReviewSet {
   }
 
   /**
-   * Add the kit's built-ins (BUILT_INS) a scheme doesn't have yet, on, at the front of the ship column. Idempotent; a
-   * scheme's own entry that already took a built-in's slug keeps it, and that built-in stays at its kit default (on).
+   * Add the kit's built-ins (BUILT_INS) a scheme doesn't have yet, on unless it is opt-in, at the front of the ship column. Idempotent; a
+   * scheme's own entry that already took a built-in's slug keeps it, and that built-in stays at its kit default.
    */
   ensureBuiltIns(projectId: number, at = Date.now()): void {
     const have = new Set((this.db.prepare('SELECT slug FROM review_entries WHERE project_id = ?').all(projectId) as { slug: string }[]).map((r) => r.slug));
     BUILT_INS.forEach((b, i) => {
       if (have.has(b.slug)) return;
-      this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', "The kit's, added to the page", at);
+      this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, enabled: !b.off, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', "The kit's, added to the page", at);
     });
   }
 
@@ -1334,11 +1344,15 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
         : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, and ship only on that go, the way the scheme ships (with hand_off_land: no risk, and name the go).",
     );
   }
-  const rest = off.filter((e) => e.slug !== 'pre-ship-review');
+  // An opt-in one that is off is as the kit has it: no line. One that is on is said, since the skill skips it otherwise.
+  const optIn = new Set(BUILT_INS.filter((b) => b.off).map((b) => b.slug));
+  const rest = off.filter((e) => e.slug !== 'pre-ship-review' && !optIn.has(e.slug));
   if (rest.length)
     out.push(
       `This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, an off fresh eyes means no citadel:fresh-eyes Grunt, and an off professor means no citadel:professor, so a stubborn fail's hand-off to it goes to the next step (a person, at the last round).`,
     );
+  const optedIn = kit.filter((e) => e.enabled && optIn.has(e.slug));
+  if (optedIn.length) out.push(`This scheme switched on: ${optedIn.map((e) => e.name).join(', ')} (citadel:self-review says when it runs).`);
   const named = (list: ReviewEntry[]) => list.map((e) => `\`${e.slug}\` (${e.source!.slice(6)})`).join(', ');
   const ownOff = own.filter((e) => !e.enabled);
   if (ownOff.length) out.push(`This scheme switched off its own agents ${named(ownOff)}: don't run them where a skill or the scheme's instructions would, and a hand-off to one goes to its next step.`);

@@ -639,9 +639,10 @@ export function threadRow(t, href = threadHref(t)) {
     presenceChip(t),
     ownerChip(t, coord),
     waitChip(t, coord),
-    wait
+    // A held CI run (#1984) is the note, over a wait's or a release's line.
+    wait && !t.held_line
       ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
-      : rel
+      : rel && !t.held_line
         ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, `${rel.target}: ${rel.text || rel.stage}`, rel.since ? [' · ', waitClock({ since: rel.since })] : '')
         : note || ship || gone
           ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, gone ? h('span', { class: 'closed-at', title: gone.full }, `Dismissed ${gone.short}`) : '', gone && note ? ' · ' : '', note)

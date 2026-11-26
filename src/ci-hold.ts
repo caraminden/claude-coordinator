@@ -19,11 +19,11 @@
 // Left out: desktop.yml (a release build), other schemes' push-started builds, which the runner agents squeeze (src/ci-ships.ts).
 // A job asks before it starts (POST /api/ci-hold; citadel-heavy reads hold.json). Fails open: a job that can't ask, or a
 // GitHub this can't read, means optional work goes ahead; nothing here is asked by a ship. Off switch: <deploy state>/hold-off.
-import { type GhGet, ghGet, ghPost, RateLimited } from './gh-api.ts';
+import { type GhGet, ghGet, ghPost, RateLimited, rateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import type { Store } from './db.ts';
 import { every, type Job } from './every.ts';
-import { ZONE } from './pacific.ts';
+import { pacificClock, pacificDay, pacificStamp, ZONE } from './pacific.ts';
 
 export const HOLD_POLL_MS = 15_000;
 /** How long the line must stay empty before optional work starts: by day ships follow each other in minutes. */
@@ -51,7 +51,11 @@ const CHECK_WAIT_MS = 30 * 60_000;
 const SLOT_GRACE_MS = 60_000;
 /** A run started again that no runner takes gives the slot up. */
 const QUEUED_MS = 10 * 60_000;
-export const REPORT_MS = 24 * 3600_000;
+/** A job held this long is told to its scheme's Taskmaster (#1984; Josh, 2026-11-25, picked "Tell someone when work is stuck"). */
+export const REPORT_MS = 2 * 3600_000;
+/** The least time between two such notes to one scheme: what falls due meanwhile goes in the next one together. */
+export const REPORT_GAP_MS = 3600_000;
+const NOTED_KEY = 'ci-hold-noted';
 const KEY = 'ci-hold';
 const RECANCEL_MS = 60_000;
 const RATE_LIMITED_MS = 5 * 60_000;
@@ -134,6 +138,17 @@ interface GhRun {
   run_started_at?: string;
 }
 
+/** A heavy job a ship holds before it has a run (src/long-jobs.ts), so none of HeldRun's. */
+export interface WaitingJob {
+  id: string;
+  repo: string;
+  ticket: number;
+  what: string;
+  since: number;
+  why: string;
+  reported: boolean;
+}
+
 export interface HoldDeps {
   /** Citadel's own repo, owner/name, lowercase; null when no scheme runs this server (then nothing is held). */
   own: () => string | null;
@@ -152,6 +167,15 @@ export interface HoldDeps {
   heldSince?: (heavyId: string) => number | undefined;
   tell: (ticket: number, text: string) => void;
   report: (repo: string, text: string) => void;
+  /** A minion's number, as people read it. */
+  number?: (ticket: number) => number | undefined;
+  /** The heavy jobs held before they have a run, and how one is marked as told. */
+  waiting?: () => WaitingJob[];
+  told?: (heavyId: string) => void;
+  /** Whether a job was told while it had no run yet, so its run isn't told again. */
+  heldTold?: (heavyId: string) => boolean | undefined;
+  /** A minion's held line (noteFor) changed, so its list row is sent again. */
+  changed?: (ticket: number) => void;
   store: { getSetting<T>(key: string): T | null; setSetting(key: string, value: unknown): void };
   /** Where citadel-heavy reads the hold, after every look. */
   publish?: (state: HoldState & { at: number }) => void | Promise<void>;
@@ -189,14 +213,21 @@ const groupOf = (repo: string, kind: HoldKind, what: string) => (kind === 'heavy
 const heavyId = (kind: HoldKind, title: string) => (kind === 'heavy' ? (/^heavy (\S+)$/.exec(title)?.[1] ?? null) : null);
 const NAMES: Record<HoldKind, string> = { proof: 'flake proof', heavy: 'heavy job', suite: 'test run', main: "main's full run", check: "ship's own check", early: "next ship's early tests" };
 
-/** CI health's GitHub reads without the held runs: a run stopped for a ship starts again, so its cancel is nobody's red. */
+/** A hold's reason in the few words a list row has room for. */
+function shortWhy(why: string): string {
+  if (/at a time|waited longer|is queued/.test(why)) return 'one at a time';
+  if (/main's full/.test(why)) return "main's run first";
+  return /long job/.test(why) ? 'waits for its hours' : 'ships first';
+}
+
+/** CI health's GitHub reads with the held runs as waiting: a run stopped for a ship starts again, so its cancel is nobody's red and nobody need start another. */
 export function withoutHeld(get: GhGet, isHeld: (run: number) => boolean): GhGet {
   return async (path, etag, as) => {
     const r = await get(path, etag, as);
     const body = r.body as RunList | null;
     const runs = body?.workflow_runs;
     if (!Array.isArray(runs) || !runs.some((run) => isHeld(run.id))) return r;
-    return { ...r, body: { ...body, workflow_runs: runs.filter((run) => !isHeld(run.id)) } };
+    return { ...r, body: { ...body, workflow_runs: runs.map((run) => (isHeld(run.id) ? { ...run, status: 'queued', conclusion: null } : run)) } };
   };
 }
 
@@ -228,6 +259,8 @@ export class CiHold {
   private job: Job | null = null;
   private said = '';
   private publishing: Promise<unknown> = Promise.resolve();
+  /** Each waiting minion's held line as last sent to the list. */
+  private lines = new Map<number, string>();
   /** Ship and main runs at the last good look, and when that was. */
   private seen = { at: 0, ship: 0, main: false };
   /** What was running at the last good look (the ships' runs by id), and the queued runs that aren't a check's or a proof's. */
@@ -258,6 +291,26 @@ export class CiHold {
   stop() {
     this.job?.stop();
     this.job = null;
+  }
+
+  /** What a minion's list row says in place of its note while a run of its own is held, or null. A ship's own check or early run is never waited for. */
+  noteFor(ticket: number, now = Date.now()): string | null {
+    let first: { since: number; why: string } | undefined;
+    for (const h of this.held.values()) if (h.ticket === ticket && h.phase !== 'resumed' && !sideRun(h.kind) && !(first && first.since <= h.since)) first = h;
+    for (const j of this.d.waiting?.() ?? []) if (j.ticket === ticket && !(first && first.since <= j.since)) first = j;
+    if (!first) return null;
+    const when = pacificDay(first.since) === pacificDay(now) ? pacificClock(first.since) : pacificStamp(first.since);
+    return `held off CI since ${when}, ${shortWhy(first.why)}`;
+  }
+
+  private sendLines(now: number) {
+    const was = this.lines;
+    this.lines = new Map();
+    for (const { ticket } of [...this.held.values(), ...(this.d.waiting?.() ?? [])]) {
+      const line = ticket === null ? null : this.noteFor(ticket, now);
+      if (line) this.lines.set(ticket!, line);
+    }
+    for (const t of new Set([...was.keys(), ...this.lines.keys()])) if (was.get(t) !== this.lines.get(t)) this.d.changed?.(t);
   }
 
   /** A run this stopped and will start again: its cancelled end isn't news. */
@@ -420,6 +473,7 @@ export class CiHold {
 
   /** One write at a time, each of the state as it is then. */
   private publish(now: number) {
+    this.sendLines(now);
     this.publishing = this.publishing.then(() => this.d.publish?.({ at: now, ...this.state(now) })).catch((err) => this.say(`CI hold: ${err?.message ?? err}`));
     return this.publishing;
   }
@@ -486,6 +540,7 @@ export class CiHold {
     const groups = new Set<string | null>();
     for (const a of active.values()) groups.add(groupOf(a.repo, a.kind, a.run.display_title || NAMES[a.kind]));
     for (const h of this.held.values()) if (h.phase === 'resumed' && now - h.at <= RECANCEL_MS) groups.add(groupOf(h.repo, h.kind, h.what));
+    this.oneMain();
     let failed = false;
     // In order: main's run first (it and the suites share a group), then a ship's checks, then the longest held.
     for (const h of [...this.held.values()].sort((a, b) => RANK[a.kind] - RANK[b.kind] || a.since - b.since)) {
@@ -590,12 +645,19 @@ export class CiHold {
           Object.assign(h, { why: taken, behind: h.behind ?? now });
           this.save();
         }
-        if (ship && h.kind === 'proof' && h.why !== ship) {
+        if (ship && h.why !== ship) {
           h.why = ship;
           this.save();
         }
         if (taken && !this.slotPast(h, now)) return;
         if (sideRun(h.kind) && this.queued.size) return;
+      }
+      // A long job outside its hours waits for them, not for what stopped it: its reason says so.
+      const later = !off && id !== null && this.d.mayResume?.(id) === false && !this.shipWhy(now);
+      const hours = 'it is a long job, which starts again only in its hours';
+      if (later && h.why !== hours) {
+        h.why = hours;
+        this.save();
       }
       const clear = sideRun(h.kind) || h.kind === 'proof' || h.kind === 'main' ? !this.shipsFirst(h.kind, h, true, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
       if ((!off && !clear) || (group && groups.has(group)) || (h.misses && now - h.at < RECANCEL_MS)) return;
@@ -629,6 +691,15 @@ export class CiHold {
     return h?.since ?? (id ? this.d.heldSince?.(id) : undefined);
   }
 
+  /** Of main's runs that wait, only the newest comes back (the others test older code), with the longest one's wait. */
+  private oneMain() {
+    const [last, ...older] = [...this.held.values()].filter((h) => h.kind === 'main' && h.phase === 'held').sort((a, b) => b.run - a.run);
+    for (const h of older) {
+      last.since = Math.min(last.since, h.since);
+      this.drop(h);
+    }
+  }
+
   private phase(h: HeldRun, phase: HeldRun['phase'], now: number) {
     Object.assign(h, { phase, at: now, misses: 0 });
     this.save();
@@ -656,7 +727,7 @@ export class CiHold {
       at: now,
       attempt: run.run_attempt ?? 1,
       stops: (had?.stops ?? 0) + (taken ? 0 : 1),
-      reported: had?.reported,
+      reported: had?.reported ?? (heavyId(kind, what) === null ? undefined : this.d.heldTold?.(heavyId(kind, what)!)),
       ...(/^(check|early)\//.test(run.head_branch ?? '') ? { branch: run.head_branch as string } : {}),
       ...(taken ? { behind: had?.behind ?? now } : {}),
     };
@@ -718,16 +789,44 @@ export class CiHold {
     return sideRun(kind) && this.fresh(now) && [...this.queued].some((id) => id !== run) ? 'another Citadel job is queued, and a check starts only on an idle CI desktop' : null;
   }
 
-  /** A job held over a day is told to its scheme's Taskmaster, once. */
+  /**
+   * What is still waiting REPORT_MS after it was first held is told to its scheme's Taskmaster, each job once, in one
+   * note a scheme. Main's run is told only once its own limit (MAIN_WAIT_MS) has failed to start it.
+   */
   private report(now: number) {
+    const due = new Map<string, { since: number; ticket: number | null; name: string; why: string; mark: () => void }[]>();
+    const add = (repo: string, item: NonNullable<ReturnType<typeof due.get>>[number]) => due.set(repo, [...(due.get(repo) ?? []), item]);
     for (const h of this.held.values()) {
-      if (h.reported || h.phase === 'resumed' || now - h.since < REPORT_MS) continue;
-      h.reported = true;
-      this.save();
-      this.d.report(
-        h.repo,
-        `A ${NAMES[h.kind]} has been held off the CI desktop for over 24 hours (${h.what}, ${h.url}): ${h.why}. ${h.kind === 'proof' ? 'Flake proofs run one at a time, the longest held first; it' : 'Ships go first, so it starts once the line is empty; it'} is never forced. The CI page lists what is held.`,
-      );
+      if (h.reported || h.phase === 'resumed' || now - h.since < REPORT_MS + (h.kind === 'main' ? MAIN_WAIT_MS : 0)) continue;
+      add(h.repo, {
+        since: h.since,
+        ticket: h.ticket,
+        name: `${NAMES[h.kind]} (${h.what}, ${h.url})`,
+        why: h.why,
+        mark: () => {
+          h.reported = true;
+          this.save();
+        },
+      });
+    }
+    for (const j of this.d.waiting?.() ?? []) {
+      if (j.reported || now - j.since < REPORT_MS) continue;
+      add(j.repo, { since: j.since, ticket: j.ticket, name: `${NAMES.heavy} (${j.what})`, why: j.why, mark: () => this.d.told?.(j.id) });
+    }
+    if (!due.size) return;
+    const noted = this.d.store.getSetting<Record<string, number>>(NOTED_KEY) ?? {};
+    for (const [repo, jobs] of due) {
+      if (now - (noted[repo] ?? 0) < REPORT_GAP_MS) continue;
+      noted[repo] = now;
+      this.d.store.setSetting(NOTED_KEY, noted);
+      for (const j of jobs) j.mark();
+      const lines = jobs
+        .sort((a, b) => a.since - b.since)
+        .map((j) => {
+          const n = j.ticket === null ? undefined : this.d.number?.(j.ticket);
+          return `- ${j.name}, first held ${pacificStamp(j.since)}, ${n === undefined ? 'no minion waits on it' : `#${n} waits on it`}: ${j.why}.`;
+        });
+      this.d.report(repo, `Still off the CI desktop ${REPORT_MS / 3600_000} hours or more after first being held:\n${lines.join('\n')}\nCitadel starts each by itself when it may. If one should not be waiting this long, look into why; the CI page lists what is held.`);
     }
   }
 
@@ -753,7 +852,7 @@ export class CiHold {
       this.cache.set(path, { etag: r.etag, body });
       return body;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')))) throw new RateLimited();
+    if (rateLimited(r)) throw new RateLimited();
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

@@ -1,7 +1,7 @@
 // What the worker line's drawer shows and what a move in it asks for (public/worker-linemath.js).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyMove, applyStart, dropped, lineGroups, lineWhy, nextUrgent, ownSaid } from '../public/worker-linemath.js';
+import { applyMove, applyStart, dropped, laneSaid, lineGroups, lineWhy, nextUrgent, ownSaid } from '../public/worker-linemath.js';
 
 const wait = (ticket, more = {}) => ({ ticket, project: 2, number: ticket, title: `m${ticket}`, person: 'Josh', since: 1, urgent: false, ...more });
 const tag = (ticket, more = {}) => ({ ticket, project: 2, number: ticket, title: `m${ticket}`, waiting: true, kind: 'person', by: 'Josh', at: 1, ...more });
@@ -141,4 +141,13 @@ test('what one with its own worker is doing', () => {
   assert.equal(ownSaid({ waiting: true }, null), 'starting');
   assert.equal(ownSaid({ waiting: false, working: true }, null), 'working');
   assert.equal(ownSaid({ waiting: false }, null), 'idle');
+});
+
+test('the quick lane in words, at each memory level', () => {
+  assert.equal(laneSaid({ used: 1, size: 2, moved: 0 }), '1 of 2 working');
+  assert.equal(laneSaid({ used: 0, size: 2, moved: 2 }), '0 of 2 working · 2 moved to pool');
+  assert.equal(laneSaid({ used: 1, size: 1, moved: 0 }), '1 of 1 working, 1 while memory is under strain');
+  assert.equal(laneSaid({ used: 0, size: 0, moved: 0 }), 'closed while memory is tight');
+  assert.equal(laneSaid({ used: 2, size: 0, moved: 1 }), '2 working, closed while memory is tight · 1 moved to pool');
+  assert.equal(lineWhy({ quick: true, warm: true }), 'or quick lane · warm, about to go cold');
 });

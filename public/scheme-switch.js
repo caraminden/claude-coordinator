@@ -20,7 +20,7 @@ export function schemeSwitchHash(hash, id, isAdmin = false) {
   // The Releases page (#1423) opens on the scheme you switch to, on the tab you were on.
   if (page === 'releases') {
     const tab = (rest ?? '').split('/')[1];
-    return `${home}/releases/${id}${/^(overview|history|health|numbers|status)$/.test(tab ?? '') ? `/${tab}` : ''}`;
+    return `${home}/releases/${id}${/^(overview|history|health|numbers|code|status)$/.test(tab ?? '') ? `/${tab}` : ''}`;
   }
   // A schedule's page opens the other scheme's Schedules list: its schedules are its own.
   if (page === 'schedules') return `${home}/schedules`;

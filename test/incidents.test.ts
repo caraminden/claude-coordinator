@@ -236,6 +236,15 @@ test('redTrigger: five failed runs in half an hour, counted once each, after the
   assert.equal(redTrigger(five, 0, T0 + 40 * MIN), null, 'outside the half hour');
 });
 
+test("redTrigger: a minion's own failed citadel-heavy job (#2002) is not a red; ship and main test reds are", () => {
+  const j = (run: number, min: number, name: string) => ({ run_id: run, name, conclusion: 'failure', completed_at: new Date(T0 + min * MIN).toISOString() });
+  const heavy = [1, 2, 3, 4, 5].map((n) => j(n, n, 'heavy'));
+  assert.equal(redTrigger(heavy, 0, T0 + 10 * MIN), null, 'five heavy jobs alone');
+  assert.equal(redTrigger([...heavy, j(6, 6, 'test'), j(7, 7, 'test')], 0, T0 + 10 * MIN), null, 'five heavy jobs plus two ship reds');
+  const five = [1, 2, 3, 4, 5].map((n) => j(n, n, 'test'));
+  assert.ok(redTrigger([...five, ...heavy.map((h) => ({ ...h, run_id: h.run_id + 10 }))], 0, T0 + 10 * MIN), 'five ship reds still open one');
+});
+
 test('journal, load and grouping read what they should', () => {
   const lines = journalEntries(
     [
@@ -283,6 +292,40 @@ test('a source that fails is said in the timeline; the rest still gather', async
   assert.match(s.files[0].text, /Health · loop-lag: held 2 s/);
 });
 
+test('redTrigger: flake-proof reds (#2032) are not reds; 3 proof plus 2 ship reds is no burst, 5 ship reds still is', () => {
+  const j = (run: number, min: number, name: string) => ({ run_id: run, name, conclusion: 'failure', completed_at: new Date(T0 + min * MIN).toISOString() });
+  const mix = [j(1, 1, 'proof'), j(2, 2, 'proof'), j(3, 3, 'proof'), j(4, 4, 'test'), j(5, 5, 'test')];
+  assert.equal(redTrigger(mix, 0, T0 + 10 * MIN), null);
+  assert.ok(
+    redTrigger(
+      [1, 2, 3, 4, 5].map((n) => j(n, n, 'test')),
+      0,
+      T0 + 10 * MIN,
+    ),
+  );
+});
+
+test('readCiRuns: a run created before the window but finished in it is listed (#2032)', async () => {
+  const get = async (path: string) => {
+    if (path.includes('/jobs')) return { status: 200, etag: null, body: { jobs: [] } };
+    return {
+      status: 200,
+      etag: null,
+      body: {
+        workflow_runs: [
+          { id: 1, name: 'proof', head_branch: 'b', conclusion: 'failure', created_at: '2026-11-17T04:00:00Z', updated_at: '2026-11-17T09:50:00Z' },
+          { id: 2, name: 'proof', head_branch: 'b', conclusion: 'success', created_at: '2026-11-17T04:00:00Z', updated_at: '2026-11-17T05:00:00Z' },
+        ],
+      },
+    };
+  };
+  const runs = await readCiRuns(get, 'o/r', undefined, T0 - 30 * MIN, T0 + 30 * MIN);
+  assert.deepEqual(
+    runs.map((r) => r.id),
+    [1],
+  );
+});
+
 test('readCiRuns: the window as GitHub asks for it, and each failed run its failed step and runner', async () => {
   const asked: string[] = [];
   const get = async (path: string) => {
@@ -317,7 +360,7 @@ test('readCiRuns: the window as GitHub asks for it, and each failed run its fail
     };
   };
   const runs = await readCiRuns(get, 'o/r', undefined, T0 - 30 * MIN, T0 + 30 * MIN);
-  assert.equal(asked[0], 'repos/o/r/actions/runs?created=2026-11-17T09:14:00Z..2026-11-17T10:14:00Z&per_page=100&page=1');
+  assert.equal(asked[0], 'repos/o/r/actions/runs?created=2026-11-16T21:14:00Z..2026-11-17T10:14:00Z&per_page=100&page=1');
   assert.deepEqual(
     runs.map((r) => [r.id, r.failed ?? null, r.runner ?? null]),
     [

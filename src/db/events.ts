@@ -271,6 +271,11 @@ export const eventQueries = {
     return rows.map((r) => ({ at: r.created_at, start: r.kind === 'claude' && r.data.startsWith('{"type":"system"') }));
   },
 
+  /** A chat's events after event `after` that say where its time went (src/time-log.ts), at most `limit`, oldest first. */
+  timeLogEvents(this: Store, ticketId: number, after: number, limit: number): EventRow[] {
+    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND id > ? AND kind IN ('claude', 'note', 'user_message', 'error') ORDER BY id LIMIT ?").all(ticketId, after, limit) as unknown as EventRow[];
+  },
+
   /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
   eventIdAt(this: Store, at: number): number {
     // Two one-row lookups on the primary key: the one-query MIN(id), MAX(id) scanned the whole events table (0.7-1.3 s of stall).

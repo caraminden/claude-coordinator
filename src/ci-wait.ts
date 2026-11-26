@@ -12,7 +12,8 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
 import { every } from './every.ts';
 import { thrown } from './thrown.ts';
-import type { GhErrorBody, GhRun, GhRunsBody } from './gh-bodies.ts';
+import { rateLimited } from './gh-api.ts';
+import type { GhRun, GhRunsBody } from './gh-bodies.ts';
 
 export const POLL_MS = 20_000;
 /** Past this many runs in flight, each is looked at every SLOW_MS instead. */
@@ -414,7 +415,7 @@ export class CiRuns {
       if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value!);
       return r.body as T | null;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as GhErrorBody | null)?.message ?? '')))) throw Object.assign(new Error('rate limited'), { rateLimited: true });
+    if (rateLimited(r)) throw Object.assign(new Error('rate limited'), { rateLimited: true });
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

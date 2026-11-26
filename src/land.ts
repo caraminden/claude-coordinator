@@ -642,7 +642,7 @@ export interface HandoffDeps {
   store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
-    send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean; light?: boolean }): void;
+    send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean; light?: boolean; quick?: boolean }): void;
     close(id: number, text: string): Promise<void>;
     unpark(id: number, by: string, author: string, quiet?: boolean): boolean;
     relayMinion(from: number, to: number, author: string, text: string, urgent?: boolean, wake?: boolean, unparked?: boolean): unknown;
@@ -799,7 +799,7 @@ export class LandHandoffs {
       } catch (err: any) {
         console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
       }
-      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`));
+      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).

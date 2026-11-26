@@ -3,11 +3,12 @@
 // `"mode": "verify"` runs a verifier instead (#1740): it boots the change as shipped and drives it (verifier.md).
 // README.md beside this file; `node tools/review-escapes/run.ts --help`.
 import { spawn, execFileSync } from 'node:child_process';
-import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { thrown } from '../../src/thrown.ts';
+import { setUpCopy } from './verifier-copy.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -201,9 +202,6 @@ async function review(c: Case, arm: Arm, out: string, kit: string): Promise<void
   console.log(`${arm.name} ${c.id}: $${meta.cost.toFixed(2)} ${Math.round(meta.ms / 1000)}s ${countFindings(text)} findings${meta.error ? ' ERROR ' + meta.error : ''}`);
 }
 
-// What the box's services would do, refused: a verifier and the old server it boots reach none of them.
-const SHIMMED = ['systemctl', 'loginctl', 'journalctl', 'systemd-run', 'gh', 'podman', 'docker', 'tailscale', 'crontab', 'sudo'];
-
 /** Processes still running from a case's folder (its server, a browser, a script it left behind), by pid. */
 function leftovers(dir: string): number[] {
   const pids: number[] = [];
@@ -229,19 +227,13 @@ async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void
   git('clone', '-q', '--shared', ws, repo);
   git('-C', repo, 'branch', '-q', 'main', 'origin/main');
   git('-C', repo, 'remote', 'remove', 'origin');
-  copyFileSync(join(HERE, 'verifier-boot.mjs'), join(dir, 'boot.mjs'));
-  // The state kit (boot.mjs --turns, --clock): the dev copy's stand-in claude and its clock.
-  copyFileSync(join(HERE, 'fake-claude.mjs'), join(dir, 'fake-claude.mjs'));
-  chmodSync(join(dir, 'fake-claude.mjs'), 0o755);
-  copyFileSync(join(HERE, 'verifier-clock.mjs'), join(dir, 'clock.mjs'));
+  setUpCopy(dir);
   mkdirSync(join(dir, 'tools'));
   copyFileSync(join(REPO, 'tools/ui-shot.ts'), join(dir, 'tools/ui-shot.ts'));
   // ui-shot starts its browser through heavy-unit, whose systemd-run is stubbed here: run it in place, in this case's tree.
   writeFileSync(join(dir, 'tools/heavy-unit'), '#!/bin/sh\nwhile [ "$1" = --exec ] || [ "$1" = --what ]; do [ "$1" = --what ] && shift; shift; done\nexec "$@"\n', { mode: 0o755 });
   mkdirSync(join(dir, 'kit/skills/critique/scripts'), { recursive: true });
   copyFileSync(join(REPO, 'kit/skills/critique/scripts/ui-measure.mjs'), join(dir, 'kit/skills/critique/scripts/ui-measure.mjs'));
-  mkdirSync(join(dir, 'shims'));
-  for (const s of SHIMMED) writeFileSync(join(dir, 'shims', s), `#!/bin/sh\necho "${s}: stubbed in this verifier case (#1740)" >&2\nexit 1\n`, { mode: 0o755 });
   const brief = `${GRUNT_LINE}\n\n${readFileSync(join(HERE, 'verifier.md'), 'utf8')}`
     .replaceAll('{origin}', String(c.origin))
     .replaceAll('{repo}', repo)

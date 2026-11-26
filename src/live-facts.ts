@@ -208,36 +208,3 @@ export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmas
   const part = (head: string, items: string[], none: string) => `${head}\n${items.length ? items.join('\n') : none}`;
   return [part('Open cards waiting on people:', cards, 'none'), part('Sealed minions:', parks, 'none'), part('Minions in flight:', flight, 'none'), part('Ships in progress:', ships, 'none'), part('Last messages from people (newest last):', people, 'none')].join('\n\n');
 }
-
-const MINION_PEOPLE = 10;
-
-/**
- * A minion's own facts sheet under its seam handoff (#1129): what the database knows of it (state, note, seal, cards
- * waiting on people, branch) and people's last messages to it in their own words, so a thin handoff can't lose them.
- */
-export function minionSheet(store: Store, runner: Pick<Runner, 'view'>, t: Ticket): string {
-  const f = storedFacts(store, runner, t);
-  const people = store
-    .eventsBefore(t.id, Number.MAX_SAFE_INTEGER, 200)
-    .filter((e) => e.kind === 'user_message')
-    .map((e) => {
-      try {
-        return { at: e.created_at, d: JSON.parse(e.data) };
-      } catch {
-        return null;
-      }
-    })
-    .filter((x) => x && typeof x.d.text === 'string' && x.d.author && !x.d.from && !x.d.mail && !/^(system|citadel|mandate|github|#)/i.test(x.d.author))
-    .slice(0, MINION_PEOPLE)
-    .reverse()
-    .map((x) => `- ${x!.d.author}, ${pacific(x!.at)}: ${cut(x!.d.text.replace(/\s+/g, ' '), 600)}`);
-  return [
-    `State: ${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
-    f.parkedOn ? `Sealed on: ${f.parkedOn}` : '',
-    `Cards waiting on people:\n${f.cards.length ? f.cards.map((c) => `- ${cardText(c)}`).join('\n') : 'none'}`,
-    `Branch: ${f.branch ?? 'none'}`,
-    `People's last messages (newest last):\n${people.length ? people.join('\n') : 'none'}`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-}

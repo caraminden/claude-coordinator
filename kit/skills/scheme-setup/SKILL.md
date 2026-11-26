@@ -93,9 +93,10 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    explicit `any` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
    `--update` after lowering counts (Cara, 2026-11-24: "don't cheat and use 'any'"; Citadel's is `test/typecheck.test.ts`).
    A repo with TypeScript or JavaScript also gets the formatter (#1792): copy `templates/biome.config.json` to the repo root as `biome.json` (set its
-   `includes` to the repo's source folders, and `!`-exclude generated and vendored files), `templates/fmt` to `tools/fmt` and
+   `includes` to the repo's source folders, keep its `!**/node_modules` and `!**/.venv`, and `!`-exclude generated and vendored files), `templates/fmt` to `tools/fmt` and
    `templates/format.test.ts` to `test/`, add `@biomejs/biome` to devDependencies pinned exactly (`npm i -D --save-exact
-   --ignore-scripts @biomejs/biome`), run `tools/fmt` once and commit that reformat alone, add its hash to
+   --ignore-scripts @biomejs/biome`), commit that setup, then run `tools/fmt` once and commit that reformat alone (the format test's
+   way onto main for older branches needs `tools/fmt` in the commit before it), add its hash as it is on main to
    `.git-blame-ignore-revs` (and run `git config blame.ignoreRevsFile .git-blame-ignore-revs`), and make the format test part of
    the check commands (Cara, 2026-11-24, "Formatter everywhere"; Citadel's is `test/format.test.ts`). A Python repo uses ruff
    (`ruff format`, no lint rules beyond the default) the same way. If the repo's style differs from the template's (no semicolons,

@@ -398,3 +398,14 @@ test('a call running a minute or more says how long; a finished one does not', (
   assert.equal(runningFor([{ block, result: null, startedAt: T0 }], T0 + 5.5 * 60_000), '5 min');
   assert.equal(runningFor([{ block, result: { content: 'ok' }, startedAt: T0, doneAt: T0 + 9e5 }], T0 + 1e6), '');
 });
+
+test('a turn of only words leaves a line only for a minion that has worked, its way into the time log (#1991)', () => {
+  const p = createProgress();
+  assert.equal(progressLine(p, false, false), '', 'never worked');
+  applyEvent(p, 'claude', { type: 'system', subtype: 'init' }, 1);
+  applyEvent(p, 'claude', { type: 'result', is_error: false }, 2);
+  assert.equal(progressLine(p, false, true), 'Finished');
+  assert.equal(progressLine(p, true, true), 'Working…', 'running reads as before');
+  p.turnActions = 2;
+  assert.equal(progressLine(p, false, true), 'Finished · 2 actions', 'a turn with actions reads as before');
+});

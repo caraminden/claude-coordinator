@@ -1,12 +1,9 @@
-// Fresh starts (#406, #423): asking for one, the handoff it waits for, what ends it, the idle sweep, and the seam trial's enrolment (#1129).
+// Fresh starts (#406, #423): asking for one, the handoff it waits for, what ends it, the idle sweep.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `FreshDeps`.
 import type { EventRow, Store, Ticket } from './db.ts';
 import type { Lanes } from './lanes.ts';
-import { codexThreadKey, isCodexModel } from './codex.ts';
-import { handoffSheet, minionSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
-import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_TRIAL_KEY, SEAM_WHY, type SeamTrial } from './seam-trial.ts';
+import { handoffSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
 import { COMPACT_COMMAND, handoffPrompt, minionHandoffPrompt } from './prompts.ts';
-import { turnSettings } from './turn-launch.ts';
 import type { KillResume, LimitResume, NetResume } from './resumes.ts';
 import { contextKey, freshKey, handoffKey } from './turn-keys.ts';
 import type { QueuedMessage } from './turn-messages.ts';
@@ -22,7 +19,6 @@ export interface FreshState {
   summary?: string;
   compact?: true;
   auto?: true;
-  seam?: { carryOn: boolean };
 }
 /** A fresh start's idle time for the chat's divider (#1059): "55 m", "1 h 12 m". */
 export const idleText = (ms: number) => {
@@ -87,16 +83,13 @@ export class Fresh {
   }
 
   /**
-   * The handoff a Taskmaster's running turn wrote (fresh_session): its session resets as the turn ends. A minion in the
-   * seam trial's fresh group (#1129) hands off the same way, and its fresh session carries on at once unless `carryOn` is false.
+   * The handoff a Taskmaster's running turn wrote (fresh_session): its session resets as the turn ends.
    */
-  recordHandoff(ticketId: number, summary: string, carryOn = true): string | null {
-    const ticket = this.d.store.getTicket(ticketId);
-    const seam = ticket?.kind !== 'coordinator';
-    if (seam && armOf(this.d.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId) !== 'fresh') return "Only a Taskmaster, or a minion in the fresh-session trial's fresh group, starts its own fresh session: a person can type /fresh in your chat";
+  recordHandoff(ticketId: number, summary: string): string | null {
+    if (this.d.store.getTicket(ticketId)?.kind !== 'coordinator') return 'Only a Taskmaster starts its own fresh session: a person can type /fresh in your chat';
     if (!this.d.isRunning(ticketId)) return 'Only a running turn can hand off';
     const was = this.d.store.getSetting<FreshState>(freshKey(ticketId));
-    this.d.store.setSetting(freshKey(ticketId), { why: was?.why ?? (seam ? SEAM_WHY : 'the Taskmaster asked for it'), summary: summary.slice(0, HANDOFF_MAX), ...(seam ? { seam: { carryOn } } : {}) });
+    this.d.store.setSetting(freshKey(ticketId), { why: was?.why ?? 'the Taskmaster asked for it', summary: summary.slice(0, HANDOFF_MAX) });
     return null;
   }
 
@@ -121,27 +114,20 @@ export class Fresh {
     if (!f) return;
     const ticket = this.d.store.getTicket(ticketId);
     const who = ticket ? roleWord(ticket) : 'Taskmaster';
-    // A minion's /fresh has no fresh_session (only the seam trial's fresh group has the tool, which records the summary first): its handoff turn's reply is its handoff (#937), the status line left out.
+    // A minion's /fresh has no fresh_session: its handoff turn's reply is its handoff (#937), the status line left out.
     const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
     if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
     // A Taskmaster's failed handoff starts the fresh session from a facts sheet the server builds from the database (G6), not a compaction.
     const sheeted = ticket?.kind === 'coordinator' && !f.summary && turn?.fresh === 'handoff' && !stopped;
     if (f.summary || sheeted) {
       const sheet = ticket?.kind === 'coordinator' ? handoffSheet(this.d.store, this.d, ticket) : '';
-      // A seam handoff (#1129) gets the minion's own facts sheet, people's last words verbatim, against a thin handoff.
-      const own = f.seam && ticket ? minionSheet(this.d.store, this.d, ticket) : '';
-      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : own ? `${f.summary}\n\n${MINION_SHEET_CHECK}\n\n${own}` : f.summary!;
+      const text = sheeted ? `${SHEET_FAILED}\n\n${sheet}` : sheet ? `${f.summary}\n\n${SHEET_CHECK}\n\n${sheet}` : f.summary!;
       this.d.store.deleteSetting(freshKey(ticketId));
       this.d.store.setSetting(handoffKey(ticketId), text);
       this.d.store.deleteSetting(contextKey(ticketId));
       this.d.store.updateTicket(ticketId, { session_id: null });
       if (sheeted) this.d.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the new session starts from a facts sheet the server built from the database.` });
       this.d.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
-      // A seam handoff carries straight on (#1129), unless the turn failed or was stopped, closes, or waits on people.
-      const after = this.d.store.getTicket(ticketId);
-      if (f.seam?.carryOn && ok && !stopped && after && !this.d.closing.has(ticketId) && !this.d.parked(after) && !['ready', 'try', 'complete', 'parked', 'pending-deploy'].includes(after.state ?? '') && !this.d.store.openCardsOf(ticketId).length) {
-        this.d.send(ticketId, 'System', CARRY_ON);
-      }
     } else if (turn?.fresh === 'handoff' && stopped) {
       this.d.store.deleteSetting(freshKey(ticketId));
       this.d.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });
@@ -185,18 +171,5 @@ export class Fresh {
     const size = this.d.store.getSetting<number>(contextKey(ticketId));
     if (t?.kind !== 'coordinator' || !t.session_id || !size || size <= FRESH_CONTEXT_TOKENS) return;
     this.requestFresh(ticketId, `${Math.round(size / 1000)}k tokens of context at the end of a turn`, true);
-  }
-
-  /** Enrol a minion whose turn starts past the seam trial's mark (#1129), every scheme: at the start, so only minions that carry on are in it; the Citadel Taskmaster hears once both groups are full. */
-  seamEnrol(ticketId: number) {
-    const t = this.d.store.getTicket(ticketId);
-    const p = t && this.d.store.getProject(t.project_id);
-    const size = this.d.store.getSetting<number>(contextKey(ticketId));
-    if (!t || !p || !size || !eligible(t, isCodexModel(turnSettings(t, p).model) || !!this.d.store.getSetting(codexThreadKey(t.id)))) return;
-    const r = enrol(this.d.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId, size, this.d.now());
-    if (!r) return;
-    this.d.store.setSetting(SEAM_TRIAL_KEY, r.trial);
-    console.log(`[seam-trial] minion ${ticketId}: enrolled in the ${r.arm} group at ${Math.round(size / 1000)}k context`);
-    if (r.filled) this.d.tellCitadel(fullText(r.trial));
   }
 }

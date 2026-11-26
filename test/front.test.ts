@@ -67,7 +67,7 @@ const PATHS = [
   '/api/status',
   '/api/box-capacity',
   // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
-  ...['commands', 'ship-risk'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
+  ...['commands', 'ship-risk', 'time-log'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
   ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns'].flatMap((r) => [
     `/api/projects/${A.id}/${r}`,
     `/api/projects/${B.id}/${r}`,
@@ -81,8 +81,8 @@ const PATHS = [
   '/api/ci-desktop',
   '/api/units',
 ];
-// What differs between two servers' boots (its start time, the answer probe, the machine's load) is compared on one server instead.
-const BOOT_BOUND = new Set(['/api/status', '/api/box-capacity']);
+// What differs between two servers' boots (its start time, the answer probe, the machine's load), or ends now (a time log), is compared on one server instead.
+const BOOT_BOUND = new Set(['/api/status', '/api/box-capacity', ...[M1.id, MB.id].map((id) => `/api/tickets/${id}/time-log`)]);
 // The clock a body carries, the one field that differs between two asks of the same answer.
 const unclocked = (body: string) => body.replace(/"(at|now)":\d+/g, '"$1":0');
 
@@ -180,7 +180,7 @@ after(async () => {
 const LOG = join(root, 'server.log');
 const logged = () => readFileSync(LOG, 'utf8');
 const readyAgain = () => logged().split('Reader thread started again').length - 1;
-// A hung reader's request goes to the main thread after 1 s, the reader replaced after 3 s (2 s and 10 s live).
+// A hung reader's other requests go to another after 1 s, the reader replaced after 3 s (2 s and 10 s live).
 const KNOBS = { CITADEL_READER_ANSWER_MS: '1000', CITADEL_READER_STUCK_MS: '3000' };
 // The minion page too: it waits for main's first pass over every minion (src/reader-live.ts).
 const readerAnswers = (s: Booted) => until('a reader answers', async () => (await get(s, PATHS[0], s.cookie)).reader && (await get(s, `/api/tickets/${M1.id}`, s.cookie)).reader);
@@ -191,8 +191,9 @@ test('through the front thread, readers give every caller the same answers and r
   await readerAnswers(srv);
   const viaReaders = await answers(srv);
   for (const [key, got] of Object.entries(viaReaders)) {
-    const bound = BOOT_BOUND.has(key.split(' ')[1]);
-    assert.deepEqual({ status: got.status, body: bound ? '' : unclocked(got.body) }, { status: viaMain[key].status, body: bound ? '' : unclocked(viaMain[key].body) }, key);
+    // A time log ends now, so its numbers differ; its stretches and rows don't.
+    const same = (body: string) => (key.endsWith('/time-log') ? body.replace(/\d+/g, '0') : BOOT_BOUND.has(key.split(' ')[1]) ? '' : unclocked(body));
+    assert.deepEqual({ status: got.status, body: same(got.body) }, { status: viaMain[key].status, body: same(viaMain[key].body) }, key);
     assert.ok(got.timed, `the answer to ${key} carries Server-Timing`);
   }
   assert.ok(
@@ -271,14 +272,14 @@ test('a reader that dies mid-request is replaced, and its request answered by th
   for (let i = 0; i < 6; i++) assert.ok((await get(srv, PATHS[0], srv.cookie)).reader);
 });
 
-test('a reader that hangs: its request goes to the main thread, and the thread is replaced', { timeout: 60_000 }, async () => {
+test('a reader that hangs: its request gets a 503 the page retries, the other reader answers, and the thread is replaced', { timeout: 60_000 }, async () => {
   await readerAnswers(srv);
-  const hung = await get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie);
-  assert.equal(hung.status, 200);
-  assert.equal(hung.reader, false);
-  assert.equal(hung.body, viaMain[`cara ${PATHS[0]}`].body);
-  // Meanwhile the other reader answers.
-  assert.ok((await get(srv, PATHS[0], srv.cookie)).reader);
+  const hanging = get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie);
+  // Meanwhile the other reader answers, those asked of the hung one first included.
+  for (const got of await Promise.all(Array.from({ length: 4 }, () => get(srv, PATHS[0], srv.cookie)))) assert.ok(got.reader);
+  const hung = await hanging;
+  assert.equal(hung.status, 503);
+  assert.equal(JSON.parse(hung.body).retry, true);
   // Two replacements so far: the dead one's, then this one's.
   await until('the hung reader is replaced', () => /Reader thread silent for \d+ s: replacing it/.test(logged()) && readyAgain() === 2);
   const all = await Promise.all(Array.from({ length: 8 }, () => get(srv, PATHS[0], srv.cookie)));
@@ -448,17 +449,19 @@ test("a restart answers what the front thread already took, a reader's answer in
   assert.equal(srv.proc.exitCode, 0);
 });
 
-test('a write the writer is still holding is never missed: the read waits for it, or the main thread answers', { timeout: 120_000 }, async () => {
+test('a write the writer is still holding is never missed: the read waits for it', { timeout: 120_000 }, async () => {
   const slow = await bootServer({ root, env: { CITADEL_DB_WRITE_DELAY_MS: '300' } });
   try {
     await readerAnswers(slow);
-    // Held 300 ms on the writer: a reader waits only 50 ms, so the main thread answers meanwhile.
+    // Held 300 ms on the writer: a reader waits for it, never the main thread.
     const sent = slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' });
-    const during = await until('a held write sends reads to the main thread', async () => {
+    await until('a read that waited for the held write', async () => {
+      const t0 = Date.now();
       const got = await get(slow, PATHS[0], slow.cookie);
-      return !got.reader && got;
+      assert.deepEqual([got.status, got.reader], [200, true]);
+      // timing-ok: a read that waits for nothing takes a few ms; the write is held 300
+      return Date.now() - t0 > 100;
     });
-    assert.equal(during.status, 200);
     assert.equal((await sent).status, 202);
     // The response came once its writes ran (#1244): the next read, a reader's again, has the message.
     const next = await until('readers answer again', async () => {

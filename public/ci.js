@@ -10,6 +10,7 @@ import { settingsRow } from './settings.js';
 import { pcCard, pcWord, trouble, troubleLine } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
 import { numbersTab, readNumbers } from './ci-numbers.js';
+import { codeTab, readCode } from './code-map.js';
 import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
@@ -350,6 +351,7 @@ const TABS = [
   ['history', 'History'],
   ['health', 'Test health'],
   ['numbers', 'Numbers'],
+  ['code', 'Code'],
   ['status', 'Status'],
 ];
 const CI_TABS = new Set(['overview', 'history', 'health', 'numbers']);
@@ -393,6 +395,7 @@ export function releasesShell() {
     pc = null; // pc: a desktop picked in the list, its load in place of the tabs
   const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
   const numbers = new Map(); // scheme id -> its Numbers read (#1369), kept the same way
+  const code = new Map(); // scheme id -> its Code read (#1988), kept the same way
   const read = (cache, fetch) => async (id) => {
     try {
       cache.set(id, await fetch(id));
@@ -401,7 +404,7 @@ export function releasesShell() {
     }
     draw();
   };
-  const readers = { health: read(health, readHealth), numbers: read(numbers, readNumbers) };
+  const readers = { health: read(health, readHealth), numbers: read(numbers, readNumbers), code: read(code, readCode) };
   const readTab = () => typeof scope === 'number' && readers[tab]?.(scope);
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
@@ -605,7 +608,7 @@ export function releasesShell() {
       return;
     }
     // All has no one CI: its tabs are Releases' board and every app's Status. A scheme without CI keeps the CI tabs, each saying so.
-    const items = scope === 'all' ? TABS.filter(([k]) => !CI_TABS.has(k)) : TABS;
+    const items = scope === 'all' ? TABS.filter(([k]) => !CI_TABS.has(k) && k !== 'code') : TABS;
     if (!items.some(([k]) => k === tab)) tab = 'releases';
     tabsEl.replaceChildren(uiTabs({ items, current: tab, className: 'ci-tabs', onSelect: (k) => go(scope, k) }).element);
     if (tab === 'releases') {
@@ -616,6 +619,12 @@ export function releasesShell() {
     if (tab === 'status') {
       if (body.firstChild !== statusEl) body.replaceChildren(statusEl);
       statusEl.show(scope);
+      return;
+    }
+    // The files are the scheme's own, CI or not.
+    if (tab === 'code') {
+      const el = codeTab(scope, nameOf(scope), code.get(scope) ?? null, readTab);
+      if (body.firstChild !== el || body.childNodes.length > 1) body.replaceChildren(el);
       return;
     }
     if (!ciRead) return void body.replaceChildren(loadingLine('Reading CI…'));

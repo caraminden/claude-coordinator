@@ -5,7 +5,14 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { GhTally, ghGet, ghPost, ghTally, pathShape } from '../src/gh-api.ts';
+import { GhTally, ghGet, ghPost, ghTally, pathShape, rateLimited } from '../src/gh-api.ts';
+
+test('a 429, or a 403 naming the rate limit, is GitHub saying to slow down', () => {
+  assert.equal(rateLimited({ status: 429, body: null }), true);
+  assert.equal(rateLimited({ status: 403, body: { message: 'API rate limit exceeded for user ID 1.' } }), true);
+  assert.equal(rateLimited({ status: 403, body: { message: 'Resource not accessible by integration' } }), false);
+  assert.equal(rateLimited({ status: 200, body: { message: 'rate limit' } }), false);
+});
 
 test('a path keeps its repo and its query names, not run ids or values', () => {
   assert.equal(pathShape('repos/o/r/actions/runs?head_sha=abc123&per_page=20'), 'repos/o/r/actions/runs?head_sha&per_page');

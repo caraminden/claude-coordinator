@@ -98,15 +98,24 @@ export function step(state: IncidentState, triggers: Trigger[], now: number): { 
 /** A failed CI job as ci-health keeps it. */
 export interface RedJob {
   run_id: number;
+  /** The job's name: citadel-heavy.yml's one job is "heavy" (#2002). */
+  name?: string;
   conclusion: string | null;
   completed_at?: string | null;
 }
+const HEAVY_JOB = 'heavy';
+/** The flake-proof workflow's one job (#2032). */
+const PROOF_JOB = 'proof';
 /** A burst of red runs: RED_COUNT or more runs with a failed job finished in the last RED_WINDOW_MS, after `after`. */
 export function redTrigger(jobs: RedJob[], after: number, now: number): Trigger | null {
   const since = Math.max(after, now - RED_WINDOW_MS);
   const runs = new Map<number, number>();
   for (const j of jobs) {
     const at = j.completed_at ? Date.parse(j.completed_at) : NaN;
+    // #2002: a minion's own citadel-heavy job exiting non-zero is its script's result, not CI breaking (6 of 8 reds in the 2026-11-25 01:53 incident); ship and main test runs still count.
+    if (j.name === HEAVY_JOB) continue;
+    // #2032: a minion's flake-proof job fails by design under 10 copies at once (3 of the 5 reds in the 2026-11-25 12:47 incident).
+    if (j.name === PROOF_JOB) continue;
     if (j.conclusion !== 'failure' || !(at > since) || at > now) continue;
     runs.set(j.run_id, Math.max(runs.get(j.run_id) ?? 0, at));
   }
@@ -553,12 +562,14 @@ export async function readDeploys(liveDir: string, from: number, to: number): Pr
   }
   return out.reverse();
 }
-/** The repo's workflow runs created in the window, and each failed one's failed job, step and runner. */
+/** How far before the window a run may have been created and still count: a rerun finishes hours after its creation (#2032). */
+const CI_LOOKBACK_MS = 12 * 60 * MIN;
+/** The repo's workflow runs that were created or finished (last updated) in the window, and each failed one's failed job, step and runner. */
 export async function readCiRuns(get: GhGet, slug: string, as: GithubEnv, from: number, to: number, maxFailed = 80): Promise<CiRun[]> {
   const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
   const raw: GhRun[] = [];
   for (let page = 1; page <= 5; page++) {
-    const a = await get(`repos/${slug}/actions/runs?created=${iso(from)}..${iso(to)}&per_page=100&page=${page}`, null, as);
+    const a = await get(`repos/${slug}/actions/runs?created=${iso(from - CI_LOOKBACK_MS)}..${iso(to)}&per_page=100&page=${page}`, null, as);
     if (a.status !== 200) throw new Error(`GitHub answered ${a.status} for ${slug}'s runs`);
     const body = a.body as GhRunsBody | null;
     const runs = Array.isArray(body?.workflow_runs) ? body.workflow_runs : [];
@@ -566,7 +577,8 @@ export async function readCiRuns(get: GhGet, slug: string, as: GithubEnv, from: 
     if (runs.length < 100) break;
   }
   const out: CiRun[] = raw.map((r) => ({ id: r.id, workflow: r.name ?? 'a workflow', branch: r.head_branch ?? '', conclusion: r.conclusion ?? null, created: Date.parse(r.created_at), updated: Date.parse(r.updated_at ?? r.created_at), url: r.html_url ?? `https://github.com/${slug}/actions/runs/${r.id}` }));
-  for (const r of out.filter((x) => x.conclusion === 'failure').slice(0, maxFailed)) {
+  const inWindow = out.filter((r) => (r.created >= from && r.created <= to) || (r.updated >= from && r.updated <= to));
+  for (const r of inWindow.filter((x) => x.conclusion === 'failure').slice(0, maxFailed)) {
     const a = await get(`repos/${slug}/actions/runs/${r.id}/jobs?per_page=50`, null, as).catch(() => null);
     const job = ((a?.body as GhJobsBody | null)?.jobs ?? []).find((j) => j.conclusion === 'failure');
     if (!job) continue;
@@ -574,7 +586,7 @@ export async function readCiRuns(get: GhGet, slug: string, as: GithubEnv, from: 
     r.failed = `${job.name}${stepName ? ` › ${stepName}` : ''}`;
     r.runner = job.runner_name ?? null;
   }
-  return out.sort((a, b) => a.updated - b.updated);
+  return inWindow.sort((a, b) => a.updated - b.updated);
 }
 
 // ---- The watcher the server runs ----

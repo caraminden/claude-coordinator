@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
+import { Runner } from '../src/runner.ts';
 import { busyNow, track } from '../src/settled.ts';
-import { settled } from './helpers.ts';
+import { procsUnder, settled, stopTurns, testPins, until } from './helpers.ts';
+testPins();
 
 // #1437: a test waits until the work it started is finished, not for its first sign. settled() only resolves once the
 // DB write worker has applied every queued write.
@@ -15,7 +17,7 @@ const root = mkdtempSync(join(tmpdir(), 'settled-'));
 const writers: Writer[] = [];
 after(async () => {
   for (const w of writers) await w.stop();
-  // timing-ok: only the in-process Store's database is in root, and its writers have stopped above; bootServer cleans its own
+  // timing-ok: in root are in-process Stores' databases, their writers stopped above, and a turn its own test stops; bootServer cleans its own
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -50,4 +52,36 @@ test('settled() names what is still busy when it runs out of time, and counts tr
   finish();
   await job;
   await settled(1000);
+});
+
+// #1998: a launch awaits its file calls (#1808), so it has no process for stopTurns to find yet. Not counted as busy, it
+// made its folders again after the teardown's delete (loop-guard, in CI), and its turn ran on in them.
+test("stopTurns waits out a turn that is still launching, then stops it, so nothing is made after the teardown's delete", async () => {
+  const dir = mkdtempSync(join(root, 'launching-'));
+  const fake = join(dir, 'claude');
+  writeFileSync(fake, '#!/bin/sh\nexec sleep 600\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(dir, 'coordinator.db'));
+  const project = store.createProject('P', null);
+  const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(minion.id, dir, null);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
+  let started = 0;
+  runner.onTurnStart = () => started++;
+  try {
+    runner.relay(minion.id, minion.id, 'Taskmaster', 'go');
+    assert.equal(started, 0, 'still launching');
+    await stopTurns(dir);
+    assert.equal(started, 1, 'the launch is over, so it has nothing left to make');
+    assert.deepEqual([...procsUnder([dir]).values()], [], 'and the turn it started is stopped');
+  } finally {
+    await until('its launch to be over', () => started > 0);
+    runner.noTurns = true; // its killed turn isn't resumed in the folder the teardown deletes
+    await stopTurns(dir);
+  }
 });

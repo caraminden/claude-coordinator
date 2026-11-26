@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
-import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc } from './land-fixture.ts';
+import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc, stopShip } from './land-fixture.ts';
 import { until } from './wait.ts';
 const repo = join(import.meta.dirname, '..');
 
@@ -332,6 +332,93 @@ test('a landing stopped while it waits for CI is logged as stopped there, not la
   await done;
   assert.match(timings(shared).join('\n'), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · stopped at ci( \(exit \d+\))?$/);
   assert.ok(c.calls());
+});
+
+// #1894: stopping a ship ends the run it pushed, whose id it may not have read yet. `when` says when to stop it; then
+// with `listed`, GitHub
+// lists the run from after its clean-up's first look for it on (else never).
+async function stopped(extra: Record<string, string> | ((r: ReturnType<typeof setup>) => Record<string, string>), when: (c: ReturnType<typeof ci>, r: ReturnType<typeof setup>) => boolean, listed = false) {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const seen = join(r.dir, 'listed');
+  const child = spawn('bash', [land], {
+    cwd: r.wt,
+    env: {
+      ...env,
+      DEPLOY_LIVE: r.live,
+      DEPLOY_SOURCE: r.source,
+      DEPLOY_NOTE: join(r.dir, 'note'),
+      PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`,
+      LAND_CI: '1',
+      LAND_CI_POLL: '2', // long beside a stop, so the gate's own polls don't read the run's id
+      FAKE_CI: 'running',
+      FAKE_UNLISTED: `b.txt ${seen}`,
+      ...(typeof extra === 'function' ? extra(r) : extra),
+    },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr!.on('data', (d) => (stderr += d));
+  let ended = false;
+  child.once('close', () => (ended = true));
+  await until(
+    'the moment to stop it',
+    () => when(c, r),
+    30_000,
+    () => stderr,
+  );
+  const lines = () => c.calls().split('\n').filter(Boolean);
+  const before = lines().length;
+  stopShip(child.pid!);
+  if (listed) {
+    await until('its first look for the run', () => ended || lines().length > before);
+    writeFileSync(seen, '');
+  }
+  await until(
+    'land.sh to end',
+    () => ended,
+    undefined,
+    () => stderr,
+  );
+  return { r, calls: lines(), after: lines().slice(before) };
+}
+const cancels = (calls: string[]) => calls.filter((x) => x.includes('-X POST') && x.endsWith('/cancel')).map((x) => /runs\/(\d+)\/cancel/.exec(x)?.[1]);
+const hubHas = (r: ReturnType<typeof setup>, ref: string) => git(join(r.dir, 'hub.git'), 'for-each-ref', `refs/heads/${ref}`) !== '';
+const waits = (c: ReturnType<typeof ci>, r: ReturnType<typeof setup>) => hubHas(r, 'land/ticket/1-x') && c.calls().split('head_sha=').length > 2;
+
+test('a ship stopped before it has read the id of the run it pushed cancels that run, listed a moment late (#1894)', async () => {
+  const s = await stopped({}, waits, true);
+  assert.deepEqual(cancels(s.calls), ['7']);
+  assert.ok(!hubHas(s.r, 'land/ticket/1-x') && !hubHas(s.r, 'land-base/ticket/1-x'), 'the scratch branches go');
+});
+
+test("a stopped ship whose commit's red run from before is all GitHub lists yet waits for its own run, and cancels that (#1894)", async () => {
+  // The old run is the answer to the gate's two asks and the stop's first two.
+  const s = await stopped((r) => ({ FAKE_OLD_RUN: `${git(r.wt, 'rev-parse', 'HEAD')} completed failure`, FAKE_LAG: '3', FAKE_UNLISTED: '', LAND_CI_LATE_POLL: '0.2' }), waits);
+  assert.deepEqual(cancels(s.calls), ['7']);
+});
+
+test("a stopped ship never cancels a run another branch's push started on its commit (#1894)", async () => {
+  const s = await stopped({ FAKE_RUN_BRANCH: 'check/ticket/9-x', LAND_CI_LATE: '3' }, waits, true);
+  assert.deepEqual(cancels(s.calls), []);
+});
+
+test('a stopped ship whose run GitHub never lists ends within its cap, scratch branches gone (#1894)', async () => {
+  const s = await stopped({ LAND_CI_LATE: '3', LAND_CI_LATE_POLL: '0.2' }, waits);
+  assert.deepEqual(cancels(s.calls), []);
+  assert.ok(!hubHas(s.r, 'land/ticket/1-x'));
+});
+
+test('a ship stopped before it pushed asks GitHub nothing on its way out (#1894)', async () => {
+  const s = await stopped(
+    (r) => {
+      spawnSync('mkfifo', [join(r.dir, 'runners')]); // nothing is ever written to it, so the question before the push never ends
+      return { FAKE_RUNNERS_FILE: join(r.dir, 'runners') };
+    },
+    (c) => c.calls().includes('/actions/runners '),
+  );
+  assert.deepEqual(s.after, []);
 });
 
 test('a landing that gives up in line leaves a timing line too', () => {

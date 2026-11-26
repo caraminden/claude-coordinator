@@ -139,7 +139,7 @@ import { branchTips, type CiView, type GhBody, type GhNote, type Job, type Run, 
 export { type CiView, type Job, type Run, type Runner, runKind, runMinion, runningNow, type ViewRun } from './ci-view.ts';
 import { type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
-import { type GhGet, ghGet, ghPost, RateLimited, GhError } from './gh-api.ts';
+import { type GhGet, ghGet, ghPost, RateLimited, rateLimited, GhError } from './gh-api.ts';
 export { type GhAnswer, type GhGet, ghGet, ghPost } from './gh-api.ts';
 
 const POLL_MS = 5 * 60_000;
@@ -1185,8 +1185,10 @@ export class CiHealth {
     const file = workflowFile(runs.find((r) => r.id === mark.run) ?? runs[0] ?? ({ name: 'its workflow' } as Run));
     const re = mark.rerun?.ticket === t.id ? mark.rerun : undefined;
     if (re && !re.failed) {
-      // Ours is the first dispatched run since: GitHub runs the branch's tip when it starts it, which can be past re.sha.
-      const seen = re.dispatched || re.inputs ? runs.filter((r) => r.event === 'workflow_dispatch' && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at))[0] : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+      // Ours is the first run started since (the daily one tests the tip too): GitHub runs the branch's tip when it starts it, which can be past re.sha.
+      const started = runs.filter((r) => /^(workflow_dispatch|schedule)$/.test(r.event ?? '') && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at));
+      // A cancelled one gave way to a later one (the CI desktop hold keeps main's newest).
+      const seen = re.dispatched || re.inputs ? (started.find((r) => r.conclusion !== 'cancelled') ?? started[0]) : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
       if (seen && (seen.id !== re.run || seen.head_sha !== re.sha)) {
         re.run = seen.id;
         re.sha = seen.head_sha;
@@ -1511,7 +1513,7 @@ ${text}`,
       this.cache.set(path, { etag: r.etag, body: r.body });
       return r.body as T;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')))) throw new RateLimited();
+    if (rateLimited(r)) throw new RateLimited();
     if (quiet && (r.status === 403 || r.status === 404)) return null;
     // Anything else skips this scheme's round: an answer GitHub didn't give mustn't read as "all clear" and clear alerts.
     throw new GhError(r.status, path);

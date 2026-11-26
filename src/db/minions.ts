@@ -3,6 +3,7 @@
 import type { Store, Ticket, TicketKind, User } from '../db.ts';
 import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
+import type { ChangeBy } from './wait-records.ts';
 import { copyRow, inScope, scoped, warm } from '../read-scope.ts';
 
 export const minionQueries = {
@@ -27,9 +28,9 @@ export const minionQueries = {
     return this.db.prepare('SELECT * FROM tickets WHERE project_id = ? AND number = ?').get(projectId, number) as unknown as Ticket | undefined;
   },
 
-  /** The minion on a branch (the land line names its waiters by branch, src/waits.ts): an open one first, then the newest. */
-  ticketByBranch(this: Store, branch: string): Ticket | undefined {
-    return this.db.prepare("SELECT * FROM tickets WHERE branch = ? ORDER BY status = 'closed', id DESC LIMIT 1").get(branch) as unknown as Ticket | undefined;
+  /** The minion on a branch (the land line names its waiters by branch, src/waits.ts): an open one first, then the newest; a branch name is per scheme. */
+  ticketByBranch(this: Store, branch: string, projectId: number | null = null): Ticket | undefined {
+    return this.db.prepare("SELECT * FROM tickets WHERE branch = ? AND project_id = coalesce(?, project_id) ORDER BY status = 'closed', id DESC LIMIT 1").get(branch, projectId) as unknown as Ticket | undefined;
   },
 
   /** A scheme's minions open now or closed since `since` (ms), each with its first message's data (its brief, if posted), for the duplicate-start check (#1488). */
@@ -46,6 +47,18 @@ export const minionQueries = {
     // In a read scope (#1527) the rows are shared, not copied: copying Citadel's 1,500 rows per call cost more than the
     // read saved. Only read-only code runs in a scope; each caller still gets its own array to filter or sort.
     return [...scoped(this.db, `tickets:${projectId}`, () => this.db.prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as unknown as Ticket[])];
+  },
+
+  /** A scheme's bug minions' numbers, open and closed: what the Code tab counts as bug fixes (#1988). */
+  bugNumbers(this: Store, projectId: number): number[] {
+    const sql = `SELECT k.number FROM tickets k JOIN properties p ON p.target_type = 'minion' AND p.target_id = k.id JOIN property_keys pk ON pk.id = p.key_id AND pk.key = 'type'
+      WHERE k.project_id = ? AND k.number IS NOT NULL AND p.value = 'bug'`;
+    return (this.db.prepare(sql).all(projectId) as { number: number }[]).map((r) => r.number);
+  },
+
+  /** A scheme's open minions, by number and title. */
+  openTitles(this: Store, projectId: number): { number: number; title: string }[] {
+    return this.db.prepare("SELECT number, title FROM tickets WHERE project_id = ? AND status != 'closed' AND kind != 'coordinator' AND number IS NOT NULL ORDER BY number").all(projectId) as { number: number; title: string }[];
   },
 
   /** Open tickets whose last turn hit the usage limit, in every project. */
@@ -300,6 +313,7 @@ export const minionQueries = {
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM wait_records WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
     this.minionIndex.deleteTicket(id);
     this.claims.releaseHeldBy(id);
@@ -313,18 +327,25 @@ export const minionQueries = {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   },
 
-  updateTicket(this: Store, id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>) {
+  updateTicket(
+    this: Store,
+    id: number,
+    fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'plugin_dirs' | 'last_model' | 'last_effort' | 'person_id' | 'picked_because'>>,
+    by: ChangeBy = { kind: 'server' },
+  ) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => fields[k] ?? null);
     const before = fields.status ? this.getTicket(id)?.status : undefined;
+    const was = 'state' in fields ? (this.db.prepare('SELECT state FROM tickets WHERE id = ?').get(id) as Pick<Ticket, 'state'> | undefined) : undefined;
     const now = Date.now();
     // Strictly after every earlier close, so a quick reopen and re-close never lands on the minion index's cursor mark.
     const closedAt = fields.status === 'closed' ? (this.lastClosedAt = Math.max(now, this.lastClosedAt + 1)) : now;
     // The dismissal's time (#1072): stamped when it goes closed, cleared when it opens again.
     const closing = fields.status === 'closed' ? (before === 'closed' ? '' : ', closed_at = ?') : fields.status ? ', closed_at = NULL' : '';
     this.db.prepare(`UPDATE tickets SET ${sets}${closing}, updated_at = ? WHERE id = ?`).run(...values, ...(closing === ', closed_at = ?' ? [closedAt] : []), now, id);
+    if (was && was.state !== (fields.state ?? null)) this.addWaitRecord(id, 'state', { at: now, old: was.state, new: fields.state ?? null, by });
     // Dismissing moves the stage to done, reopening back to in-progress.
     if (before && fields.status) this.props.statusChanged(id, before, fields.status);
     if (fields.title?.includes('status:')) this.noteLooks(id, fields.title, now);

@@ -608,6 +608,7 @@ test('workerWaitLabel: one a person started now says so, and why it still waits 
   assert.equal(workerWaitLabel({ place: 3, held: null }, hold), 'Starting now, on a worker of its own');
   assert.equal(workerWaitLabel({ place: 1, held: 'Cara paused all minions', paused: 'Cara' }, hold), 'Waiting: Cara paused all minions');
   assert.equal(workerWaitLabel({ place: 3 }, null), 'Waiting for a worker, 3rd in line');
+  assert.equal(workerWaitLabel({ place: 3, quick: true }, null), 'Waiting for a worker, 3rd in line, or the quick lane');
 });
 
 test('workerWaitLabel: places read as words do', () => {

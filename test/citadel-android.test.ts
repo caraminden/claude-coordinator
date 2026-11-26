@@ -59,6 +59,8 @@ before(async () => {
     ANDROID_AVD_HOME: join(root, 'avd'),
     CITADEL_ANDROID_CLEAN_PORT: '1',
     CITADEL_ANDROID_SETTLE: '0',
+    CITADEL_ANDROID_TICK: '0.1',
+    CITADEL_ANDROID_POLL: '0.1',
   };
 });
 after(() => tmp.teardown());
@@ -181,7 +183,9 @@ test('serve waits for a step that holds the screen before it stops the emulator'
   const s = serve(locks);
   const pid = await emulatorPid();
   try {
-    await holds('the emulator stays up while the step runs', () => alive(pid), { ms: 2000 });
+    // Serve says once that the idle time is up and a step holds the screen: from then on it has met the hold.
+    await until('serve meets the held screen', async () => /a step holds the screen/.test(s.out()));
+    await holds('the emulator stays up while the step runs', () => alive(pid), { ms: 300 });
     assert.ok(alive(pid), 'still up while the step runs');
     writeFileSync(release, '');
     await stepDone;

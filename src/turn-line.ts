@@ -14,6 +14,11 @@
 // waiting turns ("Their turns are waiting"). Judged per turn: a machine that can't take it (away, not lent, a ship's tests)
 // is no machine, one that is only full still is. A minion marked for a machine (src/runs-on.ts) is the one exception: it
 // starts there whatever perigee holds, and nowhere else.
+//
+// The quick lane (#1986; Josh, 2026-11-25: "ok, build the quick lane"): with no worker free in the pool, a few turns more may
+// run, for a person's own words and answers and the server's wake-ups (`quick`, src/line-place.ts). One that runs on past
+// POOL.laneMs counts in the pool from then on, up to POOL.laneOver over its size, and the lane has its worker back.
+// The lane is perigee's and comes last: a forced start or perigee's free worker first, then the person's machine, then the lane.
 import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
@@ -36,6 +41,12 @@ export const POOL = {
   machineStart: 2,
   /** A machine's load sample older than this is no reading: its size stays as it is. */
   loadStaleMs: 60_000,
+  /** The quick lane's workers at each memory level. A turn that runs is never stopped by it. */
+  lane: { ok: 2, easing: 1, tight: 0 } satisfies Record<PoolBox['level'], number>,
+  /** A quick lane turn still running after this counts in the pool. */
+  laneMs: 2 * 60_000,
+  /** How far over its size the pool takes such turns; the next keeps its lane worker until there is room. Josh's pick said "up to 2 turns sitting on top of the pool". */
+  laneOver: 2,
 };
 
 const LINE = 'turn-line';
@@ -77,6 +88,8 @@ export interface LinePlace {
   rank: number;
   /** A person gave it a worker of its own (src/start-now.ts): ahead of everything, past the size. */
   forced?: true;
+  /** It may start in the quick lane while the pool has no free worker. */
+  quick?: true;
   /** Its spot in the Urgent group (src/urgent.ts), ahead of every share. */
   urgent?: number;
   /** Its ship was refused, or other minions wait on it. */
@@ -170,16 +183,21 @@ export interface LineHost {
   readonly detached: boolean;
 }
 
+const inLane = (g: { lent?: true; lane?: { moved?: true } }) => !!g.lane && !g.lane.moved && !g.lent;
+
 export class TurnLine {
   private host: LineHost;
   private entries: LineEntry[];
   /**
    * Turns that run: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose
    * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916); a `forced` one
-   * started on a worker of its own (#1957), that person's. `place`: whose pool the worker is of.
+   * started on a worker of its own (#1957), that person's. `place`: whose pool the worker is of. `lane`: it started in
+   * perigee's quick lane, and `moved` once it counts in the pool.
    */
-  private granted = new Map<number, { steps: number; person: number; place: number; lent?: true; forced?: number }>();
-  private admitting: { ticket: number; place: number } | null = null;
+  private granted = new Map<number, { steps: number; person: number; place: number; lent?: true; forced?: number; lane?: { since: number; moved?: true } }>();
+  private admitting: { ticket: number; place: number; lane: boolean } | null = null;
+  /** The box's memory level at the last tick, which sizes the quick lane. */
+  private level: PoolBox['level'] = 'ok';
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
@@ -198,9 +216,9 @@ export class TurnLine {
     this.entries = host.store.getSetting<LineEntry[]>(LINE) ?? [];
   }
 
-  /** A place's workers that run a turn. */
+  /** A place's workers that run a turn; perigee's quick lane's are beside its pool. */
   used(place = 0): number {
-    return [...this.granted.values()].filter((g) => g.place === place && !g.lent).length;
+    return [...this.granted.values()].filter((g) => g.place === place && !g.lent && !inLane(g)).length;
   }
 
   /** Where a turn that holds a worker runs: 0 perigee, else a machine. */
@@ -214,6 +232,21 @@ export class TurnLine {
     if (held) held.place = 0;
   }
 
+  private laneUsed(): number {
+    return [...this.granted.values()].filter(inLane).length;
+  }
+
+  /** The running turns that started in the quick lane, those that count in the pool by now too. */
+  laneTurns(): { ticket: number; person: number; since: number; moved: boolean }[] {
+    return [...this.granted].flatMap(([ticket, g]) => (g.lane && !g.lent ? [{ ticket, person: g.person, since: g.lane.since, moved: !!g.lane.moved }] : []));
+  }
+
+  /** The waiting turns that may start in the quick lane now: none while perigee's pool has a worker for them, nor those marked for a machine. */
+  private laneReady(): LineEntry[] {
+    if (this.used() < this.size() || this.laneUsed() >= POOL.lane[this.level]) return [];
+    return this.ready().filter((e) => this.host.asks(e.ticket, e.via).quick);
+  }
+
   /** The minions that wait on an approval card without a worker. */
   lent(): number {
     return [...this.granted.values()].filter((g) => g.lent).length + this.carded().length;
@@ -222,13 +255,16 @@ export class TurnLine {
   /**
    * Give a running turn's worker back while it only waits on an approval card, or take it again. Josh, 2026-11-24: "shouldnt a minion waiting on
    * a card just release to the pool until the card is answered?" Taking it again never waits: the turn already goes on, over the size if need be.
+   * A quick lane turn's comes back to it as the pool's.
    */
   setLent(ticketId: number, lent: boolean) {
     const held = this.granted.get(ticketId);
     // A machine's worker stays with its turn: the agent there counts every live turn against its cap.
     if (!held || held.place || !!held.lent === lent) return;
-    if (lent) held.lent = true;
-    else delete held.lent;
+    if (lent) {
+      held.lent = true;
+      if (held.lane) held.lane.moved = true;
+    } else delete held.lent;
     this.ordered = null;
     if (lent) this.pumpIn(0);
   }
@@ -269,7 +305,8 @@ export class TurnLine {
   wait(ticketId: number): WorkerWait | null {
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return null;
-    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...this.machineWait(entry) };
+    const quick = !this.need(ticketId) && this.line().find((w) => w.ticket === ticketId)?.quick;
+    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...(quick ? { quick: true as const } : {}), ...this.machineWait(entry) };
   }
 
   /** Its waiting turn may only start on the machine it is marked for. */
@@ -341,18 +378,19 @@ export class TurnLine {
     return this.stalled.has(person);
   }
 
-  /** Each person's workers, turns waiting on a card (`lent`) and waiting turns, the most first. */
-  people(): { person: number; used: number; waiting: number; lent: number; stalled?: true }[] {
-    const out = new Map<number, { person: number; used: number; waiting: number; lent: number }>();
-    const add = (person: number, key: 'used' | 'waiting' | 'lent') => {
-      const p = out.get(person) ?? { person, used: 0, waiting: 0, lent: 0 };
-      p[key]++;
+  /** Each person's workers, those in the quick lane apart, turns waiting on a card (`lent`) and waiting turns, the most first. */
+  people(): { person: number; used: number; lane?: number; waiting: number; lent: number; stalled?: true }[] {
+    type Person = { person: number; used: number; lane?: number; waiting: number; lent: number };
+    const out = new Map<number, Person>();
+    const add = (person: number, key: 'used' | 'lane' | 'waiting' | 'lent') => {
+      const p: Person = out.get(person) ?? { person, used: 0, waiting: 0, lent: 0 };
+      p[key] = (p[key] ?? 0) + 1;
       out.set(person, p);
     };
-    for (const g of this.granted.values()) add(g.person, g.lent ? 'lent' : 'used');
+    for (const g of this.granted.values()) add(g.person, g.lent ? 'lent' : inLane(g) ? 'lane' : 'used');
     for (const c of this.carded()) add(c.person, 'lent');
     for (const w of this.asked(this.entries)) add(w.person, 'waiting');
-    const all = (p: { used: number; waiting: number; lent: number }) => p.used + p.waiting + p.lent;
+    const all = (p: Person) => p.used + (p.lane ?? 0) + p.waiting + p.lent;
     return [...out.values()].map((p) => (this.full(p.person) ? { ...p, stalled: true as const } : p)).sort((a, b) => all(b) - all(a) || a.person - b.person);
   }
 
@@ -411,7 +449,24 @@ export class TurnLine {
 
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
-    return { used: this.used(), lent: this.lent(), running: this.granted.size, forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people(), machines: this.machinePools() };
+    return {
+      used: this.used(),
+      lent: this.lent(),
+      running: this.granted.size,
+      forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length,
+      lane: this.lane(),
+      size: this.size(),
+      pool: this.pool(),
+      paused: this.paused(),
+      waiting: this.entries.length,
+      people: this.people(),
+      machines: this.machinePools(),
+    };
+  }
+
+  /** The quick lane for the tile: `moved` counts the turns that started there and take a pool worker now. */
+  private lane() {
+    return { used: this.laneUsed(), size: POOL.lane[this.level], moved: this.laneTurns().filter((t) => t.moved).length };
   }
 
   /** Each machine that lends workers, as the tile's rows have it. */
@@ -459,6 +514,9 @@ export class TurnLine {
   tick(reading: PressureReading, stalled: Iterable<number> = [], now = Date.now(), box: PoolBox = { freeGb: null, level: 'ok' }) {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
+    this.level = box.level;
+    const own = [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length;
+    for (const g of this.granted.values()) if (inLane(g) && now - g.lane!.since >= POOL.laneMs && this.used() - own < this.size() + POOL.laneOver) g.lane!.moved = true;
     const p = this.pool();
     this.starved = starvedBy(reading, box, this.limits());
     this.stalled = new Set(p.fixed ? [] : stalled);
@@ -526,12 +584,15 @@ export class TurnLine {
       held.steps++;
       return true;
     }
-    if (this.admitting?.ticket === ticketId) return this.grant(ticketId, via, this.admitting.place);
+    if (this.admitting?.ticket === ticketId) return this.grant(ticketId, via, this.admitting.place, this.admitting.lane);
     const own = this.entries.find((e) => e.ticket === ticketId);
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
     if (!paused && !this.closed && !this.host.busy(ticketId) && !(own?.via && !via)) {
-      const place = this.placeFor(own ?? { ticket: ticketId, since: Date.now(), via }, via);
+      const me = own ?? { ticket: ticketId, since: Date.now(), via };
+      const place = this.placeFor(me, via);
       if (place !== null) return this.grant(ticketId, via, place);
+      // Perigee full and no machine of its own free: the quick lane, last.
+      if (this.laneFor(me, via)) return this.grant(ticketId, via, 0, true);
     }
     this.join(ticketId, via);
     return false;
@@ -546,6 +607,14 @@ export class TurnLine {
     const ready = this.ready();
     const there = this.needed(ready.filter((e) => e.ticket !== me.ticket)) ? this.machineFor(me, via) : null;
     return there ?? (!full && this.isFirst(me, ready, true) ? 0 : null);
+  }
+
+  /** It may start in perigee's quick lane now: a quick turn not marked for a machine, first among those the lane may take. */
+  private laneFor(me: LineEntry, via?: RetryKind): boolean {
+    const asks = this.host.asks(me.ticket, via);
+    if (!asks.quick || this.need(me.ticket) || this.full(asks.person)) return false;
+    if (this.used() < this.size() || this.laneUsed() >= POOL.lane[this.level]) return false;
+    return this.isFirst(me, this.laneReady(), true);
   }
 
   private isFirst(me: LineEntry, ready: LineEntry[], home = false): boolean {
@@ -594,7 +663,7 @@ export class TurnLine {
     const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
-    if (this.used() < this.size() || this.forcedFor(ticketId) !== null || this.host.pools?.machines().length) this.pumpIn(0);
+    if (this.used() < this.size() || this.forcedFor(ticketId) !== null || this.host.pools?.machines().length || this.laneReady().length) this.pumpIn(0);
   }
 
   /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
@@ -640,7 +709,7 @@ export class TurnLine {
     this.pumpIn(wait);
   }
 
-  /** Start who is next, while workers are free, or past the size one a person starts now; a burst goes gapMs apart. */
+  /** Start who is next, while workers are free, or past the size one a person starts now or one of the quick lane's; a burst goes gapMs apart. */
   pump() {
     if (this.timer || this.closed || this.host.detached || this.admitting !== null) return;
     if (!this.entries.length || this.paused()) return;
@@ -653,11 +722,14 @@ export class TurnLine {
       const there = this.best(this.ready(m));
       if (there) return this.admit(there, m.id);
     }
+    // The quick lane last: a quick turn whose machine had room went there above.
+    const quick = this.best(this.laneReady(), true);
+    if (quick) this.admit(quick, 0, true);
   }
 
-  private admit(entry: LineEntry, place: number) {
+  private admit(entry: LineEntry, place: number, lane = false) {
     this.save(this.entries.filter((e) => e.ticket !== entry.ticket));
-    this.admitting = { ticket: entry.ticket, place };
+    this.admitting = { ticket: entry.ticket, place, lane };
     try {
       this.host.start(entry);
     } catch (err) {
@@ -681,12 +753,12 @@ export class TurnLine {
     this.timer.unref();
   }
 
-  private grant(ticketId: number, via?: RetryKind, place = 0): true {
+  private grant(ticketId: number, via?: RetryKind, place = 0, lane = false): true {
     const held = this.granted.get(ticketId);
     if (held) {
       held.steps++;
       delete held.lent;
-    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined) });
+    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined), ...(lane && !place ? { lane: { since: Date.now() } } : {}) });
     this.leave(ticketId);
     return true;
   }

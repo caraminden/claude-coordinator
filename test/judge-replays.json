@@ -1,12 +1,12 @@
 {
   "any-nudge": {
-    "hash": "5d13782b51c1a101",
+    "hash": "f7fc98ca705d1db0",
     "at": "2026-11-25",
     "days": 3,
-    "inputs": "3276 TypeScript file changes in 717 commits",
-    "hits": 78,
+    "inputs": "3988 TypeScript file changes in 836 commits",
+    "hits": 63,
     "real": 0,
-    "summary": "0 as before, 78 new, 0 gone"
+    "summary": "0 as before, 63 new, 0 gone"
   },
   "app-shots": {
     "hash": "06b527913fbf81dd",
@@ -18,13 +18,13 @@
     "summary": "0 as before, 0 new, 0 gone"
   },
   "ci-hold": {
-    "hash": "1a50345814d6b4cc",
+    "hash": "e2fd63bcbed0238b",
     "at": "2026-11-25",
     "days": 3,
-    "inputs": "573 CI runs of caraminden/claude-coordinator (gh, read-only); 205 runs held, waits median 102 min, longest 1249 min",
-    "hits": 243,
+    "inputs": "566 CI runs of caraminden/claude-coordinator (gh, read-only); 192 runs held, waits median 95 min, longest 1198 min",
+    "hits": 237,
     "real": 0,
-    "summary": "0 as before, 243 new, 0 gone"
+    "summary": "0 as before, 237 new, 0 gone"
   },
   "ci-red": {
     "hash": "0567173957833657",

@@ -104,3 +104,27 @@ and the done lines if your first reply showed any. Hand it the spec or PR text o
 agent's step 3 says. Its three lists (built but not asked, asked but not built, read
 differently) are findings like the reviewer's: fix them or list them under "Not fixed" with a
 reason. Record the run with `review_set` (slug `fresh-eyes`).
+
+## Verifier
+
+Opt-in: it runs only when the turn's "Kit reviewers" line says Verifier is switched on, or the brief or
+a person asks for it on this change. A Grunt (`general-purpose`, `model: sonnet`,
+`effort: medium`) runs the change on a scratch copy and reports what it saw go wrong. About $1 and 10 minutes.
+
+- **Runs** when the diff changes what happens at runtime and a state matters to it: a turn or job ending
+  in different ways, a limit, a restart, saved data, the clock, two people or two things at once.
+- **Skips** docs, copy, styling, tests, pure refactors and anything nothing in the repo can run on
+  scratch data. Say `Verifier: skipped: <why>` in the report.
+- **When:** after the review's fixes are committed, so it drives what will ship. Foreground.
+
+Brief it as the reviewer (the Grunt line, branch, worktree, `<kit>`), with `Follow <kit>/skills/self-review/references/verifier.md`,
+the ask in the requester's own words, and a scratch folder of its own (`$TMPDIR/verifier`). Not your view
+of what works.
+
+If its report shows fewer than 3 flows with a command and its output, or leaves a state it could have
+made untried, send it back once (SendMessage, its agent id), naming that one state.
+
+Its findings are claims. Run the steps of each before you act on it: fix the ones that happen, with a test;
+the rest are `wrong`. Nothing it finds sets the label by itself. Record the run with `review_set` (slug
+`verifier`: `fail` when a finding held, `pass` when none did). One that never drove the change (it couldn't boot, or
+still shows fewer than 3 flows after going back) is no pass: record nothing and say `Verifier: incomplete: <why>`.

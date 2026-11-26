@@ -72,6 +72,7 @@ export interface QueuedMessage {
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
   card?: string; // the kept card it answers (#1916): only the turn that gets this may have its pass
   rerun?: true; // a cut-off turn's, given back to run again (#1958): it wakes nobody, so a seal set since stays
+  quick?: boolean; // its sender's own word on the quick lane (#1986): a plan's answer may use it, a refused ship or an agent's Unseal not
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
 

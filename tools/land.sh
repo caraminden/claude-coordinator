@@ -1255,6 +1255,7 @@ CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spa
 # the suite's end, burn-in taken off), p50 was 259 s, p90 353, p95 369 and the max 461: 6 greens ran past 360 s and fell
 # back. 540 s clears that max with room for the suite's growth; a run that hangs costs 3 min more before it falls back.
 CI_START=${LAND_CI_START:-90} CI_START_ONLINE=${LAND_CI_START_ONLINE:-900} CI_LIMIT=${LAND_CI_TIMEOUT:-540} CI_POLL=${LAND_CI_POLL:-15} CI_BACKOFF=${LAND_CI_BACKOFF:-60} # #1655: 5 s was 720 calls an hour for each landing waiting
+CI_LATE=${LAND_CI_LATE:-20} CI_LATE_POLL=${LAND_CI_LATE_POLL:-2} # for how long after a push a stop looks for its run, which GitHub lists some seconds late (#1894)
 CI_ONLINE_POLL=${LAND_CI_ONLINE_POLL:-30} # how often a job waiting past CI_START asks whether a runner is online
 # The reruns alone get a window of their own (#1374, Cara 2026-11-20: "maybe that situation should restart the timer?
 # instead of globally raising it to 10m?"). On Nov 20 a busy desktop's full run took 295-351 s, so it ended past the
@@ -1282,7 +1283,7 @@ gh_quota() {
   else echo unknown; fi
 }
 ci_fail_n=0 ci_fail_at=''
-ci_quota='' ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why='' burn_red='' burned='' ci_lost='' ci_step=''
+ci_quota='' ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' ci_pushed_at='' ci_stale='' why='' burn_red='' burned='' ci_lost='' ci_step=''
 # Perigee runs a ship's suite only while it is quiet (#1254, Josh 2026-11-20: "only if and when perigee has plenty of
 # resources, just make sure we play nice and that it doesnt affect performance"): CPU pressure (some avg60) under
 # QUIET_PSI %, the 1-minute load under half the cores, at least QUIET_MEM % of memory available, and citadel-heavy's
@@ -1406,11 +1407,24 @@ ci_run() {
   [ -z "$run" ] || [[ $run =~ ^[0-9]+$'\t' ]] || { echo "it sent something that isn't a run: $(head -c 100 <<<"$run")" >"$state/ci.err"; return 1; }
   read -r ci_id ci_status ci_result ci_url <<<"$run" || true
 }
+# The run this landing's push started, when no poll has read its id yet (#1894: a stop in the seconds after the push left
+# it running, and the next ship waited behind it). Only one of the pushed commit on this landing's own scratch branch.
+ci_late() {
+  local run
+  while :; do
+    run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$ci_pushed&per_page=20" --jq "[.workflow_runs[] | select((.path | startswith(\"$CI_WORKFLOW\")) and .head_branch == \"$CI_REF\")][0] // empty | [.id, .status] | @tsv" 2>/dev/null) || run=''
+    if [[ $run =~ ^([0-9]+)$'\t'([a-z_]+) ]] && [ "${BASH_REMATCH[1]}" -gt "${ci_stale:-0}" ]; then ci_id=${BASH_REMATCH[1]} ci_status=${BASH_REMATCH[2]}; return 0; fi
+    [ -n "$ci_pushed_at" ] && [ $((SECONDS - ci_pushed_at)) -lt "$CI_LATE" ] || return 0
+    sleep "$CI_LATE_POLL"
+  done
+}
 # Leaves nothing behind on GitHub: a run nobody waits for is cancelled, and the scratch branch goes.
 ci_done() {
+  [ "$ci_id" != "$ci_stale" ] || ci_id='' # a stop between a poll's answer and ci_gate passing over the old run
+  [ -z "$ci_pushed" ] || [ -n "$ci_id" ] || ci_late
   [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true
   [ -z "$ci_pushed" ] || hub git push -q "$REMOTE" ":refs/heads/$CI_REF" ":refs/heads/$CI_BASE_REF" >/dev/null 2>&1 || true
-  ci_id='' ci_pushed=''
+  ci_id='' ci_pushed='' ci_pushed_at='' ci_stale=''
 }
 # 0 when the run's full suite step failed and it has a rerun step (#1374), in any state: one already ended means the
 # run ended between the gate's look and this one, and the next look reads its verdict rather than falling back on a
@@ -1457,7 +1471,7 @@ ci_fact() {
 }
 # 0: green on this commit. 1: red ($ci_lost: its runner was lost, so no verdict). 2: no answer, with the reason in $why.
 ci_gate() {
-  local url online='' online_at='' stale='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
+  local url online='' online_at='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
   ci_lost='' ci_step=''
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
@@ -1474,19 +1488,20 @@ ci_gate() {
   fi
   # After the outage note (#553): a landing it sends straight to the run here doesn't ask GitHub even this.
   ci_quota=$(gh_quota)
+  ci_stale=''
   { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's figure (#1722)
   ci_run || { why="GitHub didn't answer$(ci_said)"; return 2; }
   # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
   if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
-    stale=$ci_id ci_id='' ci_status='' ci_result='' # its verdict isn't this run's, if GitHub misses the next ask (LB9)
+    ci_stale=$ci_id ci_id='' ci_status='' ci_result='' # its verdict isn't this run's, if GitHub misses the next ask (LB9)
     # shortcut: with the repo variable CI_RUNNER=github (hosted runners) this finds no runner and falls back; look at the variable too if that is ever used for long.
     online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }
     [[ $online =~ ^[0-9]+$ ]] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
     [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
-    ci_pushed=1
+    ci_pushed=$tip ci_pushed_at=$SECONDS # before the push: a stop can end it once GitHub has it
     # Forced on purpose: land/<branch> and land-base/<branch> are scratch branches only this script writes and deletes, so
     # there is no one's work to overwrite. Atomic, so the run never starts without the base its burn-in compares with.
-    hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; return 2; }
+    hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; ci_pushed_at=''; return 2; }
   fi
   say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet). GitHub calls left this hour: $ci_quota"
   queue_phase "waiting for CI since $(date +%H:%M)"
@@ -1494,7 +1509,7 @@ ci_gate() {
     # One missed answer is not a verdict: the limits below end the wait. But a run of them is: ci_status is then the last
     # answer GitHub gave, maybe long ago, so the limits below say GitHub didn't answer instead of blaming CI (#1655).
     if ci_run; then ci_fail_n=0; else ci_fail_n=$((ci_fail_n + 1)); [ "$ci_fail_n" -gt 1 ] || ci_fail_at=$(date +%H:%M); fi
-    [ "$ci_id" != "$stale" ] || ci_id='' ci_status=''
+    [ "$ci_id" != "$ci_stale" ] || ci_id='' ci_status=''
     if [ -z "$ci_taken" ] && { [ "$ci_status" = in_progress ] || [ "$ci_status" = completed ]; }; then # a runner took it
       ci_taken=1 taken_at=$SECONDS
       land_mark cirun
@@ -1879,8 +1894,9 @@ early_next() {
   [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
   [ ! -e "$state/early-stop.$$" ] || return 0
   # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.
-  hub git push -q --atomic "$REMOTE" "+$top:refs/heads/early/$nb" "+$tip:refs/heads/early-base/$nb" 2>"$state/early.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said "$state/early.err"), so its CI waits for its turn"; return 0; }
+  # Its record goes first: a stop that ends the push once GitHub has it still leaves the next landing the run to count or drop (#1894).
   echo "$top $nb $(date +%s) $branch $tip $riders" >"$state/early"
+  hub git push -q --atomic "$REMOTE" "+$top:refs/heads/early/$nb" "+$tip:refs/heads/early-base/$nb" 2>"$state/early.err" || { rm -f "$state/early"; say "early next train: pushing $nb's train to GitHub failed$(ci_said "$state/early.err"), so its CI waits for its turn"; return 0; }
   say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while ${1:-"this one's CI runs"} ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
   retro_log "early train · $nb${x:+ + $n riders} onto $label's train ($(git rev-parse --short "$tip")) · pushed $(git rev-parse --short "$top")"
 }
@@ -1949,6 +1965,10 @@ early_gate() {
   rm -f "$state/early"
   [[ $at =~ ^[0-9]+$ ]] && slug=$(early_slug) || return 0
   read -r id st w _ <<<"$(early_run "$slug" "$top")" || true
+  while [[ ! $id =~ ^[0-9]+$ ]] && [ $(($(date +%s) - at)) -lt "$CI_LATE" ]; do # pushed a moment ago: not listed yet (#1894)
+    sleep "$CI_LATE_POLL"
+    read -r id st w _ <<<"$(early_run "$slug" "$top")" || true
+  done
   if [ "$b" = "$branch" ] && [ "$top" = "$tip" ] && [[ $id =~ ^[0-9]+$ ]] && { [ "$st" != completed ] || [ "$w" = success ]; }; then
     early_ahead=$(($(date +%s) - at)) early_top=$top
     say "early next train: CI started on this train at $(date -d "@$at" +%H:%M) beside $fb's, and it came out the same, so that run is its CI ($early_ahead s head start)"
@@ -2126,7 +2146,7 @@ gate() {
   ci_status='' # a run before this gate's says nothing of it, if GitHub doesn't answer its first ask
   CI_REF=land/$branch CI_BASE_REF=land-base/$branch
   # A counted early run is the first gate's, on its own scratch branches, which are this landing's to delete however it ends.
-  [ "$1" != "$early_top" ] || CI_REF=early/$branch CI_BASE_REF=early-base/$branch ci_pushed=1
+  [ "$1" != "$early_top" ] || CI_REF=early/$branch CI_BASE_REF=early-base/$branch ci_pushed=$1
   early_top=''
   tip=$1 short=$(git rev-parse --short "$1") failed='' reran='' burn_red=''
   ci_gate || rc=$?
@@ -2168,7 +2188,7 @@ gate() {
     else
       if [ -n "$cut" ]; then say "the CI run on $short $how ($cut), so it says nothing about this commit: running CI once more"
       else say "failed in the full run but passed alone ($reran); running CI once more on $short, the land needs a fully green run"; fi
-      ci_id='' ci_status='' ci_pushed='' CI_REF=land/$branch CI_BASE_REF=land-base/$branch # a counted early run's fresh run goes with the lands'
+      ci_id='' ci_status='' ci_pushed='' ci_pushed_at='' CI_REF=land/$branch CI_BASE_REF=land-base/$branch # a counted early run's fresh run goes with the lands'
       rc=0
       ci_gate || rc=$?
       if [ "$rc" = 1 ] && ! ci_failed; then rc=2; fi

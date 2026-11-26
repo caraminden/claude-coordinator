@@ -30,8 +30,6 @@ function config(env: NodeJS.ProcessEnv) {
     // The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
     MACHINES: (env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean),
     JOB_MACHINES: (env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean),
-    /** A minion in the seam trial's fresh group (#1129): offered its own fresh_session. */
-    SEAM_TRIAL: env.COORDINATOR_SEAM_TRIAL === '1',
     /** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
     MSG: msgFromEnv(env.COORDINATOR_MSG),
     // propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.

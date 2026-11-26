@@ -602,11 +602,12 @@ CHECK_LIMIT=${LAND_CHECK_TIMEOUT:-1800}
 # waiting for a runner the ones ahead are using): a runner takes the run within CI_START, and the run
 # ends within CI_LIMIT. CI is asked every CI_POLL. For CI_GRACE after a push, an older run of the
 # same commit may still be the one that answers, so red or lost is not believed yet. For CI_DOWN after a
-# landing waited out CI_START or CI_LIMIT, the next ones park as soon as no runner has taken theirs.
-for v in LAND_CI_START LAND_CI_TIMEOUT LAND_CI_POLL LAND_CI_GRACE LAND_CI_DOWN; do
+# landing waited out CI_START or CI_LIMIT, the next ones park as soon as no runner has taken theirs. A stopped or refused
+# landing looks for the run of a push under CI_LATE old, which GitHub lists some seconds late.
+for v in LAND_CI_START LAND_CI_TIMEOUT LAND_CI_POLL LAND_CI_GRACE LAND_CI_DOWN LAND_CI_LATE; do
   [[ ${!v:-0} =~ ^[0-9]+$ ]] || refuse "$v is in whole seconds, not \"${!v}\""
 done
-CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60} CI_DOWN=${LAND_CI_DOWN:-600}
+CI_START=${LAND_CI_START:-600} CI_LIMIT=${LAND_CI_TIMEOUT:-2700} CI_POLL=${LAND_CI_POLL:-20} CI_GRACE=${LAND_CI_GRACE:-60} CI_DOWN=${LAND_CI_DOWN:-600} CI_LATE=${LAND_CI_LATE:-20}
 [[ $CI_STACK =~ ^[1-9][0-9]*$ ]] || refuse "CI_STACK is a number from 1 up, not \"$CI_STACK\""
 [[ $CI_BATCH =~ ^[1-9][0-9]*$ ]] || refuse "CI_BATCH is a number from 1 up, not \"$CI_BATCH\""
 [[ $FLAKE_RUNS =~ ^[0-9]+$ ]] || refuse "FLAKE_RUNS is a number from 0 up, not \"$FLAKE_RUNS\""
@@ -1481,7 +1482,7 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
            # shortcut: it waits for the ones ahead to land, not just to turn green; read their verdicts
            # from their tickets if a red landing holding up the ones behind it ever costs real time.
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
-green='' pushed='' pushed_at='' retried='' flaked=0 ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
+green='' pushed='' pushed_at='' late_sha='' late_at=0 late_seen='' retried='' flaked=0 ci_clock=0 ci_begun='' ci_last=-1 landed='' ci_skipped=''
 ci_fail_n=0 ci_fail_at='' # how many polls in a row CI gave no answer to, and since when
 ci_more=0 ci_more_keys='' # land_ci_more: the seconds it added to CI_LIMIT for this run, and the keys it gave them under
 main_pushed='' # step 7 runs land_after only once this is set
@@ -1705,7 +1706,8 @@ ci_push() {
   fi
   [ -n "$pushed" ] || ci_cancel # what a landing of this branch that was killed left running (a landed one's runs go on)
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
-  hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
+  late_sha=$tip late_at=$SECONDS late_seen='' # before the push: a stop can end it once origin has it
+  hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || { late_sha=''; refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"; }
   pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS ci_begun='' ci_more=0 ci_more_keys=''
   say "waiting for CI on ${tip:0:12} (origin's $CI_REF). GitHub calls left this hour: $(gh_quota)"
 }
@@ -1715,6 +1717,7 @@ ci_push() {
 ci_cancel() {
   local id sha
   while read -r id sha; do
+    [ -z "$id" ] || [ "$sha" != "$late_sha" ] || [[ " $late_seen" = *" $id "* ]] || late_seen+="$id "
     [ -z "$id" ] || git merge-base --is-ancestor "$sha" "refs/heads/$BRANCH" 2>/dev/null || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
   done < <(hub gh api "repos/$slug/actions/runs?branch=$CI_REF&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | [.id, .head_sha] | @tsv' 2>/dev/null)
 }
@@ -2491,8 +2494,13 @@ leave() {
   rm -f "$gitdir/land-branch"
   queue_done $landed
   exec 9>&- 6>&-
-  if [ -n "$pushed" ]; then
+  if [ -n "$pushed$late_sha" ]; then
     ci_cancel
+    # A run pushed a moment ago may not be listed yet (#1894), nor all of its push's workflows at once.
+    while [ -n "$late_sha" ] && [ -z "$landed" ] && [ "$(wc -w <<<"$late_seen")" -lt "$(wc -w <<<"${LW:-one}")" ] && [ $((SECONDS - late_at)) -lt "$CI_LATE" ]; do
+      sleep 2
+      ci_cancel
+    done
     hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
   fi
   if [ -n "$main_pushed" ] && declare -F land_after >/dev/null; then

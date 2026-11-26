@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GrowthStop, STOP, readTurnScopes, scopeTicket, type ScopeReading } from '../src/growth-stop.ts';
+import { fakeSystemd } from './helpers.ts';
 
 // The growth stop (#1748): while memory is tight, the fastest-growing host turn over 2 GB is held at its size, through
 // `systemctl set-property --runtime MemoryHigh` (faked here); lifted when the box isn't tight. Nothing is stopped or killed.
@@ -161,9 +162,43 @@ test('only turn scopes are read, so a Taskmaster or the server is never held', a
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }
-  // And the server never calls anything but set-property MemoryHigh (no stop, kill or MemoryMax).
-  const src = readFileSync(join(import.meta.dirname, '..', 'src', 'growth-stop.ts'), 'utf8');
-  assert.doesNotMatch(src, /'(stop|kill)'|MemoryMax=|process\.kill/);
+});
+
+test('a hold and its lift run only set-property MemoryHigh: no stop, kill or MemoryMax', async (t) => {
+  // The real setMemoryHigh, with the stand-in systemctl as the only thing on PATH, so the real one cannot be reached.
+  const bin = mkdtempSync(join(tmpdir(), 'fake-systemctl-'));
+  const systemd = fakeSystemd(bin);
+  const path = process.env.PATH;
+  process.env.PATH = bin;
+  const kill = t.mock.method(process, 'kill', () => true);
+  try {
+    let now = 1_800_000_000_000;
+    let current = 3 * GB;
+    let high: number | null = null;
+    const g = new GrowthStop({
+      turnsDir: '/fake/citadel-turns.slice',
+      now: () => now,
+      log: () => {},
+      read: async () => [{ unit: unit(7), current, high }],
+    });
+    await g.tick('tight');
+    now += 60_000;
+    current = 4 * GB;
+    await g.tick('tight');
+    high = 4 * GB + STOP.headroom; // what the next reading finds, or the hold counts as already lifted
+    await g.tick('ok');
+    high = null;
+    now += 60_000;
+    current = 5 * GB;
+    await g.tick('tight');
+    await g.stop(); // shutdown lifts too
+    const set = `--user set-property --runtime ${unit(7)}`;
+    assert.deepEqual(systemd.calls(), [`${set} MemoryHigh=${4 * GB + STOP.headroom}`, `${set} MemoryHigh=infinity`, `${set} MemoryHigh=${5 * GB + STOP.headroom}`, `${set} MemoryHigh=infinity`]);
+    assert.equal(kill.mock.callCount(), 0, 'no signal sent');
+  } finally {
+    process.env.PATH = path;
+    rmSync(bin, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });
 
 test('a hold whose set was still running when the server stopped is lifted, and no reading after stop holds anyone', async () => {

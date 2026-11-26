@@ -23,7 +23,8 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
 // Two ships that change an entry merge by rule (count, MERGES in tools/land.local.sh, #1917).
 // biome-ignore format: one line per entry is what the merge rule reads
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
-  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 46 },
+  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 45 },
+  'src/apk-deploy.ts': { why: 'wiring moved out of server.ts (#1838): tells the Taskmaster who published an Android build; judges nothing', calls: 1 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/running-turn.ts': { why: 'sends a running turn the signal the runner asks for (a stop, or what is left of a killed turn); judges nothing (#1937)', calls: 2 },
   'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits (and asks whether that test is alive); judges nothing", calls: 3 },

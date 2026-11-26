@@ -1,5 +1,6 @@
 // CI health (src/ci-health.ts, #368): the four rules on GitHub answers shaped like Peek Auras' real ones, and the
 // poller putting and clearing admins' Mandate alerts.
+import { withoutHeld } from '../src/ci-hold.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -1961,6 +1962,31 @@ test('a dispatched re-run GitHub never lists is sent once more, then said; a lat
   assert.equal(w.marks()['7'].rerun?.error, undefined);
   assert.equal(w.problem(w.red)!.quiet, true, 'it runs after all');
   assert.equal(w.posts.length, 2);
+});
+
+test('a dispatched re-run the CI desktop hold stopped is listed and waits: not sent again, nobody rung; replaced by a later one, that one counts (#1902)', async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  w.fixer();
+  w.tips.ship = 'tip-a';
+  const held = new Set([9102]);
+  const red = new CiHealth(w.store, { ...w.deps2, get: withoutHeld(w.deps2.get!, (run) => held.has(run)) });
+  await red.tick(NOW + 5 * MIN);
+  assert.equal(w.posts.length, 1);
+  w.gh.mainRuns = [w.run(9102, -6 * MIN, 'cancelled', { event: 'workflow_dispatch' }), ...w.gh.mainRuns];
+  for (const m of [20, 35, 200]) await red.tick(NOW + m * MIN);
+  assert.equal(w.posts.length, 1, 'it waits for ships; it was not lost');
+  assert.equal(w.marks()['7'].rerun?.run, 9102);
+  assert.equal(w.problem(red)!.quiet, true);
+  // A newer main run took its place in the hold.
+  held.delete(9102);
+  held.add(9103);
+  w.gh.mainRuns = [w.run(9103, -201 * MIN, 'cancelled', { event: 'schedule' }), ...w.gh.mainRuns];
+  await red.tick(NOW + 205 * MIN);
+  assert.equal(w.marks()['7'].rerun?.run, 9103);
+  assert.doesNotMatch(JSON.stringify(w.marks()['7'].rerun), /failed/, 'the dropped one is no verdict');
+  assert.equal(w.posts.length, 1);
 });
 
 test("a workflow whose run name shows its input: another input's green neither clears a red nor hides it, and Citadel doesn't start it (#1954, 2CA6)", async () => {

@@ -18,6 +18,7 @@ exception is Real-hardware ledger: only a native-app scheme has that line.
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Agent instructions | Prompts, guides and tool descriptions an agent reads beyond the kit, `CLAUDE.md`, `AGENTS.md` and `.claude/` (an app's system prompt, a guides folder) | self-review (Agent instructions lens) | those alone |
 | Numbered things | What minions number in parallel and could both take the same "next" of: migration files, a version, ledger ids. Entries split by `;`: `files <glob with NNNN>`, `ids <glob> "<regex>"`, `version <glob> "<regex>"` (the format is in `land.sh`'s header). Only with `tools/land.sh`, which refuses a change that clashes | land.sh | no check |
+| Verifier's copy | How to run the app on scratch data away from the live one, and how to make states on it: a second person, a restart, a failed or limited job, the clock | self-review (the opt-in verifier) | it works the run out from the README and Check commands |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
 | Real-hardware ledger | Native-app schemes only: `docs/unproven.md`, written as below | self-review | no line |
 

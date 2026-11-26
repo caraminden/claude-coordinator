@@ -36,7 +36,6 @@
  "release-key-cards.test.ts": { "tmp": 1 },
  "runner-agent.test.ts": { "tmp": 1 },
  "schedules.test.ts": { "tmp": 1 },
- "seam-trial.test.ts": { "tmp": 1 },
  "ship-lessons.test.ts": { "tmp": 1 },
  "ship-line.test.ts": { "tmp": 1 },
  "thread-identity.test.ts": { "tmp": 1 },

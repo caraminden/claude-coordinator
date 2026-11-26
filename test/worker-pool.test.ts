@@ -413,6 +413,51 @@ test("a size over the owner's cap starts nothing more, and no word of its load h
   assert.equal(p.turns.size(DESK), 0, 'no cap said yet');
 });
 
+// The quick lane (#1986) meets the places (Build 7): perigee's free worker or a forced start, then the person's machine, then the lane.
+function quickPlaces(...quick: number[]) {
+  return places({}, (id) => ({ person: 1, rank: 1, ...(quick.includes(id) ? { quick: true as const } : {}) }));
+}
+const inLane = (p: ReturnType<typeof places>) => p.turns.laneTurns().map((t) => t.ticket);
+
+test('perigee full, a quick turn whose machine has room starts there, not in the quick lane', () => {
+  const p = quickPlaces(2);
+  p.turns.enter(1);
+  assert.deepEqual([p.turns.enter(2), p.at(2), inLane(p)], [true, DESK, []]);
+  p.turns.stop();
+});
+
+test('perigee full, a waiting quick turn takes a machine worker that frees with a lane worker, not the lane', async () => {
+  const p = quickPlaces(4, 5, 6);
+  for (const id of [1, 2, 3, 4, 5]) p.turns.enter(id);
+  assert.deepEqual([p.at(1), p.at(2), p.at(3), inLane(p)], [0, DESK, DESK, [4, 5]], 'perigee, the machine and the lane all full');
+  assert.equal(p.turns.enter(6), false);
+  // Both free before the next pump: the machine's goes first.
+  await Promise.all([p.turns.hold(4, () => {}), p.turns.hold(2, () => {})]);
+  await until('the quick turn to start', () => p.started.includes(6));
+  assert.deepEqual([p.at(6), inLane(p)], [DESK, [5]]);
+  p.turns.stop();
+});
+
+test('perigee and the machine full, a quick turn takes the quick lane', () => {
+  const p = quickPlaces(4);
+  for (const id of [1, 2, 3]) p.turns.enter(id);
+  assert.deepEqual([p.turns.enter(4), p.at(4), inLane(p)], [true, 0, [4]]);
+  p.turns.stop();
+});
+
+test('a quick turn marked for a machine never takes the quick lane: it waits for that machine', async () => {
+  const p = quickPlaces(4);
+  for (const id of [1, 2, 3]) p.turns.enter(id);
+  p.marks.set(4, DESK);
+  assert.deepEqual([p.turns.enter(4), p.turns.has(4), inLane(p)], [false, true, []]);
+  p.turns.pump();
+  assert.deepEqual([p.turns.has(4), inLane(p)], [true, []], 'nor when the line moves');
+  await p.turns.hold(2, () => {});
+  await until('it to start on its machine', () => p.started.includes(4));
+  assert.deepEqual([p.at(4), inLane(p)], [DESK, []]);
+  p.turns.stop();
+});
+
 test("Auto sizes a machine on its own pressure, leaves perigee's alone, and says what it can't give way to", () => {
   const p = places({ 'turn-pool': { size: 10, at: 0 } });
   const now = Date.now();

@@ -162,6 +162,10 @@ test('kit reviewers switch per scheme, trial locks blocking until calibrated, an
     "kit entries are off trial and carry the kit's own words",
   );
 
+  // #1740: the opt-in verifier is listed off in a scheme other than Citadel, and a person's switch turns it on.
+  const ver = first.data.entries.find((e: { slug: string }) => e.slug === 'verifier');
+  assert.equal(ver.enabled, false);
+  assert.equal((await call(`${url}/verifier`, { method: 'PATCH', body: { enabled: true } })).data.enabled, true);
   // A person switches a lens, fresh eyes and the pre-ship review off; a kit entry's name stays the kit's.
   for (const slug of ['lens-tests', 'fresh-eyes', 'pre-ship-review']) {
     const r = await call(`${url}/${slug}`, { method: 'PATCH', body: { enabled: false } });

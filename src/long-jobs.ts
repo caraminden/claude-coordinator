@@ -29,7 +29,9 @@ export interface LongJob {
   quiet?: boolean;
   /** When ships first held it (src/ci-hold.ts). */
   held_at?: number;
-  /** A quiet job held a day was told to its Taskmaster. */
+  /** Why it waits, while held with no run yet. */
+  held_why?: string;
+  /** Its long hold was told to its Taskmaster (src/ci-hold.ts). */
   reported?: boolean;
   dispatched_at?: number;
   started_at?: number;
@@ -63,7 +65,6 @@ export interface LongDeps {
   hold?(slug: string, since?: number): string | null;
   /** A run the hold stopped and will start again. */
   heldRun?(run: number): boolean;
-  report?(slug: string, text: string): void;
   now?: () => number;
 }
 
@@ -78,7 +79,6 @@ const MAX_MISSES = 60;
 const MAX_TRIES = 3;
 /** A dispatched job GitHub shows no run for after this long goes back in line. */
 const NO_RUN_MS = 5 * 60_000;
-const DAY_MS = 24 * 3600_000;
 /** Ended jobs and their logs are kept this long. */
 export const KEEP_MS = 7 * 24 * 3600_000;
 const ID = /^[a-z0-9]+-\d+-[a-z0-9]+$/;
@@ -265,22 +265,24 @@ export class LongJobs {
     return this.list().find((x) => x.id === id)?.held_at;
   }
 
+  /** A long hold of this job was told to its Taskmaster: it isn't told again. */
+  async told(id: string) {
+    const j = this.jobs.find((x) => x.id === id);
+    if (!j) return;
+    j.reported = true;
+    await this.save(j);
+  }
+
   /** Dispatch a queued job: a long one in its hours, either kind only while no ship holds the desktop; false when it waits. */
   private async start(j: LongJob, projectId: number): Promise<boolean> {
-    if (!j.quiet && !this.open(j)) return false;
-    const why = this.d.hold?.(j.slug, j.held_at);
-    if (why) {
-      if (!j.held_at) {
-        j.held_at = j.quiet ? j.queued_at : this.now();
-        await this.save(j);
-      }
-      if (!j.reported && this.now() - j.held_at >= DAY_MS) {
-        j.reported = true;
-        await this.save(j);
-        this.d.report?.(j.slug, `A heavy job has been held off the CI desktop for over 24 hours (${j.what}, ${j.who}): ${why}. Ships go first, so it starts once the line is empty; it is never forced. The CI page lists what is held.`);
-      }
-      return false;
+    const outside = !j.quiet && !this.open(j);
+    const why = outside ? (j.held_at ? 'it is a long job, which starts only in its hours' : null) : this.d.hold?.(j.slug, j.held_at);
+    if (why && (!j.held_at || j.held_why !== why)) {
+      j.held_at ||= j.quiet ? j.queued_at : this.now();
+      j.held_why = why;
+      await this.save(j);
     }
+    if (why || outside) return false;
     const branch = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}`])).default_branch;
     // GitHub checks inputs against the workflow on the branch it runs, so `minutes` goes only when that copy declares it.
     const wf = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/contents/.github/workflows/${WORKFLOW}?ref=${encodeURIComponent(branch)}`]));
@@ -290,7 +292,7 @@ export class LongJobs {
     if (!j.quiet && /^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
     // Saved first and never put back on an error: a dispatch GitHub took but didn't answer is found by watch(), and one it
     // never took goes back in line there once it shows no run, so the command can't run twice.
-    Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1 });
+    Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1, held_why: undefined });
     await this.save(j);
     await this.d.gh(projectId, ['-X', 'POST', `repos/${j.slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${j.sha}`, '-f', `inputs[command]=${j.command}`, '-f', `inputs[id]=${j.id}`, ...minutes]);
     this.d.note(j.ticket, j.quiet ? `Heavy job ${j.id} (${j.what}) went to ${j.slug}'s CI: nothing is ahead of it now.` : `Long job ${j.id} (${j.what}) went to ${j.slug}'s CI for the night.`);

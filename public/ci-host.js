@@ -139,7 +139,7 @@ function holdRow(l) {
     h(
       'p',
       { class: 'look-prose' },
-      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs except a flake proof. One flake proof at a time runs beside ships; the others wait, the longest held first. The full run on main waits for a gap between ships; after 4 hours of waiting it starts anyway. A stopped job starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has been running for 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
+      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs except a flake proof. One flake proof at a time runs beside ships; the others wait, the longest held first. The full run on main waits for a gap between ships; after 4 hours of waiting it starts anyway. A stopped job starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has been running for 4 hours keeps no other waiting, and a job held 2 hours is told to its scheme's Taskmaster (main's full run, 2 hours after its 4 are up). While a minion's job is held, its row in the minion list says since when and why.",
     ),
   );
   return row;

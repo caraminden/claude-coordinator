@@ -33,7 +33,6 @@ export const TOOL_INPUTS = [
   'COORDINATOR_CODEX_IMAGES',
   'COORDINATOR_APP_TURNS_RUN',
   'COORDINATOR_MSG',
-  'COORDINATOR_SEAM_TRIAL',
 ];
 
 export const shortHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 10);

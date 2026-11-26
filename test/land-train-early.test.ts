@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { DEP, ci, depsRepo, git, seen, setup, landAsync } from './land-fixture.ts';
-import { line, shipped, bad, realOf, shared } from './land-train-fixture.ts';
+import { type Ship, line, shipped, bad, realOf, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 
 // Red on main too (#1430): main's own tip fails test/real.test.ts run alone (Nov 21 00:00 PST's clock test), so every
@@ -364,6 +364,58 @@ test("early next train: the next ship's train is stacked and its CI started whil
   assert.ok(!pushes.some((x) => / refs\/heads\/land(-base)?\/ticket\/4-x$/.test(x)), `ship 4's counted run needed no land/ run: ${pushes.join('; ')}`);
   assert.equal(git(join(l.r.dir, 'hub.git'), 'for-each-ref', 'refs/heads/early/', 'refs/heads/early-base/'), '', 'its early refs end deleted');
   l.done();
+});
+
+test("a ship stopped at the gate of its counted early run cancels that run, whose id the gate hasn't read yet (#1894)", async () => {
+  const [two, four]: Ship[] = [{}, {}];
+  const l = await line(
+    [{}, two, {}, four],
+    (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }),
+    (r) => {
+      two.env = { FAKE_CI_GATE: join(r.dir, 'go') };
+      // The early run is listed for early_look and early_gate, and not for the gate's own questions after them.
+      four.env = { FAKE_UNLISTED: `f4.txt ${join(r.dir, 'listed')} 2`, LAND_CI_LATE_POLL: '0.2' };
+    },
+  );
+  const all = l.go();
+  await until("the early push beside ship 2's run", () => /its CI starts now/.test(l.out[1]));
+  writeFileSync(join(l.r.dir, 'go'), '');
+  await until("ship 4 at its early run's gate", () => /so that run is its CI/.test(l.out[3]) && /waiting for CI on/.test(l.out[3]));
+  l.stop(4);
+  writeFileSync(join(l.r.dir, 'listed'), '');
+  const done = await all;
+  assert.notEqual(done[3].status, 0);
+  assert.equal(l.cancelled().length, 1, l.c.calls());
+  assert.equal(l.hubAt('early/ticket/4-x'), '', 'its scratch branch goes');
+});
+
+test('a ship stopped while it pushes an early run leaves it to the next landing, which counts or drops it (#1894)', async () => {
+  const [two, three]: Ship[] = [{}, {}];
+  const l = await line(
+    [{}, two, three, {}],
+    (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }),
+    (r) => {
+      two.env = { FAKE_CI_GATE: join(r.dir, 'go') };
+      three.env = { FAKE_UNLISTED: `f4.txt ${join(r.dir, 'listed')}`, LAND_CI_LATE_POLL: '0.2' };
+      // GitHub has the early push, and is slow to say so.
+      const hook = join(r.dir, 'hub.git', 'hooks', 'post-receive');
+      writeFileSync(hook, `#!/bin/sh\nwhile read -r _ _ ref; do case $ref in refs/heads/early/*) until [ -e "${join(r.dir, 'stopped')}" ]; do sleep 0.05; done ;; esac; done\n`, { mode: 0o755 });
+    },
+  );
+  const all = l.go();
+  await until("the early push beside ship 2's run", () => l.hubAt('early/ticket/4-x') !== '');
+  const early = git(join(l.r.dir, 'hub.git'), 'rev-parse', 'early/ticket/4-x');
+  l.stop(2);
+  writeFileSync(join(l.r.dir, 'stopped'), '');
+  await until("the next landing's look for the early run", () => l.c.calls().includes(`head_sha=${early}`));
+  const before = l.cancelled().length;
+  writeFileSync(join(l.r.dir, 'listed'), ''); // a moment later GitHub lists it
+  await until('the early run to be dropped', () => /dropped the early CI run/.test(l.out[2]));
+  assert.equal(l.cancelled().length, before + 1, l.c.calls());
+  writeFileSync(join(l.r.dir, 'listed.end'), '');
+  const done = await all;
+  for (const i of [3, 4]) assert.equal(done[i - 1].status, 0, done[i - 1].stderr);
+  assert.equal(l.hubAt('early/ticket/4-x'), '', 'the next landing dropped it');
 });
 
 // The early run's train is the one its landing builds (#1568): a ship that would make it different (here ship 6, which

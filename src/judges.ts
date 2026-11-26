@@ -75,7 +75,7 @@ export const JUDGES: Judge[] = [
     name: 'Deploys first: the CI desktop hold (#1902)',
     mode: 'act',
     replay: true,
-    acts: "stops optional CI runs while a ship is in line, and all but one Citadel job at a time, and starts them again after, telling their minions, and wakes the scheme's Taskmaster once about one held over a day",
+    acts: "stops optional CI runs while a ship is in line, and all but one Citadel job at a time, and starts them again after, telling their minions, and wakes the scheme's Taskmaster once about what is still waiting 2 hours after it was first held",
     pins: [
       {
         path: 'src/ci-hold.ts',
@@ -109,6 +109,7 @@ export const JUDGES: Judge[] = [
           'CiHold.mainPast',
           'CiHold.mainMay',
           'CiHold.mainDue',
+          'CiHold.oneMain',
           'CiHold.gap',
           'CiHold.look',
           'CiHold.follow',

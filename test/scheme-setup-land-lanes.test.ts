@@ -26,7 +26,7 @@ function laneSetup(files: string[], { lanes = LANES, extra = '', builtin = false
   writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\necho "$# ${1:0:12} ${2:-}" >>"$CI_DIR/status.log"\nread -r code <"$CI_DIR/${1:0:12}" 2>/dev/null || code=3\nexit "$code"\n', { mode: 0o755 });
   const checks = join(q.dir, 'checks');
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), CHECKS: checks, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
+  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), CHECKS: checks, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_LATE: '0', LAND_BATCH: batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
   type L = ReturnType<typeof land>;

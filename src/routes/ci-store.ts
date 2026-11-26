@@ -139,6 +139,15 @@ export const ciStoreRoutes: Route[] = [
     },
   },
   {
+    // The scheme's Code tab (#1988): the last daily count of its files, and which of them an open minion is splitting. Reads no git.
+    method: 'GET',
+    path: '/api/projects/:project/code-counts',
+    ...readers,
+    async handler({ app, res, project }) {
+      return json(res, 200, await app.codeCounts.view(project.id));
+    },
+  },
+  {
     method: 'GET',
     path: '/api/projects/:project/ci-files/:file/:name',
     ...readers,

@@ -15,6 +15,7 @@ import { minionJobRoutes } from './minion-jobs.ts';
 import { ciStoreRoutes } from './ci-store.ts';
 import { desktopRoutes } from './desktop.ts';
 import { pushRoutes } from './push.ts';
+import { timeLogRoutes } from './time-log.ts';
 import { unitRoutes } from './units.ts';
 import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
@@ -28,6 +29,7 @@ export const apiRoutes = [
   ...projectRoutes,
   ...reviewRoutes,
   ...ticketRoutes,
+  ...timeLogRoutes,
   ...proposalRoutes,
   ...memoryCuratorRoutes,
   ...fileRoutes,

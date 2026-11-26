@@ -9,3 +9,6 @@ export const ownMemoryKey = (ticketId: number) => `memory-own:${ticketId}`;
 export const planKey = (ticketId: number) => `plan:${ticketId}`;
 /** A minion's task-list state just before the furthest chat page start read, so a restart's first open replays only what came since (#613; src/history.ts planBefore). */
 export const pagePlanKey = (ticketId: number) => `plan:${ticketId}:page`;
+
+/** When the wait records began (#1992, src/db/wait-records.ts), ms. */
+export const WAITS_SINCE_KEY = 'wait_records_since';

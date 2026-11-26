@@ -448,6 +448,12 @@ export class CiLoad {
     ];
   }
 
+  /** The repos (owner/name, lowercase) one machine's runner agent for `os` lists runners for, by its newest sample in the last 10 minutes (#2064). */
+  reposOn(machineId: number, os: 'windows' | 'linux', now = Date.now()): Set<string> {
+    const s = this.latest.get(`${machineId}:${os}`);
+    return new Set(s && now - s.at < 10 * MIN ? s.runners.map((r) => r.repo.toLowerCase()).filter(Boolean) : []);
+  }
+
   /** Each PC connected or heard from in the last 10 minutes, with the runners its agents' newest samples list (#1934). */
   runnersByPc(now = Date.now()): Pcs {
     const pcs: Pcs = new Map(this.deps.hosts().map((h) => [h.toLowerCase(), new Set()]));

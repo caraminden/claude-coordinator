@@ -65,8 +65,8 @@ export interface ShipWatchDeps {
   send: (ships: Ship[]) => void;
   /** owner/name, lowercase, of the repo whose ships go first (Citadel's own); null when unknown. */
   first?: () => string | null;
-  /** Each repo's CI jobs queued for self-hosted runners (Build 7 M6: waiting CI shrinks the workers); left out, they aren't read. */
-  queued?: (byRepo: Map<string, number>) => void;
+  /** Each repo's CI jobs queued for self-hosted runners (Build 7 M6: waiting CI shrinks the workers), and the labels those jobs ask for (#2064: a label no runner has gets one); left out, they aren't read. */
+  queued?: (byRepo: Map<string, number>, labels: Map<string, Set<string>>) => void;
   get?: GhGet;
   log?: (line: string) => void;
 }
@@ -119,17 +119,20 @@ export class ShipWatch {
       }
       if (this.deps.queued) {
         const queued = new Map<string, number>();
+        const labels = new Map<string, Set<string>>();
         for (const repo of repos) {
           const as = this.deps.as(repo);
           if (as === null) continue;
           try {
-            queued.set(repo, await this.waiting(repo, as, used));
+            const w = await this.waiting(repo, as, used);
+            queued.set(repo, w.n);
+            if (w.labels.size) labels.set(repo, w.labels);
           } catch (err) {
             if (err instanceof RateLimited) throw err;
             this.say(`Ship watch: ${repo}'s queued jobs: ${thrown(err).message ?? err}`);
           }
         }
-        this.deps.queued(queued);
+        this.deps.queued(queued, labels);
       }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
       const first = this.deps.first?.()?.toLowerCase();
@@ -144,7 +147,7 @@ export class ShipWatch {
       // An empty list now, so the agents lift at once and one connecting meanwhile isn't handed the old list.
       this.last.clear();
       this.deps.send([]);
-      this.deps.queued?.(new Map());
+      this.deps.queued?.(new Map(), new Map());
       this.say('Ship watch: GitHub says to slow down; looking again in 5 minutes (the agents lift any squeeze meanwhile).');
       return null;
     } finally {
@@ -169,14 +172,19 @@ export class ShipWatch {
   }
 
   /** Jobs waiting for a self-hosted runner in the repo's queued runs. shortcut: a queued job inside a run already going isn't counted; read in_progress runs' jobs too if workers grow over waiting CI. */
-  private async waiting(repo: string, as: GithubEnv, used: Set<string>): Promise<number> {
+  private async waiting(repo: string, as: GithubEnv, used: Set<string>): Promise<{ n: number; labels: Set<string> }> {
     const runs = ((await this.read(`repos/${repo}/actions/runs?status=queued&per_page=20`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
     let n = 0;
+    const labels = new Set<string>();
     for (const r of runs.filter((r) => Number.isInteger(r?.id)).slice(0, QUEUED_RUNS)) {
       const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
-      n += jobs.filter((j) => j?.status === 'queued' && Array.isArray(j.labels) && j.labels.includes('self-hosted')).length;
+      for (const j of jobs) {
+        if (j?.status !== 'queued' || !Array.isArray(j.labels) || !j.labels.includes('self-hosted')) continue;
+        n++;
+        for (const l of j.labels) if (typeof l === 'string' && l !== 'self-hosted') labels.add(l.toLowerCase());
+      }
     }
-    return n;
+    return { n, labels };
   }
 
   private async read(path: string, as: GithubEnv, used: Set<string>): Promise<unknown> {

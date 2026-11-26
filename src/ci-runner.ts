@@ -76,11 +76,14 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
  * admin is in all of them), an ownerless one if any of its roles that's on is lent there. An ownerless CI runner host
  * from before #438 that was never given a list (machines.scoped 0, which nothing else reads now): with CI on, if an
  * admin owns the scheme, so `ci_runners` keeps working for a new scheme. The token lets a PC run the repo's CI jobs,
- * which a member can already do by pushing a workflow.
+ * which a member can already do by pushing a workflow. With `removing` (a removal token, unregister, a list or remove
+ * job), any PC that hosts CI may: taking its own runners off a scheme it no longer lends to only stops it serving there
+ * (#2064: unticking a scheme under CI removes its runners).
  */
-export function mayFetch(store: Store, machine: Machine, project: Project): boolean {
+export function mayFetch(store: Store, machine: Machine, project: Project, removing = false): boolean {
   const role = store.machineRoles(machine.id).find((r) => r.role === 'ci');
   const ci = role?.on ?? false;
+  if (removing && (ci || storedCheck(machine)?.runners || role?.setup?.runner_agent || role?.setup?.runner_host)) return true;
   if (machine.owner_id === null && !machine.scoped) return ci && adminOwned(store, project);
   // A PC's row a runner agent has connected to (Build 7 M2b) is one too: its CI role decides, so off is off.
   if (ci || storedCheck(machine)?.runners || role?.setup?.runner_agent) return lendsRole(store, machine, 'ci', project);
@@ -114,7 +117,7 @@ export class RunnerTokens {
   async issue(machine: Machine, schemeRef: unknown, mint = true, kind: 'register' | 'remove' = 'register'): Promise<RunnerToken> {
     const project = findScheme(this.store, schemeRef);
     // A scheme this machine can't act for looks the same as one that doesn't exist.
-    if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may fetch a runner token for`);
+    if (!project || !mayFetch(this.store, machine, project, kind === 'remove')) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may fetch a runner token for`);
     const { slug, owner, ownerToken, label, hint } = this.repoOf(project);
     if (!mint) return { scheme: project.name, repo: slug, label, token: null, expires_at: null };
     const r = await this.github(ownerToken, 'POST', `/repos/${slug}/actions/runners/${kind === 'remove' ? 'remove-token' : 'registration-token'}`);
@@ -136,7 +139,7 @@ export class RunnerTokens {
    */
   async unregister(machine: Machine, schemeRef: unknown, name: unknown, label: unknown): Promise<{ scheme: string; repo: string; name: string; removed: boolean }> {
     const project = findScheme(this.store, schemeRef);
-    if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may remove a runner for`);
+    if (!project || !mayFetch(this.store, machine, project, true)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may remove a runner for`);
     // Only ever compared with the names GitHub lists, never put in a URL: GitHub's own limit is 64 characters.
     if (typeof name !== 'string' || !/^[^\p{Cc}]{1,64}$/u.test(name)) throw new HttpError(400, "name must be the runner's name, 1 to 64 characters");
     const { slug, owner, ownerToken, hint } = this.repoOf(project);
@@ -369,19 +372,21 @@ export class RunnerJobs {
   }
 
   /**
-   * Start a job for `project`, asked by person `askerId`, who must be a member (an admin is in every scheme). It runs in the
-   * background: wait() follows it. Throws an HttpError when it can't start, before anything reaches the PC.
+   * Start a job for `project`, asked by person `askerId`, who must be a member (an admin is in every scheme), or by Citadel
+   * itself (`auto`, the words its note names it by: src/ci-auto.ts). It runs in the background: wait() follows it. Throws an
+   * HttpError when it can't start, before anything reaches the PC.
    */
-  async start(project: Project, askerId: number | null, ask: RunnerAsk): Promise<RunnerJobView> {
+  async start(project: Project, askerId: number | null, ask: RunnerAsk, auto?: string): Promise<RunnerJobView> {
     const asker = askerId === null ? undefined : this.store.getUser(askerId);
-    if (!asker || asker.disabled_at || !this.store.canSee({ uid: asker.id, admin: !!asker.admin }, project.id)) {
+    if (!auto && (!asker || asker.disabled_at || !this.store.canSee({ uid: asker.id, admin: !!asker.admin }, project.id))) {
       throw new HttpError(403, `Only ${project.name}'s members can change its CI runners, and this ask isn't from one.`);
     }
+    const by = auto ?? asker?.name ?? '';
     // What GitHub lists before an add: the runners it makes are the ones that aren't there yet, and only those get a role.
     const before = ask.op === 'add' ? await this.tokens.listed(project) : [];
     const running = this.jobs.get(project.id);
     if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
-    const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project));
+    const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project, ask.op !== 'add'));
     const named = ask.host?.toLowerCase();
     const machines = named ? online.filter((m) => m.name.toLowerCase() === named || this.relay.runnerHost(m.id, ask.os)?.toLowerCase() === named) : online;
     if (online.length && !machines.length) {
@@ -401,8 +406,8 @@ export class RunnerJobs {
     if (!targets.length) throw new HttpError(409, `The runner agent on ${(free.length ? machines.filter((m) => this.busy.has(`${m.id}:${ask.os}`)) : machines).map((m) => m.name).join(', ')} is busy with another scheme's job; try again in a few minutes.`);
     const machine = targets[0];
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
-    const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false);
-    const view: RunnerJobView = { op: ask.op, count: ask.count, os: ask.os, scheme: project.name, machine: targets.map((m) => m.name).join(', '), by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
+    const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false, ask.op === 'remove' ? 'remove' : 'register');
+    const view: RunnerJobView = { op: ask.op, count: ask.count, os: ask.os, scheme: project.name, machine: targets.map((m) => m.name).join(', '), by, started_at: Date.now(), finished_at: null, ok: null, text: '' };
     for (const m of targets) this.busy.add(`${m.id}:${ask.os}`);
     this.tokenNotes.set(project.id, { machineIds: new Set(targets.map((m) => m.id)), lines: [] });
     // A Linux runner's label (#510): add-runner.sh makes the same one from the label Citadel hands it.

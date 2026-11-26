@@ -195,6 +195,19 @@ export const machineQueries = {
     });
   },
 
+  /**
+   * A person joined or made a scheme: each PC of theirs with CI on serves it too, as a role switched on goes to every scheme
+   * they are in (Josh, "Every scheme you're in"; #2064: so a scheme made later gets runners with no one asking). A scheme
+   * they untick later stays unticked: this runs only as they join.
+   */
+  lendCiToJoined(this: Store, projectId: number, userId: number) {
+    for (const m of this.listMachines()) {
+      if (m.owner_id !== userId) continue;
+      const ci = this.machineRoles(m.id).find((r) => r.role === 'ci');
+      if (ci?.on && !ci.projects.includes(projectId)) this.writeMachineRoles(m.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [...r.projects, projectId] } : r)));
+    }
+  },
+
   /** Whether this role of the machine is switched on and lent to the scheme (access.ts lendsRole adds who asked). */
   roleGrants(this: Store, machineId: number, role: Role, projectId: number): boolean {
     const r = this.machineRoles(machineId).find((x) => x.role === role)!;

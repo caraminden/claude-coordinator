@@ -19,6 +19,7 @@ export const schemeQueries = {
 
   createProject(this: Store, name: string, repoUrl: string | null, ownerId: number | null = null): Project {
     const r = this.db.prepare('INSERT INTO projects (name, repo_url, owner_id, created_at) VALUES (?, ?, ?, ?)').run(name, repoUrl, ownerId, Date.now());
+    if (ownerId !== null) this.lendCiToJoined(Number(r.lastInsertRowid), ownerId);
     return this.getProject(Number(r.lastInsertRowid))!;
   },
 

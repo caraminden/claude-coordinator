@@ -200,9 +200,15 @@ test('queued jobs for self-hosted runners are counted per repo, and shared among
     },
   });
   const counts: Map<string, number>[] = [];
-  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: (m) => void counts.push(m) });
+  const labels: Map<string, Set<string>>[] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: (m, l) => void (counts.push(m), labels.push(l)) });
   await w.tick(0);
   assert.deepEqual([...counts[0]], [[repo, 2]]);
+  // #2064: the labels a queued self-hosted job asks for, so a label no runner has gets one; a hosted job's aren't.
+  assert.deepEqual(
+    [...labels[0]].map(([r, l]) => [r, [...l]]),
+    [[repo, ['citadel']]],
+  );
   const pcs = new Map([
     ['desk', new Set([`${repo}/desk`])],
     ['laptop', new Set([`${repo}/laptop`, 'caraminden/peek-auras/laptop'])],

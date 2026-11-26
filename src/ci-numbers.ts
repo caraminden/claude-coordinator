@@ -105,9 +105,9 @@ export class CiNumbers {
   private busyPc(repository: string, from: number, to: number): boolean {
     const samples = this.store.runnerLoadSince(from).flatMap((r) => (r.at <= to ? [JSON.parse(r.data) as Sample] : []));
     const repo = repository.toLowerCase();
-    const hosts = new Set(samples.filter((s) => s.runners.some((r) => r.repo.toLowerCase() === repo)).map((s) => s.host));
+    const hosts = new Set(samples.filter((s) => s.runners.some((r) => r.repo.toLowerCase() === repo)).map((s) => s.host.toLowerCase()));
     return [...hosts].some((host) => {
-      const cpu = samples.filter((s) => s.os === 'windows' && s.host === host).map(trueCpu);
+      const cpu = samples.filter((s) => s.os === 'windows' && s.host.toLowerCase() === host).map(trueCpu);
       return cpu.reduce((a, c) => a + c, 0) > BUSY_PC * cpu.length;
     });
   }

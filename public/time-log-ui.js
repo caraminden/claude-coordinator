@@ -177,7 +177,7 @@ async function explain() {
   draw();
   try {
     const log = await api(`api/tickets/${id}/time-log/explain`, { method: 'POST', body: {} });
-    Object.assign(e, { log, at: Date.now(), sig: openView().ticket?.id === id ? signature() : '' });
+    Object.assign(e, { log, at: Date.now(), sig: view?.ticket?.id === id ? signature() : '' });
   } catch (err) {
     e.explainFailed = /** @type {Error} */ (err).message;
   }

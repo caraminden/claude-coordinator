@@ -181,7 +181,7 @@ function signIns(m, k) {
   const w = m.worker;
   const win = w.wsl;
   const tag = win ? 'powershell' : 'bash';
-  const chip = (name, is) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${is ? 'signed in' : is === false ? 'not signed in' : 'checking'}`);
+  const chip = (name, is, word) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${word ?? (is ? 'signed in' : is === false ? 'not signed in' : 'checking')}`);
   const claudeNote = 'Claude Code opens its own sign-in. Type /exit once it says you are in.';
   // Several linked accounts (#2061): each signs in there into its own folder, and a turn runs only on one signed in there.
   const several = (w.accounts?.length ?? 0) > 1;
@@ -191,6 +191,7 @@ function signIns(m, k) {
         a.there === 'in',
         a.n === 1 ? 'signin' : `signin ${a.n}`,
         a.there === 'other' ? `It is signed in there to another Claude organization than your account ${a.n} here: sign in again, picking that account's organization.` : `Sign in with the account Settings → Your account lists as account ${a.n}. ${claudeNote}`,
+        a.there === 'other' ? 'another organization' : undefined,
       ])
     : [['Claude', w.signed_in, 'signin', claudeNote]];
   const steps = [...claude, ['GitHub', w.github, 'signin-github', 'So turns can push and open pull requests as you.']];
@@ -200,7 +201,7 @@ function signIns(m, k) {
   return h(
     'section',
     { class: 'worker-part' },
-    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Sign-ins there'), ...steps.map(([name, is]) => chip(name, is))),
+    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Sign-ins there'), ...steps.map(([name, is, , , word]) => chip(name, is, word))),
     w.image?.state === 'building' && todo.length ? h('p', { class: 'muted small' }, 'These work once its image is built.') : null,
     todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`) : null,
     ...todo.map(how),

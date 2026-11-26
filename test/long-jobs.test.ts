@@ -316,3 +316,19 @@ test('a run already on CI when its minion closed is left to finish', async () =>
   assert.equal(readLongJobs(s.dir)[0].state, 'running');
   assert.ok(!s.calls.some((c) => c.includes('POST')), 'nothing cancels it');
 });
+
+test('a minion closed while its job was starting gets no dispatch', async () => {
+  const s = setup([1], { now: NIGHT });
+  let closed = false;
+  s.deps.scheme = () => ({ projectId: 1, slug: 'own/repo1', closed });
+  const gh = s.deps.gh;
+  s.deps.gh = (p, args) => {
+    closed = true;
+    return gh(p, args);
+  };
+  const pump = new LongJobs(s.deps);
+  await pump.pump();
+  assert.equal(s.dispatches().length, 0);
+  await pump.pump();
+  assert.equal(readLongJobs(s.dir)[0].state, 'lost');
+});

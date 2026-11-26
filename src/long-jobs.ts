@@ -296,6 +296,8 @@ export class LongJobs {
     const minutes = !j.quiet && /^\s+minutes:\s*$/m.test(text) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
     // A `long` input sends it to the runner with the long label, so flake proofs and heavy runs never queue behind it on the side runner (#1592; that runner takes side work too between long jobs, #1646).
     if (!j.quiet && /^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
+    // Dismissed while GitHub answered: the next pass drops it.
+    if (this.d.scheme(j.ticket)?.closed) return false;
     // Saved first and never put back on an error: a dispatch GitHub took but didn't answer is found by watch(), and one it
     // never took goes back in line there once it shows no run, so the command can't run twice.
     Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1, held_why: undefined });

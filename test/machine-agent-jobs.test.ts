@@ -15,7 +15,6 @@ import { JobRunner, loadConfig, outFiles, podmanRunArgs, sendRetrying } from '..
 // The machine agent's GPU job runner (#858) against a fake podman, a fake nvidia-smi and a stand-in for the app's
 // three job routes. The fake podman keeps each container as a file; a test ends one by writing that file.
 const root = mkdtempSync(join(tmpdir(), 'machine-agent-jobs-'));
-after(() => rmSync(root, { recursive: true, force: true }));
 const node = process.execPath;
 const fakes = join(root, 'fakes');
 mkdirSync(fakes);
@@ -154,7 +153,13 @@ writeFileSync(join(outside, 'secret.txt'), 'never leaves');
 const block = (over: object = {}) => ({ dir: jobsDir, folders: new Map([['voice', voice]]), max_limit_h: 12, max_disk_gb: 5, gpu: true, ...over });
 
 const runners: any[] = [];
-after(() => runners.forEach((r) => r.close()));
+// The folder goes last, once no runner or podman child is left to write in it (#2072): deleted first, a job still
+// stopping threw ENOENT after the tests, or put a file back mid-delete and the folder stayed.
+after(async () => {
+  for (const r of runners) r.close();
+  await until('every podman child gone', () => runners.every((r) => r.children.size === 0));
+  rmSync(root, { recursive: true, force: true });
+});
 function runner(b: object | null = block(), log: (line: string) => void = () => {}, over: object = {}) {
   const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1, log, ...over });
   runners.push(r);
@@ -911,5 +916,6 @@ test('a tick whose GPU sample outlasts a job says nothing more about that job (#
   } finally {
     writeFileSync(join(dir, 'go'), '');
     await r.handle({ type: 'job.stop', id: stays.id });
+    await until('stopped', () => lastState(stays.id)?.state === 'stopped', undefined, statesTail);
   }
 });

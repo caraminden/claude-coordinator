@@ -28,9 +28,9 @@ export interface CardStart {
 }
 
 /** The handoff's path inside the scheme's shared folder (the folder's own spelling, not a link's target), or why not. */
-async function handoffPath(shared: string, raw: string): Promise<string> {
+async function handoffPath(shared: string, raw: string, where = ''): Promise<string> {
   // The duplicate check and the brief's cost line read a handoff's path out of the brief's text, which ends a path at a space or quote.
-  if (/[\s`'"()<>[\]]/.test(raw)) throw new HttpError(400, `start.handoff ${raw}: rename the file without spaces, quotes or brackets, so its brief can name it`);
+  if (/[\s`'"()<>[\]]/.test(raw)) throw new HttpError(400, `${where}start.handoff ${raw}: rename the file without spaces, quotes or brackets, so its brief can name it`);
   const abs = isAbsolute(raw) ? raw : join(shared, raw);
   let real: string;
   let root: string;
@@ -38,9 +38,9 @@ async function handoffPath(shared: string, raw: string): Promise<string> {
     real = await realpath(abs);
     root = await realpath(shared);
   } catch {
-    throw new HttpError(400, `start.handoff ${raw} does not exist: write the handoff first, then post the card`);
+    throw new HttpError(400, `${where}start.handoff ${raw} does not exist: write the handoff first, then post the card`);
   }
-  if (!real.startsWith(`${root}/`) || !real.endsWith('.md') || !(await stat(real)).isFile()) throw new HttpError(400, `start.handoff must be a .md file in this scheme's shared folder (${shared}), not ${raw}`);
+  if (!real.startsWith(`${root}/`) || !real.endsWith('.md') || !(await stat(real)).isFile()) throw new HttpError(400, `${where}start.handoff must be a .md file in this scheme's shared folder (${shared}), not ${raw}`);
   return join(shared, relative(root, real));
 }
 
@@ -48,7 +48,7 @@ async function handoffPath(shared: string, raw: string): Promise<string> {
 export async function cleanStart(app: App, projectId: number, raw: unknown, where: string): Promise<CardStart> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, `${where} start must be an object: { handoff, title, type, model?, effort?, start_after?, build? }`);
   const s = raw as Record<string, unknown>;
-  const handoff = await handoffPath(projectSharedDir(app.dataDir, projectId), str(s.handoff, `${where} start.handoff`, 1000));
+  const handoff = await handoffPath(projectSharedDir(app.dataDir, projectId), str(s.handoff, `${where} start.handoff`, 1000), `${where} `);
   const title = str(s.title, `${where} start.title`, 120);
   const type = str(s.type, `${where} start.type`, 40);
   try {

@@ -95,7 +95,7 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
       const again = await posted([opt('a', {}, true), none]);
       assert.equal(await asJosh(`/api/tickets/${owner.id}/answer`, { questionId: again, answers: [{ selected: ['Start a'] }] }), 202);
       assert.equal((db.prepare("SELECT count(*) AS n FROM tickets WHERE title = 'Do a'").get() as { n: number }).n, 1, 'no second minion from one handoff');
-      assert.match(answerTo((await s.call(`/api/tickets/${owner.id}/events?after=0`)).data, again), /Not started: Do a: .*already started from/);
+      assert.match(answerTo((await s.call(`/api/tickets/${owner.id}/events?after=0`)).data, again), /Not started: Do a: .*already started from .*ask your Taskmaster to start it/);
 
       // A handoff deleted after its card was posted: refused at the pick.
       const gone = await posted([opt('d', {}, true), none]);

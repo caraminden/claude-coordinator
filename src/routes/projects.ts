@@ -322,7 +322,8 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
     if (twins.length) {
       throw new HttpError(
         409,
-        `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). ` + 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.',
+        `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). ` +
+          (picked ? 'If it is the same work, message it instead. If not, ask your Taskmaster to start it.' : 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.'),
       );
     }
   }

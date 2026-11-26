@@ -15,6 +15,10 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    minions (a chain only when the second needs the first's code), above all when only one waits on a
    person's card: a read-only Flow tab and a saved closing word whose word list a person picks were
    one brief, and should have been two.
+   A sweep split across several minions is split from the tool's per-file list (a baseline,
+   `git ls-files`, a report's per-file counts), never from name patterns: every file goes to exactly
+   one brief, and the leftovers are a round of their own, named. When several of them add to one
+   shared file at once, each brief names its own file or section in it.
 2. **Their words**: the person's own words that asked for it, in quotation marks, with who and the
    date: `Josh, 2026-11-19: "Go on A1"`. Quote the ask itself, not your summary of it, and each
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.

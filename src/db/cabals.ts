@@ -9,7 +9,7 @@ export interface CabalRow {
   name: string;
   red: string | null;
   red_at: number | null;
-  /** How many members may be open at once (#2091); a start past it waits as next up. */
+  /** How many members may be at work at once (#2091); a start past it waits as next up. */
   width: number;
   created_at: number;
 }
@@ -86,11 +86,12 @@ export const cabalQueries = {
     this.db.prepare('UPDATE cabals SET name = ? WHERE lead_id = ?').run(name, leadId);
   },
 
-  /** The red-run line pinned on top of the board; null clears it. */
+  /** How many members may be at work at once (#2091). */
   setCabalWidth(this: Store, leadId: number, width: number) {
     this.db.prepare('UPDATE cabals SET width = ? WHERE lead_id = ?').run(width, leadId);
   },
 
+  /** The red-run line pinned on top of the board; null clears it. */
   setCabalRed(this: Store, leadId: number, red: string | null, at = Date.now()) {
     this.db.prepare('UPDATE cabals SET red = ?, red_at = ? WHERE lead_id = ?').run(red, red == null ? null : at, leadId);
   },

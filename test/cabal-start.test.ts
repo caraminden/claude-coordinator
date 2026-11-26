@@ -50,13 +50,14 @@ const events = async (id: number) => (await s.call(`/api/tickets/${id}/events?af
 const held = async (id: number) => ((await s.call(`/api/tickets/${id}`)).data.ticket.held_mail as Held)?.items ?? [];
 
 /** Post the forming card and answer it as the signed-in person; returns the lead's answer message. */
-async function form(pick: string, width?: number) {
+async function form(pick: string, width?: number, between?: () => Promise<unknown>) {
   const r = await board(lead.id, { action: 'form', ...(width ? { width } : {}) });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const card = (await events(lead.id)).filter((e) => e.kind === 'question').at(-1)!;
   const data = JSON.parse(card.data);
   assert.ok(data.cabalForm, 'a forming card carries its rows');
   assert.equal(data.to, undefined, 'open to the scheme');
+  await between?.();
   assert.equal((await s.call(`/api/tickets/${lead.id}/answer`, { questionId: data.id, answers: [{ selected: [pick] }] })).status, 202);
   return { data, answer: (await events(lead.id)).find((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === data.id)! };
 }
@@ -73,7 +74,7 @@ test('the forming card approves the roster with who and when; an unapproved row 
   assert.equal((await board(lead.id, { action: 'row', label: 'X', title: 'Gone', handoff: 'handoffs/nope.md' })).status, 400, 'a handoff must exist');
 
   const { data, answer } = await form('Not yet');
-  assert.match(data.questions[0].question, /Do a · Sonnet[^\n]*· ~\$40/, "each row with its tier and its handoff's cost");
+  assert.match(data.questions[0].question, /Do a · handoffs\/a\.md · Sonnet[^\n]*· ~\$40/, "each row with its handoff, its tier and its handoff's cost");
   assert.equal(rowOf('A').approved_at, null, 'Not yet approves nothing');
   assert.ok(answer);
 
@@ -93,6 +94,13 @@ test('the forming card approves the roster with who and when; an unapproved row 
   assert.equal(rowOf('B').approved_at, null, 'a changed row needs a new card');
   await form('Start the cabal', 1);
   assert.ok(rowOf('B').approved_at && rowOf('C').approved_at);
+
+  // A row changed between the card and its go isn't approved: people said go to what the card showed.
+  assert.equal((await board(lead.id, { action: 'row', label: 'E', title: 'Do e', handoff: 'handoffs/d.md', model: 'claude-sonnet-5-5', effort: 'low' })).status, 200);
+  const { answer: stale } = await form('Start the cabal', 1, () => board(lead.id, { action: 'row', row: rowOf('E').id, model: 'claude-opus-5-5' }));
+  assert.match(JSON.parse(stale.data).text, /Not approved, changed after the card was posted: E/);
+  assert.equal(rowOf('E').approved_at, null);
+  assert.equal((await board(lead.id, { action: 'row', row: rowOf('E').id, remove: true })).status, 200);
 });
 
 test('cabal_start starts an approved row in the build and Goal, with the lead as parent and cabal; past the width it is next up until a member closes', async () => {
@@ -121,6 +129,7 @@ test('cabal_start starts an approved row in the build and Goal, with the lead as
   assert.equal(b.status, 200);
   assert.equal(b.data.next, 1);
   assert.ok(rowOf('B').next_at && !minion('Do b'));
+  assert.match(String((await s.call(`/api/tickets/${lead.id}/cabal?text=1`)).data.text), /B roster Do b \| next up \|/, 'the board shows it next up');
   await until(`#${a.number} idle`, async () => (await s.call(`/api/tickets/${a.id}`)).data.ticket.status !== 'running');
   const closed = await s.call(`/api/tickets/${a.id}/status`, { status: 'closed' });
   assert.equal(closed.status, 200, JSON.stringify(closed.data));
@@ -138,6 +147,10 @@ test("cabal_member unseals, stops and reseals only the lead's own members; a mem
   assert.match(String(refused.data.error), /only your own members/);
   assert.equal((await member('reseal', outsider.number)).status, 403);
   assert.equal((await member('unseal', outsider.number)).status, 403);
+  // Linking a minion to a row doesn't make it the lead's own: only one it started from an approved row is.
+  assert.equal((await board(lead.id, { action: 'row', label: 'O', title: 'Linked', minion: outsider.number })).status, 200);
+  assert.match(String((await member('stop', outsider.number)).data.error), /only your own members/);
+  assert.equal((await board(lead.id, { action: 'row', row: rowOf('O').id, remove: true })).status, 200);
   // A member can't use a lead's tools on anyone.
   assert.equal((await as(b.id, `/api/tickets/${b.id}/cabal/member`, { action: 'stop', minion: b.number })).status, 403);
   assert.equal((await as(b.id, `/api/tickets/${b.id}/cabal/start`, { row: 'C' })).status, 403);
@@ -159,6 +172,7 @@ test("a started member's turn waits for a worker like any minion's; a row after 
   assert.equal(d.status, 200, JSON.stringify(d.data));
   assert.equal(minion('Do d')!.state, 'parked', 'chained on B, which is open');
   assert.match(String((await s.call(`/api/tickets/${minion('Do d')!.id}`)).data.ticket.note), new RegExp(`#${minion('Do b')!.number} is merged into Build 7`), "a build member waits for its leader's merge");
+  assert.match(String((await s.call(`/api/tickets/${lead.id}/cabal?text=1`)).data.text), /· 1 at work, up to 3 at once ·/, 'D, sealed on its chain, holds no place: only B is at work');
   assert.equal((await s.call('/api/workers', { pause: true }, 'PUT')).status, 200);
   try {
     const r = await start('C');

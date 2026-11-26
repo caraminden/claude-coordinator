@@ -26,7 +26,7 @@ export const CABAL_BOARD = {
       model: { type: ['string', 'null'], description: 'row: the model it starts on, as create_ticket takes it' },
       effort: { type: ['string', 'null'], description: 'row: its effort, as create_ticket takes it' },
       cost: { type: ['number', 'null'], description: "row: its expected dollars; left out, form reads its handoff's Expected cost line" },
-      width: { type: 'integer', minimum: 1, maximum: 20, description: 'form: how many members may be open at once (default 4); the rest wait as next up' },
+      width: { type: 'integer', minimum: 1, maximum: 20, description: 'form: how many members may be at work at once (default 4; one sealed on its chain, merged or dismissed holds no place); the rest wait as next up' },
       remove: { type: 'boolean', description: 'row: true deletes the row' },
     },
   },
@@ -41,7 +41,7 @@ const ROW_KEYS = ['row', 'minion', 'label', 'title', 'lane', 'after', 'role', 'n
 export const CABAL_START = {
   name: 'cabal_start',
   description:
-    "Start a member of your cabal from a row on your board that people approved on its forming card (cabal_board action form). It starts from the row's handoff on the row's model and effort, in your build and Goal, with you as parent and lead, chained on the row's after; the Taskmaster hears of it. A row nobody approved is refused: add it with a card. Past your width it waits as next up and starts by itself once a member closes.",
+    "Start a member of your cabal from a row on your board that people approved on its forming card (cabal_board action form). It starts from the row's handoff on the row's model and effort, in your build and Goal, with you as parent and lead, chained on the row's after; the Taskmaster hears of it. A row nobody approved is refused: add it with a card. Past your width it waits as next up and starts by itself once a member merges, is dismissed or is sealed.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -69,7 +69,7 @@ export const CABAL_MEMBER = {
 export async function runCabalTool(name: string, args: Record<string, unknown>): Promise<string | typeof NOT_HERE> {
   if (name === 'cabal_start') {
     const r = await call<{ started?: number; title?: string; next?: number; notes?: string[] }>('POST', `/api/tickets/${C().TICKET}/cabal/start`, { row: args.row, ...(args.text ? { text: args.text } : {}) });
-    if (r.next != null) return `Next up, number ${r.next} in line: your width is full. It starts by itself once a member closes.`;
+    if (r.next != null) return `Next up, number ${r.next} in line: your width is full. It starts by itself once a member merges, is dismissed or is sealed.`;
     return [`Started #${r.started} ${r.title}.`, ...(r.notes ?? [])].join('\n');
   }
   if (name === 'cabal_member') return (await call<{ text: string }>('POST', `/api/tickets/${C().TICKET}/cabal/member`, { action: args.action, minion: args.minion })).text;

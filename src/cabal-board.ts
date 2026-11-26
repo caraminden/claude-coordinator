@@ -29,6 +29,8 @@ export const STATE_WORD: Record<MemberState, string> = {
 /** Open ones first, the blocked on top (the picked ledger's order). */
 const ORDER: Record<MemberState, number> = { blocked: 0, running: 1, idle: 2, sealed: 3, roster: 4, merged: 5, shipped: 6, closed: 7 };
 const DONE = new Set<MemberState>(['merged', 'shipped', 'closed']);
+/** At work: what a cabal's width counts (#2091). */
+const AT_WORK = new Set<MemberState>(['running', 'idle', 'blocked']);
 
 export interface BoardAsk {
   id: number;
@@ -74,8 +76,8 @@ export interface Board {
   asks: BoardAsk[];
   log: CabalLogLine[];
   red: { text: string; at: number } | null;
-  counts: { members: number; started: number; merged: number; open: number; running: number; spend: number };
-  /** How many members may be open at once (#2091). */
+  counts: { members: number; started: number; merged: number; open: number; working: number; running: number; spend: number };
+  /** How many members may be at work at once (#2091). */
   width: number;
 }
 
@@ -167,6 +169,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
       started: members.filter((m) => m.state !== 'roster').length,
       merged: members.filter((m) => m.state === 'merged' || m.state === 'shipped').length,
       open: members.filter((m) => !DONE.has(m.state)).length,
+      working: members.filter((m) => AT_WORK.has(m.state)).length,
       running: members.filter((m) => m.state === 'running').length,
       spend: members.reduce((s, m) => s + m.spend, leadSpend),
     },
@@ -212,7 +215,7 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 export function boardText(b: Board, me: number | null = null): string {
   const c = b.counts;
   const out = [
-    `${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
+    `${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
   ];
   if (b.red) out.push(`RED (${pacificClock(b.red.at)}): ${b.red.text}`);
   out.push(b.asks.length ? `Open asks (${b.asks.length}):` : 'No open asks.');

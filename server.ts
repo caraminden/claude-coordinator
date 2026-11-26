@@ -1,5 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
-import { fillCabal } from './src/cabal-start.ts';
+import { fillFor } from './src/cabal-start.ts';
 import './src/host-signals.ts'; // first: a test server's fixed zone (TZ) is set before any module reads the clock (#1485)
 import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
@@ -1025,8 +1025,7 @@ if (!BOOT_CHECK) {
     waiters.prs.forget?.();
     void waiters.check().catch((err) => console.error('Checking waiters after a dismissal failed:', err));
     // A cabal member's dismissal frees a place in its cabal's width: its next-up rows start (#2091).
-    const lead = store.cabalRowOf(ticketId)?.lead_id;
-    if (lead != null) void fillCabal(app, lead).catch((err) => console.error(`Starting cabal #${lead}'s next up failed:`, err));
+    fillFor(app, ticketId);
     // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);
@@ -2211,7 +2210,10 @@ const appShots = new AppShots(store, {
 if (!BOOT_CHECK && !PREVIEW && !services.opts.off) appShots.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
-runner.onTurnEnd = (ticketId) => github.poke(ticketId);
+runner.onTurnEnd = (ticketId) => {
+  github.poke(ticketId);
+  fillFor(app, ticketId); // a member's turn may have sealed it or shipped it (#2091)
+};
 // A merged PR catches its scheme's main up, and chains and commit waiters look again.
 github.onMerged = (repoDir, ticket, base) => {
   // Into a build branch isn't shipped yet.

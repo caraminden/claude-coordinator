@@ -1202,17 +1202,15 @@ export const ticketRoutes: Route[] = [
         runner.recordAnswer(id, session.name, `My answer to your budget card: ${CARD_STOP}. I stopped your turn.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
-      // A cabal's forming card (#2091): the go approves the rows it showed (who and when); the lead reads which with the answer.
-      const formed = data.cabalForm && answers[0]?.selected[0] === FORM_GO ? approveRoster(app, data.cabalForm, session.name) : null;
-      const text =
-        questions
-          .map((q: CardQuestion, i: number) => {
-            const { selected, other } = answers[i];
-            // The text typed with a pick expands on it; typed alone, it is the answer.
-            const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
-            return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
-          })
-          .join('\n\n') + (formed ? `\n\n${formed}` : '');
+      const text = questions
+        .map((q: CardQuestion, i: number) => {
+          const { selected, other } = answers[i];
+          // The text typed with a pick expands on it; typed alone, it is the answer.
+          const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
+          return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
+        })
+        .join('\n\n')
+        .concat(data.cabalForm && answers[0]?.selected[0] === FORM_GO ? `\n\n${approveRoster(app, data.cabalForm, session.name)}` : ''); // a cabal's forming card (#2091): its go approves the rows it showed, and the lead reads which
       const answer = { answer: { questionId: body.questionId, answers } };
       const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
       // Held from here, before the first wait: a second answer while this one saves its pictures or a ship is checked is refused.

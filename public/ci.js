@@ -3,6 +3,8 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
+/** @import { CiRead, CiScheme, CiProblem, CiRun, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, View, ReadFailed, Scheme, StatusData, TestHealth, CiNumbersView } from './types.js' */
+/** @import { Child } from './base.js' */
 import { ago, api, h, icon, keepView, view, pacificStamp, poller } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
@@ -24,18 +26,39 @@ import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { allSchemes, closeReleases, opening, serverScheme, onReleasesRedraw, releasesLoaded, releasesPage, releaseTrouble, setReleasesPage } from './releases.js';
 import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD } from './status.js';
 
+/**
+ * What the Overview's blocks need of the open page: its Host load read, and the opened queue groups and runners row.
+ * @typedef {{ host: HostLoad | null; queueOpen: Set<string>; toggleQueue: (id: string) => void; hostedOpen: boolean; toggleHosted: () => void; openPc: (host: string) => void }} CiUi
+ */
+
+/** @typedef {number | 'all'} Scope */
+/** @typedef {{ projectId: number; scope: Scope; tab: string; hl?: number | null; target?: string | null }} Pending */
+
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
+/**
+ * @param {string} href
+ * @param {string} text
+ */
 const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
 
 /** A scheme's state: down (something rings), fix (quiet items), ready (all clear), asleep (no read for 20 min). */
+/**
+ * @param {Pick<CiScheme, 'problems' | 'view'>} s
+ * @param {number} now
+ */
 function stateOf(s, now) {
   if (s.problems.some((x) => !x.quiet)) return 'down';
   if (s.problems.length) return 'fix';
   return now - s.view.at > 20 * 60_000 ? 'asleep' : 'ready';
 }
+/** @type {Record<string, string>} */
+const STATE_HUE = { running: 'running', ok: 'done', bad: 'danger' };
+/** @type {Record<string, string>} */
 const DOT_OF = { ok: 'ready', warn: 'fix', danger: 'down', neutral: 'asleep' };
+/** @type {Record<string, string>} */
 const STATE_WORDS = { down: 'needs a person', fix: 'being handled', ready: 'all clear', asleep: 'not read lately' };
+/** @type {Record<string, number>} */
 const RANK = { down: 3, fix: 2, asleep: 1, ready: 0 };
 
 /**
@@ -44,10 +67,14 @@ const RANK = { down: 3, fix: 2, asleep: 1, ready: 0 };
  * its latest line and how long it has been on it, the re-run that tests its fix, all linking to its chat; or a toned notice that none
  * has started and when that rings. Its lines are always there and its bar keeps its height, so a live read moves nothing.
  */
+/**
+ * @param {CiProblem} x
+ * @param {number} [now]
+ */
 export function fixBox(x, now = Date.now()) {
   const t = x.fixTicket;
   if (!t) {
-    const n = x.noFix;
+    const n = /** @type {NonNullable<CiProblem['noFix']>} */ (x.noFix);
     return h('div', { class: `ci-fix none${n.late ? ' late' : ''}` }, h('b', {}, n.late ? 'No fix minion started' : 'No fix minion yet'), h('div', { class: 'muted' }, n.late ? 'This is ringing now: press Investigate to start one.' : `If none starts, this rings at ${when(n.ringsAt)}.`));
   }
   const st = rowState(t, usage, now);
@@ -73,12 +100,18 @@ export function fixBox(x, now = Date.now()) {
   );
 }
 
+/** @param {string | null} c */
 const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down' : c ? 'asleep' : 'running');
 
 /** The minion a run or queued job tests (#1019): its chat, or what the run is when no minion's change is in it (a schedule, main itself). An older view has no `who`: its branch. */
+/** @param {{ who?: CiWho; branch?: string }} x */
 const whoCell = (x) => (x.who?.href ? h('a', { class: 'ci-run-who', href: x.who.href, title: x.who.label }, x.who.label) : h('span', { class: 'ci-run-who muted' }, x.who?.label ?? x.branch ?? ''));
 
 /** A run's row; `quiet` (a workflow in the scheme's quiet list, TWIReader #990) greys it and tags it, its result kept. */
+/**
+ * @param {CiRun} r
+ * @param {boolean} [quiet]
+ */
 function runRow(r, quiet = false) {
   const word = r.status === 'completed' ? (r.conclusion ?? 'done') : r.status.replace('_', ' ');
   return h(
@@ -93,15 +126,29 @@ function runRow(r, quiet = false) {
 }
 
 const GENERIC = /^(self-hosted|windows|linux|macos|x64|arm64)$/i;
+/** @param {string[]} ls */
 const labelName = (ls) => ls.filter((l) => !GENERIC.test(l)).join(', ') || ls.join(', ');
+/**
+ * @param {number} n
+ * @param {string} w
+ */
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 /** A block of the overview in Citadel's look (#1068): a heading in its hue over a box of rows that open, as Host load is. */
 // No title: the one row under it already says it (a heading that repeats its row is wasted height).
+/**
+ * @param {string | null} title
+ * @param {string} hue
+ * @param {string} cls
+ * @param {Child[]} rows
+ */
 const block = (title, hue, cls, ...rows) => h('section', { class: `ci-block ${cls}${title ? '' : ' ci-bare'}` }, title ? h('h3', { class: 'settings-section', 'data-hue': hue }, title) : '', h('div', { class: 'settings-rows' }, ...rows));
+/** @param {Child[]} cs */
 const tones = (...cs) => cs.filter(Boolean);
 /** Who a run or job tests, as plain text beside its name (a link when it is a minion's chat). */
+/** @param {{ who?: CiWho; branch?: string }} x */
 const whoText = (x) => (x.who?.href ? h('a', { href: x.who.href, title: x.who.label }, x.who.label) : h('span', { class: 'muted' }, x.who?.label ?? x.branch ?? ''));
+/** @param {number | string} t */
 const age = (t) => ago(typeof t === 'number' ? t : Date.parse(t));
 
 /**
@@ -112,12 +159,18 @@ const age = (t) => ago(typeof t === 'number' ? t : Date.parse(t));
 const pressed = new Map();
 /** The fix part drawn last per red, so an answer paints the one on screen. */
 const parts = new Map();
+/** @param {CiProblem} x */
 const openFix = (x) => x.fixTicket && x.fixTicket.status !== 'closed';
+/**
+ * @param {{ id: number }} s
+ * @param {CiProblem} x
+ * @returns {HTMLElement | string}
+ */
 function fixPart(s, x) {
   const k = `${s.id}:${x.key}`;
   const mine = pressed.get(k);
   // Shown by the server (open, or already closed), or five minutes stale (a red that cleared and came back): the read wins.
-  if (mine && ((openFix(x) && (mine.number == null || x.fixTicket.number === mine.number)) || (mine.number != null && x.fixTicket?.number === mine.number) || Date.now() - mine.at > 5 * 60_000)) pressed.delete(k);
+  if (mine && ((openFix(x) && (mine.number == null || x.fixTicket?.number === mine.number)) || (mine.number != null && x.fixTicket?.number === mine.number) || Date.now() - mine.at > 5 * 60_000)) pressed.delete(k);
   const p = pressed.get(k);
   const shown = p ? { ...x, fixTicket: { project_id: s.id, number: p.number ?? '…', title: p.title, status: 'running', created_at: p.at, last_activity: p.number ? 'Starting its first turn' : 'Starting a fix minion' } } : x;
   const box = shown.fixTicket || shown.noFix ? fixBox(shown) : '';
@@ -153,6 +206,7 @@ function fixPart(s, x) {
 }
 
 /** Open problems: what happened, why, the fix, and whether it rings. */
+/** @param {Pick<CiScheme, 'id' | 'problems'>} s */
 function problemsBlock(s) {
   const ring = s.problems.filter((x) => !x.quiet).length,
     quiet = s.problems.length - ring;
@@ -188,19 +242,20 @@ function problemsBlock(s) {
 }
 
 /** Each workflow's verdict on the branch. */
+/** @param {CiViewData} v */
 function verdictsBlock(v) {
   const ws = v.workflows;
-  const state = (w) => (!w.verdict ? 'none' : w.verdict.status !== 'completed' ? 'running' : w.verdict.conclusion === 'success' ? 'ok' : w.verdict.conclusion === 'failure' ? 'bad' : 'other');
+  const state = (/** @type {CiWorkflow} */ w) => (!w.verdict ? 'none' : w.verdict.status !== 'completed' ? 'running' : w.verdict.conclusion === 'success' ? 'ok' : w.verdict.conclusion === 'failure' ? 'bad' : 'other');
   const bad = ws.filter((w) => state(w) === 'bad' && !w.quiet).length,
     going = ws.filter((w) => state(w) === 'running').length,
     ok = ws.filter((w) => state(w) === 'ok').length;
-  const item = (w) => {
+  const item = (/** @type {CiWorkflow} */ w) => {
     if (!w.verdict) return hueRow({ hue: 'held', lead: 'none' }, w.name, ' ', h('span', { class: 'muted' }, 'no verdict'));
     const r = w.verdict,
       st = state(w);
     const word = r.status === 'completed' ? (r.conclusion ?? 'done') : r.status.replace('_', ' ');
     return hueRow(
-      { hue: w.quiet ? 'held' : ({ running: 'running', ok: 'done', bad: 'danger' }[st] ?? 'held'), lead: word, meta: age(r.at) },
+      { hue: w.quiet ? 'held' : (STATE_HUE[st] ?? 'held'), lead: word, meta: age(r.at) },
       ext(r.url, w.name),
       w.quiet ? [' ', toneChip('neutral', 'quiet')] : '',
       ' · ',
@@ -218,6 +273,7 @@ function verdictsBlock(v) {
 }
 
 /** The queue per set of labels, for Running now's header: "peek-auras-ci: 1 runner, 9 queued". */
+/** @param {CiQueue} q */
 const queueWords = (q) => `${labelName(q.labels)}: ${q.runners ? `${plural(q.runners, 'runner')}, ` : q.runners === 0 && q.labels.some((l) => /^self-hosted$/i.test(l)) ? 'no runner online, ' : ''}${q.jobs} queued`;
 
 /**
@@ -225,13 +281,18 @@ const queueWords = (q) => `${labelName(q.labels)}: ${q.runners ? `${plural(q.run
  * with which job for which minion and for how long, idle or offline, then one row for GitHub's own runners that opens to a row per
  * job. Rows are per runner, not per job, so the section keeps its height as jobs come and go between reads.
  */
+/**
+ * @param {CiScheme} s
+ * @param {number} now
+ * @param {CiUi} ui
+ */
 function runningBlock(s, now, ui) {
   const v = s.view;
   const running = v.running ?? [];
   const own = v.runners ?? [];
   const names = new Set(own.map((r) => r.name));
-  const jobCell = (j) => [ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name), ' · ', whoText(j)];
-  const since = (j) => (j ? shortSpan(now - Date.parse(j.since)) : null);
+  const jobCell = (/** @type {CiRunningJob} */ j) => [ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name), ' · ', whoText(j)];
+  const since = (/** @type {CiRunningJob | undefined} */ j) => (j ? shortSpan(now - Date.parse(j.since)) : null);
   const rows = own.map((r) => {
     const j = running.find((x) => x.runner === r.name);
     const word = r.status === 'offline' ? 'offline' : j || r.busy || r.job ? 'busy' : 'idle';
@@ -245,10 +306,11 @@ function runningBlock(s, now, ui) {
       ),
     };
   });
-  const count = (w) => rows.filter((r) => r.word === w).length;
+  const count = (/** @type {string} */ w) => rows.filter((r) => r.word === w).length;
   // GitHub's own runners (and every runner, when the repo's can't be listed): one row, opened by a click to a row per job.
   const theirs = running.filter((j) => !names.has(j.runner));
   const where = v.runners === null ? 'Runners' : "GitHub's runners";
+  /** @type {Child[]} */
   const items = rows.map((r) => r.el);
   items.push([
     hueRow(
@@ -277,26 +339,42 @@ function runningBlock(s, now, ui) {
 }
 
 /** A scheme's one line about the desktops its runners are on, linking to each one's row in the list (Josh, 2026-11-19: the load lives at the list's bottom, not in each scheme). */
+/**
+ * @param {CiScheme} s
+ * @param {PcView[]} pcs
+ * @param {CiUi} ui
+ */
 function runsOn(s, pcs, ui) {
   const mine = pcs.filter((pc) => pc.projects.includes(s.id));
   if (!mine.length) return '';
   return h('p', { class: 'ci-runs-on muted' }, 'Runs on ', ...mine.flatMap((pc, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'link', onclick: () => ui.openPc(pc.host) }, pc.host), ` · ${pcWord(pc)[1]}`]));
 }
 
+/**
+ * @param {CiWaitingJob} j
+ * @param {string} slug
+ */
 const waitItem = (j, slug) => hueRow({ hue: 'waiting', lead: 'queued', meta: age(j.since) }, h('span', { title: `${j.name}, for a runner with ${j.labels.join(', ')}, queued ${when(j.since)}` }, ext(`https://github.com/${slug}/actions/runs/${j.run}`, j.name)), ' · ', whoText(j));
 
 /** The queue in its order, adjacent jobs for one minion (or, with none, one kind of run) as one group (#1019, Cara: "sequential queued jobs for the same minion could be grouped"). */
+/** @param {CiWaitingJob[]} waiting */
 function queueGroups(waiting) {
+  /** @type {{ key: string; jobs: CiWaitingJob[] }[]} */
   const groups = [];
   for (const j of waiting) {
     const key = j.who?.href ?? j.who?.label ?? j.branch ?? '';
-    if (groups.at(-1)?.key === key) groups.at(-1).jobs.push(j);
+    if (groups.at(-1)?.key === key) /** @type {{ jobs: CiWaitingJob[] }} */ (groups.at(-1)).jobs.push(j);
     else groups.push({ key, jobs: [j] });
   }
   return groups;
 }
 
 /** A group's rows: one job as it is; several as one row (count, minion, labels, oldest wait) that opens to each job on a click. */
+/**
+ * @param {{ key: string; jobs: CiWaitingJob[] }} g
+ * @param {string} slug
+ * @param {CiUi} ui
+ */
 function queueRows(g, slug, ui) {
   const [first] = g.jobs;
   if (g.jobs.length === 1) return [waitItem(first, slug)];
@@ -318,6 +396,11 @@ function queueRows(g, slug, ui) {
   return [row, ...(open ? g.jobs.map((j) => h('div', { class: 'queue-sub' }, waitItem(j, slug))) : [])];
 }
 
+/**
+ * @param {CiScheme} s
+ * @param {number} now
+ * @param {CiUi} ui
+ */
 function waitingBlock(s, now, ui) {
   const v = s.view,
     n = v.waiting.length;
@@ -331,6 +414,12 @@ function waitingBlock(s, now, ui) {
   return block(null, n ? 'waiting' : 'done', 'ci-waiting', row);
 }
 
+/**
+ * @param {CiScheme} s
+ * @param {PcView[]} pcs
+ * @param {number} now
+ * @param {CiUi} ui
+ */
 function overview(s, pcs, now, ui) {
   return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
@@ -343,9 +432,12 @@ function overview(s, pcs, now, ui) {
  * indicates issues with runners being down or overworked". A red on the branch and a still ship line hold up deploys; stuck,
  * hung or unstarted jobs and a ship gate fallen back to perigee are CI's, as is any kind not named here (docs/adr/0023).
  */
+/** @param {CiProblem} x */
 export const holdsDeploys = (x) => x.key.startsWith('red:') || x.key === 'land:slow';
+/** @param {CiScheme} s */
 const ciSide = (s) => ({ ...s, problems: s.problems.filter((x) => !holdsDeploys(x)) });
 
+/** @type {[string, string][]} */
 const TABS = [
   ['releases', 'Releases'],
   ['overview', 'Overview'],
@@ -358,22 +450,37 @@ const TABS = [
 ];
 const CI_TABS = new Set(['overview', 'history', 'health', 'numbers']);
 /** The tab an address names: Runs is History and Runners joined Overview (#1019), so their old links land where those now are. */
+/** @param {string} t */
 export const tabOf = (t) => (t === 'runs' ? 'history' : t === 'runners' ? 'overview' : TABS.some(([k]) => k === t) ? t : 'releases');
 /** The page's address for `scope` and `tab`: what a click on its list or tabs goes to, so Back steps through them. */
+/**
+ * @param {number} projectId
+ * @param {Scope} scope
+ * @param {string} [tab]
+ */
 export const releasesHash = (projectId, scope, tab = 'releases') => `#/p/${projectId}/releases/${scope}${tab === 'releases' ? '' : `/${tab}`}`;
 
 /** GET /api/ci; an answer without its schemes (an old server, a test's stub) counts as a failed read, so nothing reads `.schemes` off it. */
+/** @returns {Promise<CiRead>} */
 const readCi = async () => {
   const r = await api('api/ci');
   if (!Array.isArray(r?.schemes)) throw new Error('no CI in the answer');
   return r;
 };
+/** @type {CiRead | null} */
 let ciRead = null; // the last /api/ci read, the page's or the chips', so a page opened again draws at once
+/** @type {HostLoad | null} */
 let hostRead = null;
+/** @type {{ el: HTMLElement; projectId: number; drawList: () => void; go: (to: Pending) => void } | null} */
 let shell = null; // the open page
+/** @type {Pending | null} */
 let pending = null; // where the next page built opens
 
 /** Point the page at `scope` (a scheme's id or 'all') on `tab`: the open one when it's this scheme's (true), else the next one built. */
+/**
+ * @param {number} projectId
+ * @param {{ scope: Scope; tab?: string; hl?: number | null; target?: string | null }} to
+ */
 export function goReleases(projectId, { scope, tab = 'releases', hl = null, target = null }) {
   pending = { projectId, scope, tab, hl, target };
   setReleasesPage(scope, hl, target);
@@ -389,16 +496,24 @@ export function goReleases(projectId, { scope, tab = 'releases', hl = null, targ
  * Status for the scheme picked. It opens on the scheme it was opened from; only Home's links open All (#1282).
  */
 export function releasesShell() {
-  const o = pending ?? { projectId: view.projectId, scope: view.projectId, tab: 'releases' };
+  const o = pending ?? { projectId: /** @type {View} */ (view).projectId, scope: /** @type {View} */ (view).projectId, tab: 'releases' };
   pending = null;
   const projectId = o.projectId;
   let scope = o.scope,
     tab = o.tab,
-    pc = null; // pc: a desktop picked in the list, its load in place of the tabs
+    pc = /** @type {string | null} */ (null); // pc: a desktop picked in the list, its load in place of the tabs
+  /** @type {Map<number, TestHealth | ReadFailed>} */
   const health = new Map(); // scheme id -> its Test health read, kept so the tab doesn't blank on a redraw
+  /** @type {Map<number, CiNumbersView | ReadFailed>} */
   const numbers = new Map(); // scheme id -> its Numbers read (#1369), kept the same way
+  /** @type {Map<number, Awaited<ReturnType<typeof readCode>> | ReadFailed>} */
   const code = new Map(); // scheme id -> its Code read (#1988), kept the same way
-  const read = (cache, fetch) => async (id) => {
+  /**
+   * @template T
+   * @param {Map<number, T | ReadFailed>} cache
+   * @param {(id: number) => Promise<T>} fetch
+   */
+  const read = (cache, fetch) => async (/** @type {number} */ id) => {
     try {
       cache.set(id, await fetch(id));
     } catch {
@@ -406,12 +521,15 @@ export function releasesShell() {
     }
     draw();
   };
+  /** @type {Map<number, Awaited<ReturnType<typeof readFlow>> | ReadFailed>} */
   const flow = new Map(); // scheme id -> its Flow read (#1989)
+  /** @type {Record<string, (id: number) => Promise<void>>} */
   const readers = { health: read(health, readHealth), numbers: read(numbers, readNumbers), code: read(code, readCode), flow: read(flow, readFlow) };
   const readTab = () => typeof scope === 'number' && readers[tab]?.(scope);
   let greensOpen = false; // phones: the all-clear schemes sit behind a toggle row
   let hostedOpen = false; // Running now's row for GitHub's runners opens to a row per job, on a click only
   const queueOpen = new Set(); // the queue's groups opened by a click
+  /** @type {StatusData | null} */
   let statusData = null; // the Status tab's last read, for the list's dots on that tab
   const relEl = releasesPage(); // kept: Releases' own redraws fill it, and a drag in its land line survives the list's
   const holdsEl = h('div', { class: 'rel-holds' });
@@ -419,10 +537,10 @@ export function releasesShell() {
     statusData = d;
     if (tab === 'status') drawList();
   });
-  const go = (to, t = tab) => {
+  const go = (/** @type {Scope} */ to, t = tab) => {
     location.hash = releasesHash(projectId, to, t);
   };
-  const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closeReleases }, icon(name));
+  const close = (/** @type {string} */ cls, /** @type {string} */ name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closeReleases }, icon(name));
   const title = h('span', { class: 'wide-only' });
   const head = h(
     'div',
@@ -452,7 +570,7 @@ export function releasesShell() {
     'section',
     {
       class: 'releases-main',
-      onkeydown: (e) => {
+      onkeydown: (/** @type {KeyboardEvent} */ e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) closeReleases();
       },
     },
@@ -460,7 +578,7 @@ export function releasesShell() {
     h('div', { class: 'ci-page' }, h('div', { class: 'ci-split' }, list, detail)),
   );
 
-  const nameOf = (id) => ciRead?.schemes.find((x) => x.id === id)?.name ?? view?.projects?.find((p) => p.id === id)?.name ?? `Scheme ${id}`;
+  const nameOf = (/** @type {Scope} */ id) => ciRead?.schemes.find((x) => x.id === id)?.name ?? view?.projects?.find((p) => p.id === id)?.name ?? `Scheme ${id}`;
   /** Every scheme the list shows: CI's in its order, then any that ships or has an app without CI, and the one opened. */
   const ids = () => {
     const out = (ciRead?.schemes ?? []).map((x) => x.id);
@@ -468,9 +586,10 @@ export function releasesShell() {
     return out;
   };
   /** A row's dot and line on the open tab: Releases' holds, CI's own problems, or the worst of its Status pane. */
+  /** @param {number} id */
   const rowOf = (id) => {
     const s = ciRead?.schemes.find((x) => x.id === id);
-    const words = (st, n, noun = 'problem') => (n ? `${n} ${noun}${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]);
+    const words = (/** @type {string} */ st, /** @type {number} */ n, noun = 'problem') => (n ? `${n} ${noun}${n === 1 ? '' : 's'}, ${STATE_WORDS[st]}` : STATE_WORDS[st]);
     if (tab === 'status') {
       if (!statusData) return { st: 'none', line: 'reading…' }; // a line now, so the read arriving moves nothing
       // A scheme's dot is its apps'; the server's verdict sits only on the row of the scheme that ships it.
@@ -483,7 +602,7 @@ export function releasesShell() {
     if (CI_TABS.has(tab)) {
       if (!s) return { st: 'none', line: 'no CI' };
       const c = ciSide(s),
-        st = stateOf(c, ciRead.now);
+        st = stateOf(c, /** @type {CiRead} */ (ciRead).now);
       return { st, line: words(st, c.problems.length) };
     }
     const held = s ? s.problems.filter(holdsDeploys) : [];
@@ -491,16 +610,16 @@ export function releasesShell() {
     const st = held.some((x) => !x.quiet) ? 'down' : held.length || more.length ? 'fix' : 'ready';
     return { st, line: held.length + more.length ? words(st, held.length + more.length, 'hold') : 'all clear' };
   };
-  const worst = (sts) => sts.reduce((w, x) => (RANK[x] > (RANK[w] ?? -1) ? x : w), 'ready');
+  const worst = (/** @type {string[]} */ sts) => sts.reduce((w, x) => (RANK[x] > (RANK[w] ?? -1) ? x : w), 'ready');
 
   const drawList = () => {
     const shown = ids().map((id) => ({ id, ...rowOf(id) }));
-    const pick = (to) => () => {
+    const pick = (/** @type {Scope} */ to) => () => {
       pc = null;
       if (to === scope) draw();
       else go(to, to === 'all' && CI_TABS.has(tab) ? 'releases' : tab);
     };
-    const row = ({ id, st, line }) =>
+    const row = (/** @type {{ id: number; st: string; line: string }} */ { id, st, line }) =>
       h(
         'button',
         { type: 'button', class: `ci-li${id === scope && !pc ? ' on' : ''}`, 'data-state': st, 'data-scheme': id, 'aria-current': id === scope && !pc ? 'true' : null, onclick: pick(id) },
@@ -578,7 +697,7 @@ export function releasesShell() {
               onclick: () => {
                 greensOpen = !greensOpen;
                 drawList();
-                list.querySelector('.ci-more')?.focus();
+                /** @type {HTMLElement | null} */ (list.querySelector('.ci-more'))?.focus();
               },
             },
             h('span', { class: 'dot ready' }),
@@ -596,7 +715,7 @@ export function releasesShell() {
     const held = s ? s.problems.filter(holdsDeploys) : [];
     const more = typeof scope === 'number' ? releaseTrouble(scope) : [];
     if (!held.length && !more.length) return [];
-    return [held.length ? problemsBlock({ ...s, problems: held }) : '', more.length ? block('Held up', 'held', 'rel-held', h('div', { class: 'hue-rows' }, ...more.map((t) => hueRow({ hue: 'held', lead: 'held' }, t)))) : ''];
+    return [held.length ? problemsBlock({ .../** @type {CiScheme} */ (s), problems: held }) : '', more.length ? block('Held up', 'held', 'rel-held', h('div', { class: 'hue-rows' }, ...more.map((t) => hueRow({ hue: 'held', lead: 'held' }, t)))) : ''];
   };
 
   const draw = () => keepView(el, drawNow);
@@ -626,12 +745,14 @@ export function releasesShell() {
     }
     // The files are the scheme's own, CI or not.
     if (tab === 'code') {
-      const el = codeTab(scope, nameOf(scope), code.get(scope) ?? null, readTab);
+      const id = /** @type {number} */ (scope); // not All: its tabs leave this one out
+      const el = codeTab(id, nameOf(id), code.get(id) ?? null, readTab);
       if (body.firstChild !== el || body.childNodes.length > 1) body.replaceChildren(el);
       return;
     }
     if (tab === 'flow') {
-      const el = flowTab(scope, nameOf(scope), flow.get(scope) ?? null, readTab);
+      const id = /** @type {number} */ (scope); // not All: its tabs leave this one out
+      const el = flowTab(id, nameOf(id), flow.get(id) ?? null, readTab);
       if (body.firstChild !== el || body.childNodes.length > 1) body.replaceChildren(el);
       return;
     }
@@ -646,13 +767,13 @@ export function releasesShell() {
             toggleQueue: (id) => {
               queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id);
               draw();
-              body.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus();
+              /** @type {HTMLElement | null} */ (body.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`))?.focus();
             },
             hostedOpen,
             toggleHosted: () => {
               hostedOpen = !hostedOpen;
               draw();
-              body.querySelector('.ci-now-more')?.focus();
+              /** @type {HTMLElement | null} */ (body.querySelector('.ci-now-more'))?.focus();
             },
             openPc: (host) => {
               pc = host;
@@ -690,7 +811,7 @@ export function releasesShell() {
       paintChips();
       draw();
     } catch (err) {
-      if (!ciRead && CI_TABS.has(tab)) body.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
+      if (!ciRead && CI_TABS.has(tab)) body.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${/** @type {Error} */ (err).message}`));
     }
   }, REFRESH_MS);
   draw();
@@ -701,9 +822,15 @@ export function releasesShell() {
 
 // The chips (the shelf's and the top bar's): Releases and CI share one /api/ci read a minute, each dot its own side of it.
 const chips = new Set();
+/**
+ * @param {number} n
+ * @param {string} one
+ * @param {string} [many]
+ */
 const plainCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Each chip's dot and words from the last read: CI's runners and desktops, or what holds up deploys (holdsDeploys and the releases' own). */
+/** @param {string | undefined} kind */
 function chipLook(kind) {
   const r = ciRead;
   if (kind === 'ci') {
@@ -724,14 +851,15 @@ function chipLook(kind) {
   const n = held.length + more.length;
   return { hidden: false, worst, title: n ? `Releases: ${plainCount(n, 'thing holds', 'things hold')} up deploys${ringing ? `, ${ringing} need${ringing === 1 ? 's' : ''} a person` : ''}` : 'Releases: nothing holds up deploys' };
 }
+/** @param {HTMLElement} c */
 const paintChip = (c) => {
   const look = chipLook(c.dataset.kind);
   if (!look) return;
   c.hidden = look.hidden;
   c.dataset.placed = '1';
   c.title = look.title;
-  c.setAttribute('aria-label', look.title || c.dataset.kind);
-  c.querySelector('.dot').className = `dot ${look.worst}`;
+  c.setAttribute('aria-label', look.title || /** @type {string} */ (c.dataset.kind));
+  /** @type {Element} */ (c.querySelector('.dot')).className = `dot ${look.worst}`;
 };
 // Held weakly: a chip in a page left behind would otherwise keep that whole page until the next minute's read (#1747).
 function paintChips() {
@@ -758,6 +886,12 @@ const chipPoll = poller(async () => {
   }
 }, 60_000);
 
+/**
+ * @param {string} kind
+ * @param {string} label
+ * @param {string} page
+ * @param {number | null} projectId
+ */
 function chip(kind, label, page, projectId) {
   const c = h(
     'a',

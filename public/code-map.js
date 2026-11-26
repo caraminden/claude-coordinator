@@ -9,28 +9,47 @@ import { emptyCard, meter, showFirst, toneChip } from './look.js';
 import { openDialog } from './ui/dialog.js';
 import { toast } from './ui/status.js';
 
+/** @import { CodeCountsAnswer, CodeFile } from './types.js' */
+/** @typedef {Record<string, { number: number; title: string }[]>} Splitting */
+/** @typedef {{ f: CodeFile; x: number; y: number; r: number; el: SVGElement | null }} Dot */
+/** @typedef {Partial<CodeCountsAnswer> & { error?: unknown }} CodeRead the read, or what ci.js keeps when it failed */
+
+/** @param {number} id @returns {Promise<CodeCountsAnswer>} */
 export const readCode = (id) => api(`api/projects/${id}/code-counts`);
 
+/** @param {number} n */
 const num = (n) => n.toLocaleString('en-US');
+/** @param {number} n @param {string} one @param {string} [many] */
 const plural = (n, one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
+/** @param {CodeFile} f */
 const facts = (f) => `${plural(f.lines, 'line')} · ${plural(f.changed, 'minion')}${f.bugs ? ` · ${plural(f.bugs, 'bug fix', 'bug fixes')}` : ''}`;
+/** @param {number} project @param {number} n */
 const minionHref = (project, n) => `#/p/${project}/t/${n}`;
+/**
+ * @template {HTMLElement | SVGElement} E
+ * @param {E} el
+ * @param {Record<string, string>} props
+ * @returns {E}
+ */
 const put = (el, props) => {
   for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
   return el;
 };
 /** Files with one change or a few lines are never an answer: they would only fill the bottom left. */
+/** @param {CodeFile} f */
 const drawn = (f) => f.changed >= 2 && f.lines >= 30;
 const NS = 'http://www.w3.org/2000/svg';
+/** @param {string} tag @param {Record<string, string | number>} attrs */
 const svgEl = (tag, attrs) => {
   const el = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   return el;
 };
 
 // ---------- the draft ----------
 
 /** "Start a split minion": the draft to look over, then into your Taskmaster's box in that scheme. Nothing is sent. */
+/** @param {number} project @param {CodeFile} f @param {number} days */
 function draftSplit(project, f, days) {
   const box = h('textarea', { class: 'code-draft', rows: 16, 'aria-label': 'The draft', spellcheck: 'true' });
   box.value = splitDraft(f, days);
@@ -45,7 +64,7 @@ function draftSplit(project, f, days) {
       if (!was?.includes(text)) saveDraft(key, was ? `${was}\n\n${text}` : text);
       location.hash = `#/p/${project}`;
     } catch (err) {
-      toast(`Couldn't open your Taskmaster's chat: ${err.message}`, { tone: 'warn', action: { label: 'Retry', run: go } });
+      toast(`Couldn't open your Taskmaster's chat: ${/** @type {Error} */ (err).message}`, { tone: 'warn', action: { label: 'Retry', run: go } });
     }
   };
   const dialog = openDialog({
@@ -62,17 +81,23 @@ function draftSplit(project, f, days) {
 // ---------- the chart ----------
 
 /** The dots, drawn at the box's own pixels so text and dots keep their size; `mark(path)` lights one, from the list or the chart. */
+/**
+ * @param {{ files: CodeFile[]; top: CodeFile[]; z: { lines: number; changed: number }; splitting: Splitting; inFolder: (f: CodeFile) => boolean; on: { light: (path: string | null) => void; pick: (path: string) => void } }} opts
+ */
 function chart({ files, top, z, on, splitting, inFolder }) {
   const el = h('div', { class: 'code-chart' });
   const tip = h('div', { class: 'ci-tip code-tip', hidden: true });
-  let dots = []; // { f, x, y, r, el }
+  /** @type {Dot[]} */
+  let dots = [];
   let nameDots = () => {};
   let entered = false;
   const isTop = new Set(top.map((f) => f.path));
   const maxLines = Math.max(1000, ...files.map((f) => f.lines)) * 1.25;
   const maxChanged = Math.max(10, z.changed * 2, ...files.map((f) => f.changed)) * 1.3;
+  /** @param {CodeFile} f */
   const kind = (f) => (splitting[f.path] ? 'on' : isTop.has(f.path) ? 'top' : 'rest');
 
+  /** @param {number} W */
   function draw(W) {
     const phone = W < 520,
       H = Math.round(Math.max(320, Math.min(500, W * 0.78))),
@@ -80,10 +105,12 @@ function chart({ files, top, z, on, splitting, inFolder }) {
       R = 10,
       T = 28,
       B = 40;
-    const log = (lo, hi, a, b) => (v) => a + ((Math.log(v) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))) * (b - a);
+    /** @param {number} lo @param {number} hi @param {number} a @param {number} b */
+    const log = (lo, hi, a, b) => (/** @type {number} */ v) => a + ((Math.log(v) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))) * (b - a);
     const x = log(30, maxLines, L, W - R),
       y = log(2, maxChanged, H - B, T);
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': `${plural(files.length, 'file')} by lines and by minions that changed them; ${plural(top.length, 'file')} in the marked corner. The table shows the same numbers.` });
+    /** @param {number} tx @param {number} ty @param {string} words @param {string} cls @param {string} [anchor] */
     const text = (tx, ty, words, cls, anchor = 'start') => {
       const t = svgEl('text', { x: tx, y: ty, class: cls, 'text-anchor': anchor });
       t.textContent = words;
@@ -102,6 +129,7 @@ function chart({ files, top, z, on, splitting, inFolder }) {
     }
     text((L + W) / 2, H - 5, 'Lines in the file', 'axis', 'middle');
     text(0, T - 14, 'Minions that changed it', 'axis');
+    /** @param {CodeFile} f */
     const rOf = (f) => 3.5 + Math.sqrt(f.bugs) * (phone ? 1.3 : 2);
     dots = [...files]
       .sort((a, b) => b.bugs - a.bugs) // small dots on top of big ones
@@ -121,15 +149,19 @@ function chart({ files, top, z, on, splitting, inFolder }) {
   }
 
   // Names for the best few in the folder, each where no name or marked dot is already; one with no room goes without (its row and tip have it).
+  /** @param {SVGElement} g @param {{ W: number; H: number; L: number; B: number; most: number }} box */
   function label(g, { W, H, L, B, most }) {
     g.replaceChildren();
-    const boxes = [],
-      paths = top.map((f) => f.path);
+    /** @type {number[][]} */
+    const boxes = [];
+    const paths = top.map((f) => f.path);
+    /** @param {number[]} b @param {number[]} o */
     const hits = (b, o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1];
     for (const f of top.filter(inFolder).slice(0, most)) {
-      const d = dots.find((o) => o.f === f),
+      const d = /** @type {Dot} */ (dots.find((o) => o.f === f)),
         words = shortName(f.path, paths),
         w = words.length * 6.9 + 4;
+      /** @type {[number, number, string][]} */
       const spots = [
         [d.x + d.r + 5, d.y + 4, 'start'],
         [d.x - d.r - 5, d.y + 4, 'end'],
@@ -152,12 +184,14 @@ function chart({ files, top, z, on, splitting, inFolder }) {
   }
 
   const filter = () => {
-    for (const d of dots) d.el.classList.toggle('out', !inFolder(d.f));
+    for (const d of dots) /** @type {SVGElement} */ (d.el).classList.toggle('out', !inFolder(d.f));
     nameDots();
   };
+  /** @param {Dot | null | undefined} d */
   const ring = (d) => {
-    for (const o of dots) o.el.classList.toggle('lit', o === d);
+    for (const o of dots) /** @type {SVGElement} */ (o.el).classList.toggle('lit', o === d);
   };
+  /** @param {Dot | null} d */
   const show = (d) => {
     ring(d);
     if (!d) {
@@ -172,12 +206,14 @@ function chart({ files, top, z, on, splitting, inFolder }) {
       hgt = tip.offsetHeight;
     put(tip, { left: `${Math.max(0, d.x + d.r + 10 + w > W ? d.x - d.r - 10 - w : d.x + d.r + 10)}px`, top: `${Math.max(0, Math.min(el.clientHeight - hgt, d.y - hgt / 2))}px` });
   };
+  /** @param {MouseEvent} ev */
   const near = (ev) => {
     const b = el.getBoundingClientRect(),
       px = ev.clientX - b.left,
       py = ev.clientY - b.top;
-    let best = null,
-      gap = 22;
+    /** @type {Dot | null} */
+    let best = null;
+    let gap = 22;
     for (const d of dots) {
       if (!inFolder(d.f)) continue;
       const g = Math.max(0, Math.hypot(d.x - px, d.y - py) - d.r) + (isTop.has(d.f.path) ? 0 : 0.5);
@@ -185,6 +221,7 @@ function chart({ files, top, z, on, splitting, inFolder }) {
     }
     return best;
   };
+  /** @param {MouseEvent} ev */
   const move = (ev) => {
     const d = near(ev);
     show(d);
@@ -197,7 +234,7 @@ function chart({ files, top, z, on, splitting, inFolder }) {
     show(null);
     on.light(null);
   });
-  el.addEventListener('click', (ev) => {
+  el.addEventListener('click', (/** @type {MouseEvent} */ ev) => {
     const d = near(ev);
     if (d) on.pick(d.f.path);
   });
@@ -206,15 +243,17 @@ function chart({ files, top, z, on, splitting, inFolder }) {
     const w = Math.round(el.clientWidth);
     if (w && w !== width) draw((width = w));
   }).observe(el);
-  return { el, filter, light: (path) => ring(dots.find((d) => d.f.path === path)) };
+  return { el, filter, light: (/** @type {string | null} */ path) => ring(dots.find((d) => d.f.path === path)) };
 }
 
 // ---------- the tab ----------
 
 const kinds = new Map(); // scheme id -> { folder, table }: kept across reads
+/** @type {{ id: number; data: CodeRead | null | undefined; el: HTMLElement } | null} */
 let last = null; // { id, data, el }: the same read draws the same page, so a poll's redraw moves nothing
 
 /** The Code tab for scheme `id`: `data` is its read, null while it's on its way, `{ error }` when that failed. */
+/** @param {number} id @param {string} name @param {CodeRead | null | undefined} data @param {() => void} retry */
 export function codeTab(id, name, data, retry) {
   if (last?.id === id && last.data === data && data?.kept) return last.el;
   const el = h('div', { class: 'code-tab' }, ...build(id, name, data, retry));
@@ -222,7 +261,9 @@ export function codeTab(id, name, data, retry) {
   return el;
 }
 
+/** @param {number} id @param {string} name @param {CodeRead | null | undefined} data @param {() => void} retry */
 function build(id, name, data, retry) {
+  /** @param {...import('./base.js').Child} more */
   const head = (...more) => h('div', { class: 'ci-head' }, h('h3', {}, name), ...more);
   if (data?.error) return [head(), h('p', { class: 'error' }, "Couldn't read this scheme's files. ", h('button', { type: 'button', class: 'secondary small', onclick: retry }, 'Try again'))];
   if (!data) return [head(), h('div', { class: 'code-skeleton', 'aria-label': 'Reading the files' })];
@@ -230,30 +271,35 @@ function build(id, name, data, retry) {
   if (!data.repo) return [head(), emptyCard('No repo to count', 'A scheme with a git repo shows its files here, by size and by how many minions changed them.', { mark: '·', hue: 'muted' })];
   if (!k) return [head(), emptyCard('Not counted yet', 'Its files are counted from git once a day, one scheme at a time. The first count comes within a couple of hours, outside 3 to 6 AM Pacific.', { mark: '·', hue: 'muted' })];
   if (!k.at) return [head(), emptyCard("Its files couldn't be counted", `${k.error}. It is tried again tomorrow.`, { mark: '!', hue: 'waiting' })];
-  const { splitting } = data;
+  const { splitting } = /** @type {CodeCountsAnswer} */ (data);
   const when = h('span', { class: 'muted small' }, `the last ${k.days} days on ${k.branch}, counted ${pacificStamp(k.at)}`);
   const stale = k.error ? h('div', { class: 'code-stale' }, toneChip('warn', 'Last count failed'), ' ', h('span', { class: 'muted' }, `These are the numbers from before. ${k.error}`)) : null;
   const files = k.files.filter(drawn);
   if (!files.length) return [head(when), stale ?? '', emptyCard('No file stands out', `Fewer than two minions changed any one file in ${k.days} days. Files show here as they get busy.`)];
-  const top = candidates(files),
+  const top = /** @type {CodeFile[]} */ (candidates(files)),
     z = zone(files),
     open = top.filter((f) => !splitting[f.path]);
   const st = kinds.get(id) ?? { folder: '', table: false };
   kinds.set(id, st);
+  /** @param {CodeFile} f */
   const inFolder = (f) => f.path.startsWith(st.folder);
   if (st.folder && !files.some(inFolder)) st.folder = '';
 
+  /** @type {ReturnType<typeof chart>} */
   let map; // the chart, once drawn
+  /** @type {Map<string, HTMLElement>} */
   const rows = new Map();
   const listBox = h('div', { class: 'code-list' });
+  /** @param {string | null} path */
   const light = (path) => {
     for (const [p, r] of rows) r.classList.toggle('lit', p === path);
   };
   const names = top.map((f) => f.path);
   const best = top.length ? score(top[0]) : 1;
+  /** @param {CodeFile} f */
   const rowOf = (f) => {
     const by = splitting[f.path];
-    const dir = f.path.slice(0, f.path.length - f.path.split('/').at(-1).length);
+    const dir = f.path.slice(0, f.path.length - /** @type {string} */ (f.path.split('/').at(-1)).length);
     const row = h(
       'li',
       { class: `code-row${by ? ' busy' : ''}`, tabindex: -1, onmouseenter: () => map.light(f.path), onmouseleave: () => map.light(null), onfocusin: () => map.light(f.path), onfocusout: () => map.light(null) },
@@ -290,7 +336,7 @@ function build(id, name, data, retry) {
       pick: (path) => {
         const r = rows.get(path);
         if (!r) return;
-        if (!r.isConnected) listBox.querySelector('.show-more')?.click();
+        if (!r.isConnected) /** @type {HTMLElement | null} */ (listBox.querySelector('.show-more'))?.click();
         (rows.get(path) ?? r).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         rows.get(path)?.focus({ preventScroll: true });
       },
@@ -299,7 +345,9 @@ function build(id, name, data, retry) {
   const legend = h(
     'div',
     { class: 'ci-legend code-legend' },
-    ...[['top', 'Big and busy'], Object.keys(splitting).length ? ['on', 'Being split'] : null, ['rest', 'The rest']].filter(Boolean).map(([c, words]) => h('span', {}, h('i', { class: `code-key ${c}`, 'aria-hidden': 'true' }), words)),
+    .../** @type {([string, string] | null)[]} */ ([['top', 'Big and busy'], Object.keys(splitting).length ? ['on', 'Being split'] : null, ['rest', 'The rest']])
+      .filter(/** @returns {x is [string, string]} */ (x) => !!x)
+      .map(([c, words]) => h('span', {}, h('i', { class: `code-key ${c}`, 'aria-hidden': 'true' }), words)),
     h('span', {}, h('i', { class: 'code-key sizes', 'aria-hidden': 'true' }), 'Bigger: more bug fixes'),
   );
   const stage = h('div', { class: 'code-stage' });
@@ -319,6 +367,7 @@ function build(id, name, data, retry) {
   };
   const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Folder' });
   const views = h('div', { class: 'chips', role: 'group', 'aria-label': 'Show as' });
+  /** @param {string} words @param {boolean} on @param {() => void} pick @param {string} [title] */
   const chip = (words, on, pick, title) => h('button', { type: 'button', class: `chip${on ? ' on' : ''}`, 'aria-pressed': String(on), title, onclick: pick }, words);
   const drawChips = () => {
     chips.replaceChildren(
@@ -329,20 +378,20 @@ function build(id, name, data, retry) {
           drawList();
           map.filter();
           if (st.table) drawStage();
-          chips.querySelector('.on')?.focus();
+          /** @type {HTMLElement | null} */ (chips.querySelector('.on'))?.focus();
         }),
       ),
     );
     views.replaceChildren(
-      ...[
+      .../** @type {[string, boolean][]} */ ([
         ['Chart', false],
         ['Table', true],
-      ].map(([words, table]) =>
+      ]).map(([words, table]) =>
         chip(words, st.table === table, () => {
           st.table = table;
           drawChips();
           drawStage();
-          views.querySelector('.on')?.focus();
+          /** @type {HTMLElement | null} */ (views.querySelector('.on'))?.focus();
         }),
       ),
     );

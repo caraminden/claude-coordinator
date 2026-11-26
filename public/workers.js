@@ -8,11 +8,15 @@ import { tooCold, waitsLine } from './threadstate.js';
 import { optimistic } from './ui/optimistic.js';
 import { lineMoved, openLine, quickLane } from './worker-line.js';
 
+/** @import { WorkerLimit, WorkersTile } from './types.js' */
+
 const READ_MS = 3_000;
 const SIZES = Array.from({ length: 50 }, (_, i) => i + 1);
+/** @param {number} n @param {string} word */
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The line moved: `line` is every waiting minion's id, next first, `paused` who paused them all. */
+/** @param {{ line: number[]; paused: string | null }} msg */
 export function onWorkers({ line, paused }) {
   lineMoved();
   if (view?.kind !== 'project') return;
@@ -25,21 +29,25 @@ export function onWorkers({ line, paused }) {
 }
 
 /** The tile, reading the pool every 3 s while `page` shows. */
+/** @param {HTMLElement} page */
 export function workersPanel(page) {
+  /** @type {WorkersTile | null} */
   let w = null;
+  /** @type {string | null} */
   let failed = null;
   let first = true; // the page is put in after this returns
   let open = false; // the size list
   let limitsOpen = false; // the collapsed Limits section
   let sent = 0; // changes on their way: a read started before one lands would show the old state
   const el = h('section', { class: 'st-tile wide st-lines st-workers', 'data-tile': 'workers' });
+  /** @param {Record<string, unknown>} body @param {Partial<WorkersTile>} next @param {string} label */
   const set = (body, next, label) => {
     const was = w;
     sent++;
     return optimistic({
       key: el,
       apply: () => {
-        w = { ...w, ...next };
+        w = /** @type {WorkersTile} */ ({ ...w, ...next });
         draw();
       },
       send: () => api('api/workers', { method: 'PUT', body }),
@@ -56,15 +64,18 @@ export function workersPanel(page) {
       .catch(() => {})
       .finally(() => sent--);
   };
+  /** @param {boolean | 'stop'} how */
   const pause = (how) => {
-    if (how === 'stop' && !confirm(`Stop the ${plural(w.running, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
+    if (how === 'stop' && !confirm(`Stop the ${plural(/** @type {WorkersTile} */ (w).running, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
     set({ pause: how }, { paused: how ? { by: 'you', at: Date.now(), ...(how === 'stop' ? { stop: true } : {}) } : null }, how ? 'pause minions' : 'resume minions');
   };
+  /** @param {WorkerLimit} row @param {number | null} value */
   const setLimit = (row, value) => {
-    const limits = w.limits.map((l) => (l.key === row.key ? { ...l, value: value ?? l.default, ...(value === null ? { by: undefined, at: undefined } : { by: 'you', at: Date.now() }) } : l));
+    const limits = /** @type {WorkersTile} */ (w).limits.map((l) => (l.key === row.key ? { ...l, value: value ?? l.default, ...(value === null ? { by: undefined, at: undefined } : { by: 'you', at: Date.now() }) } : l));
     return set({ limits: { [row.key]: value } }, { limits }, `set ${row.label.toLowerCase()}`);
   };
   /** One limit: its number, what the last 7 days did against it, who set it, and Reset to default. */
+  /** @param {WorkerLimit} row */
   const limitRow = (row) => {
     const input = h('input', {
       type: 'number',
@@ -75,9 +86,11 @@ export function workersPanel(page) {
       max: row.hi,
       step: row.unit === 'GB' ? 0.5 : 1,
       value: String(row.value),
+      /** @param {Event} e */
       onchange: (e) => {
-        const n = Number(e.target.value);
-        if (e.target.value === '' || !Number.isFinite(n) || n === row.value) return draw();
+        const { value } = /** @type {HTMLInputElement} */ (e.target);
+        const n = Number(value);
+        if (value === '' || !Number.isFinite(n) || n === row.value) return draw();
         setLimit(row, n === row.default ? null : n);
       },
     });
@@ -91,9 +104,10 @@ export function workersPanel(page) {
       row.by ? button(`reset-${row.key}`, 'Reset to default', `Put back ${row.default} ${row.unit}`, () => setLimit(row, null)) : '',
     );
   };
+  /** @param {string} key @param {string} text @param {string} title @param {() => void} onclick */
   const button = (key, text, title, onclick) => h('button', { type: 'button', class: 'cui-btn cui-small', 'data-key': key, title, onclick }, text);
   const draw = () => {
-    const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
+    const focused = el.contains(document.activeElement) ? /** @type {HTMLElement} */ (document.activeElement).dataset.key : undefined;
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
     page.dispatchEvent(new CustomEvent('pool', { detail: w.size })); // the mark on How many minions fit (box-capacity.js)
@@ -109,9 +123,11 @@ export function workersPanel(page) {
         onpointerdown: () => (open = true),
         onkeydown: () => (open = true),
         onblur: () => (open = false),
+        /** @param {Event} e */
         onchange: (e) => {
           open = false;
-          const n = e.target.value === 'auto' ? null : Number(e.target.value);
+          const { value } = /** @type {HTMLSelectElement} */ (e.target);
+          const n = value === 'auto' ? null : Number(value);
           const { fixed: _, ...auto } = pool;
           set({ size: n }, { size: n ?? pool.size, pool: n === null ? auto : { ...pool, fixed: { size: n, by: 'you' } } }, 'set the workers');
         },
@@ -137,7 +153,7 @@ export function workersPanel(page) {
       ),
       h(
         'details',
-        { class: 'st-limits', open: limitsOpen, ontoggle: (e) => (limitsOpen = e.target.open) },
+        { class: 'st-limits', open: limitsOpen, ontoggle: /** @param {Event} e */ (e) => (limitsOpen = /** @type {HTMLDetailsElement} */ (e.target).open) },
         h('summary', {}, 'Limits ', changed ? toneChip('info', `${changed} changed`) : toneChip('neutral', 'all defaults')),
         h('p', { class: 'muted small' }, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason."),
         ...w.limits.map(limitRow),
@@ -154,7 +170,7 @@ export function workersPanel(page) {
         ),
       ),
     );
-    if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+    if (focused) /** @type {HTMLElement | null} */ (el.querySelector(`[data-key="${CSS.escape(focused)}"]`))?.focus();
   };
   const load = async () => {
     if (!page.isConnected && !first) return;
@@ -165,7 +181,7 @@ export function workersPanel(page) {
         if (!sent) w = now;
         failed = null;
       } catch (err) {
-        failed = err.message;
+        failed = /** @type {Error} */ (err).message;
       }
       // An open size list would close under the redraw.
       if (!open && !el.querySelector('.st-limits input:focus')) draw();

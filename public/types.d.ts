@@ -506,3 +506,847 @@ export type View = Omit<ReturnType<typeof chatView>, keyof SessionState> &
     machineSetupOs: 'posix' | 'windows';
     runnerSetupOs: 'posix' | 'windows';
   };
+
+// Round 4: chains.js
+/** How one minion waits on another (src/chains.ts EdgeKind). */
+export type EdgeKind = 'start_after' | 'wait' | 'claim' | 'build';
+
+/** One minion (or an unowned build) in a chain (src/chains.ts ChainNode, from GET api/projects/:id/chains). */
+export interface ChainNode {
+  /** The ticket's id, or `build:<n>` for a build with no build minion named. */
+  key: string;
+  id: number | null;
+  project: number;
+  number: number | null;
+  title: string;
+  status: string;
+  state: string | null;
+  /** The column it sits in, left to right: 0 waits on nobody in the chain. */
+  col: number;
+}
+
+/** A wire between two nodes (src/chains.ts ChainEdge): `from` waits on `to`. */
+export interface ChainEdge {
+  from: string;
+  to: string;
+  kind: EdgeKind;
+  label: string;
+}
+
+/** A set of minions joined by waits (src/chains.ts Chain). */
+export interface Chain {
+  key: string;
+  title: string;
+  kinds: EdgeKind[];
+  nodes: ChainNode[];
+  edges: ChainEdge[];
+}
+
+// Round 4: status.js (the /api/status answer: src/status-page.ts StatusData, and the shapes it holds)
+export type StatusTone = 'ok' | 'warn' | 'bad';
+/** src/status-page.ts Verdict. */
+export interface StatusVerdict {
+  tone: StatusTone;
+  reasons: string[];
+  tiles: string[];
+}
+/** src/status-page.ts Look. */
+export interface StatusLook {
+  sentAt: number | null;
+  by: string | null;
+  minion: { project: number; number: number; title: string; closed: boolean } | null;
+}
+/** src/ship-time.ts ShipTarget and ShipRow. */
+export interface StatusShipTarget {
+  key: string;
+  title: string;
+  scheme: number | null;
+  counts: number[];
+  median: (number | null)[];
+  p90: (number | null)[];
+  ships: { at: number; took: number; stages: Record<string, number>; label: string }[];
+}
+/** src/db-rows.ts HostSample, the fields the page reads. */
+export interface StatusHostSample {
+  at: number;
+  mem_total: number;
+  mem_avail: number;
+  disk_total: number;
+  disk_free: number;
+  load1: number;
+  rss: number;
+  cpu_psi?: number | null;
+  mem_psi?: number | null;
+  db_cached?: number | null;
+  db_size?: number | null;
+  kswapd_rate?: number | null;
+  refault_rate?: number | null;
+  server_refault_rate?: number | null;
+  pgpgin_rate?: number | null;
+  thp_fallback_rate?: number | null;
+  warm_ms?: number | null;
+  warm_mb?: number | null;
+  warm_backoffs?: number | null;
+}
+/** src/cpu-ledger.ts CpuRow, CpuWindow and CpuHour. */
+export interface StatusCpuRow {
+  key: string;
+  label: string;
+  cores: number;
+  kernel: number;
+}
+export interface StatusCpuWindow {
+  rows: StatusCpuRow[];
+  host: { busy: number; kernel: number; iowait: number; started: number } | null;
+}
+/** src/memory-storms.ts Storm. */
+export interface StatusStorm {
+  group: string;
+  seconds: number;
+  stalled: number;
+  limit: number | null;
+  unit: string | null;
+  unitBytes: number | null;
+}
+/** src/memory-ease.ts EaseWaiting. */
+export interface StatusEaseWaiting {
+  starts: number;
+  heavy: number;
+  nested: number;
+}
+/** src/memory-ease.ts Episode and EaseNow, with the held turns' minion named (CitadelStatus.easing). */
+export interface StatusEaseHeld {
+  minion: string | null;
+  bytes: number;
+}
+export interface StatusEaseEpisode {
+  since: number;
+  until: number | null;
+  peak: 'ok' | 'easing' | 'tight';
+  why: string;
+  lowestFree: number | null;
+  waited: StatusEaseWaiting;
+  slowed: StatusEaseHeld[];
+}
+export interface StatusEaseNow {
+  level: 'ok' | 'easing' | 'tight';
+  since: number;
+  at: number | null;
+  why: string;
+  free: number | null;
+  reclaim: number | null;
+  swapOut: number | null;
+  load1: number;
+  waiting: StatusEaseWaiting;
+  slowed: StatusEaseHeld[];
+}
+/** src/every.ts JobRow, with the flags CitadelStatus adds. */
+export interface StatusJob {
+  name: string;
+  ms: number;
+  fails: number;
+  last: number | null;
+  took: number | null;
+  error: string | null;
+  errorAt: number | null;
+  overdue: boolean;
+  slow: boolean;
+}
+/** src/standing-checks.ts StandingStatus. */
+export interface StatusChecks {
+  checks: { name: string; promise: string }[];
+  last: { ranAt: number; findings: { check: string; text: string; since: number }[]; error: string | null } | null;
+}
+/** src/answer-time.ts and StatusPage.answerData. */
+export interface StatusAnswer {
+  /** [time, p50, p95, p99, max, over, load, turns] */
+  rows: [number, ...number[]][];
+  latest: { at: number; p95: number; p99: number; max: number } | null;
+  now: number | null;
+  reader: number | null;
+  probing: boolean;
+  line: { p95: number; p99: number };
+  target: { p95: number; p99: number; max: number; load: number; turns: number };
+  alert: boolean;
+}
+/** src/db/slow-moments.ts SlowMoment, as slowView sends it. */
+export interface StatusSlowMoment {
+  at: number;
+  person: string;
+  device: string;
+  kind: string;
+  what: string;
+  page: string;
+  scheme: string | null;
+  total_ms: number;
+  server_ms: number | null;
+  network_ms: number;
+  tab_ms: number;
+}
+/** src/status-page.ts CitadelStatus. */
+export interface StatusCitadel {
+  verdict: StatusVerdict;
+  looks: Record<string, StatusLook>;
+  canInvestigate: boolean;
+  uptime: { bootAt: number; reason: string | null; restarts: number[] };
+  stalls: { counts: number[]; afterBoot: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; work: string | null; afterBoot: boolean } | null };
+  host: {
+    answer: StatusAnswer;
+    /** Hourly [time, memory used %, disk used %, highest load, highest CPU pressure %, memory pressure %]. */
+    series: [number, number, number, number, number | null, number | null][];
+    /** Hourly [time, least % of the database in memory, highest discard MB/s, highest re-read MB/s]. */
+    cache: [number, number, number, number][];
+    latest: StatusHostSample | null;
+    cores: number;
+    cpuWarn: number;
+    cpuWarnMin: number;
+    peak: { at: number; load1: number } | null;
+    cpu: { windows: { hour: StatusCpuWindow; day: StatusCpuWindow; week: StatusCpuWindow }; hours: { at: number; seconds: number; groups: Record<string, number> }[]; groups: { key: string; label: string }[] };
+  };
+  storms: { counts: number[]; stalled: number[]; last: (StatusStorm & { at: number }) | null; now: StatusStorm[] };
+  easing: { counts: number[]; minutes: number[]; last: StatusEaseEpisode | null; now: StatusEaseNow | null };
+  jobs: StatusJob[];
+  checks: StatusChecks | null;
+  ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
+  ciVisible: boolean;
+  ci: { tone: StatusTone; at: number; url: string; workflows: { name: string; conclusion: string | null; status: string | null; url: string | null }[]; runs: number; green: number } | null;
+  unitsFailed: boolean;
+  units: { unit: string; load: string; active: string; sub: string }[];
+  /** src/ci-load.ts PcView, the fields pcWord (ci-desktop.js) and this page read. */
+  desktops: { host: string; verdict: { kind: string }; now: { cpu: number; mem_total: number; mem_free: number } | null }[];
+  backup: { db: { at: number; size: number } | null; pulledAt: number | null; apps: { title: string; day: string | null; ok: boolean }[]; problems: string[] };
+  slots: { key: string; title: string; note: string }[];
+  slow: { count: number; longest: number; rows: StatusSlowMoment[] };
+}
+/** src/status-page.ts AppStatus. */
+export interface StatusApp {
+  name: string;
+  title: string;
+  scheme: number | null;
+  verdict: StatusVerdict;
+  looks: Record<string, StatusLook>;
+  service: { unit: string; active: string; installed: boolean } | null;
+  deploys: { tone: StatusTone; counts: number[]; failed: number[]; median: number | null; longest: number | null; last: { at: number; outcome: string; by: string; took: number | null } | null };
+  errors: { counts: number[]; kinds: Record<string, number>; top: { kind: string; count: number; sample: string; last_at: number }[]; lastDay: number };
+  turns: { counts: number[]; tokens: number[]; people: { name: string; turns: number }[] };
+  disk: { bytes: number | null; at: number; warn_gb: number | null } | null;
+  backup: { day: string | null; ok: boolean };
+}
+/** src/status-page.ts StatusData. */
+export interface StatusData {
+  now: number;
+  days: string[];
+  shipTimes: StatusShipTarget[];
+  citadel: StatusCitadel;
+  apps: StatusApp[];
+}
+/** One line of /api/ship-lines (src/ship-stop.ts shipLines, ShipRow). */
+export interface StatusShipLine {
+  projectId: number;
+  scheme: string;
+  rows: { seq: number; name: string; ticketId: number | null; holds: boolean; place: string; heldSince: number | null; since: number; text: string; noStop: string | null }[];
+}
+
+// Round 4: ci-health.js (GET api/projects/:id/test-health: src/routes/projects.ts, src/fast-mode.ts view, src/land-reds.ts)
+export interface FastModeView {
+  state: 'running' | 'pinning' | 'stuck' | 'verified' | 'idle';
+  verified: string | null;
+  stuck: string | null;
+  running: { sha: string; at: number } | null;
+  pin: { ids: string[]; at: number | null } | null;
+  reds: { ids: string[]; sha: string; n: number | null; at: number; escalated: boolean; escalateAt: number }[];
+}
+export interface FlakeFix {
+  state: string;
+  minion: number | null;
+  owner: string | null;
+  startedAt: number;
+  heldAt: number | null;
+  cleanRuns: number;
+  need: number;
+  reopened: number;
+}
+export interface FlakeFile {
+  file: string;
+  count: number;
+  last: number;
+  ticketId: number | null;
+  messages: { message: string; test: string; cls: string; count: number }[];
+  none: number;
+  before: number;
+  changedAt: number | null;
+  fix: FlakeFix | null;
+  minion: number | null;
+  lastMinion: number | null;
+}
+export type LandRedCause = 'change' | 'flaky' | 'main' | 'unknown';
+export interface LandReds {
+  since: number;
+  runs: number;
+  green: number;
+  red: number;
+  other: number;
+  causes: Record<LandRedCause, number>;
+  riders: number;
+  reds: { id: number; branch: string; at: string; url: string | null; cause: LandRedCause; rider: boolean; why: string }[];
+  partial: boolean;
+}
+export interface TestHealth {
+  fast: FastModeView | null;
+  flakes: FlakeFile[];
+  landReds: LandReds | null;
+  now: number;
+  error?: undefined;
+}
+/** What a CI tab keeps when its read failed (ci.js). */
+export interface ReadFailed {
+  error: true;
+}
+
+// Round 4: ci-host.js (GET api/host-load: src/routes/machines.ts, src/host-load.ts HostLoad, src/ci-hold.ts heldRows, src/reaper.ts)
+export type HostJobKind = 'turn' | 'deploy' | 'apk' | 'app';
+export interface HostWaits {
+  jobs: number;
+  medianS: number;
+  longestS: number;
+}
+export interface HostWeek extends HostWaits {
+  scheme: string;
+  parts?: (HostWaits & { label: string; kind: HostJobKind })[];
+}
+/** src/waits.ts HeavyJob, tagged with its scheme's name. */
+export interface HostHeavyJob {
+  who: string;
+  what: string;
+  since: number;
+  reason?: string;
+  slot?: number;
+  scheme: string;
+}
+export type HostLongState = 'queued' | 'dispatched' | 'running' | 'done' | 'failed' | 'lost';
+/** src/long-jobs.ts longView, tagged with its scheme's name (and the minion's number and scheme id when the viewer sees it). */
+export interface HostLongJob {
+  id: string;
+  ticket: number;
+  who: string;
+  what: string;
+  quiet: boolean;
+  held: boolean;
+  slug: string;
+  state: HostLongState;
+  since: number;
+  queuedAt: number;
+  url: string | null;
+  code: number | null;
+  why: string | null;
+  scheme: string;
+  number?: number;
+  schemeId?: number;
+}
+export type HoldKind = 'proof' | 'heavy' | 'suite' | 'main' | 'check' | 'early';
+/** src/ci-hold.ts heldRows: a held run with its minion and scheme. */
+export interface HostHeldRun {
+  kind: HoldKind;
+  what: string;
+  url: string;
+  ticket: number | null;
+  since: number;
+  why: string;
+  phase: 'stopping' | 'held' | 'resumed';
+  number?: number;
+  schemeId?: number;
+  scheme?: string;
+}
+export interface HostHold {
+  off: boolean;
+  why: string | null;
+  busy: string | null;
+  running: { kind: HoldKind | 'ship'; what: string; url: string | null; ticket: number | null }[];
+  held: HostHeldRun[];
+  cap: string | null;
+}
+/** src/reaper.ts byMinion (MinionProcs). */
+export interface HostMinion {
+  ticket: number;
+  number: number;
+  title: string;
+  scheme: string;
+  schemeId: number;
+  status: string;
+  procs: { pid: number; command: string; cpuS: number; ageS: number }[];
+}
+/** src/reaper.ts reapedRows (Reaped plus its time and scheme name). */
+export interface HostReaped {
+  ticket: number;
+  number: number;
+  scheme: number;
+  pid: number;
+  command: string;
+  cpuS: number;
+  ageS: number;
+  signal: 'TERM' | 'KILL';
+  at: number;
+  schemeName: string;
+}
+export interface HostLoad {
+  slots: number;
+  holders: HostHeavyJob[];
+  waiters: HostHeavyJob[];
+  pressure: number | null;
+  maxPressure: number;
+  loadWaitS: number;
+  week: HostWeek[];
+  long: HostLongJob[];
+  now: number;
+  minions?: HostMinion[];
+  reaped?: HostReaped[];
+  hold?: HostHold | null;
+}
+
+// Round 4: releases.js (GET api/releases, src/releases.ts; ReleaseTarget and Release are above)
+/** A ship try's early test (src/waits.ts EarlyTest). */
+export interface EarlyTest {
+  state: 'running' | 'passed' | 'failed' | 'dropped';
+  brief: string;
+  text: string;
+}
+
+/** A failed try seen again in line (src/ship-failures.ts LastTry). */
+export interface LastTry {
+  kind: string;
+  names: string[];
+  more: number;
+  ci: string | null;
+  at: number;
+}
+
+/** Where a change or release is (src/releases.ts Progress). */
+export interface ReleaseProgress {
+  stage: string;
+  since: number;
+  usual: number | null;
+  waitingOn: string | null;
+  text: string;
+  brief?: string;
+  label?: string;
+  done?: number;
+  total?: number;
+  early?: EarlyTest;
+  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
+}
+
+/** One minion's change in the release under way (src/releases.ts Change). */
+export interface ReleaseChange extends ReleaseProgress {
+  ticketId: number;
+  number: number | null;
+  title: string;
+  canPreview?: boolean;
+  later?: boolean;
+  idle?: boolean;
+  lastTry?: LastTry;
+  fix?: string;
+}
+
+/** A line of the ship under way (src/land-news.ts NewsItem). */
+export interface NewsItem {
+  tone: 'bad' | 'warn' | 'info';
+  text: string;
+  refs?: Record<string, number>;
+}
+
+/** The release being made (src/releases.ts Next). */
+export interface ReleaseNext extends ReleaseProgress {
+  number: number | null;
+  name?: string;
+  link: string | null;
+  stages: { name: string; usual: number | null }[];
+  eta: number | null;
+  news?: NewsItem[];
+  changes: ReleaseChange[];
+}
+
+/** Who placed a waiter in the ship line (src/ship-line-state.ts Placed). */
+export interface Placed {
+  by: string;
+  at: number;
+  reason?: string;
+  taskmaster: boolean;
+}
+
+/** One entry of the ship line (src/releases.ts LineEntry). */
+export interface LineEntry {
+  name: string;
+  ticketId: number | null;
+  holds: boolean;
+  label?: string;
+  place: string;
+  seq: number;
+  movable: boolean;
+  why?: string;
+  placed?: Placed;
+  stage: string;
+  since: number;
+  lastTry?: LastTry;
+  /** src/frozen-ships.ts Frozen. */
+  frozen?: { unit: string; since: number; thaw: string };
+}
+
+/** A preview, download or site made to try a change (src/releases.ts TestCopy). */
+export interface TestCopy {
+  kind: 'preview' | 'build-preview' | 'download' | 'site' | 'debug-apk';
+  target: string | null;
+  name: string;
+  path?: string;
+  file?: string;
+  port?: number;
+  link?: string;
+  at?: number;
+  ticketId?: number;
+  number?: number;
+  build?: number;
+  running: boolean;
+  commit: string | null;
+}
+
+/** A target's Deploy button state (src/auto-deploy.ts DeployInfo). */
+export interface DeployInfo {
+  can: boolean;
+  auto: boolean;
+  due: number | null;
+  more: boolean;
+}
+
+/** A roll back's pin (src/last-green.ts Pin). */
+export interface Pin {
+  sha: string;
+  from: string;
+  at: number;
+  by: string;
+  build?: { run: number; sha: string; workflow: string };
+  code?: number;
+}
+
+/** A target's Roll back to last green state (src/rollback.ts RollbackInfo). */
+export interface RollbackInfo {
+  sha: string;
+  can: boolean;
+  pin: Pin | null;
+  running: boolean;
+  failed: { sha: string; at: number; why: string } | null;
+}
+
+/** One target's card (src/releases.ts TargetView). */
+export interface TargetView {
+  target: ReleaseTarget;
+  current: Release | null;
+  next: ReleaseNext | null;
+  line: LineEntry[];
+  testCopies: TestCopy[];
+  recent: Release[];
+  deploy?: DeployInfo;
+  releaseKey?: string;
+  rollback?: RollbackInfo;
+}
+
+/** One scheme's releases (src/releases.ts SchemeReleases). */
+export interface SchemeReleases {
+  projectId: number;
+  targets: TargetView[];
+  testCopies: TestCopy[];
+}
+
+// Round 4: ci-numbers.js (GET api/projects/:id/ci-numbers: src/ci-numbers.ts CiNumbers.view)
+export interface CiNumberStepRow {
+  run_id: number;
+  sha: string;
+  at: number;
+  baseline: number;
+  level: number;
+}
+export interface CiNumberSeries {
+  name: string;
+  ref: string;
+  unit: string;
+  points: { value: number; sha: string; run_id: number; workflow: string; at: number }[];
+  steps: CiNumberStepRow[];
+}
+export interface CiNumbersRules {
+  held: number;
+  base: number;
+  pct: number;
+  noise: number;
+  keepDays: number;
+}
+export interface CiNumbersView {
+  repo: string | null;
+  series: CiNumberSeries[];
+  rules: CiNumbersRules;
+  error?: undefined;
+}
+
+// Round 4: ci-desktop.js (src/ci-load.ts PcView, Pool, Verdict; the CI page reads it from GET api/ci-load)
+export interface CiPool {
+  key: string;
+  repo: string;
+  title: string;
+  project: number | null;
+  labels: string;
+  runners: string[];
+  busy: number;
+  waiting: number;
+  oldest_ms: number;
+  jobs: number;
+  wait_p50_ms: number;
+  wait_max_ms: number;
+  cpu: number | null;
+}
+export type PcVerdictKind = 'none' | 'fine' | 'more' | 'over' | 'crash' | 'full';
+/** [time, average CPU % or null, peak, jobs running, jobs waiting], in 5-minute steps over 24 hours. */
+export type PcSample = [number, number | null, number | null, number, number];
+export interface PcView {
+  host: string;
+  projects: number[];
+  now: null | {
+    at: number;
+    cores: number;
+    cpu: number;
+    mem_total: number;
+    mem_free: number;
+    disk_total: number | null;
+    disk_free: number | null;
+    queue: number | null;
+    idle_sec: number | null;
+    temp: number | null;
+    runners: number;
+    wsl: number | null;
+    vms: Record<string, number>;
+  };
+  series: PcSample[];
+  restarts: number[];
+  pools: CiPool[];
+  verdict: { kind: PcVerdictKind; text: string; pool: string | null };
+}
+/** What trouble and pcWord read of a PC: a PcView, or the Status page's shorter copy (it sends `seen` in place of the series). */
+export interface PcBrief {
+  host: string;
+  verdict: { kind: string };
+  now: { cpu: number; mem_total: number; mem_free: number } | null;
+  series?: PcSample[];
+  seen?: boolean;
+}
+
+// Round 4: workers.js (GET /api/workers: src/routes/workers.ts tile(), from src/turn-line.ts summary())
+/** One limit Auto steers by (src/routes/workers.ts limitRows). */
+export interface WorkerLimit {
+  key: string;
+  label: string;
+  unit: string;
+  lo: number;
+  hi: number;
+  value: number;
+  default: number;
+  by?: string;
+  at?: number;
+  share?: number;
+}
+export interface WorkersTile {
+  used: number;
+  lent: number;
+  running: number;
+  forced: number;
+  lane: { used: number; size: number; moved: number };
+  size: number;
+  pool: { size: number; at: number; why?: string; fixed?: { size: number; by: string } };
+  paused: { by: string; stop?: true; at: number } | null;
+  waiting: number;
+  people: { name: string; used: number; lane?: number; waiting: number; lent: number; stalled?: true }[];
+  min: number;
+  max: number;
+  limits: WorkerLimit[];
+  /** The waits that gave their worker back (src/routes/workers.ts waitsEnded). */
+  waits: { count: number; median: number | null; woken: number; cold: number };
+}
+
+// Round 4: ci.js (GET api/ci: src/routes/machines.ts, src/ci-health.ts snapshot, src/ci-view.ts CiView, src/ci-problems.ts Problem)
+/** Whose change a run or job tests: a minion's chat (`href`), or what the run is. */
+export interface CiWho {
+  href?: string;
+  label: string;
+}
+/** src/ci-view.ts ViewRun, with the `who` snapshot adds. */
+export interface CiRun {
+  id: number;
+  name: string;
+  branch: string;
+  event?: string;
+  status: string;
+  conclusion: string | null;
+  at: string;
+  url: string;
+  minion?: number | null;
+  who?: CiWho;
+}
+export interface CiRunner {
+  name: string;
+  status: string;
+  busy: boolean;
+  labels: string[];
+  job: string | null;
+  offlineSince: number | null;
+}
+export interface CiWaitingJob {
+  name: string;
+  labels: string[];
+  since: string;
+  run: number;
+  branch?: string;
+  event?: string;
+  minion?: number | null;
+  who?: CiWho;
+}
+export interface CiRunningJob {
+  name: string;
+  runner: string;
+  since: string;
+  run: number;
+  branch?: string;
+  event?: string;
+  minion?: number | null;
+  who?: CiWho;
+}
+export interface CiQueue {
+  labels: string[];
+  jobs: number;
+  runners: number | null;
+}
+export interface CiWorkflow {
+  name: string;
+  file: string;
+  verdict: CiRun | null;
+  skipped: string[];
+  quiet?: boolean;
+}
+export interface CiViewData {
+  at: number;
+  slug: string;
+  branch: string;
+  runners: CiRunner[] | null;
+  waiting: CiWaitingJob[];
+  running?: CiRunningJob[];
+  queues?: CiQueue[];
+  workflows: CiWorkflow[];
+  runs: CiRun[];
+}
+/** The fix minion as the minions list draws it (src/routes/machines.ts fixTicket); the page's own stand-in has fewer fields. */
+export interface CiFixTicket {
+  id?: number;
+  number?: number | string;
+  project_id: number;
+  title: string;
+  status: string;
+  state?: TicketState | null;
+  note?: string | null;
+  last_activity?: string | null;
+  created_at: number;
+  updated_at?: number;
+  closed_at?: number | null;
+}
+/** src/ci-problems.ts Problem, as GET api/ci sends it. */
+export interface CiProblem {
+  key: string;
+  title: string;
+  why?: string;
+  fix?: string;
+  quiet?: boolean;
+  held?: number;
+  since?: number;
+  fixMinion?: { number: number; closed: boolean };
+  noFix?: { ringsAt: number; late: boolean };
+  rerun?: { sha: string; url?: string; state: 'running' | 'failed' | 'manual' };
+  fixTicket?: CiFixTicket;
+  link?: { kind: 'minion' | 'taskmaster'; href: string; label: string; closed?: boolean };
+}
+export interface CiScheme {
+  id: number;
+  name: string;
+  view: CiViewData;
+  problems: CiProblem[];
+}
+export interface CiRead {
+  schemes: CiScheme[];
+  pcs: PcView[];
+  now: number;
+}
+
+// Round 4: code-map.js (GET /api/projects/:id/code-counts: src/code-counts.ts CodeCounts.view)
+/** One counted file (src/code-counts.ts CodeFile). */
+export interface CodeFile {
+  path: string;
+  lines: number;
+  changed: number;
+  bugs: number;
+  who: number[];
+}
+export interface CodeCountsAnswer {
+  repo: boolean;
+  /** The last good count; `error` says why the newest try failed, and `at` is 0 when none ever worked. */
+  kept: { at: number; branch: string; commit: string; days: number; files: CodeFile[]; error?: string } | null;
+  /** File path -> the open minions splitting it (src/code-counts.ts SplitBy). */
+  splitting: Record<string, { number: number; title: string }[]>;
+}
+
+// Round 4: jobs.js (GPU jobs on a person's machine: src/machine-jobs.ts jobView, JobKind and JobSettings)
+export type JobState = 'needs-go' | 'queued' | 'starting' | 'running' | 'paused' | 'uploading' | 'done' | 'failed' | 'stopped' | 'refused';
+/** A job's recipe (src/machine-jobs.ts JobKind, as jobView sends it, and a go card's recipe). */
+export interface JobKindView {
+  name: string;
+  image: string;
+  command: string[];
+  reads: string[];
+  gpu: boolean;
+  network: boolean;
+  resumable: boolean;
+}
+/** A job's public fields (src/machine-jobs.ts JobView). */
+export interface JobView {
+  id: number;
+  machine_id: number;
+  machine: string | null;
+  project_id: number;
+  ticket_id: number | null;
+  ticket_number: number | null;
+  asked_by: string;
+  decider_id: number | null;
+  kind: JobKindView;
+  inputs: { name: string; size: number }[];
+  limit_s: number;
+  when: 'hours' | 'now';
+  reason: string | null;
+  state: JobState;
+  waits: string | null;
+  go: 'hours' | 'now' | 'always' | 'standing' | null;
+  go_by: string | null;
+  paused_by: string | null;
+  created_at: number;
+  started_at: number | null;
+  ended_at: number | null;
+  run_s: number;
+  gpu_busy_s: number;
+  gpu_pct: number | null;
+  vram_mb: number | null;
+  held_vram_mb: number | null;
+  log_tail: string;
+  live_at: number | null;
+  exit_code: number | null;
+  error: string | null;
+  pause_failed: string | null;
+  outputs: { path: string; size: number; uploaded: boolean }[];
+  swept: boolean;
+}
+/** A machine's job hours, one-off window and pause (src/machine-jobs.ts JobSettings). */
+export interface JobSettings {
+  start: string;
+  end: string;
+  until: number | null;
+  paused: boolean;
+}

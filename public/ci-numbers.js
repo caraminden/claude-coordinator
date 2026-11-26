@@ -1,18 +1,34 @@
 // The CI page's Numbers tab (#1369, Cara 2026-11-20: "Keep CI numbers per commit and flag a step up"; on #1369's card,
 // "New tab on the CI page"): a row per series a scheme's CI sends (kit/skills/ci-store/ci-numbers.sh), with its chart
 // over its runs. Each point links its commit; a step up that held (src/ci-numbers.ts) is marked where it started.
+/** @import { CiNumbersView, CiNumberSeries, CiNumberStepRow, CiNumbersRules, ReadFailed } from './types.js' */
+/** @typedef {CiNumberSeries['points'][number]} Point */
 import { api, h, pacificDate, pacificStamp } from './base.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
 
+/**
+ * @param {number} id
+ * @returns {Promise<CiNumbersView>}
+ */
 export const readNumbers = (id) => api(`api/projects/${id}/ci-numbers`);
 
+/**
+ * @param {number} v
+ * @param {string} [unit]
+ */
 const fmt = (v, unit) => `${+Number(v).toPrecision(4)}${unit ? ` ${unit}` : ''}`;
+/** @param {{ baseline: number; level: number }} s */
 const pct = (s) => (s.baseline ? `+${Math.round(((s.level - s.baseline) / Math.abs(s.baseline)) * 100)}%` : 'up');
+/**
+ * @param {HTMLElement} el
+ * @param {Record<string, string>} props
+ */
 const at = (el, props) => {
   for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
   return el;
 };
+/** @param {number[]} xs */
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b),
     m = s.length >> 1;
@@ -20,6 +36,10 @@ const median = (xs) => {
 };
 
 /** One series' chart: a 2px line over its runs in order, a link per point, a dashed mark where each step started. */
+/**
+ * @param {CiNumberSeries} series
+ * @param {(sha: string) => string} commit
+ */
 function chart(series, commit) {
   const W = 600,
     H = 120,
@@ -36,8 +56,8 @@ function chart(series, commit) {
   const pad = (hi - lo) * 0.15 || Math.abs(hi) * 0.05 || 1;
   lo -= pad;
   hi += pad;
-  const x = (i) => (n === 1 ? W / 2 : L + (i / (n - 1)) * (W - L - R));
-  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const x = (/** @type {number} */ i) => (n === 1 ? W / 2 : L + (i / (n - 1)) * (W - L - R));
+  const y = (/** @type {number} */ v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
   const stepAt = series.steps.map((s) => pts.findIndex((p) => p.run_id === s.run_id)).filter((i) => i >= 0);
   const el = h('div', { class: 'ci-chart ci-num-chart' });
   // Numbers only go into this markup: every label and link is set through the DOM below.
@@ -49,8 +69,8 @@ function chart(series, commit) {
   </svg>`;
   const svg = /** @type {SVGSVGElement} */ (el.firstElementChild); // the innerHTML just set
   svg.setAttribute('aria-label', `${series.name} over its last ${n} runs${series.steps.length ? `, stepped up ${series.steps.length === 1 ? 'once' : `${series.steps.length} times`}` : ''}`);
-  const left = (i) => `${(x(i) / W) * 100}%`,
-    top = (v) => `${(y(v) / H) * 100}%`;
+  const left = (/** @type {number} */ i) => `${(x(i) / W) * 100}%`,
+    top = (/** @type {number} */ v) => `${(y(v) / H) * 100}%`;
   const xs = n > 2 ? [0, (n - 1) >> 1, n - 1] : [0, n - 1].slice(0, n);
   const axis = h(
     'div',
@@ -65,7 +85,7 @@ function chart(series, commit) {
     at(h('a', { class: 'ci-pt', href: commit(p.sha), target: '_blank', rel: 'noopener', 'aria-label': `${fmt(p.value, unit)}, ${p.workflow} run ${p.run_id}, commit ${p.sha.slice(0, 9)}`, 'data-step': stepAt.includes(i) ? '' : null, onfocus: () => show(i), onblur: () => hide() }), { left: left(i), top: top(p.value) }),
   );
   let near = -1;
-  const show = (i) => {
+  const show = (/** @type {number} */ i) => {
     near = i;
     const p = pts[i],
       box = el.getBoundingClientRect();
@@ -102,11 +122,16 @@ function chart(series, commit) {
   );
 }
 
+/**
+ * @param {{ id: number }} s
+ * @param {CiNumberSeries} view
+ * @param {CiNumbersRules & { repo: string | null }} rules
+ */
 function seriesRow(s, view, rules) {
   const pts = view.points,
     unit = view.unit,
-    last = pts.at(-1);
-  const commit = (sha) => (rules.repo ? `${rules.repo}/commit/${sha}` : `#${sha}`);
+    last = /** @type {Point} */ (pts.at(-1));
+  const commit = (/** @type {string} */ sha) => (rules.repo ? `${rules.repo}/commit/${sha}` : `#${sha}`);
   // A step is news while it's inside the runs the rule looks at; older ones stay marked on the chart.
   const recent = view.steps.filter((st) => pts.findIndex((p) => p.run_id === st.run_id) >= pts.length - (rules.held + rules.base));
   const before = pts.slice(-rules.held - rules.base, -rules.held).map((p) => p.value);
@@ -116,9 +141,9 @@ function seriesRow(s, view, rules) {
       icon: 'chart',
       hue: recent.length ? 'waiting' : 'done',
       title: view.name,
-      summary: [recent.length ? toneChip('warn', `Stepped up ${pct(recent.at(-1))}`) : toneChip('ok', 'Steady'), fmt(last.value, unit)],
+      summary: [recent.length ? toneChip('warn', `Stepped up ${pct(/** @type {CiNumberStepRow} */ (recent.at(-1)))}`) : toneChip('ok', 'Steady'), fmt(last.value, unit)],
     },
-    statTiles([fmt(last.value, unit), 'latest run', recent.length ? 'waiting' : 'done'], recent.length ? [fmt(recent.at(-1).baseline, unit), 'before the step', 'held'] : before.length && [fmt(median(before), unit), `usual, the ${before.length} runs before`, 'held'], [
+    statTiles([fmt(last.value, unit), 'latest run', recent.length ? 'waiting' : 'done'], recent.length ? [fmt(/** @type {CiNumberStepRow} */ (recent.at(-1)).baseline, unit), 'before the step', 'held'] : before.length && [fmt(median(before), unit), `usual, the ${before.length} runs before`, 'held'], [
       String(pts.length),
       `runs, kept ${rules.keepDays} days`,
     ]),
@@ -159,6 +184,11 @@ function seriesRow(s, view, rules) {
 }
 
 /** The tab: `data` is the scheme's read (null while reading, { error } when it failed). */
+/**
+ * @param {{ id: number }} s
+ * @param {CiNumbersView | ReadFailed | null} data
+ * @param {() => void} refresh
+ */
 export function numbersTab(s, data, refresh) {
   if (!data) return [h('p', { class: 'muted' }, 'Reading CI numbers…')];
   if (data.error) return [h('p', { class: 'error' }, "Couldn't read CI numbers. ", h('button', { type: 'button', class: 'secondary', onclick: refresh }, 'Try again'))];
@@ -166,6 +196,7 @@ export function numbersTab(s, data, refresh) {
     return [h('section', { class: 'ci-block' }, emptyCard('No CI numbers yet', 'A workflow sends them with a line like tools/ci-numbers.sh startup=412ms apk-size=12.5MB (the citadel:ci-store skill); each run adds a point here.', { mark: '∿', hue: 'held' }))];
   }
   const rules = { ...data.rules, repo: data.repo };
+  /** @param {CiNumberSeries} v */
   const isNew = (v) => v.steps.some((st) => v.points.findIndex((p) => p.run_id === st.run_id) >= v.points.length - (rules.held + rules.base));
   const stepped = data.series.filter(isNew);
   return [h('section', { class: 'ci-block' }, h('h3', { class: 'settings-section', 'data-hue': stepped.length ? 'waiting' : 'done' }, 'Numbers per run'), h('div', { class: 'settings-rows' }, ...[...stepped, ...data.series.filter((v) => !isNew(v))].map((v) => seriesRow(s, v, rules))))];

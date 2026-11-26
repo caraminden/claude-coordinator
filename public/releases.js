@@ -15,22 +15,30 @@ import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { loadingLine } from './ui/state.js';
+/** @import { Release, ReleaseChange, ReleaseNext, ReleaseProgress, SchemeReleases, TargetView, TestCopy, LineEntry, Ticket, View, Placed, EarlyTest, Pin, LastTry } from './types.js' */
+/** @typedef {{ scope: string | number, hl: number | null, target: string | null, shown?: boolean }} PageWant */
+/** @typedef {{ c?: ReleaseChange, e?: LineEntry, i: number, key: number, wait?: LineEntry | null, why?: string | null, placed?: Placed | null }} ChangeRow */
 
-/** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). */
+/** The screen on show: these run on a scheme's page, where `view` is set. */
+const cur = () => /** @type {View} */ (view);
+
+/** projectId → { projectId, targets: TargetView[], testCopies } for every scheme this person can see (src/releases.ts). @type {Map<number, SchemeReleases>} */
 let schemes = new Map();
-/** Schemes the person is a member of, hidden ones included: what All covers (Josh, 2026-11-13). */
+/** Schemes the person is a member of, hidden ones included: what All covers (Josh, 2026-11-13). @type {Set<number>} */
 let member = new Set();
 let loaded = false;
-/** What the open page shows ('all' or a scheme's id) and the change it highlights. */
+/** What the open page shows ('all' or a scheme's id) and the change it highlights. @type {PageWant | null} */
 let page = null;
-/** Where × goes back to: the hash the page was opened from. */
+/** Where × goes back to: the hash the page was opened from. @type {string | null} */
 let returnTo = null;
 
 /** A change that shipped as a fix without a go (#1398): its one line, beside its title. */
+/** @param {{ fix?: string }} c */
 const fixTag = (c) => (c.fix ? h('span', { class: 'rel-fix muted' }, ` · ${c.fix}`) : '');
 
 /** Fetch every scheme's releases (on the stream's hello, so after a reconnect too) and redraw what shows them. */
 export async function loadReleases() {
+  /** @type {{ schemes: SchemeReleases[] }[] | null} */
   const got = await Promise.all([api('api/releases'), api('api/releases?scope=member')]).catch(() => null);
   if (!got) return; // an older server, or a restart's gap: the next hello asks again
   schemes = new Map(got[0].schemes.map((s) => [s.projectId, s]));
@@ -47,21 +55,25 @@ export async function loadReleases() {
  * once they're all in. Only the Releases page shows them, so they're read when it opens and while it's open (#1528).
  */
 function refreshExtras() {
+  /** @type {Set<number>} */
   const ids = new Set([...schemes.keys(), ...(view?.projects ?? []).map((p) => p.id)]);
   Promise.all([...[...ids].map((id) => loadClaims(id)), loadWatch()]).then(redraw);
 }
 
 /** A `claims` event: that scheme's claims changed. Off the Releases page the next open reads them. */
+/** @param {{ projectId: number }} msg */
 export function onClaims(msg) {
   if (pageEl?.isConnected) loadClaims(msg.projectId, redraw);
 }
 
 /** A `ticket` event: a claim holder's stage may have moved (#1334). */
+/** @param {Ticket} ticket */
 export function onClaimHolder(ticket) {
   if (loaded && pageEl?.isConnected) onHolderTicket(ticket, redraw);
 }
 
 /** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
+/** @param {{ projectId: number, releases: SchemeReleases }} msg */
 export function onReleases(msg) {
   if (!loaded) return;
   const s = msg.releases;
@@ -76,7 +88,9 @@ export function onReleases(msg) {
 }
 
 /** Others drawn from the releases (the Releases button's dot and the page's list), told on each redraw. */
+/** @type {Set<() => void>} */
 const redrawn = new Set();
+/** @param {() => void} fn */
 export const onReleasesRedraw = (fn) => redrawn.add(fn);
 
 /**
@@ -86,7 +100,7 @@ export const onReleasesRedraw = (fn) => redrawn.add(fn);
  */
 function swapRailRows() {
   if (heldWhilePressed(swapRailRows)) return;
-  for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(el.dataset.relScheme)));
+  for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(/** @type {HTMLElement} */ (el).dataset.relScheme)));
 }
 
 function redraw() {
@@ -96,34 +110,43 @@ function redraw() {
   if (pageEl?.isConnected) fillPage();
   const slot = view?.branchEl?.querySelector('.rel-chip-slot');
   if (slot) {
-    slot.replaceChildren(releaseChip(view.ticket) ?? '');
-    view.branchEl.hidden = !view.branchEl.querySelector(':scope > :not(.rel-chip-slot)') && !slot.firstChild;
+    slot.replaceChildren(releaseChip(cur().ticket) ?? '');
+    cur().branchEl.hidden = !cur().branchEl.querySelector(':scope > :not(.rel-chip-slot)') && !slot.firstChild;
   }
   for (const fn of redrawn) fn(); // after Releases' own, so a listener that throws can't keep the page from drawing
 }
 
 // ---------- words and numbers ----------
 
+/** @param {number | string} id */
 const schemeOf = (id) => view?.projects?.find((p) => p.id === id) ?? (view?.project?.id === id ? view.project : null);
+/** @param {number | string} id */
 const schemeName = (id) => schemeOf(id)?.name ?? `Scheme ${id}`;
 /** The scheme's icon as the sidebar shows it, beside its targets' names (Cara, 2026-11-12: "maybe also the scheme icons?"). */
+/** @param {number | string} id */
 const iconOf = (id) => (schemeOf(id) ? schemeIcon(schemeOf(id)) : '');
 /** Stages whose key reads wrong to a person: a contraption's wait for someone to start its deploy, and a PR's wait for its go (Cara, 2026-11-19, picked "Ship" on #1020's card). */
+/** @type {Record<string, string>} */
 const STAGE_NAMES = { call: 'Start', merge: 'Ship', land: 'Ship' };
 /** A stage's name as the land track says it, else the stage itself, capitalised. */
+/** @param {string} key */
 const stageName = (key) => {
   if (STAGE_NAMES[key]) return STAGE_NAMES[key];
   const t = TRACK.find(([k]) => k === key);
   // A short key is an initialism ("ci" → "CI").
   return t ? (t[2] ?? t[1]) : key.length <= 3 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
 };
+/** @param {string} v */
 const isSha = (v) => /^[0-9a-f]{7,40}$/.test(v);
+/** @param {number | null} projectId @param {{ number?: number | null, ticketId: number | null | undefined }} c */
 const minionHref = (projectId, c) => (c.number != null ? `#/p/${projectId}/t/${c.number}` : `#/t/${c.ticketId}`);
 /** Where Releases opens from scheme `id` with no scope named (Josh, 2026-11-19): that scheme's own, and every scheme's only from Citadel (project 2). */
 
 /** The page's address on `scope`, with change `hl` highlighted, or a release target's card scrolled to (#1647: `target` is a target's id, which has colons). */
+/** @param {string | number} scope @param {number | null} [hl] @param {string | null} [target] */
 const pageHref = (scope, hl, target = null) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : target ? `/target/${encodeURIComponent(target)}` : ''}`;
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
+/** @param {{ started: number | null, live: number | null, stages?: Record<string, number> }} r */
 const tookText = (r) => {
   if (!(r.started && r.live)) return null;
   const total = r.live - r.started,
@@ -138,31 +161,45 @@ const tookText = (r) => {
  * from `since` (the current stage's start) to the estimate; `full` false leaves the usual time to the hover, for narrow
  rows under a stage line that says it. With no `since` (auto-deploy's timer) it's "any moment".
  */
+/**
+ * @param {number} eta
+ * @param {{ suffix?: string, since?: number | null, full?: boolean }} [opts]
+ */
 function etaText(eta, { suffix = '', since = null, full = true } = {}) {
   return h('span', { class: 'rel-eta', 'data-eta': eta, 'data-suffix': suffix, 'data-since': since ?? '', 'data-full': full ? '1' : '', title: etaTitle(eta, since) }, etaWords(eta, suffix, since, full));
 }
+/** @param {number} eta @param {string} suffix @param {number | null} since @param {boolean} full */
 const etaWords = (eta, suffix, since, full) => {
   if (eta > Date.now()) return `~${shortSpan(eta - Date.now())}${suffix}`;
   if (!since) return 'any moment';
   return full ? `running long · usually ~${shortSpan(eta - since)}` : 'running long';
 };
 /** The hover past the estimate: the usual time spelled out, and how long this stage has run. */
+/** @param {number} eta @param {number | null} since */
 const etaTitle = (eta, since) => (eta <= Date.now() && since ? `Taking longer than usual: this stage and the rest usually take ~${shortSpan(eta - since)}; this stage started ${shortSpan(Date.now() - since)} ago` : '');
 
 /** The commit or version name behind it, shown small on its card for whoever wants it (no hover: Cara, 2026-11-12, "if you want more info, click"). */
+/** @param {{ version: string }} r */
 const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.version.slice(0, 7)}` : `version ${r.version}`) : '');
 
 /** A release by its number, linked to the release itself (the live site, its file) when it has one: a new tab, as it may leave Citadel. */
+/**
+ * @param {{ number: number | null, name?: string, link: string | null, outcome?: string }} r
+ * @param {string} [cls]
+ * @param {boolean} [short]
+ */
 function versionLink(r, cls = 'rel-ver', short = false) {
   // data-version: what the right-click menu's Copy version copies (#1663).
-  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', 'data-version': releaseName(r), onclick: (e) => e.stopPropagation() }, releaseName(r, short)) : h('span', { class: cls, 'data-version': releaseName(r) }, releaseName(r, short));
+  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', 'data-version': releaseName(r), onclick: (/** @type {Event} */ e) => e.stopPropagation() }, releaseName(r, short)) : h('span', { class: cls, 'data-version': releaseName(r) }, releaseName(r, short));
 }
 
 // ---------- the Schemes list ----------
 
 /** The whole release's estimate: "~3m", "waiting" while a stage waits, else the stage it's at. */
+/** @type {ReturnType<typeof mountTips> | null} */
 let relTips = null;
 /** A row's estimate, whose tap or hover says why (#906): what it waits on, since when, against usual. */
+/** @param {ReleaseNext} next */
 function estimate(next) {
   relTips ??= mountTips(document.body, { selector: '.rel-row .rel-est[data-tip]', tapOpens: true });
   const tip = { tabindex: 0, 'data-tip': progressWhy(next, stageName(next.stage)) };
@@ -182,6 +219,7 @@ export function opening() {
  * an idle target shows none (Josh, 2026-11-13: "only show up if there is something in the release queue"). The empty
  * container stays, hidden by CSS, so redraw() finds it when a change enters the queue.
  */
+/** @param {number} projectId */
 export function releaseRows(projectId) {
   const s = schemes.get(projectId);
   return h(
@@ -190,24 +228,25 @@ export function releaseRows(projectId) {
     (s?.targets ?? [])
       .filter((tv) => tv.next)
       .map((tv) => {
+        const next = /** @type {ReleaseNext} */ (tv.next); // the filter above kept only these
         const href = pageHref(projectId, null, tv.target.id);
         return h(
           'div',
           {
             class: 'rel-row',
             // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
-            onclick: (e) => {
-              if (!e.target.closest('a') && !e.defaultPrevented) {
+            onclick: (/** @type {Event} */ e) => {
+              if (!(/** @type {HTMLElement} */ (e.target).closest('a')) && !e.defaultPrevented) {
                 opening();
                 location.hash = href;
               }
             }, // a tap on the estimate opens its why
           },
           h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
-          estimate(tv.next),
+          estimate(next),
           // The release being made (Cara, 2026-11-17): its number, linked to its preview or download when it has one, plain when not; never the current release.
-          versionLink(tv.next.number != null ? tv.next : { ...tv.next, link: null }, 'rel-ver', true),
-          stageTrack(tv.next.stages, tv.next),
+          versionLink(next.number != null ? next : { ...next, link: null }, 'rel-ver', true),
+          stageTrack(next.stages, next),
         );
       }),
   );
@@ -216,7 +255,13 @@ export function releaseRows(projectId) {
 // ---------- tracks ----------
 
 /** The stage track (takes D, E, F): wait.js segTrack, a segment per stage; `labels` names them under. */
+/**
+ * @param {{ name: string, usual: number | null }[]} stages
+ * @param {{ stage: string, since: number, usual: number | null, waitingOn: string | null, done?: number, total?: number }} p
+ * @param {{ mini?: boolean, labels?: boolean }} [opts]
+ */
 function stageTrack(stages, p, { mini = false, labels = false } = {}) {
+  /** @type {{ name: string, usual: number | null }[]} */
   const list = segments(stages);
   const at = list.findIndex((s) => s.name === p.stage);
   return segTrack(
@@ -235,6 +280,7 @@ function stageTrack(stages, p, { mini = false, labels = false } = {}) {
  * Where a change or release is, in a few words: its short ones first (Josh, 2026-11-13: "the line should be apparent
  * from the list you are looking at"): "Line · 2nd", "Test · CI: the full suite" (#630's), then its wait, time left or text.
  */
+/** @param {ReleaseProgress} p @param {number | null} eta @param {boolean} [full] */
 const nowWords = (p, eta, full = false) => {
   const stuck = stuckFor(p);
   if (stuck) return `stuck ${shortSpan(stuck)}: ${p.waitingOn}`;
@@ -242,6 +288,7 @@ const nowWords = (p, eta, full = false) => {
 };
 
 /** A row's "now" words with its ship train: the front says how many ride, a rider whose train it is in, a waiter which train it will be in. */
+/** @param {ReleaseNext} next @param {ReleaseChange} c @param {HTMLElement | null} waits */
 function trainNow(next, c, waits) {
   const t = c.train;
   if (!t) return waits ? [waits] : changeNow(next, c);
@@ -252,21 +299,25 @@ function trainNow(next, c, waits) {
 }
 
 /** A waiting ship's early test (#1905): "Testing early · 12/40 files", "Passed early", or why it was dropped. */
+/** @param {{ early?: EarlyTest }} c */
 function earlyNote(c) {
   const e = c.early;
   return e ? [' ', h('span', { class: `early muted early-${e.state}`, title: e.text }, e.brief)] : [];
 }
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
+/** @param {ReleaseNext} next @param {ReleaseChange} c */
 function changeNow(next, c) {
   return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage)), ' ', h('span', { class: 'muted' }, nowWords(c, changeEta(next, c)))];
 }
 
 // ---------- the page ----------
 
+/** @type {HTMLElement | null} */
 let pageEl = null;
 
 /** Open the Releases tab on `scope` ('all' or a scheme's id), with change `hl` (a ticket id) highlighted; redraws an open one. */
+/** @param {string | number} scope @param {number | null} [hl] @param {string | null} [target] */
 export function setReleasesPage(scope, hl = null, target = null) {
   if (page?.scope === scope && page?.hl === hl && page?.target === target) return;
   page = { scope, hl, target };
@@ -283,20 +334,21 @@ export function releasesPage() {
 
 /** The page's ×: back where it was opened from. */
 export function closeReleases() {
-  location.hash = returnTo ?? `#/p/${view.projectId}`;
+  location.hash = returnTo ?? `#/p/${cur().projectId}`;
   returnTo = null;
 }
 
 /** The schemes All covers, in the Schemes list's order, then any it doesn't list. */
 export function allSchemes() {
   const order = (view?.projects ?? []).map((p) => p.id);
+  /** @param {number} id */
   const rank = (id) => (order.includes(id) ? order.indexOf(id) : order.length + id);
   return [...schemes.keys()].filter((id) => member.has(id)).sort((a, b) => rank(a) - rank(b));
 }
 
 function fillPage() {
   const scope = page?.scope ?? 'all';
-  pageEl.replaceChildren(...(!loaded ? [loadingLine('Loading releases…')] : scope === 'all' ? allView(allSchemes()) : schemeCards(scope, true)));
+  /** @type {HTMLElement} */ (pageEl).replaceChildren(...(!loaded ? [loadingLine('Loading releases…')] : scope === 'all' ? allView(allSchemes()) : schemeCards(/** @type {number} */ (scope), true)));
   bringIntoView(page);
 }
 
@@ -305,8 +357,9 @@ function fillPage() {
  * back someone who scrolled away. A page just built isn't in the document yet, and its opening scrolls to the top after it is, so
  * that one waits a frame; one that isn't there yet (the releases still loading) tries again when it draws.
  */
+/** @param {PageWant | null} want @param {number} [frames] */
 function bringIntoView(want, frames = 120) {
-  if (want?.shown || (want?.hl == null && want?.target == null)) return;
+  if (!want || want.shown || (want.hl == null && want.target == null)) return;
   if (!pageEl?.isConnected) {
     if (frames > 0) requestAnimationFrame(() => page === want && bringIntoView(want, frames - 1));
     return;
@@ -322,12 +375,14 @@ function bringIntoView(want, frames = 120) {
  * (a refused ship, a deploy that didn't go live) and a failed ship try of the last 12 hours that hasn't shipped, been tried
  * again or closed. One line each; CI's own reds and a still ship line come from /api/ci.
  */
+/** @param {number} id @param {number} [now] */
 export function releaseTrouble(id, now = Date.now()) {
+  /** @type {string[]} */
   const out = [];
   for (const tv of schemes.get(id)?.targets ?? []) {
     const n = tv.next;
     if (n && [n, ...n.changes].some((p) => stuckFor(p, now))) out.push(`${tv.target.name} is stuck: ${n.waitingOn ?? stageName(n.stage)}`);
-    const open = tv.recent.filter((r) => ['fixing', 'idle'].includes(r.failure?.next.kind) && now - (r.started ?? 0) < 12 * 3_600_000).length;
+    const open = tv.recent.filter((r) => ['fixing', 'idle'].includes(/** @type {string} */ (r.failure?.next.kind)) && now - (r.started ?? 0) < 12 * 3_600_000).length;
     if (open) out.push(`${tv.target.name}: ${open} failed ship tr${open === 1 ? 'y' : 'ies'} in 12 h, not shipped yet`);
   }
   return out;
@@ -345,6 +400,7 @@ export const serverScheme = () => [...schemes].find(([, s]) => s.targets.some((t
 const CITADEL_TARGET_ID = 'citadel-server';
 
 /** A scheme's cards (take D): one per target, then its test copies of no target. */
+/** @param {number} projectId @param {boolean} alone */
 function schemeCards(projectId, alone) {
   const s = schemes.get(projectId);
   if (!s) return alone ? [claimsBlock(projectId, redraw), h('p', { class: 'muted rel-empty' }, `Nothing ships from ${schemeName(projectId)} yet: no release, preview or test copy.`)] : [claimsBlock(projectId, redraw)];
@@ -356,6 +412,7 @@ function schemeCards(projectId, alone) {
   ];
 }
 
+/** @param {number} projectId @param {TargetView} tv @param {boolean} alone */
 function targetCard(projectId, tv, alone) {
   const n = tv.next,
     cur = tv.current,
@@ -378,8 +435,10 @@ function targetCard(projectId, tv, alone) {
 }
 
 /** What happened so far in the ship under way (#1368): its land.sh lines, oldest first, each #N a link to its minion. */
+/** @param {ReleaseNext} n */
 function newsList(n) {
   if (!n.news?.length) return '';
+  /** @param {{ text: string, refs?: Record<string, number> }} x */
   const words = (x) => x.text.split(/(#\d+)/).map((t) => (x.refs?.[t] != null ? h('a', { href: `#/t/${x.refs[t]}` }, t) : t));
   return h(
     'ul',
@@ -396,13 +455,15 @@ const openPrevious = new Set();
  * Previous releases could have links to old builds and how long the build took to deploy"): each one's number (linked
  * to its file or site while one still exists), when it went live, how long it took and the minions it carried.
  */
+/** @param {number} projectId @param {TargetView} tv */
 function previousList(projectId, tv) {
   if (!tv.recent.length) return '';
   const key = `${projectId}/${tv.target.id}`;
+  /** @param {Release} r */
   const label = (r) => (r.number != null ? releaseName(r) : r.outcome === 'signed' ? 'Signed build' : r.outcome === 'live' ? 'Earlier release' : 'Failed try');
   return h(
     'details',
-    { class: 'rel-prev', open: openPrevious.has(key), ontoggle: (e) => (e.target.open ? openPrevious.add(key) : openPrevious.delete(key)) },
+    { class: 'rel-prev', open: openPrevious.has(key), ontoggle: (/** @type {Event} */ e) => (/** @type {HTMLDetailsElement} */ (e.target).open ? openPrevious.add(key) : openPrevious.delete(key)) },
     h('summary', {}, `Previous releases (${tv.recent.length})`),
     h(
       'ul',
@@ -435,6 +496,7 @@ function previousList(projectId, tv) {
 }
 
 /** A failed try's kind in a few words (#1375): "3 tests failed", "merge conflict in 2 files", "smoke check". */
+/** @param {{ kind: string, names: string[], more: number }} f */
 function failText(f) {
   const n = f.names.length + f.more,
     s = n === 1 ? '' : 's';
@@ -444,6 +506,7 @@ function failText(f) {
 }
 
 /** The failing tests or conflicted files (the first few, "+N more") and the CI run, or nothing when it has neither. */
+/** @param {{ names: string[], more: number, ci: string | null }} f */
 function failureNames(f) {
   const names = [f.names.join(', '), f.more ? `+${f.more} more` : ''].filter(Boolean).join(' ');
   const ci = f.ci ? h('a', { href: f.ci, target: '_blank', rel: 'noopener' }, 'CI run') : '';
@@ -451,8 +514,9 @@ function failureNames(f) {
 }
 
 /** Under a failed try's row: what failed, then what happened since (its minion fixing it, back in line, shipped). */
+/** @param {number} projectId @param {Release} r */
 function failureLines(projectId, r) {
-  const f = r.failure,
+  const f = /** @type {NonNullable<Release['failure']>} */ (r.failure),
     nx = f.next,
     c = r.changes[0];
   const who = c ? h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`) : 'its minion';
@@ -475,6 +539,7 @@ function failureLines(projectId, r) {
 }
 
 /** A ship back in line after a failed try: that try in one line (#1375), "last try: 3 tests failed, 7:18 PM PST · CI run". */
+/** @param {{ lastTry?: LastTry } | null | undefined} x */
 function lastTryLine(x) {
   const l = x?.lastTry;
   if (!l) return '';
@@ -487,6 +552,7 @@ function lastTryLine(x) {
 const deploying = new Set();
 
 /** A deploy pressed here shows as one until the server's own view stops offering it (it's running, or done). */
+/** @param {SchemeReleases} s */
 function settleDeploys(s) {
   for (const tv of s.targets) {
     if (!tv.deploy?.can) deploying.delete(`${s.projectId}/${tv.target.id}`);
@@ -495,6 +561,7 @@ function settleDeploys(s) {
 }
 
 /** A target's deploy as last drawn: events replace the objects, so actions look it up again rather than keep one. */
+/** @param {number} projectId @param {string} id */
 const deployOf = (projectId, id) => schemes.get(projectId)?.targets.find((t) => t.target.id === id)?.deploy;
 
 /**
@@ -502,6 +569,7 @@ const deployOf = (projectId, id) => schemes.get(projectId)?.targets.find((t) => 
  * The button shows while a next release waits and no deploy runs; pressing it shows "Deploying…" at once and sends
  * behind it, and a refusal puts the button back with a toast and Retry. Busy shows on this card alone.
  */
+/** @param {number} projectId @param {TargetView} tv */
 function deployBar(projectId, tv) {
   const d = tv.deploy;
   if (!d) return '';
@@ -521,11 +589,13 @@ function deployBar(projectId, tv) {
       },
       label: `deploy ${schemeName(projectId)} ${tv.target.name}`,
     });
+  /** @param {boolean} on */
   const show = (on) => {
     const cur = deployOf(projectId, tv.target.id);
     if (cur) cur.auto = on;
     redraw();
   };
+  /** @param {boolean} on */
   const flip = (on) =>
     optimistic({
       sets: `auto-deploy:${key}`,
@@ -539,7 +609,7 @@ function deployBar(projectId, tv) {
     'div',
     { class: 'rel-deploy' },
     busy ? h('span', { class: 'rel-deploying', role: 'status' }, 'Deploying…') : d.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Deploy the next release now' }, 'Deploy') : '',
-    h('label', { class: 'rel-auto', title: 'Deploys by itself right after main moves, or once the ships still coming have gone (10 minutes at most)' }, h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
+    h('label', { class: 'rel-auto', title: 'Deploys by itself right after main moves, or once the ships still coming have gone (10 minutes at most)' }, h('input', { type: 'checkbox', checked: d.auto, onchange: (/** @type {Event} */ e) => flip(/** @type {HTMLInputElement} */ (e.target).checked) }), 'Auto-deploy'),
     d.due && !busy ? h('span', { class: 'muted' }, d.more ? 'ships in line: deploys by itself, at the latest ' : 'deploys by itself ', etaText(d.due)) : '',
   );
 }
@@ -553,6 +623,7 @@ const rollingBack = new Set();
  * green behind it; a refusal puts the button back with a toast and Retry. Once there, the target stays pinned until main
  * has a newer green commit ("Hold until the fix"), and the line says so; a roll back that didn't go live says why.
  */
+/** @param {number} projectId @param {TargetView} tv */
 function rollbackBar(projectId, tv) {
   const rb = tv.rollback;
   if (!rb) return '';
@@ -575,11 +646,12 @@ function rollbackBar(projectId, tv) {
   const busy = rb.running || (rollingBack.has(key) && rb.can);
   const pin = rb.pin;
   // A desktop app's feed names another build (2RE2): the roll back's is on its way, was refused, or a by-hand one went out over it.
+  const held = /** @type {Pin} */ (pin); // pinElsewhere is false without a pin
   const elsewhere =
     pinElsewhere(tv) &&
     (tv.next?.stage === 'publish' && !tv.next.waitingOn
-      ? h('span', { class: 'muted' }, `Rolling back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: PCs get the current release above until the desktop feed names its build.`)
-      : h('span', { class: 'waits' }, `Set back to ${pin.sha.slice(0, 7)} by ${pin.by} ${ago(pin.at)}, but the desktop feed names another build: PCs get the current release above.`));
+      ? h('span', { class: 'muted' }, `Rolling back to ${held.sha.slice(0, 7)} by ${held.by} ${ago(held.at)}: PCs get the current release above until the desktop feed names its build.`)
+      : h('span', { class: 'waits' }, `Set back to ${held.sha.slice(0, 7)} by ${held.by} ${ago(held.at)}, but the desktop feed names another build: PCs get the current release above.`));
   const line = busy
     ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
     : elsewhere
@@ -605,6 +677,7 @@ function rollbackBar(projectId, tv) {
 }
 
 /** What the roll back button does on each kind of card (ADR 0012): an APK goes out as the next version, a CI package hands out an existing build. */
+/** @param {string} kind @param {string} to */
 function rollbackTitle(kind, to) {
   const hold = 'and hold it there until a newer one passes';
   if (kind === 'apk') return `Sign ${to}, the newest commit on main that passed the full suite, as the next Android build and publish it, so phones update to it, ${hold}`;
@@ -620,6 +693,7 @@ const makingKeys = new Set();
  * key on the server, which never sends it or its password back. "Making the key…" shows at once; a refusal puts the
  * button back with a toast and Retry.
  */
+/** @param {number} projectId @param {TargetView} tv */
 function keyBar(projectId, tv) {
   const app = tv.releaseKey;
   if (!app) return '';
@@ -650,25 +724,32 @@ function keyBar(projectId, tv) {
 }
 
 /** A target's changes in the order its list shows them: the ones under way (-1), furthest along first, then the land line in its order. */
+/**
+ * @param {Pick<TargetView, 'next' | 'line'>} tv
+ * @returns {ChangeRow[]}
+ */
 function changeRows(tv) {
   const changes = tv.next?.changes ?? [];
+  /** @param {number | null | undefined} id */
   const at = (id) => tv.line.findIndex((e) => e.ticketId === id);
   // A rider goes right behind its front, whatever waiters sit between them in the line (the server's order for the release).
   const frontAt = at(changes.find((c) => c.train?.role === 'front')?.ticketId);
+  /** @param {ReleaseChange} c @param {number} k */
   const place = (c, k) => (c.train?.role === 'rider' && frontAt >= 0 ? frontAt + (k + 1) / (changes.length + 1) : at(c.ticketId));
   return [...changes.map((c, k) => ({ c, i: at(c.ticketId), key: place(c, k) })), ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i, key: i }]))].sort((a, b) => a.key - b.key); // stable: the changes past the line (-1) keep their furthest-along-first order
 }
 
 /** Each minion's place in that order across the targets (the minions list's Deploying section sorts by it, #1003): ticketId → index. */
 export function releaseOrder() {
+  /** @type {Map<number, number>} */
   const order = new Map();
   for (const s of schemes.values())
     for (const tv of s.targets)
       for (const { c, e } of changeRows(tv)) {
-        const id = (c ?? e).ticketId;
+        const id = (c ?? /** @type {LineEntry} */ (e)).ticketId;
         if (id != null && !order.has(id)) order.set(id, order.size);
       }
-  return (t) => order.get(t.id);
+  return (/** @type {Ticket} */ t) => order.get(t.id);
 }
 
 /**
@@ -679,6 +760,7 @@ export function releaseOrder() {
  * coloured, the rest shaded in turn; a place in the line then just says "waiting", and each change offers what it can
  * be tried on (tryIt).
  */
+/** @param {number} projectId @param {TargetView} tv */
 function changeList(projectId, tv) {
   const n = tv.next,
     hl = page?.hl;
@@ -690,9 +772,9 @@ function changeList(projectId, tv) {
   const waiting = () => h('b', { class: 'waits' }, 'waiting');
   // Only the changes in the release under way sit under its name; the ones past it say what they wait behind (no number).
   const firstLater = rows.findIndex((r) => r.c?.later);
-  const inLine = ['line', 'land'].includes(rows[firstLater]?.c?.stage) && !rows[firstLater]?.c?.train ? ': in line' : '';
+  const inLine = ['line', 'land'].includes(/** @type {string} */ (rows[firstLater]?.c?.stage)) && !rows[firstLater]?.c?.train ? ': in line' : '';
   const next = rows[firstLater]?.c?.train;
-  const after = firstLater > 0 ? `${next ? 'Releasing next, after' : 'After'} ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
+  const after = firstLater > 0 ? `${next ? 'Releasing next, after' : 'After'} ${/** @type {ReleaseNext} */ (n).number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
   const now = rows[0]?.c?.train?.role === 'front' ? `Releasing now: train of ${rows[0].c.train.size}` : '';
   const waiters = rows.filter((r) => r.wait);
   const list = h(
@@ -705,17 +787,22 @@ function changeList(projectId, tv) {
   if (waiters.length > 1) {
     dragReorder(list, {
       items: () => [...list.querySelectorAll(':scope > li[data-seq]')],
-      onDrop: (from, to) => {
-        const seqs = [...list.querySelectorAll(':scope > li[data-seq]')].map((li) => Number(li.dataset.seq));
+      onDrop: (/** @type {number} */ from, /** @type {number} */ to) => {
+        const seqs = [...list.querySelectorAll(':scope > li[data-seq]')].map((li) => Number(/** @type {HTMLElement} */ (li).dataset.seq));
         reorderLine(projectId, line, moved(seqs, from, to), seqs[from]);
       },
     });
   }
   return list;
   /** A waiter that can't move says why in its row (#1007), when there is a line to move in. */
+  /** @param {string | null | undefined} why */
   function stuck(why) {
     return why && line.filter((x) => !x.holds).length > 1 ? h('span', { class: 'stuck muted' }, why) : '';
   }
+  /**
+   * @param {ChangeRow} r
+   * @param {number} i
+   */
   function row({ c, e, wait, why, placed }, i) {
     const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}${wait && waiters.length > 1 ? ' movable' : ''}`;
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
@@ -733,7 +820,9 @@ function changeList(projectId, tv) {
           h(
             'span',
             { class: 'where' },
-            ...(i === 0 && (!c.train || c.train.role === 'front') ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))] : [stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)]),
+            ...(i === 0 && (!c.train || c.train.role === 'front')
+              ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))]
+              : [stageTrack(/** @type {ReleaseNext} */ (n).stages, c, { mini: true }), ...trainNow(/** @type {ReleaseNext} */ (n), c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)]),
           ),
           ...(i > 0 && c.train?.role === 'waiting' && c.early ? [h('span', { class: 'early-line' }, ...earlyNote(c).slice(1))] : []),
           lastTryLine(c),
@@ -744,6 +833,7 @@ function changeList(projectId, tv) {
         ),
       );
     }
+    const entry = /** @type {LineEntry} */ (e);
     return h(
       'li',
       { class: cls, ...seq },
@@ -751,15 +841,15 @@ function changeList(projectId, tv) {
       h(
         'div',
         { class: 'body' },
-        h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
+        h('span', { class: 'what' }, entry.ticketId != null ? h('a', { href: `#/t/${entry.ticketId}` }, entry.name) : entry.name),
         h(
           'span',
           { class: 'where' },
-          n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
-          e.holds ? [h('b', { class: 'work' }, e.label ?? stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')] : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)],
+          n ? stageTrack(n.stages, { stage: entry.stage, since: entry.since, usual: null, waitingOn: entry.holds ? null : entry.place }, { mini: true }) : '',
+          entry.holds ? [h('b', { class: 'work' }, entry.label ?? stageName(entry.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')] : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, entry.place)],
         ),
-        frozenLine(e),
-        lastTryLine(e),
+        frozenLine(entry),
+        lastTryLine(entry),
         landNext(wait),
         stuck(why),
         placedNote(placed),
@@ -767,6 +857,7 @@ function changeList(projectId, tv) {
     );
   }
   /** A frozen ship or check (#1881): it isn't waiting, its cgroup is frozen; since when Citadel saw it, and the command that thaws it. */
+  /** @param {LineEntry} e */
   function frozenLine(e) {
     if (!e.frozen) return '';
     const at = pacificStamp(e.frozen.since);
@@ -779,24 +870,32 @@ function changeList(projectId, tv) {
     );
   }
   /** Who placed a waiter (#1358): a person's drag pins it; a Taskmaster's move says why it went there. */
+  /** @param {Placed | null | undefined} p */
   function placedNote(p) {
     if (!p) return '';
     const at = new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     return h('span', { class: 'placed muted', title: p.taskmaster ? `Moved by ${p.by}` : `${p.by} placed it, so a Taskmaster won't move it or pass it` }, p.taskmaster ? `${p.by}: ${p.reason ?? 'moved it'}` : `Placed by ${p.by}, ${at}: stays put until it ships`);
   }
   /** Land next: the waiter goes to the front of the waiting landings (for a phone or a keyboard, where dragging is clumsy). */
+  /** @param {LineEntry | null | undefined} wait */
   function landNext(wait) {
     if (!wait || wait === line.find((e) => !e.holds)) return '';
-    const seqs = waiters.map((r) => r.wait.seq);
+    const seqs = waiters.map((r) => /** @type {LineEntry} */ (r.wait).seq);
     return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the changes waiting to ship: it ships once the one shipping now is done', onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Ship next');
   }
 }
 
 /** projectId → the waiting landings' line tickets in the order last set here, shown until the server's line says it (#1002). */
+/** @type {Map<number, number[]>} */
 const lineOrders = new Map();
 let lineDrops = 0;
 
 /** The line with its waiters in the order set here, if that's still on its way; the holder stays in front. */
+/**
+ * @param {number} projectId
+ * @param {LineEntry[]} line
+ * @returns {LineEntry[]}
+ */
 function lineInOrder(projectId, line) {
   const order = lineOrders.get(projectId);
   if (!order) return line;
@@ -807,16 +906,18 @@ function lineInOrder(projectId, line) {
     lineOrders.delete(projectId);
     return line;
   }
-  return [...line.filter((e) => e.holds), ...inOrder(waiting, (e) => e.seq, keys)];
+  return [...line.filter((e) => e.holds), ...inOrder(waiting, (/** @type {LineEntry} */ e) => e.seq, keys)];
 }
 
 /**
  * Set the waiting landings' order (#1002): the rows move at once, and the server's land line (tools/deploy-queue.sh's
  * queue/.order) follows; a refusal puts the rows back with a toast and Retry. `moved` is the row dragged or sent next.
  */
+/** @param {number} projectId @param {LineEntry[]} line @param {number[]} seqs @param {number} movedSeq */
 function reorderLine(projectId, line, seqs, movedSeq) {
   const drop = ++lineDrops;
   const name = line.find((e) => e.seq === movedSeq)?.name ?? 'the change';
+  /** @type {number[] | undefined} */
   let before;
   optimistic({
     sets: `land-order:${projectId}`,
@@ -853,6 +954,7 @@ const requested = new Set();
  * Request preview: it shows "Starting preview…" at once, POSTs start_preview's route behind it, and turns into the
  * link once the server lists the preview. Other kinds have nothing per change to start yet (#638's notes).
  */
+/** @param {number} projectId @param {TargetView} tv @param {ReleaseChange} c */
 function tryIt(projectId, tv, c) {
   const copies = [...tv.testCopies, ...(schemes.get(projectId)?.testCopies ?? [])].filter((x) => x.ticketId === c.ticketId);
   const preview = copies.find((x) => x.kind === 'preview');
@@ -890,6 +992,7 @@ function tryIt(projectId, tv, c) {
 }
 
 /** Each kind of test copy: where it opens, what it's called and the line beside it. Previews open in a new tab (a stopped one starts again when opened); a download saves. */
+/** @param {TestCopy} c */
 function copyLink(c) {
   const state = c.running ? (c.commit ? `running ${c.commit.slice(0, 7)}` : 'running') : 'stopped';
   const made = [c.commit?.slice(0, 7), c.at ? ago(c.at) : ''].filter(Boolean).join(' · ');
@@ -911,6 +1014,7 @@ function copyLink(c) {
   }
 }
 
+/** @param {TestCopy[]} copies */
 function copyList(copies) {
   return h(
     'ul',
@@ -924,12 +1028,15 @@ function copyList(copies) {
 
 // ---------- All (take E) ----------
 
+/** @param {number[]} ids */
 function allView(ids) {
   if (!ids.length) return [h('p', { class: 'muted rel-empty' }, "Nothing ships yet from the schemes you're a member of.")];
-  const rows = ids.flatMap((id) => schemes.get(id).targets.map((tv) => ({ id, tv })));
+  const rows = ids.flatMap((id) => /** @type {SchemeReleases} */ (schemes.get(id)).targets.map((tv) => ({ id, tv })));
+  /** @param {number} id @param {ReleaseNext} next @param {ReleaseChange} c */
   const card = (id, next, c) =>
     h('a', { class: `rel-card-sm${c.ticketId === page?.hl ? ' hl' : ''}`, href: minionHref(id, c) }, h('span', { class: 'what' }, h('span', { class: 'num' }, `#${c.number ?? c.ticketId}`), ' ', c.title), stageTrack(next.stages, c, { mini: true }), h('span', { class: 'where' }, ...changeNow(next, c)));
   // The newest live release: its number (linked to the release itself), its age and the minions it carried.
+  /** @param {number} id @param {Release} r */
   const lastCard = (id, r) =>
     h(
       'div',
@@ -952,8 +1059,9 @@ function allView(ids) {
       ['Target', ...COLUMNS].map((c) => h('span', { role: 'columnheader' }, c)),
     ),
     rows.map(({ id, tv }) => {
+      /** @type {HTMLElement[][]} */
       const cells = COLUMNS.map(() => []);
-      for (const c of tv.next?.changes ?? []) cells[columnOf(tv.next.stages, c)].push(card(id, tv.next, c));
+      for (const c of tv.next?.changes ?? []) cells[columnOf(/** @type {ReleaseNext} */ (tv.next).stages, c)].push(card(id, /** @type {ReleaseNext} */ (tv.next), c));
       if (tv.current) cells[3].push(lastCard(id, tv.current));
       return tint(
         h(
@@ -964,8 +1072,8 @@ function allView(ids) {
             {
               class: 'rel-target',
               role: 'rowheader',
-              onclick: (e) => {
-                if (!e.target.closest('a')) {
+              onclick: (/** @type {Event} */ e) => {
+                if (!(/** @type {HTMLElement} */ (e.target).closest('a'))) {
                   opening();
                   location.hash = pageHref(id, null, tv.target.id);
                 }
@@ -980,7 +1088,7 @@ function allView(ids) {
     }),
   );
   const copies = ids.flatMap((id) => {
-    const s = schemes.get(id);
+    const s = /** @type {SchemeReleases} */ (schemes.get(id));
     return [...s.targets.flatMap((tv) => tv.testCopies), ...s.testCopies].map((c) => ({ id, c }));
   });
   return [
@@ -995,7 +1103,7 @@ function allView(ids) {
             h(
               'ul',
               { class: 'rel-list' },
-              copies.map(({ id, c }) => h('li', {}, copyList([c]).firstChild.firstChild, h('span', { class: 'muted' }, schemeName(id)))),
+              copies.map(({ id, c }) => h('li', {}, /** @type {Node} */ (copyList([c]).firstChild).firstChild, h('span', { class: 'muted' }, schemeName(id)))),
             ),
           ]
         : '',
@@ -1010,20 +1118,22 @@ function allView(ids) {
 
 /** Each icon's colour for its scheme's All grid row, keyed by icon URL (it carries the icon's version, so a new icon is read again):
  *  its coloured pixels, averaged; grey for an icon without colour; null while reading or unreadable. */
+/** @type {Map<string, string | null>} */
 const tints = new Map();
 
 /** Give `row` its scheme's tint (Cara, 2026-11-12: "Tint per scheme"), reading each icon once. */
+/** @param {HTMLElement} row @param {number} id */
 function tint(row, id) {
   const src = schemeOf(id) && iconSrc(/** @type {import('./types.js').Scheme} */ (schemeOf(id)));
   if (!src) return row;
-  if (tints.get(src)) row.style.setProperty('--tint', tints.get(src));
+  if (tints.get(src)) row.style.setProperty('--tint', /** @type {string} */ (tints.get(src)));
   if (tints.has(src)) return row;
   tints.set(src, null);
   const img = new Image();
   img.onerror = () => tints.delete(src); // a failed load is tried again on the next render
   img.onload = () => {
     try {
-      const g = Object.assign(document.createElement('canvas'), { width: 24, height: 24 }).getContext('2d');
+      const g = /** @type {CanvasRenderingContext2D} */ (Object.assign(document.createElement('canvas'), { width: 24, height: 24 }).getContext('2d'));
       g.drawImage(img, 0, 0, 24, 24);
       const px = g.getImageData(0, 0, 24, 24).data;
       const sum = [0, 0, 0];
@@ -1035,7 +1145,7 @@ function tint(row, id) {
         n++;
       }
       tints.set(src, n ? `rgb(${sum.map((v) => Math.round(v / n)).join(' ')})` : 'var(--muted)');
-      for (const el of document.querySelectorAll(`.rel-grid-row[data-scheme="${CSS.escape(String(id))}"]`)) el.style.setProperty('--tint', tints.get(src));
+      for (const el of document.querySelectorAll(`.rel-grid-row[data-scheme="${CSS.escape(String(id))}"]`)) /** @type {HTMLElement} */ (el).style.setProperty('--tint', /** @type {string} */ (tints.get(src)));
     } catch {
       /* an icon the canvas can't read leaves its row plain */
     }
@@ -1047,31 +1157,33 @@ function tint(row, id) {
 // ---------- the chip beside the PR info (take F) ----------
 
 /** The chip for minion `t`: its change's mini track, stage and wait or time left, opening its scheme's page at it; or "merged into Build N". */
+/** @param {Ticket | null | undefined} t */
 export function releaseChip(t) {
   if (!t || !loaded) return null;
   for (const tv of schemes.get(t.project_id)?.targets ?? []) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
     if (c) {
+      const next = /** @type {ReleaseNext} */ (tv.next); // c came out of it
       // A change past the build under way isn't in it, so it carries no number (#764).
-      const n = c.later ? null : tv.next.number;
+      const n = c.later ? null : next.number;
       // Only the number opens the release itself (its test copy); the rest of the chip opens the scheme's page at this change.
       return h(
         'span',
         { class: 'rel-chip' },
-        n != null ? versionLink(tv.next, 'rel-ver', true) : '',
+        n != null ? versionLink(next, 'rel-ver', true) : '',
         h(
           'a',
           {
             class: 'rel-chip-open',
             href: pageHref(t.project_id, t.id),
-            onclick: (e) => {
+            onclick: (/** @type {Event} */ e) => {
               e.stopPropagation();
               opening();
             },
-            'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release`,
+            'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release`,
           },
-          stageTrack(tv.next.stages, c, { mini: true }),
-          ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? earlyNote(c) : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(tv.next, c)),
+          stageTrack(next.stages, c, { mini: true }),
+          ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? earlyNote(c) : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(next, c)),
           h('span', { 'aria-hidden': 'true' }, '›'),
         ),
       );
@@ -1083,7 +1195,7 @@ export function releaseChip(t) {
       {
         class: 'rel-chip',
         href: pageHref(t.project_id),
-        onclick: (e) => {
+        onclick: (/** @type {Event} */ e) => {
           e.stopPropagation();
           opening();
         },
@@ -1098,17 +1210,19 @@ export function releaseChip(t) {
 // ---------- minion rows ----------
 
 /** The release minion `t`'s change is on its way in (#764): its name ("Build 997", "Next build"), target and stage; null when none. */
+/** @param {Ticket | null | undefined} t */
 export function pendingRelease(t) {
   if (!t || !loaded) return null;
   for (const tv of schemes.get(t.project_id)?.targets ?? []) {
     const c = tv.next?.changes.find((x) => x.ticketId === t.id);
     if (!c || c.idle) continue;
+    const nx = /** @type {ReleaseNext} */ (tv.next); // c came out of it
     // A change past the build under way (`later`) goes out in the one after, which has no number yet.
     const tpl = tv.target.numbering?.name;
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
     // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
     const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
-    return { name: inLine ? (c.train?.label ?? 'In line') : c.later ? next : tv.next.number != null ? releaseName(tv.next) : (tv.next.name ?? next), target: tv.target.name, targetId: tv.target.id, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
+    return { name: inLine ? (c.train?.label ?? 'In line') : c.later ? next : nx.number != null ? releaseName(nx) : (nx.name ?? next), target: tv.target.name, targetId: tv.target.id, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
   }
   return null;
 }
@@ -1116,7 +1230,7 @@ export function pendingRelease(t) {
 /** Each minion's pending release as rows show it, so a releases event redraws the list only when one changed. */
 let rowsKey = '';
 function rowsChanged() {
-  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next.number, tv.next.name, c.later, c.stage, c.waitingOn ?? c.text, stuckFor(c) > 0]))));
+  const key = JSON.stringify([...schemes.values()].flatMap((s) => s.targets.flatMap((tv) => (tv.next?.changes ?? []).map((c) => [c.ticketId, tv.next?.number, tv.next?.name, c.later, c.stage, c.waitingOn ?? c.text, stuckFor(c) > 0]))));
   const changed = key !== rowsKey;
   rowsKey = key;
   return changed;
@@ -1126,9 +1240,10 @@ function rowsChanged() {
 
 if (typeof document !== 'undefined') {
   setInterval(() => {
-    for (const el of document.querySelectorAll('.rel-eta[data-eta]')) {
+    for (const node of document.querySelectorAll('.rel-eta[data-eta]')) {
+      const el = /** @type {HTMLElement} */ (node);
       const [eta, since] = [Number(el.dataset.eta), Number(el.dataset.since) || null];
-      el.textContent = etaWords(eta, el.dataset.suffix, since, !!el.dataset.full);
+      el.textContent = etaWords(eta, /** @type {string} */ (el.dataset.suffix), since, !!el.dataset.full);
       el.title = etaTitle(eta, since);
     }
   }, 1000);

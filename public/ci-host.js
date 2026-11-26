@@ -1,17 +1,27 @@
 // Host load on the CI page (#1060): citadel-heavy's slots and line, the CPU-pressure gate and a week of waits per
 // scheme (src/host-load.ts). Read-only: the slot count is a file, and more slots made every suite slower (Nov 10).
 // Three rows that open, in Citadel's look (#1068): each says its state on its closed line; the detail is inside.
+/** @import { HostLoad, HostWeek, HostLongJob } from './types.js' */
 import { h } from './base.js';
 import { emptyCard, hueRow, meter, pips, schemeHue, schemeTag, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
 import { threadNumberHref } from './threadrefs.js';
 
+/** @param {number} s */
 const span = (s) => (s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`);
+/**
+ * @param {{ since: number }} j
+ * @param {number} now
+ */
 const held = (j, now) => span((now - j.since) / 1000);
+/** @type {Record<string, string>} */
 const WHY = { load: 'free slot, box busy', first: 'a deploy goes first', line: 'in line behind another job' };
+/** @type {Record<string, string>} */
 const KIND = { deploy: 'app deploy', apk: 'APK build', app: 'app step', turn: 'minions' };
+/** @type {Set<string>} */
 const opened = new Set(); // schemes whose parts a click opened in the waits table
 
+/** @param {HostLoad | null | undefined} l */
 export function hostLoadBlock(l) {
   if (!l) return '';
   const busy = l.holders.length,
@@ -37,7 +47,7 @@ export function hostLoadBlock(l) {
   const [line] = settingsRow(
     { key: 'host-line', icon: 'users', hue: waiting ? 'waiting' : 'done', title: 'Waiting for a slot', summary: waiting ? [toneChip('warn', `${waiting} waiting`), `longest ${held(l.waiters[0], l.now)}`] : [toneChip('ok', 'Nobody'), 'a heavy job gets a slot at once'] },
     waiting
-      ? h('div', { class: 'hue-rows' }, ...l.waiters.map((w, i) => hueRow({ hue: 'waiting', lead: i + 1, meta: held(w, l.now) }, schemeTag(w.scheme, w.who), `${w.what} · `, h('span', { class: 'muted' }, WHY[w.reason] ?? 'all slots busy'))))
+      ? h('div', { class: 'hue-rows' }, ...l.waiters.map((w, i) => hueRow({ hue: 'waiting', lead: i + 1, meta: held(w, l.now) }, schemeTag(w.scheme, w.who), `${w.what} · `, h('span', { class: 'muted' }, WHY[/** @type {string} */ (w.reason)] ?? 'all slots busy'))))
       : emptyCard('Nobody in line', `Jobs wait here when all ${l.slots} slots are busy or the box is.`),
   );
 
@@ -59,9 +69,11 @@ export function hostLoadBlock(l) {
   return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'), h('div', { class: 'settings-rows' }, slots, line, holdRow(l), longRow(l), week, minionsRow(l)));
 }
 
+/** @param {{ schemeId?: number; scheme?: string | number; number?: number }} m */
 const minionLink = (m) => h('a', { href: threadNumberHref(m.schemeId ?? m.scheme, m.number) }, `#${m.number}`);
 
 /** What runs from which minion's folders, and what closed minions left that was stopped this week (#1365, src/reaper.ts). */
+/** @param {HostLoad} l */
 function minionsRow(l) {
   const minions = l.minions ?? [],
     reaped = l.reaped ?? [];
@@ -107,11 +119,17 @@ function minionsRow(l) {
 }
 
 // Deploys first (#1902), one Citadel job at a time (#1906): what runs on the CI desktop, what waits and why (src/ci-hold.ts).
+/** @type {Record<string, string>} */
 const RUNS = { ship: 'ship', main: 'main', check: 'own check', early: 'early tests', proof: 'flake proof', heavy: 'heavy job', suite: 'test run' };
+/** A held run, or a long job a ship's hold handed over, as "One job at a time" lists it. */
+/** @typedef {{ since: number; what: string; why: string; phase?: string; who?: string; scheme?: string; number?: number; schemeId?: number; url?: string | null }} HoldItem */
+
+/** @param {HostLoad} l */
 function holdRow(l) {
   if (!l.hold) return '';
   const { off, why, busy, running = [], cap } = l.hold;
   const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? busy ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
+  /** @type {HoldItem[]} */
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
   const waits = runs.filter((r) => r.phase !== 'resumed').length;
   const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : running.length ? toneChip('info', `${running.length} running`) : toneChip('ok', 'Nothing held');
@@ -146,9 +164,13 @@ function holdRow(l) {
 }
 
 // Long jobs (#1363): `citadel-heavy --long` queues them for the scheme's CI at night, from 2am (src/long-jobs.ts).
+/** @param {HostLongJob} j */
 const handedOver = (j) => (j.quiet || j.held) && j.state === 'queued'; // in "One job at a time"
+/** @type {Record<string, string>} */
 const LONG = { queued: 'waits for 2am', dispatched: 'sent to CI, waiting for a runner', running: 'running on CI', done: 'passed' };
+/** @type {Record<string, string>} */
 const LONG_HUE = { queued: 'waiting', dispatched: 'running', running: 'running', done: 'done', failed: 'danger', lost: 'danger' };
+/** @param {HostLoad} l */
 function longRow(l) {
   const jobs = (l.long ?? []).filter((j) => !handedOver(j));
   const running = jobs.filter((j) => j.state === 'running' || j.state === 'dispatched').length,
@@ -177,6 +199,10 @@ function longRow(l) {
 
 /** The shown schemes' rows in the waits table, each with its parts (its minions, each app's builds) under it once opened, built
  * from `opened` on every draw so "Show all" keeps what a click opened. Bars are against the longest wait of the whole `week`. */
+/**
+ * @param {HostWeek[]} shown
+ * @param {HostWeek[]} week
+ */
 function weekRows(shown, week) {
   const max = Math.max(...week.map((w) => w.longestS), 1);
   return shown.flatMap((w) => {
@@ -188,11 +214,13 @@ function weekRows(shown, week) {
             type: 'button',
             class: 'parts-toggle',
             'aria-expanded': String(opened.has(w.scheme)),
+            /** @param {MouseEvent} e */
             onclick: (e) => {
               if (opened.has(w.scheme)) opened.delete(w.scheme);
               else opened.add(w.scheme);
-              const tr = e.currentTarget.closest('tr');
-              e.currentTarget.setAttribute('aria-expanded', String(opened.has(w.scheme)));
+              const btn = /** @type {HTMLElement} */ (e.currentTarget);
+              const tr = /** @type {HTMLTableRowElement} */ (btn.closest('tr'));
+              btn.setAttribute('aria-expanded', String(opened.has(w.scheme)));
               while (tr.nextElementSibling?.classList.contains('sub')) tr.nextElementSibling.remove();
               if (opened.has(w.scheme)) tr.after(...partRows(w, cat));
             },
@@ -205,4 +233,8 @@ function weekRows(shown, week) {
   });
 }
 
-const partRows = (w, cat) => w.parts.map((p) => h('tr', { class: 'sub', 'data-cat': cat }, h('td', { title: p.label }, KIND[p.kind]), h('td', { class: 'num' }, String(p.jobs)), h('td', { class: 'num host-median' }, span(p.medianS)), h('td', {}, span(p.longestS))));
+/**
+ * @param {HostWeek} w
+ * @param {string} cat
+ */
+const partRows = (w, cat) => /** @type {NonNullable<HostWeek['parts']>} */ (w.parts).map((p) => h('tr', { class: 'sub', 'data-cat': cat }, h('td', { title: p.label }, KIND[p.kind]), h('td', { class: 'num' }, String(p.jobs)), h('td', { class: 'num host-median' }, span(p.medianS)), h('td', {}, span(p.longestS))));

@@ -31,7 +31,8 @@ const run = (bin: string, args: string[], input: string | null = null, timeout =
   new Promise<string>((ok) => {
     const child = execFile(bin, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, ...where }, (err, out, errText) => {
       const text = `${out}${errText ? `${out ? '\n' : ''}${errText}` : ''}`.trimEnd();
-      const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : err && !text ? String(err.message) : '';
+      // 124: coreutils timeout stopped it (judge_replay).
+      const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : bin === 'timeout' && err?.code === 124 ? `(stopped after ${args[2]} s)` : err && !text ? String(err.message) : '';
       const all = [text, why].filter(Boolean).join('\n') || '(no output)';
       ok(all.length > MAX_OUTPUT ? `… (earlier output cut)\n${all.slice(-MAX_OUTPUT)}` : all);
     });
@@ -86,5 +87,6 @@ async function judgeReplay(opts: HostCheckOptions, body: Record<string, unknown>
   // Registered judges with a replay have tools/judge-replays/<id>.ts; judge-replay itself refuses one src/judges.ts doesn't register.
   if (!(await exists(join(wt.cwd, 'tools', 'judge-replays', `${id}.ts`)))) throw new HttpError(400, `No replay for a judge ${id} in your worktree: node tools/judge-replay.ts --list names them`);
   const args = [join(wt.cwd, 'tools', 'judge-replay.ts'), id, '--record', '--db', opts.db, '--days', String(days), ...(scheme ? ['--scheme', String(scheme)] : [])];
-  return run(process.execPath, args, null, REPLAY_TIMEOUT, { cwd: wt.cwd, env: wt.env });
+  // coreutils timeout kills the replay's whole process group (its git and gh too); execFile's own timeout would kill only node.
+  return run('timeout', ['-k', '5', String(REPLAY_TIMEOUT / 1000), process.execPath, ...args], null, REPLAY_TIMEOUT + 10_000, { cwd: wt.cwd, env: wt.env });
 }

@@ -214,7 +214,7 @@ conflict() {
   refuse "$3${conflicted:+; conflicted files: $conflicted}.$(number_hint "$conflicted" "$1") $(conflict_fix)"
 }
 
-# <commit title> <command> <patterns...>: run a Regenerate command (above) on the rebased branch and commit what it
+# <commit title> <command> <patterns...>: run a Regenerate command (land.sh's Regenerate comment) on the rebased branch and commit what it
 # changed, if anything. It may change only files the patterns (all the branch declared) name: when it fails or writes
 # elsewhere, the worktree is put back and the land refused. Its fds 6, 7 and 9 (the locks) are closed, so a process it
 # leaves behind can't hold the line.

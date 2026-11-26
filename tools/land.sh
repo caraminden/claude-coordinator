@@ -10,7 +10,7 @@
 # steps 1 and 2 are done again without it.
 # 0. The smoke check (#1012), before it gets in line, so what fails in seconds never holds the line: a trial rebase
 #    (git merge-tree), tools/commit-titles.sh, tools/parse-check.ts, and through tools/citadel-test the always-tests plus the test files the
-#    branch changes. A fail says "smoke: …", logs a smoke line to the retro log and no timing line. See smoke() below.
+#    branch changes. A fail says "smoke: …", logs a smoke line to the retro log and no timing line. See smoke(), tools/land/prepare.sh.
 #    Then, with others in line and the one check runner free, its own check (#1567, tools/own-check.sh): its CI on that
 #    runner before it joins the line, so a ship red on its own goes back to its minion without holding anyone up.
 #    With that runner busy, the light check instead (#1620, tools/light-check.sh): its own and affected test files on
@@ -18,7 +18,7 @@
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 #    Then refuses a branch that removes what a recent landing added without naming it (a stale squash: undo_guard).
-#    Then runs the guard tests on the rebased commit (#1240: guards() below), so a break only the branch and main
+#    Then runs the guard tests on the rebased commit (#1240: guards(), tools/land/guards.sh), so a break only the branch and main
 #    together make is refused in a second or two, before a CI run is spent on it. A ship train's top and each step of
 #    its bisect get the same run (#1479: train_guards, train_bisect).
 # 2. Needs the full suite green on the rebased commit, with main untouched otherwise. Cara's desktop runs it

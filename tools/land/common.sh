@@ -14,11 +14,11 @@ retro_log() (
 ) >/dev/null 2>&1 || true
 
 # Phase times for the timing line (#565): "<name> <epoch seconds> [<the phase a refusal from here on is at>]" lines
-# in $times, a file of this process's own, so the rebased copy (the exec below) keeps them. deploy.sh adds "queued"
+# in $times, a file of this process's own, so the rebased copy (the exec in land.sh) keeps them. deploy.sh adds "queued"
 # (the restart queued or the front end reloaded) and "live" lines to it, and "landed" comes once its deploy went through.
 land_mark() { { echo "$1 $(date +%s) ${2:-}" >>"$times"; } 2>/dev/null || true; }
 
-# One line when the landing ends, however it ends (each EXIT trap below calls it; only the first call finds $times). Best
+# One line when the landing ends, however it ends (each EXIT trap in land.sh calls it; only the first call finds $times). Best
 # effort, like retro_log.
 land_timing() (
   set +eu

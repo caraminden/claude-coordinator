@@ -62,7 +62,7 @@ export function handOffResult(args: Record<string, unknown>, contraptions: strin
 /** The host's read-only checks (#621), for a turn in a container: it has no live database or systemd user bus of its own. */
 export const HOST_CHECK = {
   name: 'host_check',
-  description: `The host's read-only checks, since this turn runs in a container that can't reach them itself: wherever instructions or habits say \`sqlite3 -readonly …/coordinator.db\`, \`journalctl --user\`, \`systemctl --user status\` or \`list-units\`, call this instead. what: "db" runs one SQL statement on ${APP_NAME}'s live database, read-only, with login secrets shown as [hidden] (at most 1,000 rows; it holds every scheme's chat, so only a turn a ${APP_NAME} admin or ${APP_NAME} scheme member asked for may run it); "journal" prints a user unit's journal (unit, lines, since, grep); "status" is \`systemctl --user status <unit>\`; "units" lists user units (unit as a pattern); "judge_replay" runs your worktree's \`node tools/judge-replay.ts <judge> --record\` on the host over the live database (read-only; judge, days, scheme; the same people as db), writes the record into your worktree's test/judge-replays.json and returns its report: use it whenever judge-replay needs the live database, such as after changing a judge's pinned code, then read the hits and commit the file. A turn's chat, tool calls and output are in the events table (ticket_id is the minion's internal id, which read_ticket shows). The live checkout (the code ${APP_NAME} runs) is mounted read-only at its own path, so read it with Read, grep and git as usual.`,
+  description: `The host's read-only checks, since this turn runs in a container that can't reach them itself: wherever instructions or habits say \`sqlite3 -readonly …/coordinator.db\`, \`journalctl --user\`, \`systemctl --user status\` or \`list-units\`, call this instead. what: "db" runs one SQL statement on ${APP_NAME}'s live database, read-only, with login secrets shown as [hidden] (at most 1,000 rows; it holds every scheme's chat, so only a turn a ${APP_NAME} admin or ${APP_NAME} scheme member asked for may run it); "journal" prints a user unit's journal (unit, lines, since, grep); "status" is \`systemctl --user status <unit>\`; "units" lists user units (unit as a pattern); "judge_replay" runs your worktree's \`node tools/judge-replay.ts <judge> --record\` on the host over the live database (read-only; judge, days, scheme; the same people as db), writes the record into your worktree's test/judge-replays.json and returns its report: use it whenever judge-replay needs the live database, such as after changing a judge's pinned code, then read the hits and commit the file. A slow judge's replay can take up to 15 minutes: wait for it. A turn's chat, tool calls and output are in the events table (ticket_id is the minion's internal id, which read_ticket shows). The live checkout (the code ${APP_NAME} runs) is mounted read-only at its own path, so read it with Read, grep and git as usual.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -348,7 +348,10 @@ export async function runShipTool(name: string, args: Record<string, unknown>): 
     case 'host_check': {
       const body: Record<string, unknown> = {};
       for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep', 'judge', 'days', 'scheme'] as const) if (args[k] !== undefined) body[k] = args[k];
-      return (await call<{ output: string }>('POST', '/api/host-check', body)).output;
+      const { output } = await call<{ output?: string }>('POST', '/api/host-check', body);
+      // A slow answer's 200 goes out before the check ends (slowJson), so a restart mid-way leaves a body with no output.
+      if (output === undefined) throw new Error('The check was cut off before it answered (a restart of the server does that): run it again');
+      return output;
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};

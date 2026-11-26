@@ -1,12 +1,17 @@
 // The host_check tool's checks (#621): the database with its secrets masked, and a user unit's journal and status.
 import assert from 'node:assert/strict';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { SECRET } from '../src/db-view.ts';
 import { hostCheck } from '../src/host-check.ts';
+import { slowJson } from '../src/http.ts';
+import { runShipTool } from '../src/mcp-ship.ts';
+import { turnStore } from '../src/pool-context.ts';
 import { judge } from '../src/judges.ts';
 import { judgeHash } from '../tools/judge-replays/pins.ts';
 
@@ -125,4 +130,39 @@ test('judge_replay refuses a bad judge, days or scheme, a judge with no replay, 
     await assert.rejects(hostCheck({ ...opts, worktree }, body), (err: Error & { status: number }) => err.status === 400 && why.test(err.message), JSON.stringify(body));
   }
   await assert.rejects(hostCheck(opts, { what: 'judge_replay', judge: 'container-relief' }), (err: Error & { status: number }) => err.status === 400 && /worktree has none/.test(err.message));
+});
+
+test('judge_replay waits for a slow judge: the flake counter’s 3 days take about 600 s (#2100)', async () => {
+  // A stand-in replay that prints its parent, coreutils `timeout`, whose third argument is the limit it runs under.
+  const slow = join(root, 'slow');
+  mkdirSync(join(slow, 'tools/judge-replays'), { recursive: true });
+  writeFileSync(join(slow, 'tools/judge-replay.ts'), "import { readFileSync } from 'node:fs';\nconsole.log(readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').split('\\0')[3]);\n");
+  writeFileSync(join(slow, 'tools/judge-replays/flake-counter.ts'), '');
+  const out = await hostCheck({ ...opts, worktree: { cwd: slow, env: worktree.env } }, { what: 'judge_replay', judge: 'flake-counter' });
+  assert.ok(Number(out) >= 2 * 3 * 201 * 0.7, `stopped after ${out} s`);
+});
+
+test('a slow answer sends its headers before the work ends, so the caller’s fetch does not give up (#2100)', async (t) => {
+  let finish!: (v: object) => void;
+  const server = createServer((_req, res) => void slowJson(res, new Promise<object>((ok) => (finish = ok)), 10));
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  t.after(() => server.close());
+  const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
+  finish({ output: 'done' });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { output: 'done' });
+});
+
+test('host_check says so when its answer is cut off, as by a restart mid-replay (#2100)', async (t) => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.write(' ', () => res.destroy());
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  t.after(() => server.close());
+  const env = { COORDINATOR_API: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+  await assert.rejects(
+    turnStore.run({ env, cwd: root }, () => runShipTool('host_check', { what: 'judge_replay', judge: 'flake-counter' })),
+    /cut off/,
+  );
 });

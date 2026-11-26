@@ -7,7 +7,9 @@ A minion whose turn runs in a person's container couldn't re-record a judge repl
 is a hash of the branch's pinned judge code, so the branch's code has to run, not the live checkout's.
 
 The host_check tool's `what: "judge_replay"` runs the calling minion's own `tools/judge-replay.ts --record` in its worktree,
-on the host, over the live database, with the environment a land gets (`Runner.hostEnv`). The same people as `db` may run
+on the host, over the live database, with the environment a land gets (`Runner.hostEnv`). It is stopped after 15 minutes
+(#2100: the flake counter's 3 days take about 10); past a minute the answer beats (`slowJson`) so the caller's fetch,
+which gives up after 5 minutes of silence, keeps waiting. The same people as `db` may run
 it (`adminAskRefusal`). On #2074's card Josh picked, 2026-11-25: "Ship it as built", over a Node permission-model sandbox
 (no fence on SQLite writes, and the judges that call git or gh couldn't run) and dropping it.
 

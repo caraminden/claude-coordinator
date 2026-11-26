@@ -24,8 +24,8 @@ const UNIT = /^[\w@.:*-]{1,120}$/;
 const SINCE = /^[\w :+.-]{1,40}$/;
 /** A judge id as src/judges.ts names them (any-nudge, ci-hold). */
 const JUDGE = /^[a-z0-9][a-z0-9-]{0,40}$/;
-/** Under the MCP client's 5 minutes for an answer's headers (undici's headersTimeout). */
-export const REPLAY_TIMEOUT = 240_000;
+/** The flake counter's 3 days take about 600 s (#2075). The answer beats past the MCP server's 5-minute fetch (slowJson). */
+export const REPLAY_TIMEOUT = 900_000;
 
 const run = (bin: string, args: string[], input: string | null = null, timeout = 30_000, where: { cwd?: string; env?: Record<string, string> } = {}) =>
   new Promise<string>((ok) => {

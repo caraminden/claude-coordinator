@@ -168,6 +168,28 @@ export function json(res: ServerResponse, status: number, body: unknown, headers
   send(res, status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers }, JSON.stringify(body));
 }
 
+/**
+ * JSON for work that may outlast a fetch's patience (undici: 5 minutes for the headers, and 5 between pieces of the body):
+ * once it runs past `beatMs`, a 200 goes out with a space every beat, which JSON.parse skips, and the value follows.
+ * Past the first beat the status can't change, so work that fails then cuts the answer off.
+ */
+export async function slowJson(res: ServerResponse, work: Promise<unknown>, beatMs = 60_000) {
+  const beat = setInterval(() => {
+    if (!res.headersSent) res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.write(' ');
+  }, beatMs);
+  try {
+    const value = await work;
+    if (res.headersSent) res.end(JSON.stringify(value));
+    else json(res, 200, value);
+  } catch (err) {
+    if (!res.headersSent) throw err;
+    res.destroy();
+  } finally {
+    clearInterval(beat);
+  }
+}
+
 /** A request's JSON body: always an object, so a route reads its fields and narrows each one it uses. */
 export type JsonBody = Record<string, unknown>;
 

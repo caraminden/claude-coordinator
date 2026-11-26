@@ -44,7 +44,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, overLimit, type BatchRow, 
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { afterAllWrites, buildNumber, HttpError, isRecord, json, type JsonBody, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, isRecord, json, type JsonBody, oneOf, ownWrites, readJson, replyList, slowJson, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { deciding, postPlan } from '../plan-cards.ts';
@@ -1619,7 +1619,11 @@ export const ticketRoutes: Route[] = [
       const { systemctl, journalctl } = app.services.opts;
       const own = body?.what === 'judge_replay' && caller!.kind === 'ticket' && caller!.cwd ? caller! : null;
       const worktree = own ? { cwd: own.cwd!, env: app.runner.hostEnv(own, bearer(req)) } : null;
-      return json(res, 200, { output: await hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl, worktree }, body) });
+      // A slow judge's replay outlasts the MCP server's fetch unless the answer beats (#2100).
+      return slowJson(
+        res,
+        hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl, worktree }, body).then((output) => ({ output })),
+      );
     },
   },
   {

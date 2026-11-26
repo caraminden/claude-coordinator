@@ -251,7 +251,7 @@ try {
         // A slow reader's 503 on a busy box (#2003) means ask again, as the page does, within the turn's own limit.
         if (got.status === 503) await got.body?.cancel();
         else if (!got.ok) fail(`Reading the ${what} answered ${got.status}: ${(await got.text()).slice(0, 300)}`);
-        const t = got.ok ? (await got.json()).ticket : null;
+        const t = got.ok ? ((await got.json()) as { ticket: { status: string; note?: string | null } }).ticket : null;
         if (t && t.status !== 'running' && t.status !== 'new') {
           if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
           const r = JSON.parse(readFileSync(report, 'utf8'));

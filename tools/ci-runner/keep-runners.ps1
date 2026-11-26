@@ -21,8 +21,13 @@
   any, every other runner's slot is held to -SqueezePercent of the whole PC, shared among those running a job; the
   ship runners keep the shared cap alone. It reads the file every 2 seconds; one that names none, or has expired
   (Citadel stopped saying so), gives every slot its normal share back.
-  It holds the jobs open for as long as it runs, and ends when the agent (-AgentPid) does. It never stops, removes or
-  re-registers a runner, and never restarts the PC.
+  Runners awake (Build 7 M6b): Citadel's balancer sends the agent how many runners to keep awake, and the agent writes
+  the folders of the runners to put to sleep to asleep.json beside this script, with an expiry. Each sweep stops the
+  service of each one named there that runs no job, and starts again each one it stopped that is no longer named (or
+  once the file has expired). The ones it stopped are kept in slept.json beside it, so a restarted script wakes them
+  and never starts a runner someone else stopped.
+  It holds the jobs open for as long as it runs, and ends when the agent (-AgentPid) does. It never removes or
+  re-registers a runner, never stops one running a job, and never restarts the PC.
 
   -Prove checks the mechanism on this PC instead, and touches no runner: it makes a job capped at 50% with two slots
   nested in it, one squeezed to 10% of the PC, and starts one CPU-burning process per core in each. It reports
@@ -274,6 +279,74 @@ function Read-Ship {
   } catch { return @() }
 }
 
+$asleepFile = Join-Path $PSScriptRoot 'asleep.json'
+$sleptFile = Join-Path $PSScriptRoot 'slept.json'
+
+# The runner folders Citadel's plan keeps asleep now (M6b), lowercase; none when the file names none or has expired.
+function Read-Asleep {
+  try {
+    $file = Get-Content -LiteralPath $asleepFile -Raw -ErrorAction Stop | ConvertFrom-Json
+    if ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [long]$file.until) { return @() }
+    return @(@($file.dirs) | ForEach-Object { ([string]$_).ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+  } catch { return @() }
+}
+
+# The runner folders this script put to sleep (slept.json), lowercase.
+function Read-Slept {
+  try {
+    return @(@(Get-Content -LiteralPath $sleptFile -Raw -ErrorAction Stop | ConvertFrom-Json) | ForEach-Object { ([string]$_).ToLowerInvariant() } | Where-Object { $_ })
+  } catch { return @() }
+}
+
+# A runner service's folder from its PathName ("C:\actions-runner-x\bin\RunnerService.exe"), lowercase; '' if it isn't one.
+function Get-ServiceDir($service) {
+  if ([string]$service.PathName -match '^"?(.*)\\bin\\RunnerService\.exe') { return $Matches[1].ToLowerInvariant() }
+  return ''
+}
+
+# Puts to sleep each runner service asleep.json names that runs no job ($busy: folder -> $true), and wakes each one
+# it put to sleep that the file no longer names. $services are Win32_Service rows (Name, State, PathName).
+function Set-Asleep($services, $busy) {
+  $asleep = @(Read-Asleep)
+  $slept = New-Object System.Collections.Generic.List[string]
+  foreach ($d in @(Read-Slept)) { if (-not $slept.Contains($d)) { $slept.Add($d) } }
+  $changed = $false
+  foreach ($s in @($services)) {
+    $dir = Get-ServiceDir $s
+    if (-not $dir) { continue }
+    if ($asleep -contains $dir) {
+      if ($s.State -ne 'Running' -or $busy.ContainsKey($dir)) { continue }
+      try {
+        Stop-Service -Name $s.Name -ErrorAction Stop
+        if (-not $slept.Contains($dir)) { $slept.Add($dir) }
+        $changed = $true
+        Write-Host "Put $($s.Name) to sleep: Citadel's plan has no room for it now."
+      } catch {
+        Write-Host "Couldn't put $($s.Name) to sleep: $($_.Exception.Message)"
+      }
+    } elseif ($slept.Contains($dir)) {
+      if ($s.State -eq 'Stopped') {
+        try {
+          Start-Service -Name $s.Name -ErrorAction Stop
+          Write-Host "Woke $($s.Name): Citadel's plan has room for it again."
+        } catch {
+          Write-Host "Couldn't wake $($s.Name): $($_.Exception.Message)"
+          continue
+        }
+      }
+      [void]$slept.Remove($dir)
+      $changed = $true
+    }
+  }
+  # A runner removed since is forgotten.
+  $dirs = @(@($services) | ForEach-Object { Get-ServiceDir $_ })
+  foreach ($d in @($slept)) { if ($dirs -notcontains $d) { [void]$slept.Remove($d); $changed = $true } }
+  if ($changed) {
+    Set-Content -LiteralPath "$sleptFile.new" -Value (ConvertTo-Json -InputObject @($slept) -Compress) -Encoding ascii
+    Move-Item -LiteralPath "$sleptFile.new" -Destination $sleptFile -Force
+  }
+}
+
 # Each slot's cap for the ships named now: none (the shared cap alone) normally; while a ship runs, every other slot
 # held so that together the busy ones use about -SqueezePercent of the PC. A slot outside the shared job (nested in
 # another) gets its share of the PC itself.
@@ -397,12 +470,19 @@ for (;;) {
     }
     $ships = @(Read-Ship)
     Set-SlotRate
+    $busyDirs = @{}
+    foreach ($d in @($seen.Keys)) { if ($seen[$d]) { $busyDirs[$d.ToLowerInvariant()] = $true } }
+    $runnerServices = @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'")
+    Set-Asleep $runnerServices $busyDirs
 
     $now = Get-Date
     # Only just after a boot: a runner stopped later was stopped by someone, or by a removal under way.
     $boot = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime
     if (($now - $boot).TotalMinutes -lt 30) {
+      $asleepNow = @(Read-Asleep)
       foreach ($s in @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%' AND StartMode = 'Auto' AND State = 'Stopped'")) {
+        # Asleep for Citadel's plan, not left stopped by the reboot.
+        if ($asleepNow -contains (Get-ServiceDir $s)) { continue }
         if ($lastStart.ContainsKey($s.Name) -and ($now - $lastStart[$s.Name]).TotalMinutes -lt 5) { continue }
         $lastStart[$s.Name] = $now
         try {

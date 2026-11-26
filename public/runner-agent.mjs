@@ -300,6 +300,8 @@ export class Sampler {
   /** One sample, or null on the first look of the CPU clock (there is nothing to compare with yet). */
   async take() {
     const { procs, ...rest } = await this.platform();
+    // Which runners are up and which run a job, for RunnerWake on Windows (where only a sample can say).
+    this.lastProcs = procs;
     this.count++;
     const at = this.now();
     const times = this.times();
@@ -498,6 +500,205 @@ export class LinuxSqueeze {
   }
 }
 
+// ---- Runners awake (Build 7 M6b; Josh, 2026-11-25: "if there is CI to run, we use less workers, or more workers") ----
+// Citadel's balancer splits the PC's threads among its ship, CI, heavy jobs and minion turns, and sends the agent how
+// many CI runners to keep awake, every 10 seconds: { plan: { runners, queued } }. The rest sleep (their service stopped),
+// so GitHub hands a job to a PC with room. A ship's runners and a runner running a job are never stopped; a plan that
+// stops coming wakes every runner it put to sleep after PLAN_HOLD_MS, so a Citadel that went away never leaves CI asleep.
+// While a plan is held the ship squeeze above is off: the plan holds the ship's threads first. A Citadel from before
+// sends no plan, and the squeeze works as it did.
+export const PLAN_HOLD_MS = 2 * 60_000;
+
+/** Citadel's plan, checked: the runners to keep awake (a whole number) and CI jobs waiting by repo; null if it isn't one. */
+export function cleanPlan(raw) {
+  const n = raw?.runners;
+  if (!Number.isInteger(n) || n < 0 || n > 1000) return null;
+  const queued = {};
+  if (raw.queued && typeof raw.queued === 'object' && !Array.isArray(raw.queued)) for (const [repo, count] of Object.entries(raw.queued).slice(0, 200)) if (repo.length <= 200 && Number.isInteger(count) && count > 0) queued[repo.toLowerCase()] = Math.min(count, 1000);
+  return { runners: n, queued };
+}
+
+/**
+ * Which runners stay awake: { key, repo, name, busy, ship, awake } each, `awake` meaning up now. A ship's runners stay up
+ * outside the count (the plan holds their threads apart); a busy one counts and is never stopped. The rest of the count
+ * goes to idle runners, a repo's queued jobs first (one runner each), then one repo at a time in turn, each repo's
+ * runners already up before ones asleep, so a steady plan moves nothing.
+ */
+export function pickAwake(runners, plan) {
+  const keep = new Set(runners.filter((r) => r.ship || r.busy).map((r) => r.key));
+  let left = Math.max(0, plan.runners - runners.filter((r) => r.busy && !r.ship).length);
+  const idle = new Map();
+  const sorted = runners.filter((r) => !keep.has(r.key)).sort((a, b) => Number(b.awake) - Number(a.awake) || a.repo.localeCompare(b.repo) || a.name.localeCompare(b.name));
+  for (const r of sorted) (idle.get(r.repo) ?? idle.set(r.repo, []).get(r.repo)).push(r);
+  const take = (repo) => {
+    const r = idle.get(repo)?.shift();
+    if (!r) return false;
+    keep.add(r.key);
+    left--;
+    return true;
+  };
+  const wanted = new Map(Object.entries(plan.queued).filter(([repo]) => idle.has(repo)));
+  // Queued jobs: one runner for each, the repos taking turns from the one with most waiting.
+  for (let more = true; left > 0 && more; ) {
+    more = false;
+    for (const [repo] of [...wanted].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+      if (left <= 0) break;
+      if (wanted.get(repo) > 0 && take(repo)) {
+        wanted.set(repo, wanted.get(repo) - 1);
+        more = true;
+      }
+    }
+  }
+  // Then every repo in turn, so one with no job waiting has a runner up for the next.
+  for (let more = true; left > 0 && more; ) {
+    more = false;
+    for (const repo of [...idle.keys()].sort()) if (left > 0 && take(repo)) more = true;
+  }
+  return keep;
+}
+
+/** The runners the agent (or on Windows keep-runners.ps1) put to sleep, in a file beside it. */
+const SLEPT_FILE = 'slept.json';
+
+/**
+ * Applies the plan. Linux stops and starts the runner units itself; Windows writes asleep.json beside keep-runners.ps1,
+ * which stops and starts the services (it runs as long as the agent does, and checks each is idle right before).
+ * Either way the runners it put to sleep are kept in slept.json, so a restarted agent wakes them, and a runner someone
+ * else stopped is never started.
+ */
+export class RunnerWake {
+  constructor({ os = defaultOs(), dir, run = runCommand, units = '/etc/systemd/system', procs = linuxProcs, windowsProcs = () => [], identity = runnerIdentity, roots = windowsRoots, now = Date.now, log = () => {} } = {}) {
+    Object.assign(this, { os, dir, run, units, procs, windowsProcs, identity, roots, now, log, plan: null, until: 0, ships: [], said: '', queue: Promise.resolve() });
+  }
+
+  /** A plan is held: the squeeze stays off. */
+  held() {
+    return !!this.plan && this.now() < this.until;
+  }
+
+  update(plan, ships = this.ships) {
+    this.plan = plan;
+    this.ships = ships;
+    this.until = this.now() + PLAN_HOLD_MS;
+    return this.next();
+  }
+
+  /** The ship list moved: its runners stay up. */
+  shipsAre(ships) {
+    this.ships = ships;
+    return this.plan ? this.next() : Promise.resolve();
+  }
+
+  /** Wakes every runner it put to sleep once Citadel hasn't renewed the plan in time. */
+  tick() {
+    if (!this.plan || this.now() < this.until) return Promise.resolve();
+    this.plan = null;
+    this.log('No plan from Citadel for 2 minutes: every runner it put to sleep wakes.');
+    return this.next();
+  }
+
+  next() {
+    this.queue = this.queue.then(() => (this.os === 'linux' ? this.applyLinux() : this.applyWindows()));
+    return this.queue;
+  }
+
+  slept() {
+    try {
+      const list = JSON.parse(readFileSync(join(this.dir, SLEPT_FILE), 'utf8'));
+      return new Set(Array.isArray(list) ? list.filter((x) => typeof x === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  saveSlept(set) {
+    const file = join(this.dir, SLEPT_FILE);
+    writeFileSync(`${file}.new`, JSON.stringify([...set].sort()));
+    renameSync(`${file}.new`, file);
+  }
+
+  onShip(r) {
+    return this.ships.some((s) => s.repo === r.repo.toLowerCase() && s.runner === r.name.toLowerCase());
+  }
+
+  say(text) {
+    if (text !== this.said) this.log(text);
+    this.said = text;
+  }
+
+  async applyLinux() {
+    const units = new LinuxSqueeze({ units: this.units, identity: this.identity }).runners();
+    if (!units.length) return;
+    const slept = this.slept();
+    const { code, output } = await this.run({ command: 'systemctl', args: ['is-active', ...units.map((u) => u.unit)] }, process.env, 30_000);
+    const states = output.trim().split('\n');
+    // is-active exits 3 when any unit is down; its lines still say which.
+    if (code !== 0 && states.length !== units.length) return this.log(`Couldn't read the runner units' state: ${states.at(-1)}`);
+    const working = new Set(
+      this.procs()
+        .map((p) => /^(.*)\/bin(?:\.[\d.]+)?\/Runner\.Worker$/.exec(p.path)?.[1])
+        .filter(Boolean),
+    );
+    const list = units.map((u, i) => ({ ...u, key: u.unit, awake: states[i] === 'active', busy: working.has(u.dir), ship: this.onShip(u) }));
+    // One someone else stopped is theirs: left down and out of the count.
+    const ours = list.filter((r) => r.awake || slept.has(r.key));
+    const keep = this.plan ? pickAwake(ours, this.plan) : new Set(ours.map((r) => r.key));
+    for (const r of ours) {
+      const want = keep.has(r.key);
+      if (want === r.awake) continue;
+      // The plan moved since the runner took a job: it finishes, and sleeps at the next look.
+      if (!want && (r.busy || r.ship)) continue;
+      const { code: c, output: out } = await this.run({ command: 'systemctl', args: [want ? 'start' : 'stop', r.unit] }, process.env, 60_000);
+      if (c !== 0) {
+        this.log(`Couldn't ${want ? 'wake' : 'put to sleep'} ${r.unit}: ${out.split('\n').at(-1)}`);
+        continue;
+      }
+      if (want) slept.delete(r.key);
+      else slept.add(r.key);
+    }
+    for (const key of [...slept]) if (!list.some((r) => r.key === key)) slept.delete(key);
+    this.saveSlept(slept);
+    this.say(this.plan ? `Citadel's plan: ${this.plan.runners} runner(s) awake besides a ship's; ${ours.filter((r) => keep.has(r.key)).length} of ${ours.length} up.` : 'No plan from Citadel: every runner is up.');
+  }
+
+  /** Windows: the runner folders to keep asleep, for keep-runners.ps1 (which keeps its own slept.json). */
+  async applyWindows() {
+    const slept = this.slept();
+    const procs = this.windowsProcs() ?? [];
+    const up = new Set();
+    const working = new Set();
+    for (const p of procs) {
+      const m = /^(.*)\\bin\\(Runner\.Listener|Runner\.Worker)\.exe$/i.exec(p.path ?? '');
+      if (m) (m[2].toLowerCase() === 'runner.worker' ? working : up).add(m[1].toLowerCase());
+    }
+    const list = this.roots().flatMap((dir) => {
+      const { name, repo } = this.identity(dir);
+      if (!name || !repo) return [];
+      const key = dir.toLowerCase();
+      return [{ key, dir, name, repo, awake: up.has(key), busy: working.has(key), ship: false }];
+    });
+    for (const r of list) r.ship = this.onShip(r);
+    const ours = list.filter((r) => r.awake || slept.has(r.key));
+    const keep = this.plan ? pickAwake(ours, this.plan) : new Set(ours.map((r) => r.key));
+    const asleep = this.plan ? ours.filter((r) => !keep.has(r.key)).map((r) => r.dir) : [];
+    const file = join(this.dir, 'asleep.json');
+    writeFileSync(`${file}.new`, JSON.stringify({ until: this.plan ? this.until : 0, dirs: asleep }));
+    renameSync(`${file}.new`, file);
+    this.say(this.plan ? `Citadel's plan: ${this.plan.runners} runner(s) awake besides a ship's; ${asleep.length} of ${ours.length} to sleep.` : 'No plan from Citadel: every runner is up.');
+  }
+}
+
+/** Windows: the service runners' folders (add-runner.ps1's C:\actions-runner-<repo>[-n]; a -desktop one has no service). */
+export function windowsRoots(root = `${process.env.SystemDrive ?? 'C:'}\\`) {
+  try {
+    return readdirSync(root)
+      .filter((f) => /^actions-runner-/i.test(f) && !/-desktop$/i.test(f))
+      .map((f) => join(root, f));
+  } catch {
+    return [];
+  }
+}
+
 /** Server-sent events from a fetch body, one parsed JSON message per event. */
 async function* events(body) {
   const decoder = new TextDecoder();
@@ -587,17 +788,51 @@ async function main() {
   const squeeze = os === 'linux' ? new LinuxSqueeze({ log, percent: caps.squeeze }) : null;
   squeeze?.next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
   if (squeeze) setInterval(() => squeeze.tick().catch((err) => log(`Couldn't lift the ship squeeze: ${err.message}`)), 10_000).unref();
+  // Runners awake (M6b): while Citadel's plan is held the squeeze is off, and the plan's runners stay up.
+  const wake = new RunnerWake({ os, dir: jobs.dir, log, windowsProcs: () => sampler.lastProcs });
+  let lastShips = [];
+  let squeezed = true;
   let shipError = '';
+  const squeezeShips = async () => {
+    squeezed = !wake.held();
+    const list = squeezed ? lastShips : [];
+    if (squeeze) await squeeze.update(list);
+    else writeShips(jobs.dir, list);
+  };
   const ships = async (raw) => {
     try {
-      if (squeeze) await squeeze.update(cleanShips(raw));
-      else writeShips(jobs.dir, cleanShips(raw));
+      lastShips = cleanShips(raw);
+      await squeezeShips();
+      await wake.shipsAre(lastShips);
       shipError = '';
     } catch (err) {
       if (err.message !== shipError) log(`Couldn't pass on the ships (said once): ${err.message}`);
       shipError = err.message;
     }
   };
+  let planError = '';
+  const plan = async (raw) => {
+    const p = cleanPlan(raw);
+    if (!p) return log(`Citadel sent a plan this agent can't read: ${JSON.stringify(raw).slice(0, 200)}`);
+    try {
+      await wake.update(p, lastShips);
+      if (squeezed) await squeezeShips();
+      planError = '';
+    } catch (err) {
+      if (err.message !== planError) log(`Couldn't apply Citadel's plan (said once): ${err.message}`);
+      planError = err.message;
+    }
+  };
+  setInterval(
+    () =>
+      wake
+        .tick()
+        .then(() => (!wake.held() && !squeezed ? squeezeShips() : null))
+        .catch((err) => log(`Couldn't wake the runners: ${err.message}`)),
+    10_000,
+  ).unref();
+  // Runners a restarted agent put to sleep before stay so only until Citadel's first plan or PLAN_HOLD_MS.
+  setTimeout(() => wake.next().catch((err) => log(`Couldn't wake the runners: ${err.message}`)), PLAN_HOLD_MS).unref();
 
   let retry = 0;
   for (;;) {
@@ -625,6 +860,8 @@ async function main() {
           answer(msg.runners);
         } else if (msg.ships) {
           ships(msg.ships);
+        } else if (msg.plan) {
+          plan(msg.plan);
         }
       }
       throw new Error('the connection closed');

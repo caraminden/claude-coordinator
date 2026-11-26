@@ -48,6 +48,11 @@ if [ -f CLAUDE.md ]; then
 else
   echo "no CLAUDE.md"
 fi
+# Files whose code is unchanged once types and comments are stripped (section 4), when the repo has the check.
+if [ -f tools/types-only.ts ]; then
+  same=$(node tools/types-only.ts "$base" 2>/dev/null | awk -F'\t' '$1 == "same" {print $2}' | cap 40)
+  [ -n "$same" ] && printf '%s\n' "--- TYPES ONLY: code unchanged once types and comments are stripped (section 4: risk from what it does)" "$same"
+fi
 # A ship script this diff touches that is now byte-identical to the kit's template is a straight sync (section 4).
 tpl=$(cd "$(dirname "$0")/../../scheme-setup/templates" 2>/dev/null && pwd)
 if [ -n "$tpl" ]; then

@@ -137,6 +137,9 @@ stay high whatever the edit, since a slip there can stop the service or open it 
 One exception: the section 1 facts print `SHIP SCRIPT SYNC` when the diff's only touch of `tools/land.sh` or
 `tools/land.local.sh` leaves it byte-identical to the kit's template (`scheme-setup/templates/`): that sync is medium.
 `SHIP SCRIPT EDIT`, or any other high-by-file file in the diff, stays high.
+A second exception: a high-by-file file the section 1 facts list as `TYPES ONLY` (the repo's `tools/types-only.ts` found
+its code the same once types and comments are stripped) takes its risk from what the change does. Text-pinning tests
+still run on it: a types-only edit can still break a test that pins a line.
 
 | Risk | When the change |
 |---|---|

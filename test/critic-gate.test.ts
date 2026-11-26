@@ -118,6 +118,26 @@ test('a change that only touches comments or blank lines in a file asks no criti
   assert.doesNotMatch((await criticRefusal(set, ticket, [], false)) ?? '', /app\.js/);
 });
 
+test('a JSDoc-only front-end change, a cast and its parentheses included, asks no critic; a code change on the same line does (#2143)', async () => {
+  const repo = join(root, 'jsdoc');
+  mkdirSync(join(repo, 'public'), { recursive: true });
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(repo, 'public', 'app.js'), 'function f(a) {\n  const el = document.querySelector("#x");\n  el.value = a;\n}\n');
+  git('add', '.');
+  git('commit', '-qm', 'base');
+  git('checkout', '-qb', 'ticket/42');
+  writeFileSync(join(repo, 'public', 'app.js'), '/** @param {string} a */\nfunction f(a) {\n  const el = /** @type {HTMLInputElement} */ (document.querySelector("#x"));\n  el.value = a;\n}\n');
+  git('commit', '-qam', 'types');
+  const set = fresh();
+  set.create(3, { slug: 'ui', name: 'UI critic', triggers: { diff: ['public/**'] }, gate: 'advise' }, 'Josh');
+  const ticket = { id: 42, project_id: 3, cwd: repo };
+  assert.equal(await criticRefusal(set, ticket, [], false), null, 'JSDoc and a cast only');
+  writeFileSync(join(repo, 'public', 'app.js'), '/** @param {string} a */\nfunction f(a) {\n  const el = /** @type {HTMLInputElement} */ (document.querySelector("#y"));\n  el.value = a;\n}\n');
+  git('commit', '-qam', 'code on the cast line');
+  assert.match((await criticRefusal(set, ticket, [], false)) ?? '', /UI critic \(`ui`, \d+ lines in public\/app\.js\)/);
+});
+
 test('a comment with code beside it, or a new /* */ wrapped round untouched code, is code: it can hide what a page draws', () => {
   const patch = (name: string, hunk: string) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n${hunk}`;
   const only = (p: string) => [...commentOnlyFiles(p)];

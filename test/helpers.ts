@@ -361,7 +361,7 @@ export type Booted = {
  */
 let compileCacheDir: string | null | undefined;
 /** NODE_COMPILE_CACHE for booted servers: `<git dir>/compile-cache`, or nothing outside a git checkout. */
-function compileCache(): { NODE_COMPILE_CACHE?: string } {
+export function compileCache(): { NODE_COMPILE_CACHE?: string } {
   if (compileCacheDir === undefined) {
     try {
       compileCacheDir = resolve(REPO, execFileSync('git', ['-C', REPO, 'rev-parse', '--git-path', 'compile-cache'], { encoding: 'utf8', timeout: 10_000 }).trim());

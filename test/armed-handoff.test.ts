@@ -181,8 +181,8 @@ test('a Taskmaster giving the lane straight to an armed minion ships it', async 
   assert.equal(store.claims.get(projectId, LANE), undefined);
   const r = await srv.call(`/api/projects/${projectId}/claims`, { name: LANE, minion: m.number });
   assert.ok(r.status < 300, JSON.stringify(r.data));
-  await until('it ships', () => m.state().status === 'closed' || m.texts().find((x) => x.includes("didn't ship by itself")));
-  assert.equal(m.state().status, 'closed', m.texts().at(-1));
+  await until('it ships', () => m.state().status === 'closed' || m.texts().some((x) => x.includes("didn't ship by itself")));
+  assert.equal(m.state().status, 'closed', String(m.texts().at(-1)));
   assert.ok(m.texts().includes('The pipeline lane is yours, so Citadel started your armed hand-off with no turn.'));
 });
 

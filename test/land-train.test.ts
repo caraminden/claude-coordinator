@@ -92,7 +92,7 @@ test('a red train is bisected: the ship that turned it red is refused with its o
 test("a ship stopped during its train's bisect cancels the step's run, whose id it hasn't read yet (#1894)", async () => {
   const two: Ship = {};
   const l = await line([{}, two, {}, { change: ['red.txt', 'red\n'] }], { FAKE_RED_PATH: 'red.txt' }, (r) => {
-    two.env = { FAKE_UNLISTED: `f2.txt ${join(r.dir, 'listed')}`, LAND_CI_LATE_POLL: '0.2' };
+    two.env = { FAKE_UNLISTED: `f2.txt ${join(r.dir, 'listed')}`, LAND_CI_LATE: '20', LAND_CI_LATE_POLL: '0.2' };
   });
   const all = l.go();
   await until("the bisect's first step in CI", () => /bisect: testing the first 1 of 3/.test(l.out[1]) && l.hubAt('land/ticket/2-x') === 'f2.txt: 2');

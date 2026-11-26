@@ -388,14 +388,14 @@ const hubHas = (r: ReturnType<typeof setup>, ref: string) => git(join(r.dir, 'hu
 const waits = (c: ReturnType<typeof ci>, r: ReturnType<typeof setup>) => hubHas(r, 'land/ticket/1-x') && c.calls().split('head_sha=').length > 2;
 
 test('a ship stopped before it has read the id of the run it pushed cancels that run, listed a moment late (#1894)', async () => {
-  const s = await stopped({}, waits, true);
+  const s = await stopped({ LAND_CI_LATE: '20' }, waits, true);
   assert.deepEqual(cancels(s.calls), ['7']);
   assert.ok(!hubHas(s.r, 'land/ticket/1-x') && !hubHas(s.r, 'land-base/ticket/1-x'), 'the scratch branches go');
 });
 
 test("a stopped ship whose commit's red run from before is all GitHub lists yet waits for its own run, and cancels that (#1894)", async () => {
   // The old run is the answer to the gate's two asks and the stop's first two.
-  const s = await stopped((r) => ({ FAKE_OLD_RUN: `${git(r.wt, 'rev-parse', 'HEAD')} completed failure`, FAKE_LAG: '3', FAKE_UNLISTED: '', LAND_CI_LATE_POLL: '0.2' }), waits);
+  const s = await stopped((r) => ({ FAKE_OLD_RUN: `${git(r.wt, 'rev-parse', 'HEAD')} completed failure`, FAKE_LAG: '3', FAKE_UNLISTED: '', LAND_CI_LATE: '20', LAND_CI_LATE_POLL: '0.2' }), waits);
   assert.deepEqual(cancels(s.calls), ['7']);
 });
 

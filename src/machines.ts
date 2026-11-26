@@ -588,7 +588,7 @@ export class MachineRelay {
   /** Send a role's Set up or Test to a machine's own agent (Build 7 M4); false when it isn't connected. */
   sendSetup(machineId: number, msg: unknown): boolean {
     const agent = this.agents.get(machineId);
-    if (!agent || agent.runners) return false;
+    if (!agent) return false; // a runner agent is in runnerAgents (M2b), never here
     agent.res.write(`data: ${JSON.stringify(msg)}\n\n`);
     return true;
   }

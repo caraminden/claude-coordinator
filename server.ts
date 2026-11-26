@@ -1047,7 +1047,16 @@ const standingChecks = new StandingChecks({
 });
 if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingChecks.run(), 3 * 60_000);
 // Main went back (#2077): each open minion cut from the commits a reset took off its scheme's main is told the rebase that takes them out.
-const mainRollbacks = new MainRollbacks({ store, tell: (id, text) => void runner.send(id, APP_NAME, text, [], { hold: true }, runner.isRunning(id)) });
+const mainRollbacks = new MainRollbacks({
+  store,
+  tell: judged(
+    'main-rollbacks',
+    'tell',
+    (id: number, text: string) => void runner.send(id, APP_NAME, text, [], { hold: true }, runner.isRunning(id)),
+    () => {},
+    judgeNote((id) => store.getTicket(id)?.project_id),
+  ),
+});
 if (!BOOT_CHECK && !PREVIEW) every('main roll-backs', ROLLBACK_EVERY_MS, () => mainRollbacks.sweep(), 60_000);
 
 /**

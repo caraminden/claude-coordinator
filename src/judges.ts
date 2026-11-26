@@ -336,6 +336,14 @@ export const JUDGES: Judge[] = [
     ],
     callers: ['src/app-shots.ts', 'tools/app-shots/app-shots.ts', 'tools/app-shots/inner.ts'],
   },
+  {
+    id: 'main-rollbacks',
+    name: 'Main went back (#2077)',
+    mode: 'act', // the brief's Done when (Josh's pick on #2068's retro card, 2026-11-25); replayed over the real resets first
+    replay: true,
+    acts: "tells each open minion whose branch still holds commits a reset took off its scheme's main, with the rebase that takes them out (held for a sealed one)",
+    pins: [{ path: 'src/main-rollback.ts', symbols: ['REFLOG_DEPTH', 'reflog', 'MainRollbacks.scheme', 'MainRollbacks.tellHolders', 'rollbackText'] }],
+  },
 ];
 
 export const judge = (id: string): Judge | undefined => JUDGES.find((j) => j.id === id);

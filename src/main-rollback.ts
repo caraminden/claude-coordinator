@@ -26,12 +26,16 @@ export interface RollbackDeps {
   store: Pick<Store, 'listProjects' | 'listTickets' | 'getSetting' | 'setSetting'>;
   /** Tell minion `ticketId` (server.ts: steered into a running turn, held for a sealed one, else a turn). */
   tell: (ticketId: number, text: string) => void;
+  /** Called with each roll-back before its minions are listed: the replay (tools/judge-replays/main-rollbacks.ts) reads them as they were then. */
+  before?: (r: Rollback) => void;
+  /** A branch's commit as the sweep sees it (now: its tip); the replay reads it as it was just after the reset. */
+  tipAt?: (repo: string, branch: string, r: Rollback) => Promise<string | null>;
 }
 
 const git = (repo: string, ...args: string[]) => gitOut(args, repo);
 
 /** `ref`'s reflog, newest first; null when git can't read it. */
-async function reflog(repo: string, ref: string, depth?: number): Promise<Entry[] | null> {
+export async function reflog(repo: string, ref: string, depth?: number): Promise<Entry[] | null> {
   const out = await git(repo, 'reflog', 'show', '--date=unix', '--format=%H %gd', ...(depth ? ['-n', String(depth)] : []), ref, '--');
   if (out == null) return null;
   const entries: Entry[] = [];
@@ -93,6 +97,7 @@ export class MainRollbacks {
       if (!out) continue;
       const r = { from, to, at: log[i].at, dropped: new Set(out.split('\n').filter(Boolean)) };
       found.push(r);
+      this.d.before?.(r);
       await this.tellHolders(projectId, repo, name, log, r);
     }
     return found;
@@ -110,7 +115,7 @@ export class MainRollbacks {
     let list: string | null = null;
     for (const t of this.d.store.listTickets(projectId)) {
       if (t.kind !== 'ticket' || t.status === 'closed' || !t.branch) continue;
-      const tip = await git(repo, 'rev-parse', '-q', '--verify', `refs/heads/${t.branch}^{commit}`);
+      const tip = await (this.d.tipAt ?? ((repo, branch) => git(repo, 'rev-parse', '-q', '--verify', `refs/heads/${branch}^{commit}`)))(repo, t.branch, r);
       if (!tip) continue;
       const base = await git(repo, 'merge-base', tip, r.from);
       if (!base || !r.dropped.has(base)) continue;

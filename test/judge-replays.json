@@ -80,6 +80,15 @@
     "real": 23,
     "summary": "22 as before, 0 new, 0 gone"
   },
+  "main-rollbacks": {
+    "hash": "526b282abc4dde87",
+    "at": "2026-11-26",
+    "days": 6,
+    "inputs": "6 resets of main that dropped commits in 1 schemes over 6 days",
+    "hits": 13,
+    "real": 0,
+    "summary": "0 as before, 13 new, 0 gone"
+  },
   "seen-guard": {
     "hash": "cab90620e70a296f",
     "at": "2026-11-25",

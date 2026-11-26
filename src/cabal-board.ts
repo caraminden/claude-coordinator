@@ -147,7 +147,8 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   const leadSpend = store.ticketCost(leadId);
   return {
     lead: { id: lead.id, number: lead.number, title: lead.title, spend: leadSpend },
-    name: cabal.name || (lead.build != null ? `Build ${lead.build}` : String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title),
+    // A build's cabal is always "Build 7" (Josh, 2026-11-25: "Build 7's Overseer"); a name only names a goal cabal.
+    name: lead.build != null ? `Build ${lead.build}` : cabal.name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title,
     kind: ref ? 'build' : 'goal',
     build: ref ? lead.build : null,
     members,

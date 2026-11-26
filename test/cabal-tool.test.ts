@@ -95,6 +95,27 @@ test("people read the board by the lead's #N (the page) and from any member's ch
   assert.deepEqual((await srv.call(`/api/tickets/${OUTSIDER.id}/cabal`)).data, { lead: null, board: null });
 });
 
+test('create_ticket and update_ticket put a minion on a board; a refused field leaves it where it was; a lead is no row', async () => {
+  const made = await srv.call(`/api/projects/${A.id}/tickets`, { title: 'Fixer', message: 'Fix the red run', cabal: LEAD.number, start_after: M2.number }); // sealed: no turn to wait out at teardown
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  const id = made.data.id;
+  assert.equal(store.cabalRowOf(id)?.lead_id, LEAD.id);
+  assert.equal(store.cabalRowOf(id)?.role, 'fixer', "the lead's planned Fixer row became its row");
+  assert.equal((await srv.call(`/api/projects/${A.id}/tickets`, { title: 'Nope', message: 'x', cabal: M1.number })).status, 400, 'a member leads nothing');
+  assert.equal((await srv.call(`/api/tickets/${OUTSIDER.id}`, { cabal: LEAD.number, model: 'not-a-model' }, 'PATCH')).status, 400);
+  assert.equal(store.cabalRowOf(OUTSIDER.id), undefined, 'the refused model kept it off');
+  assert.equal((await srv.call(`/api/tickets/${OUTSIDER.id}`, { cabal: LEAD.number }, 'PATCH')).status, 200);
+  assert.equal(store.cabalRowOf(OUTSIDER.id)?.lead_id, LEAD.id);
+  assert.equal((await srv.call(`/api/tickets/${OUTSIDER.id}`, { cabal: null }, 'PATCH')).status, 200);
+  assert.equal(store.cabalRowOf(OUTSIDER.id), undefined, 'off again: its row was made for it, so it goes');
+  // Another lead can't be pulled onto this board as a row's minion.
+  const other = minion('Other lead');
+  store.ensureCabal(other.id, A.id);
+  const r = await tool(LEAD.id, { action: 'row', title: 'Pulled', minion: other.number });
+  assert.ok(r.error);
+  assert.match(r.text, /leads a cabal/);
+});
+
 test("the lead's answer comes back the way it was asked: held mail for a plain ask, a wake for a blocking one", async () => {
   const plain = store.cabalAsks(LEAD.id).find((a) => !a.blocking)!;
   assert.match((await tool(LEAD.id, { action: 'answer', ask: plain.id, text: 'test/helpers.ts' })).text, /reads it as held mail/);

@@ -58,7 +58,7 @@ import type { ContentBlock } from '../claude-events.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 import { stopMinionShip } from '../ship-stop.ts';
-import { putOnCabal } from './cabals.ts';
+import { cabalLead, putOnCabal } from './cabals.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -92,9 +92,10 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
     if (!takeOffChain(ticket, name, { store, runner, waiters: app.waiters }, body.note === undefined)) throw new HttpError(409, `#${ticket.number} isn't sealed waiting on another minion's work`);
   }
   // A cabal's board (#2090): the Taskmaster or a person puts a minion on one, never the minion itself.
+  // Checked here, done after the other fields: a refused field leaves it where it was.
   if (body.cabal !== undefined) {
     if (caller === id) throw new HttpError(400, "A minion can't put itself on a cabal or take itself off one: ask the Taskmaster");
-    putOnCabal(app, ticket, body.cabal, name);
+    if (body.cabal !== null) cabalLead(store, ticket.project_id, body.cabal, id);
   }
   // The view's replies are a list; compare the stored JSON.
   const stored = store.getTicket(id)!;
@@ -133,6 +134,7 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
       app.notify(id, { kind: 'state', state: fields.state, note: 'note' in fields ? (fields.note ?? null) : stored.note }, caller ? null : name);
     }
   }
+  if (body.cabal !== undefined) putOnCabal(app, ticket, body.cabal, name);
   if (unparks) {
     unparkTicket(app, stored, name, caller ? APP_NAME : name).catch((err) => {
       runner.emit(id, 'note', { text: `Unparking failed: ${err.message}` });

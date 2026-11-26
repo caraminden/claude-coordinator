@@ -161,6 +161,7 @@ export const cabalRoutes: Route[] = [
           const t = body.minion === null ? null : store.getTicketByNumber(ticket.project_id, Number(body.minion));
           if (body.minion !== null && (!t || t.kind === 'coordinator')) throw new HttpError(404, `No minion #${String(body.minion).slice(0, 20)} in this scheme`);
           if (t?.id === ticket.id) throw new HttpError(400, 'That is you: the lead has no row of its own');
+          if (t && store.getCabal(t.id)) throw new HttpError(400, `#${t.number} leads a cabal, so it can't be on another's board`);
           const other = t ? store.cabalRowOf(t.id) : undefined;
           if (other && other.id !== Number(body.row)) throw new HttpError(409, `#${t!.number} already has a row${other.lead_id === ticket.id ? ` (row ${other.id})` : ' on another board'}`);
           fields.ticket_id = t?.id ?? null;

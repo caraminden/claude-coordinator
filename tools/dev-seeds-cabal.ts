@@ -1,5 +1,5 @@
-// A cabal's board seeds (#2090), apart from tools/dev-seeds.ts, which lists them: Build 7's real crew as a goal cabal (no
-// repo in a dev copy, so "shipped" stands in for "merged"), in the mock's three scenes: mid-build with a blocking ask, just
+// A cabal's board seeds (#2090), apart from tools/dev-seeds.ts, which lists them: Build 7's real crew (a dev copy has no
+// repo, so no build/7 branch: "shipped" stands in for "merged"), in the mock's three scenes: mid-build with a blocking ask, just
 // formed (a roster nobody started), and a red run with its fixer.
 import type { Ticket } from '../src/db-rows.ts';
 import type { SeedCtx } from './dev-seeds.ts';
@@ -35,7 +35,8 @@ function scene(c: SeedCtx, kind: Scene): string {
     return store.getTicket(t.id)!;
   };
   const cost = (t: Ticket, usd: number) => store.recordTurn(t.id, { session_id: `cabal-${t.id}`, ended_at: Date.now(), session_cost_usd: usd });
-  const lead = made('Build 7: worker machines', { status: 'running', last_activity: 'Reading the board… 2/5' });
+  // A build's lead reads "Build 7's Overseer"; the just-formed one is a goal cabal, named.
+  const lead = made(kind === 'formed' ? 'Worker machines lead' : 'Build 7: worker machines', { status: 'running', last_activity: 'Reading the board… 2/5', build: kind === 'formed' ? null : 7 });
   cost(lead, 30.49);
   store.ensureCabal(lead.id, project.id);
   store.setCabalName(lead.id, 'Worker machines');

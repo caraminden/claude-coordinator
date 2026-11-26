@@ -49,7 +49,8 @@ import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep,
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { MachinePools } from './src/machine-pools.ts';
-import { machineLink, workerInfo } from './src/machine-turn.ts';
+import { MachineCopies, wireCopies } from './src/machine-away.ts';
+import { awayTick, machineLink, workerInfo } from './src/machine-turn.ts';
 import { imageFile, WorkerJoin } from './src/worker-join.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
@@ -94,7 +95,7 @@ import { guardPipes, keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
-import { agentRoutes } from './src/routes/machines.ts';
+import { agentRoutes, dropRemoved } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
 import { CodeCounts, countApart } from './src/code-counts.ts';
 import { readApart, WorkFlow } from './src/work-flow.ts';
@@ -755,6 +756,10 @@ runner.onLimit = (person, account, until) => claudeLink.limitedView(person, acco
 claudeLink.turnOn = (configDir) => runner.turnIn(configDir);
 runner.onCleared = (person, account) => claudeLink.cleared(person, account);
 runner.onRan = (person, key, account) => claudeLink.ran(person, key, account);
+// What machines hold of each minion, and turns whose machine has been away too long (Build 7 T6, src/machine-away.ts).
+const machineCopies = new MachineCopies({ store, note: (id, text) => runner.emit(id, 'note', { text }), now: Date.now });
+wireCopies(machineCopies, runner.runsOn);
+if (!BOOT_CHECK && !PREVIEW) every('machine away', 5_000, () => awayTick());
 const codexLink = new CodexLink(claudeLink);
 // Codex turns (#337) run only in a person's own container, once they've signed in to Codex there (the server login's: #341).
 const codexReady = (uid: number) => {
@@ -2415,6 +2420,7 @@ const app: App = {
   apkBuilds,
   desktop,
   machines,
+  machineCopies,
   jobs,
   pusher,
   clients,
@@ -2472,6 +2478,8 @@ const app: App = {
   sharedDir,
   registryChanged,
 };
+// A machine being removed goes once its agent has deleted what it held of each minion (Build 7 T6).
+if (!BOOT_CHECK && !PREVIEW) every('machine removals', 10_000, () => dropRemoved(app));
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {
   every(

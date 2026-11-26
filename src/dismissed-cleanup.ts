@@ -1,6 +1,7 @@
 // What removes a dismissed minion's folders, and puts one back: its build output, its worktree once GRACE_MS old, leftover Grunt
 // worktrees, and a reopen's restore. The rules are in src/worktree-sweep.ts and src/build-output.ts; this runs them.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `CleanupDeps`.
+import { dropMachineRefs } from './machine-sync.ts';
 import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
@@ -147,6 +148,7 @@ export class DismissedCleanup {
               const s = await saveWork(dir, ref, t.branch, `Citadel: #${t.number}'s work not on its branch, saved before its worktree was removed`);
               if ('kept' in s) return keep(what, s.kept);
               const bytes = await removeWorktree(p.repo_dir!, dir);
+              await dropMachineRefs(p, t.id, t.branch!).catch(() => 0); // its machine turns' marks (Build 7 T6)
               removed(what, bytes, s.saved ? `, its uncommitted work saved in ${ref}` : '');
               this.d.emit(t.id, 'note', { text: `Removed this dismissed minion's worktree (${size(bytes)}). Its branch ${t.branch} stays, and a reopen brings the folder back${s.saved ? ` with its uncommitted work, saved meanwhile in ${ref}` : ''}.` });
             } catch (err) {

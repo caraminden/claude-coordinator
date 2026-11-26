@@ -3,6 +3,7 @@
 // in-memory queue and the copies that used to carry it across restarts and waits (`waiting:`, `resume-owed:`'s
 // queued, `turn:`'s queued and steered, the limit, network and kill waits' queued, `mail:` and `cold:`).
 // Waits keep only their counters and timers; the messages they hold back stay here.
+import type { AwayEnd } from './machine-turn.ts';
 import type { QueuedMessage } from './runner.ts';
 
 export const queueKey = (ticketId: number) => `minion-queue:${ticketId}`;
@@ -15,6 +16,8 @@ export type OwedResume = {
   onAccount?: true;
   /** A pause stopped it (#1868): its resume says so. */
   paused?: true;
+  /** Its machine was away too long (Build 7 T6): it carries on at perigee, from that machine's last checkpoint. */
+  away?: AwayEnd;
   killTries?: number;
   switchTries?: number;
   /** What the cut-off turn set and its resume reads (Runner's TurnState from, parkedAs, status, #1452), so a restart before the resume keeps them. */

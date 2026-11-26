@@ -54,7 +54,8 @@ import { stuckList } from './stuck-list.ts';
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
-import { MachineTurn, placedAt, placeTurn } from './machine-turn.ts';
+import { awayLine, awayResume, nextMark } from './machine-away.ts';
+import { type AwayEnd, MachineTurn, placedAt, placeTurn } from './machine-turn.ts';
 import type { Block, MachineHost, MachinePools } from './machine-pools.ts';
 import { RunsOn, type runsOnCard } from './runs-on.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -1121,6 +1122,7 @@ export class Runner {
       // Its turn waits for a worker (#1868): it shows as working, and its activity line says where it stands.
       worker_wait: closed ? null : this.turnLine.wait(ticket.id),
       runs_on: closed ? null : this.runsOn.view(ticket.id),
+      machine_away: closed || !this.turns.has(ticket.id) ? null : awayLine(runningTurn(this.turns.get(ticket.id)!)),
       // Who marked it Urgent, when and why (#1888).
       urgent: closed ? null : this.urgent.view(ticket.id),
       start_now: closed ? null : this.startNow.view(ticket.id),
@@ -1204,6 +1206,7 @@ export class Runner {
       // got 401s from it (#1618). Combined here, not in live(), so a reader's own fresh row still has the say once the
       // turn has ended (its copy of live() is posted on each broadcast, src/reader-live.ts).
       status: shown.turn_live || (shown.worker_wait && !away) ? 'running' : ticket.status,
+      ...(shown.machine_away ? { last_activity: shown.machine_away } : {}),
       // One that waits for the computer it is marked for is stuck outside: blocked, with what it waits for (Build 7 T4).
       ...(away && !shown.turn_live ? { state: 'blocked' as const, note: `Waiting for ${away.name}: ${away.why}` } : {}),
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
@@ -1660,6 +1663,7 @@ export class Runner {
   private resume(ticketId: number, via: RetryKind, retries: Retries, onCodex = false): Promise<void> | undefined {
     const killLine = via === 'kill';
     const paused = !!this.queue.owed(ticketId)?.paused;
+    const resumed = awayResume(this.queue.owed(ticketId)?.away, { note: 'Resumed after a server restart', prompt: RESUME_PROMPT });
     // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
     const token = this.limitStarting.get(ticketId);
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
@@ -1698,15 +1702,14 @@ export class Runner {
             }
             if (this.startPlace(ticket, person, via) === 'wait') return;
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
-            if (via !== 'switch' && !killLine)
-              this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
+            if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : resumed.note });
             const carriesOn = !this.queue.wakes(ticketId);
             // It carries on the interrupted turn, so it runs for that turn's person.
             return this.ranTurn(
               this.startTurn(
                 project,
                 ticket,
-                [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : paused ? RESUME_PAUSE_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
+                [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : paused ? RESUME_PAUSE_PROMPT : resumed.prompt, images: [] }, ...this.takeQueue(ticketId)],
                 person,
                 retries,
                 carriesOn,
@@ -2541,9 +2544,9 @@ export class Runner {
   }
 
   /** A turn a pause stopped waits in the line to carry on; one stopped before claude had its prompt runs its batch again. */
-  private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }) {
+  private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }, away?: AwayEnd) {
     const rerun = !turn.offset && this.queue.giveBack(ticketId, false, true).length > 0;
-    if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), paused: true });
+    if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), ...(away ? { away } : { paused: true }) });
     // Never takes a worker here: the turn ending still holds its own, and a Resume may have come already.
     this.turnLine.join(ticketId, rerun ? undefined : retry.via);
   }
@@ -2565,10 +2568,7 @@ export class Runner {
   /** What the line asks of the machines, with what each minion's next turn is. */
   private readonly machineHost: MachineHost = {
     machines: () => this.pools?.machines() ?? [],
-    mark: (id) => {
-      const need = this.runsOn.needs(id);
-      return need && this.fresh.freshStep(id) ? 0 : need;
-    },
+    mark: (id) => nextMark(this.runsOn.needs(id), this.queue.owed(id)?.away, () => this.fresh.freshStep(id)),
     nameOf: (machineId, id) => (id !== undefined && this.runsOn.get(id)?.machine === machineId ? this.runsOn.get(id)!.name : (this.pools?.nameOf(machineId) ?? `machine ${machineId}`)),
     takes: (machineId, id, via) => {
       const ticket = this.store.getTicket(id);
@@ -3681,7 +3681,7 @@ export class Runner {
     }
   }
 
-  private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
+  private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string; away?: AwayEnd } | null) {
     clearInterval(live.timer);
     this.unfollow(live);
     this.clock.clearTimeout(live.stopTimer);
@@ -3738,8 +3738,8 @@ export class Runner {
       else row(false);
     }
     const cleared = out.followUps.includes('cleared');
-    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'card' ? 'idle' : 'error';
-    if (out.kind === 'paused') this.waitOutPause(ticketId, turn!, out.retry!);
+    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'away' || out.kind === 'card' ? 'idle' : 'error';
+    if (out.kind === 'paused' || out.kind === 'away') this.waitOutPause(ticketId, turn!, out.retry!, out.kind === 'away' ? exit!.away : undefined);
     if (status === 'error') {
       out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
       const said = out.killed && !exit ? this.store.eventsOfKinds(ticketId, ['note', 'error']).findLast((e) => JSON.parse(e.data).text?.startsWith(out.killed)) : undefined;

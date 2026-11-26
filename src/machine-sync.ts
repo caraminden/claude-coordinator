@@ -8,7 +8,7 @@
 // started from: a worktree with a landing running in it, or one that moved meanwhile, is left as it is and the
 // machine's copy is kept in refs/citadel/kept/<ticket>/, which the minion's chat says.
 import { createHash } from 'node:crypto';
-import { access, readFile, unlink } from 'node:fs/promises';
+import { access, readFile, unlink, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -16,7 +16,9 @@ import { pipeline } from 'node:stream/promises';
 import { Changed, Frames, ZERO, cutOff, place, branchesElsewhere, commonDir, complete, frame, git, gitDirOf, inside, listTree, packTo, refsOf, runs, same, snapHead, snapshot, statOf, take, unpack } from '../public/machine-sync.mjs';
 import type { Project, Store, Ticket } from './db.ts';
 import { HttpError, json, readJson } from './http.ts';
+import { ZONE } from './pacific.ts';
 import type { Placed } from './machine-turn.ts';
+import type { FileHead } from '../public/machine-sync.mjs';
 import { projectSlug, sessionFiles, validSessionId } from './sessions.ts';
 
 /** In a placed turn's `machine` file: what its syncs need beyond the minion itself, which the database has. */
@@ -35,6 +37,8 @@ export interface StateDeps {
   /** A landing of the minion's runs: its worktree is land.sh's. */
   landing: (ticketId: number) => boolean;
   note: (ticketId: number, text: string) => unknown;
+  /** Say something the minion itself must read at its next turn (an open one's starts it). */
+  tell: (ticketId: number, text: string) => unknown;
 }
 
 const SCRIPT = join(import.meta.dirname, '..', 'public', 'machine-sync.mjs');
@@ -314,12 +318,81 @@ async function commit(d: StateDeps, dir: string, at: string, t: Ticket, w: Work,
 /** A file's time here: never at or before the copy it replaces, or the session's save (sessions.ts) would take it for an older one. */
 const timeHere = (skew: number) => (f: { mtime: number }, here: [number, number] | null) => Math.max(Math.round(f.mtime + skew), (here?.[1] ?? 0) + 1);
 
-/** A machine's call about a turn's state: `op` is the path past /api/machines/state/. */
-export async function stateCall(d: StateDeps, op: string, dir: string, at: Placed, req: IncomingMessage, res: ServerResponse): Promise<void> {
+/** A time as a ref's or folder's name, in Pacific time: 20261125-141305. */
+export function stamp(ms: number): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(ms).map((x) => [x.type, x.value]));
+  return `${p.year}${p.month}${p.day}-${p.hour}${p.minute}${p.second}`;
+}
+
+/** The scheme repo's own git folder, whether or not the minion's worktree is still here. */
+async function repoCommon(p: Project): Promise<string | null> {
+  return p.repo_dir && (await there(join(p.repo_dir, '.git'))) ? commonDir(await gitDirOf(p.repo_dir)) : null;
+}
+
+const isAncestor = (common: string, a: string, b: string) =>
+  git(['--git-dir', common, 'merge-base', '--is-ancestor', a, b]).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * Work a machine held that never came home, into places of its own here (Build 7 T6): refs/citadel/away/<ticket>/<time>
+ * (the worktree as a snapshot; `-heads/x`, `-tags/x`, `-stash/<sha>` for refs), and files the machine put aside
+ * before this call. Nothing the minion has is changed; it is told what came. Work already here is not kept twice.
+ */
+async function away(d: StateDeps, at: string, t: Ticket, p: Project, body: { refs?: unknown; files?: unknown }) {
+  const refs = (Array.isArray(body.refs) ? body.refs : []) as { at: number; name: string; sha: string }[];
+  const bad = (r: (typeof refs)[number]) => !isSha(r?.sha) || !Number.isFinite(r.at) || typeof r.name !== 'string' || (r.name !== '' && (!/^(heads|tags|stash)\/[^\s~^:?*[\\\x00-\x1f]+$/.test(r.name) || r.name.includes('..')));
+  if (refs.some(bad)) throw new HttpError(400, 'Not refs');
+  const common = refs.length ? await repoCommon(p) : null;
+  if (refs.length && !common) throw new HttpError(409, 'This minion has no repo');
+  const made: string[] = [];
+  if (common) {
+    if (
+      !(await complete(
+        common,
+        refs.map((r) => r.sha),
+      ))
+    )
+      return { need: true };
+    const have = new Set(Object.values(await refsOf(common, [`refs/citadel/away/${t.id}`])));
+    for (const r of refs) {
+      if (have.has(r.sha)) continue;
+      if (!r.name) {
+        if ([await refAt(common, mark(t.id)), await refAt(common, left(t.id))].includes(r.sha)) continue;
+      } else if (!r.name.startsWith('stash/')) {
+        const here = await refAt(common, `refs/${r.name}`);
+        if (here && (here === r.sha || (await isAncestor(common, r.sha, here)))) continue;
+      }
+      // Two in the same second (or the same wall time twice, at the fall back) get a number: none is written over.
+      let ref = `refs/citadel/away/${t.id}/${stamp(r.at)}${r.name ? `-${r.name}` : ''}`;
+      for (let i = 2; await refAt(common, ref); i++) ref = `refs/citadel/away/${t.id}/${stamp(r.at)}.${i}${r.name ? `-${r.name}` : ''}`;
+      await setRef(common, ref, r.sha);
+      have.add(r.sha);
+      made.push(ref);
+    }
+  }
+  const files = Math.max(0, Math.floor(Number(body.files)) || 0);
+  if (made.length || files) {
+    const what = [
+      ...made.map((r) => (/\/\d{8}-\d{6}(\.\d+)?$/.test(r) ? `${r} (the worktree as it was there: the commit's work/ folder; git stash apply does not take it, git restore --source=${r} -- . does)` : r)),
+      ...(files ? [`${files} file${files === 1 ? '' : 's'} in ${join(d.files(t), 'away')}/<time>/<folder>/`] : []),
+    ];
+    d.tell(t.id, `Work from ${at} that never came home is here now, beside yours; nothing of it was merged: ${what.join('; ')}. Look through it and take what you still need.`);
+  }
+  return { refs: made };
+}
+
+/**
+ * A machine's call about a turn's state: `op` is the path past /api/machines/state/. `copy`: about a copy the machine
+ * holds of a minion that is no longer running there (src/machine-away.ts): it may only send what it has home, aside.
+ */
+export async function stateCall(d: StateDeps, op: string, dir: string, at: Placed, req: IncomingMessage, res: ServerResponse, copy = false): Promise<void> {
   const s = at.state;
   const t = s ? d.store.getTicket(s.ticket) : null;
   const p = t ? d.store.getProject(t.project_id) : null;
   if (!s || !t || !p) throw new HttpError(410, 'This turn has no state to sync');
+  if (copy) return copyCall(d, op, at, s, t, p, req, res);
   // Ended here (killed while its machine was away): nothing more of it is taken in.
   if (await there(join(dir, 'exit.json'))) throw new HttpError(410, 'This turn has ended');
   const work = async () => {
@@ -368,6 +441,7 @@ export async function stateCall(d: StateDeps, op: string, dir: string, at: Place
   if (op === 'put') {
     const frames = new Frames(req);
     const head = await frames.json();
+    if (head?.aside !== undefined) return json(res, 200, await putAside(d, t, frames, head));
     const skew = Number.isFinite(head?.now) ? Date.now() - head.now : 0;
     const files = Array.isArray(head?.files) ? head.files : [];
     const place = async (f: { root: string; rel: string }) => {
@@ -389,6 +463,13 @@ export async function stateCall(d: StateDeps, op: string, dir: string, at: Place
     }
     return json(res, 200, { dropped });
   }
+  if (op === 'done') {
+    // When the last whole checkpoint looked: a turn that ends away carries on from there.
+    const { at: when } = await readJson(req);
+    if (Number.isFinite(when)) await writeFile(join(dir, 'checkpoint'), String(Math.round(when)));
+    return json(res, 200, {});
+  }
+  if (op === 'away') return json(res, 200, await alone(t.id, async () => away(d, at.name, t, p, await readJson(req, 1_000_000))));
   if (op === 'failed') {
     const { error, files } = await readJson(req);
     const names = Array.isArray(files) ? files.map(String) : null;
@@ -397,6 +478,55 @@ export async function stateCall(d: StateDeps, op: string, dir: string, at: Place
     return json(res, 200, {});
   }
   throw new HttpError(404, 'No such call');
+}
+
+/** Files a machine sends aside: into the minion's files folder, away/<time>/<folder>/, never over one there. */
+async function putAside(d: StateDeps, t: Ticket, frames: Frames, head: { aside?: unknown; files?: unknown }) {
+  if (!Number.isFinite(head.aside)) throw new HttpError(400, 'aside must be a time');
+  const files = d.files(t);
+  const under = join(files, 'away', stamp(Number(head.aside)));
+  const place = async (f: { root: string; rel: string }) => {
+    const file = typeof f.root === 'string' && /^\w+$/.test(f.root) ? await inside(join(under, f.root), f.rel) : null;
+    return file ? { root: files, file } : null;
+  };
+  const heads: FileHead[] = Array.isArray(head.files) ? head.files : [];
+  // Sent again after a try that failed partway (same folder, same time): a file that already arrived whole is taken again.
+  for (const f of heads) {
+    const to = await place(f);
+    const here = to && (await statOf(to.file));
+    if (here && same(here, [f.size, f.mtime])) f.expect = here;
+  }
+  return { files: await take(frames, heads, place, (f) => f.mtime) };
+}
+
+/** A copy's calls: what it holds, its look, and what it sends aside. */
+async function copyCall(d: StateDeps, op: string, at: Placed, s: TurnState, t: Ticket, p: Project, req: IncomingMessage, res: ServerResponse) {
+  if (op === 'look') {
+    if ((await readJson(req)).rescue !== true) throw new HttpError(410, 'This turn has ended');
+    const roots = [];
+    for (const { home, ...r } of rootsOf(d, s, t, p)) roots.push({ ...r, files: [...(await listTree(home))].map(([f, [size, mtime]]) => [f, size, mtime]) });
+    return json(res, 200, { now: Date.now(), ticket: t.id, git: p.repo_dir && t.cwd !== p.repo_dir ? { repo: p.repo_dir, cwd: t.cwd } : null, roots });
+  }
+  if (op === 'unpack') {
+    const common = await repoCommon(p);
+    if (!common) throw new HttpError(409, 'This minion has no repo');
+    return json(
+      res,
+      200,
+      await unpack(common, req).then(
+        () => ({}),
+        (err: Error) => ({ need: err.message }),
+      ),
+    );
+  }
+  if (op === 'put') {
+    const frames = new Frames(req);
+    const head = await frames.json();
+    if (head?.aside === undefined) throw new HttpError(410, 'This turn has ended');
+    return json(res, 200, await putAside(d, t, frames, head));
+  }
+  if (op === 'away') return json(res, 200, await alone(t.id, async () => away(d, at.name, t, p, await readJson(req, 1_000_000))));
+  throw new HttpError(410, 'This turn has ended');
 }
 
 /** Where a machine keeps what both sides had when they were last the same, and its copy of the script: under the turns' root, so inside its container. */
@@ -411,3 +541,17 @@ const DISK = /^api\/(tickets\/\d+\/(openrouter|questions|jobs|learned|wake|memor
  * from a machine whose sync is broken still reaches its person).
  */
 export const readsDisk = (path: string): 'must' | 'may' | null => (MUST.test(path) ? 'must' : DISK.test(path) ? 'may' : null);
+
+/**
+ * A closed minion's worktree went (src/dismissed-cleanup.ts, after its work was saved): the marks its machine turns synced
+ * by go, and what was kept or sent aside goes only once its branch holds it. Work nothing else holds stays.
+ */
+export async function dropMachineRefs(p: Project, ticket: number, branch: string): Promise<number> {
+  const common = await repoCommon(p);
+  if (!common) return 0;
+  const refs = await refsOf(common, [mark(ticket), next(ticket), left(ticket), `refs/citadel/kept/${ticket}`, `refs/citadel/away/${ticket}`]);
+  const gone: string[] = [];
+  for (const [name, sha] of Object.entries(refs)) if (name === mark(ticket) || name === left(ticket) || (await isAncestor(common, sha, `refs/heads/${branch}`))) gone.push(`delete ${name} ${sha}`);
+  if (gone.length) await git(['--git-dir', common, 'update-ref', '--stdin'], { input: `${gone.join('\n')}\n` });
+  return gone.length;
+}

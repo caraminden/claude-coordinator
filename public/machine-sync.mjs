@@ -889,9 +889,16 @@ export class Machine {
       for (const [id, names] of await this.folders(again, skew, false)) left.set(id, names);
     }
     if (o.final && left.size) await this.json('failed', { files: [...left.values()].flat() });
+    if (!o.start) {
+      const kept = look.git && (await this.checkpoint(look.git, look.ticket));
+      // Everything the turn had at the look is home: a turn that ends away carries on from here (src/machine-away.ts).
+      if (!kept && !left.size && !o.roots && o.git !== false) await this.json('done', { at: look.now });
+      return { kept };
+    }
     if (!look.git) return { kept: null };
-    if (!o.start) return { kept: await this.checkpoint(look.git, look.ticket) };
     await this.seed(look.git, look.ticket);
+    // An earlier turn's unsent work, set aside by what came just now. A turn doesn't wait on it: what fails is sent at the next start.
+    await this.aside(look, false).catch(() => {});
     return { kept: null };
   }
 
@@ -900,7 +907,7 @@ export class Machine {
     /** @type {Map<string, string[]>} */
     const left = new Map();
     for (const r of look.roots) {
-      const names = await this.folder(r, skew, start);
+      const names = await this.folder(r, skew, start, look.ticket);
       if (names.length) left.set(r.id, names);
     }
     return left;
@@ -916,7 +923,171 @@ export class Machine {
     }
   }
 
+  // -- work that goes home beside what is there --
+
+  /**
+   * Send home what the server has not got, into places of its own there: refs/citadel/away/ and the files folder's away/.
+   * Nothing at home is changed by it. `all`: everything unsent here (the minion went on without this machine, or is
+   * done), else only what a start set aside. @param {Look} look @param {boolean} all
+   */
+  async aside(look, all) {
+    const now = Date.now();
+    let files = 0;
+    if (all) for (const r of look.roots) files += await this.asideUnsent(r, now);
+    const sent = [];
+    for (const name of await readdir(join(this.state, 'left')).catch(() => [])) {
+      const m = /^(\d+)-(\d+)-(\w+)$/.exec(name);
+      if (Number(m?.[1]) !== look.ticket) continue;
+      const dir = join(this.state, 'left', name);
+      files += (await this.put(dir, m[3], [...(await listTree(dir)).keys()], Number(m[2]))).length;
+      sent.push(dir);
+    }
+    const refs = look.git ? await this.asideRefs(look.git, look.ticket, all, now) : null;
+    if (files || refs?.refs.length) {
+      const body = { files, refs: refs?.refs.map(({ at, name, sha }) => ({ at, name, sha })) ?? [] };
+      const send = async (/** @type {string[]} */ have) => {
+        if (!refs?.refs.length) return this.json('away', body);
+        const got = await this.json('unpack', await packTo(refs.common, [...new Set(refs.refs.map((r) => r.sha))], have, refs.snaps));
+        return got.need ? got : this.json('away', body);
+      };
+      let said = await send(refs?.have ?? []);
+      if (said.need) said = await send([]);
+      if (said.need) throw new Error(`what went to the app did not arrive whole (${said.need})`);
+      const gone = refs?.refs.flatMap((r) => (r.from ? [`delete ${r.from} ${r.sha}`] : [])) ?? [];
+      if (refs && gone.length) await git(['--git-dir', refs.common, 'update-ref', '--stdin'], { input: `${gone.join('\n')}\n` });
+    }
+    for (const dir of sent) await rm(dir, { recursive: true, force: true });
+  }
+
+  /** Files of a folder here home under away/; those there now. @param {string} dir @param {string} id @param {string[]} rels @param {number} aside */
+  async put(dir, id, rels, aside) {
+    /** @type {{ rel: string, st: Stat }[]} */
+    const there = [];
+    const files = [];
+    for (const rel of rels) {
+      const file = await inside(dir, rel);
+      const st = file && (await statOf(file));
+      if (st) files.push({ file, root: id, rel, size: st[0], mtime: st[1], x: await runs(file), expect: null });
+    }
+    for (const batch of batches(files)) {
+      const said = await this.json('put', frame({ files: batch.map(({ file: _, ...f }) => f), now: Date.now(), aside }, batch));
+      for (const [i, s] of said.files.entries()) {
+        // Aside, a file that did not arrive is not sent: its copy here must not be deleted for it (a retry sends it again; one that arrived is taken again).
+        if (!('ok' in s) && (aside || s.left !== 'changed')) throw new Error(`${batch[i].rel} could not be written there`);
+        there.push({ rel: batch[i].rel, st: [batch[i].size, batch[i].mtime] });
+      }
+    }
+    return there;
+  }
+
+  /** What changed in a folder here and did not go home; how many files went. @param {Look['roots'][number]} root @param {number} now */
+  async asideUnsent(root, now) {
+    const at = this.at(root.path);
+    /** @type {Base} */
+    const base = JSON.parse(await readFile(this.baseFile(root), 'utf8').catch(() => '{}'));
+    const home = new Map(root.files.map(([p, size, mtime]) => [p, [size, mtime]]));
+    const unsent = [...(await listTree(at))].filter(([p, st]) => !same(st, base[p]?.l) && !same(st, /** @type {Stat} */ (home.get(p) ?? null))).map(([p]) => p);
+    const went = await this.put(at, root.id, unsent, now);
+    if (!went.length) return 0;
+    // As if it were the copy both had: the next start takes the server's, and a file only here goes.
+    for (const { rel, st } of went) base[rel] = { l: st, r: [-1, 0] };
+    await mkdir(this.state, { recursive: true });
+    await writeFile(`${this.baseFile(root)}.tmp`, JSON.stringify(base));
+    await rename(`${this.baseFile(root)}.tmp`, this.baseFile(root));
+    return went.length;
+  }
+
+  /** @param {GitLook} look @param {number} ticket @param {boolean} all @param {number} now */
+  async asideRefs(look, ticket, all, now) {
+    const common = join(this.at(look.repo), '.git');
+    if (!existsSync(common)) return null;
+    const work = this.at(look.cwd);
+    const at = `refs/citadel/left/${ticket}`;
+    /** @type {{ at: number, name: string, sha: string, from?: string }[]} */
+    const refs = Object.entries(await refsOf(common, [at])).map(([from, sha]) => {
+      const [time, ...name] = from.slice(at.length + 1).split('/');
+      return { at: Number(time), name: name.join('/'), sha, from };
+    });
+    /** @type {Record<string, string>} */
+    const base = JSON.parse(await readFile(this.refsFile(look), 'utf8').catch(() => '{}'));
+    const last = (await git(['--git-dir', common, 'rev-parse', '--verify', '--quiet', `refs/citadel/machine/${ticket}`], { ok: [1] })).trim();
+    if (all && existsSync(join(work, '.git'))) {
+      const gitDir = await gitDirOf(work);
+      const snap = await snapshot(work);
+      if (snap.sha !== last) refs.push({ at: now, name: '', sha: snap.sha });
+      const elsewhere = await branchesElsewhere(common, gitDir);
+      for (const [name, sha] of Object.entries(await refsOf(common, ['refs/heads', 'refs/tags']))) if (name !== snap.branch && base[name] !== sha && base[`refused ${name}`] !== sha && !elsewhere.has(name)) refs.push({ at: now, name: name.slice('refs/'.length), sha });
+      for (const sha of await this.stashes(common, await this.beenOn(gitDir, snap.branch))) if (!base[`refs/stash/${sha}`]) refs.push({ at: now, name: `stash/${sha}`, sha });
+    }
+    const have = [...(last ? [last] : []), ...Object.keys(base).flatMap((k) => (/^(sent|refused) /.test(k) ? [] : [base[k]]))];
+    return { common, refs, have, snaps: last ? [last] : [] };
+  }
+
+  /** Bring home everything unsent here. @returns {Promise<Look>} */
+  async rescue() {
+    /** @type {Look} */
+    const look = await this.json('look', { rescue: true });
+    await this.aside(look, true);
+    return look;
+  }
+
+  /**
+   * Delete this machine's copy of a minion once nothing in it is only here. `stays`: what keeps it. `all`: the machine is
+   * being removed, so what its other minions share goes too. @param {boolean} all @returns {Promise<{ stays?: string }>}
+   */
+  async clear(all) {
+    const look = await this.rescue();
+    const work = look.git && this.at(look.git.cwd);
+    const own = look.roots.filter((r) => all || !/^(shared|memory)$/.test(r.id));
+    const keys = [];
+    for (const r of own) for (const e of await readdir(this.at(r.path), { recursive: true, withFileTypes: true }).catch(() => [])) if (e.isFile() && SECRET_NAME.test(e.name)) keys.push(join(e.parentPath, e.name));
+    if (work && existsSync(join(work, '.git'))) {
+      const { nested } = await snapshot(work);
+      const loose = (await git(['-C', work, 'ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter((f) => SECRET_NAME.test(basename(f)));
+      keys.push(...nested, ...loose);
+    }
+    if (keys.length) return { stays: `${keys.slice(0, 3).join(', ').slice(0, 200)}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}` };
+    if (work && look.git) {
+      const common = join(this.at(look.git.repo), '.git');
+      const gitDir = existsSync(join(work, '.git')) ? await gitDirOf(work) : null;
+      await rm(work, { recursive: true, force: true });
+      if (gitDir && dirname(gitDir) === join(common, 'worktrees')) await rm(gitDir, { recursive: true, force: true });
+      if (existsSync(common)) {
+        const marks = Object.keys(await refsOf(common, ['refs/citadel/machine'])).filter((r) => new RegExp(`^refs/citadel/machine/${look.ticket}(-|$)`).test(r));
+        if (marks.length) await git(['--git-dir', common, 'update-ref', '--no-deref', '--stdin'], { input: marks.map((r) => `delete ${r}\n`).join('') });
+        const others = (await readdir(join(common, 'worktrees')).catch(() => [])).length || Object.keys(await refsOf(common, ['refs/citadel/left', 'refs/citadel/machine'])).length;
+        if (all && !others) {
+          await rm(this.at(look.git.repo), { recursive: true, force: true });
+          await rm(this.refsFile(look.git), { force: true });
+        }
+      }
+    }
+    for (const r of own) {
+      await rm(this.at(r.path), { recursive: true, force: true });
+      await rm(this.baseFile(r), { force: true });
+    }
+    return {};
+  }
+
   // -- the worktree --
+
+  /** What both sides had of a repo's refs. @param {GitLook} look */
+  refsFile(look) {
+    return join(this.state, `refs-${createHash('sha256').update(look.repo).digest('hex').slice(0, 16)}.json`);
+  }
+
+  /** The branches a worktree has been on. @param {string} gitDir @param {(string | null | undefined)[]} now */
+  async beenOn(gitDir, ...now) {
+    const been = new Set(now.map((b) => b?.replace('refs/heads/', '') ?? '(no branch)'));
+    for (const l of (await git(['--git-dir', gitDir, 'reflog', 'show', '--format=%gs', 'HEAD', '--'], { ok: [128] })).split('\n')) for (const b of /^checkout: moving from (.+) to (.+)$/.exec(l)?.slice(1) ?? []) been.add(/^[0-9a-f]{40}$/.test(b) ? '(no branch)' : b);
+    return been;
+  }
+
+  /** Stashes made on those branches: the list is the repo's, every minion's here, and git names the branch each was made on. @param {string} common @param {Set<string>} been */
+  async stashes(common, been) {
+    const all = (await git(['--git-dir', common, 'reflog', 'show', '--format=%H %gs', 'refs/stash', '--'], { ok: [128] })).split('\n').filter(Boolean);
+    return all.filter((l) => been.has(/^(?:WIP on|On) (.+?): /.exec(l.slice(41))?.[1] ?? '')).map((l) => l.slice(0, 40));
+  }
 
   /** @param {GitLook} look @param {number} ticket */
   async seed(look, ticket) {
@@ -951,7 +1122,7 @@ export class Machine {
       if (!(await complete(common, want))) throw new Error('what came from the app is not whole');
     }
     if (existsSync(join(work, '.git')) && existsSync(join(gitDir, 'HEAD'))) {
-      // Work a lost turn left here that never got home: kept aside, not written over. shortcut: only here, T6 brings it home.
+      // Work a lost turn left here that never got home: kept aside, not written over, and sent home after (aside).
       const left = await snapshot(work);
       if (left.sha !== last && left.sha !== look.snap) await git([...kept, 'update-ref', `refs/citadel/left/${ticket}/${Date.now()}`, left.sha]);
     } else {
@@ -969,7 +1140,7 @@ export class Machine {
     // The server's refs, but for branches another minion here is on, and this server's deletions of what it once sent.
     const elsewhere = await branchesElsewhere(common, gitDir);
     const main = look.main?.branch ?? null;
-    const baseFile = join(this.state, `refs-${createHash('sha256').update(look.repo).digest('hex').slice(0, 16)}.json`);
+    const baseFile = this.refsFile(look);
     /** @type {Record<string, string>} */
     const base = JSON.parse(await readFile(baseFile, 'utf8').catch(() => '{}'));
     /** @type {string[]} */
@@ -1023,7 +1194,7 @@ export class Machine {
     const mark = `refs/citadel/machine/${ticket}`;
     let last = (await git(['--git-dir', common, 'rev-parse', '--verify', '--quiet', mark], { ok: [1] })).trim();
     if (!last) throw new Error('this turn has no copy of its worktree here');
-    const baseFile = join(this.state, `refs-${createHash('sha256').update(look.repo).digest('hex').slice(0, 16)}.json`);
+    const baseFile = this.refsFile(look);
     /** @type {Record<string, string>} */
     const base = JSON.parse(await readFile(baseFile, 'utf8').catch(() => '{}'));
     const elsewhere = await branchesElsewhere(common, gitDir);
@@ -1049,14 +1220,7 @@ export class Machine {
     /** What went before in a call whose answer did not come, and what home said it would not take. @param {string} name @param {string} sha */
     const offer = (name, sha) => base[`refused ${name}`] !== sha && refs.push({ name, old: base[name] ?? null, sent: (base[`sent ${name}`] ?? '').split(' ').filter(Boolean), sha });
     for (const [name, sha] of Object.entries(await refsOf(common, ['refs/heads', 'refs/tags']))) if (base[name] !== sha && !elsewhere.has(name)) offer(name, sha);
-    // The branches this worktree has been on.
-    const been = new Set([now.branch, look.branch].map((b) => b?.replace('refs/heads/', '') ?? '(no branch)'));
-    for (const l of (await git(['--git-dir', gitDir, 'reflog', 'show', '--format=%gs', 'HEAD', '--'], { ok: [128] })).split('\n')) for (const b of /^checkout: moving from (.+) to (.+)$/.exec(l)?.slice(1) ?? []) been.add(/^[0-9a-f]{40}$/.test(b) ? '(no branch)' : b);
-    for (const l of (await git(['--git-dir', common, 'reflog', 'show', '--format=%H %gs', 'refs/stash', '--'], { ok: [128] })).split('\n').filter(Boolean)) {
-      const sha = l.slice(0, 40);
-      // The list is the repo's, every minion's here; git names the branch each was made on.
-      if (been.has(/^(?:WIP on|On) (.+?): /.exec(l.slice(41))?.[1] ?? '') && !base[`refs/stash/${sha}`]) offer(`refs/stash/${sha}`, sha);
-    }
+    for (const sha of await this.stashes(common, await this.beenOn(gitDir, now.branch, look.branch))) if (!base[`refs/stash/${sha}`]) offer(`refs/stash/${sha}`, sha);
     const own = (/** @type {string} */ name) => name === now.branch || name === look.branch;
     /** @type {string | null} */
     let why = null;
@@ -1107,10 +1271,15 @@ export class Machine {
 
   // -- folders --
 
-  /** One folder; its files that did not go home. @param {Look['roots'][number]} root @param {number} skew @param {boolean} start */
-  async folder(root, skew, start) {
+  /** @param {Root} root */
+  baseFile(root) {
+    return join(this.state, `base-${createHash('sha256').update(root.path).digest('hex').slice(0, 16)}.json`);
+  }
+
+  /** One folder; its files that did not go home. @param {Look['roots'][number]} root @param {number} skew @param {boolean} start @param {number} ticket */
+  async folder(root, skew, start, ticket) {
     const at = this.at(root.path);
-    const baseFile = join(this.state, `base-${createHash('sha256').update(root.path).digest('hex').slice(0, 16)}.json`);
+    const baseFile = this.baseFile(root);
     /** @type {Base} */
     const base = JSON.parse(await readFile(baseFile, 'utf8').catch(() => '{}'));
     const local = await listTree(at);
@@ -1133,7 +1302,7 @@ export class Machine {
     for (const batch of batches(plan.dropThere.map((rel) => ({ rel, size: 0 })))) for (const p of (await this.json('drop', { root: root.id, files: batch.map(({ rel }) => ({ rel, expect: remote.get(rel) })) })).dropped) delete base[p];
     if (start && root.session) {
       // A transcript's end a lost turn left here that never got home: kept aside, not written over.
-      const aside = join(this.state, 'left', String(Date.now()));
+      const aside = join(this.state, 'left', `${ticket}-${Date.now()}-${root.id}`);
       for (const p of plan.pull) {
         if (!local.has(p) || same(local.get(p), base[p]?.l)) continue;
         await mkdir(dirname(join(aside, p)), { recursive: true });
@@ -1220,8 +1389,9 @@ export function* batches(files) {
 async function main(arg) {
   onMachine = true;
   const o = JSON.parse(Buffer.from(arg, 'base64').toString('utf8'));
+  const run = async (/** @type {Machine} */ m) => (o.mode === 'clear' ? m.clear(!!o.all) : o.mode === 'rescue' ? void (await m.rescue()) : m.sync(o));
   try {
-    console.log(JSON.stringify({ ok: true, ...(await new Machine({ ...o, prefix: process.env.CITADEL_SYNC_PREFIX }).sync(o)) }));
+    console.log(JSON.stringify({ ok: true, ...(await run(new Machine({ ...o, prefix: process.env.CITADEL_SYNC_PREFIX }))) }));
   } catch (err) {
     console.log(JSON.stringify(err instanceof Gone ? { gone: true } : { error: err.message, offline: err instanceof Offline }));
   }

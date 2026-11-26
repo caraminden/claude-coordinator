@@ -5,6 +5,7 @@
  */
 import { isAuthFailure } from './claude-link.ts';
 import { USAGE_LIMIT } from './turn-launch.ts';
+import type { AwayEnd } from './machine-turn.ts';
 
 /** Claude's words for an account problem only a person can fix, like "API Error: 400 Identity verification is required to continue.": never retried. */
 export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|invalid api key|run \/login|organization has been disabled/i;
@@ -20,7 +21,7 @@ export function isNetworkFailure(text: string): boolean {
   return NETWORK_ERROR.test(text) && !isAuthFailure(text) && !/\b(status|API Error:) [1-5]\d\d\b/i.test(text);
 }
 
-export type Kind = 'ok' | 'stopped' | 'paused' | 'card' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
+export type Kind = 'ok' | 'stopped' | 'paused' | 'away' | 'card' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
 
 /**
  * What an ending sets off besides its kind. A turn that ended well: `cleared` (its failure note, the limits it proved
@@ -99,7 +100,7 @@ export function retriesOf(turn: EndedTurn | null | undefined): Retries {
 export interface TurnEnd {
   turn: EndedTurn | null;
   /** How its process exited; null when it was killed with no record of how. */
-  exit: { code: number | null; signal: string | null; error?: string } | null;
+  exit: { code: number | null; signal: string | null; error?: string; away?: AwayEnd } | null;
   /** Its stderr, line by line. */
   stderr: string[];
   /** It asked to close after this turn (close_self). */
@@ -151,6 +152,8 @@ export function outcome(end: TurnEnd): Outcome {
   // pause landing that late would run it again. An interrupted claude's result is an error, even on exit 0.
   const finished = !!turn?.result && !turn.result.error && exit?.code === 0 && !exit.signal;
   if (turn?.paused && !finished) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
+  // Its machine was away too long (Build 7 T6): carried on elsewhere, from its last checkpoint, and counted towards no cap.
+  if (exit?.away && !finished) return { kind: 'away', followUps: [], ...base, retry: { via: 'restart', retries: r } };
   const code = exit?.code ?? null;
   // Citadel never sends SIGABRT: claude raises it on itself when it can't go on (#1848: five turns whose container was refused threads).
   const abort = exit?.signal === 'SIGABRT';

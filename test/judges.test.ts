@@ -45,7 +45,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/relay.ts': { why: 'relays a Mandate event a person made', calls: 1 },
   'src/routes/contraptions.ts': { why: "an app's deploy notes and a person's ask from an app", calls: 4 },
   'src/routes/files.ts': { why: "a person's comment on a file", calls: 1 },
-  'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile', calls: 2 },
+  'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile; a minion told its machine sent work home aside (T6)', calls: 3 },
   'src/minion-relay.ts': { why: 'leaveMail itself', calls: 1 },
   'src/closing.ts': { why: 'claimPassed: who a claim passed to, told to its keeper as held mail', calls: 1 },
   'src/ship-lane.ts': { why: 'passes the lane to a minion that said it is ready, on the 10 min Josh picked (#1985), and tells the one it passed over; acts from day one rather than log-only: Josh, 2026-11-25, "Act from day one"', calls: 2 },

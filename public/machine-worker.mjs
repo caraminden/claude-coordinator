@@ -104,8 +104,8 @@ const read = (/** @type {string} */ file) => {
 
 /**
  * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[], sync?: { at: string, key: string } }} Launch sync: its state comes from the server and goes back (public/machine-sync.mjs); `at` is that program's folder, `key` what one of it at a time runs for
- * @typedef {{ start?: boolean, git?: boolean, roots?: string[], final?: boolean }} SyncAsk
- * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean, seeded: boolean, script: string | null, home: number, homeFailed: string | null, asked: number, steering: boolean, checking: boolean, checked: number, nextTry: number, failures: number, ref: number, final: boolean }} Turn
+ * @typedef {{ start?: boolean, git?: boolean, roots?: string[], final?: boolean, mode?: 'rescue' | 'clear', all?: boolean }} SyncAsk
+ * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean, seeded: boolean, script: string | null, home: number, homeFailed: string | null, asked: number, steering: boolean, checking: boolean, checked: number, nextTry: number, failures: number, ref: number, final: boolean, boot?: string | null, rescuing?: boolean, rescued?: true | string }} Turn
  */
 
 export class Worker {
@@ -127,12 +127,18 @@ export class Worker {
     this.port = 0;
     /** What each scheme's syncs wait in line behind: two at once would write the same repo. @type {Map<string, Promise<unknown>>} */
     this.lines = new Map();
+    /** This computer's boot: a turn begun in another one ended with it (`lost`). */
+    this.boot = read('/proc/sys/kernel/random/boot_id')?.trim() ?? null;
+    /** Copies being cleared, and those cleared that the app has not heard of yet (src/machine-away.ts). @type {Set<string>} */
+    this.clearing = new Set();
+    /** @type {{ dir: string, stays?: string }[]} */
+    this.cleared = [];
     this.checkpointMs = o.checkpointMs ?? CHECKPOINT_MS;
     mkdirSync(join(this.cfg.root, 'fs'), { recursive: true, mode: 0o700 });
     // The turns an earlier run of this agent held: their wrappers ran on in the container without it.
     try {
       for (const t of JSON.parse(readFileSync(this.index(), 'utf8')))
-        if (this.mine(t.dir) && existsSync(this.local(t.dir))) this.turns.set(t.dir, newTurn({ dir: t.dir, local: this.local(t.dir), launch: t.launch, applied: Number(t.applied) || 0, seeded: t.seeded === true, script: typeof t.script === 'string' ? t.script : null }));
+        if (this.mine(t.dir) && existsSync(this.local(t.dir))) this.turns.set(t.dir, newTurn({ dir: t.dir, local: this.local(t.dir), launch: t.launch, applied: Number(t.applied) || 0, seeded: t.seeded === true, script: typeof t.script === 'string' ? t.script : null, boot: typeof t.boot === 'string' ? t.boot : null }));
     } catch {}
   }
 
@@ -151,7 +157,7 @@ export class Worker {
   }
 
   save() {
-    writeFileSync(`${this.index()}.tmp`, JSON.stringify([...this.turns.values()].map((t) => ({ dir: t.dir, launch: t.launch, applied: t.applied, seeded: t.seeded, script: t.script }))), { mode: 0o600 });
+    writeFileSync(`${this.index()}.tmp`, JSON.stringify([...this.turns.values()].map((t) => ({ dir: t.dir, launch: t.launch, applied: t.applied, seeded: t.seeded, script: t.script, boot: t.boot }))), { mode: 0o600 });
     renameSync(`${this.index()}.tmp`, this.index());
   }
 
@@ -203,15 +209,19 @@ export class Worker {
     for (const t of this.turns.values()) this.checkpointIfDue(t);
     const turns = [...this.turns.values()].map((t) => this.report(t));
     const claude = this.claude;
-    const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude, max: this.cfg.max, ...this.facts() }, turns: turns.map((r) => r.body) }), signal: AbortSignal.timeout(30_000) });
+    const cleared = this.cleared;
+    const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude, max: this.cfg.max, ...this.facts() }, turns: turns.map((r) => r.body), ...(cleared.length ? { cleared } : {}) }), signal: AbortSignal.timeout(30_000) });
     if (!res.ok) throw new Error(`it answered ${res.status}`);
     this.said = null;
     // Said once the app has it: with another version than the app's own claude, no turn comes here.
     if (claude) this.quietly(`Minion turns: claude here is ${claude}`);
     const reply = await res.json();
+    this.cleared = this.cleared.filter((c) => !cleared.includes(c));
+    for (const c of cleared) this.clearing.delete(c.dir);
+    for (const c of Array.isArray(reply.clear) ? reply.clear : []) this.clear(c);
     for (const r of turns) await this.heard(r.turn, r, reply.turns?.[r.turn.dir]);
     for (const s of Array.isArray(reply.start) ? reply.start : []) {
-      if (!this.mine(s?.dir) || this.turns.has(s.dir)) continue;
+      if (!this.mine(s?.dir) || this.turns.has(s.dir) || this.clearing.has(s.dir)) continue;
       // Its owner's cap: a turn past it stays the server's to place elsewhere, and is asked for again next sync.
       if (this.turns.size >= this.cfg.max) break;
       void this.begin(s.dir, s.launch);
@@ -247,7 +257,11 @@ export class Worker {
       if (text === null || text === t.sentWhole[name] || (name === 'exit.json' && (!caughtUp || !this.settled(t)))) continue;
       put[name] = text;
     }
-    const body = { dir: t.dir, append, put, steer: size(join(t.local, 'steer.jsonl')), signals: t.applied, alive: t.starting || this.beats(t) || !this.settled(t), ...(t.home ? { home: t.home } : {}), ...(t.homeFailed ? { homeFailed: t.homeFailed } : {}) };
+    const alive = t.starting || this.beats(t) || !this.settled(t);
+    // Begun before this computer last started: its wrapper went with that boot, and what it had is home (settled).
+    const lost = !alive && !!t.boot && !!this.boot && t.boot !== this.boot && !existsSync(join(t.local, 'exit.json'));
+    const rescued = t.rescued ? { rescued: true, ...(t.rescued === true ? {} : { rescueFailed: t.rescued }) } : {};
+    const body = { dir: t.dir, append, put, steer: size(join(t.local, 'steer.jsonl')), signals: t.applied, alive, ...(lost ? { lost } : {}), ...rescued, ...(t.home ? { home: t.home } : {}), ...(t.homeFailed ? { homeFailed: t.homeFailed } : {}) };
     return { turn: t, body, put };
   }
 
@@ -255,12 +269,50 @@ export class Worker {
   async heard(t, sent, r) {
     if (!r) return;
     if (r.gone) return this.drop(t);
+    if (r.rescue) return this.rescue(t);
     t.acked = r.sizes ?? {};
     Object.assign(t.sentWhole, sent.put);
     if (typeof r.script === 'string') t.script = r.script;
     if (Number(r.checkpoint) > t.asked) t.asked = Number(r.checkpoint);
     if (typeof r.steer === 'string' && !t.steering) void this.steer(t, Buffer.from(r.steer, 'base64'));
     if (Array.isArray(r.signals) && r.signals.length) await this.signal(t, r.signals);
+  }
+
+  /**
+   * The app carried this turn on without this machine (it was away): the turn here stops, and what it did that never
+   * came home goes there beside the minion's work (public/machine-sync.mjs, rescue). Then the app answers `gone`.
+   * @param {Turn} t
+   */
+  rescue(t) {
+    if (t.rescuing || t.rescued) return;
+    t.rescuing = true;
+    const stop = async () => {
+      const pid = this.pid(t);
+      if (!pid || existsSync(join(t.local, 'exit.json'))) return;
+      await this.exec(this.cfg.podman, ['exec', this.cfg.container, 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
+      // Its wrapper writes its end once claude is gone: what it wrote last is part of what goes.
+      for (let i = 0; i < 20 && !existsSync(join(t.local, 'exit.json')); i++) await sleep(250);
+    };
+    void (t.seeded ? this.stateSync(t, { mode: 'rescue' }, stop) : stop().then(() => ({ ok: true }))).then((r) => {
+      t.rescuing = false;
+      if (r.ok || r.gone) t.rescued = true;
+      else if (r.offline) t.nextTry = Date.now() + 2000;
+      else if (++t.failures >= 3) t.rescued = r.error ?? 'its sync program stopped 3 times with no reason given';
+      this.poke();
+    });
+  }
+
+  /** Delete this machine's copy of a minion the app is done with, once its work is home. @param {any} c */
+  clear(c) {
+    if (!this.mine(c?.dir) || this.clearing.has(c.dir) || this.turns.has(c.dir) || !c.launch?.sync || !this.mine(c.launch.sync.at) || !Array.isArray(c.launch.roots) || !c.launch.roots.every((/** @type {unknown} */ r) => this.mine(r))) return;
+    this.clearing.add(c.dir);
+    const t = newTurn({ dir: c.dir, local: this.local(c.dir), launch: c.launch });
+    // A rescue of a copy whose turn this agent no longer holds (it was restarted, say) goes the same way.
+    void this.stateSync(t, { mode: c.mode === 'rescue' ? 'rescue' : 'clear', all: c.all === true }).then((r) => {
+      if (r.ok) return void this.cleared.push({ dir: c.dir, ...(typeof r.stays === 'string' ? { stays: r.stays } : {}) });
+      this.quiet(`Could not clear this machine's copy of minion ${c.ticket}: ${r.error}`);
+      setTimeout(() => this.clearing.delete(c.dir), r.offline ? 2000 : 60_000).unref?.();
+    });
   }
 
   /** Steers for the turn, once the pictures they may name are here. @param {Turn} t @param {Buffer} lines */
@@ -304,12 +356,14 @@ export class Worker {
   /**
    * Run the sync program for a turn in the worker container, where the server's paths are and whatever a minion put in
    * its git config stays. Never throws. @param {Turn} t @param {SyncAsk} ask
-   * @returns {Promise<{ ok?: true, gone?: true, error?: string, offline?: boolean, kept?: string | null }>}
+   * @param {() => Promise<void>} [first] what goes in the line before the program
+   * @returns {Promise<{ ok?: true, gone?: true, error?: string, offline?: boolean, kept?: string | null, stays?: string }>}
    */
-  stateSync(t, ask) {
+  stateSync(t, ask, first = async () => {}) {
     const { at, key } = /** @type {{ at: string, key: string }} */ (t.launch.sync);
     const now = async () => {
       try {
+        await first();
         const program = await this.syncProgram(t);
         // Its container may have stopped with the machine since the turn began.
         if (!ask.start) await this.ensureContainer(t.launch);
@@ -337,7 +391,7 @@ export class Worker {
 
   /** Send home what a turn changed: at its end, when the server asks, on a commit, and every couple of minutes. @param {Turn} t */
   checkpointIfDue(t) {
-    if (!t.seeded || t.starting || t.checking) return;
+    if (!t.seeded || t.starting || t.checking || t.rescuing || t.rescued) return;
     const over = existsSync(join(t.local, 'exit.json')) || !this.beats(t);
     // A machine that slept looks over until its wrapper beats again.
     if (!over) t.final = false;
@@ -410,7 +464,7 @@ export class Worker {
 
   /** Fetch a turn's folder and start its wrapper in the worker container. @param {string} dir @param {Launch} launch */
   async begin(dir, launch) {
-    const t = newTurn({ dir, local: this.local(dir), launch, starting: true });
+    const t = newTurn({ dir, local: this.local(dir), launch, starting: true, boot: this.boot });
     this.turns.set(dir, t);
     this.save();
     try {

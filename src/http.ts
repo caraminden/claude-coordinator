@@ -1,4 +1,5 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
+import type { MachineCopies } from './machine-away.ts';
 import type { HeldStarts } from './held-starts.ts';
 import type { TestCounts } from './waits.ts';
 import type { Presence } from './presence.ts';
@@ -334,6 +335,8 @@ export interface App {
   /** Desktop apps' update feeds and their launcher (src/desktop-feed.ts, #1148); absent in tests that build no server. */
   desktop?: { feeds: DesktopFeeds; launchers: Launchers };
   machines: MachineRelay;
+  /** What worker machines hold of each minion (src/machine-away.ts, Build 7 T6); absent in tests that build no server. */
+  machineCopies?: MachineCopies;
   /** Jobs on people's own machines (src/machine-jobs.ts, #857). */
   jobs: MachineJobs;
   /** The kit's scheme files syncing themselves (src/kit-sync.ts, #1100). */

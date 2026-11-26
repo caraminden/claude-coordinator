@@ -23,7 +23,8 @@ import { thrown } from '../thrown.ts';
 import { request } from 'node:http';
 import { projectSharedDir } from '../workspace.ts';
 import { readsDisk, stateCall, syncScript, type StateDeps } from '../machine-sync.ts';
-import { askCheckpoint, owned, placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
+import { askCheckpoint, AWAY_MS, endAway, heardAt, liveOn, machineLink, owned, placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
+import { UNINSTALL } from '../machine-away.ts';
 import { BLOB_BYTES } from '../worker-join.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
@@ -143,11 +144,38 @@ const stateDeps = (app: App): StateDeps => ({
   shared: (p) => projectSharedDir(app.dataDir, p.id),
   landing: (id) => app.landings.get(id)?.code === null,
   note: (id, text) => app.runner.emit(id, 'note', { text }),
+  // Work a machine sent home aside: an open minion hears it as a message (it may act on it), a closed one keeps a line.
+  tell: (id, text) => (app.store.getTicket(id)?.status === 'closed' ? app.runner.emit(id, 'note', { text }) : app.runner.send(id, 'System', text)),
 });
 
 function workersOf(app: Ctx['app']) {
   if (!app.machines.workers) throw new HttpError(503, 'No worker machines here');
   return app.machines.workers;
+}
+
+/** A machine's row and all it lends go. A worker's turns still there end as away (they carry on at perigee). */
+export async function dropMachine(app: App, machine: Machine) {
+  for (const dir of await liveOn(machine.id)) await endAway(dir, Date.now(), true);
+  // Before its rows go: the agent is told to stop, and each job's minion hears (2MA9).
+  app.jobs.drop(machine.id, `${machine.name} was removed from Citadel`, () => true);
+  app.store.deleteMachine(machine.id);
+  app.machineCopies?.forget(machine.id);
+  app.runner.turnLine.forget(machine.id);
+  app.ciLoad.forget(machine.id);
+  app.machines.workers?.forget(machine.id);
+  app.machines.disconnect(machine.id);
+  await ownWrites(); // the broadcast re-reads the list (#1244)
+  app.broadcast({ type: 'machines', machines: app.machines.list() });
+}
+
+/** Machines being removed whose agent has deleted every copy there, or that went offline meanwhile: their rows go now. */
+export async function dropRemoved(app: App) {
+  for (const id of app.machineCopies?.removals() ?? []) {
+    const m = app.store.getMachine(id);
+    if (!m) app.machineCopies!.forget(id);
+    // Every copy cleared, or kept for what can't come home (its uninstall deletes those); or silent AWAY_MS by its syncs.
+    else if ((Object.values(app.machineCopies!.all(id)).every((c) => c.stays && !c.away) && !(await liveOn(id)).length) || Date.now() - heardAt(id) >= AWAY_MS) await dropMachine(app, m);
+  }
 }
 
 /** A route a machine's agent calls with its token, which reaches nothing else. */
@@ -229,9 +257,12 @@ export const agentRoutes: Route[] = [
   agent(['GET', 'POST'], '/api/machines/state/*rest', async ({ req, res, url, params, app }, machine) => {
     if (params.rest === 'script') return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end((await syncScript()).text);
     const dir = url.searchParams.get('dir') ?? '';
-    const at = (await owned(machine.id, dir)) ? placedAt(dir) : null;
+    // A copy whose turn has ended (T6, src/machine-away.ts) may only send home what it holds, and be cleared: also one
+    // whose folder is still here, ended while its machine was away.
+    const copy = app.machineCopies && (app.machineCopies.held(machine.id, dir) || !(await owned(machine.id, dir))) ? app.machineCopies.copyAt(machine.id, dir) : null;
+    const at = copy ?? ((await owned(machine.id, dir)) ? placedAt(dir) : null);
     if (!at) throw new HttpError(410, 'Not a turn placed on this machine');
-    return stateCall(stateDeps(app), params.rest, dir, at, req, res);
+    return stateCall(stateDeps(app), params.rest, dir, at, req, res, !!copy);
   }),
   // A worker's own program (Build 7 T5, src/worker-join.ts): how it stands, every 2 s, and what its self-test measures.
   agent('POST', '/api/machines/worker', async ({ req, res, app }, machine) => json(res, 200, await workersOf(app).report(machine, await readJson(req, 50_000)))),
@@ -645,17 +676,21 @@ export const machineRoutes: Route[] = [
     method: 'DELETE',
     path: '/api/machines/:machine',
     ...people,
-    handler: managed(async ({ res, app, machine }) => {
-      // Before its rows go: the agent is told to stop, and each job's minion hears (2MA9).
-      app.jobs.drop(machine.id, `${machine.name} was removed from Citadel`, () => true);
-      app.store.deleteMachine(machine.id);
-      app.runner.turnLine.forget(machine.id);
-      app.ciLoad.forget(machine.id);
-      app.machines.workers?.forget(machine.id);
-      app.machines.disconnect(machine.id);
-      await ownWrites(); // the broadcast re-reads the list (#1244)
-      app.broadcast({ type: 'machines', machines: app.machines.list() });
-      return json(res, 200, {});
+    handler: managed(async ({ res, app, machine, url }) => {
+      const copies = app.machineCopies;
+      // A worker's copies of minions go first (Build 7 T6): its Minion turns switch goes off, its turns there run out, and
+      // its agent sends home what never came and deletes the rest; the row goes once it has (dropRemoved). Offline, or
+      // with ?now, it goes at once: what is there stays there, and its turns carry on at perigee.
+      if (copies && url.searchParams.get('now') === null && machineLink.online(machine.id) && (Object.keys(copies.all(machine.id)).length || (await liveOn(machine.id)).length)) {
+        copies.remove(machine.id);
+        if (app.machines.lendsWorker(machine)) app.store.updateMachine(machine.id, { lend: JSON.stringify({ ...JSON.parse(machine.lend!), worker: undefined }) });
+        app.machines.pokeWorker(machine.id);
+        await ownWrites();
+        app.broadcast({ type: 'machines', machines: app.machines.list() });
+        return json(res, 202, { removing: true, uninstall: UNINSTALL });
+      }
+      await dropMachine(app, machine);
+      return json(res, 200, { uninstall: UNINSTALL });
     }),
   },
 

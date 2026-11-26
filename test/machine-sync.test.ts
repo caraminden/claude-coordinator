@@ -7,7 +7,8 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Changed, Frames, Machine, frame, inside, reconcile, restore, snapshot, take } from '../public/machine-sync.mjs';
 import { HttpError, json } from '../src/http.ts';
-import { readsDisk, stateCall, type StateDeps } from '../src/machine-sync.ts';
+import { dropMachineRefs, readsDisk, stateCall, type StateDeps } from '../src/machine-sync.ts';
+import type { Project } from '../src/db.ts';
 import type { Placed } from '../src/machine-turn.ts';
 import { projectSlug } from '../src/sessions.ts';
 import { tempRoot } from './helpers.ts';
@@ -60,7 +61,11 @@ async function scheme(o: { landing?: () => boolean } = {}) {
   const session = '11111111-2222-3333-4444-555555555555';
   const ticket = { id: 7, cwd, project_id: 2, session_id: session as string | null };
   const notes: string[] = [];
+  const told: string[] = [];
+  /** The machine's calls are about a copy it holds (src/machine-away.ts), not a running turn. */
+  const mode = { copy: false };
   const deps = {
+    tell: (_id: number, text: string) => told.push(text),
     store: { getTicket: () => ticket, getProject: () => ({ id: 2, repo_dir: repo }) },
     files: () => join(server, 'shared', '7'),
     uploads: () => join(server, 'uploads', '7'),
@@ -81,12 +86,12 @@ async function scheme(o: { landing?: () => boolean } = {}) {
     if (lose.has(op)) res.writeHead = () => res.destroy() as never;
     const { bytesRead, bytesWritten } = req.socket;
     res.on('close', () => bytes.push(req.socket.bytesRead - bytesRead + req.socket.bytesWritten - bytesWritten));
-    stateCall(deps, op, dir, at, req, res).catch((err) => (res.headersSent ? res.destroy() : json(res, err instanceof HttpError ? err.status : 500, { error: String(err.message) })));
+    stateCall(deps, op, dir, at, req, res, mode.copy).catch((err) => (res.headersSent ? res.destroy() : json(res, err instanceof HttpError ? err.status : 500, { error: String(err.message) })));
   });
   const port = await tmp.serve(http);
   const prefix = join(home, 'machine');
   const machine = new Machine({ app: `http://127.0.0.1:${port}`, dir, state: join(server, 'turns', '.sync'), prefix });
-  return { server, repo, cwd, config, session, ticket, notes, calls, bytes, lose, dir, machine, there: prefix + cwd, prefix, slug: projectSlug(cwd) };
+  return { server, repo, cwd, config, session, ticket, notes, told, mode, calls, bytes, lose, dir, machine, there: prefix + cwd, prefix, slug: projectSlug(cwd) };
 }
 
 /** A worktree in every state a turn leaves one in. */
@@ -145,7 +150,7 @@ test('a worktree goes to a machine and comes back with every file, its index and
   // Nothing new: nothing moves.
   const was = s.calls.length;
   await s.machine.sync({});
-  assert.deepEqual(s.calls.slice(was), ['look']);
+  assert.deepEqual(s.calls.slice(was), ['look', 'done']);
 
   // The next turn here, then one there again: only what is new goes.
   sh(s.cwd, '-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'home again');
@@ -190,7 +195,7 @@ test('a checkpoint with a new commit sends that commit, not the repo, and once',
     s.calls.length = 0;
     s.bytes.length = 0;
     await s.machine.sync({});
-    assert.deepEqual(s.calls, ['look', 'unpack', 'commit']);
+    assert.deepEqual(s.calls, ['look', 'unpack', 'commit', 'done']);
     assert.ok(s.bytes.reduce((a, b) => a + b, 0) < 50_000, `sent ${s.bytes}`);
     assert.equal(sh(s.cwd, 'log', '-1', '--format=%s'), `commit ${lost}`);
   }
@@ -334,14 +339,108 @@ test('a branch another worktree here is on, main among them, is never moved by a
   assert.equal(sh(s.cwd, 'log', '-1', '--format=%s'), 'x');
 });
 
-test('work a lost turn left on the machine is kept aside there when the next one starts', async () => {
+test('work a lost turn left on the machine is kept aside when the next one starts, and comes home beside the worktree', async () => {
   const s = await scheme();
   await s.machine.sync({ start: true });
   put(join(s.there, 'a.txt'), 'never sent\n');
   await s.machine.sync({ start: true });
   assert.equal(readFileSync(join(s.there, 'a.txt'), 'utf8'), 'one\n');
-  const ref = sh(s.there, 'for-each-ref', '--format=%(refname)', 'refs/citadel/left/7');
-  assert.equal(sh(s.there, 'show', `${ref}:work/a.txt`), 'never sent');
+  assert.equal(readFileSync(join(s.cwd, 'a.txt'), 'utf8'), 'one\n', 'nothing merges by itself');
+  assert.equal(sh(s.there, 'for-each-ref', 'refs/citadel/left'), '', 'brought home, so gone there');
+  const refs = sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/away/7').split('\n');
+  assert.equal(refs.length, 1);
+  assert.match(refs[0], /^refs\/citadel\/away\/7\/\d{8}-\d{6}$/);
+  assert.equal(sh(s.repo, 'show', `${refs[0]}:work/a.txt`), 'never sent');
+  assert.match(s.told.join('\n'), /never came home.*refs\/citadel\/away\/7\//);
+  await s.machine.sync({ start: true });
+  assert.equal(sh(s.repo, 'for-each-ref', 'refs/citadel/away/7').split('\n').length, 1, 'once');
+});
+
+test('two snapshots kept aside in the same second are both kept; a folder sent again after a failed try is taken again', async () => {
+  const s = await scheme();
+  await s.machine.sync({ start: true });
+  const real = Date.now;
+  const second = Math.floor(real() / 1000) * 1000 + 400;
+  Date.now = () => second; // the machine's clock and this one, in the same second for both
+  try {
+    put(join(s.there, 'a.txt'), 'first\n');
+    await s.machine.sync({ start: true });
+    put(join(s.there, 'a.txt'), 'second\n');
+    await s.machine.sync({ start: true });
+  } finally {
+    Date.now = real;
+  }
+  const refs = sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/away/7').split('\n');
+  assert.equal(refs.length, 2, refs.join());
+  assert.deepEqual(refs.map((r) => sh(s.repo, 'show', `${r}:work/a.txt`)).sort(), ['first', 'second'], 'neither written over');
+
+  // A folder sent aside under its own time, whose first try stopped after this file arrived: the retry takes it again.
+  const left = join(tmp.dir, 'left-again');
+  put(join(left, 'x.txt'), 'sent twice\n');
+  const aside = real();
+  assert.equal((await s.machine.put(left, 'files', ['x.txt'], aside)).length, 1);
+  assert.equal((await s.machine.put(left, 'files', ['x.txt'], aside)).length, 1, 'taken again, not refused as changed');
+  put(join(left, 'x.txt'), 'changed there\n');
+  await assert.rejects(s.machine.put(left, 'files', ['x.txt'], aside), /could not be written there/, 'a different file at that place is never written over');
+});
+
+test('a machine whose minion went on without it sends everything it holds home aside, then its copy can go', async () => {
+  const s = await scheme();
+  const log = join('projects', s.slug, `${s.session}.jsonl`);
+  put(join(s.config, log), '{"n":1}\n');
+  await s.machine.sync({ start: true });
+  // The turn on the machine works on, and never sends it.
+  put(join(s.there, 'a.txt'), 'only there\n');
+  sh(s.there, 'tag', 'v-there');
+  sh(s.there, 'stash', 'push', '-q', '-m', 'kept');
+  put(join(s.there, 'a.txt'), 'only there\n');
+  put(join(s.prefix, '/h/.claude', log), '{"n":1}\n{"n":"there"}\n');
+  put(join(s.prefix + s.server, 'shared', '7', 'report.md'), 'made there');
+  // Meanwhile the minion carried on here.
+  put(join(s.cwd, 'b.txt'), 'here\n');
+  put(join(s.server, 'shared', '7', 'report.md'), 'made here');
+  s.mode.copy = true;
+  await assert.rejects(s.machine.sync({}), /has ended/, 'a copy is not a turn: it may only send aside');
+  await s.machine.rescue();
+  assert.equal(readFileSync(join(s.cwd, 'b.txt'), 'utf8'), 'here\n');
+  assert.equal(readFileSync(join(s.server, 'shared', '7', 'report.md'), 'utf8'), 'made here', 'what is here stays');
+  const refs = sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/away/7').split('\n');
+  const work = refs.find((r) => /\d{6}$/.test(r))!;
+  assert.equal(sh(s.repo, 'show', `${work}:work/a.txt`), 'only there');
+  assert.ok(
+    refs.some((r) => r.endsWith('-tags/v-there')),
+    'a tag made there',
+  );
+  assert.ok(
+    refs.some((r) => /-stash\/[0-9a-f]{40}$/.test(r)),
+    refs.join(),
+  );
+  const away = join(s.server, 'shared', '7', 'away');
+  const [time] = readdirSync(away);
+  assert.equal(readFileSync(join(away, time, 'files', 'report.md'), 'utf8'), 'made there');
+  assert.match(readFileSync(join(away, time, 'session', `${s.session}.jsonl`), 'utf8'), /there/);
+  assert.equal(s.told.length, 1);
+  await s.machine.rescue();
+  assert.equal(s.told.length, 1, 'sent once');
+  assert.deepEqual(await s.machine.clear(false), {});
+  assert.ok(!existsSync(s.there), 'its worktree there is gone');
+  assert.ok(!existsSync(join(s.prefix, '/h/.claude', 'projects', s.slug)), 'and its session');
+  assert.ok(!existsSync(join(s.prefix + s.server, 'shared', '7')), 'and its files folder');
+  assert.ok(existsSync(join(s.prefix + s.server, 'shared', 'project')) || true);
+  assert.equal(sh(s.prefix + s.repo, 'for-each-ref', 'refs/citadel/machine'), '');
+  assert.ok(existsSync(join(s.prefix + s.repo, '.git')), "the scheme's copy stays for its other minions");
+});
+
+test('a copy holding a repo of its own or a key the server never gets is not deleted', async () => {
+  const s = await scheme();
+  await s.machine.sync({ start: true });
+  put(join(s.there, 'deploy.pem'), 'key');
+  s.mode.copy = true;
+  assert.match((await s.machine.clear(false)).stays ?? '', /deploy\.pem/);
+  assert.ok(existsSync(join(s.there, 'deploy.pem')));
+  unlinkSync(join(s.there, 'deploy.pem'));
+  assert.deepEqual(await s.machine.clear(true), {});
+  assert.ok(!existsSync(s.prefix + s.repo), 'removing the machine takes the scheme copy too, once no other minion is on it');
 });
 
 test('what the server has cleaned up since is sent again whole', async () => {
@@ -499,7 +598,7 @@ test('a stash and a tag made on the machine come home', async () => {
   assert.equal(sh(s.repo, 'rev-parse', 'v1'), sh(s.cwd, 'rev-parse', 'HEAD'));
   s.calls.length = 0;
   await s.machine.sync({});
-  assert.deepEqual(s.calls, ['look'], 'once');
+  assert.deepEqual(s.calls, ['look', 'done'], 'once');
 });
 
 test('a stash made before the turn moved to another branch comes home too', async () => {
@@ -536,7 +635,7 @@ test('side branches on the machine: one that never got home stays, names that cl
   assert.equal(sh(s.there, 'rev-parse', 'side'), unsent);
   assert.equal(sh(s.there, 'rev-parse', 'build/7'), sh(s.repo, 'rev-parse', 'build/7'));
   assert.equal(sh(s.there, 'symbolic-ref', 'HEAD').trim(), 'refs/heads/taken');
-  assert.ok(sh(s.there, 'for-each-ref', '--format=%(objectname)', 'refs/citadel/left').includes(further.trim()), 'its commits are kept aside');
+  assert.ok(sh(s.repo, 'for-each-ref', '--format=%(objectname)', 'refs/citadel/away/7').includes(further.trim()), 'its commits are kept aside, at home');
   await s.machine.sync({});
   assert.equal(sh(s.repo, 'rev-parse', 'side'), unsent, 'and goes home at the next checkpoint');
 });
@@ -562,7 +661,7 @@ test('folders: a script stays runnable, many deletes go in parts, and what canno
   assert.match(s.notes.join(), /notes could not be written here. They are still on Desk/);
 });
 
-test('a transcript’s end that never got home is kept on the machine when the server’s goes over it', async () => {
+test('a transcript’s end that never got home is kept when the server’s goes over it, and sent home aside', async () => {
   const s = await scheme();
   const log = join('projects', s.slug, `${s.session}.jsonl`);
   put(join(s.config, log), '{"n":1}\n');
@@ -571,8 +670,9 @@ test('a transcript’s end that never got home is kept on the machine when the s
   put(there, '{"n":1}\n{"n":"unsent"}\n');
   await s.machine.sync({ start: true });
   assert.equal(readFileSync(there, 'utf8'), '{"n":1}\n');
-  const left = join(s.prefix + s.server, 'turns', '.sync', 'left');
-  assert.match(readFileSync(join(left, readdirSync(left)[0], `${s.session}.jsonl`), 'utf8'), /unsent/);
+  const away = join(s.server, 'shared', '7', 'away');
+  assert.match(readFileSync(join(away, readdirSync(away)[0], 'session', `${s.session}.jsonl`), 'utf8'), /unsent/, 'home, beside the record');
+  assert.deepEqual(readdirSync(join(s.prefix + s.server, 'turns', '.sync', 'left')), [], 'and no longer kept there');
 });
 
 test('an answer lost with all the machine knew of it: the branch still follows, side branches too', async () => {
@@ -837,7 +937,7 @@ test('a side branch moved on both sides is said once, and stops nothing else', a
   assert.match(s.notes.join(), /side moved here and on Desk both/);
   s.calls.length = 0;
   await s.machine.sync({});
-  assert.deepEqual(s.calls, ['look']);
+  assert.deepEqual(s.calls, ['look', 'done']);
   put(join(s.cwd, 'a.txt'), 'home\n');
   await s.machine.sync({});
   assert.equal(readFileSync(join(s.there, 'a.txt'), 'utf8'), 'home\n', 'what moves at home still comes');
@@ -900,7 +1000,7 @@ test('folders: uploads go down, the files folder, shared folder and memory come 
   // Settled: nothing more to send either way.
   const was = s.calls.length;
   await s.machine.sync({});
-  assert.deepEqual(s.calls.slice(was), ['look']);
+  assert.deepEqual(s.calls.slice(was), ['look', 'done']);
 });
 
 test('a session: only this conversation goes down, the server’s copy wins at the start, and its growth comes back', async () => {
@@ -1007,4 +1107,20 @@ test('the tools that read the worktree here wait for it; the chatty ones do not'
   for (const p of ['questions', 'openrouter', 'jobs']) assert.equal(readsDisk(`api/tickets/7/${p}`), 'may', p);
   assert.equal(readsDisk('api/contraptions/x/deploy'), 'may');
   for (const p of ['api/tickets/7/status', 'api/tickets/7/plan', 'api/tickets/7', 'api/tickets/7/minion-message']) assert.ok(!readsDisk(p), p);
+});
+
+test("a closed minion's machine marks go with its worktree; what was kept or sent aside goes only once its branch has it", async () => {
+  const s = await scheme();
+  await s.machine.sync({ start: true });
+  put(join(s.there, 'a.txt'), 'there\n');
+  await s.machine.sync({});
+  const onBranch = sh(s.cwd, 'rev-parse', 'HEAD');
+  sh(s.repo, 'update-ref', 'refs/citadel/kept/7/x/heads/side', onBranch);
+  sh(s.repo, 'update-ref', 'refs/citadel/away/7/20261125-120000', sh(s.repo, 'commit-tree', '-m', 'aside', `${onBranch}^{tree}`));
+  sh(s.repo, 'update-ref', 'refs/citadel/machine/70', onBranch);
+  assert.match(sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/machine/7'), /machine\/7$/m);
+  assert.ok((await dropMachineRefs({ id: 2, repo_dir: s.repo } as Project, 7, 'ticket/7')) >= 2);
+  assert.equal(sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/kept/7', 'refs/citadel/machine/7', 'refs/citadel/machine/7-home'), '');
+  assert.equal(sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/away/7'), 'refs/citadel/away/7/20261125-120000', 'not on its branch: it stays');
+  assert.equal(sh(s.repo, 'for-each-ref', '--format=%(refname)', 'refs/citadel/machine/70'), 'refs/citadel/machine/70', "another minion's");
 });

@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, lines, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
-import { askCheckpoint, MachineTurn, machineLink, placeTurn, placedAt, sameClaude, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
+import { askCheckpoint, awayTimes, MachineTurn, machineLink, placeTurn, placedAt, sameClaude, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
 import { runningTurn, wrapperAlive } from '../src/running-turn.ts';
 import { machineEnv } from '../src/turn-launch.ts';
 import { containerArgs, workerConfig, Worker } from '../public/machine-worker.mjs';
@@ -40,7 +40,7 @@ const b64 = (s: string) => Buffer.from(s).toString('base64');
 const text = (dir: string, f: string) => readFileSync(join(dir, f), 'utf8');
 const one = async (id: number, turn: Record<string, unknown> & { dir: string }) => {
   const r = (await syncTurns(id, { turns: [turn] })).turns[turn.dir];
-  if ('gone' in r) throw new Error("the turn is not the machine's");
+  if (!('sizes' in r)) throw new Error(`the turn is not the machine's: ${JSON.stringify(r)}`);
   return r;
 };
 
@@ -102,11 +102,14 @@ test('steers and signals go down past what the agent has, and a turn ended here 
   assert.deepEqual(JSON.parse(text(dir, 'exit.json')), { code: null, signal: null, stopped: true });
 });
 
-test('alive by its syncs while the agent is connected; away is not gone, and a kill while away ends it here', async (t) => {
+test('alive by its syncs while the agent is connected; away is not gone, and a stop while away ends it here at once', async (t) => {
   const was = { ...machineLink };
   t.after(() => Object.assign(machineLink, was));
   let online = true;
   machineLink.online = () => online;
+  // Just after this server starts, or a machine comes back, a stale beat is no sign yet: the grace is the away tests'.
+  awayTimes.back = 0;
+  t.after(() => void (awayTimes.back = 30_000));
   const dir = await placed(1);
   const old = new Date(Date.now() - 120_000);
   assert.equal(wrapperAlive(dir), true, 'its first beat counts while the agent fetches it');
@@ -122,10 +125,11 @@ test('alive by its syncs while the agent is connected; away is not gone, and a k
   assert.equal(wrapperAlive(dir), true, 'its machine away: still counted as running');
   const turn = runningTurn({ dir, unit: null, container: null });
   turn.signal('SIGINT');
-  assert.equal(existsSync(join(dir, 'exit.json')), false, 'an interrupt waits for the machine');
-  turn.signal('SIGKILL');
-  assert.deepEqual(JSON.parse(text(dir, 'exit.json')), { code: null, signal: 'SIGKILL' });
-  assert.deepEqual((await one(1, { dir, signals: 0 })).signals, ['SIGINT', 'SIGKILL'], 'and the machine still gets them when it returns');
+  await until("a person's stop frees the minion without waiting for its machine", () => existsSync(join(dir, 'exit.json')));
+  const end = JSON.parse(text(dir, 'exit.json'));
+  assert.deepEqual({ ...end, away: { ...end.away, since: 0 } }, { code: null, signal: 'SIGINT', away: { name: 'box-1', since: 0, checkpoint: null, home: true } });
+  assert.ok(end.away.since > old.getTime(), 'away since its last sync');
+  assert.deepEqual((await one(1, { dir, signals: 0 })).signals, ['SIGINT'], 'and the machine still gets it when it returns');
 });
 
 test("the worker container holds only the turn's folders, and the home volume", () => {
@@ -309,6 +313,10 @@ const heard = join(root, 'heard.log');
 const release = join(root, 'release');
 /** With it, claude says it is this session. */
 const sessionFile = join(root, 'session');
+/** The machine's agent in the whole-path tests, and a fresh one in its place. */
+type Agent = ReturnType<ReturnType<typeof machineFakes>['startMachineAgent']>;
+let agentNow: () => Agent;
+let restartAgent: () => Agent;
 // podman: `exec [-d] <container> <command…>` runs the command here, the server's turns folder mapped to the worker's
 // copy as the container's mount does; `run` and `inspect` are only recorded (no container runs yet, each time).
 const podman = join(bin, 'podman');
@@ -389,7 +397,10 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   const config = join(root, 'machine-agent.json');
   writeFileSync(config, JSON.stringify({ worker: { root: workerRoot, image: 'citadel-worker', max: 2 } }));
   const { startMachineAgent } = machineFakes(root, procs);
-  const agent = startMachineAgent({ base: srv.base, token, run: ['--config', config], env: { PATH: env.PATH } });
+  restartAgent = () => startMachineAgent({ base: srv!.base, token, run: ['--config', config], env: { PATH: env.PATH } });
+  let agent = restartAgent();
+  agentNow = () => agent;
+  restartAgent = () => (agent = startMachineAgent({ base: srv!.base, token, run: ['--config', config], env: { PATH: env.PATH } }));
   await until('the machine to come online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'w1' && m.online));
   const project = await call('/api/projects', { name: 'P' });
 
@@ -551,6 +562,33 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   assert.equal(git(there(cwd), 'log', '-1', '--format=%s'), 'at home');
   await end(t.id);
   assert.doesNotMatch(JSON.stringify(await call(`/api/tickets/${t.id}/events?after=0`)), /could not send|is kept in/);
+
+  // The machine drops off mid-turn (T6): a person's stop frees the minion at once; what the machine did meanwhile
+  // comes home beside the minion's work when it is back, and nothing of it merges.
+  await turn('there, then away', t.id);
+  const turnsDir = join(s.data, 'run', 'turns');
+  await until('its pid to come home', () => require_dirs(turnsDir).some((d) => existsSync(join(turnsDir, d, 'pid.json')) && !existsSync(join(turnsDir, d, 'exit.json'))));
+  const a = agentNow();
+  a.agent.kill('SIGKILL');
+  await until('the machine to be away', async () => !(await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'w1').online);
+  writeFileSync(there(join(cwd, 'a.txt')), 'three, while away\n');
+  git(there(cwd), 'commit', '-qam', 'while away');
+  const mine = git(there(cwd), 'rev-parse', 'HEAD');
+  await call(`/api/tickets/${t.id}/stop`, {});
+  await until('the stop to free it while its machine is away', async () => (await call(`/api/tickets/${t.id}`)).ticket.status !== 'running');
+  const here = git(cwd, 'rev-parse', 'HEAD');
+  assert.notEqual(here, mine);
+  restartAgent();
+  await online();
+  const refs = await until('the work it held to come home aside', () => git(cwd, 'for-each-ref', '--format=%(refname)', `refs/citadel/away/${t.id}`) || null);
+  const snapshot = refs.split('\n').find((r) => /\/\d{8}-\d{6}$/.test(r));
+  assert.ok(snapshot, refs);
+  assert.equal(git(cwd, 'show', `${snapshot}:work/a.txt`), 'three, while away');
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), here, 'nothing merged by itself');
+  assert.equal(text(cwd, 'a.txt'), 'two\n');
+  await until('the minion to be told', async () => /never came home is here now/.test(JSON.stringify(await call(`/api/tickets/${t.id}/events?after=0`))));
+  // Being told starts its next turn (there again): let it end.
+  await end(t.id);
 });
 
 function require_dirs(dir: string): string[] {

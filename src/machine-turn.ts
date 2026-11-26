@@ -13,6 +13,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, statSync, writeFi
 import { appendFile, readFile, rename, stat, utimes, writeFile } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
+import type { Clear } from './machine-away.ts';
 import { syncDir, syncScript, type TurnState } from './machine-sync.ts';
 import type { ProcCheck } from './quiet.ts';
 import type { RunningTurn } from './running-turn.ts';
@@ -60,6 +61,96 @@ export const machineLink = {
   poke: (_machineId: number): void => {},
 };
 
+/** How a turn ended because its machine was away (Build 7 T6), in its exit.json. `home`: it carries on at perigee. */
+export interface AwayEnd {
+  name: string;
+  since: number;
+  /** When its last whole checkpoint looked, or null: none since it started. */
+  checkpoint: number | null;
+  home: boolean;
+}
+
+/**
+ * What src/machine-away.ts and the runner add, set at start (server.ts). The defaults are a server with no record of
+ * copies: an overdue turn ends here.
+ */
+export const machineAway = {
+  /** A turn was placed: the machine holds its minion's copy now. */
+  placed: (_machineId: number, _dir: string, _at: Placed): void => {},
+  /** The turn in `dir` ended here while its machine was away. */
+  left: (_machineId: number, _dir: string, _a?: AwayEnd, _signal?: string | null): void => {},
+  /** Its machine has been away AWAY_MS: end it here, or keep it for a minion that must wait for that machine. */
+  overdue: (_machineId: number, dir: string, since: number): unknown => endAway(dir, since, true),
+  /** The answer for a folder the agent holds that is no longer a followed turn's. */
+  held: (_machineId: number, _dir: string): { rescue: true } | null => null,
+  rescued: (_machineId: number, _dir: string, _failed: string | null): void => {},
+  /** Copies the agent is to clear, and what it says of those it did. */
+  clears: (_machineId: number, _held: Set<string>): Clear[] => [],
+  cleared: (_machineId: number, _dir: string, _stays: string | null): void => {},
+};
+
+/** A machine away this long has its turns carried on at perigee (Josh's pick on #2011's brief). */
+export const AWAY_MS = 10 * 60_000;
+/** A machine back from away counts its turns alive this long, before their first beat since lands. */
+export const awayTimes = { back: 30_000 };
+/** A sync this long after the last one starts a new stretch of contact. */
+const GAP_MS = 10_000;
+/** Each machine's worker's last sync, and when the stretch of syncs it is in began. A sync counts as contact: a restart's syncs come back before its link (T5). */
+const contact = new Map<number, { at: number; since: number }>();
+/** When this server could last hear machines without a break: its start, or its waking from a stall or sleep. */
+let began = Date.now();
+let ticked = Date.now();
+
+/** Away since: its last sync, or before this server started, its turn's last beat. */
+async function awaySince(machineId: number, dir: string): Promise<number> {
+  return contact.get(machineId)?.at ?? (await stat(join(dir, 'beat')).catch(() => null))?.mtimeMs ?? Date.now();
+}
+
+const exists = (file: string) =>
+  stat(file).then(
+    () => true,
+    () => false,
+  );
+/** Turn folders being ended as away, so two at once write one end. */
+const ending = new Set<string>();
+
+/** End the turn in `dir` here because its machine is away, or came back without it (`home` false: it restarted). `since` defaults to when it was last heard from. */
+export async function endAway(dir: string, since: number | null, home: boolean, signal: string | null = null) {
+  const at = placedAt(dir);
+  if (!at || ending.has(dir)) return;
+  ending.add(dir);
+  try {
+    if (await exists(join(dir, 'exit.json'))) return;
+    const checkpoint = Number(await readFile(join(dir, 'checkpoint'), 'utf8').catch(() => '')) || null;
+    const away: AwayEnd = { name: at.name, since: since ?? (await awaySince(at.id, dir)), checkpoint, home };
+    put(dir, 'exit.json', JSON.stringify({ code: null, signal, away }));
+    machineAway.left(at.id, dir, away, signal);
+  } finally {
+    ending.delete(dir);
+  }
+}
+
+/** The away clock, every few seconds: a machine away AWAY_MS since it was last heard from (or since this server could hear it) has its turns ended here. */
+export async function awayTick(now = Date.now()) {
+  // This server slept or stalled: no machine could reach it meanwhile, so none is counted away for that time.
+  if (now - ticked > 60_000) began = now;
+  ticked = now;
+  for (const machineId of placed.keys()) {
+    if (machineLink.online(machineId) || now - heardAt(machineId) < AWAY_MS) continue;
+    for (const dir of await liveOn(machineId)) machineAway.overdue(machineId, dir, await awaySince(machineId, dir));
+  }
+}
+
+/** When this server last heard from a machine: its last sync, or when this server last started or woke from a stall. */
+export const heardAt = (machineId: number): number => Math.max(contact.get(machineId)?.at ?? 0, began);
+
+/** The turns placed on a machine that have not ended. */
+export async function liveOn(machineId: number): Promise<string[]> {
+  const dirs = [...(placed.get(machineId) ?? [])];
+  const live = await Promise.all(dirs.map(async (dir) => (await exists(join(dir, 'machine'))) && !(await exists(join(dir, 'exit.json')))));
+  return dirs.filter((_, i) => live[i]);
+}
+
 /** The turns the runner follows on each machine, by folder: filled as the runner asks about them (MachineTurn), so a restart rebuilds it. */
 const placed = new Map<number, Set<string>>();
 const workers = new Map<number, WorkerInfo>();
@@ -95,6 +186,7 @@ export async function placeTurn(dir: string, machine: { id: number; name: string
   await writeFile(join(dir, 'beat'), '');
   await writeFile(join(dir, 'machine'), JSON.stringify({ id: machine.id, name: machine.name, ...launch } satisfies Placed), { mode: 0o600 });
   note(machine.id, dir);
+  machineAway.placed(machine.id, dir, { id: machine.id, name: machine.name, ...launch });
   machineLink.poke(machine.id);
 }
 
@@ -139,19 +231,21 @@ export class MachineTurn implements RunningTurn {
     if (!existsSync(this.dir)) return;
     appendFileSync(join(this.dir, 'signals'), `${sig}\n`);
     machineLink.poke(this.machine);
-    // A stop wins at once (spec section 6): with its machine away nothing will write the turn's end, so the kill does,
-    // and the machine applies the recorded signals when it returns (its copy is then dropped: sync answers `gone`).
-    if (sig === 'SIGKILL' && !machineLink.online(this.machine) && !existsSync(join(this.dir, 'exit.json'))) put(this.dir, 'exit.json', JSON.stringify({ code: null, signal: 'SIGKILL' }));
+    // A stop wins at once (spec section 6): with its machine away nothing will write the turn's end, so the stop does.
+    // When the machine is back the turn there is stopped and what it did comes home aside (src/machine-away.ts).
+    if (!machineLink.online(this.machine)) void endAway(this.dir, null, true, sig);
   }
 
   /** Stopped before its claude started, as far as this copy knows: ended here, and the agent drops the start (it has its SIGTERM). */
   endStart() {
     put(this.dir, 'exit.json', JSON.stringify({ code: null, signal: null, stopped: true }));
+    if (!machineLink.online(this.machine)) machineAway.left(this.machine, this.dir);
   }
 
   /**
    * By its agent's syncs, each of which touches `beat`. With the agent not connected it is away, not gone (spec section 3,
-   * "never killed"): it counts as running until a person stops it. shortcut: no clock on away, T6 adds the 10 minute wait.
+   * "never killed"): it counts as running until a person stops it or awayTick ends it. Back from away, it has awayTimes.back for
+   * a sync that names it: the first syncs carry the worker's facts before its turns' beats.
    */
   alive() {
     let age: number;
@@ -160,7 +254,13 @@ export class MachineTurn implements RunningTurn {
     } catch {
       return null;
     }
-    return age < BEAT_STALE_MS || !machineLink.online(this.machine);
+    return age < BEAT_STALE_MS || !machineLink.online(this.machine) || Date.now() - (contact.get(this.machine)?.since ?? began) < awayTimes.back;
+  }
+
+  /** Its machine is away: which, and since when, for the minion's working line. */
+  away(): { name: string; since: number | null } | null {
+    // shortcut: since is unknown until the agent's first sync after this server started; the row then says only "away".
+    return machineLink.online(this.machine) ? null : { name: this.where.replace(/^machine /, ''), since: contact.get(this.machine)?.at ?? null };
   }
 
   /** Always: its folder says whose it is, and the agent sends from wherever this copy stops. */
@@ -196,10 +296,15 @@ interface SyncTurn {
   /** The last checkpoint asked for here (askCheckpoint) that it finished, or why it couldn't. */
   home?: number;
   homeFailed?: string;
+  /** Its machine restarted under it: its wrapper is gone, and what it had is home. */
+  lost?: boolean;
+  /** A rescue (src/machine-away.ts) is done, or why it failed. */
+  rescued?: boolean;
+  rescueFailed?: string;
 }
 
 /** `script`: the sync program's id, of a turn whose state is synced; `checkpoint`: one asked for here. */
-type SyncReply = { gone: true } | { sizes: Record<string, number>; steer?: string; signals: string[]; script?: string; checkpoint?: number };
+type SyncReply = { gone: true } | { rescue: true } | { sizes: Record<string, number>; steer?: string; signals: string[]; script?: string; checkpoint?: number };
 
 /** Checkpoints waited for, by turn folder. In memory: what waits is a request, which ends with this process. */
 const asked = new Map<string, { id: number; done: (problem: string | null) => void }[]>();
@@ -234,8 +339,8 @@ export async function owned(machineId: number, dir: unknown): Promise<boolean> {
  * An agent's sync: its worker facts, the turns it holds with what is new in each, answered with what each needs from
  * here and the turns it should start. A turn it names that is no longer the machine's (ended and tidied here) is `gone`.
  */
-type Sync = { turns: Record<string, SyncReply>; start: { dir: string; launch: Offered }[] };
-type SyncBody = { worker?: { claude?: unknown; max?: unknown; load?: unknown; signedIn?: unknown }; turns?: unknown };
+type Sync = { turns: Record<string, SyncReply>; start: { dir: string; launch: Offered }[]; clear?: Clear[] };
+type SyncBody = { worker?: { claude?: unknown; max?: unknown; load?: unknown; signedIn?: unknown }; turns?: unknown; cleared?: unknown };
 /** An agent's load, checked: nothing for a kernel without pressure files, which Auto reads as not known. */
 function loadSaid(raw: unknown): WorkerInfo['load'] {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -254,6 +359,9 @@ export function syncTurns(machineId: number, body: SyncBody): Promise<Sync> {
 }
 
 async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
+  const now = Date.now();
+  const c = contact.get(machineId);
+  contact.set(machineId, { at: now, since: c && now - c.at < GAP_MS ? c.since : now });
   if (body.worker)
     workers.set(machineId, { claude: typeof body.worker.claude === 'string' ? body.worker.claude.slice(0, 80) : null, max: Math.max(0, Math.floor(Number(body.worker.max)) || 0), at: Date.now(), load: loadSaid(body.worker.load), signedIn: typeof body.worker.signedIn === 'boolean' ? body.worker.signedIn : null });
   const turns: Record<string, SyncReply> = {};
@@ -261,8 +369,11 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
   for (const t of (Array.isArray(body.turns) ? body.turns : []) as SyncTurn[]) {
     if (!t || typeof t.dir !== 'string') continue;
     held.add(t.dir);
-    turns[t.dir] = (await owned(machineId, t.dir)) ? await syncTurn(t) : { gone: true };
+    if (t.rescued) machineAway.rescued(machineId, t.dir, typeof t.rescueFailed === 'string' ? t.rescueFailed : null);
+    turns[t.dir] = (await owned(machineId, t.dir)) ? await syncTurn(machineId, t) : (!t.rescued && machineAway.held(machineId, t.dir)) || { gone: true };
   }
+  for (const c of (Array.isArray(body.cleared) ? body.cleared : []) as { dir?: unknown; stays?: unknown }[]) if (typeof c?.dir === 'string') machineAway.cleared(machineId, c.dir, typeof c.stays === 'string' ? c.stays : null);
+  const clear = machineAway.clears(machineId, held);
   const start: Sync['start'] = [];
   for (const dir of [...(placed.get(machineId) ?? [])]) {
     const at = await placedNow(dir);
@@ -270,13 +381,16 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
     // Not one that has ended here (a stop before it started): there is nothing to run.
     else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
   }
-  return { turns, start };
+  return { turns, start, ...(clear.length ? { clear } : {}) };
 }
 
-async function syncTurn(t: SyncTurn): Promise<SyncReply> {
+async function syncTurn(machineId: number, t: SyncTurn): Promise<SyncReply> {
   const { dir } = t;
   for (const w of asked.get(dir) ?? []) if (typeof t.home === 'number' && t.home >= w.id) w.done(typeof t.homeFailed === 'string' ? t.homeFailed.slice(0, 300) : null);
+  if (t.lost) await endAway(dir, (await stat(join(dir, 'beat')).catch(() => null))?.mtimeMs ?? Date.now(), false);
   const over = await there(join(dir, 'exit.json'));
+  // Ended here while its machine was away (a stop, the clock, a restart there): the agent stops it, and sends what it did home aside.
+  if (over && !t.rescued && machineAway.held(machineId, dir)) return { rescue: true };
   const sizes: Record<string, number> = {};
   for (const name of APPENDED) {
     const file = join(dir, name);

@@ -186,3 +186,28 @@ no `podman exec`, no `/proc`. Five places asking "which kind" would become five 
   programs with one token, the newest install has it (`installed`, kept over restarts); the older one ends its turns and stops.
 - No turn starts there until its self-test has passed, nor while the last one failed, its image is being built or its disk
   cap is reached (`WorkerJoin.hold`, read by `MachinePools`).
+
+## T6 (#2011): a machine away, and back home
+
+- A worker that stops syncing (T5's `HERE_MS`: `machineLink.online` is `WorkerJoin.here`) is "away", never a kill. A sync
+  counts as contact. A turn there counts as running while its machine is away, and for 30 s after it is back
+  (`awayTimes.back`), before its first beat since lands.
+- The clock is `awayTick` in `src/machine-turn.ts`, every 5 s from `server.ts`: a machine silent `AWAY_MS` (10 min) has
+  its turns ended here as `exit.json {away}`. A stall of this server (a gap of over a minute between ticks) restarts the
+  count. `outcome` reads that as the `away` kind: no retry cap, carried on by `waitOutPause` like a pause, and the
+  machine host places that one next turn at perigee (`owed.away.home`), with the chat told the last checkpoint's time
+  (the `checkpoint` file, written by the `done` op after each whole checkpoint).
+- A minion marked for that machine is never ended by the clock: it waits, and T4's card asks after a day
+  (`runsOn.stuck`, wired in `wireCopies`). A person's stop while the machine is away ends the turn here at once; the
+  signal still goes down when it is back. A machine that rebooted (its boot id changed, `lost`) ends its turns as away,
+  not home.
+- What a machine holds of each minion is a settings row per machine (`machine-copies:<id>`, `MachineCopies` in
+  `src/machine-away.ts`). A copy whose turn ended here while away is `away`: when the agent is back it is told `rescue`,
+  stops that turn and sends what never came home beside the minion's work (refs/citadel/away/<ticket>/<Pacific time>,
+  the files folder's away/<time>/), never over it; the minion is told, and nothing merges by itself.
+- A closed minion's copy there is cleared once it is `GRACE_MS` closed, after the same rescue; one holding a repo of its
+  own or a key stays, and the chat says why. A machine being removed (DELETE, online, with copies) goes in two steps:
+  its Minion turns switch goes off, its copies are cleared with what they share, then `dropRemoved` deletes the row.
+  Offline, or with `?now`, it goes at once and its turns carry on at perigee. The answer carries the uninstall commands.
+- Home's own refs for a closed minion (`refs/citadel/machine/<t>`, `-home`; `-next`, kept and away refs only once its
+  branch holds them) go with its worktree in the dismissed sweep (`dropMachineRefs`).

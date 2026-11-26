@@ -20,6 +20,7 @@ import type { EaseNow } from './memory-ease.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
 import type { JobRow } from './every.ts';
+import type { CabalCard } from './cabal-cards.ts';
 
 /**
  * The people's GETs readers answer, as their routes' paths: a minion's history pages and single events, memory search
@@ -206,14 +207,15 @@ export interface StatusSnap {
   units: UnitState[] | null;
   jobs: JobRow[];
 }
-export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: StatusSnap | null; builds: Record<number, unknown>; ownScheme: number | null; previews: boolean; ships: Ships | null };
-export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: StatusSnap; builds?: Record<number, unknown>; ownScheme?: number | null; previews?: boolean; ships?: Ships };
-export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null, previews: false, ships: null });
+export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: StatusSnap | null; builds: Record<number, unknown>; cabals: Record<number, CabalCard[]>; ownScheme: number | null; previews: boolean; ships: Ships | null };
+export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: StatusSnap; builds?: Record<number, unknown>; cabals?: Record<number, CabalCard[]>; ownScheme?: number | null; previews?: boolean; ships?: Ships };
+export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, cabals: {}, ownScheme: null, previews: false, ships: null });
 export function applySnap(s: Snapshot, d: SnapDelta) {
   if (d.ready) s.ready = true;
   if (d.live) Object.assign(s.live, d.live);
   if (d.status) s.status = d.status;
   if (d.builds) Object.assign(s.builds, d.builds);
+  if (d.cabals) Object.assign(s.cabals, d.cabals);
   if (d.ownScheme !== undefined) s.ownScheme = d.ownScheme;
   if (d.previews !== undefined) s.previews = d.previews;
   if (d.ships) s.ships = d.ships;

@@ -2758,6 +2758,7 @@ if (config.front) {
     store,
     runner,
     builds: (id) => builds.get(id),
+    cabals: (id) => cabals.get(id),
     ownScheme: () => ownScheme()?.id ?? null,
     previews: !!previews,
     status,

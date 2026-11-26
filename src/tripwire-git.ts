@@ -53,9 +53,9 @@ function conflicted(dir: string, paths: Word[]): boolean {
 }
 
 /**
- * The git habits every scheme shares: no stash; a file checked out or restored from HEAD or the index only once
- * its diff is saved (pushed onto `saves`, which the hook writes once the whole call passes), and no folder or other
- * commit's version; no checkout, merge, rebase or reset over uncommitted tracked changes; from a minion's worktree,
+ * The git habits every scheme shares: no stash; files or folders checked out or restored, from the index, HEAD or
+ * another commit, only once their diff is saved (pushed onto `saves`, which the hook writes once the whole call
+ * passes); no checkout, merge, rebase or reset over uncommitted tracked changes; from a minion's worktree,
  * no push to main and no plain force. With the folder unknown it checks only what the words alone show.
  */
 export function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false, moved = false, saves?: Save[]): Verdict | null {
@@ -68,10 +68,11 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
       return ['list', 'show'].includes(words[0]) ? null : hard(`\`git stash\` is blocked. ${STASH_WHY}`);
     case 'restore': {
       if (dir && scratchClone(dir, cfg)) return null;
-      // Short flags can come together (`-SW`).
-      const short = (f: string) => words.some((a) => new RegExp(`^-[qSW]*${f}[qSW]*$`).test(a));
-      const staged = has('--staged') || short('S');
-      if (staged && !has('--worktree') && !short('W')) return null;
+      // Options come before `--` (a file may be named `-S`); short ones can come together (`-SW`).
+      const opts = words.includes('--') ? words.slice(0, words.indexOf('--')) : words;
+      const flag = (long: string, f: string) => opts.some((a) => a === long || new RegExp(`^-[qSW]*${f}[qSW]*$`).test(a));
+      const staged = flag('--staged', 'S');
+      if (staged && !flag('--worktree', 'W')) return null;
       // Files and folders from the index, HEAD or another commit, saved first (#1716, #2038); any other flag (-p, --ours) stays refused.
       const refused = hard(`\`git restore ${words.join(' ')}\` is blocked. ${NEVER_PATH}`);
       let source: Word | undefined;
@@ -102,6 +103,11 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
       if (dd >= 0) {
         // Files and folders from the index, HEAD or another commit: saved first (#1716, #2038). Any flag but -q stays refused.
         const ref = plain.filter((w) => args.indexOf(w) < dd);
+        // `git checkout <branch> --` names no path: a switch.
+        if (dd === words.length - 1 && ref.length === 1) {
+          move = `git checkout ${ref[0].text}`;
+          break;
+        }
         if (quiet(words.slice(0, dd)) && ref.length <= 1) return savePaths(`git checkout ${words.join(' ')}`, args.slice(dd + 1), ref[0], ref.length === 1, true, dir, cfg, saves);
         return hard(`\`git checkout ${words.join(' ')}\` is blocked. ${NEVER_PATH}`);
       }
@@ -197,8 +203,16 @@ function againstIndex(dir: string, source: string, paths: string[]): { untracked
   if (top?.status !== 0 || tree?.status !== 0 || index?.status !== 0) return null;
   const inTree = new Set(tree.out.split('\0').filter(Boolean));
   const inIndex = new Set(index.out.split('\0').filter(Boolean));
+  // Anything on disk where the source puts a file is in the way, a file where it puts a folder (ENOTDIR) too.
+  const onDisk = (f: string) => {
+    try {
+      return !!lstatSync(join(top.out.trim(), f), { throwIfNoEntry: false });
+    } catch {
+      return true;
+    }
+  };
   return {
-    untracked: [...inTree].filter((f) => !inIndex.has(f) && lstatSync(join(top.out.trim(), f), { throwIfNoEntry: false })),
+    untracked: [...inTree].filter((f) => !inIndex.has(f) && onDisk(f)),
     indexOnly: [...inIndex].some((f) => !inTree.has(f)),
   };
 }
@@ -206,8 +220,9 @@ function againstIndex(dir: string, source: string, paths: string[]): { untracked
 /**
  * A checkout or restore of files or folders, from `source` (a commit) or the index: through, once their uncommitted
  * changes are queued on `saves` (nothing queued when they are clean). `index`: the call writes the index as well as
- * the worktree; `overlay`: it leaves files the source lacks as they are (checkout does, restore doesn't). A pattern, a path or source it can't read, an untracked file the source would overwrite, or nowhere
- * to save (no TMPDIR, no saves list, a folder that isn't a repo) is refused.
+ * the worktree; `overlay`: it leaves files the source lacks as they are (checkout does, restore doesn't). A pattern,
+ * a path or source it can't read, an untracked file the source would overwrite, an open conflict, or nowhere to save
+ * (no TMPDIR, no saves list, a folder that isn't a repo) is refused.
  */
 function savePaths(cmd: string, paths: Word[], source: Word | undefined, index: boolean, overlay: boolean, dir: string | null, cfg: TripwireConfig, saves?: Save[]): Verdict | null {
   const refused = hard(`\`${cmd}\` is blocked. ${NEVER_PATH}`);
@@ -227,6 +242,11 @@ function savePaths(cmd: string, paths: Word[], source: Word | undefined, index: 
     const lost = seen.untracked;
     // A checkout keeps the index's files its source lacks, staged edits and all, so the patches can't recreate them until they're cleared.
     stray = overlay && seen.indexOnly;
+    // An open conflict's markers and hand edits make no patch `git apply` takes back.
+    const open = git(dir, 'diff', '--name-only', '--diff-filter=U', '--', ...texts);
+    if (open?.status !== 0) return refused;
+    if (open.out.trim())
+      return hard(`\`${cmd}\` is blocked: it would write over the open conflict in ${open.out.trim().split('\n').slice(0, 5).join(', ')}, which the tripwire can't save. Take a side with \`git checkout --ours -- path\` or \`--theirs\` (they pass mid-merge), or finish the file and \`git add\` it first.`);
     if (lost.length) return hard(`\`${cmd}\` is blocked: it would write over ${lost.length} untracked file(s) (${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', …' : ''}), which the tripwire can't save. Move them aside or commit them first (a WIP commit is fine).`);
   }
   const quiet = parts(index).map(([, ...flags]) => git(dir, 'diff', '--quiet', ...flags, '--', ...texts)?.status);

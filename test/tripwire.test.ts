@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { envBelow, tripwire, tripwireResult, type TripwireConfig } from '../src/tripwire.ts';
+import type { Save } from '../src/tripwire-git.ts';
 import { tripwireHooks } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
@@ -1634,6 +1635,33 @@ test("a folder, `.` or another commit's version checked out or restored: its dif
     assert.match(at('git checkout HEAD -- .') ?? '', /untracked file\(s\) \(b\.txt\)/);
     clean();
 
+    // A file where the source puts a folder is in the way too (a stat under it throws ENOTDIR, which must not skip the guard).
+    sh('git checkout -q main && mkdir f && echo x > f/x.txt && git add f && git commit -qm f && git checkout -q ticket/9');
+    writeFileSync(join(wt, 'f'), 'a file of mine\n');
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    assert.match(at('git checkout main -- .') ?? '', /untracked file\(s\) \(f\/x\.txt\)/);
+    clean();
+    // Options come before `--`: a file named like one (`-S`) is a path, so both files' edits are saved.
+    writeFileSync(join(wt, '-S'), 's\n');
+    sh('git add -- -S && git commit -qm s');
+    writeFileSync(join(wt, '-S'), 'mine\n');
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    const queued: Save[] = [];
+    assert.equal(tripwire({ tool_name: 'Bash', tool_input: { command: 'git restore -- -S a.txt' }, cwd: wt }, c, queued)?.reason ?? null, null);
+    assert.deepEqual(
+      queued.map((q) => q.paths),
+      [['-S', 'a.txt']],
+    );
+    clean();
+    // An open conflict's markers make no patch: a checkout from a commit over one is refused; picking a side passes (#485).
+    sh('git checkout -q -b theirs && echo theirs > b.txt && git commit -qam t && git checkout -q ticket/9 && echo ours > b.txt && git commit -qam o');
+    sh('git merge -q theirs || true');
+    writeFileSync(join(wt, 'b.txt'), 'half fixed by hand\n');
+    for (const no of ['git checkout main -- b.txt', 'git checkout HEAD -- .', 'git restore --source=main b.txt']) assert.match(at(no) ?? '', /open conflict in b\.txt/, no);
+    assert.equal(at('git checkout --ours -- b.txt'), null);
+    sh('git merge --abort');
+    clean();
+
     // Still refused: patterns, sources it can't read or name, -f, -p, --overlay, and a branch switch over the edits.
     dirty();
     for (const no of [
@@ -1647,6 +1675,7 @@ test("a folder, `.` or another commit's version checked out or restored: its dif
       'git checkout --no-overlay main -- sub',
       'git restore --overlay --source=main sub',
       'git checkout main',
+      'git checkout main --',
       'git checkout -f',
     ])
       assert.ok(at(no), no);

@@ -342,7 +342,8 @@ under_of() {
 }
 # Ship-time merges (#1221, #1418): git with the kit core's driver (tools/land-core.sh --merge, MERGES in land.local.sh) for
 # the files tools/ship-numbers.attributes names: a SCHEMA_HISTORY number main took moves on (ship-numbers.ts), MIGRATIONS
-# lines both added stay, budgets, size caps and judges' counts add up, the prompt baseline is main's, measured again below.
+# lines both added stay, budgets, size caps and judges' counts add up, the prompt baseline is main's, measured again below,
+# and rows both add to README's Layout table stay (#2104).
 # The rest conflicts as before. <main side>: main's or the build's (ours for merge-tree and a rebase, theirs for --build's
 # merge of main). Not for a person's rebase. A tools/ without the core (mid-rebase) renumbers only, or merges as git would.
 numbers_git() {

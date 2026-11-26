@@ -3,3 +3,4 @@ test/prompt-budget.test.ts merge=citadel-numbers
 test/prompt-baseline.json merge=citadel-numbers
 test/size-budget.test.ts merge=citadel-numbers rider
 test/judges.test.ts merge=citadel-numbers rider
+README.md merge=citadel-numbers rider

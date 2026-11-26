@@ -5,7 +5,8 @@
 # This copy's tools (the branch's own, as land.sh runs them).
 CITADEL_TOOLS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# Citadel numbers_git (#1221), the prompt budget's sums and the size list's and judges' counts (#1917): ship-time merges in place of a stopped rebase.
+# Citadel numbers_git (#1221), the prompt budget's sums, the size list's and judges' counts (#1917) and README's Layout rows
+# (#2104): ship-time merges in place of a stopped rebase.
 MERGES='src/db.ts hook
 src/db.ts append ^const\ MIGRATIONS
 test/prompt-budget.test.ts sum ^const\ (BUDGET|KIT_BUDGET|TOOLS_BUDGET)\ =
@@ -13,7 +14,8 @@ test/size-budget.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \[[0-9]+,|^\ \ \ \ ([0-
 test/size-budget.test.ts append ^export\ const\ ALLOWED:
 test/judges.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \{\ why:\ .*,\ calls:\ [0-9]+\ \},$
 test/judges.test.ts append ^const\ NOT_JUDGES:
-test/prompt-baseline.json main'
+test/prompt-baseline.json main
+README.md rows ^##\ Layout$'
 
 # Core hook (MERGES src/db.ts hook): Citadel's numbers_git driver, ship-numbers.ts merge; git's own merge without it.
 # A tools/ without ship-numbers.ts (mid-rebase) falls back to the worktree's tools/ (git runs drivers from its root).

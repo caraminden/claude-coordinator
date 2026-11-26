@@ -307,14 +307,21 @@ fi
 #                          keep $BRANCH's, then the branch's.
 #   <path> count <regex>   as sum, for a list of sizes or counts: a number either side lowered adds up too (main 110 and
 #                          the branch 95 over 100: 105). Two sides changing one #N differently is a clash.
+#   <path> rows <regex>    rows both sides add to a markdown table (lines starting and ending with |) under the
+#                          nearest heading above (a line starting with #) that matches <regex>: $BRANCH's rows, then
+#                          the branch's, where the table had no rows of its own between them (a Layout table both add
+#                          a file to). A row one side changed or removed, beside rows the other side only added, takes
+#                          both. Every line of the clash is a row, the line above it is one too, and two rows with the
+#                          same first cell (one file listed twice) is a clash; a row both sides changed always is.
 #   <path> main            $BRANCH's copy: a file land_rebased makes again from the merged tree (a baseline).
 #   <path> hook            land.local.sh's land_merge decides.
-# A path may have several append, sum and count lines: each clash tries them in order. main takes the whole file, so it stands
+# A path may have several append, sum, count and rows lines: each clash tries them in order. main takes the whole file, so it stands
 # alone. hook may come with append, sum and count lines (Citadel's src/db.ts: renumbered by its hook, appended by rule): the
 # hook runs first with LAND_MERGE_DIFF3=1 set, and where it can't merge cleanly it leaves this script's own clash
 # markers in <ours> (git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch: the side that is $BRANCH first) and
 # exits non-zero; the path's other rules then take those clashes, as they would git's.
-# Anything a rule isn't sure of stops the rebase, as a clash in any other file does. <path> is a repo path. git runs
+# Anything a rule isn't sure of stops the rebase, as a clash in any other file does, with git's own conflict markers
+# in the file (but a hook's), so a fix recorded ahead of time with git rerere still replays. <path> is a repo path. git runs
 # this script as the merge driver (tools/land.sh --merge <side> <base> <ours> <theirs> <path>; a copy made as the
 # landing starts, since the rebase changes the worktree's own) for the rebase onto $BRANCH, the merge-tree of the smoke
 # check and --check, --build's merge and --into's rebase, so every batch member's rebase takes it too.
@@ -324,14 +331,16 @@ MARK_B=$(printf '>%.0s' {1..31})' branch'
 merge3() { git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch "$@"; } # <main's> <base> <branch's>
 # A diff3 merge on stdin, its clashes resolved by merge_hunk <rule> <regex>; fails on one it can't.
 merge_hunks() { # <rule> <regex> [<rule> <regex>...], on a merge with conflicts on stdin
-  local line part=out head=''
+  local line part=out head='' sect='' prev=''
   local -a M O B
   while IFS= read -r line || [ -n "$line" ]; do
     case $part in
       out)
         if [ "$line" = "$MARK_M" ]; then part=m M=() O=() B=(); continue; fi
         printf '%s\n' "$line"
-        [[ ! $line =~ ^[^[:space:]] ]] || head=$line ;;
+        prev=$line
+        [[ ! $line =~ ^[^[:space:]] ]] || head=$line
+        [[ ! $line =~ ^#{1,6}[[:space:]] ]] || sect=$line ;;
       m) if [ "$line" = "$MARK_O" ]; then part=o; else M+=("$line"); fi ;;
       o) if [ "$line" = "$MARK_E" ]; then part=b; else O+=("$line"); fi ;;
       b) if [ "$line" = "$MARK_B" ]; then part=out; merge_rules "$@" || return 1; else B+=("$line"); fi ;;
@@ -347,8 +356,10 @@ merge_rules() { # <rule> <regex> [<rule> <regex>...]: the first that takes the h
   done
   return 1
 }
+MD_ROW='^\|.*\|[[:space:]]*$'
 merge_hunk() { # <rule> <regex>, on M (main's lines), O (base) and B (the branch's)
-  local i l
+  local i l n o
+  local -a R
   case $1 in
     append)
       [ ${#O[@]} = 0 ] && [[ $head =~ $2 ]] || return 1
@@ -356,6 +367,26 @@ merge_hunk() { # <rule> <regex>, on M (main's lines), O (base) and B (the branch
       # A key both added ('a.ts': twice) would let the last one win: a clash for a person.
       for l in "${M[@]}" "${B[@]}"; do [[ ! $l =~ ^[[:space:]]+([\'\"][^\'\"]+[\'\"]): ]] || echo "${BASH_REMATCH[1]}"; done | sort | uniq -d | grep -q . && return 1
       printf '%s\n' "${M[@]}" "${B[@]}" ;;
+    rows)
+      [[ $sect =~ $2 ]] && [[ $prev =~ $MD_ROW ]] || return 1
+      for l in "${M[@]}" "${B[@]}"; do [[ $l =~ $MD_ROW ]] || return 1; done
+      n=${#O[@]}
+      if [ "$n" = 0 ]; then
+        R=("${M[@]}" "${B[@]}")
+      else
+        # One side kept the table's rows here whole and only added rows before or after them; the other changed them.
+        # Its change, with those added rows in their place.
+        R=() o=$(printf '%s\n' "${O[@]}")
+        if [ ${#B[@]} -gt "$n" ] && [ "$(printf '%s\n' "${B[@]:0:n}")" = "$o" ]; then R=("${M[@]}" "${B[@]:n}")
+        elif [ ${#B[@]} -gt "$n" ] && [ "$(printf '%s\n' "${B[@]: -n}")" = "$o" ]; then R=("${B[@]:0:${#B[@]}-n}" "${M[@]}")
+        elif [ ${#M[@]} -gt "$n" ] && [ "$(printf '%s\n' "${M[@]:0:n}")" = "$o" ]; then R=("${B[@]}" "${M[@]:n}")
+        elif [ ${#M[@]} -gt "$n" ] && [ "$(printf '%s\n' "${M[@]: -n}")" = "$o" ]; then R=("${M[@]:0:${#M[@]}-n}" "${B[@]}")
+        else return 1
+        fi
+      fi
+      # One first cell twice (a file both list): a clash for a person.
+      for l in "${R[@]}"; do l=${l#|} && l=${l%%|*} && l=${l#"${l%%[![:space:]]*}"} && echo "${l%"${l##*[![:space:]]}"}"; done | sort | uniq -d | grep -q . && return 1
+      printf '%s\n' "${R[@]}" ;;
     sum | count)
       [ ${#O[@]} != 0 ] && [ ${#M[@]} = ${#O[@]} ] && [ ${#B[@]} = ${#O[@]} ] || return 1
       for ((i = 0; i < ${#O[@]}; i++)); do
@@ -419,7 +450,7 @@ merge_driver() {
     case $rule in
       main) [ ${#rules[@]} = 0 ] && [ -z "$hook" ] || return 1; rules=(main); break ;; # the whole file: alone
       hook) [ -z "$hook" ] || return 1; hook=1 ;;
-      append | sum | count) [ -n "$re" ] || return 1; rules+=("$rule" "$re") ;;
+      append | sum | count | rows) [ -n "$re" ] || return 1; rules+=("$rule" "$re") ;;
       *) return 1 ;;
     esac
   done <<<"$MERGES"
@@ -442,6 +473,7 @@ merge_driver() {
     cat "$out" >"$3" && rm -f "$out" && return 0
   fi
   rm -f "$out" "$out.2"
+  git merge-file "$3" "$2" "$4" >/dev/null 2>&1 # git's own markers, as with no rule: what git rerere's recorded fixes match
   return 1
 }
 if [ "${1:-}" = --merge ]; then

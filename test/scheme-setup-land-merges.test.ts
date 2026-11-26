@@ -2,11 +2,13 @@
 // budget, append a migration or regenerate a baseline ship without a hand rebase, alone and inside a batch, and
 // refuses what its rules aren't sure of. On files shaped like Citadel's.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { ciSetup, git, GREEN, setup } from './scheme-setup-land-fixture.ts';
+import { ciSetup, env, git, GREEN, setup } from './scheme-setup-land-fixture.ts';
 
 const BUDGET_FILE = 'test/prompt-budget.test.ts';
 const DB_FILE = 'src/db.ts';
@@ -170,4 +172,93 @@ test('inside a batch: each member merges onto the one below it, and all three sh
   } finally {
     c.stop();
   }
+});
+
+/** A README with a Layout table (#2104): <rows> between its header and the last row, then prose under another heading. */
+const README = 'README.md';
+const ROWS = `MERGES='${README} rows ^##\\ Layout$'\n`;
+const readme = (rows: string[], prose = 'Run it.', other = '| `x` | X |') => `# R\n\n## Layout\n\n| Path | What |\n| --- | --- |\n| \`a\` | A |\n${rows.map((r) => `${r}\n`).join('')}| \`z\` | Z |\n\n## Running\n\n${prose}\n\n| Other | table |\n| --- | --- |\n${other}\n`;
+const row = (f: string, what = f.toUpperCase()) => `| \`${f}\` | ${what} |`;
+/** Main's and the branch's README, both from <base>: the landing's result and main's README after it. */
+function readmeLanding(main: string, branch: string, base = readme([])) {
+  const r = setup('true', {}, ROWS);
+  change(r.main, { [README]: base }, 'shared base');
+  git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  change(r.main, { [README]: main }, 'main: #9');
+  change(r.wt, { [README]: branch }, 'branch: #2');
+  return { out: r.run(), shown: show(r.main, README), r };
+}
+
+test("the rows rule: two branches that each add a row to the Layout table both ship, main's row first", () => {
+  const { out, shown } = readmeLanding(readme([row('b'), row('b2')]), readme([row('c')]));
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(shown, readme([row('b'), row('b2'), row('c')]));
+});
+
+for (const [what, main, branch, base] of [
+  ['a row both changed differently', readme([], 'Run it.').replace('| A |', '| A2 |'), readme([]).replace('| A |', '| A3 |')],
+  ['a clash in the prose outside the table', readme([], 'Run it twice.'), readme([], 'Run it once.')],
+  ['rows both add to a table under another heading', readme([], 'Run it.', '| `x` | X |\n| `y` | Y |'), readme([], 'Run it.', '| `x` | X |\n| `w` | W |')],
+  ['one file both list', readme([row('b', 'from main')]), readme([row('b', 'from the branch')])],
+  ['a row and a line that is not one', readme([row('b')]), readme([row('c'), 'not a row'])],
+])
+  test(`the rows rule stops on ${what}: refused, main stays`, () => {
+    const { out, shown } = readmeLanding(main, branch, base);
+    assert.equal(out.status, 1, out.stderr);
+    assert.match(out.stderr, /conflicted files: README\.md/);
+    assert.equal(shown, main, 'main stays');
+  });
+
+/** The merge driver itself, as git runs it: <main's>, <base>, <the branch's>; its exit and what it left in main's file. */
+function driver(main: string, base: string, branch: string) {
+  const r = setup('true', {}, ROWS);
+  for (const [f, text] of Object.entries({ m: main, o: base, b: branch })) writeFileSync(join(r.dir, f), text);
+  const res = spawnSync('bash', [join(r.main, 'tools', 'land.sh'), '--merge', 'ours', join(r.dir, 'o'), join(r.dir, 'm'), join(r.dir, 'b'), README], { cwd: r.main, encoding: 'utf8', env });
+  return { status: res.status, text: readFileSync(join(r.dir, 'm'), 'utf8') };
+}
+const changed = (text: string) => text.replace('| A |', '| A, changed |');
+for (const [what, main, branch, want] of [
+  ['main changed a row, the branch added one after it', changed(readme([])), readme([row('b')]), changed(readme([row('b')]))],
+  ['the branch changed a row, main added one after it', readme([row('b')]), changed(readme([])), changed(readme([row('b')]))],
+  ['main removed a row, the branch added one after it', readme([]).replace('| `a` | A |\n', ''), readme([row('b')]), readme([row('b')]).replace('| `a` | A |\n', '')],
+  ['main changed a row, the branch added one before it', changed(readme([])), readme([]).replace('| `a` |', `${row('0')}\n| \`a\` |`), changed(readme([]).replace('| `a` |', `${row('0')}\n| \`a\` |`))],
+])
+  test(`the rows rule: ${what}, and both stay`, () => {
+    assert.deepEqual(driver(main, readme([]), branch), { status: 0, text: want });
+  });
+
+test("a clash no rule takes leaves git's own conflict markers, so a fix recorded ahead of time with git rerere still replays", () => {
+  const base = readme([]);
+  const [main, branch] = [base.replace('| A |', '| A2 |'), base.replace('| A |', '| A3 |')];
+  const merged = driver(main, base, branch);
+  assert.equal(merged.status, 1);
+  const d = mkdtempSync(join(tmpdir(), 'rows-'));
+  try {
+    for (const [f, text] of Object.entries({ m: main, o: base, b: branch })) writeFileSync(join(d, f), text);
+    const unlabelled = (text: string) => text.replace(/^([<>]{7}) .*$/gm, '$1');
+    assert.equal(unlabelled(merged.text), unlabelled(spawnSync('git', ['merge-file', '-p', join(d, 'm'), join(d, 'o'), join(d, 'b')], { encoding: 'utf8' }).stdout));
+  } finally {
+    rmSync(d, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+  // The fix, recorded by a plain cherry-pick as a minion would, replays in the rebase with the driver on.
+  const r = setup('true', {}, ROWS);
+  change(r.main, { [README]: base }, 'shared base');
+  git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  change(r.main, { [README]: main }, 'main: #9');
+  change(r.wt, { [README]: branch }, 'branch: #2');
+  const rr = ['-c', 'rerere.enabled=true', '-c', 'rerere.autoupdate=true'];
+  const fix = base.replace('| A |', '| A2 and A3 |');
+  const scratch = join(r.dir, 'fix');
+  git(r.main, 'worktree', 'add', '-q', '--detach', scratch, 'main');
+  assert.throws(() => git(scratch, ...rr, 'cherry-pick', 'ticket/1-x'));
+  writeFileSync(join(scratch, README), fix);
+  git(scratch, ...rr, 'add', README);
+  git(scratch, ...rr, 'rerere');
+  git(scratch, 'cherry-pick', '--abort');
+  writeFileSync(join(r.dir, 'attributes'), `${README} merge=land-ship\n`);
+  const withDriver = ['-c', `core.attributesFile=${join(r.dir, 'attributes')}`, '-c', `merge.land-ship.driver=bash '${join(r.wt, 'tools', 'land.sh')}' --merge ours %O %A %B %P`];
+  assert.throws(() => git(r.wt, ...withDriver, ...rr, 'rebase', '-q', 'main'), 'git stops even on a conflict rerere resolved');
+  assert.equal(git(r.wt, 'diff', '--name-only', '--diff-filter=U'), '', 'rerere resolved it');
+  assert.equal(readFileSync(join(r.wt, README), 'utf8'), fix);
+  git(r.wt, 'rebase', '--abort');
 });

@@ -162,7 +162,7 @@ function orderLine(m, redraw) {
     h('option', { value: '', selected: c.priority == null }, 'No order'),
     ...Array.from({ length: most }, (_, i) => h('option', { value: String(i + 1), selected: c.priority === i + 1 }, i === 0 ? '1, first' : String(i + 1))),
   );
-  return h('label', { class: 'small muted role-caps role-order', title: 'Minion turns go to your first computer until it is full, then the next' }, 'Order ', pick);
+  return h('label', { class: 'small muted role-caps role-order', title: 'Minion turns go to your first computer until it is full, then the next' }, 'Fill order ', pick);
 }
 
 /** A whole number in a cap's bounds, or null; blank is "that PC's own". */

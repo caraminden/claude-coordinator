@@ -135,7 +135,10 @@ export function handOver(
       try {
         // One line: readline also ends a line at U+2028 and U+2029, which JSON leaves raw inside strings.
         const snap = hooks.handOff?.();
-        if (snap) ctl.write(`snapshot ${snap.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')}\n`);
+        if (snap) {
+          ctl.write(`snapshot ${snap.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')}\n`);
+          log(`Handover: sent it the readers' snapshot (${Math.round(snap.length / 1024)} KB).`);
+        }
       } catch (err) {
         console.error("Handover: taking the readers' snapshot threw; the new server builds its own:", err);
       }

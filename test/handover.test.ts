@@ -125,6 +125,10 @@ test('the old server lets go once the copy is ready, and finishes once it is liv
   assert.equal(warmed, 'warm');
   assert.deepEqual(JSON.parse(handed.slice('handed '.length)), JSON.parse(snapshot), 'the snapshot it was handed reads back whole');
   assert.equal(rest, '', 'on one line');
+  assert.ok(
+    side.lines.some((l) => /^Handover: sent it the readers' snapshot \(\d+ KB\)\.$/.test(l)),
+    side.lines.join('\n'),
+  );
   // The copy told systemd it is the main process, with its own pid.
   const pid = Number(/pid (\d+) is the server now/.exec(side.lines.join('\n'))?.[1]);
   assert.ok(pid > 0, side.lines.join('\n'));
@@ -302,6 +306,7 @@ test('the real server hands over under a request loop with no failed request and
   assert.doesNotMatch(out, /still open after/, 'the old server sat out its grace');
   // #2119: the new server warmed up before it said ready, and its readers started from the old server's snapshot.
   assert.ok(out.indexOf('Handover: warmed up in') < out.indexOf('is ready; handing it the socket'), out.slice(-3000));
+  assert.match(out, /is ready; handing it the socket\.\n(.*\n)*Handover: sent it the readers' snapshot \(\d+ KB\)\./);
   await until("the new server's own readers' snapshot", () => /Readers' snapshot: \d+ minions in \d+ ms, at most \d+ ms at a time, after \d+ handed over/.test(readFileSync(log, 'utf8')), undefined, serverLog);
   process.kill(newPid, 'SIGTERM');
   await until('the new server exits', () => {

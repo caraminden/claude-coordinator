@@ -171,6 +171,8 @@ export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms =
 export function wholeSteps(db: DatabaseSync, shared: BigInt64Array | null, pin = atWholeStep) {
   let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
   return async <T>(run: () => Promise<T>): Promise<T | null> => {
+    // No write worker: a read from before may still hold its snapshot, older than what main has written in place since.
+    if (!writerUp(shared)) return null;
     const start = Date.now();
     for (let wait = READ_WAIT_MS; !tx || tx.at < stepsOpened(shared); wait = 0) {
       // The front thread answered it long since (four times READER_ANSWER_MS): a writer far behind must not pile these up here.

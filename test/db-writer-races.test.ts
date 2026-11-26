@@ -11,7 +11,7 @@ import { after, test } from 'node:test';
 import { writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { type App, writes } from '../src/http.ts';
-import { atWholeStep } from '../src/reader.ts';
+import { atWholeStep, wholeSteps } from '../src/reader.ts';
 import { ensureCoordinator } from '../src/routes/projects.ts';
 import { until } from './wait.ts';
 
@@ -222,6 +222,34 @@ test('a reader whose pin the worker died during gives it up: what it pinned may 
   });
   assert.equal(atWholeStep(db, w.shared), null);
   assert.equal(reader.db.isTransaction, false);
+});
+
+test('once the worker is gone no new request joins a snapshot a read from before still holds', async () => {
+  const { store, w } = open();
+  const t = minion(store);
+  await until('the step closes', () => w.shared[3] >= w.shared[4]);
+  const reader = new Store(store.path, { reader: true });
+  const inWholeStep = wholeSteps(reader.db, w.shared);
+  let done!: () => void;
+  const inFlight = inWholeStep(() => new Promise<void>((r) => (done = r)));
+  await w.stop();
+  store.updateTicket(t.id, { title: 'written in place' });
+  assert.equal(await inWholeStep(async () => reader.getTicket(t.id)!.title), null);
+  done();
+  await inFlight;
+});
+
+// #2130: terminate() and running out of memory wake nobody, and the server's 'exit' handler can't run while it waits.
+test('a write waiting on a worker that dies stops waiting and writes in place', () => {
+  const { store, w } = open({ delayMs: HELD });
+  const m = minion(store); // its writes are held on the worker
+  store.addHealthEvent('db-write-slow', Date.now(), null, 'queued');
+  void w.stop();
+  // Blocks this thread until the queue runs or the worker is gone: refused only if it waits the whole drain out.
+  assert.ok(store.createProject('after the death', null).id);
+  // Still in the same run, before the server's 'exit' handler: a late write lands too.
+  store.updateTicket(m.id, { title: 'late' });
+  assert.equal(store.getTicket(m.id)!.title, 'late');
 });
 
 /** Run `body` in a process of its own (`store` and `w` are there), which kills itself as a crash would; its database. */

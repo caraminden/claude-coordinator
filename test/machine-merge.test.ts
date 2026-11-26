@@ -11,8 +11,8 @@ import type { ServerResponse } from 'node:http';
 import { lendsRole } from '../src/access.ts';
 import { mayFetch } from '../src/ci-runner.ts';
 import { Store } from '../src/db.ts';
-import { pickKept } from '../src/machine-merge.ts';
-import { MachineRelay } from '../src/machines.ts';
+import { MERGES_KEY, mergedCi, pickKept } from '../src/machine-merge.ts';
+import { MachineRelay, storedCheck } from '../src/machines.ts';
 import { bootServer, stopProcs, until } from './helpers.ts';
 
 type Row = { id: number; name: string; online: boolean; runners: boolean; runner_agents: { os: string; host: string }[]; same_pc: { id: number; name: string }[]; merging: { from: number; into: number; os: string[] } | null; status: string; reason: string };
@@ -44,18 +44,19 @@ function res() {
   return r;
 }
 
-test("a PC row's CI role goes on at the runner agent's first connection and, switched off, stays off and lends no runner token", () => {
+test("a PC row's CI role goes on at the runner agent's first connection, lent to every scheme its owner is in, and, switched off, stays off and lends no runner token", () => {
   const store = new Store(':memory:');
   const relay = new MachineRelay(store, () => {});
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const vault = store.createProject('Vault', null, josh.id);
+  const den = store.createProject('Den', null, josh.id);
   const pc = store.createMachine('desk', 'x', 'Josh', josh.id);
   store.setMachineRole(pc.id, 'tools', { projects: [vault.id] });
   const ci = () => store.machineRoles(pc.id).find((r) => r.role === 'ci')!;
   const first = res();
   relay.connectAgent(pc, first, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
   try {
-    assert.deepEqual([ci().on, ci().projects], [true, [vault.id]]);
+    assert.deepEqual([ci().on, ci().projects], [true, [vault.id, den.id]]);
     assert.equal(mayFetch(store, store.getMachine(pc.id)!, vault), true);
     assert.equal(lendsRole(store, store.getMachine(pc.id)!, 'tools', vault, [josh.id]), true, 'its other roles keep working');
     store.setMachineRole(pc.id, 'ci', { on: false });
@@ -63,6 +64,64 @@ test("a PC row's CI role goes on at the runner agent's first connection and, swi
     relay.connectAgent(pc, res(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
     assert.equal(ci().on, false);
     assert.equal(mayFetch(store, store.getMachine(pc.id)!, vault), false);
+  } finally {
+    relay.disconnect(pc.id);
+  }
+});
+
+test('a PC row whose machine agent is gone is offline, though its runner agent is connected', () => {
+  const store = new Store(':memory:');
+  const relay = new MachineRelay(store, () => {});
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const pc = store.createMachine('desk', 'x', 'Josh', josh.id);
+  store.updateMachine(pc.id, { report: JSON.stringify({ host: 'DESK', os: 'windows', threads: 8 }) });
+  relay.connectAgent(pc, res(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  try {
+    const v = relay.view(store.getMachine(pc.id)!);
+    assert.deepEqual([v.online, v.runners, v.runner_agents.map((r) => r.os)], [false, false, ['windows']]);
+    assert.notEqual(v.status, 'ready', v.reason);
+  } finally {
+    relay.disconnect(pc.id);
+  }
+});
+
+test("a merge waiting on a PC row lends no scheme more CI: the runner agent connecting there doesn't switch its CI on for the row's own schemes", () => {
+  const store = new Store(':memory:');
+  const relay = new MachineRelay(store, () => {});
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const a = store.createProject('A', null, josh.id);
+  const c = store.createProject('C', null, josh.id);
+  const pc = store.createMachine('desk', 'x', 'Josh', josh.id);
+  store.setMachineRole(pc.id, 'tools', { projects: [a.id] });
+  const old = store.createMachine('desk-ci-runners', 'y', 'Josh', josh.id);
+  store.setMachineRole(old.id, 'ci', { on: true, projects: [c.id] });
+  store.setSetting(MERGES_KEY, [{ from: old.id, into: pc.id, os: ['windows'], by: 'Josh', at: 1 }]);
+  relay.connectAgent(pc, res(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  try {
+    assert.equal(store.machineRoles(pc.id).find((r) => r.role === 'ci')!.on, false);
+    assert.deepEqual(mergedCi(store, store.getMachine(old.id)!, store.getMachine(pc.id)!), [c.id]);
+  } finally {
+    relay.disconnect(pc.id);
+  }
+});
+
+test("a runner host flag an older release wrote on a PC row (a rollback) changes none of its roles, and its machine agent's next connection clears it", () => {
+  const store = new Store(':memory:');
+  const relay = new MachineRelay(store, () => {});
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const vault = store.createProject('Vault', null, josh.id);
+  const pc = store.createMachine('desk', 'x', 'Josh', josh.id);
+  store.setMachineRole(pc.id, 'tools', { projects: [vault.id] });
+  relay.connectAgent(pc, res(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  relay.disconnect(pc.id);
+  const roles = store.machineRoles(pc.id);
+  // What the release before M2b writes when this runner agent connects on the PC row's token.
+  store.updateMachine(pc.id, { last_check: JSON.stringify({ at: 1, results: [], runners: true }) });
+  assert.deepEqual(store.machineRoles(pc.id), roles);
+  relay.connectAgent(store.getMachine(pc.id)!, res(), { host: 'DESK', command: 'citadel machine agent' });
+  try {
+    assert.equal(storedCheck(store.getMachine(pc.id)!)?.runners, undefined);
+    assert.equal(lendsRole(store, store.getMachine(pc.id)!, 'tools', vault, [josh.id]), true);
   } finally {
     relay.disconnect(pc.id);
   }
@@ -151,6 +210,15 @@ test('end to end: the runner agent joins the PC row beside its agent, and two ro
     assert.equal((await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' })).status, 202);
     assert.equal((await srv.call(`/api/projects/${project.id}/ci-runners?wait=20`)).data.job.ok, true);
     assert.ok(!machineAgent.sent.some((m) => m.replaced));
+
+    // An Update replaces only the machine agent: it keeps the token the runner agents on that row hold.
+    const { code } = (await srv.call(`/api/machines/${pc.machine.id}/join`, {}, 'POST')).data;
+    const joined = await fetch(`${srv.base}/api/machines/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, report: { host: hostname(), os: 'linux', threads: 8 } }) });
+    assert.equal(joined.status, 201);
+    assert.equal(((await joined.json()) as { token: string }).token, pc.token);
+    // A new token cuts them off too, and says which ones, so the page shows their lines.
+    const fresh = await srv.call(`/api/machines/${pc.machine.id}/token`, {}, 'POST');
+    assert.deepEqual(fresh.data.runner_os.sort(), ['linux', 'windows']);
   } finally {
     for (const s of streams) s.close();
     if (agent) await stopProcs([agent]);

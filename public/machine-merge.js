@@ -11,6 +11,9 @@ const WAYS = {
   linux: { tag: 'wsl', where: "In a root shell in the CI runners' WSL distro on that PC (wsl -d citadel-ci -u root), or sudo -i on a Linux PC, paste this. It replaces the Linux runner agent there; its runners stay.", line: machineSetupRunnerAgentLinux },
 };
 
+/** The lines that (re)install a PC's runner agents, one per os, with `token`: a merge's, or a new token's on one PC's row. */
+export const runnerAgentLines = (url, token, osList) => osList.map((os) => [h('p', { class: 'small' }, WAYS[os].where), markdownElement(`\`\`\`${WAYS[os].tag}\n${WAYS[os].line(url, token)}\n\`\`\``)]);
+
 /** Open the merge of `m` and `other` in `el`; `done` runs when it closes. Returns its close. */
 export function openMergePanel(el, m, other, { onDone = () => {}, machines = () => [] } = {}) {
   const st = { got: null, failed: '', closed: false, cancelling: false };
@@ -59,7 +62,7 @@ export function openMergePanel(el, m, other, { onDone = () => {}, machines = () 
               ? notice('ok', h('strong', {}, `Merged: ${g.into.name}`), ` is this PC's one row now; ${g.from.name} and its token are gone.`)
               : [
                   h('p', { class: 'small' }, `${g.into.name} stays. ${g.from.name}'s runner agent moves onto it with ${g.into.name}'s token, and ${g.from.name} goes once it connects there. Until then both keep working.`),
-                  g.os.map((os) => [h('p', { class: 'small' }, WAYS[os].where), markdownElement(`\`\`\`${WAYS[os].tag}\n${WAYS[os].line(g.agent_url, g.token)}\n\`\`\``)]),
+                  runnerAgentLines(g.agent_url, g.token, g.os),
                   notice('info', h('strong', {}, `Waiting for the runner agent to connect to ${g.into.name}…`)),
                   h('div', { class: 'row' }, h('button', { type: 'button', class: 'secondary small', onclick: cancel }, 'Stop merging')),
                 ],

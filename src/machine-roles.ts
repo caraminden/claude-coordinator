@@ -45,8 +45,14 @@ export function parseLegacyLend(text: string | null): LegacyLend | null {
 }
 
 /** Whether a machine is a CI runner host (machines.last_check says runners, #328): what it lends is runner tokens. */
-/** The CI role's setup marks a runner host this release has seen (`runner_host`), so one an older release made is caught. */
-export const runnerSeen = (roles: readonly RoleRow[]) => roles.find((r) => r.role === 'ci')?.setup?.runner_host === true;
+/**
+ * The CI role's setup marks a runner host this release has seen (`runner_host`), so one an older release made is caught; and a
+ * PC row a runner agent joined (`runner_agent`, M2b), so a flag an older release wrote for it there (a rollback) changes no role.
+ */
+export const runnerSeen = (roles: readonly RoleRow[]) => {
+  const setup = roles.find((r) => r.role === 'ci')?.setup;
+  return setup?.runner_host === true || setup?.runner_agent === true;
+};
 export const runnerHost = (lastCheck: string | null) => /"runners":true/.test(lastCheck ?? '');
 
 /**

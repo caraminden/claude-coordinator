@@ -62,6 +62,9 @@ export const machineMergeRoutes: Route[] = [
       const other = Number.isSafeInteger(body.with) ? app.store.getMachine(body.with as number) : undefined;
       if (!managesMachine(session, machine) || !other || !managesMachine(session, other)) throw new HttpError(404, 'No such machine');
       if (!ownsToken(session, machine) || !ownsToken(session, other)) throw new HttpError(403, "Only the machines' owner can merge them: it shows the kept one's token");
+      // As its twins in routes/machines.ts: a row being removed takes no new token holder, and gives none up mid-removal.
+      const gone = [machine, other].find((m) => app.machineCopies?.removing(m.id));
+      if (gone) throw new HttpError(409, `${gone.name} is being removed: merge once it is gone, or not at all`);
       const waiting = mergeOf(app.store, machine.id);
       if (waiting && [waiting.from, waiting.into].includes(other.id)) return json(res, 200, lines(app, ctx, waiting));
       if (waiting || mergeOf(app.store, other.id)) throw new HttpError(409, 'One of these is already being merged with another machine: cancel that first');

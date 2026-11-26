@@ -28,7 +28,7 @@ import type { WorkerJoin } from './worker-join.ts';
 import type { RoleSetups } from './role-setup.ts';
 import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
-import { mergeOf } from './machine-merge.ts';
+import { mergeOf, merges } from './machine-merge.ts';
 import { pausedRoles } from './machine-pause.ts';
 import { legacyFromRoles, ROLE_NAMES } from './machine-roles.ts';
 
@@ -454,8 +454,9 @@ export class MachineRelay {
       workerHere: worker?.on && worker.here,
       now: Date.now(),
       startedAt: this.startedAt,
-      online: !!agent || runnersHere.length > 0,
-      runners: agent ? false : runnersHere.length > 0 || runnerRow,
+      // A PC row is online by its machine agent; only a runner host's row is online by its runner agent.
+      online: !!agent || (runnerRow && runnersHere.length > 0),
+      runners: !agent && runnerRow,
       alwaysOn: !!machine.always_on,
       createdAt: machine.created_at,
       lastSeenAt: worker?.seen ? Math.max(worker.seen, machine.last_seen_at ?? 0) : machine.last_seen_at,
@@ -482,7 +483,7 @@ export class MachineRelay {
       notes: machine.notes,
       created_at: machine.created_at,
       last_seen_at: machine.last_seen_at,
-      online: !!agent || runnersHere.length > 0,
+      online: !!agent || (runnerRow && runnersHere.length > 0),
       host: agent?.host ?? runnersHere[0]?.host ?? null,
       command: agent?.command ?? null,
       connected_at: agent?.since ?? runnersHere[0]?.since ?? null,
@@ -613,7 +614,10 @@ export class MachineRelay {
     if (mcp) this.store.updateMachine(machine.id, mcp);
     const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.managed ? [] : ['mcp'], managed: !!info.managed, found: [], workspaces: [], problems: [], timers: [] };
     this.agents.set(machine.id, agent);
-    this.store.updateMachine(machine.id, { last_seen_at: agent.since });
+    // A runner host's flag on a row its machine agent connects to was written by an older release (a rollback) for the runner
+    // agent beside it: one PC's row is no runner host's, so the flag goes and its other roles lend again.
+    const stale = storedCheck(machine)?.runners && !this.store.machineRoles(machine.id).find((r) => r.role === 'ci')?.setup?.runner_host;
+    this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(stale ? { last_check: null } : {}) });
     this.onChange();
     agent.timers.push(
       setTimeout(() => this.checkIfDue(machine.id), CHECK_UNASKED_MS),
@@ -653,9 +657,18 @@ export class MachineRelay {
     const check = storedCheck(machine);
     this.store.updateMachine(machine.id, { last_seen_at: runner.since, ...(check?.runners ? { last_check: JSON.stringify({ at: runner.since, results: [], runners: true, host, os }) } : {}) });
     // Its CI role goes on the first time a runner agent connects, lent where the machine is; switched off after that, it stays off.
+    // As a role its owner switches on, it goes to every scheme they are in (Josh's pick, "Every scheme you're in"); a shared row's
+    // to where the machine is. A merge into this row sets it in finishMerge instead, so the merge lends no scheme more CI.
     const ci = this.store.machineRoles(machine.id).find((r) => r.role === 'ci');
-    if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host) {
-      this.store.setMachineRole(machine.id, 'ci', { on: true, everyScheme: legacyFromRoles(this.store.machineRoles(machine.id)).projects, setup: { ...ci.setup, runner_agent: true } });
+    if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && !merges(this.store).some((m) => m.into === machine.id)) {
+      const owner = machine.owner_id === null ? null : this.store.getUser(machine.owner_id);
+      const everyScheme = owner
+        ? this.store
+            .listProjects()
+            .filter((p) => this.store.canSee({ uid: owner.id, admin: !!owner.admin }, p.id))
+            .map((p) => p.id)
+        : legacyFromRoles(this.store.machineRoles(machine.id)).projects;
+      this.store.setMachineRole(machine.id, 'ci', { on: true, everyScheme, setup: { ...ci.setup, runner_agent: true } });
     }
     this.onChange();
     const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);

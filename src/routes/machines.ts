@@ -331,7 +331,12 @@ export const agentRoutes: Route[] = [
     async handler({ req, res, app }) {
       const joined = redeemJoin(
         app.store,
-        (id) => app.machines.issueToken(id),
+        // A runner agent on this PC's row holds its token too (M2b): an Update replaces only the machine agent, so it keeps it.
+        (id) => {
+          const m = app.store.getMachine(id);
+          const kept = m && app.store.machineRoles(id).find((r) => r.role === 'ci')?.setup?.runner_agent ? app.machines.shownToken(m) : null;
+          return kept ?? app.machines.issueToken(id);
+        },
         await readJson(req, 20_000),
         Date.now(),
         (id) => !!app.machineCopies?.removing(id),
@@ -783,13 +788,15 @@ export const machineRoutes: Route[] = [
     handler: managed(async ({ req, res, app, machine }) => {
       // Its agent is still clearing its copies: a new token would cut it off before they are home.
       if (app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token until its copies are cleared, or remove it now`);
-      // A new token locks out whoever holds the old one, the connected agent included.
+      // A new token locks out whoever holds the old one, the connected agent included: on one PC's row its runner agents too,
+      // so the reply names them and the page shows their lines (M2b).
+      const runnerOs = app.machines.view(machine).runners ? [] : app.machines.runnersOn(machine.id).map((r) => r.os);
       const token = app.machines.issueToken(machine.id);
       app.machines.disconnect(machine.id);
       await ownWrites(); // the reply re-reads the machine (#1244)
       // An offline machine's disconnect says nothing, and its row should now offer Show (#1355).
       app.broadcast({ type: 'machines', machines: app.machines.list() });
-      return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
+      return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, runner_os: runnerOs, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
     }),
   },
   {

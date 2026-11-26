@@ -3,7 +3,7 @@ import { account, ago, api, h, icon, view } from './base.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { machineJobsSection } from './jobs.js';
 import { openConnectPanel, reportLine } from './machine-connect.js';
-import { openMergePanel } from './machine-merge.js';
+import { openMergePanel, runnerAgentLines } from './machine-merge.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
 import { pauseButton, roleCards } from './machine-role-cards.js';
 import { forgetWorkerLink, workerReason, workerWord } from './machine-worker-row.js';
@@ -203,8 +203,8 @@ function mergeMachines(m, other) {
 }
 
 /** A machine just added or given a new token: what its install line needs. */
-function setupFor(machine, token, url) {
-  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, runners: machine.runners };
+function setupFor(machine, token, url, runnerOs = []) {
+  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, runners: machine.runners, runnerOs };
 }
 
 function renderMachineSetup() {
@@ -286,6 +286,8 @@ function renderMachineSetup() {
           w.note ? h('p', { class: 'small muted' }, w.note) : h('p', { class: 'small muted' }, 'It writes what it prints to ', h('code', {}, w.log), ', and ends by printing how to watch that log, stop it and remove it.'),
         ),
       ),
+      // One PC's row (M2b): its runner agents held the old token too, so they reinstall with this one.
+      t.runnerOs.length ? [h('div', { class: 'cui-notice', 'data-tone': 'warn', role: 'status' }, h('strong', {}, 'Its CI runner agent is cut off too.'), ' It used the old token: paste this on that PC as well, and its runners stay.'), runnerAgentLines(t.url, t.token, t.runnerOs)] : '',
       t.runners ? '' : h('p', { class: 'small' }, `Once it connects, ${t.name}'s line below shows the MCP servers and folders it found there: open it and tick what to lend.`),
     ),
   );
@@ -338,11 +340,11 @@ async function newMachineToken(m) {
     )
   )
     return;
-  const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
+  const { machine, token, agent_url, runner_os } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
   if (!token) return;
   shownTokens.delete(m.id); // the old one stopped working
   forgetWorkerLink(m.id);
-  view.machineToken = setupFor(machine, token, agent_url);
+  view.machineToken = setupFor(machine, token, agent_url, runner_os);
   renderMachineSetup();
   document.getElementById('machine-setup')?.scrollIntoView({ block: 'nearest' });
 }
@@ -552,7 +554,7 @@ function machineLine(m) {
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
   // Two rows for one PC (Build 7 M2b): its owner merges them into one. It shows the kept row's token, so only to its owner.
-  const other = !gone && tokenIsMine(m) && m.same_pc?.find((x) => view.machines.some((y) => y.id === x.id && tokenIsMine(y)));
+  const other = !gone && tokenIsMine(m) && m.same_pc?.find((x) => view.machines.some((y) => y.id === x.id && tokenIsMine(y) && !removing(y)));
   const merge = other && h('button', { type: 'button', class: 'secondary small', title: `${m.name} and ${other.name} report one hostname. Opens the line that moves the CI runner agent onto one row`, onclick: () => mergeMachines(m, other) }, m.merging ? 'Merging: show the line' : 'These are one computer: merge');
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
   if (fix || update || merge) sum.after(h('span', { class: 'machine-fix' }, merge || '', update || '', fix || ''));

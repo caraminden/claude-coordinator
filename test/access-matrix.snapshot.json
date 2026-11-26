@@ -1623,6 +1623,16 @@
   "m1": "200",
   "m2": "200"
  },
+ "GET /api/projects/:p/cabal/1": {
+  "anon": "401 Not logged in",
+  "person": "404 #1 leads no cabal in this scheme",
+  "member": "404 #1 leads no cabal in this scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "404 #1 leads no cabal in this scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/chains": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -2982,6 +2992,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/cabal": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/cabal": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal member or its lead writes on its board",
+  "member": "403 Only a cabal member or its lead writes on its board",
+  "outsider": "403 Only a cabal member or its lead writes on its board",
+  "tmA": "403 Only a cabal member or its lead writes on its board",
+  "tmB": "403 Only a cabal member or its lead writes on its board",
+  "m1": "400 action must be read, note, ask, answer, row, log or red",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/check": {
   "anon": "401 Not logged in",
   "person": "409 No turn is running.",
@@ -3889,6 +3919,26 @@
   "outsider": "404 No such minion",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/cabal": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cabal": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal member or its lead writes on its board",
+  "member": "403 Only a cabal member or its lead writes on its board",
+  "outsider": "403 Only a cabal member or its lead writes on its board",
+  "tmA": "403 Only a cabal member or its lead writes on its board",
+  "tmB": "403 Only a cabal member or its lead writes on its board",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

@@ -1069,6 +1069,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/machines/:m/join": {
+  "anon": "401 Not logged in",
+  "person": "201",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/machines/:m/roles": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1198,6 +1208,36 @@
   "tmB": "401 Unknown machine token; make a new one in the Machines panel",
   "m1": "401 Unknown machine token; make a new one in the Machines panel",
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/join": {
+  "anon": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "person": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "member": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "outsider": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "tmA": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "tmB": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "m1": "400 That isn't a join code: copy the whole command from the Machines page again",
+  "m2": "400 That isn't a join code: copy the whole command from the Machines page again"
+ },
+ "POST /api/machines/joins": {
+  "anon": "401 Not logged in",
+  "person": "201",
+  "member": "201",
+  "outsider": "201",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/machines/joins/1": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "404 No such join code",
+  "outsider": "404 No such join code",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "POST /api/machines/run-on-host": {
   "anon": "401 Not logged in",

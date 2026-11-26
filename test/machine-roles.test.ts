@@ -94,7 +94,7 @@ test('the migration grants every turn, tool and runner token exactly as before, 
   assert.deepEqual(roles('cara-desktop-linux'), { tools: false, screen: false, ci: true, turns: false, gpu: true });
   assert.deepEqual(roles('josh-worker'), { tools: true, screen: false, ci: false, turns: true, gpu: true });
   assert.deepEqual(roles('gpu-off-box'), { tools: true, screen: false, ci: false, turns: false, gpu: false });
-  assert.equal(s.getSetting('schema_version'), 121);
+  assert.ok(Number(s.getSetting('schema_version')) >= 121, 'the roles migration ran'); // later builds add their own numbers
   s.db.close();
 });
 

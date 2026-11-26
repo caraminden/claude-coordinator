@@ -350,7 +350,7 @@ train_reporter() {
   [ -n "${COORDINATOR_API:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] && [ -n "${COORDINATOR_TICKET:-}" ] || return 0
   (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
 }
-# Conflict prep's waiting side (#1366, tools/land/prepare.sh): while a train ahead of this one is tested (<state>/train-top, top_say
+# Conflict prep's waiting side (#1366, above): while a train ahead of this one is tested (<state>/train-top, top_say
 # below), whether this would still rebase once it ships, by git merge-tree, as against main. Once per train top, branch
 # tip and count of recorded fixes. A conflict the recorded fixes don't resolve says one "prep:" line, which the server
 # turns into a wake with the steps (src/land.ts), naming the ship on the train that brings it (the first train commit it

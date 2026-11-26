@@ -396,7 +396,8 @@ export interface ProgressTask {
   work?: number;
   workFrom?: number | null;
   kind?: string;
-  own?: boolean;
+  /** The status the minion set on this step itself (the plan tool's `status`), which wins over the server's guess. */
+  own?: 'todo' | 'doing' | 'done' | 'dropped';
   seen?: boolean;
   stage?: string;
 }

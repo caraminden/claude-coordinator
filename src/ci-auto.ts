@@ -2,18 +2,20 @@
 // schemes, there should be one connection that multiple schemes can use", then "can we do anything to streamline/automate
 // this process so from the user of citadels perspective it feels like just one connection?"). GitHub wants one runner
 // registration per repo on a personal account, so those registrations are plumbing: every PASS_MS this looks at each scheme
-// with a GitHub repo and, when it first needs a runner of a kind (its workflows ask for its `<slug>-ci…` labels and GitHub
-// lists none, or a job sits queued with one of those labels and no connected PC has runners for the repo), registers one on
-// the best PC lending it CI (M6's ranking), through the runner agent there (src/ci-runner.ts RunnerJobs). A scheme unticked
-// under a PC's CI runners has that PC's runners taken off. Only when no PC lends CI to a scheme whose jobs wait does anyone
-// hear of it: one card to its members naming the PCs they could ask to be lent. The `ci_runners` tool stays for odd cases.
+// with a GitHub repo and, when it needs a runner of a kind (its workflows ask for its `<slug>-ci…` labels, or a job sits
+// queued with one), registers one on each connected PC lending it CI that has none for its repo yet (the spec's section 5:
+// ticking a scheme makes that PC register its runners; Josh, 2026-11-25: "load balance across all valid machines"), one
+// PC at a time in M6's order, through the runner agent there (src/ci-runner.ts RunnerJobs). A scheme unticked under a PC's
+// CI runners has that PC's runners taken off. People hear of it only when it fails (the job's note) or when no PC lends CI
+// to a scheme whose jobs wait: one card to its members naming the PCs they could ask. `ci_runners` stays for odd cases.
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { lendsRole } from './access.ts';
-import { type Listed, type RunnerAsk, runnerLabel } from './ci-runner.ts';
+import { type RunnerAsk, runnerLabel } from './ci-runner.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { CardQuestion } from './ci-armed.ts';
 import { rank } from './machine-balancer.ts';
+import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { thrown } from './thrown.ts';
 
@@ -24,10 +26,10 @@ const OSES: Os[] = ['windows', 'linux'];
 export const PASS_MS = 2 * 60_000;
 /** After an add or remove starts for a scheme on a PC, the same isn't tried again for this long: the runner shows in the agent's next sample well within it. */
 export const RETRY_MS = 30 * 60_000;
-/** After one fails (its note in the Taskmaster's chat says why), this long. */
+/** After one can't start for a reason that lasts (no repo, no GitHub link: the log says why), this long. */
 export const FAILED_MS = 6 * 3600_000;
-/** GitHub's list of a scheme's runners, asked only when its workflows want a kind no connected PC serves, is kept this long. */
-export const LISTED_MS = 3600_000;
+/** After one can't start because a job is going (the scheme's other one, or the agent's for another scheme): the next free pass or so. */
+export const BUSY_MS = 5 * 60_000;
 /** The no-machine card comes again at most this often while jobs still wait with no PC lending CI. */
 export const CARD_MS = 7 * 24 * 3600_000;
 
@@ -65,8 +67,6 @@ export interface CiAutoDeps {
   reposOn(machineId: number, os: Os): Set<string>;
   /** Each repo's queued self-hosted jobs' labels (lowercase), from ShipWatch's last look. */
   queuedLabels(): Map<string, Set<string>>;
-  /** GitHub's list of the scheme's runners (RunnerTokens.listed). */
-  listed(project: Project): Promise<Listed[]>;
   /** Start a runner job as Citadel itself (RunnerJobs.start with `auto`); throws when it can't start. */
   start(project: Project, ask: RunnerAsk): Promise<unknown>;
   /** The CI room a machine has now (M6's plan: runners awake); null when the balancer has no say there. */
@@ -88,7 +88,6 @@ export class CiAuto {
   private busy = false;
   /** `<add|remove>:<scheme id>:<os>[:<machine id>]` → when it may be tried again. Set before the job starts (every-scheme §4 q5). */
   private next = new Map<string, number>();
-  private listedAt = new Map<number, { at: number; runners: Listed[] }>();
   /** The repos (lowercase) whose workflows asked for runners at the last pass: ShipWatch reads their queued jobs too, before any runner is there. */
   asking = new Set<string>();
 
@@ -124,7 +123,7 @@ export class CiAuto {
     return started;
   }
 
-  /** The runner kinds a scheme needs and has none of on a connected PC; each registered on the best PC lending it CI. */
+  /** The runner kinds a scheme needs; each registered on the connected PCs lending it CI that have none for its repo, best first (one job a scheme at a time: RunnerJobs). */
   private async add(project: Project): Promise<string[]> {
     const slug = repoSlug(project.repo_url)?.toLowerCase();
     if (!slug || !runnerLabel(project.name)) return [];
@@ -136,38 +135,30 @@ export class CiAuto {
     for (const os of OSES) {
       if (!queued.has(os) && !asked.has(os)) continue;
       const online = this.d.runnerMachines(os);
-      if (online.some((m) => this.d.reposOn(m.id, os).has(slug))) continue;
       const lending = online.filter((m) => lendsCi(this.d.store, m, project));
-      // Asked for in a workflow but nothing waits: only when GitHub lists no runner of that kind at all (one on a PC that's off counts).
-      if (!queued.has(os) && (await this.hasOnGithub(project, os))) continue;
-      if (!lending.length) {
-        if (queued.has(os)) this.noMachine(project, os);
-        continue;
+      const lacking = lending.filter((m) => !this.d.reposOn(m.id, os).has(slug));
+      // Jobs wait, nothing connected serves the repo, and no PC lends it CI at all (one that does but is off or asleep will run them when it's back).
+      if (queued.has(os) && !lending.length && !online.some((m) => this.d.reposOn(m.id, os).has(slug)) && !this.d.store.listMachines().some((m) => lendsCi(this.d.store, m, project))) {
+        this.noMachine(project, os);
       }
-      const key = `add:${project.id}:${os}`;
-      if ((this.next.get(key) ?? 0) > this.now()) continue;
-      this.next.set(key, this.now() + RETRY_MS);
-      const ranked = rank(lending.map((m) => ({ id: m.id, priority: m.priority ?? null, free: this.d.room(m.id) ?? 1, m })));
-      const pick = (ranked[0]?.m ?? lending[0])!;
-      try {
-        await this.d.start(project, { op: 'add', count: 1, os, host: pick.name });
-        out.push(`add ${project.name} ${os} on ${pick.name}`);
-        this.listedAt.delete(project.id);
-      } catch (err) {
-        this.next.set(key, this.now() + FAILED_MS);
-        this.say(`CI runners: couldn't register ${project.name}'s ${os} runner on ${pick.name}: ${thrown(err).message}`);
+      const ranked = rank(lacking.map((m) => ({ id: m.id, priority: m.priority ?? null, free: this.d.room(m.id) ?? 1, m })));
+      for (const { m: pick } of ranked) {
+        const key = `add:${project.id}:${os}:${pick.id}`;
+        if ((this.next.get(key) ?? 0) > this.now()) continue;
+        this.next.set(key, this.now() + RETRY_MS);
+        try {
+          await this.d.start(project, { op: 'add', count: 1, os, host: pick.name });
+          out.push(`add ${project.name} ${os} on ${pick.name}`);
+          return out;
+        } catch (err) {
+          const busy = err instanceof HttpError && err.status === 409;
+          this.next.set(key, this.now() + (busy ? BUSY_MS : FAILED_MS));
+          this.say(`CI runners: couldn't register ${project.name}'s ${os} runner on ${pick.name}: ${thrown(err).message}`);
+          if (busy) break;
+        }
       }
     }
     return out;
-  }
-
-  private async hasOnGithub(project: Project, os: Os): Promise<boolean> {
-    let had = this.listedAt.get(project.id);
-    if (!had || this.now() - had.at > LISTED_MS) {
-      had = { at: this.now(), runners: await this.d.listed(project) };
-      this.listedAt.set(project.id, had);
-    }
-    return had.runners.some((r) => r.labels.some((l) => osOfLabel(project.name, l) === os));
   }
 
   /** Runners on one PC's row (a runner agent joined it, Build 7 M2b) for a scheme its CI no longer lends to come off. A CI runner host's row from before keeps what people added by hand. */
@@ -188,7 +179,7 @@ export class CiAuto {
             await this.d.start(project, { op: 'remove', count: null, os, host: m.name });
             out.push(`remove ${project.name} ${os} on ${m.name}`);
           } catch (err) {
-            this.next.set(key, this.now() + FAILED_MS);
+            this.next.set(key, this.now() + (err instanceof HttpError && err.status === 409 ? BUSY_MS : FAILED_MS));
             this.say(`CI runners: couldn't take ${project.name}'s ${os} runners off ${m.name}: ${thrown(err).message}`);
           }
         }
@@ -197,7 +188,7 @@ export class CiAuto {
     return out;
   }
 
-  /** Jobs wait and no connected PC lends CI here: one card, again only after CARD_MS (kept in settings, so a restart doesn't repeat it). */
+  /** Jobs wait and no PC lends CI here: one card, again only after CARD_MS (kept in settings, so a restart doesn't repeat it). */
   private noMachine(project: Project, os: Os) {
     const key = `ci_auto_card:${project.id}`;
     const at = this.d.store.getSetting<number>(key);
@@ -219,7 +210,7 @@ export function noMachineCard(store: Store, project: Project, os: Os, could: Mac
   return {
     header: 'CI runners',
     question: could.length
-      ? `${project.name}'s CI jobs are waiting for a ${kind} runner, and no connected computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
+      ? `${project.name}'s CI jobs are waiting for a ${kind} runner, and no computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
       : `${project.name}'s CI jobs are waiting for a ${kind} runner, and no computer hosts CI runners yet. A member can connect one (Machines, Connect a computer) and switch its CI runners on; ${project.name} then gets a runner by itself. What do you want to do?`,
     options: [...(asks.length ? asks : [{ label: "I'll connect a computer", description: 'Connect it on the Machines page and switch on its CI runners.' }]), { label: 'Leave the jobs waiting', description: 'Nothing changes; they run once a computer lends CI here.' }],
   };

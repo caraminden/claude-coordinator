@@ -504,4 +504,5 @@ test("#2064: Citadel's own add needs no member asking; a PC unticked from a sche
   assert.equal(removing.machine, 'cara-desktop-runners');
   w.answer(true, 'removed');
   assert.equal((await w.jobs.wait(w.scheme.id, 5000))!.ok, true);
+  assert.equal(w.notes.length, 1, "Citadel's own job that went through is plumbing: no note; only the failed add above has one");
 });

@@ -78,7 +78,7 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
  * admin owns the scheme, so `ci_runners` keeps working for a new scheme. The token lets a PC run the repo's CI jobs,
  * which a member can already do by pushing a workflow. With `removing` (a removal token, unregister, a remove
  * job), any PC that hosts CI may: taking its own runners off a scheme it no longer lends to only stops it serving there
- * (#2064: unticking a scheme under CI removes its runners).
+ * (#2064: unticking a scheme under CI removes its runners); unregister then takes off only runners named for its hosts.
  */
 export function mayFetch(store: Store, machine: Machine, project: Project, removing = false): boolean {
   const role = store.machineRoles(machine.id).find((r) => r.role === 'ci');
@@ -99,6 +99,9 @@ export class RunnerTokens {
   private live: boolean;
   /** Told after each token handed out and each runner taken off GitHub, for a note in the scheme Taskmaster's chat (or a runner job's, when one asked for it). */
   onFetched: (project: Project, words: string, machine: Machine) => void = () => {};
+
+  /** The hostnames a machine's runner agents report (MachineRelay.runnerHost): a PC that may only remove takes off only runners named for them. */
+  hostsOf: (machine: Machine) => string[] = () => [];
 
   /** Whether Citadel itself took that label off the runner and owes it back (src/runner-cap.ts): it still counts as carrying it. */
   owed: (id: number, label: string) => boolean = () => false;
@@ -157,6 +160,10 @@ export class RunnerTokens {
     }
     if (!this.owed(Number(found.id), label) && (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label || l?.name === roleLabels('check', label)[0]))) {
       throw new HttpError(403, `The runner ${name} of ${slug} doesn't carry the label ${label}, so it isn't the kind of runner being removed and Citadel won't remove it; nothing changed.`);
+    }
+    // A PC that no longer lends to the scheme (#2064) only takes its own runners off: ones named for its hosts, as add-runner names them.
+    if (!mayFetch(this.store, machine, project) && !this.hostsOf(machine).some((h) => onHost(name, h))) {
+      throw new HttpError(403, `The runner ${name} of ${slug} isn't on ${machine.name}, which no longer runs CI for ${project.name}; nothing changed.`);
     }
     if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);
     const r = await this.github(ownerToken, 'DELETE', `/repos/${slug}/actions/runners/${found.id}`);
@@ -415,7 +422,7 @@ export class RunnerJobs {
     const label = names ? (ask.os === 'linux' ? `${names.label}-linux` : names.label) : '';
     const done = this.run(project, targets, ask, label, view, before)
       .catch((err) => Object.assign(view, { ok: false, text: `Citadel failed while following the job: ${err?.message ?? err}`, finished_at: Date.now() }))
-      .then(() => this.note(project, view))
+      .then(() => this.note(project, view, !!auto))
       .catch((err) => console.error(`Couldn't note ${project.name}'s runner job:`, err))
       .finally(() => {
         for (const m of targets) this.busy.delete(`${m.id}:${ask.os}`);
@@ -467,8 +474,9 @@ export class RunnerJobs {
   }
 
   /** An add's or remove's one note, when it ends however it ends: who, what, where, how it went; the output goes under it. */
-  private note(project: Project, view: RunnerJobView) {
-    if (view.op === 'list') return;
+  private note(project: Project, view: RunnerJobView, auto: boolean) {
+    // Citadel's own add or remove that went through is plumbing (#2064: "feels like just one connection"): only a failure is told.
+    if (view.op === 'list' || (auto && view.ok)) return;
     const linux = view.os === 'linux' ? 'Linux ' : '';
     const what = view.op === 'add' ? `${view.count} ${linux}CI runner${view.count === 1 ? '' : 's'} for ${project.name}` : `${project.name}'s ${linux}CI runners`;
     const words = view.ok ? `✓ ${view.by} ${view.op === 'add' ? 'added' : 'removed'} ${what} on ${view.machine}` : `✗ ${view.by} tried to ${view.op} ${what} on ${view.machine}, and it failed: ${why(view.text)}`;

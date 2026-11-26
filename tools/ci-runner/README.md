@@ -23,9 +23,10 @@ scheme X" (Josh, 2026-11-25: "there should be one connection that multiple schem
    or make later is ticked too; untick one you don't want. A scheme's runners can go on it only when you own it, you
    are in that scheme and you lent it.
 3. That's all. When a ticked scheme's workflow asks for its label (`<scheme-slug>-ci`, `<scheme-slug>-ci-linux`), or a
-   job waits for one, Citadel registers one runner for it on a PC lending it CI (`src/ci-auto.ts`, every 2 minutes;
-   with several, the owner's order on the Machines page, then the most room). Unticking a scheme takes its runners off
-   that PC. Idle runners cost a service each and nothing else. Only when no PC lends a scheme CI while its jobs wait
+   job waits for one, Citadel registers one runner for it on each connected PC lending it CI (`src/ci-auto.ts`, every 2
+   minutes, one PC at a time: the owner's order on the Machines page, then the most room), so its jobs spread over them.
+   Unticking a scheme takes its runners off that PC. Idle runners cost a service each and nothing else; Citadel posts
+   nothing when one goes on or off, only when it fails. Only when no PC lends a scheme CI while its jobs wait
    do its members get one card naming PCs they could ask. Set the [caps](#your-own-caps) if 75% of the PC is too much.
 
 `ci_runners` (below) stays for odd cases: a second runner, a [role](#runner-roles-1934), a list. A **CI runner host**

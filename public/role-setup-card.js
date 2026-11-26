@@ -21,7 +21,7 @@ const ABOUT = {
   screen: 'Turns screenshots on in its machine-agent.json, then takes a screenshot and opens and closes Notepad.',
   turns: 'Installs the worker (a WSL distro of its own on Windows), then runs its self-test.',
   gpu: 'Checks the GPU, podman and NVIDIA’s container toolkit, turns GPU jobs on, then runs nvidia-smi in a container.',
-  ci: 'Shows the one command that installs the CI runner agent (as administrator), waits for it, then tests it. Each scheme ticked here gets its runner by itself when its CI first needs one.',
+  ci: 'Shows the command that installs the CI runner agent (as administrator; on Windows, the Linux one in WSL too), waits for it to join this row, then tests it. Each scheme ticked here gets its runner here by itself when its CI first needs one.',
 };
 
 /** The row's token and address for the runner agent's install, by machine id: asked once a Set up shows it. @type {Map<number, { token?: string, url?: string, failed?: string }>} */

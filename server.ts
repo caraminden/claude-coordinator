@@ -2117,7 +2117,6 @@ const ciAuto = new CiAuto({
   runnerMachines: (os) => machines.runnerMachines(os),
   reposOn: (id, os) => ciLoad.reposOn(id, os),
   queuedLabels: () => ciQueuedLabels,
-  listed: (project) => runnerTokens.listed(project),
   start: (project, ask) => runnerJobs.start(project, null, ask, APP_NAME),
   room: (id) => balancer.current(id)?.runners ?? null,
   card: (project, os, could) => {
@@ -2220,6 +2219,7 @@ const mainCap = new RunnerCap({
   store,
   report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
 });
+runnerTokens.hostsOf = (m) => (['windows', 'linux'] as const).flatMap((os) => machines.runnerHost(m.id, os) ?? []);
 runnerTokens.owed = (id, label) => runnerCap.owes(id, label) || mainCap.owes(id, label);
 if (!BOOT_CHECK && !PREVIEW) {
   runnerCap.start();

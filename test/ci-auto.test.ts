@@ -2,8 +2,9 @@
 // asking; an unticked scheme's runners come off; only when no PC lends CI while jobs wait do its members get a card.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { askedIn, CiAuto, type CiAutoDeps, osOfLabel, RETRY_MS, type Os } from '../src/ci-auto.ts';
-import type { Listed, RunnerAsk } from '../src/ci-runner.ts';
+import { askedIn, BUSY_MS, CiAuto, type CiAutoDeps, osOfLabel, RETRY_MS, type Os } from '../src/ci-auto.ts';
+import type { RunnerAsk } from '../src/ci-runner.ts';
+import { HttpError } from '../src/http.ts';
 import { Store } from '../src/db.ts';
 
 function world() {
@@ -24,7 +25,6 @@ function world() {
   ]);
   const samples = new Map<string, Set<string>>();
   const queued = new Map<string, Set<string>>();
-  const github = new Map<number, Listed[]>();
   const room = new Map<number, number>();
   let workflows: Record<number, string[]> = {};
   let now = 1_000_000;
@@ -35,7 +35,6 @@ function world() {
     runnerMachines: (os) => store.listMachines().filter((m) => online.get(os)!.has(m.id)),
     reposOn: (id, os) => samples.get(`${id}:${os}`) ?? new Set(),
     queuedLabels: () => queued,
-    listed: async (p) => github.get(p.id) ?? [],
     start: async (p, ask: RunnerAsk) => void started.push(`${ask.op} ${p.name} ${ask.os} ${ask.host}`),
     room: (id) => room.get(id) ?? null,
     card: (p, os, could) => void cards.push(`${p.name} ${os}: ${could.map((m) => m.name).join(', ')}`),
@@ -53,7 +52,6 @@ function world() {
     up,
     samples,
     queued,
-    github,
     room,
     started,
     cards,
@@ -78,7 +76,7 @@ test("a scheme's labels say which runner it asks for; another scheme's or a sess
   assert.deepEqual([...askedIn('Peek Auras', ['runs-on: [self-hosted, peek-auras-ci-linux]'])], ['linux']);
 });
 
-test("a workflow asking for the scheme's runner gets one on a PC lending it CI, picked by the owner's order, with no one asking", async () => {
+test("a workflow asking for the scheme's runner gets one on each PC lending it CI, in the owner's order, with no one asking", async () => {
   const w = world();
   const a = w.pc('josh-laptop', w.josh.id, [w.delve.id], undefined, 2);
   const b = w.pc('josh-desktop', w.josh.id, [w.delve.id], undefined, 1);
@@ -88,42 +86,48 @@ test("a workflow asking for the scheme's runner gets one on a PC lending it CI, 
   w.room.set(b.id, 2);
   w.setWorkflows({ [w.delve.id]: [LINUX_CI] });
   await w.auto.pass();
-  assert.deepEqual(w.started, ['add Delve linux josh-desktop'], "the owner's first machine, though the other has more room");
+  assert.deepEqual(w.started, ['add Delve linux josh-desktop'], "one job a pass, the owner's first machine first, though the other has more room");
   assert.ok(w.auto.asking.has('caraminden/delve'), 'ShipWatch reads its queued jobs from now on');
-  // Started once: the next pass within the retry time leaves it, though the runner isn't in a sample yet.
+  // The next pass: the other PC, and josh-desktop isn't asked again within the retry time though its runner isn't in a sample yet.
   await w.auto.pass();
-  assert.equal(w.started.length, 1);
-  // Once the PC's sample lists runners for the repo, it's served: nothing more, even after the retry time.
+  assert.deepEqual(w.started, ['add Delve linux josh-desktop', 'add Delve linux josh-laptop']);
+  // Once each PC's sample lists runners for the repo, it's served: nothing more, even after the retry time.
   w.samples.set(`${b.id}:linux`, new Set(['caraminden/delve']));
+  w.samples.set(`${a.id}:linux`, new Set(['caraminden/delve']));
   w.tick(RETRY_MS + 1);
   await w.auto.pass();
-  assert.equal(w.started.length, 1);
+  assert.equal(w.started.length, 2);
   assert.deepEqual(w.cards, []);
 });
 
-test('a PC the scheme is unticked on is never picked; a workflow already served on GitHub needs nothing until its jobs queue', async () => {
+test('a PC the scheme is unticked on is never picked; with none lending, waiting jobs bring one card naming the PCs that could', async () => {
   const w = world();
   const other = w.store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', w.cara.id);
   const elsewhere = w.pc('cara-desktop', w.cara.id, [other.id]);
   w.up(elsewhere);
   w.setWorkflows({ [w.delve.id]: [LINUX_CI] });
-  w.github.set(w.delve.id, [{ id: 1, name: 'josh-pc-1', status: 'offline', busy: false, labels: ['self-hosted', 'delve-ci-linux'] }]);
   await w.auto.pass();
-  assert.deepEqual(w.started, [], 'a runner on a PC that is off still counts while nothing waits');
-  assert.deepEqual(w.cards, []);
+  assert.deepEqual(w.started, []);
+  assert.deepEqual(w.cards, [], 'no card while nothing waits');
   // Now a job waits for it, and no connected PC serves Delve: one card naming the PC that could be lent.
   w.queued.set('caraminden/delve', new Set(['delve-ci-linux']));
   await w.auto.pass();
   await w.auto.pass();
   assert.deepEqual(w.started, []);
   assert.deepEqual(w.cards, ['Delve linux: cara-desktop'], 'one card, not one a pass');
+  // A PC that lends Delve CI but is asleep: the jobs wait for it, and nobody is asked again.
+  w.tick(8 * 24 * 3600_000);
+  const asleep = w.pc('josh-laptop', w.josh.id, [w.delve.id]);
+  await w.auto.pass();
+  assert.deepEqual(w.cards, ['Delve linux: cara-desktop']);
+  w.store.writeMachineRoles(asleep.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [] } : r)));
   // Ticking Delve there: the next pass registers it there.
   w.store.writeMachineRoles(elsewhere.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [other.id, w.delve.id] } : r)));
   await w.auto.pass();
   assert.deepEqual(w.started, ['add Delve linux cara-desktop']);
 });
 
-test('a queued job with a label no runner has gets one even with no workflow file read; a failed add waits longer', async () => {
+test('a queued job with a label no runner has gets one even with no workflow file read; a failed add waits longer, a busy agent only a few minutes', async () => {
   const w = world();
   const m = w.pc('josh-desktop', w.josh.id, [w.delve.id]);
   w.up(m, 'windows');
@@ -141,6 +145,25 @@ test('a queued job with a label no runner has gets one even with no workflow fil
   assert.deepEqual(w.started, ['tried'], 'a failure backs off past the ordinary retry');
   await w.auto.pass();
   assert.deepEqual(w.started, ['tried', 'add Delve windows josh-desktop']);
+  // Another scheme's job holds the agent (409): tried again within minutes, not hours.
+  const peek = w.store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', w.cara.id);
+  w.store.addMember(peek.id, w.josh.id);
+  w.store.writeMachineRoles(m.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [w.delve.id, peek.id] } : r)));
+  w.queued.set('caraminden/peek-auras', new Set(['peek-auras-ci']));
+  let busy = true;
+  const shared = new CiAuto({
+    ...(w.auto as unknown as { d: CiAutoDeps }).d,
+    start: async (p, ask) => {
+      if (busy) throw new HttpError(409, "The runner agent on josh-desktop is busy with another scheme's job");
+      w.started.push(`${ask.op} ${p.name} ${ask.os} ${ask.host}`);
+    },
+  });
+  w.samples.set(`${m.id}:windows`, new Set(['caraminden/delve']));
+  await shared.pass();
+  busy = false;
+  w.tick(BUSY_MS + 1);
+  await shared.pass();
+  assert.deepEqual(w.started.at(-1), 'add Peek Auras windows josh-desktop');
 });
 
 test("unticking a scheme on a PC's own row takes its runners off there; a CI runner host from before keeps what people added", async () => {
@@ -166,6 +189,10 @@ test("a scheme someone joins or makes later is lent their PCs' CI; one they unti
   const own = w.store.createProject('Josh Own', null, w.josh.id);
   const ci = (id: number) => w.store.machineRoles(id).find((r) => r.role === 'ci')!;
   assert.deepEqual(ci(m.id).projects, [w.delve.id, later.id, own.id]);
+  // An admin sees every scheme, so their CI PC, lent to all they saw when it connected, gets a scheme someone else makes too.
+  const admins = w.pc('cara-desktop', w.cara.id, [w.delve.id, later.id, own.id]);
+  const another = w.store.createProject('Another', null, w.josh.id);
+  assert.deepEqual(ci(admins.id).projects, [w.delve.id, later.id, own.id, another.id]);
   assert.deepEqual(ci(off.id).projects, [], 'a PC with CI off is left alone');
   w.store.writeMachineRoles(m.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [w.delve.id] } : r)));
   w.store.addMember(later.id, w.josh.id);

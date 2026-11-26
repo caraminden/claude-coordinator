@@ -196,7 +196,7 @@ export const machineQueries = {
   },
 
   /**
-   * A person joined or made a scheme: each PC of theirs with CI on serves it too, as a role switched on goes to every scheme
+   * A person joined or made a scheme, or one was made that they see (an admin): each PC of theirs with CI on serves it too, as a role switched on goes to every scheme
    * they are in (Josh, "Every scheme you're in"; #2064: so a scheme made later gets runners with no one asking). A scheme
    * they untick later stays unticked: this runs only as they join.
    */

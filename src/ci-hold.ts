@@ -756,12 +756,13 @@ export class CiHold {
     this.letIn.delete(run.id);
     this.save();
     await this.publish(now); // before the cancel: citadel-heavy must never see the cancelled run without its hold
+    const mine = repo === this.d.own()?.toLowerCase();
     if (!had && h.ticket !== null && !sideRun(kind))
       this.d.tell(
         h.ticket,
         taken || kind === 'proof'
           ? `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why}. Citadel starts it again by itself${kind === 'proof' ? ', its clean runs counted from zero,' : ' from the start'} once that has ended. Nothing to do; don't start it again, and the cancelled run isn't a failure.`
-          : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself from the start once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again). Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
+          : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself from the start once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again)${kind === 'heavy' || kind === 'suite' ? `, or once it has been held ${(mine ? OWN_CAP_MS : OTHERS_CAP_MS) / 3600_000} hours, ships or not` : ''}. Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
       );
     await (this.d.post ?? ghPost)(`repos/${repo}/actions/runs/${run.id}/cancel`, this.d.as(repo) ?? {}).catch((err) => this.say(`CI hold: cancel of run ${run.id}: ${err?.message ?? err}`));
   }
@@ -829,7 +830,8 @@ export class CiHold {
       });
     }
     for (const j of this.d.waiting?.() ?? []) {
-      if (j.reported || now - j.since < REPORT_MS || this.d.closed(j.ticket)) continue;
+      // Citadel's own is free to start at OWN_CAP_MS, which equals REPORT_MS: give the long-job pump (a minute) its turn first.
+      if (j.reported || now - j.since < REPORT_MS + (j.repo.toLowerCase() === this.d.own()?.toLowerCase() ? 2 * 60_000 : 0) || this.d.closed(j.ticket)) continue;
       add(j.repo, { since: j.since, ticket: j.ticket, name: `${NAMES.heavy} (${j.what})`, why: j.why, mark: () => this.d.told?.(j.id) });
     }
     if (!due.size) return;

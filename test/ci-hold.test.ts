@@ -125,7 +125,7 @@ test('a ship joining the line stops a running heavy job within a minute, and tel
   await w.for(5 * MIN);
   assert.equal(w.told.length, 1);
   assert.equal(w.told[0].ticket, 7);
-  assert.match(w.told[0].text, /a ship is in line.*starts it again by itself from the start.*don't start it again/s);
+  assert.match(w.told[0].text, /a ship is in line.*starts it again by itself from the start.*held 2 hours, ships or not.*don't start it again/s);
 });
 
 test('a stopped job comes back by itself once the line has been empty for the settle time, and is left alone after', async () => {
@@ -694,6 +694,15 @@ test('jobs past their two hours still go one at a time, and a check or a proof g
   w.land();
   await w.for(OWN_CAP_MS + 10 * MIN);
   assert.deepEqual([a.status, b.status, check.conclusion], ['queued', 'completed', 'cancelled']);
+});
+
+test("Citadel's own job with no run yet is not told as stuck the moment its two hours are up", async () => {
+  const w = world();
+  w.waiting.push({ id: 'h1', repo: OWN, ticket: 7, what: 'burn-in', since: w.now, why: 'a ship is in line', reported: false });
+  await w.tick(REPORT_MS);
+  assert.deepEqual(w.reports, []);
+  await w.tick(2 * MIN);
+  assert.equal(w.reports.length, 1);
 });
 
 test("a job past its two hours still waits for main's full run that waits its turn", async () => {

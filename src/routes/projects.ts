@@ -253,12 +253,8 @@ function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string |
   return hits.map((h) => ({ ...h, owner: String(app.store.props.forTarget('minion', h.ticket_id).assigned ?? '') || null, twin: h.score >= TWIN_SCORE }));
 }
 
-/**
- * A new minion, as create_ticket and the New minion form make it: a person (`caller` null) or a Taskmaster (`caller`
- * its ticket). `picked` (#2050) is a person's pick on a minion's card whose option carries a start: `caller` is that
- * minion and `session` the person who picked, so the agent's checks run (duplicate handoff, start card, brief
- * warnings) while the minion is the picker's own and runs on their login.
- */
+// A new minion, from a person (`caller` null) or a Taskmaster (`caller` its ticket). `picked` (#2050): a person's pick on
+// minion `caller`'s card: the agent's checks run, but the minion is the picker's (`session`) and runs on their login.
 export async function createMinion(app: App, project: Project, body: Awaited<ReturnType<typeof readJson>>, session: Session, caller: Ticket | null, picked = false): Promise<TicketView & { notes: string[] }> {
   if (app.preview) throw new HttpError(403, "A preview can't start minions");
   const { store, runner, waiters } = app;

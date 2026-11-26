@@ -204,7 +204,8 @@ export function renderSchemesShelf() {
   rememberHomeLine(!!home);
   el.replaceChildren(
     h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesChipEl),
-    /** @type {Node} */ (home), // null when there is nothing to show
+    // A finding kept as it was (#2026): with under two schemes home is null, which replaceChildren writes as the text "null".
+    /** @type {Node} */ (home),
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),

@@ -4,8 +4,8 @@
 /** Under the Claude bar, Codex's own bar shows past this (Josh, 2026-11-05: "if it goes above 75%"). */
 export const CODEX_BAR_PCT = 75;
 
-/** @typedef {{ usedPercent: number; windowDurationMins: number | null; resetsAt: number | null }} CodexWindow src/codex.ts CodexUsage */
-/** @typedef {{ primary: CodexWindow | null; secondary: CodexWindow | null; updatedAt?: number } | null | undefined} CodexUsageIn */
+/** @import { CodexUsage, CodexWindow } from './types.js' */
+/** @typedef {(Pick<CodexUsage, 'primary' | 'secondary'> & Partial<Pick<CodexUsage, 'updatedAt'>>) | null | undefined} CodexUsageIn */
 
 /** A window's name: "5-hour window", "Weekly"… */
 /** @param {number | null | undefined} mins */

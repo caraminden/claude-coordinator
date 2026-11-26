@@ -1,13 +1,14 @@
 // Claude usage windows across accounts, pure so tests can load it. One rule for the bar and the tooltip's lines:
 // a window past its reset counts as 0% used (the server's windowNow in src/account-pick.ts does the same).
 
-/** @typedef {{ utilization: number; resetsAt: number | null }} UsageWindow src/account-pick.ts MeterWindow */
-/** @typedef {{ n?: number; label: string; same?: string | null; usage?: { weekly?: UsageWindow | null; session?: UsageWindow | null } | null }} UsageAccount a row of the account list */
+/** @import { UsageWindow } from './types.js' */
+/** The parts of a window the page reads (src/account-pick.ts MeterWindow). @typedef {Pick<UsageWindow, 'utilization' | 'resetsAt'>} MeterWindow */
+/** @typedef {{ n?: number; label: string; same?: string | null; usage?: { weekly?: MeterWindow | null; session?: MeterWindow | null } | null }} UsageAccount a row of the account list */
 
-/** @param {UsageWindow | null | undefined} w @param {number} now */
+/** @param {MeterWindow | null | undefined} w @param {number} now */
 const live = (w, now) => w && (!w.resetsAt || w.resetsAt > now);
-/** @param {UsageWindow | null | undefined} w @param {number} now */
-const util = (w, now) => (live(w, now) ? Math.min(1, Math.max(0, /** @type {UsageWindow} */ (w).utilization)) : 0);
+/** @param {MeterWindow | null | undefined} w @param {number} now */
+const util = (w, now) => (live(w, now) ? Math.min(1, Math.max(0, /** @type {MeterWindow} */ (w).utilization)) : 0);
 
 /**
  * One window combined across a person's accounts (Cara, 2026-11-16: "just combine all accounts into a single bar"):
@@ -25,7 +26,7 @@ export function combineWindows(accounts, key, now = Date.now()) {
 /** One account's tooltip line, on the same rule as the bar; ▸ marks where new minions start. */
 /** @param {UsageAccount} a @param {boolean} current @param {number} [now] */
 export function accountLine(a, current, now = Date.now()) {
-  /** @param {UsageWindow | null | undefined} w */
+  /** @param {MeterWindow | null | undefined} w */
   const pct = (w) => Math.round(util(w, now) * 100);
   const wk = a.usage?.weekly;
   const week = wk ? `week ${pct(wk)}%${live(wk, now) ? '' : ' (week reset, no turns since)'}` : 'no turns yet';

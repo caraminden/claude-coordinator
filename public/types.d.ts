@@ -1343,6 +1343,19 @@ export interface TimeLog {
   segs: TimeSeg[];
   rows: TimeRow[];
   totals: { work: number; wait: number; lost: number; guess: number };
+  /** Haiku's reading of it (src/time-log-explain.ts ExplainView). */
+  explain?: TimeExplain;
+}
+export interface TimeExplainLine {
+  kind: 'work' | 'wait' | 'lost';
+  text: string;
+  ev: number[];
+}
+export interface TimeExplain {
+  parts: Record<string, TimeExplainLine[]>;
+  presses: { by: string; at: number; cost: number | null; parts: number }[];
+  fresh: string[];
+  writing: { by: string; at: number } | null;
 }
 
 // Ultra review (public/ultrareview.js; src/ultrareview.ts, src/routes/tickets.ts).

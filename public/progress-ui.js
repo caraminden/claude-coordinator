@@ -2,7 +2,7 @@
 import { api, dismissedWhen, h, isCoordinator, openView, statusLabel, view } from './base.js';
 
 /** @import { ChatAction, ProgressTask, Ticket } from './types.js' */
-/** A chat readout's own state, kept per chat. @typedef {{ open: boolean, openSteps: Set<string>, cmdsOpen: Set<string>, actsOpen: Set<string>, looseOpen?: boolean }} ProgressUi */
+/** A chat readout's own state, kept per chat. @typedef {{ open: boolean, openSteps: Set<string>, cmdsOpen: Set<string>, actsOpen: Set<string>, looseOpen?: boolean, tlSel?: string | null, tlSeg?: number | null, tlAll?: boolean, tlPlain?: boolean }} ProgressUi */
 import { threadRefs, usage } from './core.js';
 import { jobOf, rowState, workingBy } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';

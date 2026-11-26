@@ -203,7 +203,7 @@ export function composer(chatId, ticket) {
   /** @param {string} text */
   const askSide = (text) => {
     const t = view?.ticket?.id === chatId ? openView().ticket : ticket;
-    const cold = !sideOk && sideColdCost(t);
+    const cold = !sideOk && sideColdCost(/** @type {Ticket} */ (t));
     sideOk = false;
     if (cold) {
       sideStrip.replaceChildren(

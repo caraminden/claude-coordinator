@@ -1,7 +1,7 @@
 // Whose Claude plan a minion's turns run on (#219, take A): a line over the composer only when your
 // message would switch it, or the payer's limit is hit. The head's chip went (Josh, 2026-11-13).
 /** @import { Ticket } from './types.js' */
-/** @typedef {(text?: string) => unknown} SendText */
+/** @typedef {(text: string) => unknown} SendText */
 import { account, api, h, me } from './base.js';
 import { usage } from './core.js';
 import { optimistic } from './ui/optimistic.js';

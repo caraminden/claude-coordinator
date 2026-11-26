@@ -137,7 +137,7 @@ export function renderTicketHead() {
     bar.hidden = !chips;
     bar.replaceChildren(chips);
     const slot = /** @type {HTMLElement} */ (/** @type {Element} */ (chat).querySelector('#chat-payer'));
-    const line = payerLine(t, form.sendText);
+    const line = payerLine(t, /** @type {(text: string) => Promise<unknown>} */ (form.sendText));
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
     renderWaiting();

@@ -93,7 +93,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
     const named = (el) => [...mount.querySelectorAll(el.tagName)].filter((x) => nameOf(x) === nameOf(el));
     const paint = () => {
       const at = mount.contains(document.activeElement) && document.activeElement;
-      const nth = at && named(at).indexOf(at);
+      const nth = at ? named(at).indexOf(at) : -1;
       sum.textContent = draw(mount);
       if (at && document.activeElement !== at) (at.isConnected ? at : named(at)[nth])?.focus({ preventScroll: true });
     };

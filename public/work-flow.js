@@ -396,7 +396,7 @@ function build(id, name, data, retry, redraw) {
         wrap: (xs) => h('ol', { class: 'flow-rows' }, ...xs),
       }),
     );
-    if (at) [...listBox.querySelectorAll(`.flow-why[data-id="${at}"] button`)].find((b) => b.textContent === word)?.focus({ preventScroll: true });
+    if (at) [.../** @type {NodeListOf<HTMLButtonElement>} */ (listBox.querySelectorAll(`.flow-why[data-id="${at}"] button`))].find((b) => b.textContent === word)?.focus({ preventScroll: true });
   };
   const pick = (p) => {
     st.pick = p;
@@ -424,7 +424,7 @@ function build(id, name, data, retry, redraw) {
         ),
       ),
     );
-    if (at) legend.querySelector(`[data-hue="${at}"]`)?.focus({ preventScroll: true });
+    if (at) /** @type {HTMLElement | null} */ (legend.querySelector(`[data-hue="${at}"]`))?.focus({ preventScroll: true });
   };
   const sum = h('p', { class: 'flow-words' }, ...summary(ms, shown.early));
   const stage = h('div', { class: 'flow-stage' });

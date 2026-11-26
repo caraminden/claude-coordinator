@@ -5,6 +5,9 @@ import { api, h } from './base.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { toneChip } from './look.js';
+/** An area's fieldset in the form, which reads its own ask. @typedef {HTMLFieldSetElement & { read: () => { name: string, paths: string[], question: string } }} AreaBox */
+/** A review's result as its card shows it. @typedef {{ pr?: { url: string, number: number }, ok: boolean, text: string, file?: string, code?: number | null }} UltraResult */
+/** A review's chat card, which its result settles. @typedef {HTMLDivElement & { settle: (r: UltraResult) => void }} UltraCard */
 
 const COST = "It uses one of your 3 free ultra reviews, or about $5-25 in usage credits once those are gone. Citadel can't see how many free runs you have left, and a run counts as soon as it starts, even if it fails.";
 
@@ -32,7 +35,7 @@ function openUltra(t) {
   const form = h('form', { class: 'ur-form' }, h('div', { class: 'ur-modes' }, branchOpt, areaOpt, batchOpt), pathsBox, size, batch.el, cost, err, h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
   const dialog = openDialog({ title: 'Ultra review', className: 'new-scheme ultra-review', body: form });
 
-  const mode = () => form.elements.mode.value;
+  const mode = () => /** @type {RadioNodeList} */ (form.elements.namedItem('mode')).value;
   const pathList = () => paths.value.split(/[\s,]+/).filter(Boolean);
   let checked = null;
   let timer = null;
@@ -83,7 +86,7 @@ function openUltra(t) {
     checked = null;
     timer = setTimeout(check, 400);
   };
-  form.addEventListener('change', (e) => e.target.name === 'mode' && check());
+  form.addEventListener('change', (e) => /** @type {HTMLInputElement} */ (e.target).name === 'mode' && check());
   paths.addEventListener('input', later);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -105,8 +108,8 @@ function openUltra(t) {
   // Someone with prepped reviews here opens on them.
   batch.load().then((rows) => {
     // Only over a form nobody has touched: a late read never switches someone mid-typing to the batch (WP8, #1858).
-    if (rows.length && form.elements.mode.value !== 'batch' && !paths.value.trim()) {
-      form.elements.mode.value = 'batch';
+    if (rows.length && /** @type {RadioNodeList} */ (form.elements.namedItem('mode')).value !== 'batch' && !paths.value.trim()) {
+      /** @type {RadioNodeList} */ (form.elements.namedItem('mode')).value = 'batch';
       check();
     }
   });
@@ -148,30 +151,32 @@ function batchPanel(t, dialogOf) {
     const ps = h('textarea', { name: 'area-paths', rows: 2, placeholder: 'src/db.ts src/db', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Paths in the area' });
     ps.value = a.paths || '';
     const q = h('input', { name: 'area-question', placeholder: 'Question for the review (optional)', autocomplete: 'off', value: a.question || '', 'aria-label': 'Question for the review' });
-    const box = h(
-      'fieldset',
-      { class: 'ur-area' },
+    const box = /** @type {AreaBox} */ (
       h(
-        'div',
-        { class: 'row' },
-        name,
+        'fieldset',
+        { class: 'ur-area' },
         h(
-          'button',
-          {
-            type: 'button',
-            class: 'secondary ur-remove',
-            title: 'Remove this area',
-            'aria-label': 'Remove this area',
-            onclick: () => {
-              box.remove();
-              if (!areas.children.length) addArea(true);
+          'div',
+          { class: 'row' },
+          name,
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'secondary ur-remove',
+              title: 'Remove this area',
+              'aria-label': 'Remove this area',
+              onclick: () => {
+                box.remove();
+                if (!areas.children.length) addArea(true);
+              },
             },
-          },
-          '×',
+            '×',
+          ),
         ),
-      ),
-      ps,
-      q,
+        ps,
+        q,
+      )
     );
     box.read = () => ({ name: name.value.trim(), paths: ps.value.split(/[\s,]+/).filter(Boolean), question: q.value.trim() });
     areas.append(box);
@@ -247,7 +252,7 @@ function batchPanel(t, dialogOf) {
   }
 
   async function send() {
-    const boxes = [...areas.children];
+    const boxes = /** @type {AreaBox[]} */ ([...areas.children]);
     const asks = boxes.map((b) => b.read());
     const filled = asks.map((a, i) => [a, boxes[i]]).filter(([a]) => a.paths.length);
     refused.hidden = true;
@@ -308,17 +313,19 @@ const what = (d) =>
 /** The chat's card for a review: busy until its result settles it with the findings, or why it failed. */
 export function ultraCard(data) {
   const status = h('div', { class: 'ur-status muted', role: 'status' }, 'Running on ', data.by, "'s Claude account: 5-15 minutes, up to 45", h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')));
-  const card = h(
-    'div',
-    { class: 'qcard ur-card busy', 'data-ultra': data.id },
-    h('div', { class: 'who' }, 'Ultra review'),
-    h('div', { class: 'qtitle' }, data.by, ' started an ultra review of ', what(data), ` (${fmt(data.size.files)} files, ${fmt(data.size.lines)} lines)`),
-    data.pr ? prLine(data.pr) : '',
-    data.question ? h('div', { class: 'ur-question' }, h('span', { class: 'muted' }, 'Question: '), data.question) : '',
-    status,
+  const card = /** @type {UltraCard} */ (
+    h(
+      'div',
+      { class: 'qcard ur-card busy', 'data-ultra': data.id },
+      h('div', { class: 'who' }, 'Ultra review'),
+      h('div', { class: 'qtitle' }, data.by, ' started an ultra review of ', what(data), ` (${fmt(data.size.files)} files, ${fmt(data.size.lines)} lines)`),
+      data.pr ? prLine(data.pr) : '',
+      data.question ? h('div', { class: 'ur-question' }, h('span', { class: 'muted' }, 'Question: '), data.question) : '',
+      status,
+    )
   );
   card.settle = (r) => {
-    if (r.pr && !card.querySelector('.ur-pr')) card.querySelector('.qtitle').after(prLine(r.pr));
+    if (r.pr && !card.querySelector('.ur-pr')) /** @type {Element} */ (card.querySelector('.qtitle')).after(prLine(r.pr));
     card.classList.remove('busy');
     card.classList.toggle('failed', !r.ok);
     const body = h('pre', { class: 'ur-findings' }, r.text);
@@ -336,7 +343,7 @@ const prLine = (pr) => h('div', { class: 'ur-pr muted' }, 'Via draft pull reques
 /** A result whose card isn't in the log (it was paged out): shown on its own. */
 export function ultraResult(r) {
   const card = ultraCard({ id: r.id, by: 'Someone', mode: 'area', paths: [], size: { files: 0, lines: 0 } });
-  card.querySelector('.qtitle').textContent = 'Ultra review finished';
+  /** @type {Element} */ (card.querySelector('.qtitle')).textContent = 'Ultra review finished';
   card.settle(r);
   return card;
 }

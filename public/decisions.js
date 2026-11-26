@@ -69,7 +69,7 @@ export function decisionsPage() {
       const target = rows.find((r) => r.d.id === id);
       if (!target) return;
       if (!shows(target.d)) {
-        pick.querySelector('[data-scope="all"]').click();
+        /** @type {HTMLButtonElement} */ (pick.querySelector('[data-scope="all"]')).click();
       }
       search.value = '';
       filter();

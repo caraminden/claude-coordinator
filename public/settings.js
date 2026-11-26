@@ -1042,7 +1042,7 @@ export function myInstructionsEditor() {
       // Open on this scheme's text when only it is set.
       showScope(!r.everywhere.text && r.scheme.text ? 'scheme' : 'everywhere');
     } catch (err) {
-      status.textContent = `Could not load them: ${err.message}`;
+      status.textContent = `Could not load them: ${/** @type {Error} */ (err).message}`;
     }
   })();
   showScope('everywhere');

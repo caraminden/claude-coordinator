@@ -2,6 +2,7 @@
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
 import { account, ago, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+/** @import { MemoryHit, Ticket, View } from './types.js' */
 import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -41,7 +42,7 @@ export async function openStartScheme() {
   const shown = projects.filter((p) => (!p.hidden && p.member !== false) || p.id === last);
   const id = startScheme(shown.length ? shown : projects, last);
   if (id != null) return replaceHash(`#/p/${id}`); // replace: Back shouldn't bounce through here
-  setView({ kind: 'projects' });
+  setView(/** @type {View} */ ({ kind: 'projects' })); // no scheme open: only the kind is read
   crumbs.replaceChildren('New scheme');
   // In no scheme yet (#1151): the welcome says how to get into one, over the form to make one.
   const welcome = welcomePanel(null, []);
@@ -86,20 +87,22 @@ function newSchemeForm() {
       s.linked && !admin ? h('span', { class: 'source-note muted', hidden: true }) : '',
     ),
   );
-  const form = h(
-    'form',
-    {},
-    h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
-    h('fieldset', { class: 'sources' }, h('legend', {}, 'Code'), ...sources),
-    h('label', {}, "What's it about? (the Taskmaster starts from this)", h('textarea', { name: 'about', rows: 3, maxlength: 4000, 'data-draft': true, placeholder: 'What it is, who it is for, the first milestone' })),
-    h('p', { class: 'error', hidden: true }),
-    h('div', { class: 'row create-buttons' }, h('button', { type: 'submit', value: 'setup' }, 'Create and set up'), h('button', { type: 'submit', value: 'only', class: 'secondary' }, 'Create only')),
+  const form = /** @type {NewSchemeForm} */ (
+    h(
+      'form',
+      {},
+      h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
+      h('fieldset', { class: 'sources' }, h('legend', {}, 'Code'), ...sources),
+      h('label', {}, "What's it about? (the Taskmaster starts from this)", h('textarea', { name: 'about', rows: 3, maxlength: 4000, 'data-draft': true, placeholder: 'What it is, who it is for, the first milestone' })),
+      h('p', { class: 'error', hidden: true }),
+      h('div', { class: 'row create-buttons' }, h('button', { type: 'submit', value: 'setup' }, 'Create and set up'), h('button', { type: 'submit', value: 'only', class: 'secondary' }, 'Create only')),
+    )
   );
   // Only the picked source's field shows.
   const showField = () => {
     for (const l of form.querySelectorAll('label.source')) {
-      const field = l.querySelector('input:not([type=radio])');
-      if (field) field.hidden = !l.querySelector('input[type=radio]').checked;
+      const field = /** @type {HTMLInputElement | null} */ (l.querySelector('input:not([type=radio])'));
+      if (field) field.hidden = !(/** @type {HTMLInputElement} */ (l.querySelector('input[type=radio]')).checked);
     }
   };
   let touched = false;
@@ -117,11 +120,11 @@ function newSchemeForm() {
     });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = e.submitter ?? form.querySelector('button[type=submit]');
+    const btn = /** @type {HTMLButtonElement} */ (e.submitter ?? form.querySelector('button[type=submit]'));
     const label = btn.textContent;
-    const err = form.querySelector('.error');
+    const err = /** @type {HTMLElement} */ (form.querySelector('.error'));
     const source = form.source.value;
-    for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = true;
+    for (const b of /** @type {NodeListOf<HTMLButtonElement>} */ (form.querySelectorAll('button[type=submit]'))) b.disabled = true;
     btn.textContent = source === 'url' || source === 'folder' ? 'Cloning…' : 'Creating…';
     try {
       // Only the picked source's own field: a non-admin's form has no folder field at all.
@@ -129,9 +132,9 @@ function newSchemeForm() {
       const p = await api('api/projects', {
         method: 'POST',
         body: {
-          name: form.name.value,
+          name: /** @type {HTMLInputElement} */ (form.elements.namedItem('name')).value, // form.name is the same field, but typed as the form's own name
           source,
-          ...(field && { [field]: form.elements[field].value }),
+          ...(field && { [field]: /** @type {HTMLInputElement} */ (form.elements.namedItem(field)).value }),
           about: form.about.value,
           setup: btn.value === 'setup',
         },
@@ -139,9 +142,9 @@ function newSchemeForm() {
       form.closest('dialog')?.close();
       location.hash = `#/p/${p.id}`;
     } catch (ex) {
-      err.textContent = ex.message;
+      err.textContent = /** @type {Error} */ (ex).message;
       err.hidden = false;
-      for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = false;
+      for (const b of /** @type {NodeListOf<HTMLButtonElement>} */ (form.querySelectorAll('button[type=submit]'))) b.disabled = false;
       btn.textContent = label;
     }
   });
@@ -216,6 +219,7 @@ export function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el || heldWhilePressed(renderSidebar)) return;
   // Each minion's change on its way in a release (#764): its row says which, and a dismissed one stays under Deploying till it's live.
+  /** @type {(Ticket & { release?: ReturnType<typeof pendingRelease> })[]} */
   const all = [...view.tickets.values()].map((t) => {
     const release = pendingRelease(t);
     return release ? { ...t, release } : t;
@@ -443,6 +447,9 @@ export function revealActiveRow() {
 
 // The threads search, kept across thread switches within a project. `meaning`: the last search of
 // the chats by meaning (#488), which only Enter or its button runs: each costs the box a CPU-second.
+/** The new-scheme form with its fields by name. @typedef {HTMLFormElement & { about: HTMLTextAreaElement, source: RadioNodeList }} NewSchemeForm */
+/** @typedef {{ q: string, busy: boolean, error?: string }} SearchRun */
+/** @type {{ projectId: number | null, q: string, meaning: (SearchRun & { hits?: MemoryHit[] }) | null, closed: (SearchRun & { tickets: Ticket[], more: boolean }) | null }} */
 const threadSearch = { projectId: null, q: '', meaning: null, closed: null };
 
 export function threadSearchBox(projectId) {
@@ -475,6 +482,7 @@ function searchClosedSoon() {
   if (!q || !closedState().more) return void (threadSearch.closed = null);
   closedSearchTimer = setTimeout(async () => {
     const list = view.tickets;
+    /** @type {NonNullable<typeof threadSearch.closed>} */
     let run = { q, busy: true, tickets: [], more: false };
     threadSearch.closed = run;
     renderSidebar();
@@ -492,7 +500,9 @@ function searchClosedSoon() {
 async function searchByMeaning() {
   const { projectId, q, meaning } = threadSearch;
   if (meaning?.busy && meaning.q === q) return; // a held Enter repeats: one search at a time
-  const run = (threadSearch.meaning = { q, busy: true });
+  /** @type {NonNullable<typeof threadSearch.meaning>} */
+  const run = { q, busy: true };
+  threadSearch.meaning = run;
   renderSidebar();
   try {
     run.hits = (await api(`api/projects/${projectId}/memory?q=${encodeURIComponent(q)}&limit=10`)).hits;

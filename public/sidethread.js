@@ -118,7 +118,7 @@ function sideRow(id, first, ticket, live) {
   };
   toMinion.onclick = () => {
     const send = document.querySelector('.chat .composer')?.sendText;
-    const lines = [...list.children].map((x) => `> ${x.querySelector('.side-q').textContent.replace(/\n/g, '\n> ')}\n\n${x.querySelector('.side-a').innerText.trim()}`);
+    const lines = [...list.children].map((x) => `> ${/** @type {Element} */ (x.querySelector('.side-q')).textContent.replace(/\n/g, '\n> ')}\n\n${/** @type {HTMLElement} */ (x.querySelector('.side-a')).innerText.trim()}`);
     send?.(`From a side question:\n\n${lines.join('\n\n')}`);
   };
 

@@ -350,6 +350,21 @@ export interface Release {
 }
 
 /** The signed-in person (GET api/me, src/routes/app.ts meView). */
+/** One chunk search by meaning found: GET api/projects/:id/memory's hits (src/memory.ts MemoryHit). */
+export interface MemoryHit {
+  ticket_id: number;
+  /** null for the Taskmaster's chat (kind 'coordinator'). */
+  number: number | null;
+  title: string;
+  kind: string;
+  status: string;
+  source_kind: 'turn' | 'ticket';
+  source_id: number;
+  ts: number;
+  text: string;
+  score: number;
+}
+
 export interface Account {
   id: number | null;
   name: string;
@@ -421,6 +436,14 @@ export interface PendingMessage {
   retry?: () => unknown;
 }
 
+/** The chat's newest plan card (cards.js planCard): a later one is shown as a revision of it. */
+export interface PlanMemo {
+  plan: string;
+  summary: string;
+  /** Its card, once drawn: `status` is 'approved' once someone approved it. */
+  handle: { status: string } | null;
+}
+
 /** A chat's drawing state that a merged Taskmaster view swaps per session (thread.js SESSION_STATE). */
 interface SessionState {
   part?: NonNullable<ReturnType<typeof mergedView>>['parts'][number];
@@ -430,7 +453,7 @@ interface SessionState {
   folds: Fold[];
   heldCards: Node[];
   pendingMessages: PendingMessage[];
-  lastPlan: unknown;
+  lastPlan: PlanMemo | null;
   gruntStarts: Map<string, number>;
   sawInit: boolean;
   latestReply: number | null;

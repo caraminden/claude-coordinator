@@ -1,5 +1,6 @@
 // The cards in a chat that wait on a person: approval (and merge), plan, loop and question cards.
 // appendEvent in thread.js builds them, and each registers itself in view.cards so later events settle it.
+/** @import { PlanMemo } from './types.js' */
 import { asSpeaker } from './avatars.js';
 import { account, ago, api, fileHref, fileKind, fileUrl, h, noAutofill, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
 import { catchUpEvents, markdown, threadRefs } from './core.js';
@@ -324,6 +325,7 @@ export function planCard(ticketId, card, opts = {}) {
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed && !ins }, ins ? 'Send back' : fixed ? 'Reject' : 'Send notes');
   // Diffed against the plan before it unless that one was approved: a later plan after a go is new work, not a revision.
   const prev = fixed || ins || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
+  /** @type {PlanMemo} */
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
   if (!fixed && !ins) view.lastPlan = mine;
   const head = whoLine(
@@ -484,13 +486,13 @@ export function loopCard(data) {
     optimistic({
       key: `continue:${data.minion}`,
       apply: () => {
-        go.closest('.qcard').classList.add('answered');
+        /** @type {Element} */ (go.closest('.qcard')).classList.add('answered');
         go.hidden = true;
         status.textContent = 'Continued';
       },
       send: () => api(`api/tickets/${data.minion}/continue`, { method: 'POST' }),
       undo: () => {
-        go.closest('.qcard').classList.remove('answered');
+        /** @type {Element} */ (go.closest('.qcard')).classList.remove('answered');
         go.hidden = false;
         status.textContent = '';
       },
@@ -642,7 +644,7 @@ export function questionCard(ticketId, card, opts = {}) {
   const ready = () => atts.items.some((i) => i.data || i.upload?.name) || picks.every((p) => p.selected.size || p.other.trim());
   const refresh = () => {
     for (const [i, q] of card.questions.entries()) {
-      for (const btn of el.querySelectorAll(`[data-q="${i}"] .opt`)) btn.classList.toggle('picked', picks[i].selected.has(btn.dataset.label));
+      for (const btn of /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll(`[data-q="${i}"] .opt`))) btn.classList.toggle('picked', picks[i].selected.has(btn.dataset.label));
     }
     sendBtn.disabled = answered || !ready();
     const done = picks.filter((p) => p.selected.size || p.other.trim()).length;
@@ -654,7 +656,7 @@ export function questionCard(ticketId, card, opts = {}) {
   const lock = (on) => {
     answered = on;
     el.classList.toggle('answered', on);
-    for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = on;
+    for (const input of /** @type {NodeListOf<HTMLButtonElement | HTMLInputElement>} */ (el.querySelectorAll('.opt:not(.pic), .other'))) input.disabled = on;
     sendBtn.hidden = on;
     attach.hidden = on || !!card.job;
     if (pictures) refreshViewerBar();
@@ -866,12 +868,12 @@ export function questionCard(ticketId, card, opts = {}) {
       }
       answers.forEach((a, i) => {
         picks[i].selected = new Set(a.selected);
-        const other = el.querySelector(`[data-q="${i}"] .other`);
+        const other = /** @type {HTMLInputElement} */ (el.querySelector(`[data-q="${i}"] .other`));
         other.value = a.other ?? '';
         other.hidden = !a.other;
         other.disabled = true;
       });
-      for (const btn of el.querySelectorAll('.opt:not(.pic)')) btn.disabled = true;
+      for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (el.querySelectorAll('.opt:not(.pic)'))) btn.disabled = true;
       sendBtn.hidden = true;
       dismiss.hidden = true;
       status.textContent = `Answered by ${author}`;
@@ -884,8 +886,8 @@ export function questionCard(ticketId, card, opts = {}) {
       cardPicks.delete(card.id);
       cardPictures.delete(card.id);
       el.classList.add('answered');
-      for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = true;
-      for (const other of el.querySelectorAll('.other')) other.hidden = true;
+      for (const input of /** @type {NodeListOf<HTMLButtonElement | HTMLInputElement>} */ (el.querySelectorAll('.opt:not(.pic), .other'))) input.disabled = true;
+      for (const other of /** @type {NodeListOf<HTMLInputElement>} */ (el.querySelectorAll('.other'))) other.hidden = true;
       sendBtn.hidden = true;
       dismiss.hidden = true;
       attach.hidden = true;
@@ -1075,6 +1077,7 @@ function docCard(ticketId, card, opts) {
 /** A question option's picture: a thumbnail (muted and looping for video) that opens the file's full view. */
 function optionThumb(ticketId, o, onclick) {
   const src = fileUrl(ticketId, o.image);
+  /** @type {HTMLImageElement | HTMLVideoElement} */
   let media = h('img', { src, alt: o.label, loading: 'lazy' });
   if (fileKind(o.image) === 'video') {
     media = h('video', { src, muted: true, autoplay: true, loop: true, playsinline: true, preload: 'metadata' });

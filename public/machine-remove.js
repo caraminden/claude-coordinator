@@ -6,6 +6,7 @@ import { optimistic } from './ui/optimistic.js';
 
 /** The removals this app has started, by machine id, until Done: kept over redraws and page switches. */
 const removals = new Map();
+const seen = new Set();
 
 /** Its row shows Removing… */
 export const removing = (id) => removals.has(id);
@@ -60,6 +61,7 @@ export function renderRemovals(el, redraw) {
       const done = h('button', { type: 'button', class: 'secondary small' }, 'Done');
       done.onclick = () => {
         removals.delete(id);
+        seen.delete(id);
         redraw();
       };
       const box = h(
@@ -71,6 +73,9 @@ export function renderRemovals(el, redraw) {
         there ? '' : h('div', { class: 'row' }, h('span', { class: 'spacer' }), done),
       );
       box.dataset.name = name;
+      // Remove was pressed down the list, so a command new on the page is brought into sight.
+      if (!seen.has(id)) requestAnimationFrame(() => box.scrollIntoView({ block: 'nearest' }));
+      seen.add(id);
       return box;
     }),
   );

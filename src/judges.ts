@@ -301,8 +301,8 @@ export const JUDGES: Judge[] = [
     name: 'Effort retros (#1751)',
     mode: 'act', // Cara, 2026-11-24: "Start for real now"
     replay: true,
-    acts: "starts a citadel:retro minion in a scheme when every minion of a named effort (3+) or an unnamed start_after chain (4+) has closed for 6 hours, unless a major build's retro covers it",
-    pins: [{ path: 'src/effort-retros.ts', symbols: ['NAMED_FLOOR', 'CHAIN_FLOOR', 'QUIET_MS', 'AUTO', 'effortsDue', 'EffortRetros.tick'] }],
+    acts: "starts a citadel:retro minion in a scheme when every minion of a named effort (3+) or an unnamed start_after chain (4+) has closed for 6 hours (and every minion their asks moved into), unless a major build's retro covers it",
+    pins: [{ path: 'src/effort-retros.ts', symbols: ['NAMED_FLOOR', 'CHAIN_FLOOR', 'QUIET_MS', 'AUTO', 'effortsDue', 'moveEffort', 'movedTo', 'EffortRetros.tick'] }],
     callers: ['src/effort-retros.ts'],
   },
   {

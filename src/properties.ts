@@ -448,6 +448,7 @@ export class Registry {
   statusChanged(ticketId: number, before: string, after: string) {
     if (before !== after && after !== 'closed') {
       this.db.prepare("DELETE FROM properties WHERE target_type = 'minion' AND target_id = ? AND key_id = (SELECT id FROM property_keys WHERE scope IS NULL AND key = 'closedAs')").run(ticketId);
+      this.db.prepare('DELETE FROM settings WHERE key = ?').run(`moved-into:${ticketId}`); // where its ask went goes with the word
     }
     const stage = this.globalKey('stage');
     if (!stage || before === after) return;

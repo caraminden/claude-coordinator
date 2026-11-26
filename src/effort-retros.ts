@@ -18,17 +18,13 @@ export const CHAIN_FLOOR = 4;
 export const QUIET_MS = 6 * 3_600_000;
 const AUTO = /^chain from #\d+$/;
 /** The ticket id a closed minion's ask moved into (close_ticket's and close_self's `into`). */
-const movedKey = (ticketId: number) => `moved-into:${ticketId}`;
+export const movedKey = (ticketId: number) => `moved-into:${ticketId}`;
 
 /**
- * Records where a closing minion's ask went (none: forgets an older close's), and hands its effort to that minion when it
- * has none (#2080; Josh, 2026-11-25, "Effort follows moved asks"). Answers the effort that minion joined.
+ * Records where a closing minion's ask went and hands its effort to that minion when it has none (#2080; Josh, 2026-11-25, "Effort follows moved asks"). Answers the effort that minion joined.
  */
 export function moveEffort(store: Store, from: Pick<Ticket, 'id'>, into: Pick<Ticket, 'id' | 'project_id'> | null, by: string): string | null {
-  if (!into) {
-    store.deleteSetting(movedKey(from.id));
-    return null;
-  }
+  if (!into) return null;
   store.setSetting(movedKey(from.id), into.id);
   const name = store.props.forTarget('minion', from.id)[EFFORT_KEY];
   if (typeof name !== 'string' || store.props.forTarget('minion', into.id)[EFFORT_KEY]) return null;

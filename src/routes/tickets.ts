@@ -302,7 +302,6 @@ async function choicesDoc(app: App, ticket: Ticket | TicketView, raw: unknown): 
   return { path: found.abs, title: pageTitle(html, found.abs) };
 }
 
-/** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
 /** The minion a close's `into` names, where the closing one's ask moved; refused before anything closes. */
 function movedInto(app: App, ticket: Ticket | TicketView, body: Record<string, unknown>): Ticket | null {
   if (body.into == null) return null;
@@ -312,6 +311,7 @@ function movedInto(app: App, ticket: Ticket | TicketView, body: Record<string, u
   return into;
 }
 
+/** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
 function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
   const stopped = app.runner.stop(ticket.id);
   // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).

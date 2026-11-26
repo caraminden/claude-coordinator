@@ -131,6 +131,7 @@ test('an effort follows an ask that moves into another minion, and its retro wai
     assert.equal(r.status, 200, JSON.stringify(r.data));
     return r.data;
   };
+  const setting = (key: string) => new Store(join(srv.data, 'coordinator.db')).getSetting(key);
   /** The effort names whose retro a tick starts, once they have been quiet long enough. */
   const retros = async () => {
     const store = new Store(join(srv.data, 'coordinator.db'));
@@ -164,7 +165,11 @@ test('an effort follows an ask that moves into another minion, and its retro wai
   assert.equal((await get(own.id)).properties.effortName, 'Desktop CI');
   await shut(plain.id);
   assert.deepEqual(await retros(), [], 'the minion one of its asks moved into is still open');
-  await shut(own.id);
+  // Its work moves on again: the wait follows every hop.
+  const last = await mk('Third');
+  await shut(own.id, { as: 'replaced', into: last.number });
+  assert.deepEqual(await retros(), [], 'two hops on is still open');
+  await shut(last.id);
   assert.deepEqual(await retros(), ['Retro: Push gaps']);
 
   // A minion's own close says where its work went too; a bad number or the wrong word closes nothing.
@@ -180,4 +185,11 @@ test('an effort follows an ask that moves into another minion, and its retro wai
   assert.deepEqual([r.status, r.data.joined], [202, 'Moves'], JSON.stringify(r.data));
   await end(f.id);
   assert.equal((await get(e.id)).properties.effortName, 'Moves');
+
+  // A close that is called off forgets where the ask was going.
+  const g = await minion();
+  assert.equal((await close(g, { as: 'replaced', into: e.number })).status, 202);
+  assert.ok((await srv.call(`/api/tickets/${g.id}/stop`, {})).status < 300);
+  await until('it to stop', async () => (await get(g.id)).status !== 'running');
+  assert.equal(setting(`moved-into:${g.id}`), null);
 });

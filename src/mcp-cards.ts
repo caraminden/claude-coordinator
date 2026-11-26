@@ -44,12 +44,7 @@ export const ASK_QUESTION = () => ({
                     description: 'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail; pictured options show as a gallery.',
                   },
                   recommended: { type: 'boolean', description: 'true on the option you recommend, listed first; the card labels it "(Recommended)". Leave the words out of the label.' },
-                  start: {
-                    type: 'object',
-                    description: "Starts a minion from this handoff on a plain pick, with no turn; create_ticket's fields",
-                    properties: { handoff: { type: 'string' }, title: { type: 'string' }, type: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string' }, start_after: { type: 'integer' }, build: { type: 'integer' } },
-                    required: ['handoff', 'title', 'type'],
-                  },
+                  start: { type: 'object', description: 'A pick starts a minion: {handoff, title, type, model?, effort?, start_after?, build?}' },
                 },
                 required: ['label'],
               },

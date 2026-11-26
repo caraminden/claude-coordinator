@@ -1,4 +1,4 @@
-// A pick on a card starts the minion (#2050; Josh, 2026-11-25, picked "Start" on #2031's choices page; docs/adr/0037).
+// A pick on a card starts the minion (#2050; Josh, 2026-11-25, picked "Start" on #2031's choices page; docs/adr/0038).
 // A minion's ask_question option can carry `start`: the handoff it starts from and its title, type, model and effort. A
 // person's plain pick makes that minion with no Taskmaster turn, through the Taskmaster's own create path (createMinion:
 // the duplicate-handoff check, the start card over $30, the worker pool), as the person who picked. A pick that comes with

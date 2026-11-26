@@ -3,10 +3,10 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { agentToken, bootServer } from './helpers.ts';
+import { bootServer, mintedAgentToken } from './helpers.ts';
 import { json } from './typed.ts';
 
-// A pick on a card starts the minion (#2050; Josh, 2026-11-25, picked "Start" on #2031's page; docs/adr/0037): an option's
+// A pick on a card starts the minion (#2050; Josh, 2026-11-25, picked "Start" on #2031's page; docs/adr/0038): an option's
 // `start` makes the minion when a person picks it plainly, with no Taskmaster turn, as that person's, child of the card's owner.
 
 type Ev = { id: number; kind: string; data: string };
@@ -17,8 +17,9 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
   try {
     const { data: p } = await s.call('/api/projects', { name: 'Delve' }); // any scheme but Citadel's
     const { data: owner } = await s.call(`/api/projects/${p.id}/tickets`, { title: 'Ideas', message: 'Find ideas.', model: 'claude-sonnet-5-5', effort: 'medium' });
-    const asOwner = (path: string, body: object) =>
-      fetch(`${s.base}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, owner.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await json<{ id: string; error?: string }>(r) }));
+    // The token its first turn minted (that turn ends at once: there is no Claude here).
+    const token = await mintedAgentToken(s.data, owner.id);
+    const asOwner = (path: string, body: object) => fetch(`${s.base}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await json<{ id: string; error?: string }>(r) }));
     const handoffs = join(s.data, 'projects', String(p.id), 'shared', 'project', 'handoffs');
     mkdirSync(handoffs, { recursive: true });
     for (const n of ['a', 'b', 'c']) writeFileSync(join(handoffs, `${n}.md`), `# Handoff ${n}\n\n## Goal\nDo ${n}.\n`);
@@ -53,7 +54,10 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
       assert.equal(brief.text, `Start from the handoff ${join(handoffs, 'a.md')}`);
       assert.equal(brief.author, (db.prepare('SELECT name FROM users WHERE id = ?').get(me) as { name: string }).name, 'its first turn is asked by the picker');
       const view = (await s.call(`/api/tickets/${owner.id}`)).data.ticket;
-      assert.ok(view.held_mail > 0 || view.held_ids?.length > 0, 'the owner hears it as held mail');
+      assert.ok(
+        (view.held_mail?.items as { text: string }[] | undefined)?.some((m) => m.text.includes(`Citadel started #${a.number} Do a`)),
+        'the owner hears it as held mail',
+      );
       const events = (await s.call(`/api/tickets/${owner.id}/events?after=0`)).data as Ev[];
       assert.ok(
         events.some((e) => e.kind === 'note' && JSON.parse(e.data).text.includes(`#${a.number} Do a`)),

@@ -215,7 +215,7 @@ export function brokenTest(files: string[], branch: string, env: Record<string, 
 }
 
 /**
- * Put a hand-off refused on load alone back in line, as its minion handed it off, with no turn (#2030, Josh, 2026-11-25,
+ * Put a hand-off refused through no fault of its change (requeueReason) back in line, as its minion handed it off, with no turn (#2030, Josh, 2026-11-25,
  * "Yes, re-queue it"). At the end of the line, like any hand-off: land.sh's own keeps in place (flake_keep) are used up by
  * now, and the time behind the others is time for the load to pass. Null once it is in line; else why not, for the wake.
  */
@@ -236,10 +236,17 @@ export async function requeueShip(app: App, ticketId: number, h: Handoff & { arg
   if (!(await sameChange(t.cwd, h.head))) return 'your branch moved since the hand-off';
   const dirty = await gitOut(['status', '--porcelain', '--untracked-files=no'], t.cwd);
   if (dirty !== '') return 'your worktree has uncommitted changes or a rebase in progress';
+  // A land.sh cut off mid-way (#2051) can leave a rebase stopped with a clean tree, or main already moved.
+  if (!(await gitOut(['symbolic-ref', '-q', 'HEAD'], t.cwd))) return 'your worktree is not on its branch (a rebase may be in progress)';
+  const target = h.args[0] === '--into' ? h.args[1] : 'main';
+  const ahead = await gitOut(['rev-list', '--count', `${target}..HEAD`], t.cwd);
+  if (ahead === '0') return `your commits are already on ${target}, so check what is left to do`;
+  if (!ahead) return `it couldn't tell whether your commits are already on ${target}`;
   const lane = (await laneRefusal(app, t)) ?? (h.args.length ? null : await besideRefusal(app, t));
   if (lane) return lane;
   const env = landEnv(app, t, h);
-  const broken = await brokenTest(aloneFiles(output), t.branch ?? '', { ...env, LAND_FLAKE_DB: join(app.dataDir, 'coordinator.db') });
+  const alone = aloneFiles(output);
+  const broken = alone.length ? await brokenTest(alone, t.branch ?? '', { ...env, LAND_FLAKE_DB: join(app.dataDir, 'coordinator.db') }) : '';
   if (broken === null) return "it couldn't tell whether the failed files are broken tests (tools/known-flakes.ts gave no answer)";
   if (broken) return `${broken} is a broken test, not a flake: red in too many of the last hours' runs`;
   const late = why();

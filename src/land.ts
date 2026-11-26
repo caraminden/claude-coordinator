@@ -63,7 +63,7 @@ export interface Handoff {
   /** hand_off_land's fix and outage, kept for a re-queue's land.sh (LAND_FIX, LAND_URGENT). */
   fix?: true;
   outage?: true;
-  /** The server put this hand-off back in line itself after a refusal on load alone (#2030): its next refusal wakes the minion. */
+  /** The server put this hand-off back in line itself after a refusal that wasn't the change's (#2030): its next refusal wakes the minion. */
   requeued?: true;
 }
 
@@ -499,12 +499,21 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
 }
 
 /**
- * Whether a refused hand-off goes back in line with no turn (#2030, Josh, 2026-11-25, "Yes, re-queue it"): a red of load
- * alone (the passed-alone kind), once a hand-off, and not past what already says it isn't load: a broken test (#1487) or
- * land.sh's own keeps in place used up (flake_keep), or the leak guard's red beside them. requeueShip asks about broken tests too.
+ * Why a refused hand-off goes back in line with no turn (#2030, Josh, 2026-11-25, "Yes, re-queue it"), said in its note;
+ * null when it wakes the minion. Only a red the box or the pipeline caused: load alone, and since #2051 a cut-off run, a
+ * boot-check copy failure, a run on perigee out of time, a second red after one of flakes only. Once a hand-off, never
+ * with deploy refusing, nor past what already says it isn't load: a broken test (#1487), land.sh's own keeps in place used
+ * up (flake_keep), the leak guard's red. requeueShip asks about broken tests too.
  */
-export function loadOnly(output: string, cls: { kind: string } | null, h: Handoff): boolean {
-  return cls?.kind === 'passed-alone' && !h.requeued && !/^land: broken test, not a flake: /m.test(output) && !/has kept its place \d+ times already/.test(output) && !/The tests left \d+ process\(es\) running/.test(output); // the leak guard's red is no load (flake_free)
+export function requeueReason(output: string, cls: { kind: string } | null, h: Handoff): string | null {
+  if (h.requeued || /^land: (broken test, not a flake: |deploy has been refusing since )/m.test(output) || /has kept its place \d+ times already/.test(output) || /The tests left \d+ process\(es\) running/.test(output)) return null;
+  if (output.endsWith(NO_CODE)) return 'land.sh was cut off with no exit code';
+  if (cls?.kind === 'passed-alone') return 'the failed test files passed when rerun alone';
+  if (cls?.kind === 'boot-copy') return 'the boot check failed on its copy of the database';
+  if (/^land: the suite on perigee ran out of its time limit and no test is known to be/m.test(output)) return 'the test run on perigee ran out of its time limit';
+  // Not a second red the ship's own change is known to have caused: a file that failed again alone, a burn-in, a skip.
+  if (/on the one fresh run after a red whose files all passed alone/.test(output) && !/run-tests: \S+: failed again alone/.test(output) && !['conflict', 'parse', 'burn-in', 'skipped-test'].includes(cls?.kind ?? '')) return 'a second red after one of flakes only';
+  return null;
 }
 
 /** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
@@ -824,9 +833,10 @@ export class LandHandoffs {
         console.error(`Counting minion ${id}'s failed ship failed: ${thrown(err).message ?? err}`);
       }
       // Not in once(): the new hand-off starts in a fresh folder, and a step marked done would carry over into it.
-      const notAgain = r.kind === 'failed' && loadOnly(run.output, cls, h) && this.d.requeue && !('told' in done) ? await this.d.requeue(id, h, run.output) : '';
+      const again = r.kind === 'failed' && this.d.requeue && !('told' in done) ? requeueReason(run.output, cls, h) : null;
+      const notAgain = again ? await this.d.requeue!(id, h, run.output) : '';
       if (notAgain === null) {
-        runner.emit(id, 'note', { text: `Shipping was refused on load alone (the failed test files passed when rerun alone), so the server put this ship back in line by itself, once, with no turn. It wakes you only if it is refused again.` });
+        runner.emit(id, 'note', { text: `Shipping was refused (${again}), so the server put this ship back in line by itself, once, with no turn. It wakes you only if it is refused again.` });
         return true;
       }
       store.updateTicket(id, { state: null, note: null });

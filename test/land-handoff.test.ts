@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, NO_CODE, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { addReview, agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
-import { brokenTest, sameChange } from '../src/ship-handoff.ts';
+import type { App } from '../src/http.ts';
+import { brokenTest, requeueShip, sameChange } from '../src/ship-handoff.ts';
 import { git } from './git.ts';
 import { spawnSync } from 'node:child_process';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
@@ -328,6 +329,74 @@ test('only a passed-alone refusal goes back by itself: failed again alone, burn-
     assert.equal(asked, 0, `${kind}: not put back in line`);
     assert.equal(s.sent.length, 1, `${kind}: woken at once`);
     assert.equal(s.notes.length, 0, kind);
+  }
+});
+
+// #2051 (#2031's audit, candidate 6): refusals the box or the pipeline caused go back the same way, once.
+const BOX = {
+  'cut off by a restart': `land: smoke: checking ticket/1-x before it queues\n${NO_CODE}`,
+  'boot-check copy': 'Error: database is locked\ndeploy: boot check failed; nothing deployed\n',
+  'hung on perigee': "run-tests: the tests ran past 600s and were stopped: a test hung\nland: the suite on perigee ran out of its time limit and no test is known to be ticket/1-x's own failure (full log: /x.log): that is no answer, so main is untouched. Run this again\n",
+  'second red':
+    "run-tests: test/c.test.ts: rerun alone stopped after 150s, when CI's answer was due: counts as a real failure\nland: tests failed on the rebased branch in CI again (https://github.com/o/r/actions/runs/1), on the one fresh run after a red whose files all passed alone (test/a.test.ts), so main is untouched. A second red refuses whatever its labels say\n",
+};
+
+/** One landing ended with `out`, polled. An `out` ending in NO_CODE is a wrapper a restart cut off: no pid, no code. */
+async function ended(s: ReturnType<typeof setup>, out: string, h: object = {}) {
+  if (!out.endsWith(NO_CODE)) {
+    await s.land(out, 1, h);
+    return s.handoffs.poll();
+  }
+  const dir = join(s.data, 'run', 'landings', '1');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'started'), String(Date.now() - 600_000));
+  writeFileSync(join(dir, 'output.log'), out.slice(0, -NO_CODE.length));
+  writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ ...H, args: [], ...h }));
+  const landings = new Landings(s.data);
+  await new LandHandoffs({ ...s.deps, landings }).poll();
+}
+
+test('a refusal the box caused goes back in line once with no turn, and the next one wakes the minion (#2051)', async () => {
+  for (const [kind, out] of Object.entries(BOX)) {
+    let asked = 0;
+    const s = setup(`box-${kind.replace(/ /g, '-')}`, {
+      requeue: async () => {
+        asked++;
+        new Landings(s.data).settled(1);
+        return null;
+      },
+    });
+    await ended(s, out);
+    assert.equal(asked, 1, `${kind}: put back in line`);
+    assert.deepEqual(s.sent, [], `${kind}: no wake`);
+    assert.match(s.notes[0], /put this ship back in line by itself/, kind);
+    await ended(s, out, { requeued: true });
+    assert.equal(asked, 1, `${kind}: once per hand-off`);
+    assert.equal(s.sent.length, 1, `${kind}: then woken`);
+  }
+});
+
+test("a box refusal that deploy's refusing note, a skipped test or the ship's own cause is part of wakes the minion (#2051)", async () => {
+  const kinds = {
+    'refusing deploy, cut off': `land: deploy has been refusing since Nov 25 10:00 PST (boot): running its boot check on abc1234 before a CI run is spent on it\n${NO_CODE}`,
+    'refusing deploy, boot copy': 'land: deploy has been refusing since Nov 25 10:00 PST: boot, and abc1234 fails the same check here (its output is above) while main passes it\nland: abc1234 fails the same check here: database is locked\n',
+    'second red, skipped test': `land: 1 tests were skipped in CI (x)\n${BOX['second red']}`,
+    'second red, a file failed again alone': `run-tests: test/c.test.ts: failed again alone\n${BOX['second red']}`,
+    'second red, burn-in': `land: test/d.test.ts failed its burn-in in CI\n${BOX['second red']}`,
+    'second red, kept twice': `land: only flakes failed again (test/b.test.ts), but it has kept its place 2 times already, so it is refused this time\n${BOX['second red']}`,
+    'out of time, own failure': 'run-tests: the tests ran past 600s and were stopped: a test hung\nland: tests failed on the rebased branch: the suite ran out of time, and test/a.test.ts fails alone here and passes on main (full log: /x.log), so main is untouched\n',
+  };
+  for (const [kind, out] of Object.entries(kinds)) {
+    let asked = 0;
+    const s = setup(`box-no-${kind.replace(/[ ,']+/g, '-')}`, {
+      requeue: async () => {
+        asked++;
+        return null;
+      },
+    });
+    await ended(s, out);
+    assert.equal(asked, 0, `${kind}: not put back in line`);
+    assert.equal(s.sent.length, 1, `${kind}: woken`);
   }
 });
 
@@ -912,6 +981,8 @@ test('the server puts a passed-alone refusal back in line with no turn, and wake
     git(cwd, 'init', '-q', '-b', 'main');
     git(cwd, 'add', '.');
     git(cwd, 'commit', '-qm', 'init');
+    git(cwd, 'checkout', '-qb', 'ticket/1-m');
+    git(cwd, 'commit', '-qm', 'mine', '--allow-empty');
     store.setTicketDir(minion.id, cwd, null);
     addReview(store, minion.id);
     const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(srv.data, minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'Usage bar', risk: 'low', risk_reason: 'front end only' }) });
@@ -924,6 +995,22 @@ test('the server puts a passed-alone refusal back in line with no turn, and wake
   } finally {
     await srv.stop();
   }
+});
+
+test('a re-queue never ships commits already on main, nor from a worktree off its branch (#2051)', async () => {
+  const cwd = join(root, 'on-main');
+  mkdirSync(cwd, { recursive: true });
+  git(cwd, 'init', '-q', '-b', 'main');
+  writeFileSync(join(cwd, 'a.txt'), '1\n');
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'base');
+  git(cwd, 'checkout', '-qb', 'ticket/1-x');
+  const ticket = { id: 1, kind: 'ticket', cwd, status: 'idle' };
+  const app = { store: { getTicket: () => ticket }, runner: { parked: () => false, busy: () => false }, landings: { wasTalked: () => false } } as unknown as App;
+  const again = () => requeueShip(app, 1, { summary: 's', risk: 'low', reason: 'r', args: [], head: git(cwd, 'rev-parse', 'HEAD').trim() }, '');
+  assert.equal(await again(), 'your commits are already on main, so check what is left to do');
+  git(cwd, 'checkout', '-q', '--detach');
+  assert.match((await again())!, /not on its branch/);
 });
 
 test("brokenTest asks known-flakes.ts about every passed-alone file, the fresh run's too (#2030, #1487)", async () => {

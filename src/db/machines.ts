@@ -1,6 +1,6 @@
 // Machines (the CI runners and computers people lend to schemes), their load samples and their jobs (#1313: src/db.ts by area).
 import type { Machine, MachineJob, Store } from '../db.ts';
-import { type Caps, type LegacyLend, legacyFromRoles, parseLegacyLend, ROLES, type Role, type RoleRow, rolesFromLegacy, runnerHost, type Ticks } from '../machine-roles.ts';
+import { type Caps, type LegacyLend, legacyFromRoles, parseLegacyLend, ROLES, type Role, type RoleRow, rolesFromLegacy, runnerHost, runnerSeen, type Ticks } from '../machine-roles.ts';
 
 export const machineQueries = {
   listMachines(this: Store): Machine[] {
@@ -47,7 +47,6 @@ export const machineQueries = {
   updateMachine(this: Store, id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'token_sealed' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings'>>) {
     const { lend, ...rest } = fields;
     const keys = Object.keys(rest) as (keyof typeof rest)[];
-    const wasRunner = keys.includes('last_check') && runnerHost(this.getMachine(id)?.last_check ?? null);
     if (keys.length) this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => rest[k] ?? null), id);
     // What it lends goes into its roles (the old column is written from them): the Tools ticks, and the GPU and Minion
     // turns switches. A switch turned on here gets the machine's one list, as the old column lent it.
@@ -59,10 +58,10 @@ export const machineQueries = {
         return roles.map((r) => (r.role === 'tools' ? { ...r, caps: { ...r.caps, ticks: l ? { server: l.server, workspaces: l.workspaces, ...(l.before_ticks ? { before_ticks: true as const } : {}) } : null } } : r.role === 'gpu' ? on(r, !l?.gpu_off) : r.role === 'turns' ? on(r, !!l?.worker) : r));
       });
     }
-    // It just became a CI runner host (added as one, or a runner agent connected with its key): the CI role goes on,
-    // lent where the machine was, as its runner tokens were before roles (ci-runner.ts mayFetch).
-    if (keys.includes('last_check') && !wasRunner && runnerHost(rest.last_check ?? null)) {
-      this.writeMachineRoles(id, (roles) => roles.map((r) => (r.role === 'ci' && !r.on ? { ...r, on: true, projects: legacyFromRoles(roles).projects } : r)));
+    // It just became a CI runner host (added as one, or a runner agent connected with its key), or an older release
+    // made it one: the CI role goes on, lent where the machine was, as its runner tokens were before roles (ci-runner.ts mayFetch).
+    if (keys.includes('last_check') && runnerHost(rest.last_check ?? null) && !runnerSeen(this.machineRoles(id))) {
+      this.writeMachineRoles(id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: r.on ? r.projects : legacyFromRoles(roles).projects, setup: { ...r.setup, runner_host: true } } : r)));
     }
   },
 

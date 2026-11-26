@@ -102,8 +102,8 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   // Switched on: its workspace tools get their first check now.
   if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
   // A job already running there goes on to its end (its minion hears of it); one that hasn't started never will (2MA9).
-  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.machineGranted(machine.id, j.project_id));
-  if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.machineGranted(machine.id, id));
+  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, 'gpu', j.project_id));
+  if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return app.machines.view(app.store.getMachine(machine.id)!);
 }
@@ -151,7 +151,7 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   app.machines.rolesChanged(machine.id);
   if (role === 'turns') app.runner.turnLine.pump();
   // A job already running goes on to its end; one that hasn't started never will (2MA9). A turn mid-call loses the tools now.
-  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.machineGranted(machine.id, j.project_id));
+  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, 'gpu', j.project_id));
   if (role === 'tools') app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return { roles: rolesView(roles), machine: app.machines.view(app.store.getMachine(machine.id)!) };
@@ -841,9 +841,9 @@ export const machineRoutes: Route[] = [
       if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
         throw new HttpError(403, "That machine is someone else's, or this turn started without it");
       }
-      // A machine opens only for a minion in a scheme on its list (#438), as at its turn's start (src/runner.ts):
-      // a scheme taken off the list mid-turn can't open it again.
-      if (machine && (!project || caller!.kind === 'coordinator' || !app.store.machineGranted(machine.id, project.id))) {
+      // A machine opens only for a minion in a scheme its Tools role is lent to (#438, M1), as at its turn's start
+      // (src/runner.ts): a scheme taken off the list, or Tools switched off, mid-turn can't open it again.
+      if (machine && (!project || caller!.kind === 'coordinator' || !app.store.roleGrants(machine.id, 'tools', project.id))) {
         throw new HttpError(403, "That machine isn't lent to this scheme");
       }
       const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;

@@ -45,6 +45,8 @@ export function parseLegacyLend(text: string | null): LegacyLend | null {
 }
 
 /** Whether a machine is a CI runner host (machines.last_check says runners, #328): what it lends is runner tokens. */
+/** The CI role's setup marks a runner host this release has seen (`runner_host`), so one an older release made is caught. */
+export const runnerSeen = (roles: readonly RoleRow[]) => roles.find((r) => r.role === 'ci')?.setup?.runner_host === true;
 export const runnerHost = (lastCheck: string | null) => /"runners":true/.test(lastCheck ?? '');
 
 /**
@@ -60,7 +62,7 @@ export function rolesFromLegacy(m: { lend: string | null; last_check: string | n
   const ticks: Ticks = lend ? { server: lend.server, workspaces: lend.workspaces, ...(lend.before_ticks ? { before_ticks: true as const } : {}) } : null;
   const on: Record<Role, boolean> = { tools: !runners, screen: false, ci: runners, turns: !!lend?.worker, gpu: !lend?.gpu_off };
   const list = [...new Set(projects)].sort((a, b) => a - b);
-  return ROLES.map((role) => ({ role, on: on[role], caps: role === 'tools' ? { ticks } : {}, setup: null, projects: on[role] ? [...list] : [] }));
+  return ROLES.map((role) => ({ role, on: on[role], caps: role === 'tools' ? { ticks } : {}, setup: role === 'ci' && runners ? { runner_host: true } : null, projects: on[role] ? [...list] : [] }));
 }
 
 /**

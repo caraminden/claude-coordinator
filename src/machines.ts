@@ -662,11 +662,11 @@ export class MachineRelay {
 
   /**
    * A role was switched or its schemes changed (routes/machines.ts PATCH roles, Build 7 M1): its agent hears what it
-   * lends, a GPU job running when GPU jobs went off stops (as setLend does), and the page hears the rest.
+   * lends and the page hears the rest.
    */
   rolesChanged(machineId: number) {
+    // A role switched off drains (spec section 4): running GPU jobs finish, fromSession refuses new ones.
     this.sendLend(machineId);
-    if (this.store.machineLend(machineId)?.gpu_off) for (const job of this.gpuJobs.get(machineId) ?? []) this.stopGpuJob(machineId, job);
     this.onChange();
   }
 
@@ -915,7 +915,7 @@ export class MachineRelay {
       this.unwatch(w, 'closed');
       return true;
     }
-    if (!this.store.machineGranted(w.machine, t.project_id)) {
+    if (!this.store.roleGrants(w.machine, 'tools', t.project_id)) {
       this.unwatch(w, 'unlent');
       this.tell(w, `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}): that computer is no longer lent to this scheme${w.started ? '' : ', so the job left the line'}.`);
       return true;
@@ -1128,8 +1128,8 @@ export class MachineRelay {
     const call = message as { id?: unknown; method?: string; params?: { name?: string; arguments?: { task?: string } } } | null | undefined;
     if (s.server === 'ws' && call?.method === 'tools/call' && call.params?.name === 'run_task' && call.params?.arguments?.task === GPU_TASK) {
       const machine = this.store.getMachine(s.machineId);
-      if (machine && storedLend(this.store, machine)?.gpu_off) {
-        const text = `GPU jobs are switched off for ${machine.name} on Citadel's Machines page. Nothing was run. Don't retry: use the run task (software drawing), or ask a person to switch GPU jobs back on.`;
+      if (machine && (storedLend(this.store, machine)?.gpu_off || (s.projectId !== null && !this.store.roleGrants(machine.id, 'gpu', s.projectId)))) {
+        const text = `GPU jobs are switched off for ${machine.name}, or not lent to this scheme, on Citadel's Machines page. Nothing was run. Don't retry: use the run task (software drawing), or ask a person to switch GPU jobs back on.`;
         s.res.write(`data: ${JSON.stringify({ message: { jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text }], isError: true } } })}\n\n`);
         return true;
       }

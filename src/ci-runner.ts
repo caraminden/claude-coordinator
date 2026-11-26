@@ -69,17 +69,19 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 }
 
 /**
- * Whether this machine's key may fetch a runner token for the scheme. A CI runner host: if its CI role is on and lent
- * there, and a person's own one's owner is in the scheme (access.ts lendsRole). A machine that isn't one yet, as a
- * runner agent connecting with its key would make it (its CI role then goes on, lent where the machine was: db/machines.ts
- * updateMachine): a person's own if its owner is in the scheme (an admin is in all of them), an ownerless one if any
- * of its roles that's on is lent there. An ownerless CI runner host from before #438 that was never given a list
- * (machines.scoped 0, which nothing else reads now): if an admin owns the scheme, so `ci_runners` keeps working for a
- * new scheme. The token lets a PC run the repo's CI jobs, which a member can already do by pushing a workflow.
+ * Whether this machine's key may fetch a runner token for the scheme. Its CI role on: if lent there, and a person's
+ * own one's owner is in the scheme (access.ts lendsRole). A CI runner host with CI off: never. A machine that isn't
+ * one yet and never had CI switched on, as a runner agent connecting with its key would make it (its CI role then goes
+ * on, lent where the machine was: db/machines.ts updateMachine): a person's own if its owner is in the scheme (an
+ * admin is in all of them), an ownerless one if any of its roles that's on is lent there. An ownerless CI runner host
+ * from before #438 that was never given a list (machines.scoped 0, which nothing else reads now): with CI on, if an
+ * admin owns the scheme, so `ci_runners` keeps working for a new scheme. The token lets a PC run the repo's CI jobs,
+ * which a member can already do by pushing a workflow.
  */
 export function mayFetch(store: Store, machine: Machine, project: Project): boolean {
-  if (machine.owner_id === null && !machine.scoped) return adminOwned(store, project);
-  if (storedCheck(machine)?.runners) return lendsRole(store, machine, 'ci', project);
+  const ci = store.machineRoles(machine.id).find((r) => r.role === 'ci')?.on ?? false;
+  if (machine.owner_id === null && !machine.scoped) return ci && adminOwned(store, project);
+  if (ci || storedCheck(machine)?.runners) return lendsRole(store, machine, 'ci', project);
   if (machine.owner_id === null) return store.machineGranted(machine.id, project.id);
   return ownerAsked(store, machine.owner_id, [machine.owner_id], project.id);
 }

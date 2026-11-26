@@ -973,10 +973,10 @@ export async function jobInputs(paths: unknown, roots: string[]): Promise<{ name
   return out;
 }
 
-/** The machines a scheme's minions may queue jobs on: granted to it, not a CI runner host, with a jobs block. */
+/** The machines a scheme's minions may queue jobs on: its GPU jobs role lent to it (M1), not a CI runner host, with a jobs block. */
 export function jobMachinesFor(store: Store, projectId: number): string[] {
   return store
     .listMachines()
-    .filter((m) => storedOffer(m) && !m.last_check?.includes('"runners":true') && store.machineGranted(m.id, projectId))
+    .filter((m) => storedOffer(m) && !m.last_check?.includes('"runners":true') && store.roleGrants(m.id, 'gpu', projectId))
     .map((m) => m.name);
 }

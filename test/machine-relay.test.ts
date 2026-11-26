@@ -134,7 +134,9 @@ test('a second agent with the same token takes over, and the first is told so be
 });
 
 test('the GPU jobs switch (#1175): off, run-gpu is refused before it reaches the machine and a running one is stopped', async () => {
-  const { relay, box } = world();
+  const { relay, box, store } = world();
+  const scheme = store.createProject('scheme', null, null); // id 1, the session's: its GPU jobs role lends it run-gpu (M1)
+  store.setMachineProjects(box.id, [scheme.id]);
   const agent = stream();
   relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
   relay.setInfo(box, {
@@ -181,6 +183,13 @@ test('the GPU jobs switch (#1175): off, run-gpu is refused before it reaches the
   assert.match(refusal.result.content[0].text, /GPU jobs are switched off for box/);
   task(7, 'run');
   assert.ok(reached(7));
+  // GPU jobs on again but lent to no scheme of this session's (M1): refused the same way.
+  relay.setLend(box.id, { server: null, workspaces: ['w'] });
+  store.setMachineRole(box.id, 'gpu', { projects: [] });
+  task(8, 'run-gpu');
+  assert.equal(reached(8), false);
+  assert.match(proxy.sent.at(-1).message.result.content[0].text, /not lent to this scheme/);
+  relay.setLend(box.id, { server: null, workspaces: ['w'], gpu_off: true });
 
   // A job that outlasts its call's wait after the switch went off is stopped once its id comes back.
   relay.setLend(box.id, { server: null, workspaces: ['w'] });

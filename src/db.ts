@@ -16,7 +16,7 @@ import { deliveryQueries } from './db/deliveries.ts';
 import { flakeQueries } from './db/flakes.ts';
 import { flowQueries } from './db/flow.ts';
 import { machineQueries } from './db/machines.ts';
-import { legacyFromRoles, parseLegacyLend, ROLE_NAMES, rolesFromLegacy, sameLend } from './machine-roles.ts';
+import { legacyFromRoles, parseLegacyLend, ROLE_NAMES, rolesFromLegacy, runnerHost, runnerSeen, sameLend } from './machine-roles.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
 import { readWarmQueries } from './db/read-warm.ts';
@@ -598,8 +598,9 @@ export class Store {
    * A machine's roles (Build 7 M1, src/machine-roles.ts rolesFromLegacy): each machine's lend and one list of schemes
    * become its roles and a list per role, so every turn, tool and runner token goes where it went before. Every boot,
    * for a machine with no role rows (the first boot from schema 121, or one an older release added after a rollback)
-   * and one whose old columns no longer say what its roles do (an older release changed them): this release writes
-   * those columns from the roles on every change, so a difference is a rollback's, and the old columns win.
+   * and one whose old columns no longer say what its roles do (an older release changed them, or made it a CI runner
+   * host this release never saw: machine-roles.ts runnerSeen): this release writes those columns from the roles on
+   * every change, so a difference is a rollback's, and the old columns win.
    * Says what it did, for the deploy's notes.
    */
   private machineRoleTables() {
@@ -608,8 +609,9 @@ export class Store {
     const list = (id: number) => (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(id) as { project_id: number }[]).map((r) => r.project_id);
     const stale = machines.filter((m) => {
       if (!has.has(m.id)) return true;
-      const now = legacyFromRoles(this.machineRoles(m.id));
-      return !sameLend(parseLegacyLend(m.lend), now.lend) || list(m.id).join() !== now.projects.join();
+      const roles = this.machineRoles(m.id);
+      const now = legacyFromRoles(roles);
+      return !sameLend(parseLegacyLend(m.lend), now.lend) || list(m.id).join() !== now.projects.join() || (runnerHost(m.last_check) && !runnerSeen(roles));
     });
     if (!stale.length) return;
     this.db.exec('BEGIN IMMEDIATE');

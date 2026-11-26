@@ -1,9 +1,9 @@
 {
   "any-nudge": {
-    "hash": "bad42bb239747ba5",
+    "hash": "4a7e64deb9a91dc0",
     "at": "2026-11-26",
     "days": 3,
-    "inputs": "4472 TypeScript file changes in 965 commits",
+    "inputs": "4486 TypeScript file changes in 972 commits",
     "hits": 105,
     "real": 0,
     "summary": "0 as before, 105 new, 0 gone"

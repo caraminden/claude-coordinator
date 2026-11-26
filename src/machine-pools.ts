@@ -79,6 +79,8 @@ export interface MachinePoolsDeps {
 export type AccountsThere = (person: number, slots: { n: number; org: string | null }[]) => { linked: number[]; usable: number[]; ready: boolean };
 
 /** The accounts a worker holds a sign-in for; an agent from before #2061 says only whether it has one, which is account 1's. */
+/** Whether its worker could tell its sign-ins: one it couldn't read is not a no. */
+const known = (info: WorkerInfo) => typeof info.signedIn === 'boolean';
 export const slotsOf = (info: WorkerInfo) => info.accounts ?? (info.signedIn ? [{ n: 1, org: null }] : []);
 
 export class MachinePools {
@@ -154,7 +156,7 @@ export class MachinePools {
     const info = this.d.info(m.id);
     if (info?.signedIn === false) return never(`${owner} is not signed in to Claude there`);
     // The account a turn runs on must be signed in there (#2061): the pick there is among those (accountsAt).
-    const there = info && person !== null ? this.d.accountsThere?.(person, slotsOf(info)) : null;
+    const there = info && known(info) && person !== null ? this.d.accountsThere?.(person, slotsOf(info)) : null;
     if (there && !there.usable.length) return never(`none of ${owner}'s linked Claude accounts is signed in there`);
     return there && !there.ready ? { why: `${owner}'s Claude accounts signed in there are at their usage limit or need linking again` } : null;
   }
@@ -162,7 +164,7 @@ export class MachinePools {
   /** The accounts a turn of `person`'s on that machine may run on, for the account pick; undefined when it can't say (no worker facts yet). */
   accountsAt(machineId: number, person: number | null): number[] | undefined {
     const info = this.d.info(machineId);
-    return info && person !== null ? this.d.accountsThere?.(person, slotsOf(info)).usable : undefined;
+    return info && known(info) && person !== null ? this.d.accountsThere?.(person, slotsOf(info)).usable : undefined;
   }
 
   nameOf(machineId: number): string {

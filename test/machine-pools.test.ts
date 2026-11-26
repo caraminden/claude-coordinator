@@ -132,6 +132,10 @@ test("a turn there runs only on its owner's account signed in there: none never,
   pools.accountsAt(t.m.id, t.josh.id);
   assert.deepEqual(asked[0], [t.josh.id, [{ n: 1, org: null }]]);
   assert.equal(pools.accountsAt(t.m.id, null), undefined);
+  t.s.info!.signedIn = null;
+  there.usable = [];
+  assert.equal(pools.refuses(t.m.id, turn, t.josh.id), null, "a worker that couldn't read its sign-ins: not known is not a no");
+  assert.equal(pools.accountsAt(t.m.id, t.josh.id), undefined);
   t.s.info = null;
   assert.equal(pools.accountsAt(t.m.id, t.josh.id), undefined, 'no worker facts: nothing to restrict by (and no turn goes there)');
 });

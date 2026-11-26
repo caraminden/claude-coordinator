@@ -79,8 +79,9 @@ export const TRIES = 3;
  * `since(name)` is when that name last got a verdict (undefined: never); only minions made after it count, so a name the
  * Taskmaster reuses for a later goal gets its own retro. `majorBuild(n)` says Build n has its own build minion, whose
  * retro covers its feeders: a bare build number (Delve's "found in" build on a bug) doesn't. `movedInto(t)` is where t's ask
- * went: those must be closed and quiet too, in the effort or not. `leadOf(t)` is the lead of the cabal t leads or is on:
- * an effort mostly one led cabal gets that lead's retro (#2096), not a second one.
+ * went: those must be closed and quiet too, in the effort or not. `cabalOf(t)` is the cabal t leads or is on: an effort
+ * mostly one led cabal gets that lead's retro (#2096), not a second one. It waits while the lead is open, and a lead
+ * dismissed without writing one leaves the effort retro to run.
  */
 export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => [], leadOf: (t: Ticket) => number | null = () => null): EffortVerdict[] {
   const groups = new Map<string, Ticket[]>();

@@ -227,7 +227,7 @@ test('Connect a computer end to end: the real agent joins with the code, the row
   const old = new AbortController();
   const stream = await fetch(`${base}/api/machines/connect?host=old`, { headers: { Authorization: `Bearer ${token}` }, signal: old.signal });
   assert.equal(stream.status, 200);
-  ok(await fetch(`${base}/api/machines/info`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 2, found: [] }) }));
+  assert.equal((await fetch(`${base}/api/machines/info`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 2, found: [] }) })).status, 202);
   await until('its row offers Update', async () => (await dana<{ update: boolean }[]>('/api/machines')).data[0]?.update === true);
   assert.equal((await eli(`/api/machines/${machine!.id}/join`, {}, 'POST')).status, 404, 'only who manages it updates it');
   const upd = (await dana<{ id: number; code: string; name: string }>(`/api/machines/${machine!.id}/join`, {}, 'POST')).data;

@@ -10,7 +10,7 @@ Status: accepted, 2026-11-24. Minion #1789.
 - **The rule:** `tsconfig.json` (strict, no emit, `erasableSyntaxOnly`, `verbatimModuleSyntax`) covers `server.ts`,
   `src/`, `tools/`, `test/` and `kit/` (not the kit's templates, which only run once copied). `test/typecheck.test.ts`
   rides the suite, so every ship runs it. It fails when a file's tsc errors, or its escapes (an explicit `any` in a
-  type, a `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck`), go above `test/typecheck-baseline.json`. Lower counts
+  type, an `as unknown as` double cast since #2142, a `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck`), go above `test/typecheck-baseline.json`. Lower counts
   pass; `node tools/typecheck.ts --update` writes them down and can never raise one. Moving or splitting code re-files its counts with `--update --moved`, refused when a repo total went up.
 - **Escapes** are counted with Node's own `module.stripTypeScriptTypes`: an `any` it blanks was a type. No TypeScript parser of
   our own. A JavaScript file has no types for it to strip, so a front-end script's

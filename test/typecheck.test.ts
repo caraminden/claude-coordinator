@@ -35,6 +35,7 @@ test('each `as unknown as` counts, in every way of counting; one in a comment or
   assert.equal(escapes(casts), 3);
   assert.equal(escapes(casts, 'x.tsx'), 3);
   assert.equal(escapes('const a = x as any as T;\n'), 1, 'the any counts, once');
+  for (const file of ['x.ts', 'x.tsx']) assert.equal(escapes('const a = (x as unknown) as T;\nconst b = ((y as unknown)\n) as T;\n', file), 2, `bracketed, ${file}`);
   for (const file of ['x.ts', 'x.tsx']) assert.equal(escapes('// as unknown as T\n/* as unknown as T */\nconst s = "x as unknown as T" + `as unknown as`;\nconst u = x as unknown;\nconst v = y as T;\n', file), 0, file);
 });
 

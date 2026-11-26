@@ -157,8 +157,9 @@ function stripTypes(code: string): string {
 const DIRECTIVE = /^[ \t]*(?:\/\/|\/\*+)[ \t]*@ts-(?:ignore|expect-error|nocheck)\b/gm;
 const TEXT = /\/\*[\s\S]*?\*\/|\/\/.*|'(?:\\(?:\r\n|[\s\S])|[^'\\\n])*'|"(?:\\(?:\r\n|[\s\S])|[^"\\\n])*"/y;
 const WORD = /(?<![\w$])any(?![\w$])/g;
-// `as any as` is left out: its `any` already counts.
-const DOUBLE = /(?<![\w$.])as\s+unknown\s+as(?![\w$])/g;
+// Brackets between don't hide it: `(x as unknown) as T`. `as any as` is left out: its `any` already counts.
+// shortcut: `f(x as unknown) as T` counts too; telling a call's bracket apart needs a parser.
+const DOUBLE = /(?<![\w$.])as\s+unknown(?:(?:\s*\))+\s*|\s+)as(?![\w$])/g;
 
 /** Code with comments and string literals blanked to spaces, so positions stay put. Template `${}` holes are kept. */
 function blankText(code: string): string {
@@ -259,17 +260,17 @@ export function countEscapes(code: string, file = 'x.ts', byPattern = false): { 
     if (!strip) throw e;
     return { n: directives + anysByPattern(code) + (blankText(code).match(DOUBLE)?.length ?? 0), by: 'pattern' };
   }
-  let found = 0;
+  let anys = 0;
+  let kept = ''; // the types, and of the code around them only space and `)`, for DOUBLE
   // Each stretch the stripper changed is read by itself, so a quote or backtick in the code it kept can't hide a type.
   for (let i = 0; i < code.length; i++) {
     const from = i;
     while (i < code.length && (code[i] !== stripped[i] || /\s/.test(code[i]!))) i++;
-    if (i - from < 3) continue;
-    const types = blankTypeText(code.slice(from, i));
-    // A double cast is one stretch: the stripper blanks both halves and only space lies between.
-    found += (types.match(WORD)?.length ?? 0) + (types.match(DOUBLE)?.length ?? 0);
+    const types = i - from >= 3 ? blankTypeText(code.slice(from, i)) : code.slice(from, i);
+    anys += types.match(WORD)?.length ?? 0;
+    kept += types + (code[i] === ')' ? ')' : i < code.length ? '_' : '');
   }
-  return { n: directives + found, by: 'types' };
+  return { n: directives + anys + (kept.match(DOUBLE)?.length ?? 0), by: 'types' };
 }
 
 /**

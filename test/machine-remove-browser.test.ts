@@ -116,7 +116,8 @@ test('a machine with no worker just goes, with nothing to run', { skip }, async 
 
 test('a machine added later under a removed one’s id starts clean', { skip }, async () => {
   await worker('old-pc');
-  await wait('its row', `!!${row('old-pc')}`);
+  // Its row knows it has a worker.
+  await wait('its row', `!!${row('old-pc')}?.textContent.includes('MY-PC')`);
   await remove('old-pc', null);
   await go();
   await wait('the row gone', `!${row('old-pc')}`);

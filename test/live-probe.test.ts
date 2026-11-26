@@ -290,3 +290,40 @@ test('changedLines counts added and removed lines against main, binary files lef
   assert.equal(await changedLines(repo), 3, 'two added, one removed');
   assert.equal(await changedLines(join(root, 'nowhere')), 0);
 });
+
+// #2123: a file split is nearly all moved lines, and a pure move needs no live check.
+test('changedLines leaves out moved blocks and pure renames, and still counts real changes', async () => {
+  const repo = join(root, 'moves');
+  git(root, 'init', '-q', '-b', 'main', repo);
+  // The reader's own diff settings don't change the count.
+  git(repo, 'config', 'diff.renames', 'false');
+  git(repo, 'config', 'color.diff.new', 'magenta');
+  git(repo, 'config', 'color.diff.newMoved', 'green');
+  const code = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `const ${tag}Value${i} = compute(${i});`);
+  const file = (name: string, lines: string[]) => writeFileSync(join(repo, name), lines.join('\n') + '\n');
+  const moved = code('moved', 700);
+  const kept = code('kept', 20);
+  file('big.ts', [...kept, ...moved]);
+  file('other.ts', code('other', 700));
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-qm', 'init');
+  const branch = async (name: string, change: () => void) => {
+    git(repo, 'checkout', '-q', 'main');
+    git(repo, 'checkout', '-qb', name);
+    change();
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', name);
+    return changedLines(repo);
+  };
+
+  const split = await branch('split', () => {
+    file('big.ts', [...kept, 'import { run } from "./part.ts";']);
+    // Indented one level, as a split into a namespace or class is; one line really edited.
+    file('part.ts', ['export function run() {', ...moved.map((l, i) => '  ' + (i === 350 ? 'const edited = 1;' : l)), '}']);
+  });
+  assert.equal(split, 5, 'the import, the wrapper’s two lines, and the edited line out and in');
+
+  assert.equal(await branch('rename', () => git(repo, 'mv', 'other.ts', 'renamed.ts')), 0);
+  assert.equal(await branch('rewrite', () => file('other.ts', code('fresh', 700))), 1400, '700 out, 700 in');
+  assert.equal(await branch('added', () => file('new.ts', code('added', 700))), 700);
+});

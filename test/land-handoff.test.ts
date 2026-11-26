@@ -1109,7 +1109,7 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
 
     const none = await handOff(body);
     assert.equal(none.status, 400);
-    assert.match(none.error, /^Not handed off: this change is 600 lines \(600 or more\), so it names one check .* probe is one of: /);
+    assert.match(none.error, /^Not handed off: this change is 600 changed lines, moves left out \(600 or more\), so it names one check .* probe is one of: /);
     assert.match((await handOff({ ...body, probe: { kind: 'shell', cmd: 'rm -rf /' } })).error, /^probe\.kind must be http, timing, sql or none\. probe is one of/);
     assert.match((await handOff({ ...body, probe: { kind: 'http', path: '//elsewhere.example/' } })).error, /not a valid path/);
     assert.match((await handOff({ ...body, into: 'build/2', files: ['test/a.test.ts'], probe: { kind: 'none', reason: 'x' } })).error, /goes with a ship to main/);
@@ -1147,7 +1147,7 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
     };
     assert.match((await theirHandOff({ ...body, probe: { kind: 'sql', query: 'SELECT count(*) FROM tickets', min: 1 } })).error, /reads this server's own database/);
     store.createContraption({ name: 'voice', title: 'Voice', icon: null, port: 9, home_scheme: scheme.id, open_paths: '[]', relay_paths: '[]', repo: other, branch: 'main', folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
-    assert.match((await theirHandOff(body)).error, /^Not handed off: this change is 600 lines/, 'an app this ship deploys is served here');
+    assert.match((await theirHandOff(body)).error, /^Not handed off: this change is 600 changed lines/, 'an app this ship deploys is served here');
     store.updateContraption('voice', { branch: 'dev' });
     assert.equal((await theirHandOff(body)).status, 202, 'an app on another branch is not deployed by this ship: nothing served, not asked');
     await until('their land is reported', () => store.getTicket(theirs.id)!.status === 'closed');

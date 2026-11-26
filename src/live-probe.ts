@@ -11,22 +11,23 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { thrown } from './thrown.ts';
 
-/** A main ship of this many changed lines (added plus removed) or more carries a probe (the trial's line; 200 later). */
+/** A main ship of this many changed lines (added plus removed, moves left out) or more carries a probe (the trial's line; 200 later). */
 export const PROBE_LINES = 600;
 
-/** Lines the branch in `cwd` changes against main (added plus removed, binary files left out); 0 when git can't say. */
+/** How the count's diff is drawn: only a line that really changed starts red `-` or green `+`; a moved one is blue. */
+const COUNT_COLORS = { meta: 'bold', old: 'red', new: 'green', oldMoved: 'blue', newMoved: 'blue' };
+const CHANGED_LINE = /^(\x1b\[31m-|\x1b\[32m\+)/;
+
+/** Lines the branch in `cwd` changes against main (added plus removed), moves left out: a pure rename, a binary file, and
+ * a block moved as it was or re-indented as one. 0 when git can't say. */
+// `blocks`, not `plain`: a moved block is 20 or more letters and digits, so a rewrite's stray `}` and blank lines still count (#2123).
 // shortcut: a scheme whose trunk isn't named main counts 0 (no probe asked); read its default branch if one ships big changes.
 export function changedLines(cwd: string): Promise<number> {
+  const config = Object.entries(COUNT_COLORS).flatMap(([slot, color]) => ['-c', `color.diff.${slot}=${color}`]);
+  const diff = ['diff', '--color=always', '--color-moved=blocks', '--color-moved-ws=allow-indentation-change', '--find-renames', '--no-ext-diff', '--no-textconv', 'main...HEAD'];
   return new Promise((done) =>
-    execFile('git', ['diff', '--numstat', 'main...HEAD'], { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
-      if (err) return done(0);
-      let n = 0;
-      for (const line of out.split('\n')) {
-        const [a, d] = line.split('\t');
-        if (/^\d+$/.test(a) && /^\d+$/.test(d)) n += Number(a) + Number(d);
-      }
-      done(n);
-    }),
+    // The whole diff, not numstat's counts: room enough that a big ship's doesn't overflow and count 0.
+    execFile('git', [...config, ...diff], { cwd, maxBuffer: 256 * 1024 * 1024 }, (err, out) => done(err ? 0 : out.split('\n').filter((line) => CHANGED_LINE.test(line)).length)),
   );
 }
 

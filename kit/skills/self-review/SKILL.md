@@ -152,7 +152,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 ## 5. Report and ship
 
-- **A live probe** (`hand_off_land` to main, 600+ changed lines; #1741): pick the one check that would show
+- **A live probe** (`hand_off_land` to main, 600+ changed lines, moves left out; #1741): pick the one check that would show
   this change broken once live, e.g. `{kind:"timing", path:"/api/x", ms:800}` for a speed fix, `{kind:"sql",
   query:"SELECT count(*) FROM ...", min:1}` for a new writer, `{kind:"http", path, text}` for a route or the data
   a screen reads (an app's paths are `/apps/<name>/...`). Nothing live can show it (a prompt, a PC build)?

@@ -173,7 +173,7 @@ export const VALUE_WRITES = [
   'deliveryTransaction',
 ];
 
-/** How often a wait on the worker, with nothing run meanwhile, looks whether its thread is still there. */
+/** The longest slice of a wait on the worker: after one that times out, it looks whether the thread is still there. */
 const GONE_CHECK_MS = 100;
 
 /** This thread's id to the kernel, 0 where /proc can't say (not Linux). */
@@ -404,7 +404,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   const getSetting = store.getSetting.bind(store);
   store.getSetting = (<T>(key: string): T | null => {
     const u = unwritten.get(key);
-    if (u && applied() < u.seq) return u.json === null ? null : JSON.parse(u.json);
+    if (u && !gone() && applied() < u.seq) return u.json === null ? null : JSON.parse(u.json);
     if (u) unwritten.delete(key);
     return getSetting<T>(key);
   }) as typeof store.getSetting;

@@ -244,12 +244,15 @@ test('a write waiting on a worker that dies stops waiting and writes in place', 
   const { store, w } = open({ delayMs: HELD });
   const m = minion(store); // its writes are held on the worker
   store.addHealthEvent('db-write-slow', Date.now(), null, 'queued');
+  store.setSetting('k', 'queued, and lost');
   void w.stop();
   // Blocks this thread until the queue runs or the worker is gone: refused only if it waits the whole drain out.
   assert.ok(store.createProject('after the death', null).id);
   // Still in the same run, before the server's 'exit' handler: a late write lands too.
   store.updateTicket(m.id, { title: 'late' });
   assert.equal(store.getTicket(m.id)!.title, 'late');
+  store.setSetting('k', 'newer');
+  assert.equal(store.getSetting('k'), 'newer');
 });
 
 /** Run `body` in a process of its own (`store` and `w` are there), which kills itself as a crash would; its database. */

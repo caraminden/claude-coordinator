@@ -45,7 +45,7 @@ skill step is skipped or uses its default.
 - **Verifier's copy:** `node tools/review-escapes/verifier-copy.ts <scratch folder>`; it prints how to boot the copy and make states (scripted turns, restart, a second person, the clock).
 - **Front end:** `public/`, plain JS with no build step.
 - **High risk by file (self-review):** auth (`src/auth.ts`); deploy and restart code
-  (`tools/deploy.sh`, `tools/land.sh` and its parts in `tools/land/`, `tools/boot-check.ts`, `deploy/`); the tripwire
+  (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`); the tripwire
   (`src/tripwire.ts`, `src/tripwire-git.ts`, `src/tripwire-base.ts`, `tools/guard.sh`, `.githooks/`); who sees what and whose turns run
   (`src/access.ts`, and `turnPerson` in `src/runner.ts`: whose Claude login a turn runs on); the kit's scheme-setup templates, which other schemes copy
   (`kit/skills/scheme-setup/templates/`). `src/db.ts` (setup, migrations, settings) and its area files `src/db/<area>.ts` hold every query, a new one in its area's file (`test/db-areas.test.ts`): judge an

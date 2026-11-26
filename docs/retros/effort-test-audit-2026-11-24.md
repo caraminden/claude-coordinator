@@ -51,7 +51,7 @@ Nov 24 to 26, and `git log main`.
      - #2014, guard: from about 57-65 s to about 33 s. Its deploy gain was within the noise.
      - #2015: from 39.7 s to about 20 s.
      - #2016: about 7 s. `merge-go` showed no change.
-   - That adds up to about 124 test-seconds, or about 9 s of wall time[^s].
+   - With #1829's own 69 s, that adds up to about 124 test-seconds, or about 9 s of wall time[^s].
    - #2148 found the same ratio again on Nov 26 (100 test-seconds is about 7 s)[^w].
    - The spend was small: $3.15 for the three follow-ups[^c]. The miss is that the card's reader couldn't weigh them.
    - **Fix:** the same handoff. A speed batch, and a speed handback, states its CI wall saving on the card.
@@ -99,8 +99,8 @@ is no. They label it, and the minion checks it first.
 [^t]: `sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "select number, datetime(created_at/1000,'unixepoch','localtime'), datetime(closed_at/1000,'unixepoch','localtime') from tickets where project_id=2 and number in (1828,1829,1830,1831,1832,2014,2015,2016)"`. Ship times are commit dates from `git log main --format='%cd %s' --date=format-local:'%m-%d %H:%M' --grep='^#1828 '`: #1828 shipped at 00:30 on Nov 25, 8.8 h after it was created at 15:44 on Nov 24. Both ran 2026-11-26.
 [^c]: The same database, the sum over each ticket's sessions of `max(session_cost_usd)` in `turns`, run 2026-11-26. The figures were #1828 2.69, #1829 8.91, #1830 4.74, #1831 1.29, #1832 13.18, #2014 1.09, #2015 0.50, #2016 1.56, and #1812 12.03. This is the recorded turn cost only, so it may miss spend that wasn't recorded.
 [^h]: read_minion(1832), run 2026-11-26 by a Grunt. The commit subjects confirm it: `git log main --grep='^#1832 '` shows "replaces 16 files' own scripts" and "6 onto fakeClaude".
-[^f]: `git log main --format= --name-only --grep="^#$n "` for each minion, intersected by file, run 2026-11-26. #1828 and #1832 share 8 test files. `test/typecheck-baseline.json` is touched by #1828, #1831 and #1832.
-[^l]: `grep -E "ticket/$n-" retro-log/2026-11-2{4,5,6}/land.md` in the shared folder, run 2026-11-26. It found 1 `land conflict` in the effort (#1828, `README.md`, onto f494ce069), and no conflict line has two effort branches.
+[^f]: `git log main --format= --name-only --grep="^#$n "` for each minion, intersected by file, run 2026-11-26. #1828 and #1832 share 8 files: 7 test files and `test/typecheck-baseline.json`. `test/typecheck-baseline.json` is touched by #1828, #1831 and #1832.
+[^l]: `grep -E "ticket/$n-" retro-log/2026-11-2{4,5,6}/land.md` in the shared folder, run 2026-11-26. It found 1 `land conflict` in the effort (#1828, `README.md`, onto f494ce069), and no conflict line has two effort branches (5 `train prep conflict` lines name an effort branch against #1808, #1842, #1888 or #1904).
 [^s]: My guess. It is the sum of the before and after numbers each minion reported in its chat (read_minion), divided by the audit's 14 files at once. Each minion measured on a loaded box.
 [^w]: `shared/project/reports/ci-land-test-seconds-2148.md`, "Result". The audit's ratio is in `reports/test-audit-citadel-2026-11-24.md`, "The numbers". Both were read 2026-11-26.
 [^r]: read_minion(1828), run 2026-11-26 by a Grunt. The count is 4 failed lands before the 5th shipped. The `README.md` conflict also appears in land.md[^l].

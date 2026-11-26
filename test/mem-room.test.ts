@@ -63,7 +63,7 @@ test("in a container, room is the smaller of MemAvailable and the container's ow
   const file = join(dir, 'container-room');
   // `other`'s number is longer by a digit and a suffix of a third one's: only the whole inode may match.
   const lines = `${other.ino} 9000 citadel-claude-3.service\n1${mine.ino} 70 citadel-claude-5.service\n${mine.ino}1 71 citadel-claude-6.service\n${mine.ino} 1500 citadel-claude-2.service\n${full.ino} 0 citadel-claude-2-tm.service\n`;
-  const env = (cg: string, extra: Record<string, string> = {}) => ({ CITADEL_MEMINFO: info, CITADEL_HEAVY_DIR: dir, CITADEL_OWN_CGROUP: cg, CITADEL_MEM_CORES: '16', ...extra });
+  const env = (cg: string, extra: Record<string, string> = {}) => ({ CITADEL_MEMINFO: info, CITADEL_HEAVY_CGROUP: join(root, 'no-slice'), CITADEL_HEAVY_DIR: dir, CITADEL_OWN_CGROUP: cg, CITADEL_MEM_CORES: '16', ...extra });
   const mb = (cg: string, extra = {}) => run(['mb'], env(cg, extra)).stdout.trim();
   const at = (secondsAgo: number) => utimesSync(file, new Date(), new Date(Date.now() - secondsAgo * 1000));
   const box20 = '20480';

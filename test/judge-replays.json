@@ -27,13 +27,13 @@
     "summary": "0 as before, 219 new, 0 gone"
   },
   "ci-red": {
-    "hash": "0567173957833657",
-    "at": "2026-11-25",
+    "hash": "6f2496ff21f7baf6",
+    "at": "2026-11-26",
     "days": 3,
-    "inputs": "1 schemes' runs on main (gh, read-only) and their minions' chats",
-    "hits": 1,
-    "real": 2,
-    "summary": "1 as before, 0 new, 1 gone"
+    "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",
+    "hits": 6,
+    "real": 9,
+    "summary": "6 as before, 0 new, 3 gone"
   },
   "compactions": {
     "hash": "e28af654e204f3a9",

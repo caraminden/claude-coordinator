@@ -179,7 +179,9 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Fresh eyes (features), a common line, High route included:** one line under the Risk line: `Fresh eyes: <n> found, <n> fixed` with each unfixed one in "Not fixed", and the ready note says it ran. A feature that skipped it says why in the line: `Fresh eyes: skipped, small (2 files, 90 lines)`.
 - **Proofs (a change that fixes named findings):** under the Risk line, `Proofs: <n> of <m> red on main`,
   then the brief's list as the review left it, each test marked with its base-check result. A test the
-  base check didn't show red (`PASSES ON BASE`, `skipped`) counts as `no test`, with its why. The ready
+  base check didn't show red (`PASSES ON BASE`, `skipped`, or one main already has, which it never runs)
+  counts as `no test`, with its why, unless you ran it red on main yourself as `references/ship.md`'s
+  "A test proves it" does. The ready
   note carries the count (`risk medium: tab fixes, proofs 9/13`).
 - **Verifier, when it ran:** `Verifier: <n> found, <n> fixed, <n> wrong` under the Risk line; each wrong one with its reason goes in "Not fixed".
 - **Done lines (features):** when your first reply showed done lines, tick each in the ready note (`done 5/5`) and name any not met, with why, in the report line. Bugs, chores and research have none.

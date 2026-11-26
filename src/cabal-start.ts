@@ -329,7 +329,7 @@ export async function memberAction(app: App, lead: Ticket, action: unknown, mini
     return `Unsealed #${t.number}: it runs now, or once a worker is free.`;
   }
   if (action === 'stop') {
-    const { stopped, ship } = stopMinion(app, t, author);
+    const { stopped, ship } = await stopMinion(app, t, author);
     store.addCabalLog(lead.id, `#${lead.number}`, `Stopped #${t.number}`);
     fillFor(app, t.id);
     return `${stopped ? `Stopped #${t.number}'s turn` : `#${t.number} had no turn running`}; its queued messages are dropped.${ship ? ` ${ship}` : ''}`;

@@ -6,10 +6,10 @@
 //
 // What keeps a preview from acting on the copy is set here, by the live server's code, so it holds
 // even if the branch's own preview mode is wrong: no claude to run, no push subscriptions, no secrets.
-import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { existsSync, rmSync } from 'node:fs';
+import { access, mkdir, readdir, rm } from 'node:fs/promises';
 import { get, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -49,9 +49,13 @@ interface Running {
   lastUsed: number;
 }
 
-function git(args: string[], cwd: string): string | null {
+/** For a checkout, which mustn't hold up the live server's other requests; throws on a failure. */
+const gitAsync = promisify(execFile);
+
+/** Git's trimmed output, or null when it fails. */
+async function git(args: string[], cwd: string): Promise<string | null> {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000 }).trim();
+    return (await gitAsync('git', args, { cwd, encoding: 'utf8', timeout: 15_000 })).stdout.trim();
   } catch {
     return null;
   }
@@ -59,12 +63,9 @@ function git(args: string[], cwd: string): string | null {
 
 const head = (cwd: string) => git(['rev-parse', 'HEAD'], cwd);
 
-/** For a checkout, which mustn't hold up the live server's other requests; throws on a failure. */
-const gitAsync = promisify(execFile);
-
 /** The commit build/<n> points at in a repo, the local branch first, else origin's; null when there is none. */
-export function buildTip(repoDir: string, n: number): string | null {
-  return git(['rev-parse', '--verify', '--quiet', `refs/heads/build/${n}^{commit}`], repoDir) ?? git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/build/${n}^{commit}`], repoDir);
+export async function buildTip(repoDir: string, n: number): Promise<string | null> {
+  return (await git(['rev-parse', '--verify', '--quiet', `refs/heads/build/${n}^{commit}`], repoDir)) ?? git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/build/${n}^{commit}`], repoDir);
 }
 
 const buildKey = (n: number) => `build-${n}`;
@@ -169,6 +170,7 @@ export class Previews {
   /** How long one health check may hang, and how long a stopping preview gets before SIGKILL: tests turn them down. */
   healthMs = 3000;
   killAfterMs = KILL_AFTER_MS;
+  private sweeping = false;
 
   constructor(store: Store, dataDir: string) {
     this.store = store;
@@ -232,7 +234,7 @@ export class Previews {
     if (r) {
       this.running.delete(key);
       const job = end(r.proc, this.killAfterMs)
-        .then(() => rmSync(r.dir, { recursive: true, force: true }))
+        .then(() => rm(r.dir, { recursive: true, force: true }))
         .finally(() => this.stopping.delete(key));
       this.stopping.set(key, job);
     }
@@ -241,13 +243,20 @@ export class Previews {
 
   /** Stop previews nobody has used for idleMs; a page load starts them again. Drop builds whose branch went. */
   async sweep(now = Date.now()) {
-    const idle = [...this.running].filter(([, r]) => now - r.lastUsed > this.idleMs);
-    await Promise.all(idle.map(([key]) => this.halt(key)));
-    const scheme = this.buildScheme();
-    if (!scheme?.repo_dir) return;
-    for (const name of existsSync(this.buildsDir(scheme)) ? readdirSync(this.buildsDir(scheme)) : []) {
-      const n = Number(name);
-      if (!Number.isInteger(n) || n < 1 || !buildTip(scheme.repo_dir, n)) await this.dropBuild(scheme, n, name);
+    // Its git calls wait now: a slow sweep must not overlap the next tick's.
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      const idle = [...this.running].filter(([, r]) => now - r.lastUsed > this.idleMs);
+      await Promise.all(idle.map(([key]) => this.halt(key)));
+      const scheme = this.buildScheme();
+      if (!scheme?.repo_dir) return;
+      for (const name of await readdir(this.buildsDir(scheme)).catch(() => [])) {
+        const n = Number(name);
+        if (!Number.isInteger(n) || n < 1 || !(await buildTip(scheme.repo_dir, n))) await this.dropBuild(scheme, n, name);
+      }
+    } finally {
+      this.sweeping = false;
     }
   }
 
@@ -262,10 +271,16 @@ export class Previews {
     await this.starting.get(buildKey(n))?.catch(() => {});
     await this.halt(buildKey(n));
     const dir = join(this.buildsDir(scheme), name);
-    if (!existsSync(dir)) return;
-    if (scheme.repo_dir) git(['worktree', 'remove', '--force', dir], scheme.repo_dir);
-    rmSync(dir, { recursive: true, force: true });
-    if (scheme.repo_dir) git(['worktree', 'prune'], scheme.repo_dir);
+    if (
+      !(await access(dir).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return;
+    if (scheme.repo_dir) await git(['worktree', 'remove', '--force', dir], scheme.repo_dir);
+    await rm(dir, { recursive: true, force: true });
+    if (scheme.repo_dir) await git(['worktree', 'prune'], scheme.repo_dir);
   }
 
   /** One boot at a time per preview: a page load during a start waits for it. */
@@ -312,7 +327,7 @@ export class Previews {
     const keep = (d: Buffer) => (log = (log + d).slice(-3000));
     proc.stdout!.on('data', keep);
     proc.stderr!.on('data', keep);
-    const r: Running = { proc, port, auth: new Auth(password, secret), dir, head: head(cwd), lastUsed: Date.now() };
+    const r: Running = { proc, port, auth: new Auth(password, secret), dir, head: await head(cwd), lastUsed: Date.now() };
     proc.on('exit', () => {
       if (this.running.get(key) !== r) return;
       this.running.delete(key);
@@ -348,7 +363,7 @@ export class Previews {
     const page = req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''));
     let r = this.running.get(String(ticketId));
     // Only a person's page load starts one; a file token's request reaches a running preview only.
-    if (page && session && (!r || r.head !== head(ticket.cwd!))) r = await this.boot(String(ticketId), ticket.cwd!);
+    if (page && session && (!r || r.head !== (await head(ticket.cwd!)))) r = await this.boot(String(ticketId), ticket.cwd!);
     this.serve(req, res, r, rest, session);
   }
 
@@ -360,7 +375,7 @@ export class Previews {
   async proxyBuild(req: IncomingMessage, res: ServerResponse, n: number, rest: string, session: Session | null) {
     const scheme = this.buildScheme();
     const repo = scheme?.repo_dir;
-    const tip = repo ? buildTip(repo, n) : null;
+    const tip = repo ? await buildTip(repo, n) : null;
     if (!scheme || !repo || !tip) {
       if (scheme) await this.dropBuild(scheme, n);
       throw new PreviewError(404, `There is no build/${n} branch to preview`);

@@ -41,7 +41,7 @@ function setup(bootAt = T0 - 60 * MIN) {
       now: () => clock.now,
       line: () => line,
       jobs: () => jobs,
-      write: (name, text) => {
+      write: async (name, text) => {
         if (crash) throw new Error('the server stopped mid-write');
         files.push({ name, text });
         return `/shared/reports/${name}`;

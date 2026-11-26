@@ -12,6 +12,8 @@
 // trigger, so a two-hour storm makes one timeline, not thirty.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Store } from './db.ts';
 import type { GhGet } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
@@ -591,6 +593,20 @@ export async function readCiRuns(get: GhGet, slug: string, as: GithubEnv, from: 
 
 // ---- The watcher the server runs ----
 
+/** Write a timeline into `dir` as `name`, or `name-2.md` and on when taken: never over an earlier one. Returns the path. */
+export async function writeReport(dir: string, name: string, text: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  for (let i = 1; ; i++) {
+    const file = join(dir, i === 1 ? name : name.replace(/\.md$/, `-${i}.md`));
+    try {
+      await writeFile(file, text, { flag: 'wx' });
+      return file;
+    } catch (err) {
+      if (thrown(err).code !== 'EEXIST') throw err;
+    }
+  }
+}
+
 export interface IncidentDeps {
   store: IncidentStore;
   sources: Sources;
@@ -599,7 +615,7 @@ export interface IncidentDeps {
   /** The CI jobs of Citadel's own scheme that ci-health last read (its `recent`). */
   jobs(): RedJob[];
   /** Write the timeline; the path written, or null with nowhere to put it. */
-  write(name: string, text: string): string | null;
+  write(name: string, text: string): Promise<string | null>;
   /** Wake the Taskmaster with the ask; false when there is no Taskmaster to hear it. */
   tell(text: string): boolean;
   bootAt: number;
@@ -683,7 +699,7 @@ export class Incidents {
       to = Math.min(now, incident.last + TAIL_MS);
     const g = await gather(this.d.store, this.d.sources, from, to);
     const text = render(incident, from, to, g, this.d.sources.dbPath);
-    const file = this.d.write(fileName(incident.from), text);
+    const file = await this.d.write(fileName(incident.from), text);
     if (!file) return null;
     this.d.tell(
       `Incident from ${pacific(incident.from)} to ${pacific(incident.last)}: ${incident.why.join('; ')}. ` +

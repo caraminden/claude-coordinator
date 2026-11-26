@@ -47,7 +47,7 @@ function scheme(name: string) {
     writeFileSync(join(q, i.padStart(10, '0')), [me, got, `ticket/${i}-c`, got === '0' ? 'waiting' : 'waiting for CI', '-', '-', '-', 'order'].join('\n') + '\n');
   }
   const found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
-  const lands = new LandsInFlight({ store, finder: { list: () => [found] } as never, landings: { handoffs: () => ids, get: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
+  const lands = new LandsInFlight({ store, finder: { list: () => [found] } as never, landings: { handoffs: () => ids, look: async () => ({ output: 'queue: next in line\n', code: null }), lastLook: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
   const reader = {
     read: () => {
       const vs = [{ target: { id: found.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }] as unknown as TargetView[];

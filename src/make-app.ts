@@ -194,7 +194,7 @@ export async function adoptApp(app: App, project: Project, caller: Ticket, body:
     throw new HttpError(400, `${body.repo} isn't ${project.name}'s repo (${repo}): adopt_app registers only apps in this scheme's own repo`);
   }
   const where = subdir ? `${subdir}/${MANIFEST}` : MANIFEST;
-  if (!manifestOn(project.repo_dir, subdir ?? '', 'main')) throw new HttpError(404, `No ${where} on main in ${project.name}'s repo: ship it to main first`);
+  if (!(await manifestOn(project.repo_dir, subdir ?? '', 'main'))) throw new HttpError(404, `No ${where} on main in ${project.name}'s repo: ship it to main first`);
   making.names.add(name);
   let port = 0;
   try {

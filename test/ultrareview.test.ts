@@ -176,7 +176,7 @@ test('nobody without a Claude login of their own can start one, and a restart re
   const { ur: next, events: after, settings } = reviews(bin);
   const dir = mkdtempSync(join(root, 'lost-'));
   settings.set('ultrareview_running', [{ ticketId: 7, uid: 1, id: 'old', dir }]);
-  next.recover();
+  await next.recover();
   assert.equal(after[0].kind, 'ultrareview_result');
   assert.equal(after[0].data.ok, false);
   assert.match(after[0].data.text!, /restarted/);
@@ -515,7 +515,7 @@ test('a batch preps one draft PR per area, refuses one over the caps, and surviv
   settings.set('ultrareview_batch', [...(settings.get('ultrareview_batch') as unknown[]), half]);
   const next = reviews(bin, { host: true }, extra);
   for (const [k, v] of settings) next.settings.set(k, v);
-  next.ur.recover();
+  await next.ur.recover();
   const rows = next.ur.rows(7, 1);
   assert.deepEqual(
     rows.find((x) => x.id === a.id),

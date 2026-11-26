@@ -3,8 +3,7 @@
 // read from what it already has, its contraptions and its repo's workflow files on the default branch (read from the
 // scheme's clone, so finding costs no GitHub call). A scheme's citadel-app.json may carry `targets` to rename, hide
 // or relink a found one: [{ "id": "main", "hidden": true }]. src/release-readers.ts reads each kind's releases.
-import { existsSync } from 'node:fs';
-import { open, stat } from 'node:fs/promises';
+import { access, open, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 import type { ContraptionRow, Project, Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
@@ -533,7 +532,24 @@ export class TargetFinder {
   }
 
   private async facts(p: Project, apps: ContraptionRow[]): Promise<SchemeFacts | null> {
-    const base = { project: p, own: this.d.own()?.id === p.id, contraptions: apps, apkFeeds: apps.filter((c) => existsSync(this.d.apkFeed(c.name))).map((c) => c.name), files: await this.files(p) };
+    const base = {
+      project: p,
+      own: this.d.own()?.id === p.id,
+      contraptions: apps,
+      apkFeeds: (
+        await Promise.all(
+          apps.map(async (c) =>
+            (await access(this.d.apkFeed(c.name)).then(
+              () => true,
+              () => false,
+            ))
+              ? c.name
+              : null,
+          ),
+        )
+      ).filter((n): n is string => n !== null),
+      files: await this.files(p),
+    };
     if (!p.repo_dir) return apps.length || base.files.length ? { ...base, branch: 'main', workflows: [], overrides: [] } : null;
     const dir = p.repo_dir;
     const branch = await defaultBranch(dir);

@@ -11,7 +11,7 @@ const BAD = 'b'.repeat(40);
 const DEPLOY = { DEPLOY_LIVE: 'l', DEPLOY_SOURCE: 's', DEPLOY_URL: 'u', DEPLOY_DB: 'd', DEPLOY_SERVICE: 'v', DEPLOY_UNIT: 'n' };
 const KEY = { GH_TOKEN: 'x' };
 
-type Job = ReturnType<RollbackStarterDeps['jobs']['state']>;
+type Job = Awaited<ReturnType<RollbackStarterDeps['jobs']['look']>>;
 function world(over: Record<string, unknown> = {}) {
   const calls: unknown[][] = [];
   const dir = '/data/run/rollback';
@@ -38,7 +38,7 @@ function world(over: Record<string, unknown> = {}) {
     ciPackages: { greenBuild: (id: number, t: string) => (id === 3 && t === 'ci:kit' ? { run: 7, sha: TO, workflow: 'w' } : null) },
     apk: { published: (id: number, t: string) => (id === 3 && t === 'apk:peek' ? 41 : null), rollingBack: (id: number, t: string) => id === 3 && t === 'apk:peek', started: call('started') },
     services: { running: (n: string) => (s.runningApps.includes(n) ? {} : null) },
-    jobs: { state: (d: string, tail: number) => (calls.push(['state', d, tail]), s.job), start: call('job') },
+    jobs: { look: async (d: string, tail: number) => (calls.push(['look', d, tail]), s.job), start: call('job') },
     dir,
     clear: call('clear'),
     copy: false,
@@ -170,22 +170,41 @@ test('a copy rolls Citadel back only when it was given a checkout', () => {
   assert.equal(yes.named('job').length, 1);
 });
 
-test("Citadel's roll back runs until its job ends", () => {
+const settle = () => new Promise((r) => setImmediate(r));
+/** running() as the poll asks it: the job is read off the server's thread (#2135), so an ask answers from the read the one before started. */
+async function asked(w: ReturnType<typeof world>, t: TV): Promise<boolean> {
+  await settle(); // a read already under way ends
+  w.r.running(t); // starts one of the job as it is now
+  await settle();
+  return w.r.running(t);
+}
+
+test("Citadel's roll back runs until its job ends", async () => {
   const w = world();
   const t = tv(CITADEL_TARGET, CITADEL_TARGET);
-  assert.equal(w.r.running(t), false);
+  assert.equal(await asked(w, t), false);
   assert.equal(w.named('clear').length, 0);
   w.s.job = { code: null, output: '' } as unknown as Job;
-  assert.equal(w.r.running(t), true);
+  assert.equal(await asked(w, t), true);
   assert.equal(w.named('clear').length, 0);
-  assert.deepEqual(w.named('state')[0], ['state', w.dir, 2000]);
+  assert.deepEqual(w.named('look')[0], ['look', w.dir, 2000]);
   assert.equal(w.named('failed').length, 0);
 });
 
-test('a failed job is reported with its last lines and cleared', () => {
+test("Citadel's roll back counts as running from its start, even over a read begun before it (#2135)", async () => {
+  const w = world();
+  const t = tv(CITADEL_TARGET, CITADEL_TARGET);
+  assert.equal(w.r.running(t), false); // a read starts, and finds no job
+  await w.r.starters[CITADEL_TARGET](t, TO, 'Cara', 1);
+  assert.equal(w.r.running(t), true, 'running at once, before any read');
+  await settle();
+  assert.equal(w.r.running(t), true, "the read from before the start doesn't put back its empty answer");
+});
+
+test('a failed job is reported with its last lines and cleared', async () => {
   const w = world();
   w.s.job = ended(1, 'one\ntwo\nthree\nfour\n');
-  assert.equal(w.r.running(tv(CITADEL_TARGET, CITADEL_TARGET)), false);
+  assert.equal(await asked(w, tv(CITADEL_TARGET, CITADEL_TARGET)), false);
   const [, ...a] = w.named('failed')[0];
   assert.deepEqual(a.slice(0, 3), [3, CITADEL_TARGET, TO]);
   assert.match(String(a[3]), /two three four$/);
@@ -193,14 +212,14 @@ test('a failed job is reported with its last lines and cleared', () => {
   assert.equal(w.named('clear').length, 1);
 });
 
-test('a failed job that said nothing is reported by its exit code', () => {
+test('a failed job that said nothing is reported by its exit code', async () => {
   const w = world();
   w.s.job = ended(7);
-  w.r.running(tv(CITADEL_TARGET, CITADEL_TARGET));
+  await asked(w, tv(CITADEL_TARGET, CITADEL_TARGET));
   assert.match(String(w.named('failed')[0][4]), /\b7$/);
 });
 
-test('a job that went live, exited 0, or has no pin or scheme is cleared without a report', () => {
+test('a job that went live, exited 0, or has no pin or scheme is cleared without a report', async () => {
   const cases: ((w: ReturnType<typeof world>) => TV)[] = [
     (w) => ((w.s.job = ended(1)), tv(CITADEL_TARGET, CITADEL_TARGET, { version: TO })),
     (w) => ((w.s.job = ended(0)), tv(CITADEL_TARGET, CITADEL_TARGET)),
@@ -210,8 +229,12 @@ test('a job that went live, exited 0, or has no pin or scheme is cleared without
   for (const set of cases) {
     const w = world();
     const t = set(w);
-    assert.equal(w.r.running(t), false);
+    assert.equal(await asked(w, t), false);
     assert.equal(w.named('failed').length, 0);
+    assert.equal(w.named('clear').length, 1);
+    // Cleared (its folder gone): told once, never again by the read the clearing ask began just before it cleared.
+    w.s.job = null;
+    assert.equal(await asked(w, t), false);
     assert.equal(w.named('clear').length, 1);
   }
 });

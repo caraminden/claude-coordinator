@@ -56,8 +56,8 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
   const s = setup();
   const before = existsSync(calls) ? readFileSync(calls, 'utf8') : '';
   const first = new Landings(s.data, () => true);
-  assert.deepEqual(first.start(1, s.cwd, s.env), { output: '', code: null });
-  await until('land.sh starts', () => first.get(1)!.output.includes('token:'));
+  assert.deepEqual(await first.start(1, s.cwd, s.env), { output: '', code: null });
+  await until('land.sh starts', async () => (await first.look(1))!.output.includes('token:'));
   assert.equal(first.running(), 0, 'a restart would leave it running, so it does not hold one up');
   const call = readFileSync(calls, 'utf8').slice(before.length);
   assert.match(call, /--user --collect --quiet --unit=citadel-land-[0-9a-f]{8}-1-\d+ --slice=citadel-builds\.slice -p UMask=0077 /);
@@ -66,11 +66,11 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
 
   // The server restarts: a fresh Landings on the same data dir finds it still running, then its result.
   const next = new Landings(s.data, () => true);
-  assert.equal(next.get(1)!.code, null);
-  assert.equal(next.start(1, s.cwd, s.env).code, null, 'a second land call while it runs joins it');
+  assert.equal((await next.look(1))!.code, null);
+  assert.equal((await next.start(1, s.cwd, s.env)).code, null, 'a second land call while it runs joins it');
   s.go();
-  const done = await until('land.sh ends', () => {
-    const r = next.get(1)!;
+  const done = await until('land.sh ends', async () => {
+    const r = (await next.look(1))!;
     return r.code === null ? null : r;
   });
   assert.equal(done.code, 3);
@@ -87,17 +87,17 @@ test("when systemd-run fails, the landing runs as the server's child and counts 
   const count = fallbacks.count;
   try {
     const l = new Landings(s.data, () => true);
-    l.start(2, s.cwd, s.env);
+    await l.start(2, s.cwd, s.env);
     await until('it falls back to a child', () => l.running() === 1);
     s.go();
     await until('it ends', () => l.running() === 0);
-    assert.equal(l.get(2)!.code, 3);
+    assert.equal((await l.look(2))!.code, 3);
     // Loud, not just a log line (#519): counted for /api/health, and an alert naming the job and the error.
     assert.equal(fallbacks.count, count + 1);
     assert.deepEqual(alerts, [{ job: 'tools/land.sh for minion 2', error: 'Failed to connect to bus', ticketId: 2 }]);
     // Another landing with the same cause counts, but raises no second alert.
     const t = setup();
-    l.start(5, t.cwd, t.env);
+    await l.start(5, t.cwd, t.env);
     await until('it falls back too', () => l.running() === 1);
     t.go();
     await until('it ends', () => l.running() === 0);
@@ -111,17 +111,17 @@ test("when systemd-run fails, the landing runs as the server's child and counts 
 test('a landing a restart cut off reads as ended without a code, not as running forever', async () => {
   const s = setup();
   const l = new Landings(s.data); // no units: the server's child
-  l.start(3, s.cwd, s.env);
+  await l.start(3, s.cwd, s.env);
   assert.equal(l.running(), 1);
-  await until('land.sh starts', () => l.get(3)!.output.includes('token:'));
+  await until('land.sh starts', async () => (await l.look(3))!.output.includes('token:'));
   process.kill(Number(readFileSync(join(s.data, 'run', 'landings', '3', 'pid'), 'utf8')), 'SIGKILL');
   s.go();
   // The orphaned land.sh ends before its folder goes: with `go` removed first, it waits out its 30 s.
-  await until('the orphaned land.sh ends', () => l.get(3)!.output.includes('env stays out'));
+  await until('the orphaned land.sh ends', async () => (await l.look(3))!.output.includes('env stays out'));
   await until('the child is gone', () => l.running() === 0);
   const next = new Landings(s.data);
-  const r = next.get(3)!;
+  const r = (await next.look(3))!;
   assert.equal(r.code, 1);
   assert.ok(r.output.endsWith(NO_CODE), r.output);
-  assert.equal(next.get(4), null, 'a minion that never landed has nothing');
+  assert.equal(await next.look(4), null, 'a minion that never landed has nothing');
 });

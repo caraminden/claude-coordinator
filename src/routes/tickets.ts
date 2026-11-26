@@ -322,12 +322,12 @@ function movedInto(app: App, ticket: Ticket | TicketView, body: Record<string, u
 }
 
 /** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
-export function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
+export async function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
   const stopped = app.runner.stop(ticket.id);
   // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
   const followed = app.machines.minionStopped(ticket.id);
   // Its running ship stops too (#1168).
-  const ship = ticket.kind === 'ticket' ? stopMinionShip(app, ticket.id, by) : null;
+  const ship = ticket.kind === 'ticket' ? await stopMinionShip(app, ticket.id, by) : null;
   return { stopped: stopped || followed > 0, ship };
 }
 
@@ -1198,7 +1198,7 @@ export const ticketRoutes: Route[] = [
       // A budget card's Stop (#1672): stopped as the stop button does. The answer is only recorded (it settles the card):
       // sent, it would start the very turn Stop is for.
       if (data.budget && answers[0]?.selected[0] === CARD_STOP) {
-        stopMinion(app, ticket, session.name);
+        await stopMinion(app, ticket, session.name);
         runner.recordAnswer(id, session.name, `My answer to your budget card: ${CARD_STOP}. I stopped your turn.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
@@ -1361,7 +1361,7 @@ export const ticketRoutes: Route[] = [
     who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, ticket, session } = ctx;
-      return json(res, 200, stopMinion(app, ticket, session?.agent !== undefined ? 'the Taskmaster' : (session?.name ?? 'a member')));
+      return json(res, 200, await stopMinion(app, ticket, session?.agent !== undefined ? 'the Taskmaster' : (session?.name ?? 'a member')));
     },
   },
   // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.
@@ -1657,7 +1657,7 @@ export const ticketRoutes: Route[] = [
       if (unjudged) throw new HttpError(400, unjudged);
       const unread = reviewRefusal(app.store, ticket, args);
       if (unread) throw new HttpError(400, unread);
-      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, env, args));
+      return json(res, 202, await app.landings.start(ticket.id, ticket.cwd, env, args));
     },
   },
   {
@@ -1732,7 +1732,7 @@ export const ticketRoutes: Route[] = [
       // armed (#2046): the server ships it when the lane is its own, or it may ship beside the holder.
       const armed = (await triggerHandoff(app, mine, body)) ?? (await laneHandoff(app, mine, body));
       if (armed) return json(res, 202, { ok: true, armed });
-      if (!startHandoff(app, mine, ready, { kind: 'minion' })) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
+      if (!(await startHandoff(app, mine, ready, { kind: 'minion' }))) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },
   },
@@ -1741,8 +1741,8 @@ export const ticketRoutes: Route[] = [
     path: '/api/tickets/:ticket/land',
     who: ['minion'],
     refuse: 'Only the minion itself can ship its branch',
-    handler: ({ res, app, ticket }) => {
-      const run = app.landings.get(ticket.id);
+    handler: async ({ res, app, ticket }) => {
+      const run = await app.landings.look(ticket.id);
       if (!run) throw new HttpError(404, 'Nothing has started shipping for this minion');
       return json(res, 200, run);
     },

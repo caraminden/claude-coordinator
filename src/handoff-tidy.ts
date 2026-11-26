@@ -1,12 +1,18 @@
 // Handoffs tidy themselves (#1371): once the minion started from a handoff has closed, the file moves from
 // handoffs/ to handoffs/shipped/, so the folder holds only briefs that could still be started. Files only move,
 // never get deleted. Every scheme's shared folder gets this; the one-time sweep of a backlog is tools/handoffs-sweep.ts.
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs';
+import { access, mkdir, readFile, rename, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { findBriefs } from '../public/briefs.js';
 import type { Store } from './db.ts';
 import { handoffIn } from './ideas.ts';
 import { projectSharedDir } from './workspace.ts';
+
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 export const SHIPPED = 'handoffs/shipped';
 export const NOT_PICKED = 'handoffs/not-picked';
@@ -31,7 +37,7 @@ export interface Keep {
  * Why `rel` must stay put, or null when it may move: pinned, named by an open minion's brief or by any of
  * `extraText` (the Taskmaster's memory), or a file with several briefs of which some are still unstarted.
  */
-export function whyKeep(store: Store, projectId: number, shared: string, rel: string, extraText: string[] = []): string | null {
+export async function whyKeep(store: Store, projectId: number, shared: string, rel: string, extraText: string[] = []): Promise<string | null> {
   if (store.sharedPins(projectId).some((p) => p.path === rel || p.path === join(shared, rel))) return 'pinned';
   const open = store.db
     .prepare(`SELECT t.number, (SELECT data FROM events e WHERE e.ticket_id = t.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1) AS first
@@ -41,7 +47,7 @@ export function whyKeep(store: Store, projectId: number, shared: string, rel: st
   if (extraText.some((t) => t.includes(rel) || t.includes(basename(rel)))) return 'named in memory';
   let src = '';
   try {
-    src = readFileSync(join(shared, rel), 'utf8');
+    src = await readFile(join(shared, rel), 'utf8');
   } catch {
     return 'unreadable';
   }
@@ -53,29 +59,29 @@ export function whyKeep(store: Store, projectId: number, shared: string, rel: st
 }
 
 /** Move one file under `dest` (handoffs/shipped or handoffs/not-picked), keeping its name; a clash gets the mtime day. */
-export function moveFile(shared: string, rel: string, dest: string): string {
-  mkdirSync(join(shared, dest), { recursive: true });
+export async function moveFile(shared: string, rel: string, dest: string): Promise<string> {
+  await mkdir(join(shared, dest), { recursive: true });
   let to = `${dest}/${basename(rel)}`;
   // A clash never overwrites: the mtime day, then a counter, in front of the name.
-  const day = new Date(statSync(join(shared, rel)).mtimeMs).toISOString().slice(0, 10);
-  for (let n = 0; existsSync(join(shared, to)); n++) to = `${dest}/${day}${n ? `-${n}` : ''}-${basename(rel)}`;
-  renameSync(join(shared, rel), join(shared, to));
+  const day = new Date((await stat(join(shared, rel))).mtimeMs).toISOString().slice(0, 10);
+  for (let n = 0; await exists(join(shared, to)); n++) to = `${dest}/${day}${n ? `-${n}` : ''}-${basename(rel)}`;
+  await rename(join(shared, rel), join(shared, to));
   return to;
 }
 
 /** A closed minion's brief named a handoff: file it as shipped unless something says it stays. Returns where it went. */
-export function tidyForClosed(store: Store, dataDir: string, projectId: number, briefText: string, extraText: string[] = []): string | null {
+export async function tidyForClosed(store: Store, dataDir: string, projectId: number, briefText: string, extraText: string[] = []): Promise<string | null> {
   const shared = projectSharedDir(dataDir, projectId);
   const rel = handoffIn(briefText, shared);
-  if (!rel || !isLoose(rel) || !existsSync(join(shared, rel))) return null;
-  if (whyKeep(store, projectId, shared, rel, extraText)) return null;
+  if (!rel || !isLoose(rel) || !(await exists(join(shared, rel)))) return null;
+  if (await whyKeep(store, projectId, shared, rel, extraText)) return null;
   let text = '';
   try {
-    text = readFileSync(join(shared, rel), 'utf8');
+    text = await readFile(join(shared, rel), 'utf8');
   } catch {
     return null;
   }
-  const to = moveFile(shared, rel, markedNotPicked(text) ? NOT_PICKED : SHIPPED);
+  const to = await moveFile(shared, rel, markedNotPicked(text) ? NOT_PICKED : SHIPPED);
   relocate(store, projectId, shared, rel, to);
   return to;
 }
@@ -111,9 +117,8 @@ export function relocate(store: Store, projectId: number, shared: string, from: 
  * follow it. `has` answers whether a handoff is at a path relative to the shared folder; the minute's pass hands it the
  * listing syncHandoffs just made, so the check costs no file call on the server's thread (#1463).
  */
-export function reconcileMoved(store: Store, dataDir: string, projectId: number, has?: (rel: string) => boolean) {
+export function reconcileMoved(store: Store, dataDir: string, projectId: number, exists: (rel: string) => boolean) {
   const shared = projectSharedDir(dataDir, projectId);
-  const exists = has ?? ((rel: string) => existsSync(join(shared, rel)));
   const where = (rel: string) => [SHIPPED, NOT_PICKED].map((d) => `${d}/${basename(rel)}`).find(exists);
   const gone = (rel: string) => isLoose(rel) && !exists(rel);
   const rels = new Set<string>();

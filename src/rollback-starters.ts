@@ -4,7 +4,7 @@ import { rollBackApk, type RollbackApk } from './apk-release.ts';
 import { ServiceError } from './app-services.ts';
 import type { ContraptionRow, Project } from './db.ts';
 import { HttpError } from './http.ts';
-import type { HostJobs } from './host-job.ts';
+import type { HostJobs, JobState } from './host-job.ts';
 import type { LastGreen } from './last-green.ts';
 import type { ApkReader, CiPackageReader } from './release-readers.ts';
 import { ROLLBACK_BRANCH } from './release-readers.ts';
@@ -21,7 +21,7 @@ export interface RollbackStarterDeps {
   ciPackages: Pick<CiPackageReader, 'greenBuild'>;
   apk: Pick<ApkReader, 'published' | 'rollingBack' | 'started'>;
   services: { running(name: string): unknown };
-  jobs: Pick<HostJobs, 'state' | 'start'>;
+  jobs: Pick<HostJobs, 'look' | 'start'>;
   /** Where Citadel's own roll back keeps its job. */
   dir: string;
   /** Delete that folder, once its job has ended. */
@@ -47,14 +47,36 @@ export interface RollbackStarterDeps {
 const deployEnv = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter(([k, v]) => /^DEPLOY_(LIVE|SOURCE|URL|DB|SERVICE|UNIT)$/.test(k) && v)) as Record<string, string>;
 
 export function rollbackStarters(d: RollbackStarterDeps): Required<Pick<RollbackDeps, 'follows' | 'published' | 'running' | 'starters'>> {
+  // Citadel's roll back job as last read: Releases asks on every read (each 2 s), so it is read off the server's thread
+  // (#2135) and each ask answers from the last read while starting the next. A start or a clear moves `gen` on, so a
+  // read begun before it never puts the older answer back (a cleared job read again would be told twice).
+  let seen: JobState | null = null;
+  let gen = 0;
+  let reading = false;
+  function readJob() {
+    if (reading) return;
+    reading = true;
+    const at = gen;
+    void d.jobs
+      .look(d.dir, 2000)
+      .then((job) => {
+        if (at === gen) seen = job;
+      })
+      .catch(() => {})
+      .finally(() => (reading = false));
+  }
+
   /** Whether Citadel's own roll back still runs; once its job ended, say why if it didn't go live, and clear it for the next one. */
   function citadelRollingBack(current: string | null): boolean {
-    const job = d.jobs.state(d.dir, 2000);
+    readJob();
+    const job = seen;
     if (!job) return false;
     if (job.code === null) return true;
     const p = d.ownScheme();
     const pin = p && d.lastGreen.pinned(p.id, CITADEL_TARGET);
     if (p && pin && job.code !== 0 && current !== pin.sha) d.failed(p.id, CITADEL_TARGET, pin.sha, `tools/deploy.sh --to said: ${job.output.trim().split('\n').slice(-3).join(' ') || `exit ${job.code}`}`);
+    gen++;
+    seen = null;
     d.clear();
     return false;
   }
@@ -111,6 +133,8 @@ export function rollbackStarters(d: RollbackStarterDeps): Required<Pick<Rollback
           description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`,
           ticketId: 0,
         });
+        gen++;
+        seen = { output: '', code: null };
       },
     },
   };

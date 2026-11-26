@@ -60,7 +60,7 @@ export interface AutoDeployDeps {
   /** Targets a Roll back to last green pinned (#1016): auto-deploy leaves them be, a person's deploy lets go, a minion's is refused. */
   held?: Pick<LastGreen, 'pinned' | 'unpin'>;
   /** Whether a ship is waiting in the scheme's line or landing (a hand-off running), so more may be coming. */
-  shipping?: (projectId: number) => boolean;
+  shipping?: (projectId: number) => boolean | Promise<boolean>;
   now?: () => number;
 }
 
@@ -198,7 +198,7 @@ export class AutoDeploy {
         if (!head) continue;
         waiting.add(key);
         const m = this.moved.get(key);
-        if (!shipping.has(t.projectId)) shipping.set(t.projectId, !!this.d.shipping?.(t.projectId));
+        if (!shipping.has(t.projectId)) shipping.set(t.projectId, !!(await this.d.shipping?.(t.projectId)));
         if (!m || m.head !== head) {
           // A head that was tried (failed, rolled back, pinned) spent its cap: the next one's counts from its own move.
           this.moved.set(key, { head, at: now, first: m && this.saved().tried[key] !== m.head ? m.first : now });

@@ -7,7 +7,7 @@
 // in the scheme's known-red ledger until it passes on main: later lands and runs that fail only on those ids blame
 // nobody, and land.sh lets them through (LAND_KNOWN_RED).
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { access, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { moveAside, type HostJobs } from './host-job.ts';
@@ -61,7 +61,7 @@ export interface FastModeDeps {
   schemes: () => { id: number; repo: string }[];
   get: (key: string) => FastState | undefined;
   set: (key: string, value: FastState) => void;
-  jobs: Pick<HostJobs, 'start' | 'state'>;
+  jobs: Pick<HostJobs, 'start' | 'look'>;
   /** A scheme's folder for the run: its worktree and its job. */
   dir: (projectId: number) => string;
   /** The run's environment: as a landing's, for the minion that landed the head (or the Taskmaster). */
@@ -206,7 +206,7 @@ export class FastMode {
       this.d.set(key(projectId), { ...s, landed: now.landed });
     };
     if (s.running) {
-      const job = this.d.jobs.state(jobDir, 20_000);
+      const job = await this.d.jobs.look(jobDir, 20_000);
       if (job && job.code === null) {
         this.escalate(projectId, s);
         return save();
@@ -226,12 +226,17 @@ export class FastMode {
 
   private async start(projectId: number, repo: string, s: FastState, sha: string) {
     const wt = join(this.d.dir(projectId), 'wt');
-    mkdirSync(this.d.dir(projectId), { recursive: true, mode: 0o700 });
+    await mkdir(this.d.dir(projectId), { recursive: true, mode: 0o700 });
+    const linked = () =>
+      access(join(wt, '.git')).then(
+        () => true,
+        () => false,
+      );
     // Its own detached worktree, kept between runs so what the check installs (node_modules, a venv) stays.
     // A folder whose .git file points at an entry the repo no longer has (a prune that couldn't see the folder, as a
     // container turn can't) is no worktree: start it over, losing only what the check installed in it.
     if (
-      existsSync(join(wt, '.git')) &&
+      (await linked()) &&
       !(await this.git(wt, 'rev-parse', '--git-dir').then(
         () => true,
         () => false,
@@ -240,7 +245,7 @@ export class FastMode {
       moveAside(wt); // off the server's thread (a worktree with its installs is big), and never left half deleted by a restart (#1734)
       console.log(`Fast mode for scheme ${projectId}: its worktree had lost its git link; rebuilding it.`);
     }
-    if (!existsSync(join(wt, '.git'))) {
+    if (!(await linked())) {
       await this.git(repo, 'worktree', 'prune');
       // Locked, so no `git worktree prune` from anywhere else drops it again.
       await this.git(repo, 'worktree', 'add', '-q', '--detach', '--lock', '--reason', 'Citadel fast mode', wt, sha);

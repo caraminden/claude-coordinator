@@ -561,7 +561,7 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
 /** Where a claim's holder is (#1334), and how far along the bar: its plan's steps fill Working; Reviewing and Shipping sit near the end. */
 function holderStage(app: App, t: Ticket | undefined): { stage: 'working' | 'reviewing' | 'shipping' | null; progress: number; step: { n: number; of: number; done: number } | null } {
   if (!t || t.kind === 'coordinator') return { stage: null, progress: 0, step: null };
-  if (t.state === 'pending-deploy' || app.landings.get(t.id)?.code === null) return { stage: 'shipping', progress: 0.93, step: null };
+  if (t.state === 'pending-deploy' || app.landings.lastLook(t.id)?.code === null) return { stage: 'shipping', progress: 0.93, step: null };
   const step = t.status === 'closed' ? null : app.runner.progressOf(t).step;
   if (step?.label && /review/i.test(step.label) && step.done < step.of) return { stage: 'reviewing', progress: 0.78, step };
   return { stage: 'working', progress: step ? 0.6 * (step.done / step.of) : 0, step: step && { n: step.n, of: step.of, done: step.done } };

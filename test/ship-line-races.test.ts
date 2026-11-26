@@ -61,7 +61,7 @@ function line(waiting: number, held = false) {
   };
   for (let seq = 1; seq <= waiting + 1; seq++) join1(seq);
   const found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
-  const lands = new LandsInFlight({ store, finder: { list: () => [found] } as never, landings: { handoffs: () => [...ids.values()], get: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
+  const lands = new LandsInFlight({ store, finder: { list: () => [found] } as never, landings: { handoffs: () => [...ids.values()], look: async () => ({ output: 'queue: next in line\n', code: null }), lastLook: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
   const reader = {
     read: () => {
       const vs = [{ target: { id: found.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }] as unknown as TargetView[];
@@ -392,8 +392,8 @@ for (const c of reports)
       const s = handoff();
       s.script(`printf '%b' ${JSON.stringify(c.out)}\nexit ${c.code}\n`);
       const first = s.server(cut);
-      assert.ok(first.landings.handOff(1, s.cwd, s.env, c.args ?? [], { ...H, ...c.h }));
-      await until('land.sh ends', () => first.landings.get(1)?.code !== null);
+      assert.ok(await first.landings.handOff(1, s.cwd, s.env, c.args ?? [], { ...H, ...c.h }));
+      await until('land.sh ends', async () => (await first.landings.look(1))?.code !== null);
       await first.handoffs.poll();
       const second = s.server();
       await second.handoffs.poll();
@@ -409,12 +409,12 @@ test('two hand-offs for a minion at once: one ships, and the other is told one a
   const s = handoff();
   s.script('echo ran >>ran\nuntil [ -e go ]; do read -rt 0.05 <> <(:) || :; done\n');
   const { landings } = s.server();
-  assert.deepEqual([landings.handOff(1, s.cwd, s.env, [], { ...H, summary: 'first' }), landings.handOff(1, s.cwd, s.env, [], { ...H, summary: 'second' })], [true, false]);
+  assert.deepEqual(await Promise.all([landings.handOff(1, s.cwd, s.env, [], { ...H, summary: 'first' }), landings.handOff(1, s.cwd, s.env, [], { ...H, summary: 'second' })]), [true, false]);
   const next = s.server().landings;
-  assert.equal(next.handOff(1, s.cwd, s.env, [], { ...H, summary: 'third' }), false, 'nor does the next server take one while it runs');
+  assert.equal(await next.handOff(1, s.cwd, s.env, [], { ...H, summary: 'third' }), false, 'nor does the next server take one while it runs');
   writeFileSync(join(s.cwd, 'go'), '');
-  await until('land.sh ends', () => next.get(1)?.code !== null);
-  assert.equal(next.handOff(1, s.cwd, s.env, [], { ...H, summary: 'fourth' }), false, 'nor once it ended and is not yet reported');
+  await until('land.sh ends', async () => (await next.look(1))?.code !== null);
+  assert.equal(await next.handOff(1, s.cwd, s.env, [], { ...H, summary: 'fourth' }), false, 'nor once it ended and is not yet reported');
   assert.equal((await next.readHandoff(1))!.summary, 'first');
   assert.equal(readFileSync(join(s.cwd, 'ran'), 'utf8'), 'ran\n');
 });
@@ -486,11 +486,11 @@ for (const half of [false, true])
     s.script(`echo ran >>ran\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
     killedAt(s, half);
     const next = s.server();
-    const started = !!next.landings.get(1);
-    if (started) await until('land.sh ends', () => next.landings.get(1)!.code !== null);
+    const started = !!(await next.landings.look(1));
+    if (started) await until('land.sh ends', async () => (await next.landings.look(1))!.code !== null);
     await next.handoffs.poll();
     if (started && existsSync(join(s.cwd, 'ran'))) assert.ok(s.did.includes('closed'), `it shipped, so the minion hears: ${s.did.join(', ') || 'nothing'}`);
-    else assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H));
+    else assert.ok(await next.landings.handOff(1, s.cwd, s.env, [], H));
   });
 
 for (const when of ['before', 'after'])
@@ -525,6 +525,6 @@ for (const when of ['before', 'after'])
       s.did.some((d) => d.startsWith('message: ')),
       `the minion hears: ${s.did.join(', ') || 'nothing'}`,
     );
-    assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H), 'and can hand off again');
-    await until('land.sh ends', () => next.landings.get(1)!.code !== null);
+    assert.ok(await next.landings.handOff(1, s.cwd, s.env, [], H), 'and can hand off again');
+    await until('land.sh ends', async () => (await next.landings.look(1))!.code !== null);
   });

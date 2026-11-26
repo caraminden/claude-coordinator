@@ -23,7 +23,7 @@ import { startCard, startHoldKey, startNote } from '../src/minion-budget.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';
 import { memoryFolders, readFolder } from '../src/memory-files.ts';
 import { checkChanges, countLine } from '../src/memory-curator.ts';
-import { templateBlobs } from '../src/kit-sync.ts';
+import { KIT_FILES } from '../src/kit-sync.ts';
 import { addMention } from '../src/mentions.ts';
 import { heldPlan, settingsOverlaps } from '../src/instructions-save.ts';
 import { lendAfter, lendLines, type LendChange } from '../src/machine-lend.ts';
@@ -1963,7 +1963,7 @@ mock.boards('#takes', { boards: [
       scheme('Red', "CHECK='true'\nSMOKE_CMD='echo the smoke test failed >&2; exit 3'\n", bare);
       scheme('Elsewhere', "CHECK='true'\nSMOKE_CMD='true'\n", () => 'https://github.com/citadel-kit-sync-seed/no-such-repo.git');
       // The last look saw the templates as they were before the newest land.sh change: the next look starts a round.
-      c.store.setSetting('kit-sync', { blobs: templateBlobs(kit, old) });
+      c.store.setSetting('kit-sync', { blobs: Object.fromEntries(KIT_FILES.map((f) => [f.template, git(kit, 'ls-tree', old, '--', f.template).split(/\s/)[2] || null])) });
       return `#/p/${c.project.id}`;
     },
   },

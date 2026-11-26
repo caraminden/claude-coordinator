@@ -30,26 +30,26 @@ function setup() {
   return { dir, store, project, shared, file, minion };
 }
 
-test('a closed minion files its handoff as shipped, a not-picked one aside', () => {
+test('a closed minion files its handoff as shipped, a not-picked one aside', async () => {
   const { dir, store, project, shared, file } = setup();
   file('a.md');
   file('b.md', '**Not picked (2026-11-12): do not start.**\nx');
-  assert.equal(tidyForClosed(store, dir, project, `Your brief is ${shared}/handoffs/a.md`), 'handoffs/shipped/a.md');
-  assert.equal(tidyForClosed(store, dir, project, 'see handoffs/b.md'), 'handoffs/not-picked/b.md');
+  assert.equal(await tidyForClosed(store, dir, project, `Your brief is ${shared}/handoffs/a.md`), 'handoffs/shipped/a.md');
+  assert.equal(await tidyForClosed(store, dir, project, 'see handoffs/b.md'), 'handoffs/not-picked/b.md');
   assert.ok(existsSync(join(shared, 'handoffs/shipped/a.md')) && !existsSync(join(shared, 'handoffs/a.md')));
   assert.equal(markedNotPicked('this was not picked by Josh'), false);
 });
 
-test('pinned, open-named and part-started files stay', () => {
+test('pinned, open-named and part-started files stay', async () => {
   const { dir, store, project, shared, file, minion } = setup();
   file('pin.md');
   file('open.md');
   file('multi.md', '## Brief A: one\nx\n## Brief B: two\ny');
   store.setSharedPin(project, 'handoffs/pin.md', 'Cara');
   minion('open one', 'start from handoffs/open.md');
-  assert.equal(tidyForClosed(store, dir, project, 'handoffs/pin.md'), null);
-  assert.equal(tidyForClosed(store, dir, project, 'handoffs/open.md'), null);
-  assert.equal(tidyForClosed(store, dir, project, 'handoffs/multi.md'), null);
+  assert.equal(await tidyForClosed(store, dir, project, 'handoffs/pin.md'), null);
+  assert.equal(await tidyForClosed(store, dir, project, 'handoffs/open.md'), null);
+  assert.equal(await tidyForClosed(store, dir, project, 'handoffs/multi.md'), null);
   assert.ok(existsSync(join(shared, 'handoffs/pin.md')));
 });
 
@@ -94,11 +94,11 @@ test('a name clash in shipped/ never overwrites, and only a top line marks not p
   const { shared, file } = setup();
   const { moveFile } = await import('../src/handoff-tidy.ts');
   file('x.md', 'one');
-  moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
+  await moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
   file('x.md', 'two');
-  const a = moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
+  const a = await moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
   file('x.md', 'three');
-  const b = moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
+  const b = await moveFile(shared, 'handoffs/x.md', 'handoffs/shipped');
   assert.notEqual(a, b);
   assert.equal(markedNotPicked('# H\nGoal\n\n1\n2\n3\n4\n- Not picked: option B'), false);
 });
@@ -107,10 +107,10 @@ test('a start naming a moved handoff makes no second ideas row, and reconcile do
   const { dir, store, project, shared, file, minion } = setup();
   file('x.md', '# Handoff X\nDo it.');
   await store.ideas.sync(project, shared);
-  tidyForClosed(store, dir, project, 'handoffs/x.md');
+  await tidyForClosed(store, dir, project, 'handoffs/x.md');
   const t = minion('x', `Your brief is ${shared}/handoffs/x.md`);
   await store.ideas.sync(project, shared);
-  reconcileMoved(store, dir, project);
+  reconcileMoved(store, dir, project, (rel) => existsSync(join(shared, rel)));
   await store.ideas.sync(project, shared);
   const rows = store.db.prepare('SELECT card, handoff, ticket_id FROM ideas WHERE project_id = ?').all(project) as { card: string; handoff: string; ticket_id: number }[];
   assert.equal(rows.length, 1, JSON.stringify(rows));
@@ -130,7 +130,7 @@ test('relocate combines a loose row with its shipped twin, the twin gains what o
   }
   rmSync(join(shared, 'handoffs/a.md'));
   rmSync(join(shared, 'handoffs/b.md'));
-  reconcileMoved(store, dir, project);
+  reconcileMoved(store, dir, project, (rel) => existsSync(join(shared, rel)));
   const rows = store.db.prepare('SELECT card, pick, decided_by FROM ideas WHERE project_id = ? ORDER BY card').all(project) as { card: string; pick: string; decided_by: string }[];
   assert.deepEqual(
     rows.map((r) => [r.card, r.pick, r.decided_by]),

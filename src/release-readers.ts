@@ -1120,7 +1120,7 @@ export interface LandDeps {
   store: Store;
   finder: Pick<TargetFinder, 'list'>;
   /** Handed-off lands (src/land.ts Landings): which minions have one, and its output so far (code null while it runs). */
-  landings: { handoffs(): number[]; get(ticketId: number): { output: string; code: number | null } | null };
+  landings: { handoffs(): number[]; look(ticketId: number): Promise<{ output: string; code: number | null } | null>; lastLook(ticketId: number): { output: string; code: number | null } | null | undefined };
   now?: () => number;
 }
 
@@ -1196,8 +1196,11 @@ export class LandsInFlight {
   private async readLines() {
     const at = this.reads;
     const repos = new Map<number, string>();
-    for (const id of this.d.landings.handoffs()) {
-      const t = this.d.landings.get(id)?.code === null ? this.d.store.getTicket(id) : undefined;
+    // Each landing's look also feeds attach()'s rows (Landings.lastLook) between these reads.
+    const ids = this.d.landings.handoffs();
+    const runs = await Promise.all(ids.map((id) => this.d.landings.look(id)));
+    for (const [i, id] of ids.entries()) {
+      const t = runs[i]?.code === null ? this.d.store.getTicket(id) : undefined;
       const p = t?.branch ? this.d.store.getProject(t.project_id) : null;
       if (p?.repo_dir) repos.set(p.id, p.repo_dir);
     }
@@ -1234,7 +1237,7 @@ export class LandsInFlight {
     };
     const landing = this.d.landings
       .handoffs()
-      .map((id) => ({ id, run: this.d.landings.get(id) }))
+      .map((id) => ({ id, run: this.d.landings.lastLook(id) }))
       .filter((x) => x.run?.code === null)
       .map((x) => {
         const t = store.getTicket(x.id);

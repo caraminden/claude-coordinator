@@ -30,7 +30,7 @@ test('makes the .jks and a random .pass, both mode 600, with the password only i
   assert.ok(!runs[0].some((a) => a.includes(pw)), 'the password is never an argument');
   assert.ok(runs[0].includes('-storepass:file') && runs[0].includes('-keypass:file'));
   assert.deepEqual(readdirSync(keyDir).sort(), ['twireader-release.jks', 'twireader-release.pass'], 'its scratch folder is gone');
-  assert.ok(hasKey(keyDir, 'twireader'));
+  assert.ok(await hasKey(keyDir, 'twireader'));
   await makeReleaseKey(keyDir, 'other', { home: root, keytool });
   assert.notEqual(readFileSync(join(keyDir, 'other-release.pass'), 'utf8'), readFileSync(out.pass, 'utf8'));
 });
@@ -46,7 +46,7 @@ test('never replaces a key, even half of one', async () => {
 
 test('a keytool failure or a bad name leaves nothing behind', async () => {
   await assert.rejects(makeReleaseKey(keyDir, 'broke', { home: root, keytool: fake({ fail: true }).keytool }), /boom/);
-  assert.ok(!hasKey(keyDir, 'broke'));
+  assert.ok(!(await hasKey(keyDir, 'broke')));
   await assert.rejects(makeReleaseKey(keyDir, '../x', { home: root, keytool: fake().keytool }), /isn't an app name/);
   assert.deepEqual(
     readdirSync(keyDir).filter((f) => f.startsWith('.')),

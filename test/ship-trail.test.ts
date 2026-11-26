@@ -36,7 +36,7 @@ function world(kit = false) {
       w.trail = new ShipTrail({
         store,
         now: () => w.now,
-        landings: { pending: async () => [...w.handed], look: async (id) => w.runs.get(id) ?? null, stopped: (id) => w.stops.get(id) ?? null },
+        landings: { pending: async () => [...w.handed], look: async (id) => w.runs.get(id) ?? null, stopped: async (id) => w.stops.get(id) ?? null },
         lines: async (): Promise<ShipLine[]> => [{ line: w.line, kit, minion: (l) => ids.find((id) => label(id) === l) ?? null, name: (l) => `#${l.split('/')[1]?.split('-')[0]}` }],
       });
     },

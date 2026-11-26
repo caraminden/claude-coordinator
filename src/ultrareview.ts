@@ -17,7 +17,7 @@
 // per area ahead of time, and each runs only when its person presses Start. Once the findings are posted, a
 // row is discarded or nobody starts it within EXPIRE_DAYS, its PR is closed and both branches deleted.
 import { execFile } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { AUTH_VARS, resolveClaude, stripAnsi, type TurnPlace } from './claude-link.ts';
@@ -293,6 +293,7 @@ export class UltraReviews {
   private timers = new Map<string, NodeJS.Timeout>();
   private prepping = new Map<number, Promise<unknown>>();
   private asking = new Set<string>(); // areas whose prep has begun and not yet made its row: a repeated press must not prep them twice
+  private checking = new Set<string>(); // reviews whose check is reading or finishing: the 2 s timer and the job's end never run one twice at once
   private deps: Deps;
   private jobs: HostJobs;
 
@@ -322,17 +323,9 @@ export class UltraReviews {
    * its findings. One cut off before that (still cloning) or with its CLI as the server's child is lost.
    * Batch rows come back as they were; one cut off while prepping is marked failed and its branches deleted.
    */
-  recover() {
-    for (const r of this.deps.getSetting<Running[]>(RUNNING) ?? []) {
-      if (r.job && this.jobs.state(this.jobDir(r.id), 0)) {
-        this.live.set(r.id, r);
-        this.follow(r);
-        continue;
-      }
-      this.live.set(r.id, r);
-      this.finish(r, { id: r.id, ok: false, code: null, text: 'Citadel restarted while this review ran, so its findings were lost. The run may still count against the free runs.' });
-    }
-    this.save();
+  recover(): Promise<void> {
+    const saved = this.deps.getSetting<Running[]>(RUNNING) ?? [];
+    for (const r of saved) this.live.set(r.id, r);
     const rows = this.batch();
     for (const row of rows) {
       if (row.state === 'prepping') {
@@ -343,6 +336,16 @@ export class UltraReviews {
     this.saveBatch(rows);
     this.sweep();
     setInterval(() => this.sweep(), 3600_000).unref();
+    // Each job's folder is read off the server's thread; resolves once every saved review is followed or reported.
+    return Promise.all(
+      saved.map(async (r) => {
+        if (r.job && (await this.jobs.look(this.jobDir(r.id), 0))) return this.follow(r);
+        await this.finish(r, { id: r.id, ok: false, code: null, text: 'Citadel restarted while this review ran, so its findings were lost. The run may still count against the free runs.' });
+      }),
+    ).then(
+      () => this.save(),
+      (err) => console.error('Ultra review recover:', err),
+    );
   }
 
   private jobDir(id: string): string {
@@ -373,9 +376,9 @@ export class UltraReviews {
   }
 
   /** A person's gh and git env: their token alone, an empty gh config, no prompts. */
-  private ghRun(token: string, dir: string): GhRun {
+  private async ghRun(token: string, dir: string): Promise<GhRun> {
     const config = join(dir, 'gh');
-    mkdirSync(config, { recursive: true, mode: 0o700 });
+    await mkdir(config, { recursive: true, mode: 0o700 });
     return { gh: this.deps.gh ?? 'gh', env: asEnv({ GH_TOKEN: token, GH_CONFIG_DIR: config, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' })! };
   }
 
@@ -390,9 +393,9 @@ export class UltraReviews {
         what.question ? `\n**Question for the review:** ${what.question}` : '',
         `\nDon't merge it: its base branch is \`${spec.base}\` without these files, so the diff is the whole area. Citadel closes it and deletes both branches once the review is done.`,
       ].join('\n');
-      return await openReviewPr(spec, pr, { dir: join(dir, 'repo'), remote: this.deps.remoteUrl?.(pr.slug) ?? `https://github.com/${pr.slug}`, g: this.ghRun(gh.token, dir), title: `Ultra review: ${what.name} [skip ci]`, body });
+      return await openReviewPr(spec, pr, { dir: join(dir, 'repo'), remote: this.deps.remoteUrl?.(pr.slug) ?? `https://github.com/${pr.slug}`, g: await this.ghRun(gh.token, dir), title: `Ultra review: ${what.name} [skip ci]`, body });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
     }
   }
 
@@ -402,12 +405,14 @@ export class UltraReviews {
     const left = (why: string) => this.deps.emit(ticketId, 'note', { text: `Couldn't clean up the ultra review's draft PR${pr.number ? ` #${pr.number}` : ''} (branches ${pr.head} and ${pr.base}): ${why}. Close it and delete them on GitHub.` });
     if (!gh) return left(NO_GITHUB.replace(", so Citadel can't open a draft pull request as you", ''));
     const dir = join(this.deps.scratch(uid), `ultrareview-gh-${newId()}`);
-    void closeReviewPr(pr, this.ghRun(gh.token, dir))
+    void this.ghRun(gh.token, dir)
+      .then((g) => closeReviewPr(pr, g))
       .then(
         (why) => why && left(why),
         (err) => left(errorText(err)),
       )
-      .finally(() => rmSync(dir, { recursive: true, force: true }));
+      .finally(() => rm(dir, { recursive: true, force: true }))
+      .catch((err) => console.error('Ultra review clean-up:', err));
   }
 
   /**
@@ -452,7 +457,7 @@ export class UltraReviews {
   /** Clone (or, for a PR, a folder whose remote is the repo), then start the CLI as a job of its own (src/host-job.ts) and follow it to its end. */
   private async run(r: Running, place: TurnPlace, spec: ReviewSpec) {
     try {
-      mkdirSync(r.dir, { recursive: true });
+      await mkdir(r.dir, { recursive: true });
       const repo = join(r.dir, 'repo');
       let target: string;
       if (r.pr) {
@@ -479,38 +484,46 @@ export class UltraReviews {
         // podman itself gets the server's environment, as it did as the server's child.
         env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
       }
-      this.jobs.start({ dir: this.jobDir(r.id), cwd: repo, argv, env, unit: `citadel-ultrareview-${r.id}`, description: `Ultra review ${r.id} for minion ${r.ticketId}`, ticketId: r.ticketId, onChildEnd: () => this.check(r) });
+      this.jobs.start({ dir: this.jobDir(r.id), cwd: repo, argv, env, unit: `citadel-ultrareview-${r.id}`, description: `Ultra review ${r.id} for minion ${r.ticketId}`, ticketId: r.ticketId, onChildEnd: () => void this.check(r) });
       r.job = true;
       this.save();
       this.follow(r);
     } catch (err) {
-      this.finish(r, { id: r.id, ok: false, code: null, text: `The review didn't start: ${String(thrown(err).stderr || thrown(err).message || err).trim()}` });
+      await this.finish(r, { id: r.id, ok: false, code: null, text: `The review didn't start: ${String(thrown(err).stderr || thrown(err).message || err).trim()}` });
     }
   }
 
   private follow(r: Running) {
-    const timer = setInterval(() => this.check(r), POLL_MS);
+    const timer = setInterval(() => void this.check(r), POLL_MS);
     timer.unref();
     this.timers.set(r.id, timer);
   }
 
   /** Report the review once its job has ended. */
-  private check(r: Running) {
-    if (!this.live.has(r.id) || !r.job) return;
-    const job = this.jobs.state(this.jobDir(r.id), MAX_OUTPUT);
-    if (!job) return this.finish(r, { id: r.id, ok: false, code: null, text: "The review's run folder is gone, so its findings were lost." });
-    if (job.code === null) return;
-    if (job.code !== 0 && r.spec?.mode === 'area' && !r.pr && TOO_LARGE.test(job.output)) return void this.viaPr(r, r.spec, stripAnsi(job.output).trim());
-    this.finish(r, this.result(r, job));
+  private async check(r: Running) {
+    if (!this.live.has(r.id) || !r.job || this.checking.has(r.id)) return;
+    this.checking.add(r.id);
+    try {
+      const job = await this.jobs.look(this.jobDir(r.id), MAX_OUTPUT);
+      if (!this.live.has(r.id) || !r.job) return;
+      if (!job) return await this.finish(r, { id: r.id, ok: false, code: null, text: "The review's run folder is gone, so its findings were lost." });
+      if (job.code === null) return;
+      if (job.code !== 0 && r.spec?.mode === 'area' && !r.pr && TOO_LARGE.test(job.output)) return await this.viaPr(r, r.spec, stripAnsi(job.output).trim());
+      await this.finish(r, await this.result(r, job));
+    } catch (err) {
+      console.error('Ultra review check:', err);
+    } finally {
+      this.checking.delete(r.id);
+    }
   }
 
   /** The CLI refused the scratch clone as too large: open the same area as a draft PR and review that instead. */
   private async viaPr(r: Running, spec: Extract<ReviewSpec, { mode: 'area' }>, said: string) {
     clearInterval(this.timers.get(r.id));
     this.timers.delete(r.id);
-    rmSync(this.jobDir(r.id), { recursive: true, force: true });
-    rmSync(r.dir, { recursive: true, force: true });
     delete r.job;
+    await rm(this.jobDir(r.id), { recursive: true, force: true });
+    await rm(r.dir, { recursive: true, force: true });
     try {
       const head = `review/${branchSlug(spec.paths.join('-'))}-${r.id.slice(-6)}`;
       r.pr = { slug: await repoOnGithub(spec.repo), head, base: `${head}-base` };
@@ -519,14 +532,14 @@ export class UltraReviews {
       this.save();
     } catch (err) {
       if (r.pr && !r.pr.number) delete r.pr;
-      return this.finish(r, { id: r.id, ok: false, code: null, text: `${said}\n\nCitadel tried a draft pull request instead, but ${thrown(err).message ?? err}.` });
+      return await this.finish(r, { id: r.id, ok: false, code: null, text: `${said}\n\nCitadel tried a draft pull request instead, but ${thrown(err).message ?? err}.` });
     }
     const place = this.deps.place(r.uid);
-    if (!place) return this.finish(r, { id: r.id, ok: false, code: null, text: "Your Claude plan isn't linked any more, so the review stopped." });
+    if (!place) return await this.finish(r, { id: r.id, ok: false, code: null, text: "Your Claude plan isn't linked any more, so the review stopped." });
     await this.run(r, place, spec);
   }
 
-  private result(r: Running, job: JobState): ReviewResult {
+  private async result(r: Running, job: JobState): Promise<ReviewResult> {
     const code = job.code === -1 ? null : job.code;
     let out = job.output;
     if (code === 124) out += `\nCitadel stopped waiting after ${KILL_MIN} minutes.`;
@@ -536,17 +549,17 @@ export class UltraReviews {
     if (r.pr?.number) result.pr = { number: r.pr.number, url: r.pr.url! };
     if (code === 0 && r.findings) {
       try {
-        result.file = writeFindings(r.findings.dir, r.findings.ev, result.text);
+        result.file = await writeFindings(r.findings.dir, r.findings.ev, result.text);
       } catch {}
     }
     return result;
   }
 
-  private finish(r: Running, result: ReviewResult) {
+  private async finish(r: Running, result: ReviewResult) {
     clearInterval(this.timers.get(r.id));
     this.timers.delete(r.id);
-    rmSync(r.dir, { recursive: true, force: true });
-    rmSync(this.jobDir(r.id), { recursive: true, force: true });
+    await rm(r.dir, { recursive: true, force: true });
+    await rm(this.jobDir(r.id), { recursive: true, force: true });
     this.live.delete(r.id);
     this.save();
     this.deps.emit(r.ticketId, 'ultrareview_result', result);
@@ -663,11 +676,11 @@ export class UltraReviews {
 }
 
 /** Findings as a markdown file for a chat's shared folder; returns its path. */
-export function writeFindings(dir: string, ev: Pick<ReviewEvent, 'mode' | 'base' | 'branch' | 'paths'>, text: string, now = new Date()): string {
-  mkdirSync(dir, { recursive: true });
+export async function writeFindings(dir: string, ev: Pick<ReviewEvent, 'mode' | 'base' | 'branch' | 'paths'>, text: string, now = new Date()): Promise<string> {
+  await mkdir(dir, { recursive: true });
   const stamp = now.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
   const file = join(dir, `ultrareview-${stamp}.md`);
   const what = ev.mode === 'branch' ? `branch \`${ev.branch}\` against \`${ev.base}\`` : `area ${ev.paths!.map((p) => `\`${p}\``).join(', ')}`;
-  writeFileSync(file, `# Ultra review: ${what}\n\n${now.toISOString()}\n\n\`\`\`\`\n${text}\n\`\`\`\`\n`);
+  await writeFile(file, `# Ultra review: ${what}\n\n${now.toISOString()}\n\n\`\`\`\`\n${text}\n\`\`\`\`\n`);
   return file;
 }

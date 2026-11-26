@@ -116,8 +116,8 @@ if (import.meta.main) {
     `handoffs/ holds ${plan.total} loose files.\n  move to shipped/: ${plan.shipped.length}\n${sample(plan.shipped)}\n  move to not-picked/: ${plan.notPicked.length}\n${sample(plan.notPicked)}\n  stay (pinned, named by an open brief or memory, briefs unstarted): ${plan.keep.length}\n${sample(plan.keep.map((k) => `${k.rel} (${k.why})`))}\n  unmatched and older than 14 days, listed for a person: ${plan.listed.length}\n${sample(plan.listed)}\n  left alone (unmatched, newer): ${plan.total - plan.shipped.length - plan.notPicked.length - plan.keep.length - plan.listed.length}`,
   );
   if (process.argv.includes('--apply')) {
-    for (const r of plan.shipped) moveFile(shared, r, SHIPPED);
-    for (const r of plan.notPicked) moveFile(shared, r, NOT_PICKED);
+    for (const r of plan.shipped) await moveFile(shared, r, SHIPPED);
+    for (const r of plan.notPicked) await moveFile(shared, r, NOT_PICKED);
     const left = readdirSync(join(shared, 'handoffs')).filter((n) => n.endsWith('.md')).length;
     console.log(`\nMoved ${plan.shipped.length + plan.notPicked.length}. handoffs/ now holds ${left} loose files.`);
   } else console.log('\n(dry run: nothing moved)');

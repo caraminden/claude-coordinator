@@ -6,7 +6,7 @@
 // their own ChatGPT login, run in their container by codexImage() below.
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, constants, copyFileSync, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { resolveFile } from './artifacts.ts';
 import { copyPinned } from './codex-review.ts';
@@ -72,19 +72,23 @@ export async function listMedia(dir: string): Promise<{ path: string; bytes: num
 }
 
 /** Remove every media file written more than MEDIA_KEEP_MS ago (notes go with their age too), under `root`. */
-export function sweepMedia(root: string, now = Date.now()): number {
+export async function sweepMedia(root: string, now = Date.now()): Promise<number> {
   let names: string[];
   try {
-    names = readdirSync(root, { recursive: true }) as string[];
+    names = await readdir(root, { recursive: true });
   } catch {
     return 0;
   }
   let gone = 0;
   for (const name of names) {
     const file = join(root, name);
-    const st = statSync(file, { throwIfNoEntry: false });
+    // statSync's throwIfNoEntry: false answers undefined only for a missing file; any other error still throws.
+    const st = await stat(file).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return undefined;
+      throw err;
+    });
     if (st?.isFile() && now - st.mtimeMs > MEDIA_KEEP_MS) {
-      rmSync(file, { force: true });
+      await rm(file, { force: true });
       gone++;
     }
   }

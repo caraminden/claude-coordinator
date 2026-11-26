@@ -54,7 +54,7 @@ function setup(opts: { off?: string; refuse?: Error; running?: boolean; noClone?
   return { ...d, commit, first, store, project, t, cara, asked, started, app, last };
 }
 
-test("apps: the scheme's own apps on main with a repo, and a folder app once its manifest is on main", () => {
+test("apps: the scheme's own apps on main with a repo, and a folder app once its manifest is on main", async () => {
   const s = setup();
   const other = s.store.createProject('other', null);
   s.app('plain');
@@ -63,21 +63,21 @@ test("apps: the scheme's own apps on main with a repo, and a folder app once its
   s.app('norepo', { repo: null });
   s.app('away', { home_scheme: other.id });
   s.app('folded', { subdir: 'apps/folded' });
-  assert.deepEqual(s.apps(s.t.id).sort(), ['onmain', 'plain']);
+  assert.deepEqual((await s.apps(s.t.id)).sort(), ['onmain', 'plain']);
   s.commit('apps/folded/citadel-app.json', '{}');
-  assert.deepEqual(s.apps(s.t.id).sort(), ['folded', 'onmain', 'plain']);
+  assert.deepEqual((await s.apps(s.t.id)).sort(), ['folded', 'onmain', 'plain']);
   const noClone = setup({ noClone: true });
   noClone.app('folded', { subdir: 'apps/folded' });
-  assert.deepEqual(noClone.apps(noClone.t.id), [], 'a scheme with no clone has no folder apps to read');
+  assert.deepEqual(await noClone.apps(noClone.t.id), [], 'a scheme with no clone has no folder apps to read');
 });
 
-test('apps: none for a minion that is gone, or where deploys are off', () => {
+test('apps: none for a minion that is gone, or where deploys are off', async () => {
   const gone = setup();
   gone.app('plain');
-  assert.deepEqual(gone.apps(999_999), []);
+  assert.deepEqual(await gone.apps(999_999), []);
   const off = setup({ off: 'a dev copy' });
   off.app('plain');
-  assert.deepEqual(off.apps(off.t.id), []);
+  assert.deepEqual(await off.apps(off.t.id), []);
 });
 
 test('running and last read the app services', async () => {

@@ -406,7 +406,7 @@ export const appRoutes: Route[] = [
       const body = await readJson(req);
       const projectId = Number(body?.projectId);
       if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
-      const c = homeApp(app, projectId, str(body?.contraption, 'contraption', 100));
+      const c = await homeApp(app, projectId, str(body?.contraption, 'contraption', 100));
       await makeKey(app, session, c.name);
       return json(res, 201, { ok: true });
     },
@@ -516,11 +516,11 @@ export const appRoutes: Route[] = [
  * `name`, a contraption of scheme `projectId` waiting for its first release key (#837), or an HttpError saying why not:
  * only an app whose build found no key (a deployed Capacitor app with no release workflow) gets one, so its APK builds.
  */
-export function homeApp(app: App, projectId: number, name: string): ContraptionRow {
+export async function homeApp(app: App, projectId: number, name: string): Promise<ContraptionRow> {
   const c = app.store.getContraption(name);
   if (!c || c.home_scheme !== projectId) throw new HttpError(403, `${name} isn't one of this scheme's contraptions`);
-  if (hasKey(app.apkBuilds.keyDir, c.name)) throw new HttpError(409, `${c.title} already has a release key; it's never replaced, as phones would have to uninstall the app`);
-  if (!app.apkBuilds.keyless(c.name)) throw new HttpError(409, `${c.title} isn't waiting for a release key: only a deployed Capacitor app with no release workflow gets one, once its build finds none`);
+  if (await hasKey(app.apkBuilds.keyDir, c.name)) throw new HttpError(409, `${c.title} already has a release key; it's never replaced, as phones would have to uninstall the app`);
+  if (!(await app.apkBuilds.readKeyless(c.name))) throw new HttpError(409, `${c.title} isn't waiting for a release key: only a deployed Capacitor app with no release workflow gets one, once its build finds none`);
   return c;
 }
 

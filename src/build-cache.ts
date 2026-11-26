@@ -15,9 +15,10 @@
  * Rust has no Citadel-wide cache: Peek Auras, the only Rust scheme, shares one sccache across its worktrees
  * through its own tools/rustc-wrapper (its cap is SCCACHE_CACHE_SIZE there).
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { lstat, readdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { exists } from './build-output.ts';
 
 /** The shared Gradle build cache, under the projects folder. */
 export const gradleCacheDir = (dataDir: string) => join(dataDir, 'projects', '.build-cache', 'gradle');
@@ -68,7 +69,7 @@ const SETTLING_MS = 60 * 60_000;
  */
 export async function trimCache(dir: string, cap: number): Promise<{ removed: number; freed: number; left: number }> {
   const out = { removed: 0, freed: 0, left: 0 };
-  if (!existsSync(dir)) return out;
+  if (!(await exists(dir))) return out;
   const entries: { path: string; size: number; used: number }[] = [];
   for (const name of await readdir(dir)) {
     if (keep(name)) continue;

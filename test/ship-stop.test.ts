@@ -170,9 +170,10 @@ function fakeApp() {
       ticketByBranch: () => undefined,
     },
     landings: {
-      get: (id: number) => landing[id] ?? null,
+      look: async (id: number) => landing[id] ?? null,
+      lastLook: (id: number) => landing[id] ?? null,
       markStopped: (...a: unknown[]) => stopped.push(a),
-      landPid: (id: number) => landing[id]?.pid ?? null,
+      landPid: async (id: number) => landing[id]?.pid ?? null,
     },
     runner: { emit: (id: number, _k: string, e: { text: string }) => notes.push([id, e.text]) },
   } as never;
@@ -234,30 +235,27 @@ test("the kit's line refuses a ship whose commit main already holds (fast-forwar
   assert.deepEqual(sig, [process.pid]);
 });
 
-test('stopping a minion stops its ship in line, or out of line before it joined, and never once main has moved', () => {
+test('stopping a minion stops its ship in line, or out of line before it joined, and never once main has moved', async () => {
   const f = fakeApp();
   const sig: number[] = [];
   // In line: as the panel's stop, worded for the minion's stop.
   f.put(f.own, 3, ['1700000000', 'ticket/11-own', 'waiting for CI since 12:01', 'order']);
   f.landing[11] = { output: '', code: null, pid: 555 };
-  assert.match(stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid))!, /stopped too/);
+  assert.match((await stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)))!, /stopped too/);
   assert.deepEqual([sig, f.stopped[0][3]], [[process.pid], 'by stopping its minion']);
   assert.match(f.notes[0][1], /^Cara stopped this ship by stopping its minion:/);
   // Out of line, after deploy.sh left the line to wait for live: it keeps running.
   rmSync(join(f.own, '0000000003'));
   f.landing[11] = { output: 'land: main is now at abc1234 "x"\ndeploy: going live\n', code: null, pid: 555 };
-  assert.match(stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid))!, /keeps running: main has moved/);
+  assert.match((await stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)))!, /keeps running: main has moved/);
   f.landing[11] = { output: "land: waiting outside the line for the restart of #7's ship train to be judged\n", code: null, pid: 555 };
-  assert.match(stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid))!, /keeps running/);
+  assert.match((await stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)))!, /keeps running/);
   assert.deepEqual(sig, [process.pid], 'neither was signalled');
   // Out of line before it joined: stopped.
   f.landing[11] = { output: 'land: rebasing onto main\n', code: null, pid: 555 };
-  assert.match(stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid))!, /before it joined the line/);
+  assert.match((await stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)))!, /before it joined the line/);
   assert.deepEqual(sig, [process.pid, 555]);
   // No landing running: nothing to say.
   f.landing[11] = { output: '', code: 0, pid: 555 };
-  assert.equal(
-    stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)),
-    null,
-  );
+  assert.equal(await stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)), null);
 });

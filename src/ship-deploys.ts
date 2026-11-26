@@ -15,18 +15,17 @@ export interface ShipDeploysDeps {
   startDeploy(row: ContraptionRow, by: string, uid: number | null): unknown;
 }
 
-export function shipDeploys({ store, services, autoDeploy, startDeploy }: ShipDeploysDeps): { apps(id: number): string[]; deployOps: DeployOps } {
+export function shipDeploys({ store, services, autoDeploy, startDeploy }: ShipDeploysDeps): { apps(id: number): Promise<string[]>; deployOps: DeployOps } {
   return {
     // A clean land on main deploys the scheme's home contraptions on main (#712), through auto-deploy's start, which marks the commit tried.
-    apps: (id) => {
+    apps: async (id) => {
       const t = store.getTicket(id);
       if (!t || services.opts.off) return [];
       const dir = store.getProject(t.project_id)?.repo_dir;
+      const mine = store.listContraptions().filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main');
       // An app make_app registered (#1136) waits for the ship that puts its folder on main.
-      return store
-        .listContraptions()
-        .filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main' && (!c.subdir || (!!dir && manifestOn(dir, c.subdir))))
-        .map((c) => c.name);
+      const on = await Promise.all(mine.map(async (c) => !c.subdir || (!!dir && (await manifestOn(dir, c.subdir)))));
+      return mine.filter((_, i) => on[i]).map((c) => c.name);
     },
     deployOps: {
       running: (name) => !!services.running(name),

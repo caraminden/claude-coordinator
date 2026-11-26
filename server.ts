@@ -132,7 +132,7 @@ import { GrowthStop } from './src/growth-stop.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
-import { Incidents, readCiRuns, readDeploys, readJournal } from './src/incidents.ts';
+import { Incidents, readCiRuns, readDeploys, readJournal, writeReport } from './src/incidents.ts';
 import { ghGet, ghHelpers, ghTally } from './src/gh-api.ts';
 import { ciEvidence } from './src/flake-evidence.ts';
 import { CiLoad } from './src/ci-load.ts';
@@ -156,7 +156,7 @@ import { ShipStatus } from './src/ship-status.ts';
 import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
 import { Builds } from './src/builds.ts';
 import { CabalCards } from './src/cabal-cards.ts';
-import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
+import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
@@ -1205,7 +1205,7 @@ if (!BOOT_CHECK && !PREVIEW) {
     10 * 60_000,
   );
   // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
-  every('contraption media sweep', 24 * 60 * 60_000, async () => void sweepMedia(join(DATA_DIR, 'contraption-media')), 10 * 60_000);
+  every('contraption media sweep', 24 * 60 * 60_000, async () => void (await sweepMedia(join(DATA_DIR, 'contraption-media'))), 10 * 60_000);
   // Half-made copies of an app's data a crash left (#1884): at once, since they hold its people's rows.
   void sweepAppCopies(DATA_DIR).catch((err) => console.error(`Sweeping app copies failed: ${err?.message ?? err}`));
   // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
@@ -1536,9 +1536,10 @@ const autoDeploy = new AutoDeploy({
   failed: (t, why) => tellHome(t.projectId, `Auto-deploy of ${t.name} couldn't start: ${why}`),
   enabled: () => !services.opts.off,
   // More is coming (#1736): a ship in the scheme's line, or a hand-off not reported yet (its land running, or its own deploy about to start).
-  shipping: (id) => {
+  shipping: async (id) => {
+    if (landings.handoffs().some((t) => store.getTicket(t)?.project_id === id)) return true;
     const at = lineFor(app, id);
-    return (!!at && readQueue(at.q, at.orderAt).length > 0) || landings.handoffs().some((t) => store.getTicket(t)?.project_id === id);
+    return !!at && (await readQueueA(at.q, at.orderAt)).length > 0;
   },
   deployers: {
     contraption: {
@@ -1894,7 +1895,7 @@ const landHandoffs = new LandHandoffs({
   },
   failed: (id, kind) => {
     runner.places.refused(id, true);
-    const run = landings.get(id);
+    const run = landings.lastLook(id);
     stallWatch.shipFailed(id, run ? refusalKind(run.output, run.code) : kind);
     if (run) recordFailure(store, id, run.output, run.code);
   },
@@ -1906,7 +1907,7 @@ const landHandoffs = new LandHandoffs({
     // shortcut: one whose deploy failed passes on at Citadel's next go-live; make the claim ask the deploy when another scheme keeps claims.
     void waiters
       .elsewhere(id)
-      .then((other) => (other && shipApps.apps(id).length ? null : passLiveClaims()))
+      .then(async (other) => (other && (await shipApps.apps(id)).length ? null : passLiveClaims()))
       .catch((err) => console.error('Passing on the claims of a ship failed:', err));
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
@@ -1919,7 +1920,7 @@ const landHandoffs = new LandHandoffs({
     const project = store.getProject(store.getTicket(id)?.project_id ?? 0);
     if (!project || !repoSlug(project.repo_url ?? null) || !runnerLabel(project.name)) return false;
     addRunnerWaiter(store, id, reason, outbox);
-    const run = landings.get(id); // CI gave no verdict: parked till runners are back, still a failed try (#1375)
+    const run = landings.lastLook(id); // CI gave no verdict: parked till runners are back, still a failed try (#1375)
     if (run) recordFailure(store, id, run.output, run.code);
     runner.places.refused(id, true);
     return true;
@@ -1977,15 +1978,9 @@ const incidents = new Incidents({
       return readCiRuns(ghGet, slug, ownGithub(p), from, to);
     },
   },
-  write: (name, text) => {
+  write: async (name, text) => {
     const p = ownScheme();
-    if (!p) return null;
-    const dir = join(projectSharedDir(DATA_DIR, p.id), 'reports');
-    mkdirSync(dir, { recursive: true });
-    let file = join(dir, name);
-    for (let i = 2; existsSync(file); i++) file = join(dir, name.replace(/\.md$/, `-${i}.md`));
-    writeFileSync(file, text);
-    return file;
+    return p ? writeReport(join(projectSharedDir(DATA_DIR, p.id), 'reports'), name, text) : null;
   },
   tell: (text) => {
     const p = ownScheme();

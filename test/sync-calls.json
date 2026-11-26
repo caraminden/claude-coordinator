@@ -3,13 +3,10 @@
   "checkoutHead": ["rare",1,"SIGHUP deploy handler (server.ts:2929, also boot consts)"],
   "(module)": ["boot",1,"review-backfill.json read at module load before listen"],
   "deployState": ["boot",1,"IIFE at module load, git rev-parse (server.ts:1248)"],
-  "rollback": ["rare",1,"Rollback citadelRollingBack d.clear() when roll back job ended; Releases read"],
-  "incidents": ["owed",3,"sync-disk-polls-and-timers.md: every incidents 60 s -> Incidents.tick writes timeline when incident quiet"]
+  "rollback": ["rare",1,"Rollback citadelRollingBack d.clear() when roll back job ended; Releases read"]
  },
  "src/apk-build.ts": {
   "capacitorApp": ["rare",4,"ApkBuilds.check after app deploy, startup 60 s timer, make key"],
-  "ApkBuilds.keyless": ["owed",1,"sync-disk-polls-and-timers.md: Releases.read via every waits 2 s (pollA) for contraption targets"],
-  "ApkBuilds.makeKey": ["rare",1,"make_release_key card approve / POST make release key"],
   "ApkBuilds.check": ["rare",13,"after an app deploy goes live or startup 60 s sweep; APK build"]
  },
  "src/apk-release.ts": {
@@ -17,7 +14,6 @@
   "install": ["rare",1,"APK publish into feed on build or release run"]
  },
  "src/app-services.ts": {
-  "manifestOn": ["owed",1,"sync-disk-polls-and-timers.md: every ship landed (land.ts d.apps via shipDeploys.apps), git cat-file per subdir app; also make_app"],
   "AppServices.installNow": ["rare",1,"POST contraption install or deploy; existsSync data dir"],
   "AppServices.deployNow": ["rare",8,"contraption deploy (button, ship, auto-deploy tick on new main)"]
  },
@@ -33,11 +29,7 @@
   "ArtifactScanner.scan": ["owed",1,"sync-disk-turn-start-end.md: ScanTimers after each reply/turn end per ticket; startup sweep"]
  },
  "src/build-cache.ts": {
-  "ensureGradleInit": ["owed",4,"sync-disk-turn-start-end.md: ClaudeLink.start per container turn start; also boot"],
-  "trimCache": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep in server.ts"]
- },
- "src/build-output.ts": {
-  "findBuildOutput": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep; also minion dismissal"]
+  "ensureGradleInit": ["owed",4,"sync-disk-turn-start-end.md: ClaudeLink.start per container turn start; also boot"]
  },
  "src/catalogue.ts": {
   "itemsIn": ["rare",2,"GET /api/catalogue (MCP catalogue lookup)"]
@@ -91,7 +83,6 @@
   "ErrorDigest.write": ["owed",3,"sync-disk-turn-start-end.md: every contraption errors 10 min tick writes changed days"]
  },
  "src/contraption-media.ts": {
-  "sweepMedia": ["owed",3,"sync-disk-polls-and-timers.md: every contraption media sweep 24 h"],
   "readPng": ["rare",4,"contraption generate_image_codex tool call"],
   "codexImage": ["rare",6,"contraption generate_image_codex tool call (spawnSync)"],
   "runMediaTool": ["rare",3,"contraption media MCP tool call (image generation)"]
@@ -130,10 +121,6 @@
   "threadId": ["proc",1,"readlink /proc/thread-self at the db-writer worker's start"],
   "writeOffThread": ["proc",1,"exists /proc/self/task/<tid>, after a timed-out slice (at most 100 ms) of a wait on the write worker"]
  },
- "src/dismissed-cleanup.ts": {
-  "DismissedCleanup.clearBuild": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep (also on minion dismissal)"],
-  "DismissedCleanup.sweepWorktrees": ["owed",3,"sync-disk-polls-and-timers.md: daily 24 h build output sweep, per scheme repo"]
- },
  "src/emulator-lease.ts": {
   "readEmulatorLease": ["owed",1,"sync-disk-turn-start-end.md: every turn end (releaseEmulatorLease) and GET /api/emulator-lease"],
   "releaseEmulatorLease": ["owed",3,"sync-disk-turn-start-end.md: Runner turn end, every turn (runner.ts:3797)"]
@@ -144,20 +131,11 @@
  "src/exec.ts": {
   "runLogged": ["rare",3,"contraption deploy build steps and APK builds"]
  },
- "src/fast-mode.ts": {
-  "FastMode.start": ["owed",3,"sync-disk-polls-and-timers.md: every fast mode 30 s tick, when a new main commit needs verifying"]
- },
  "src/front.ts": {
   "listenThroughFront": ["boot",2,"once at startup, before listening (server.ts:2722)"]
  },
  "src/github-link.ts": {
   "noLogin": ["owed",1,"sync-disk-turn-start-end.md: heavyEnv mkdirSync at every turn end and land env; GitHub pollers"]
- },
- "src/handoff-tidy.ts": {
-  "whyKeep": ["owed",1,"sync-disk-polls-and-timers.md: every minion index 60 s, via onClosed tidy of closed minions"],
-  "moveFile": ["owed",4,"sync-disk-polls-and-timers.md: every minion index 60 s, via onClosed tidy of closed minions"],
-  "tidyForClosed": ["owed",2,"sync-disk-polls-and-timers.md: every minion index 60 s, MinionIndexer.run indexClosed"],
-  "reconcileMoved": ["owed",1,"sync-disk-polls-and-timers.md: every minion index 60 s; existsSync only if no listing passed"]
  },
  "src/history.ts": {
   "PLAN_RULES": ["boot",1,"module-level constant read at import"]
@@ -167,14 +145,10 @@
  },
  "src/host-job.ts": {
   "heardLost": ["rare",1,"job that ended with no exit code (once per lost job)"],
-  "moveAside": ["owed",1,"sync-disk-polls-and-timers.md: HostJobs.start on every land/ship start; fast mode worktree reset"],
-  "HostJobs.start": ["owed",7,"sync-disk-polls-and-timers.md: every ship land start; also kit sync, ultra review, fast mode"],
+  "moveAside": ["owed",1,"sync-disk-polls-and-timers.md: HostJobs.start on every land/ship start; fast mode worktree reset. Left for after #2133, which rewrites HostJobs.start"],
+  "HostJobs.start": ["owed",5,"sync-disk-polls-and-timers.md: every ship land start; also kit sync, ultra review, fast mode. Left for after #2133, which rewrites HostJobs.start"],
   "HostJobs.child": ["rare",2,"systemd-run failed fallback or spawn error only"],
-  "HostJobs.state": ["owed",1,"sync-disk-polls-and-timers.md: landings.get on ticket pages, release reads, ship-stop; 2 s waits poll"],
-  "HostJobs.alive": ["owed",3,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"],
-  "lost": ["rare",1,"job ended with no code, noted once; reached from HostJobs.state/look"],
-  "readCode": ["owed",1,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"],
-  "tail": ["owed",4,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"]
+  "lost": ["rare",1,"job ended with no code, noted once; reached from HostJobs.state/look"]
  },
  "src/host-load.ts": {
   "readPressure": ["proc",1,"reads /proc/pressure/cpu (PSI)"]
@@ -194,23 +168,13 @@
   "treeHash": ["owed",3,"sync-disk-turn-start-end.md: Runner turn launch fingerprint; walks pinned files once per process"],
   "claudeStamp": ["owed",4,"sync-disk-turn-start-end.md: Runner turn launch fingerprint on every minion turn start"]
  },
- "src/kit-sync.ts": {
-  "git": ["owed",1,"sync-disk-polls-and-timers.md: execFileSync git in 'kit sync' every 20 s, template look 10 min"],
-  "merge3": ["owed",4,"sync-disk-polls-and-timers.md: kit-sync round: mkdtemp, writeFileSync, git; 'kit sync' every 20 s"],
-  "KitSync.branch": ["owed",1,"sync-disk-polls-and-timers.md: kit-sync round writes files in worktree; 'kit sync' 20 s"]
- },
  "src/land.ts": {
   "landArgs": ["rare",3,"ship hand-off or land route checks test files exist"],
   "Landings.start": ["rare",1,"POST land route starts land.sh"],
-  "Landings.handOff": ["rare",2,"ship hand-off (hand_off_land tool)"],
-  "Landings.hasHandoff": ["owed",1,"sync-disk-polls-and-timers.md: turn start serverWork, status trailer, in-flight list"],
-  "Landings.settled": ["owed",1,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s reporter settles an ended landing"],
-  "Landings.talked": ["owed",1,"sync-disk-polls-and-timers.md: runner.onMessage on every message sent to a minion"],
-  "Landings.wasTalked": ["owed",1,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s land reporter poll"],
-  "Landings.prepNew": ["owed",3,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s tellPrep for ships in line"],
+  "Landings.handOff": ["rare",1,"ship hand-off (hand_off_land tool)"],
+  "Landings.unscanned": ["rare",1,"only until the start's scan of the landing folders ends, a few seconds after a restart: one stat on that minion's folder"],
   "Landings.markStopped": ["rare",1,"person or Stop stops a minion's ship"],
-  "Landings.stopped": ["owed",1,"sync-disk-polls-and-timers.md: ship trail poll inside 'land hand-offs' 5 s"],
-  "Landings.landPid": ["rare",3,"stopping a minion's ship (Stop button)"]
+  "Landings.landPid": ["rare",2,"stopping a minion's ship (Stop button)"]
  },
  "src/link-check.ts": {
   "pageText": ["boot",4,"Stop hook child process (pinned copy), not the server"],
@@ -268,12 +232,8 @@
   "runHook": ["boot",1,"PreToolUse hook child process, not the server"]
  },
  "src/previews.ts": {
-  "git": ["owed",1,"sync-disk-polls-and-timers.md: execFileSync git: previews sweep every 5 min (buildTip), preview start"],
   "Previews.constructor": ["boot",1,"constructor, once at boot (rmSync of previews root)"],
   "Previews.start": ["rare",1,"POST preview start for a minion"],
-  "Previews.halt": ["owed",1,"sync-disk-polls-and-timers.md: idle sweep every 5 min; also minion close with a preview"],
-  "Previews.sweep": ["owed",2,"sync-disk-polls-and-timers.md: setInterval 'previews sweep' every 5 min"],
-  "Previews.dropBuild": ["owed",2,"sync-disk-polls-and-timers.md: previews sweep every 5 min drops landed builds"],
   "Previews.spawnPreview": ["rare",3,"preview boot (person opens a preview)"],
   "Previews.proxyBuild": ["rare",3,"person opens a build preview page"]
  },
@@ -292,15 +252,8 @@
  "src/reaper.ts": {
   "Reaper.constructor": ["boot",1,"constructor, once at boot (server.ts:1012)"]
  },
- "src/release-key.ts": {
-  "hasKey": ["owed",1,"sync-disk-polls-and-timers.md: Releases read every 2 s via keyless; apk build checks"],
-  "makeReleaseKey": ["rare",1,"make_release_key card Approve"]
- },
  "src/release-readers.ts": {
   "LandsInFlight.attach": ["rare",1,"ship-line and Releases actions (fresh read); timers read async"]
- },
- "src/release-targets.ts": {
-  "TargetFinder.facts": ["owed",1,"sync-disk-polls-and-timers.md: release targets rescan every 5 min (scanAll)"]
  },
  "src/replay-keep.ts": {
   "turnsIn": ["owed",1,"sync-disk-turn-start-end.md: contraption chat turn start (wantsKeep) and end (keepTurn)"],
@@ -424,19 +377,11 @@
   "sweepTmpDirs": ["boot",1,"Runner.recover once at boot"],
   "dropTurnDir": ["owed",1,"sync-disk-turn-start-end.md: turn end, renameSync in Runner and keepalive-run"]
  },
- "src/ultrareview.ts": {
-  "UltraReviews.ghRun": ["owed",1,"sync-disk-polls-and-timers.md: via viaPr/cleanUp from 2 s review check timer; also prep action"],
-  "UltraReviews.openPr": ["owed",1,"sync-disk-polls-and-timers.md: viaPr from 2 s UltraReviews.check timer"],
-  "UltraReviews.cleanUp": ["owed",1,"sync-disk-polls-and-timers.md: finish from 2 s review check timer; also close"],
-  "UltraReviews.run": ["rare",1,"person starts an ultra review"],
-  "UltraReviews.viaPr": ["owed",2,"sync-disk-polls-and-timers.md: viaPr from 2 s UltraReviews.check timer"],
-  "UltraReviews.finish": ["owed",2,"sync-disk-polls-and-timers.md: finish from 2 s UltraReviews.check timer"],
-  "writeFindings": ["owed",2,"sync-disk-polls-and-timers.md: finish from 2 s UltraReviews.check timer"]
- },
  "src/waits.ts": {
-  "read": ["owed",1,"sync-disk-polls-and-timers.md: the sync readQueue and readLandLine: auto-deploy's `shipping` check, Waits' sync apply, stop or move a ship; `read` also serves /proc/<pid>/stat"],
-  "stat": ["owed",1,"sync-disk-polls-and-timers.md: the sync readQueue and readLandLine: auto-deploy's `shipping` check, Waits' sync apply, stop or move a ship; `read` also serves /proc/<pid>/stat"],
-  "files": ["owed",1,"sync-disk-polls-and-timers.md: the sync readQueue and readLandLine: auto-deploy's `shipping` check, Waits' sync apply, stop or move a ship; `read` also serves /proc/<pid>/stat"],
+  "read": ["rare",1,"a person's action only since #2135 (the 2 s poll, the Releases timer and auto-deploy's check read the line async): moving a ship or setting its order (setOrder's pollNow), stopping one (stopInLine, stopMinionShip), a fresh Releases read on a ship-line action"],
+  "stat": ["rare",1,"a person's action only since #2135 (the 2 s poll, the Releases timer and auto-deploy's check read the line async): moving a ship or setting its order (setOrder's pollNow), stopping one (stopInLine, stopMinionShip), a fresh Releases read on a ship-line action"],
+  "procStat": ["proc",1,"/proc/<pid>/stat: whether a ship line holder still runs, on each read of the line"],
+  "files": ["rare",1,"a person's action only since #2135 (the 2 s poll, the Releases timer and auto-deploy's check read the line async): moving a ship or setting its order (setOrder's pollNow), stopping one (stopInLine, stopMinionShip), a fresh Releases read on a ship-line action"],
   "writeOrder": ["rare",2,"person reorders the ship line"]
  },
  "src/wake.ts": {
@@ -453,7 +398,6 @@
   "restoreTicketDir": ["owed",3,"sync-disk-turn-start-end.md: Runner.startTurn restoreDir existsSync every turn"]
  },
  "src/worktree-sweep.ts": {
-  "removeWorktree": ["owed",3,"sync-disk-polls-and-timers.md: daily build output sweep timer, 24 h"],
   "restoreSaved": ["rare",1,"restoreTicketDir only when worktree folder is gone"]
  },
  "src/wrapper-alive.ts": {

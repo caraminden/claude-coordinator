@@ -8,7 +8,7 @@
 // files that do. Units an app's people installed by hand before (same port, or run from its folder) are
 // reported, and stopped and disabled only when an admin asks with replace: their files stay.
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { execResult, runLogged } from './exec.ts';
 import { closeSync, existsSync, openSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
@@ -153,14 +153,9 @@ export const repoPath = (row: { subdir?: string | null }, rel: string) => (row.s
 export async function folderHolds(repoDir: string, subdir: string, landed: string, deployed: string): Promise<boolean> {
   return (await execResult('git', ['diff', '--quiet', deployed, landed, '--', subdir], { cwd: repoDir, timeout: 30_000 })).code === 0;
 }
-/** Whether its manifest is on `ref` yet: make_app registers an app before its first ship puts the folder on main. Sync: the land's apps list is. */
-export function manifestOn(repoDir: string, subdir: string, ref = 'main'): boolean {
-  try {
-    execFileSync('git', ['cat-file', '-e', `${ref}:${repoPath({ subdir }, MANIFEST)}`], { cwd: repoDir, stdio: 'ignore', timeout: 5_000 });
-    return true;
-  } catch {
-    return false;
-  }
+/** Whether its manifest is on `ref` yet: make_app registers an app before its first ship puts the folder on main. Off the thread: a ship's report asks for each folder app (#2135). */
+export async function manifestOn(repoDir: string, subdir: string, ref = 'main'): Promise<boolean> {
+  return (await execResult('git', ['cat-file', '-e', `${ref}:${repoPath({ subdir }, MANIFEST)}`], { cwd: repoDir, timeout: 5_000 })).code === 0;
 }
 /** Where a deploy keeps an app's two builds (#801), `.<folder's name>/a` and `/b` beside it; the folder links to the live one. */
 export const slotsOf = (folder: string) => join(dirname(folder), `.${basename(folder)}`);

@@ -10,7 +10,7 @@ import { HostJobs, jobLost, oomKilled } from '../src/host-job.ts';
 const root = mkdtempSync(join(tmpdir(), 'host-job-lost-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('a job that ended with no exit code is heard once, and keeps reading as code -1', () => {
+test('a job that ended with no exit code is heard once, and keeps reading as code -1', async () => {
   const heard: string[] = [],
     details: string[] = [];
   const before = jobLost.hear;
@@ -22,8 +22,8 @@ test('a job that ended with no exit code is heard once, and keeps reading as cod
     // Started long ago, its wrapper gone (no live pid), no code written: its unit was killed.
     writeFileSync(join(dir, 'started'), String(Date.now() - 3600_000));
     writeFileSync(join(dir, 'pid'), '999999999');
-    assert.equal(jobs.state(dir, 100)!.code, -1);
-    assert.equal(jobs.state(dir, 100)!.code, -1);
+    assert.equal((await jobs.look(dir, 100))!.code, -1);
+    assert.equal((await jobs.look(dir, 100))!.code, -1);
     assert.deepEqual(heard, [dir]);
     assert.deepEqual(details, [`${dir}: ended with no exit code (killed from outside, stopped, or cut off by a restart)`]);
     assert.equal(readFileSync(join(dir, 'code'), 'utf8'), '-1');
@@ -32,10 +32,10 @@ test('a job that ended with no exit code is heard once, and keeps reading as cod
     mkdirSync(done);
     writeFileSync(join(done, 'started'), '1');
     writeFileSync(join(done, 'code'), '0');
-    assert.equal(jobs.state(done, 100)!.code, 0);
+    assert.equal((await jobs.look(done, 100))!.code, 0);
     assert.deepEqual(heard, [dir]);
     assert.equal(existsSync(join(root, 'nothing')), false);
-    assert.equal(jobs.state(join(root, 'nothing'), 100), null);
+    assert.equal(await jobs.look(join(root, 'nothing'), 100), null);
     assert.deepEqual(heard, [dir], 'no job at all is not a lost one');
   } finally {
     jobLost.hear = before;
@@ -72,7 +72,7 @@ test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; on
   assert.match(await run('disk', { TMPDIR: onDisk }), new RegExp(`^${onDisk}\\s*$`));
 });
 
-test("look() reads a job as state() does, off the server's thread (#1463)", async () => {
+test("look() reads a job off the server's thread (#1463)", async () => {
   const heard: string[] = [];
   const before = jobLost.hear;
   jobLost.hear = (dir) => heard.push(dir);
@@ -85,7 +85,7 @@ test("look() reads a job as state() does, off the server's thread (#1463)", asyn
     writeFileSync(join(lost, 'output.log'), 'x'.repeat(50) + 'the end');
     assert.deepEqual(await jobs.look(lost, 7), { output: 'the end', code: -1 });
     assert.deepEqual(await jobs.look(lost, 7), { output: 'the end', code: -1 });
-    assert.deepEqual(heard, [lost], 'heard once, as state() does');
+    assert.deepEqual(heard, [lost], 'heard once');
     const starting = join(root, 'look-starting');
     mkdirSync(starting);
     writeFileSync(join(starting, 'started'), String(Date.now()));

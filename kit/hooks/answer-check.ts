@@ -17,7 +17,8 @@
  *    off (hand_off_land or land) with no self-review anywhere in the session.
  * Each hit writes one `would refuse` line to the retro log. The weekly process digest counts them and
  * how many were false alarms; refusal turns on only for a check with under one false alarm in five.
- * Refusing is on for one shape, the proposal without a card (Josh, 2026-11-19, "Go on C3", #1106): the
+ * Refusing is on for two shapes, the proposal without a card (Josh, 2026-11-19, "Go on C3", #1106) and a
+ * claim of another minion's state without a read (Josh, 2026-11-26, "Minion-state claims only", #1113): the
  * stop is sent back once per prompt, never twice, and logs a `refused stop` line instead. The other
  * shapes only count. (A choice asked in prose is refused by src/link-check.ts, a different hook.)
  * A `Process:` line in the final text (self-review's, not `none`) is also
@@ -163,9 +164,13 @@ export function placeholderInCommand(text: string): string | null {
 
 // The live-claim check (#1113): a sentence stating live state (a minion's, CI's, a deploy's, a person's turn)
 // in a turn that read none of it. The shapes come from the replies struck in the week to 2026-11-19.
+// Another minion's state: "#1002 has been live since 20:18", "#993 is sealed". The one shape sent back (Josh, 2026-11-26).
+const MINION_STATE =
+  /#\d{2,5}\b[^.?!\n]{0,40}?\b(?:is|was|are|has(?: been)?|have(?: been)?|'s|isn't|aren't|hasn't|haven't|never|already|still)\s+(?:now\s+|already\s+|still\s+|not\s+|been\s+)?(?:live|shipped|landed|deployed|merged|parked|sealed|running|idle|closed|done|blocked|stuck|waiting|ready|green|red|failed|failing)\b/i;
+// A person's turn: "waiting on you", "it needs your go" (#1507's to send back, src/link-check.ts).
+const PERSON_WAIT = /\b(?:waits?|waiting|blocked)\s+on\s+(?:you\b|your\b|Cara\b|Josh\b)|\bneeds? (?:your|Cara's|Josh's) (?:go|answer|pick|OK)\b/i;
 const LIVE_CLAIMS = [
-  // Another minion's state: "#1002 has been live since 20:18", "#993 is sealed".
-  /#\d{2,5}\b[^.?!\n]{0,40}?\b(?:is|was|are|has(?: been)?|have(?: been)?|'s|isn't|aren't|hasn't|haven't|never|already|still)\s+(?:now\s+|already\s+|still\s+|not\s+|been\s+)?(?:live|shipped|landed|deployed|merged|parked|sealed|running|idle|closed|done|blocked|stuck|waiting|ready|green|red|failed|failing)\b/i,
+  MINION_STATE,
   // CI, runners, jobs and lands with a result: "the last four lands all failed", "the test job never got a runner".
   /\b(?:CI|runs?|runners?|jobs?|lands?|landings?|workflows?|queue|checks?)\b[^.?!\n]{0,50}?\b(?:failed|fails|failing|passed|passes|passing|green|red|queued|stuck|cancell?ed|never got|timed out|hung|hangs|finished|is busy|are busy|waits? its turn|still running|still in the queue)\b/i,
   /\b(?:flaky|broken|offline|busy)\s+(?:runner|machine|box|CI)\b/i,
@@ -174,8 +179,7 @@ const LIVE_CLAIMS = [
   /\b(?:is|are|went|been|isn't|aren't|not|now)\s+live\b|\blive (?:since|now)\b|\btaking effect\b|(?:\b(?:was|were|got|is|are|been|now)\s+|'(?:re|s)\s+(?:now\s+)?)(?:deployed|restarted)\b/i,
   // Someone else's moves: "Josh's Taskmaster started that build", "the Taskmaster closed #12".
   /(?<!\b(?:the|a|an)\s)\b(?:started|closed|stopped|parked|unparked|sealed|unsealed)\s+(?:#\d+|(?:that|the|this) build|Build \d+)/i,
-  // A person's turn: "waiting on you", "it needs your go".
-  /\b(?:waits?|waiting|blocked)\s+on\s+(?:you\b|your\b|Cara\b|Josh\b)|\bneeds? (?:your|Cara's|Josh's) (?:go|answer|pick|OK)\b/i,
+  PERSON_WAIT,
 ];
 // Hedged, future or conditional sentences claim nothing now.
 const HEDGE = /\b(?:I think|probably|likely|maybe|might|may|guess|not sure|I don't know|seems?|looks like|once|if|until|when|after|before|unless|will|would|could|expect)\b/i;
@@ -212,8 +216,11 @@ function toldBy(prompt: string): string {
 }
 const numbers = (s: string) => new Set(s.match(/#\d{2,5}\b/g) ?? []);
 
-/** The live-claim check's hits for a turn that read no live state: count only, never sent back. */
-export function liveClaimCheck(turn: Turn): string[] {
+/**
+ * The live-claim check's hits for a turn that read no live state. Another minion's state (not `own`, the turn's own
+ * minion number, whose ship Citadel tells it) is a `minion-state claim`, sent back (REFUSED); the rest only count.
+ */
+export function liveClaimCheck(turn: Turn, own?: string): string[] {
   if (turn.steered) return [];
   if (turn.toolCalls.some((n) => READS.test(n)) || (turn.commands ?? []).some((c) => READ_COMMANDS.test(c))) return [];
   // A claim the prompt's own notes or a minion's report state (#655 is live, CI passed) passes them on; a person's question doesn't.
@@ -224,7 +231,13 @@ export function liveClaimCheck(turn: Turn): string[] {
   return liveClaims(turn.finalText)
     .filter((s) => !passedOn(s))
     .slice(0, 3)
-    .map((s) => `live-state claim without a read · "${s.replace(/\s+/g, ' ').slice(0, 160)}"`);
+    .map((s) => `${minionState(s, own) ? 'minion-state' : 'live-state'} claim without a read · "${s.replace(/\s+/g, ' ').slice(0, 160)}"`);
+}
+
+/** A sentence stating another minion's state: right 39 times in 43 in the week to 2026-11-26 (reports/live-claim-check-2026-11-19.md). */
+function minionState(s: string, own?: string): boolean {
+  if (!MINION_STATE.test(s) || PERSON_WAIT.test(s)) return false;
+  return [...numbers(s)].some((n) => n !== `#${own}`);
 }
 
 // The minion checks (#1154). The trailer as src/status-trailer.ts reads it: only at the very end, its body can't cross a `-->`.
@@ -289,7 +302,7 @@ export function processLine(text: string): string | null {
 }
 
 /** The shapes whose stop is sent back, once per prompt. */
-const REFUSED = /^proposal without a card/;
+const REFUSED = /^(?:proposal without a card|minion-state claim without a read)/;
 
 /**
  * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits.
@@ -304,7 +317,7 @@ export function answerHook(input: HookInput, env = process.env, refusal?: { stat
   if (transcript) turn = readTurn(transcript, input.prompt_id ?? undefined);
   // Claude Code's own copy of the last message beats the transcript, which may not be flushed yet.
   if (typeof input?.last_assistant_message === 'string' && input.last_assistant_message.trim()) turn.finalText = input.last_assistant_message;
-  const hits = [...answerCheck(turn), ...liveClaimCheck(turn)];
+  const hits = [...answerCheck(turn), ...liveClaimCheck(turn, env.COORDINATOR_NUMBER)];
   if (role === 'thread') hits.push(...statusLineCheck(turn), ...titleCheck(turn, env.CITADEL_MINION_TITLE), ...shipReviewCheck(turn, transcript));
   const refuse = refusal ? refusalFor(input, hits, refusal.stateDir ?? join(tmpdir(), 'citadel-kit')) : null;
   for (const hit of hits) {
@@ -336,9 +349,15 @@ function refusalFor(input: HookInput, hits: string[], stateDir: string): string 
   } catch {
     return null; // no marker to stop a second refusal: let the turn end
   }
-  return (
-    '[citadel answer check] Your reply proposes work (a proposal, recommendation, next steps or follow-ups) and no card, plan or message to the Taskmaster went with it. ' +
-    "Post the choice as an ask_question card (a plan as propose_plan; a handoff as a message to the Taskmaster), one option per proposal with your pick marked, then write the reply again with the card's link. " +
-    'If nobody has a choice to make (a report that only lists what was done), write the reply again without the proposal wording.'
-  );
+  const why: string[] = [];
+  if (hits.some((h) => h.startsWith('proposal without a card'))) why.push(PROPOSAL_WHY);
+  const state = hits.find((h) => h.startsWith('minion-state claim'));
+  if (state) why.push(STATE_WHY.replace('$CLAIM', state.slice(state.indexOf('"'))));
+  return `[citadel answer check] ${why.join(' ')}`;
 }
+
+const PROPOSAL_WHY =
+  'Your reply proposes work (a proposal, recommendation, next steps or follow-ups) and no card, plan or message to the Taskmaster went with it. ' +
+  "Post the choice as an ask_question card (a plan as propose_plan; a handoff as a message to the Taskmaster), one option per proposal with your pick marked, then write the reply again with the card's link. " +
+  'If nobody has a choice to make (a report that only lists what was done), write the reply again without the proposal wording.';
+const STATE_WHY = "Your reply states another minion's state ($CLAIM) and this turn read none of it, so it comes from memory or an earlier reply. " + 'Call live_facts for that minion (read_ticket or list_tickets count too), then write the reply again from what it says now.';

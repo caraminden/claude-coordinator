@@ -277,7 +277,7 @@ const bash = (command: string) => [
 test("live-claim check: a claim in a turn that read nothing is a hit; a read, a run of gh or git, or the prompt's own report grounds it", () => {
   const claim = 'Yes: #1002 has been live since 20:18 PST.';
   const hit = liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is #1002 live yet?'), calls(['Edit']), say(claim)), 'p1'));
-  assert.deepEqual(hit, [`live-state claim without a read · "${claim}"`], "a person's question names #1002 but doesn't ground it");
+  assert.deepEqual(hit, [`minion-state claim without a read · "${claim}"`], "a person's question names #1002 but doesn't ground it");
   assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is it live?'), calls(['mcp__coordinator__live_facts']), say(claim)), 'p1')), []);
   assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is it live?'), bash('gh run list --branch main'), say(claim)), 'p1')), []);
   assert.deepEqual(liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is it live?'), bash('npm test'), say(claim)), 'p1')).length, 1, 'a Bash call that reads no live state grounds nothing');
@@ -287,7 +287,7 @@ test("live-claim check: a claim in a turn that read nothing is a hit; a read, a 
   assert.equal(liveClaimCheck(readTurn(jsonl(prompt('[#1003 Other]: #1003 is live.'), say(claim)), 'p1')).length, 1, "another minion's report doesn't ground #1002");
 });
 
-test('live-claim check only counts: a hit is logged as a would-refuse line and never sends the stop back', () => {
+test("live-claim check: a card waiting on a person (#1507's), CI or a deploy only counts, logged as a would-refuse line", () => {
   const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
   const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
   writeFileSync(path, jsonl(prompt('[Josh]: anything for me?'), say("Still waiting on you: [#441's card](#/p/2/t/441?e=3), about citadel.zip.")));
@@ -300,6 +300,38 @@ test('live-claim check only counts: a hit is logged as a would-refuse line and n
     .map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8'))
     .join('');
   assert.match(log, /would refuse · live-state claim without a read/);
+});
+
+test("minion-state claims: another minion's state with no read is its own shape; the turn's own minion, a wait on a person and other live state aren't", () => {
+  const turn = (text: string) => readTurn(jsonl(prompt('[Cara]: where are we?'), say(text)), 'p1');
+  assert.deepEqual(liveClaimCheck(turn('#1229 is live, so main is green.'), '1300'), ['minion-state claim without a read · "#1229 is live, so main is green."']);
+  assert.deepEqual(liveClaimCheck(turn('#1300 is live as b0f285eb.'), '1300'), ['live-state claim without a read · "#1300 is live as b0f285eb."'], "a minion's own ship only counts: Citadel told it");
+  assert.match(liveClaimCheck(turn('#1300 and #1229 are live.'), '1300')[0], /^minion-state/, 'another number in it still claims that one');
+  assert.match(liveClaimCheck(turn('#1962 is still waiting on your go on [its card](#/p/2/t/1962?e=1).'), '1300')[0], /^live-state/, "a wait on a person is #1507's to send back");
+  assert.match(liveClaimCheck(turn('The last four lands all failed.'))[0], /^live-state/);
+});
+
+test('a minion-state claim with no read sends the stop back once per prompt, naming live_facts; a read in the rewrite clears it', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
+  const stateDir = mkdtempSync(join(tmpdir(), 'answer-state-'));
+  const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
+  const env = { COORDINATOR_ROLE: 'coordinator', COORDINATOR_SHARED_DIR: shared };
+  writeFileSync(path, jsonl(prompt('[Josh]: is the burn-in fix in?'), say('Yes: #1725 has shipped.')));
+  const out: { block?: string } = {};
+  answerHook({ session_id: 's11', prompt_id: 'p1', transcript_path: path }, env, { stateDir, out });
+  assert.match(out.block ?? '', /another minion's state \("Yes: #1725 has shipped\."\)[\s\S]*live_facts/);
+  const again: { block?: string } = {};
+  answerHook({ session_id: 's11', prompt_id: 'p1', transcript_path: path, stop_hook_active: true }, env, { stateDir, out: again });
+  assert.equal(again.block, undefined, 'never twice in one prompt');
+  const log = readdirSync(join(shared, 'retro-log'), { recursive: true })
+    .filter((f) => String(f).endsWith('.md'))
+    .map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8'))
+    .join('');
+  assert.match(log, /refused stop · minion-state claim without a read/);
+  writeFileSync(path, jsonl(prompt('[Josh]: is the burn-in fix in?'), calls(['mcp__thread__live_facts']), say('Yes: #1725 has shipped.')));
+  const read: { block?: string } = {};
+  assert.deepEqual(answerHook({ session_id: 's12', prompt_id: 'p1', transcript_path: path }, env, { stateDir, out: read }), []);
+  assert.equal(read.block, undefined);
 });
 
 test('a stop sent back for a proposal logs no would-refuse line: the stop that ends the turn is judged', () => {

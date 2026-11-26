@@ -5,7 +5,7 @@
 //   1. a ship's tests there go first (#1902; the line's ships() block stays its strongest case);
 //   2. each CI job waiting for this PC's runners takes one worker's room: no new turn starts there until it runs;
 //   3. a heavy job declares its size; no new turn starts while it waits; it starts once its size is free, or after
-//      HEAVY_WAIT_MS anyway, at low priority;
+//      HEAVY_WAIT_MS anyway (as any other job: lowering its priority is the agent's, M6b);
 //   4. the owner's caps are the ceiling for every role. Running turns are never stopped, and the workers grow back on
 //      Auto's clock (src/turn-line.ts tickMachines), never at once.
 // Perigee keeps today's rules (Josh, "Machines only for now"). The counts are the choices page's: a turn 3 threads, a CI
@@ -15,7 +15,7 @@
 export const COST = { turn: 3, ci: 4, ship: 6 } as const;
 /** Heavy jobs' sizes in threads when they don't say (spec section 6: an APK build 8, a Windows test run 4). */
 export const HEAVY = { apk: 8, desktop: 8, windows: 4, gpu: 4 } as const;
-/** A heavy job that has waited this long starts anyway, at low priority. */
+/** A heavy job that has waited this long starts anyway. */
 export const HEAVY_WAIT_MS = 30 * 60_000;
 
 export interface HeavyJob {
@@ -29,7 +29,7 @@ export interface HeavyJob {
 }
 
 export interface BalanceIn {
-  /** The PC's threads (its agent's report), under the owner's threads cap where one is set. */
+  /** The PC's threads, as its agent reported them; the owner's threads caps come in `caps`. */
   threads: number;
   /** The owner's caps: the most workers, CI runners, and threads for turns and for CI (null: none set). */
   caps: { workers: number | null; runners: number | null; turnThreads: number | null; ciThreads: number | null };
@@ -126,7 +126,7 @@ export function rank<T extends Rankable>(machines: readonly T[], opts: { mark?: 
 }
 
 export interface BalancerDeps {
-  /** The machines the balancer runs for (connected, any role on); perigee is never one. */
+  /** The machines the balancer runs for: every owned machine (one away keeps its last report's plan, unused); perigee is never one. */
   machines: () => number[];
   input: (machineId: number) => Omit<BalanceIn, 'heavy' | 'now'> | null;
   /** The plans changed: the line looks again (a target rose), and waiting heavy jobs ask again. */
@@ -155,7 +155,7 @@ export class MachineBalancer {
 
   /**
    * A heavy job asks to start there: 'start' (it now holds its size until done()), 'late' (it waited HEAVY_WAIT_MS and
-   * starts anyway, at low priority), or 'wait' (it is held, and no new turn starts there meanwhile). Ask again each tick.
+   * starts anyway), or 'wait' (it is held, and no new turn starts there meanwhile). Ask again each tick.
    */
   ask(machineId: number, job: { key: string; label: string; size: number }): 'start' | 'late' | 'wait' {
     const jobs = this.heavy.get(machineId) ?? new Map<string, HeavyJob>();
@@ -183,14 +183,9 @@ export class MachineBalancer {
     return this.plans.get(machineId) ?? null;
   }
 
-  /** It ended, or stopped waiting: its size is free. */
+  /** It ended, or stopped waiting: its size is free. For jobs run outside the server, which know only their key (M6b). */
   done(key: string) {
     for (const [id, jobs] of this.heavy) if (jobs.delete(key)) this.d.changed([id]);
-  }
-
-  /** The heavy jobs held or running there, for the tile. */
-  heavyAt(machineId: number): HeavyJob[] {
-    return [...(this.heavy.get(machineId)?.values() ?? [])];
   }
 
   /** The 10 s step: each machine's plan again; those whose plan moved are told, and a change of why is logged once. */

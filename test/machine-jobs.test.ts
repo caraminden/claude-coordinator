@@ -813,13 +813,10 @@ test('a GPU job with its go waits for its size on a busy machine, starts as turn
     jobs.pump(id0);
     assert.equal(store.getMachineJob(j.id)!.state, 'starting');
     jobs.report(m(), { id: j.id, state: 'running', run_s: 1 });
-    assert.deepEqual(
-      b.heavyAt(id0).map((h) => [h.key, h.running]),
-      [[`gpu:${j.id}`, true]],
-    );
+    assert.equal(b.plan(id0)!.workers, 2, 'running, it holds its 4 threads');
     jobs.report(m(), { id: j.id, state: 'done', run_s: 2 });
     jobs.pump(id0);
-    assert.deepEqual(b.heavyAt(id0), [], 'its size is free again');
+    assert.equal(b.plan(id0)!.workers, 4, 'its size is free again');
     assert.deepEqual(freed.at(-1), [id0]);
   } finally {
     store.db.close();

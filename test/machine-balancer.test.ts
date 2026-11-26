@@ -166,7 +166,7 @@ test('a heavy job asks, waits while turns hold its size, starts when they end, a
   assert.equal(b.ask(7, apk), 'start', 'asking again keeps it');
   b.done('apk');
   assert.deepEqual(told.at(-1), [7]);
-  assert.deepEqual(b.heavyAt(7), []);
+  assert.equal(b.plan(7)!.workers, 5, 'its 8 threads are free for turns again');
   assert.equal(b.ask(99, apk), 'start', 'a machine the balancer has no say on (no threads reported) never holds a job');
 });
 

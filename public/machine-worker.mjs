@@ -58,6 +58,32 @@ export function workerConfig(raw) {
   };
 }
 
+/** A person's Claude accounts, each its own folder in the home: the server's names (src/claude-link.ts accountDir, MAX_ACCOUNTS; keep them in step). */
+export const ACCOUNTS = 3;
+export const accountDir = (/** @type {number} */ n) => (n === 1 ? '.claude' : `.claude-${n}`);
+
+/**
+ * The accounts signed in to in the home at `home` (the worker's home volume on this computer): each whose folder holds a
+ * sign-in, that the file is there and never what is in it, with the Claude organization its .claude.json names (null
+ * when it can't say), so the server can tell an account signed in to another organization than its own of that number.
+ * @param {string} home @returns {{ n: number, org: string | null }[]}
+ */
+export function signedSlots(home) {
+  const slots = [];
+  for (let n = 1; n <= ACCOUNTS; n++) {
+    if (!(size(join(home, accountDir(n), '.credentials.json')) > 0)) continue;
+    // Account 1 signed in with no CLAUDE_CONFIG_DIR keeps .claude.json beside its folder.
+    const json = read(join(home, accountDir(n), '.claude.json')) ?? (n === 1 ? read(join(home, '.claude.json')) : null);
+    let org = null;
+    try {
+      const o = JSON.parse(json ?? '')?.oauthAccount?.organizationUuid;
+      org = typeof o === 'string' && /^[\w-]{1,80}$/.test(o) ? o : null;
+    } catch {}
+    slots.push({ n, org });
+  }
+  return slots;
+}
+
 /** Host folders as binds, each at /host/<name>; anything else is dropped. @param {unknown} raw @returns {{ src: string, dst: string, ro: boolean }[]} */
 export function hostBinds(raw) {
   return (Array.isArray(raw) ? raw : []).filter((m) => m && typeof m.src === 'string' && isAbsolute(m.src) && !m.src.includes(',') && typeof m.dst === 'string' && /^\/host\/[a-z0-9][a-z0-9_-]{0,39}$/.test(m.dst)).map((m) => ({ src: m.src, dst: m.dst, ro: m.ro !== false }));
@@ -124,7 +150,7 @@ const read = (/** @type {string} */ file) => {
 };
 
 /**
- * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[], sync?: { at: string, key: string }, host?: boolean }} Launch sync: its state comes from the server and goes back (public/machine-sync.mjs); `at` is that program's folder, `key` what one of it at a time runs for
+ * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[], sync?: { at: string, key: string }, host?: boolean, account?: number }} Launch sync: its state comes from the server and goes back (public/machine-sync.mjs); `at` is that program's folder, `key` what one of it at a time runs for
  * @typedef {{ start?: boolean, git?: boolean, roots?: string[], final?: boolean, mode?: 'rescue' | 'clear', all?: boolean }} SyncAsk
  * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean, seeded: boolean, script: string | null, home: number, homeFailed: string | null, asked: number, steering: boolean, checking: boolean, checked: number, nextTry: number, failures: number, ref: number, final: boolean, boot?: string | null, rescuing?: boolean, rescued?: true | string, counting: boolean }} Turn
  */
@@ -141,8 +167,8 @@ export class Worker {
     this.turns = new Map();
     this.claude = null;
     this.load = { at: 0, now: hostLoad() };
-    /** @type {{ at: number, now: boolean | null }} */
-    this.signedIn = { at: 0, now: null };
+    /** Signed in to Claude here at all, and which accounts (signedSlots); null when it couldn't tell. @type {{ at: number, now: boolean | null, slots: { n: number, org: string | null }[] | null }} */
+    this.signedIn = { at: 0, now: null, slots: null };
     this.busy = false;
     this.again = false;
     this.port = 0;
@@ -590,8 +616,11 @@ export class Worker {
     const file = join(t.local, 'spec.json');
     const spec = JSON.parse(readFileSync(file, 'utf8'));
     spec.env = { ...spec.env, COORDINATOR_API: `http://127.0.0.1:${this.port}` };
-    // The sign-in is this machine's own, in the container's home volume: the server's config folder isn't here.
-    delete spec.env.CLAUDE_CONFIG_DIR;
+    // The sign-in is this machine's own, in the container's home volume: the server's config folder isn't here, so the
+    // account the server picked runs from that account's folder here (account 1: Claude Code's default, as signin makes it).
+    const n = t.launch.account;
+    if (Number.isInteger(n) && n > 1 && n <= ACCOUNTS) spec.env.CLAUDE_CONFIG_DIR = join(t.launch.home, accountDir(n));
+    else delete spec.env.CLAUDE_CONFIG_DIR;
     // The turn's temp, files and shared folders are there even with nothing to bring.
     for (const dir of [spec.env.TMPDIR, spec.env.COORDINATOR_FILES_DIR, spec.env.COORDINATOR_SHARED_DIR]) if (this.mine(dir) && t.launch.roots.some((r) => dir.startsWith(`${r}/`))) mkdirSync(this.local(dir), { recursive: true });
     if (this.cfg.claude) spec.command = this.cfg.claude;
@@ -629,18 +658,16 @@ export class Worker {
       this.signedIn.at = now;
       void this.checkSignIn();
     }
-    return { load: this.load.now, signedIn: this.signedIn.now };
+    return { load: this.load.now, signedIn: this.signedIn.now, accounts: this.signedIn.slots };
   }
 
-  /** Whether the worker's home volume holds a Claude sign-in: that the file is there, never what is in it. */
+  /** Which Claude accounts the worker's home volume holds a sign-in for (signedSlots), read in the volume's folder here. */
   async checkSignIn() {
-    const { podman, container, image } = this.cfg;
-    const has = await this.exec(podman, ['volume', 'ls', '-q', '--filter', `name=^${container}-home$`]);
-    if (has.code) return void (this.signedIn.now = null);
-    if (!has.out.trim()) return void (this.signedIn.now = false);
-    // Words, not an exit code: a podman that failed or timed out says nothing about the sign-in.
-    const said = (await this.exec(podman, ['run', '--rm', '--userns=keep-id', '-v', `${container}-home:/h:ro`, image, 'sh', '-c', 'test -s /h/.claude/.credentials.json && echo yes || echo no'])).out.trim();
-    this.signedIn.now = said === 'yes' ? true : said === 'no' ? false : null;
+    const vol = await this.exec(this.cfg.podman, ['volume', 'inspect', '--format', '{{.Mountpoint}}', `${this.cfg.container}-home`]);
+    // No volume yet is no sign-in; a podman that failed or timed out says nothing about it.
+    const slots = vol.code ? (/no such volume/i.test(vol.err) ? [] : null) : existsSync(vol.out.trim()) ? signedSlots(vol.out.trim()) : null;
+    this.signedIn.slots = slots;
+    this.signedIn.now = slots && slots.length > 0;
   }
 
   /** `claude --version` there, by `podman <how…>`. @param {string[]} how */

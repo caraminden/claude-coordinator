@@ -29,6 +29,8 @@ export interface MachineLaunch {
   roots: string[];
   /** What its syncs go by (src/machine-sync.ts): its worktree, session and folders come from here first. */
   state?: TurnState;
+  /** The person's Claude account it runs on (src/claude-link.ts accountDir): the machine runs it from that account's folder there. */
+  account?: number;
   /** A minion marked for this machine, on its owner's turn (Build 7 T8, src/host-reach.ts): its own container there, with the owner's folders at /host. */
   host?: true;
 }
@@ -53,6 +55,8 @@ export interface WorkerInfo {
   load?: { cpu: number | null; mem: number | null; freeGb: number | null } | null;
   /** Its worker has a Claude sign-in; null when it couldn't tell. */
   signedIn?: boolean | null;
+  /** Which of its owner's accounts are signed in there (#2061), each with the Claude organization it names; null: it couldn't tell, or an agent from before. */
+  accounts?: { n: number; org: string | null }[] | null;
 }
 
 /** The machines' connections, set by the server at start (server.ts): a module here reads them without holding the relay. */
@@ -351,7 +355,14 @@ export async function owned(machineId: number, dir: unknown): Promise<boolean> {
  * here and the turns it should start. A turn it names that is no longer the machine's (ended and tidied here) is `gone`.
  */
 type Sync = { turns: Record<string, SyncReply>; start: { dir: string; launch: Offered }[]; clear?: Clear[] };
-type SyncBody = { worker?: { claude?: unknown; max?: unknown; load?: unknown; signedIn?: unknown }; turns?: unknown; cleared?: unknown };
+type SyncBody = { worker?: { claude?: unknown; max?: unknown; load?: unknown; signedIn?: unknown; accounts?: unknown }; turns?: unknown; cleared?: unknown };
+/** An agent's signed-in accounts, checked: account numbers 1 to 3, once each, with an organization id or null. */
+function accountsSaid(raw: unknown): WorkerInfo['accounts'] {
+  if (!Array.isArray(raw)) return null;
+  const out = new Map<number, string | null>();
+  for (const a of raw as { n?: unknown; org?: unknown }[]) if (Number.isInteger(a?.n) && (a.n as number) >= 1 && (a.n as number) <= 3) out.set(a.n as number, typeof a.org === 'string' && /^[\w-]{1,80}$/.test(a.org) ? a.org : null);
+  return [...out].map(([n, org]) => ({ n, org }));
+}
 /** An agent's load, checked: nothing for a kernel without pressure files, which Auto reads as not known. */
 function loadSaid(raw: unknown): WorkerInfo['load'] {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -374,7 +385,14 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
   const c = contact.get(machineId);
   contact.set(machineId, { at: now, since: c && now - c.at < GAP_MS ? c.since : now });
   if (body.worker)
-    workers.set(machineId, { claude: typeof body.worker.claude === 'string' ? body.worker.claude.slice(0, 80) : null, max: Math.max(0, Math.floor(Number(body.worker.max)) || 0), at: Date.now(), load: loadSaid(body.worker.load), signedIn: typeof body.worker.signedIn === 'boolean' ? body.worker.signedIn : null });
+    workers.set(machineId, {
+      claude: typeof body.worker.claude === 'string' ? body.worker.claude.slice(0, 80) : null,
+      max: Math.max(0, Math.floor(Number(body.worker.max)) || 0),
+      at: Date.now(),
+      load: loadSaid(body.worker.load),
+      signedIn: typeof body.worker.signedIn === 'boolean' ? body.worker.signedIn : null,
+      accounts: accountsSaid(body.worker.accounts),
+    });
   const turns: Record<string, SyncReply> = {};
   const held = new Set<string>();
   for (const t of (Array.isArray(body.turns) ? body.turns : []) as SyncTurn[]) {
@@ -393,7 +411,8 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
       if (placedOn.get(dir)?.id === machineId) placedOn.delete(dir);
     }
     // Not one that has ended here (a stop before it started): there is nothing to run.
-    else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.host ? { host: true } : {}), ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
+    else if (!held.has(dir) && !(await there(join(dir, 'exit.json'))))
+      start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.account ? { account: at.account } : {}), ...(at.host ? { host: true } : {}), ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
   }
   return { turns, start, ...(clear.length ? { clear } : {}) };
 }

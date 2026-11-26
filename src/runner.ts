@@ -41,7 +41,7 @@ import { killedSpend, turnOf } from './turn-row.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
-import { type TurnPlace } from './claude-link.ts';
+import { accountDir, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo, type Chain } from './wake.ts';
 import { dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
@@ -542,7 +542,8 @@ export class Runner {
   private closer: Closing;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
-  placeFor?: (person: number | null, warm?: string, taskmaster?: boolean) => TurnPlace | { refused: string };
+  /** `only`: a turn placed on a machine runs on one of these accounts, those signed in there (MachinePools.accountsAt). */
+  placeFor?: (person: number | null, warm?: string, taskmaster?: boolean, only?: number[]) => TurnPlace | { refused: string };
   /** The account such a turn would run on, moving nothing (ClaudeLink.accountFor, #1888): null for none. */
   accountFor?: (person: number, warm?: string) => number | null;
   /** The start_after chains still to fire (LiveWaiters.chains, set by the server): the minions that wait on another. */
@@ -2817,7 +2818,10 @@ export class Runner {
     // A hidden keepalive (#862): it re-reads the cached prefix and changes nothing of the minion's, the chat included.
     const keepalive = !!batch[0]?.keepalive;
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container.
-    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator') ?? { host: true as const };
+    // On a machine, only an account signed in there (#2061): startPlace has just found one ready.
+    const lined = keepalive || batch[0]?.fresh ? 0 : this.turnLine.placeOf(ticket.id);
+    const only = lined ? this.pools?.accountsAt(lined, person) : undefined;
+    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator', only) ?? { host: true as const };
     if ('refused' in claudePlace) {
       if (keepalive) return;
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
@@ -3067,8 +3071,10 @@ export class Runner {
     // Its `machine` file and first beat: the machine's agent fetches the folder and starts it (src/machine-turn.ts).
     const projects = join(dirname(this.store.path), 'projects');
     const roots = [dirname(dir), projects, ...(project.repo_dir && !project.repo_dir.startsWith(projects + sep) ? [project.repo_dir] : [])];
-    const state = { ticket: ticket.id, config: { here: configDir, there: join(env.HOME ?? '', '.claude') } };
-    if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots, state, ...(env.COORDINATOR_HOST_REACH ? { host: true as const } : {}) });
+    // The account it runs on has its own folder on the machine as here (#2061): its session goes there, and the machine runs it from there.
+    const account = place.account ?? 1;
+    const state = { ticket: ticket.id, config: { here: configDir, there: join(env.HOME ?? '', accountDir(account)) } };
+    if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots, state, account, ...(env.COORDINATOR_HOST_REACH ? { host: true as const } : {}) });
     // Nothing more to await: a stop or a dismissal meanwhile means no turn, and nothing of the minion's changed. A message
     // to a minion already dismissed does run its turn (it reopens it).
     const still = this.store.getTicket(ticket.id);

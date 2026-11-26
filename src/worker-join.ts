@@ -12,6 +12,7 @@ import { imageHashAsync } from './claude-link.ts';
 import type { Machine, Store } from './db.ts';
 import { gitOut } from './git.ts';
 import { cleanFolders, type HostFolder } from './host-reach.ts';
+import { type AccountsThere, slotsOf } from './machine-pools.ts';
 import { sameClaude, type WorkerInfo } from './machine-turn.ts';
 
 /**
@@ -56,6 +57,8 @@ export type WorkerView = {
   /** This server's claude when the worker's differs: no turn starts there until they match. */
   claude_wanted: string | null;
   signed_in: boolean | null;
+  /** Each of its owner's linked Claude accounts there (#2061): signed in, not, or signed in to another organization than that account here; null while away or not known. */
+  accounts: { n: number; there: 'in' | 'out' | 'other' }[] | null;
   github: boolean | null;
   disk_gb: number | null;
   full: boolean;
@@ -97,6 +100,8 @@ export interface WorkerJoinDeps {
   claude: () => Promise<string | null>;
   /** A worker's row differs from what people were last sent. */
   changed: () => void;
+  /** Its owner's Claude accounts against the sign-ins it holds (MachinePools' own). */
+  accountsThere?: AccountsThere;
   now: () => number;
 }
 
@@ -194,6 +199,7 @@ export class WorkerJoin {
       claude: here ? (info?.claude ?? null) : null,
       claude_wanted: here && home && info?.claude && !sameClaude(home, info.claude) ? home : null,
       signed_in: here ? (info?.signedIn ?? null) : null,
+      accounts: here && info && typeof info.signedIn === 'boolean' && machine.owner_id !== null ? this.accountsOf(machine.owner_id, info) : null,
       github: facts?.github ?? null,
       disk_gb: facts?.disk_gb ?? null,
       full: facts?.full ?? false,
@@ -203,6 +209,12 @@ export class WorkerJoin {
       passed: kept?.passed ?? null,
       twice: this.d.now() - (this.twice.get(machine.id) ?? 0) < 60_000,
     };
+  }
+
+  private accountsOf(owner: number, info: WorkerInfo): WorkerView['accounts'] {
+    const slots = slotsOf(info);
+    const there = this.d.accountsThere?.(owner, slots);
+    return there ? there.linked.map((n) => ({ n, there: there.usable.includes(n) ? 'in' : slots.some((s) => s.n === n) ? 'other' : 'out' })) : null;
   }
 
   /** The app's own side of a worker: its claude's version, the image's build files and the agent's code. */

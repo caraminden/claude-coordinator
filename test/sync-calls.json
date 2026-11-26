@@ -195,7 +195,7 @@
   "read": ["proc",1,"loop-lag worker thread reads /proc thread state"]
  },
  "src/machine-turn.ts": {
-  "placedAt": ["rare",1,"a machine going away or overdue (machine-away.ts), and Runner.recover's sweep and re-attach at startup for a turn saved before Build 7 kept its machine; followed turns carry it, and the poll, stop, stray wait and agent routes read it off the thread (placedNow)"],
+  "placedAt": ["rare",1,"a machine away: a stop or start-end with no copy, and every 5 s per turn marked for a machine away past AWAY_MS (machine-away.ts overdue); plus Runner.recover's sweep and re-attach at startup for a turn saved before Build 7 kept its machine; followed turns carry it, and the poll, stop, stray wait and agent routes read it off the thread (placedNow)"],
   "MachineTurn.alive": ["boot",1,"Runner.recover's sweep and re-attach at startup (wrapperAlive); the poll and stray wait use aliveOff"]
  },
  "src/make-app.ts": {

@@ -497,13 +497,14 @@ test("a cabal lead's turn past 150k starts its shift change: its board comes wit
     runner.send(id, 'Cara', 'go');
     await started(id);
     // Set by the turn itself, as a lead waiting on a person would: the handoff turn must not clear it.
-    store.updateTicket(id, { state: 'ready' });
+    store.updateTicket(id, { state: 'ready', replies: JSON.stringify(['Ship it']) });
     await endTurn(id, 'ok');
     const step = await lastCall(++count);
     assert.ok(promptText(step.prompt).includes(leadHandoffPrompt(`${Math.round((FRESH_CONTEXT_TOKENS + 1) / 1000)}k tokens of context at the end of a turn`)));
     await started(id);
     contextSize(null);
     assert.equal(store.getTicket(id)!.state, 'ready');
+    assert.equal(store.getTicket(id)!.replies, JSON.stringify(['Ship it']));
     // The reply's status line is not applied: it would clear the state the lead was left in.
     const applied: number[] = [];
     const wired = runner.onStatusTrailer;

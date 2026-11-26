@@ -3118,7 +3118,7 @@ export class Runner {
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
       else if (ticket.kind === 'coordinator' && ticket.note) this.store.updateTicket(ticket.id, { note: null });
       // One-tap replies answer the turn that offered them; a new turn makes them stale.
-      if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
+      if (ticket.replies && !(step && this.store.getCabal(ticket.id))) this.store.updateTicket(ticket.id, { replies: null });
     }
     const turn: TurnState = {
       ...(Object.keys(retries).length ? { retries } : {}),

@@ -196,6 +196,7 @@ test('PATCH roles: owner and admins only; on with no list is every scheme its ow
     ci.roles.find((r) => r.role === 'ci'),
     { role: 'ci', on: true, caps: { runners: 2 }, setup: null, projects: [shared.id], name: 'CI runners' },
   );
+  await assert.rejects(patchRoles(app, as(cara), m, { role: 'ci', caps: { runners: 4 } }), /Only its owner can set its caps/);
   // Off and on again: its list stays.
   await patchRoles(app, as(cara), m, { role: 'ci', on: false });
   const back = await patchRoles(app, as(josh), m, { role: 'ci', on: true });

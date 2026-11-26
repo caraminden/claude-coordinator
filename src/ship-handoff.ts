@@ -6,6 +6,7 @@ import { access, readFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { needsGo } from '../public/shipping.js';
 import { APP_NAME } from './appname.ts';
+import { armedKey } from './db-keys.ts';
 import { criticRefusal } from './critic-gate.ts';
 import { buildOwnerKey, type Ticket } from './db.ts';
 import { fixLine, fixProofProblem, parseFixProof } from './fix-proof.ts';
@@ -22,6 +23,7 @@ import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
 import { buildBranch } from './workspace.ts';
+import { armForLane, takeFreeLane } from './armed-handoff.ts';
 
 /** A hand-off that passed every check, ready for startHandoff. */
 interface Ready {
@@ -176,6 +178,7 @@ function landEnv(app: App, ticket: Ticket, h: Handoff, token?: string): Record<s
 export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy, again = false): boolean {
   if (!app.landings.handOff(ticket.id, cwd, env, args, h, again)) return false;
   app.store.claims.handedOff(ticket.id);
+  app.store.deleteSetting(armedKey(ticket.id)); // a ship that started outdates one armed before it (#2046)
   app.runner.places.refused(ticket.id, false);
   app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') }, by);
   app.runner.broadcastTicket(ticket.id);
@@ -298,23 +301,12 @@ export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, que
 }
 
 /** Whether a change touches the ship pipeline (tools/pipeline-files.txt, where a repo has one) and so ships only from the `pipeline-lane` claim's holder; null when it may ship. */
-async function laneRefusal(app: App, ticket: Ticket): Promise<string | null> {
+export async function laneRefusal(app: App, ticket: Ticket): Promise<string | null> {
   const lane = app.store.claims.get(ticket.project_id, SHIP_LANE);
   if (lane?.holder === ticket.id || lane?.beside === ticket.id) return null;
   const changed = await pipelineChanges(ticket.cwd!);
   if (changed === null) return "it couldn't tell whether the change needs the pipeline lane";
   return changed.length ? `${changed[0]} is a pipeline file and you don't hold the pipeline lane` : null;
-}
-
-/** Why a minion waiting for the lane may not hand a pipeline change off yet, null when it may; it is marked ready (#1985). */
-export async function laneHold(app: App, ticket: Ticket): Promise<string | null> {
-  const lane = app.store.claims.get(ticket.project_id, SHIP_LANE);
-  // One not in the queue ships as it always did: its brief or the Taskmaster said how.
-  if (!lane || !app.store.claims.waiting(ticket.project_id, SHIP_LANE).includes(ticket.id) || !(await laneRefusal(app, ticket))) return null;
-  app.store.claims.setReady(ticket.project_id, SHIP_LANE, ticket.id);
-  app.broadcast({ type: 'claims', projectId: ticket.project_id });
-  const holder = app.store.getTicket(lane.holder);
-  return `#${holder?.number ?? lane.holder} holds the pipeline lane. You are marked ready in its queue: you are woken when it is yours, when its holder is slow, or when you can ship beside it. End your turn now, sealed`;
 }
 
 /** Why one let in beside the lane's holder may not hand off after all (#1985): since it was, the two came to share a pipeline file. */
@@ -329,24 +321,77 @@ async function besideRefusal(app: App, ticket: Ticket): Promise<string | null> {
 }
 
 /** What the chat and the queue say now that rules out shipping with no turn; null when nothing does. Read again after the slow checks. */
-function chatRefusal(app: App, ticketId: number, cardEvent: number): string | null {
+function chatRefusal(app: App, ticketId: number, since: number, what: string): string | null {
   const { store, runner } = app;
   const t = store.getTicket(ticketId);
   if (!t || t.status === 'closed') return 'you were dismissed';
   if (runner.noTurns) return 'this is a preview';
   if (runner.parked(t)) return 'you were sealed';
   if (runner.busy(ticketId)) return 'your turn was running or about to';
-  const wrote = store.eventsOfKinds(ticketId, ['user_message'], cardEvent).some((e) => {
+  const wrote = store.eventsOfKinds(ticketId, ['user_message'], since).some((e) => {
     const d = JSON.parse(e.data);
     return !d.from && runner.personOf?.(d.author) != null;
   });
-  return wrote ? 'a person wrote to you after the card' : null;
+  return wrote ? `a person wrote to you after ${what}` : null;
+}
+
+/** How a prepared hand-off ships with no turn: since which event the chat must be quiet, and how the refusals name it. */
+export interface NoTurnShip {
+  /** The event it was prepared at: the card, or the armed line. */
+  since: number;
+  /** "the card", "you armed it". */
+  what: string;
+  /** Whose login its pushes, and a failure's wake, run on; null: the minion's own. */
+  person: number | null;
+  by: ChangeBy;
+  /** The go for its shipped line, at any risk. */
+  go?: string;
+  /** What else rules it out, read again after the slow checks. */
+  still?: () => string | null;
 }
 
 /**
- * A member pressed Ship It: ship it now as its minion prepared it, with no turn. Null once it started; else why it goes to
- * the minion as an ordinary answer, or '' for a card the server never ships (a build's, a pull-request scheme's).
- * `record` keeps the answer in the chat, and what the minion's next turn, if it has one, reads of it.
+ * Ship a prepared hand-off now, with no turn (#1930 Ship It, #2046 armed hand-offs), through every guard: not sealed or
+ * dismissed, no turn running or due, nobody wrote since, the branch unchanged, and checkHandoff's own checks. Null once
+ * it started; else why not, or `{ lane }` when only the pipeline lane stands in the way.
+ */
+export async function shipPrepared(app: App, ticket: Ticket, prepared: Prepared, o: NoTurnShip): Promise<string | null | { lane: string }> {
+  try {
+    const clear = () => {
+      const now = chatRefusal(app, ticket.id, o.since, o.what) ?? o.still?.();
+      if (now) throw new HttpError(409, now);
+    };
+    clear();
+    // A copy of the data (a dev copy) names the live worktrees: nothing pressed there may ship them.
+    if (!resolve(ticket.cwd!).startsWith(resolve(app.dataDir) + sep)) return "your worktree isn't in this server's own folder";
+    const moved = async () => (await gitOut(['rev-parse', 'HEAD'], ticket.cwd!)) !== prepared.head && `your branch moved since ${o.what}`;
+    const early = await moved();
+    if (early) return early;
+    const lane = await laneRefusal(app, ticket);
+    if (lane) return (await pipelineChanges(ticket.cwd!))?.length ? { lane } : lane;
+    const ready = await checkHandoff(app, { ...ticket, person_id: o.person ?? ticket.person_id }, { ...prepared.args, ...(o.go && { go: o.go }) }, clear);
+    if (o.go) ready.h.go = o.go; // on its shipped line at any risk
+    // The checks take seconds: what came meanwhile still counts, and nothing below the last read of the commit waits.
+    const late = await moved();
+    if (late) return late;
+    clear();
+    if (!startHandoff(app, ticket, ready, o.by)) return 'a ship of yours already ran';
+    // A ship that fails wakes it on that login, as the turn it stands in for would have run on it.
+    if (o.person != null && o.person !== ticket.person_id) app.store.updateTicket(ticket.id, { person_id: o.person });
+    return null;
+  } catch (err) {
+    return thrown(err)
+      .message!.replace(/^Not handed off: /, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 400);
+  }
+}
+
+/**
+ * A member pressed Ship It: ship it now as its minion prepared it, with no turn. Null once it started, or was armed for
+ * the pipeline lane (#2046); else why it goes to the minion as an ordinary answer, or '' for a card the server never
+ * ships (a build's, a pull-request scheme's). `record` keeps the answer in the chat, and what the minion's next turn, if
+ * it has one, reads of it.
  */
 export async function shipOnClick(app: App, ticket: Ticket, card: { event: number; data: { kind?: string; into?: number; handoff?: Prepared } }, answer: { by: string; uid: number | null; picked: string[]; added: boolean; record(held: string): void }): Promise<string | null> {
   const { data } = card;
@@ -355,39 +400,23 @@ export async function shipOnClick(app: App, ticket: Ticket, card: { event: numbe
   if (answer.added) return 'the answer had words or files added';
   const prepared = data.handoff;
   if (!prepared) return 'the card had no hand-off prepared (hand_off)';
-  try {
-    const clear = () => {
-      const now = chatRefusal(app, ticket.id, card.event);
-      if (now) throw new HttpError(409, now);
-    };
-    clear();
-    // A copy of the data (a dev copy) names the live worktrees: nothing pressed there may ship them.
-    if (!resolve(ticket.cwd!).startsWith(resolve(app.dataDir) + sep)) return "your worktree isn't in this server's own folder";
-    const moved = async () => (await gitOut(['rev-parse', 'HEAD'], ticket.cwd!)) !== prepared.head && 'your branch moved since the card';
-    const early = await moved();
-    if (early) return early;
-    const lane = await laneRefusal(app, ticket);
-    if (lane) return lane;
-    const go = `${answer.by}, ${pacificStamp(Date.now())}, by Ship It (the server shipped it with no turn)`.slice(0, 200);
-    // Its pushes go out as whoever pressed it, as from the turn their answer would have started.
-    const ready = await checkHandoff(app, { ...ticket, person_id: answer.uid ?? ticket.person_id }, { ...prepared.args, go }, clear);
-    ready.h.go = go; // on its shipped line at any risk
-    // The checks take seconds: what came meanwhile still counts, and nothing below the last read of the commit waits.
-    const late = await moved();
-    if (late) return late;
-    clear();
+  const go = `${answer.by}, ${pacificStamp(Date.now())}, by Ship It (the server shipped it with no turn)`.slice(0, 200);
+  const unsettled = () => {
     const fresh = app.store.eventsOfKinds(ticket.id, ['question'], card.event - 1).find((e) => e.id === card.event);
-    if (!fresh || JSON.parse(fresh.data).settled) return 'you settled the card meanwhile';
-    if (!startHandoff(app, ticket, ready, { kind: 'person', name: answer.by })) return 'a ship of yours already ran';
-    // A ship that fails wakes it on the presser's login, as the turn their answer would have started ran on it.
-    if (answer.uid != null && answer.uid !== ticket.person_id) app.store.updateTicket(ticket.id, { person_id: answer.uid });
-    answer.record(`${answer.by} answered your ship card: Ship It. ${APP_NAME} handed your ship off as you prepared it, with no turn of yours. If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);
-    app.runner.emit(ticket.id, 'note', { text: `${answer.by} pressed Ship It, so ${APP_NAME} started this ship with no turn.` });
+    return !fresh || JSON.parse(fresh.data).settled ? 'you settled the card meanwhile' : null;
+  };
+  const by = { kind: 'person', name: answer.by } as const;
+  const ship = () => shipPrepared(app, ticket, prepared, { since: card.event, what: 'the card', person: answer.uid, by, go, still: unsettled });
+  let why = await ship();
+  if (why && typeof why !== 'string' && takeFreeLane(app, ticket)) why = await ship();
+  if (typeof why === 'string') return why;
+  if (why) {
+    // Not the lane's holder (#2046): the click's go waits in the lane's queue, and ships when the lane passes to it.
+    const where = armForLane(app, ticket, { ...prepared.args, go }, prepared.head, answer.uid, `${answer.by}'s Ship It`, by);
+    answer.record(`${answer.by} answered your ship card: Ship It. ${why.lane}, so ${APP_NAME} armed your hand-off as you prepared it, with their go. ${where} If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);
     return null;
-  } catch (err) {
-    return thrown(err)
-      .message!.replace(/^Not handed off: /, '')
-      .replace(/\s+/g, ' ')
-      .slice(0, 400);
   }
+  answer.record(`${answer.by} answered your ship card: Ship It. ${APP_NAME} handed your ship off as you prepared it, with no turn of yours. If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);
+  app.runner.emit(ticket.id, 'note', { text: `${answer.by} pressed Ship It, so ${APP_NAME} started this ship with no turn.` });
+  return null;
 }

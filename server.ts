@@ -7,6 +7,7 @@ import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { thrown } from './src/thrown.ts';
+import { fireArmed } from './src/armed-handoff.ts';
 import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { basename, extname, join } from 'node:path';
@@ -164,7 +165,7 @@ import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
-import { ShipLane } from './src/ship-lane.ts';
+import { SHIP_LANE, ShipLane } from './src/ship-lane.ts';
 import { StallWatch, refusalKind } from './src/stall-signals.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
@@ -1837,6 +1838,8 @@ const shipLane = new ShipLane({
   },
   leaveMail: (id, author, text) => runner.leaveMail(id, author, text),
   broadcast,
+  // The first sweep runs a minute after boot, once app is set.
+  armed: (id, fallback, started) => fireArmed(app, id, SHIP_LANE, fallback, started),
 });
 // Not in a preview or a dev copy: they name the live worktrees, and wake nobody.
 if (!runner.noTurns) setInterval(() => void shipLane.sweep().catch((err) => console.error('The ship-script lane:', err)), 60_000).unref();
@@ -2443,6 +2446,8 @@ const app: App = {
   sharedDir,
   registryChanged,
 };
+// A claim that passes to a minion with an armed hand-off ships it with no turn (#2046).
+runner.armed = (id, claim, fallback) => fireArmed(app, id, claim, fallback);
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {
   every(

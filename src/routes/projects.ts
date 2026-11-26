@@ -13,6 +13,7 @@ import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME, type Session } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type TicketFields, type User } from '../db.ts';
+import { armedKey } from '../db-keys.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { readScope } from '../read-scope.ts';
@@ -1951,6 +1952,8 @@ export const projectRoutes: Route[] = [
       }
       if (queue) app.store.claims.setQueue(project.id, name, queue, session.name);
       if (first) app.runner.claimPassed(project.id, [{ to: taken.claim }], `${session.name} started its queue with you`, session.name);
+      // Given straight to a minion whose hand-off is armed for it (#2046): it ships now, as when the claim passes to it.
+      else if (!held && app.store.getSetting(armedKey(holder.id))) app.runner.claimPassed(project.id, [{ to: taken.claim }], `${session.name} gave it to you`, session.name);
       else app.broadcast({ type: 'claims', projectId: project.id });
       const view = claimView(app, taken.claim);
       if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);

@@ -936,6 +936,7 @@ export class Runner {
       cardLinks: (t) => this.cardLinks(t),
       ciHold: (id) => this.ciHold?.(id),
       probeHold: (id) => this.probeHold?.(id),
+      armed: (id, claim, fallback) => this.armed?.(id, claim, fallback) ?? false,
     });
     this.promptHolds = new Holds(store);
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
@@ -1422,6 +1423,8 @@ export class Runner {
   /** The list's line for a minion whose own CI run is held off the desktop (CiHold.noteFor); set by server.ts. */
   heldLine?: (ticketId: number) => string | null;
 
+  /** A claim passed to a minion: ship its armed hand-off (#2046, src/armed-handoff.ts fireArmed). Set in server.ts. */
+  armed?: (ticketId: number, claim: string, fallback: (why: string) => void) => boolean;
   /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
   probeHold?: (ticketId: number) => boolean;
 

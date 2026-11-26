@@ -351,8 +351,8 @@ export async function runShipTool(name: string, args: Record<string, unknown>): 
       for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       if (args.outage === true) body.outage = true;
-      await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
-      return handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
+      const r = await call<{ armed?: string }>('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
+      return r?.armed ?? handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).

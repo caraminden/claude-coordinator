@@ -27,7 +27,8 @@ import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs } from '../land.ts';
-import { checkHandoff, laneHold, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { checkHandoff, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { laneHandoff } from '../armed-handoff.ts';
 import { cleanStart, startPicked, type CardStart } from '../card-starts.ts';
 import { reviewRefusal } from '../review-gate.ts';
 import { criticRefusal } from '../critic-gate.ts';
@@ -1689,9 +1690,9 @@ export const ticketRoutes: Route[] = [
       const body = (await readJson(req)) ?? {};
       const mine = app.store.getTicket(ticket.id)!;
       const ready = await checkHandoff(app, mine, body, bearer(req));
-      // A fix for shipping that is broken right now jumps the lane.
-      const held = body.into === undefined && body.outage !== true && body.fix !== true && (await laneHold(app, mine));
-      if (held) throw new HttpError(409, `Not handed off: ${held}`);
+      // A pipeline change waits for the pipeline lane, armed (#2046): the server ships it when the lane is its own, or it may ship beside the holder.
+      const armed = await laneHandoff(app, mine, body);
+      if (armed) return json(res, 202, { ok: true, armed });
       if (!startHandoff(app, mine, ready, { kind: 'minion' })) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },

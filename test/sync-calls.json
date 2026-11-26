@@ -489,6 +489,9 @@
  "src/wake.ts": {
   "runsRepo": ["owed",1,"sync-disk-turn-start-end.md: Runner.startTurn runsRepo each turn until sticky true"]
  },
+ "src/warm-up.ts": {
+  "warmUp": ["boot",1,"a handover copy before ready (existsSync of the db), before listen"]
+ },
  "src/workspace.ts": {
   "surveyReports": ["rare",1,"Taskmaster turn start while onboarding open"],
   "buildBranch": ["owed",1,"sync-disk-turn-start-end.md: Runner turn start for minions in a build; card route"],

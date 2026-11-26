@@ -1,6 +1,7 @@
 // The warm handover (#1170; the shared folder's specs/front-door-restarts.md). tools/deploy.sh sends the running server
 // SIGUSR2, and it starts the new code beside itself, handing it systemd's held socket (fd 3) and a control pipe (fd 4).
-// The copy loads its code and says "ready". The old server stops taking connections, lets go of its turns and timers,
+// The copy loads its code, warms its slowest caches on a read-only connection (src/warm-up.ts, #2119) and says "ready".
+// The old server sends its readers' snapshot (src/reader-live.ts), so the copy's readers answer from its first request. It stops taking connections, lets go of its turns and timers,
 // and says "go". The copy boots the rest, takes the socket, tells systemd it is the main process now (MAINPID=, which
 // the unit's NotifyAccess=all accepts from any process in it) and says "live". The old one ends its streams, finishes
 // its requests and exits. Requests made during the swap wait in the socket, as they do across a restart.
@@ -22,10 +23,11 @@ export const handoverState = () => state;
 type Env = Record<string, string | undefined>;
 
 /**
- * In a copy the old server started: back out if the schemas differ, say "ready" and wait for "go". Null in a server
- * started any other way. Exits if the old server gives up first. `live()` is for once it listens on fd 3.
+ * In a copy the old server started: back out if the schemas differ, run `warm`, say "ready" and wait for "go". Null in
+ * a server started any other way, which runs no `warm`. Exits if the old server gives up first. `live()` is for once it
+ * listens on fd 3; `handed` is the old server's readers' snapshot (null from one that sent none: older code).
  */
-export async function standby(schema: number, env: Env = process.env, fd = 4): Promise<{ live(): void } | null> {
+export async function standby(schema: number, env: Env = process.env, fd = 4, warm?: () => Promise<unknown>): Promise<{ live(): void; handed: string | null } | null> {
   const theirs = env[ENV];
   if (theirs === undefined) return null;
   delete env[ENV];
@@ -38,13 +40,20 @@ export async function standby(schema: number, env: Env = process.env, fd = 4): P
   ctl.on('error', () => {});
   const gone = () => process.exit(0);
   ctl.on('close', gone);
+  // A warm-up that fails is only slower first pages, never a refused handover.
+  await warm?.().catch((err) => console.error('Handover: warming up failed; going on cold:', err));
+  let handed: string | null = null;
   await new Promise<void>((go) => {
-    createInterface({ input: ctl }).on('line', (line) => line === 'go' && go());
+    createInterface({ input: ctl }).on('line', (line) => {
+      if (line.startsWith('snapshot ')) handed = line.slice(9);
+      else if (line === 'go') go();
+    });
     ctl.write('ready\n');
   });
   ctl.off('close', gone);
   ctl.unref();
   return {
+    handed,
     live() {
       execFile('systemd-notify', [`MAINPID=${process.pid}`], { env: { ...process.env, NOTIFY_SOCKET: notifySocket }, timeout: 10_000 }, (err) => {
         // Without MAINPID systemd would take the old server's exit for the service's: it exits on the pipe's close
@@ -58,6 +67,8 @@ export async function standby(schema: number, env: Env = process.env, fd = 4): P
 }
 
 export type HandOverHooks = {
+  /** The readers' snapshot as JSON, for the copy (reader-live.ts `dump`); taken before quiesce, while turns still show running. */
+  handOff?(): string | null;
   /** The copy is ready: stop taking connections, stop the timers, let go of the turns and flush. */
   quiesce(): void;
   /** The copy is live: end the streams, finish the requests, exit. */
@@ -121,6 +132,13 @@ export function handOver(
       clearTimeout(timer);
       stage = 'go';
       log(`Handover: the new server (pid ${child.pid}) is ready; handing it the socket.`);
+      try {
+        // One line: readline also ends a line at U+2028 and U+2029, which JSON leaves raw inside strings.
+        const snap = hooks.handOff?.();
+        if (snap) ctl.write(`snapshot ${snap.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')}\n`);
+      } catch (err) {
+        console.error("Handover: taking the readers' snapshot threw; the new server builds its own:", err);
+      }
       try {
         hooks.quiesce();
       } catch (err) {

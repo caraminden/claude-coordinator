@@ -221,6 +221,12 @@ export class HomeBucketCache {
     this.held = { store, mark: top, at: now, notes, buckets: bucketShips(notes) };
   }
 
+  /** Serve `to` from what was filled from `from` (#2119): a handover's copy fills it on a read-only connection before
+   * "ready". The next get() reads the notes past the mark from `to`, so what the old server wrote meanwhile comes in. */
+  adopt(from: Store, to: Store) {
+    if (this.held?.store === from) this.held.store = to;
+  }
+
   /** The window's notes and buckets: each call reads the notes past the last event read (a few rows, on events_notes). */
   get(store: Store, now: number): { notes: ShipNote[]; buckets: HomeBuckets } {
     if (this.held?.store !== store) drain(this.fillSteps(store, now));

@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md server.ts src/routes/machines.ts src/runner.ts test/judges.test.ts
+shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md server.ts src/routes/machines.ts src/runner.ts test/judges.test.ts test/db-areas.test.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -10,7 +10,9 @@ shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts sr
 #1973: (merged in)
 #2011: (merged in)
 #2006: (merged in)
-#2070: src/tripwire.ts src/tripwire-blocks.ts test/tripwire.test.ts src/machine-mcp.ts public/settings-machines.js public/machine-worker-row.js public/machines.css public/worker-agent.mjs src/machine-lend.ts public/machine-worker.mjs
+#2070: src/tripwire.ts src/tripwire-blocks.ts test/tripwire.test.ts src/machine-mcp.ts public/worker-agent.mjs public/machine-worker-row.js public/machine-worker.mjs src/machine-turn.ts tools/worker/ src/host-reach.ts test/host-reach.test.ts src/worker-join.ts public/machines.css
+#2044: public/settings-machines.js public/machine-remove.js test/machine-remove-browser.test.ts
+#2052: src/machine-roles.ts test/machine-roles.test.ts src/machine-pools.ts test/machine-pools.test.ts src/machine-lend.ts test/machine-relay.test.ts
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
 
@@ -30,3 +32,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - T8 host reach (#2070) started 2026-11-25 from build/7 6f3b3b384. Its new files go on its line (tell #1935 the names). public/machine-agent.mjs stays shared (added lines only). Its `extraMounts` lines in public/machine-worker.mjs are #2011's file: T8 asks #1935, who lends them after T6 merges or arranges them with #2011. The same goes for any line T8 needs in src/machine-turn.ts, src/machine-pools.ts or src/runner.ts (where a marked turn's mount list is built and its per-turn host-folder line is written): ask #1935 first. T5's files on T8's line (settings-machines.js, machine-worker-row.js, machines.css, worker-agent.mjs, machine-lend.ts) are free since T5 merged in.
 - T6 (#2011) merged in on 2026-11-25 (9fb95e876, Josh's go). server.ts, src/routes/machines.ts, src/runner.ts and test/judges.test.ts are shared again. Its other files (public/machine-worker.mjs, src/machine-turn.ts, src/machine-pools.ts, src/machine-away.ts and the rest of its old line) are unclaimed, so they count as #2011's: a later piece (T8 #2070, M1-M6 #2052-#2057) that changes a line in one asks #1935 to put it on its line.
 - T6 being in, public/machine-worker.mjs (the container's `extraMounts`) moves to T8 (#2070) now; M1-M6 ask #1935 for it after T8 merges or for lines of their own.
+- 2026-11-25 evening: T8 (#2070) takes src/machine-turn.ts and tools/worker/ (its host launch, WHOLE's host-writes.json); public/settings-machines.js goes to the Remove-a-machine screen (#2044), which builds the uninstall command T6 left out; M1 (#2052) takes src/machine-pools.ts, its test and src/machine-lend.ts. M1 also changes lines other feeders wrote in src/machines.ts and src/routes/machines.ts, and T8 one line in src/runner.ts (placeTurn's call): both stay shared and are lent for that one merge, when the feeder messages #1935 just before it merges.

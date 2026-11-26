@@ -187,8 +187,8 @@ have=$(cat schema) was=$(git show "$base:schema")
   build(r);
   const args = join(r.dir, 'guard-args');
   const ran = () => (existsSync(args) ? readFileSync(args, 'utf8').trim().split('\n') : []);
-  const run = (argv: string[], cwd: string, extra: Record<string, string> = {}) => c.run({ GUARD_ARGS: args, ...extra }, argv, cwd);
-  return { ...r, c, ran, run };
+  const ship = (argv: string[], cwd: string, extra: Record<string, string> = {}) => c.run({ GUARD_ARGS: args, ...extra }, argv, cwd);
+  return { ...r, c, ran, ship };
 }
 
 test("--full compares the schema with the main the build took in, so main shipping a newer schema while it waits doesn't refuse it (#2067)", () => {
@@ -198,7 +198,7 @@ test("--full compares the schema with the main the build took in, so main shippi
   const took = tipOf(r, 'main');
   // While the build waits in line, main ships schema 2 (the last release moves past the build's base).
   r.commit(r.source, 'schema', '2\n');
-  const res = r.run(['--into', 'build/3', '--full'], bwt);
+  const res = r.ship(['--into', 'build/3', '--full'], bwt);
   assert.equal(res.status, 0, res.stderr);
   assert.doesNotMatch(res.stderr, /older than/);
   const short = git(r.source, 'rev-parse', '--short', took);
@@ -212,7 +212,7 @@ test('--build still compares the schema with the last release, and refuses a sch
   r.commit(bwt, 'schema', '0\n'); // the build lowers the schema: a real mismatch with the last release
   git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
   r.commit(r.source, 'm.txt', 'on main\n');
-  const res = r.run(['--build'], bwt, { LAND_SMOKE: '0' });
+  const res = r.ship(['--build'], bwt, { LAND_SMOKE: '0' });
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /this branch's schema is 0, older than 1/);
   assert.deepEqual(r.ran(), [git(r.source, 'rev-parse', '--short', 'main')], 'the guards ran against the last release, not a build base');

@@ -13,6 +13,7 @@ import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
 import { classifyFlake } from './flake-evidence.ts';
+import { thrown } from './thrown.ts';
 import { ALARM_QUIET_MS, ALARM_WINDOW_MS, branchShippedAt, FLAKE_REPEAT, sameFlake, suspectCommits, fileChangedAt, FLAKE_REPEAT_MS, FLAKE_WINDOW_MS, cleanRuns, flakeBrief, parseRetroFlakes } from './flakes.ts';
 
 /** A log line within this of a counted sighting of the same file is that sighting: a land counts at its end, the log at the flake. */
@@ -96,8 +97,8 @@ export class FlakeFixes {
     let looked = 0;
     for (const s of fresh) {
       // Only a CI run has a log the server can read; perigee's own runs and smoke lines keep no message. A failed read never holds the row back.
-      const look = s.source === 'in CI' && s.branch && now - s.at < EVIDENCE_MAX_AGE_MS && looked++ < MAX_EVIDENCE_PER_PASS;
-      const found = look ? await this.evidence(project, s.branch, s.file, s.at).catch(() => null) : null;
+      const branch = s.source === 'in CI' && s.branch && now - s.at < EVIDENCE_MAX_AGE_MS && looked++ < MAX_EVIDENCE_PER_PASS ? s.branch : null;
+      const found = branch ? await this.evidence(project, branch, s.file, s.at).catch(() => null) : null;
       this.d.store.addFlakeEvents(project.id, null, null, s.at, [{ file: s.file, source: s.source, detail: '', ...(found ? { testName: found.name, message: found.message, cls: classifyFlake(found.message) } : {}) }]);
     }
     return fresh.length;
@@ -263,8 +264,8 @@ export class FlakeFixes {
         const m = await this.d.start(project, { ...flakeBrief(file, count, store.flakeDetails(project.id, file)), ...intermittentTier() });
         store.updateFlakeFix(id, { ticket_id: m.id });
         started++;
-      } catch (err: any) {
-        console.error(`Starting the fix of flaky ${file} failed; the next pass retries: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Starting the fix of flaky ${file} failed; the next pass retries: ${thrown(err).message ?? err}`);
       }
     }
     return started;
@@ -301,8 +302,8 @@ export class FlakeFixes {
           await this.escalate(p, now);
           await this.broken(p, now);
           await this.prove(p, now);
-        } catch (err: any) {
-          console.error(`Flake fixes of ${p.name} failed: ${err?.message ?? err}`);
+        } catch (err) {
+          console.error(`Flake fixes of ${p.name} failed: ${thrown(err).message ?? err}`);
         }
       }
     } finally {

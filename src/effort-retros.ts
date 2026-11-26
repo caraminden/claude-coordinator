@@ -10,6 +10,7 @@ import { pickFor } from '../public/model-table.js';
 import { pacific } from './schedules.ts';
 import { judge, judged, type JudgeMode } from './judges.ts';
 import { budgetKey, family, type BudgetState } from './minion-budget.ts';
+import { thrown } from './thrown.ts';
 
 export const EFFORT_KEY = 'effortName';
 /** A named effort needs this many minions; an unnamed chain one more (a 3-minion chain is often only ordering). */
@@ -94,7 +95,7 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
     if (waited.some((t) => t.status !== 'closed')) continue;
     const last = Math.max(...waited.map((t) => t.closed_at ?? t.updated_at));
     if (now - last < QUIET_MS) continue;
-    members.sort((a, b) => a.number - b.number);
+    members.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
     // A major build's retro (citadel:retro, the build minion's step 5) already covers an effort that is mostly that build.
     const builds = new Map<number, number>();
     for (const t of members) if (t.build != null && majorBuild(t.build)) builds.set(t.build, (builds.get(t.build) ?? 0) + 1);
@@ -197,12 +198,12 @@ export class EffortRetros {
         }
         try {
           said.push(`${project.name} "${v.name}": ${await start(project, v)}`);
-        } catch (err: any) {
+        } catch (err) {
           console.error(`Effort retro for ${project.name} "${v.name}" didn't start:`, err);
           // Its minion was made (the marker has its number): leave it. Else try again next tick, TRIES in all.
           if (store.getSetting<Marker>(doneKey(project.id, v.name))?.ticket == null) {
             const tries = (before?.act === 'failed' ? (before.tries ?? 1) : 0) + 1;
-            store.setSetting(doneKey(project.id, v.name), { act: 'failed', why: String(err?.message ?? err).slice(0, 300), at: now, tries });
+            store.setSetting(doneKey(project.id, v.name), { act: 'failed', why: String(thrown(err).message ?? err).slice(0, 300), at: now, tries });
           }
         }
       }
@@ -330,12 +331,12 @@ export class TroubleRetros {
           // Marked before the start: a crash between the two loses one post-mortem rather than starting it twice.
           for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: now });
           said.push(`${project.name} #${t.number}: ${await start(project, v)}`);
-        } catch (err: any) {
+        } catch (err) {
           console.error(`Post-mortem of #${t.number} in ${project.name} didn't start:`, err);
           // Its minion was made: leave it. Else mark the failure and try again next tick, TRIES in all.
           if (store.getSetting<Marker>(troubleKey(t.id, kinds[0]))?.ticket == null) {
             const tries = (before?.act === 'failed' ? (before.tries ?? 1) : 0) + 1;
-            for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'failed', why: String(err?.message ?? err).slice(0, 300), at: now, tries });
+            for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'failed', why: String(thrown(err).message ?? err).slice(0, 300), at: now, tries });
           }
         }
       }

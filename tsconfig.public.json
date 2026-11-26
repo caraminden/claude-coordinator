@@ -4,7 +4,8 @@
   // stand in for a missing import in another. JSDoc here must not import a type from src/ that reaches Node's: that pulls
   // the server into this check and counts its errors twice (declare the type in public/, as progress.js's FinishedStep).
   "extends": "./tsconfig.json",
-  "compilerOptions": { "lib": ["esnext", "dom", "dom.iterable"], "types": [], "checkJs": true, "moduleDetection": "force" },
+  // skipLibCheck off: the shapes in public/types*.d.ts are checked too, so a name one forgets to import is an error, not a silent `any` (#2128).
+  "compilerOptions": { "lib": ["esnext", "dom", "dom.iterable"], "types": [], "checkJs": true, "moduleDetection": "force", "skipLibCheck": false },
   "include": ["public/**/*.js", "public/types/*.d.ts"],
   "exclude": ["public/sw.js"]
 }

@@ -109,7 +109,8 @@ export const waitShows = (w) => !!w && !!(w.total || w.usual || TRACK.some(([key
 /**
  * The one progress track for the chat readout and the list row (#630; Cara, on her bar during a land: "the progress
  * bars for 630 on the list and chat are out of sync, arent showing the stages"). A plan with a step underway draws
- * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'h' held | 'p' not started]), the step underway filling
+ * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'h' held | 'p' not started]), only the first step
+ * underway drawn as under way (any other draws as not started, #2156), filling
  * by the `wait` when there is one (hatched while it waits in a line or queue), else against `since`/`usual`, its
  * scaled guess. A step built and now being tested ('h', #1923) is full, in the running colour. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
  * @param {Parameters<typeof progressPieces>[0]} src @param {string} [cls]
@@ -127,10 +128,11 @@ export function progressPieces({ track, since, usual, wait }) {
   /** @param {string} state @param {number | null} size @param {WaitLike | null} [clock] @returns {Seg} */
   const piece = (state, size, clock = null) => ({ size, state, clock, waits: state === 'now' && !!w && waitFam(w) === 'wait' });
   if (track?.length && (track.some(([, st]) => st === 'i') || !w)) {
-    // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (a guess): only it fills
-    // by the clock or hatches; any other step underway shows as underway with a sliver.
+    // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (a guess): only it draws
+    // as under way, filling by the clock or hatching. Any other step underway draws as not started, so one row never
+    // looks like several steps are moving at once (#2156).
     const owner = track.findIndex(([, st]) => st === 'i');
-    return { segs: track.map(([g, st], i) => (st === 'c' ? piece('done', g) : st === 'i' ? (i === owner ? piece('now', g, wClock ?? (usual ? { since: /** @type {number} */ (since), usual } : null)) : { ...piece('now', g), waits: false }) : piece(st === 'h' ? 'held' : '', g))), label: '' };
+    return { segs: track.map(([g, st], i) => (i === owner ? piece('now', g, wClock ?? (usual ? { since: /** @type {number} */ (since), usual } : null)) : piece(st === 'c' ? 'done' : st === 'h' ? 'held' : '', g))), label: '' };
   }
   if (!w) return null;
   const { at } = stageOf(w);

@@ -84,6 +84,14 @@ const stat = (f: string) => {
   }
 };
 const mtime = (f: string) => stat(f)?.mtimeMs ?? null;
+/** A process's /proc stat line: kernel memory, no disk, so it stays on the thread (#1980). */
+const procStat = (pid: string) => {
+  try {
+    return readFileSync(`/proc/${pid}/stat`, 'utf8');
+  } catch {
+    return null;
+  }
+};
 const files = (dir: string) => {
   try {
     return readdirSync(dir);
@@ -130,7 +138,7 @@ export function labelTicket(store: Store, label: string) {
 export function procAlive(pidStart: string): boolean {
   const [pid, start] = pidStart.split(' ');
   if (!/^\d+$/.test(pid ?? '')) return false;
-  const stat = read(`/proc/${pid}/stat`);
+  const stat = procStat(pid);
   if (!stat) return false;
   const f = stat.slice(stat.lastIndexOf(') ') + 2).split(' '); // the command's name may hold spaces
   return !/^[ZXx]$/.test(f[0]) && f[19] === start;

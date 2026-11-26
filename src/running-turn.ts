@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MachineTurn, type Placed, placedAt, placedNow } from './machine-turn.ts';
+import { MachineTurn, placedAt, placedNow } from './machine-turn.ts';
 import { checkProcess, type ProcCheck } from './quiet.ts';
 import { supervisorAlive } from './supervisor-client.ts';
 import { START_GRACE_MS, wrapperAlive as hostOrContainerAlive, wrapperAliveOff as hostOrContainerAliveOff, wrapperInProc } from './wrapper-alive.ts';
@@ -17,6 +17,8 @@ export interface TurnAt {
   dir: string;
   unit: string | null;
   container: string | null;
+  /** The machine it runs on, null here, as a followed turn knows it; left out, the folder's `machine` file says. */
+  machine?: { id: number; name: string } | null;
 }
 
 export interface RunningTurn {
@@ -46,15 +48,15 @@ export interface RunningTurn {
 /** The running turn at `at`. Holds nothing: made where it's asked, from where the turn runs now (a unit that won't start leaves a child). */
 export function runningTurn(at: TurnAt): RunningTurn {
   // A turn on a connected machine has neither, and its folder's `machine` file (Build 7 T2): read only then, so a unit's or a container's turn costs no file read.
-  return turnOf(at, at.container || at.unit ? null : placedAt(at.dir));
+  return turnOf(at, at.container || at.unit ? null : at.machine !== undefined ? at.machine : placedAt(at.dir));
 }
 
 /** runningTurn, its `machine` file read off the server's thread: for a followed turn's poll and stop (#2134). */
 export async function runningTurnOff(at: TurnAt): Promise<RunningTurn> {
-  return turnOf(at, at.container || at.unit ? null : await placedNow(at.dir));
+  return turnOf(at, at.container || at.unit ? null : at.machine !== undefined ? at.machine : await placedNow(at.dir));
 }
 
-function turnOf(at: TurnAt, machine: Placed | null): RunningTurn {
+function turnOf(at: TurnAt, machine: { id: number; name: string } | null): RunningTurn {
   if (at.container) return new ContainerTurn(at.dir, at.container);
   if (machine) return new MachineTurn(at.dir, machine);
   return at.unit ? new UnitTurn(at.dir, at.unit) : new ChildTurn(at.dir);
@@ -69,7 +71,7 @@ export function wrapperAlive(dir: string): boolean | null {
 /** wrapperAlive off the server's thread, for the stray wait (#2134). */
 export async function wrapperAliveOff(dir: string): Promise<boolean | null> {
   const machine = await placedNow(dir);
-  return machine ? new MachineTurn(dir, machine).alive() : hostOrContainerAliveOff(dir);
+  return machine ? new MachineTurn(dir, machine).aliveOff() : hostOrContainerAliveOff(dir);
 }
 
 /** A turn's pids (pid.json), or {} before it has any: read on the thread, for a look a person asked for. */

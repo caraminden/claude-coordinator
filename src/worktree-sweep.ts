@@ -7,10 +7,9 @@
  */
 import { execFileSync } from 'node:child_process';
 import { copyFile, lstat, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { diskUsage, low } from './build-output.ts';
+import { diskUsage, exists, low } from './build-output.ts';
 import { identity } from './scheme-repo.ts';
 import { thrown } from './thrown.ts';
 
@@ -93,11 +92,11 @@ export const trashOf = (dir: string) => join(dirname(dir), `.removing-${basename
  * checkout at the minion's path that a reopen can't recreate.
  */
 export async function removeWorktree(repoDir: string, dir: string): Promise<number> {
-  const admin = existsSync(join(dir, '.git')) ? await git(['rev-parse', '--absolute-git-dir'], dir).catch(() => null) : null;
-  if (admin && existsSync(join(admin, 'locked'))) throw new Error('locked');
+  const admin = (await exists(join(dir, '.git'))) ? await git(['rev-parse', '--absolute-git-dir'], dir).catch(() => null) : null;
+  if (admin && (await exists(join(admin, 'locked')))) throw new Error('locked');
   const bytes = await diskUsage([dir]);
   const trash = trashOf(dir);
-  if (existsSync(trash)) throw new Error(`${basename(trash)} is still there from an earlier removal`);
+  if (await exists(trash)) throw new Error(`${basename(trash)} is still there from an earlier removal`);
   await rename(dir, trash);
   // Its admin entry now points at a folder that's gone, so prune drops it.
   await git(['worktree', 'prune'], repoDir);

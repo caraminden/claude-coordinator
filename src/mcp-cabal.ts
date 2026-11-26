@@ -9,7 +9,7 @@ export const CABAL_BOARD = {
   inputSchema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['read', 'note', 'ask', 'answer', 'row', 'log', 'red', 'form'], description: 'read (default); a member: note, ask; the lead: answer, row, log, red, form' },
+      action: { type: 'string', enum: ['read', 'timeline', 'note', 'ask', 'answer', 'row', 'log', 'red', 'form'], description: 'read (default); timeline: the starts, ships, ask waits, reds and spend a cabal retro is written from; a member: note, ask; the lead: answer, row, log, red, form' },
       note: { type: ['string', 'null'], maxLength: 200, description: 'note, or row: one line ("built, in review", "blocked on M1\'s table"); null clears' },
       files: { type: ['array', 'null'], items: { type: 'string' }, description: 'note, or row: the repo paths it expects to touch (a folder ends in /). A goal cabal has no claims file, so the board flags a file two members list' },
       text: { type: ['string', 'null'], maxLength: 2000, description: 'ask: the question or request; answer: your answer; log: the line; red: what is red (null clears it)' },
@@ -100,8 +100,8 @@ export async function runCabalTool(name: string, args: Record<string, unknown>):
   if (name !== 'cabal_board') return NOT_HERE;
   const action = String(args.action ?? 'read');
   const path = `/api/tickets/${C().TICKET}/cabal`;
-  if (action === 'read') {
-    const r = await call<{ text: string | null }>('GET', `${path}?text=1`);
+  if (action === 'read' || action === 'timeline') {
+    const r = await call<{ text: string | null }>('GET', `${path}?${action === 'read' ? 'text' : 'timeline'}=1`);
     return r.text ?? 'You are not on a cabal board and lead none.';
   }
   const pick = (keys: readonly string[]) => Object.fromEntries(keys.filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));

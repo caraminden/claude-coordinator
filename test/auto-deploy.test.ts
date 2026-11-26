@@ -36,7 +36,8 @@ function world() {
     view,
     now: () => now,
     held,
-    shipping: () => shipping,
+    // Read off the server's thread, as server.ts's reads the line (#2135); the Android world below answers at once.
+    shipping: async () => shipping,
     failed: (t, why) => failed.push(`${t.id}: ${why}`),
     deployers: {
       contraption: {

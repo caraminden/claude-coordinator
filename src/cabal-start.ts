@@ -272,6 +272,35 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   return { started: made.number!, title: r.title, notes: made.notes };
 }
 
+export const retroKey = (leadId: number) => `cabal-retro:${leadId}`;
+
+/**
+ * A goal cabal's last member was dismissed: its lead is woken to write the cabal's retro (#2096), once, and again only
+ * if members it started after that are all dismissed too. A build cabal's lead is woken by its own ship instead. A fixer
+ * never needed doesn't hold it.
+ */
+export function retroWake(app: App, ticketId: number): void {
+  const leadId = app.store.cabalRowOf(ticketId)?.lead_id;
+  if (leadId != null) retroCheck(app, leadId);
+}
+
+/** The same check after a row is removed or a minion taken off the board: what's left may all be dismissed. */
+export function retroCheck(app: App, leadId: number): void {
+  const { store } = app;
+  const lead = store.getTicket(leadId);
+  if (!lead || lead.status === 'closed' || lead.build != null) return;
+  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || r.role.trim().toLowerCase() !== 'fixer');
+  if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
+  const asked = store.getSetting<number[]>(retroKey(lead.id)) ?? [];
+  if (rows.every((r) => asked.includes(r.ticket_id!))) return;
+  store.setSetting(
+    retroKey(lead.id),
+    rows.map((r) => r.ticket_id),
+  );
+  store.addCabalLog(lead.id, 'Citadel', 'Every member is dismissed: the retro is next');
+  app.runner.send(lead.id, APP_NAME, `Every member of ${name(app, lead)}'s cabal has been dismissed. Write the cabal's retro now and then close: the citadel:cabal skill, "Closing". If you are about to start more members, do that first and write it once they are done too.`);
+}
+
 const filling = new Set<number>();
 
 /** A member's turn ended, it was sealed or stopped, or it was dismissed: a place may be free, so its lead's next-up rows start. */
@@ -329,7 +358,7 @@ export async function memberAction(app: App, lead: Ticket, action: unknown, mini
     return `Unsealed #${t.number}: it runs now, or once a worker is free.`;
   }
   if (action === 'stop') {
-    const { stopped, ship } = stopMinion(app, t, author);
+    const { stopped, ship } = await stopMinion(app, t, author);
     store.addCabalLog(lead.id, `#${lead.number}`, `Stopped #${t.number}`);
     fillFor(app, t.id);
     return `${stopped ? `Stopped #${t.number}'s turn` : `#${t.number} had no turn running`}; its queued messages are dropped.${ship ? ` ${ship}` : ''}`;

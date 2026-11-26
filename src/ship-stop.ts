@@ -212,7 +212,9 @@ export function stopShip(app: Pick<App, 'releases' | 'waits' | 'store' | 'landin
       const m = id != null ? app.store.getTicket(id) : undefined;
       name = m ? `#${m.number ?? m.id}` : t.label;
       if (!m) return;
-      if (app.landings.get(m.id)?.code === null) app.landings.markStopped(m.id, who, Date.now(), via);
+      // As the hand-off poll last read it (each 5 s), or a hand-off too new for a read yet: its report then says who stopped it.
+      const run = app.landings.lastLook(m.id);
+      if (run === undefined ? app.landings.hasHandoff(m.id) : run?.code === null) app.landings.markStopped(m.id, who, Date.now(), via);
       app.runner.emit(m.id, 'note', { text: `${who} stopped this ship ${via}: it leaves the line and main stays as it was.` });
     },
     signal,
@@ -225,8 +227,9 @@ export function stopShip(app: Pick<App, 'releases' | 'waits' | 'store' | 'landin
  * A minion stopped (its chat's Stop, or stop_ticket) stops its running ship too: in line, as the panel's stop does;
  * before it joined the line, its land.sh directly. Says what happened, or why it keeps running.
  */
-export function stopMinionShip(app: Pick<App, 'releases' | 'waits' | 'store' | 'landings' | 'runner'>, ticketId: number, who: string, signal: (pid: number) => void = (pid) => signalTree(pid)): string | null {
-  if (app.landings.get(ticketId)?.code !== null) return null;
+export async function stopMinionShip(app: Pick<App, 'releases' | 'waits' | 'store' | 'landings' | 'runner'>, ticketId: number, who: string, signal: (pid: number) => void = (pid) => signalTree(pid)): Promise<string | null> {
+  const run = await app.landings.look(ticketId);
+  if (run?.code !== null) return null;
   const t = app.store.getTicket(ticketId);
   const at = t ? lineFor(app, t.project_id) : null;
   const via = 'by stopping its minion';
@@ -240,11 +243,11 @@ export function stopMinionShip(app: Pick<App, 'releases' | 'waits' | 'store' | '
       throw err;
     }
   }
-  const pid = app.landings.landPid(ticketId);
+  const pid = await app.landings.landPid(ticketId);
   if (!pid) return null;
   // Out of the line is before it joined, or after main moved: deploy.sh leaves the line to wait for live, and a rider
   // whose train moved waits outside it. Both say so in its output.
-  if (/ is now at [0-9a-f]{7}|waiting outside the line/.test(app.landings.get(ticketId)?.output ?? '')) return 'Its ship keeps running: main has moved and it is going live, so it ends by itself.';
+  if (/ is now at [0-9a-f]{7}|waiting outside the line/.test((await app.landings.look(ticketId))?.output ?? '')) return 'Its ship keeps running: main has moved and it is going live, so it ends by itself.';
   app.landings.markStopped(ticketId, who, Date.now(), via);
   signal(pid);
   return 'Its ship was stopped too, before it joined the line: nothing landed.';

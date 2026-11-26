@@ -4,8 +4,7 @@
 // replaced: a new key means every phone has to uninstall the app to take its next update.
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { chmod, link, mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, link, mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ANDROID_JDK } from './claude-link.ts';
 import { CONTRAPTION_NAME } from './contraptions.ts';
@@ -15,8 +14,18 @@ export type Keytool = (args: string[]) => Promise<void>;
 
 export const keyFiles = (keyDir: string, app: string) => ({ jks: join(keyDir, `${app}-release.jks`), pass: join(keyDir, `${app}-release.pass`) });
 
-/** Whether `app` has a release key: either file counts, so a half-made one is never made over. */
-export const hasKey = (keyDir: string, app: string) => Object.values(keyFiles(keyDir, app)).some((f) => existsSync(f));
+/** Whether `app` has a release key: either file counts, so a half-made one is never made over. Read off the server's thread: Releases asks every 2 s. */
+export const hasKey = async (keyDir: string, app: string): Promise<boolean> =>
+  (
+    await Promise.all(
+      Object.values(keyFiles(keyDir, app)).map((f) =>
+        access(f).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    )
+  ).some(Boolean);
 
 const realKeytool =
   (home: string): Keytool =>
@@ -42,7 +51,7 @@ const realKeytool =
 export async function makeReleaseKey(keyDir: string, app: string, o: { home: string; keytool?: Keytool }): Promise<{ jks: string; pass: string }> {
   if (!CONTRAPTION_NAME.test(app)) throw new Error(`${JSON.stringify(app)} isn't an app name`);
   const out = keyFiles(keyDir, app);
-  if (hasKey(keyDir, app)) throw new Error(`${app} already has a release key (${out.jks}): it's never replaced, as phones would have to uninstall the app`);
+  if (await hasKey(keyDir, app)) throw new Error(`${app} already has a release key (${out.jks}): it's never replaced, as phones would have to uninstall the app`);
   await mkdir(keyDir, { recursive: true, mode: 0o700 });
   // Made in a private folder beside them, then hard-linked into place: link() never overwrites, so a key made meanwhile wins.
   const tmp = await mkdtemp(join(keyDir, `.${app}-`));
@@ -52,7 +61,9 @@ export async function makeReleaseKey(keyDir: string, app: string, o: { home: str
     const jks = join(tmp, 'jks');
     await writeFile(pass, `${randomBytes(24).toString('base64url')}\n`, { mode: 0o600, flag: 'wx' });
     await (o.keytool ?? realKeytool(o.home))(['-genkeypair', '-noprompt', '-keystore', jks, '-storetype', 'PKCS12', '-alias', app, '-keyalg', 'RSA', '-keysize', '4096', '-validity', '10000', '-dname', `CN=${app}, O=Citadel`, '-storepass:file', pass, '-keypass:file', pass]);
-    if (!existsSync(jks)) throw new Error('keytool made no keystore');
+    await access(jks).catch(() => {
+      throw new Error('keytool made no keystore');
+    });
     await chmod(jks, 0o600);
     await link(pass, out.pass);
     try {

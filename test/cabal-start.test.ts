@@ -187,3 +187,49 @@ test("a started member's turn waits for a worker like any minion's; a row after 
     await s.call('/api/workers', { pause: false }, 'PUT');
   }
 });
+
+test("a goal cabal's lead is woken once, for its retro, when its last member is dismissed; the timeline has ships, asks, reds and spend (#2096)", async () => {
+  const make = async (title: string) => (await s.call(`/api/projects/${p.id}/tickets`, { title, message: 'Go.', model: 'claude-sonnet-5-5', effort: 'medium' })).data as { id: number; number: number };
+  const chief = await make('Sweep lead');
+  const [one, two] = [await make('Sweep one'), await make('Sweep two')];
+  for (const [label, m] of [
+    ['M1', one],
+    ['M2', two],
+  ] as const)
+    assert.equal((await board(chief.id, { action: 'row', label, title: label, minion: m.number, cost: 5 })).status, 200);
+  assert.equal((await board(chief.id, { action: 'row', label: 'F', title: 'Fixes', role: 'fixer' })).status, 200);
+  assert.equal((await board(one.id, { action: 'ask', text: 'May I take x.ts?', blocking: false })).status, 200);
+  assert.equal((await board(chief.id, { action: 'red', text: 'full run red' })).status, 200);
+  assert.equal((await board(chief.id, { action: 'red', text: null })).status, 200);
+  const asked = async () => (await events(chief.id)).filter((e) => e.kind === 'user_message' && /Write the cabal's retro/.test(e.data)).length;
+  assert.equal((await s.call(`/api/tickets/${one.id}/status`, { status: 'closed' })).status, 200);
+  assert.equal((await s.call(`/api/tickets/${two.id}/status`, { status: 'closed' })).status, 200);
+  await until('the lead is asked for the retro', async () => (await asked()) === 1);
+  // Dismissed again: no second ask.
+  await s.call(`/api/tickets/${two.id}/status`, { status: 'open' });
+  await s.call(`/api/tickets/${two.id}/status`, { status: 'closed' });
+
+  const r = await fetch(`${s.base}/api/tickets/${chief.id}/cabal?timeline=1`, { headers: { Authorization: `Bearer ${agentToken(s.data, chief.id)}` } });
+  const { text } = await json<{ text: string }>(r);
+  assert.match(text, new RegExp(`Board: #/p/${p.id}/cabal/${chief.number}`));
+  assert.match(text, new RegExp(`M1 #${one.number} .*started .*dismissed .*of ~\\$5\\.00 expected`));
+  assert.match(text, /May I take x\.ts\? \| never answered/);
+  assert.match(text, /Red: full run red[\s\S]*Red cleared/);
+  assert.equal(await asked(), 1);
+  // A member added after that: once it is dismissed too, the lead is asked again.
+  const three = await make('Sweep three');
+  const added = await board(chief.id, { action: 'row', label: 'M3', title: 'M3', minion: three.number });
+  assert.equal(added.status, 200, JSON.stringify(added.data));
+  await until('#3 idle', async () => (await s.call(`/api/tickets/${three.id}`)).data.ticket.status !== 'running');
+  assert.equal((await s.call(`/api/tickets/${three.id}/status`, { status: 'closed' })).status, 200);
+  await until('asked again', async () => (await asked()) === 2);
+  // A planned piece dropped after the last member went: removing its row asks too.
+  const four = await make('Sweep four');
+  assert.equal((await board(chief.id, { action: 'row', label: 'M4', title: 'M4', minion: four.number })).status, 200);
+  const planned = await board(chief.id, { action: 'row', label: 'P', title: 'Dropped piece' });
+  await until('#4 idle', async () => (await s.call(`/api/tickets/${four.id}`)).data.ticket.status !== 'running');
+  assert.equal((await s.call(`/api/tickets/${four.id}/status`, { status: 'closed' })).status, 200);
+  assert.equal(await asked(), 2, 'the planned piece still holds it');
+  assert.equal((await board(chief.id, { action: 'row', row: planned.data.row, remove: true })).status, 200);
+  await until('asked once the piece is dropped', async () => (await asked()) === 3);
+});

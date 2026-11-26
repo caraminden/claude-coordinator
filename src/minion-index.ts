@@ -262,16 +262,13 @@ export class MinionIndexer {
   private store: Store;
   private dataDir: string;
   private running = false;
+  /** Closed minions' briefs indexClosed just indexed, waiting for their handoffs to be filed. */
+  private closed: [number, string][] = [];
   constructor(store: Store, dataDir: string) {
     this.store = store;
     this.dataDir = dataDir;
-    store.minionIndex.onClosed = (projectId, briefText) => {
-      try {
-        tidyForClosed(store, dataDir, projectId, briefText);
-      } catch (e) {
-        console.error(`handoff tidy: ${(e as Error).message}`);
-      }
-    };
+    // Filed by run(), off the thread's blocking calls: indexClosed only notes the brief.
+    store.minionIndex.onClosed = (projectId, briefText) => void this.closed.push([projectId, briefText]);
   }
 
   async run() {
@@ -281,6 +278,13 @@ export class MinionIndexer {
       for (const p of this.store.listProjects()) {
         await new Promise((r) => setImmediate(r));
         while (this.store.minionIndex.indexClosed(p.id) > 0) await new Promise((r) => setImmediate(r));
+        for (const [projectId, briefText] of this.closed.splice(0)) {
+          try {
+            await tidyForClosed(this.store, this.dataDir, projectId, briefText);
+          } catch (e) {
+            console.error(`handoff tidy: ${(e as Error).message}`);
+          }
+        }
         const has = await this.store.minionIndex.syncHandoffs(p.id, this.dataDir);
         try {
           reconcileMoved(this.store, this.dataDir, p.id, has);

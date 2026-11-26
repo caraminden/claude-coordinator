@@ -11,10 +11,9 @@
  * A merge that gives back the scheme's own file is nothing to do; a conflict makes no branch and goes to that scheme's
  * Taskmaster. This file holds the git side; KitSync (below) runs the rounds.
  */
-import { execFile, execFileSync } from 'node:child_process';
-import { access, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostJobs } from './host-job.ts';
@@ -32,49 +31,24 @@ export const KIT_FILES: readonly { template: string; path: string }[] = [
 /** The trailer a sync commit carries: the kit commit its files were merged from, the next sync's exact base. */
 export const TRAILER = 'Kit-Sync';
 
-export function git(cwd: string, args: string[], opts: { input?: string; env?: Record<string, string> } = {}): string {
-  return execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    input: opts.input,
-    maxBuffer: 64 << 20,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: opts.env ? { ...process.env, ...opts.env } : process.env,
-  });
-}
-
 const run = promisify(execFile);
-/** git off the event loop, for the round's checkouts and removals (a worktree can be a 1700-file checkout). */
-async function gitAsync(cwd: string, args: string[]): Promise<string> {
+/** git off the server's thread (#2111, #2135): a round runs dozens, and a worktree can be a 1700-file checkout. */
+async function git(cwd: string, args: string[]): Promise<string> {
   return (await run('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })).stdout;
 }
 
-function tryGit(cwd: string, args: string[]): string | null {
-  try {
-    return git(cwd, args);
-  } catch {
-    return null;
-  }
+function tryGit(cwd: string, args: string[]): Promise<string | null> {
+  return git(cwd, args).catch(() => null);
 }
 
 /** The blob of `path` at `rev`, or null when it has none there. */
-export function blobAt(dir: string, rev: string, path: string): string | null {
-  return tryGit(dir, ['rev-parse', '--verify', '--quiet', `${rev}:${path}`])?.trim() || null;
+export async function blobAt(dir: string, rev: string, path: string): Promise<string | null> {
+  return (await tryGit(dir, ['rev-parse', '--verify', '--quiet', `${rev}:${path}`]))?.trim() || null;
 }
 
 /** The kit's four template blobs at `rev` (null for one it has none of), keyed by template path. */
-export function templateBlobs(kitDir: string, rev: string): Record<string, string | null> {
-  return Object.fromEntries(KIT_FILES.map((f) => [f.template, blobAt(kitDir, rev, f.template)]));
-}
-
-/** templateBlobs with each git run off the server's thread. */
-export async function templateBlobsA(kitDir: string, rev: string): Promise<Record<string, string | null>> {
-  const blob = (path: string) =>
-    gitAsync(kitDir, ['rev-parse', '--verify', '--quiet', `${rev}:${path}`]).then(
-      (out) => out.trim() || null,
-      () => null,
-    );
-  return Object.fromEntries(await Promise.all(KIT_FILES.map(async (f) => [f.template, await blob(f.template)] as const)));
+export async function templateBlobs(kitDir: string, rev: string): Promise<Record<string, string | null>> {
+  return Object.fromEntries(await Promise.all(KIT_FILES.map(async (f) => [f.template, await blobAt(kitDir, rev, f.template)] as const)));
 }
 
 const exists = (path: string) =>
@@ -84,8 +58,8 @@ const exists = (path: string) =>
   );
 
 /** Every version a template has had up to `rev`, newest first: the commit that made it and its blob. */
-export function templateHistory(kitDir: string, rev: string, template: string): { commit: string; blob: string }[] {
-  const out = tryGit(kitDir, ['log', '--format=C %H', '--raw', '--no-abbrev', '--no-renames', rev, '--', template]) ?? '';
+export async function templateHistory(kitDir: string, rev: string, template: string): Promise<{ commit: string; blob: string }[]> {
+  const out = (await tryGit(kitDir, ['log', '--format=C %H', '--raw', '--no-abbrev', '--no-renames', rev, '--', template])) ?? '';
   const versions: { commit: string; blob: string }[] = [];
   let commit = '';
   for (const line of out.split('\n')) {
@@ -121,27 +95,27 @@ export interface Base {
  * The kit version a scheme's copy of `file` came from. `history` is templateHistory's list for its template (it is
  * read once per round, not per scheme).
  */
-export function pickBase(kitDir: string, history: { commit: string; blob: string }[], schemeDir: string, rev: string, file: { template: string; path: string }): Base | null {
+export async function pickBase(kitDir: string, history: { commit: string; blob: string }[], schemeDir: string, rev: string, file: { template: string; path: string }): Promise<Base | null> {
   // The newest commit touching the file that carries one: an edit of the scheme's own after a sync keeps that base.
   // git reads trailers only from a message's last paragraph, so a `Kit-Sync:` line anywhere else (a hand sync that put
   // it above a blank line and Co-Authored-By) is found by a body grep instead.
-  const log = (args: string[]) => tryGit(schemeDir, ['log', '-n', '500', ...args, rev, '--', file.path]) ?? '';
+  const log = async (args: string[]) => (await tryGit(schemeDir, ['log', '-n', '500', ...args, rev, '--', file.path])) ?? '';
   const sha =
-    log([`--format=%(trailers:key=${TRAILER},valueonly,separator=%x20)`])
+    (await log([`--format=%(trailers:key=${TRAILER},valueonly,separator=%x20)`]))
       .split('\n')
       .map((l) => l.trim())
       .find(Boolean)
       ?.split(/\s+/)[0] ??
-    log(['-E', `--grep=^${TRAILER}:`, '--format=%B'])
+    (await log(['-E', `--grep=^${TRAILER}:`, '--format=%B']))
       .split('\n')
       .map((l) => l.match(new RegExp(`^${TRAILER}:\\s*(\\S+)`))?.[1])
       .find(Boolean);
   let trailer: Base | null = null;
   if (sha && /^[0-9a-f]{7,64}$/.test(sha)) {
-    const blob = blobAt(kitDir, sha, file.template);
-    if (blob) trailer = { blob, commit: tryGit(kitDir, ['rev-parse', sha])?.trim() ?? sha, how: 'trailer' };
+    const blob = await blobAt(kitDir, sha, file.template);
+    if (blob) trailer = { blob, commit: (await tryGit(kitDir, ['rev-parse', sha]))?.trim() ?? sha, how: 'trailer' };
   }
-  const own = blobAt(schemeDir, rev, file.path);
+  const own = await blobAt(schemeDir, rev, file.path);
   if (!own || !history.length) return trailer;
   // A byte copy of a kit version is never given an older base than itself. A trailer naming a newer version than the
   // copy still wins: the scheme undid that kit change on purpose after the sync.
@@ -151,13 +125,13 @@ export function pickBase(kitDir: string, history: { commit: string; blob: string
     if (!trailer || trailerAt < 0 || exactAt <= trailerAt) return { ...history[exactAt], how: 'exact' };
   }
   if (trailer) return trailer;
-  const ours = git(schemeDir, ['cat-file', 'blob', own]);
+  const ours = await git(schemeDir, ['cat-file', 'blob', own]);
   let best: { commit: string; blob: string; d: number } | null = null;
   const seen = new Set<string>();
   for (const v of history) {
     if (seen.has(v.blob)) continue;
     seen.add(v.blob);
-    const d = lineDistance(ours, git(kitDir, ['cat-file', 'blob', v.blob]));
+    const d = lineDistance(ours, await git(kitDir, ['cat-file', 'blob', v.blob]));
     // Newest first, so a tie goes to the older version: a kit change it can't place then shows as a conflict
     // rather than being taken as already in.
     if (!best || d <= best.d) best = { ...v, d };
@@ -166,25 +140,26 @@ export function pickBase(kitDir: string, history: { commit: string; blob: string
 }
 
 /** `git merge-file -p ours base theirs`: the merged text, and whether any hunk conflicted. */
-export function merge3(ours: string, base: string, theirs: string): { text: string; conflict: boolean } {
-  const dir = mkdtempSync(join(tmpdir(), 'kit-sync-'));
+export async function merge3(ours: string, base: string, theirs: string): Promise<{ text: string; conflict: boolean }> {
+  const dir = await mkdtemp(join(tmpdir(), 'kit-sync-'));
   try {
-    for (const [name, text] of [
-      ['ours', ours],
-      ['base', base],
-      ['theirs', theirs],
-    ] as const)
-      writeFileSync(join(dir, name), text);
+    await Promise.all(
+      [
+        ['ours', ours],
+        ['base', base],
+        ['theirs', theirs],
+      ].map(([name, text]) => writeFile(join(dir, name), text)),
+    );
     try {
-      return { text: execFileSync('git', ['merge-file', '-p', '-L', 'scheme', '-L', 'kit base', '-L', 'kit', 'ours', 'base', 'theirs'], { cwd: dir, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] }), conflict: false };
+      return { text: await git(dir, ['merge-file', '-p', '-L', 'scheme', '-L', 'kit base', '-L', 'kit', 'ours', 'base', 'theirs']), conflict: false };
     } catch (err) {
-      const e = err as { status?: number; stdout?: string };
-      // A positive status is the number of conflicts, with the merged text (markers and all) on stdout.
-      if (typeof e.status === 'number' && e.status > 0 && typeof e.stdout === 'string') return { text: e.stdout, conflict: true };
+      // execFile's error: `code` is the exit status, a positive one the number of conflicts, with the merged text on stdout.
+      const e = err as { code?: unknown; stdout?: unknown };
+      if (typeof e.code === 'number' && e.code > 0 && typeof e.stdout === 'string') return { text: e.stdout, conflict: true };
       throw err;
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -232,29 +207,33 @@ export function dupCaseLabels(text: string): string[] {
  * What the sync of one scheme would change, without touching it: each kit file the scheme has, merged from its base to
  * the kit's template at `kitRev`. `histories` maps each template to templateHistory's list at `kitRev`.
  */
-export function planScheme(kitDir: string, kitRev: string, histories: Record<string, { commit: string; blob: string }[]>, schemeDir: string, rev = 'HEAD'): FileSync[] {
-  return KIT_FILES.map((file) => {
-    const own = blobAt(schemeDir, rev, file.path);
-    const kit = blobAt(kitDir, kitRev, file.template);
-    if (!own || !kit) return { path: file.path, status: 'missing' as const };
-    if (own === kit) return { path: file.path, status: 'same' as const };
-    const theirs = git(kitDir, ['cat-file', 'blob', kit]);
-    const ours = git(schemeDir, ['cat-file', 'blob', own]);
-    const base = pickBase(kitDir, histories[file.template] ?? [], schemeDir, rev, file);
-    // With no base at all (a template with no history), the copy is taken as the base: nothing comes in.
-    const baseText = base ? git(kitDir, ['cat-file', 'blob', base.blob]) : ours;
-    const merged = merge3(ours, baseText, theirs);
-    const info = { base: base?.how, baseCommit: base?.commit };
-    if (merged.conflict) return { path: file.path, status: 'conflict' as const, ...info };
-    if (merged.text === ours) return { path: file.path, status: 'same' as const, ...info };
-    // A clean merge of a shell file can still leave one label twice in a case; bash runs only the first arm.
-    if (ours.startsWith('#!')) {
-      const before = new Set(dupCaseLabels(ours));
-      const dupes = dupCaseLabels(merged.text).filter((l) => !before.has(l));
-      if (dupes.length) return { path: file.path, status: 'conflict' as const, ...info, dupes };
-    }
-    return { path: file.path, status: 'merged' as const, text: merged.text, ...info };
-  });
+export async function planScheme(kitDir: string, kitRev: string, histories: Record<string, { commit: string; blob: string }[]>, schemeDir: string, rev = 'HEAD'): Promise<FileSync[]> {
+  const plan: FileSync[] = [];
+  for (const file of KIT_FILES) plan.push(await planFile(kitDir, kitRev, histories, schemeDir, rev, file));
+  return plan;
+}
+
+async function planFile(kitDir: string, kitRev: string, histories: Record<string, { commit: string; blob: string }[]>, schemeDir: string, rev: string, file: { template: string; path: string }): Promise<FileSync> {
+  const own = await blobAt(schemeDir, rev, file.path);
+  const kit = await blobAt(kitDir, kitRev, file.template);
+  if (!own || !kit) return { path: file.path, status: 'missing' as const };
+  if (own === kit) return { path: file.path, status: 'same' as const };
+  const theirs = await git(kitDir, ['cat-file', 'blob', kit]);
+  const ours = await git(schemeDir, ['cat-file', 'blob', own]);
+  const base = await pickBase(kitDir, histories[file.template] ?? [], schemeDir, rev, file);
+  // With no base at all (a template with no history), the copy is taken as the base: nothing comes in.
+  const baseText = base ? await git(kitDir, ['cat-file', 'blob', base.blob]) : ours;
+  const merged = await merge3(ours, baseText, theirs);
+  const info = { base: base?.how, baseCommit: base?.commit };
+  if (merged.conflict) return { path: file.path, status: 'conflict' as const, ...info };
+  if (merged.text === ours) return { path: file.path, status: 'same' as const, ...info };
+  // A clean merge of a shell file can still leave one label twice in a case; bash runs only the first arm.
+  if (ours.startsWith('#!')) {
+    const before = new Set(dupCaseLabels(ours));
+    const dupes = dupCaseLabels(merged.text).filter((l) => !before.has(l));
+    if (dupes.length) return { path: file.path, status: 'conflict' as const, ...info, dupes };
+  }
+  return { path: file.path, status: 'merged' as const, text: merged.text, ...info };
 }
 
 /** The mail to a scheme's Taskmaster when files clash: what a minion does by hand (#1769). Held mail, so it stays short. */
@@ -276,8 +255,13 @@ export function byHandNote(kitDir: string, kit: string, clashes: FileSync[]): st
 }
 
 /** The scheme repos a round looks at: <projects>/<n>/repo with git, leaving out any repo holding the templates (Citadel's). */
-export function schemeRepos(projectsDir: string, ids: number[]): { project: number; dir: string }[] {
-  return ids.map((project) => ({ project, dir: join(projectsDir, String(project), 'repo') })).filter(({ dir }) => tryGit(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']) !== null && !blobAt(dir, 'HEAD', KIT_FILES[0].template));
+export async function schemeRepos(projectsDir: string, ids: number[]): Promise<{ project: number; dir: string }[]> {
+  const repos: { project: number; dir: string }[] = [];
+  for (const project of ids) {
+    const dir = join(projectsDir, String(project), 'repo');
+    if ((await tryGit(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'])) !== null && !(await blobAt(dir, 'HEAD', KIT_FILES[0].template))) repos.push({ project, dir });
+  }
+  return repos;
 }
 
 // ---- The rounds -------------------------------------------------------------------------------------------------
@@ -331,7 +315,7 @@ export interface KitSyncDeps {
   projectsDir: string;
   /** Where the checks' and ships' host jobs keep their output. */
   runDir: string;
-  jobs: Pick<HostJobs, 'start' | 'state'>;
+  jobs: Pick<HostJobs, 'start' | 'look'>;
   load(): KitSyncState | undefined;
   save(state: KitSyncState): void;
   projects(): { id: number; name: string }[];
@@ -419,11 +403,11 @@ export class KitSync {
     return this.serial(async () => {
       // deploy.sh moves the checkout before its tests and boot check, and marks that window; its kit may yet be rolled back.
       // The look runs off the server's thread (#2111): it was 6 blocking gits every 10 minutes, each a process start on a busy box.
-      const gitDir = (await gitAsync(this.d.kitDir, ['rev-parse', '--absolute-git-dir'])).trim();
+      const gitDir = (await git(this.d.kitDir, ['rev-parse', '--absolute-git-dir'])).trim();
       if (await exists(join(gitDir, 'cc-deploy', 'unchecked'))) return;
       let s = this.d.load();
-      const head = (await gitAsync(this.d.kitDir, ['rev-parse', 'HEAD'])).trim();
-      const blobs = await templateBlobsA(this.d.kitDir, head);
+      const head = (await git(this.d.kitDir, ['rev-parse', 'HEAD'])).trim();
+      const blobs = await templateBlobs(this.d.kitDir, head);
       // A running check or ship keeps its round: superseding would leave its job writing into the next round's folder.
       const shipping = s?.round?.schemes.some((x) => x.state === 'checking' || x.state === 'queued' || x.state === 'shipping');
       if (JSON.stringify(blobs) !== JSON.stringify(s?.blobs) && !shipping) {
@@ -449,19 +433,17 @@ export class KitSync {
 
   /** Sync every scheme that is behind: merge, commit on its branch in its worktree, start its check. */
   private async start(kit: string, blobs: Record<string, string | null>, prevBlobs: Record<string, string | null>): Promise<Round> {
-    const histories = Object.fromEntries(KIT_FILES.map((f) => [f.template, templateHistory(this.d.kitDir, kit, f.template)]));
+    const histories = Object.fromEntries(await Promise.all(KIT_FILES.map(async (f) => [f.template, await templateHistory(this.d.kitDir, kit, f.template)] as const)));
     const names = new Map(this.d.projects().map((p) => [p.id, p.name]));
     const round: Round = { kit, blobs, at: Date.now(), schemes: [] };
-    for (const { project, dir } of schemeRepos(
+    for (const { project, dir } of await schemeRepos(
       this.d.projectsDir,
       [...names.keys()].filter((id) => id !== this.d.home()),
     )) {
-      // Each scheme's plan is a few hundred ms of git; between schemes the server answers again.
-      await new Promise((ok) => setImmediate(ok));
       const name = names.get(project)!;
       let plan: FileSync[];
       try {
-        plan = planScheme(this.d.kitDir, kit, histories, dir);
+        plan = await planScheme(this.d.kitDir, kit, histories, dir);
       } catch (err) {
         console.error(`Kit sync: planning ${name}:`, err);
         round.schemes.push({ project, name, state: 'failed', files: [], repo: dir });
@@ -474,7 +456,7 @@ export class KitSync {
       round.schemes.push(sync);
       if (!merged.length && !clashes.length) continue;
       // A scheme with no land.sh ships by pull request: listed only (opening PRs there is out of scope).
-      if (!blobAt(dir, 'HEAD', KIT_FILES[0].path)) {
+      if (!(await blobAt(dir, 'HEAD', KIT_FILES[0].path))) {
         sync.state = 'pr';
         sync.files = [...sync.files, ...clashes];
         continue;
@@ -519,12 +501,12 @@ export class KitSync {
     const wt = this.worktree(sync.project);
     const branch = `kit-sync/${short(kit)}`;
     await this.drop(sync);
-    await gitAsync(sync.repo, ['worktree', 'add', '-q', '-B', branch, wt, 'HEAD']);
-    for (const f of merged) writeFileSync(join(wt, f.path), f.text!);
-    git(wt, ['add', '--', ...merged.map((f) => f.path)]);
+    await git(sync.repo, ['worktree', 'add', '-q', '-B', branch, wt, 'HEAD']);
+    for (const f of merged) await writeFile(join(wt, f.path), f.text!);
+    await git(wt, ['add', '--', ...merged.map((f) => f.path)]);
     const msg = `Kit sync: take the kit's ${list(merged.map((f) => f.path.split('/').pop()!))} (Citadel ${short(kit)})\n\nMerged by Citadel's kit sync (#1100) from the kit's templates, keeping this scheme's own edits.\n\n${TRAILER}: ${kit}`;
-    git(wt, ['-c', 'user.name=Citadel', '-c', 'user.email=citadel@localhost', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', msg]);
-    return git(wt, ['rev-parse', 'HEAD']).trim();
+    await git(wt, ['-c', 'user.name=Citadel', '-c', 'user.email=citadel@localhost', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', msg]);
+    return (await git(wt, ['rev-parse', 'HEAD'])).trim();
   }
 
   /** Remove a scheme's sync worktree and any sync branch. */
@@ -533,8 +515,8 @@ export class KitSync {
     // Gone before git's remove, which would walk an installed node_modules file by file on the event loop's thread pool.
     await rm(wt, { recursive: true, force: true });
     try {
-      git(sync.repo, ['worktree', 'prune']);
-      for (const b of git(sync.repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/kit-sync/']).split('\n').filter(Boolean)) git(sync.repo, ['branch', '-q', '-D', b]);
+      await git(sync.repo, ['worktree', 'prune']);
+      for (const b of (await git(sync.repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/kit-sync/'])).split('\n').filter(Boolean)) await git(sync.repo, ['branch', '-q', '-D', b]);
     } catch (err) {
       console.error('Kit sync: removing old sync branches:', err);
     }
@@ -556,7 +538,7 @@ export class KitSync {
     for (const x of round.schemes) {
       if (x.state !== 'checking' && x.state !== 'shipping') continue;
       const what = x.state === 'checking' ? 'check' : 'ship';
-      const job = this.d.jobs.state(this.jobDir(x.project, what), 6000);
+      const job = await this.d.jobs.look(this.jobDir(x.project, what), 6000);
       if (!job || job.code === null) continue;
       changed = true;
       const tail = outputTail(job.output);

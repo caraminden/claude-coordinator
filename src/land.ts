@@ -205,16 +205,29 @@ export class Landings {
     return join(this.root, String(ticketId));
   }
 
-  /** Start land.sh for a minion, with `args` from landArgs(), unless one runs already; the tool polls get() until it ends. */
-  start(ticketId: number, cwd: string, env: Record<string, string>, args: string[] = []): Landing {
-    const now = this.get(ticketId);
-    // Nor over a hand-off that ended but isn't reported yet: starting afresh would wipe its output (the land tool then reads that one).
-    if (now && (now.code === null || existsSync(join(this.dir(ticketId), HANDOFF)))) return now;
-    this.run(ticketId, cwd, env, args);
-    return { output: '', code: null };
+  /** Minions whose start or hand-off is reading its folder now: a second one meanwhile counts it as running. */
+  private readonly launching = new Set<number>();
+  /** Hand-offs being settled: their rename of the hand-off file, which a new hand-off waits for. */
+  private readonly settling = new Map<number, Promise<void>>();
+
+  /** Start land.sh for a minion, with `args` from landArgs(), unless one runs already; the tool polls look() until it ends. */
+  async start(ticketId: number, cwd: string, env: Record<string, string>, args: string[] = []): Promise<Landing> {
+    if (this.launching.has(ticketId)) return { output: '', code: null };
+    this.launching.add(ticketId);
+    try {
+      await this.settling.get(ticketId); // a hand-off settled just now has its file renamed away first, as handOff waits
+      const now = await this.look(ticketId);
+      // Nor over a hand-off that ended but isn't reported yet: starting afresh would wipe its output (the land tool then reads that one).
+      if (now && (now.code === null || existsSync(join(this.dir(ticketId), HANDOFF)))) return now;
+      this.run(ticketId, cwd, env, args);
+      return { output: '', code: null };
+    } finally {
+      this.launching.delete(ticketId);
+    }
   }
 
   private run(ticketId: number, cwd: string, env: Record<string, string>, args: string[], files?: Record<string, string>) {
+    this.talkedNow.delete(ticketId);
     this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId, files });
   }
 
@@ -223,14 +236,21 @@ export class Landings {
    * (LandHandoffs). The hand-off sits in the landing's folder from before land.sh starts, so a restart mid-land (the
    * deploy's own, most often) or a server death at the start still reports it. False when a landing already runs for this minion.
    */
-  handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff, again = false): boolean {
-    const now = this.get(ticketId);
-    if (now && now.code === null) return false;
-    // A re-queue (#2030) takes the ended, unreported hand-off's place: its folder, and note, replace the old one's.
-    if (!again && existsSync(join(this.dir(ticketId), HANDOFF))) return false;
-    this.run(ticketId, cwd, env, args, { [HANDOFF]: JSON.stringify({ ...h, args }) });
-    this.waiting.add(ticketId);
-    return true;
+  async handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff, again = false): Promise<boolean> {
+    if (this.launching.has(ticketId)) return false;
+    this.launching.add(ticketId);
+    try {
+      await this.settling.get(ticketId); // a hand-off settled just now has its file renamed away first
+      const now = await this.look(ticketId);
+      if (now && now.code === null) return false;
+      // A re-queue (#2030) takes the ended, unreported hand-off's place: its folder, and note, replace the old one's.
+      if (!again && existsSync(join(this.dir(ticketId), HANDOFF))) return false;
+      this.run(ticketId, cwd, env, args, { [HANDOFF]: JSON.stringify({ ...h, args }) });
+      this.waiting.add(ticketId);
+      return true;
+    } finally {
+      this.launching.delete(ticketId);
+    }
   }
 
   /** Minions whose handed-off landing isn't reported yet. Until the start's scan ends, only the ones this server handed off. */
@@ -244,9 +264,17 @@ export class Landings {
     return [...this.waiting];
   }
 
-  /** Whether this one minion's hand-off is unreported: from memory, else one stat on its own folder (a turn's start, not the poll). */
+  /**
+   * Whether this one minion's hand-off is unreported: from memory, which knows every hand-off once the start's scan has
+   * read the folders (#2135: a turn's start and end, the status trailer and every message sent ask).
+   */
   hasHandoff(ticketId: number): boolean {
-    return this.waiting.has(ticketId) || existsSync(join(this.dir(ticketId), HANDOFF));
+    return this.waiting.has(ticketId) || (!this.scanDone && this.unscanned(ticketId));
+  }
+
+  /** Until the start's scan ends, a few seconds after a restart: one stat on this minion's own folder. */
+  private unscanned(ticketId: number): boolean {
+    return existsSync(join(this.dir(ticketId), HANDOFF));
   }
 
   /** The hand-off's own file, read off the server's thread (#1463). */
@@ -279,33 +307,58 @@ export class Landings {
     return this.waiting.has(ticketId);
   }
 
-  /** Reported: it no longer counts as a hand-off. */
-  settled(ticketId: number) {
+  /** Reported: it no longer counts as a hand-off, at once; its file is renamed off the server's thread (#2135). */
+  settled(ticketId: number): Promise<void> {
     this.waiting.delete(ticketId);
     if (!this.scanDone) this.goneWhileScanning.add(ticketId);
-    try {
-      renameSync(join(this.dir(ticketId), HANDOFF), join(this.dir(ticketId), 'handoff.done.json'));
-    } catch {
-      // Already settled.
-    }
+    const done = rename(join(this.dir(ticketId), HANDOFF), join(this.dir(ticketId), 'handoff.done.json'))
+      .catch(() => {
+        // Already settled.
+      })
+      .finally(() => {
+        if (this.settling.get(ticketId) === done) this.settling.delete(ticketId);
+      });
+    this.settling.set(ticketId, done);
+    return done;
   }
+
+  /** Minions written to while their land is handed off, this server's life: the file below keeps it across a restart. */
+  private readonly talkedNow = new Set<number>();
 
   /** A message came for the minion (a person's, a relay): if its land is handed off, a clean land then leaves it open. */
   talked(ticketId: number) {
-    if (this.hasHandoff(ticketId)) writeFileSync(join(this.dir(ticketId), 'talked'), '');
+    if (!this.hasHandoff(ticketId)) return;
+    this.talkedNow.add(ticketId);
+    void writeFile(join(this.dir(ticketId), 'talked'), '').catch((err) => console.error(`Noting that minion ${ticketId} was written to failed: ${thrown(err).message}`));
   }
 
-  wasTalked(ticketId: number): boolean {
-    return existsSync(join(this.dir(ticketId), 'talked'));
+  async wasTalked(ticketId: number): Promise<boolean> {
+    if (this.talkedNow.has(ticketId)) return true;
+    return access(join(this.dir(ticketId), 'talked')).then(
+      () => true,
+      () => false,
+    );
   }
+
+  /** Each minion's last prepNew, so two polls' reads and writes of its file never cross. */
+  private readonly prepTold = new Map<number, Promise<boolean>>();
 
   /** Whether the minion still has to hear about this conflict-prep `key` (#1366); true once, then it's noted for this run. */
-  prepNew(ticketId: number, key: string): boolean {
+  prepNew(ticketId: number, key: string): Promise<boolean> {
     const f = join(this.dir(ticketId), 'prep-told');
-    const told = existsSync(f) ? readFileSync(f, 'utf8').split('\n') : [];
-    if (told.includes(key)) return false;
-    writeFileSync(f, [...told.filter(Boolean), key, ''].join('\n'));
-    return true;
+    const next = (this.prepTold.get(ticketId) ?? Promise.resolve(false))
+      .catch(() => false)
+      .then(async () => {
+        const told = (await readFile(f, 'utf8').catch(() => '')).split('\n');
+        if (told.includes(key)) return false;
+        await writeFile(f, [...told.filter(Boolean), key, ''].join('\n'));
+        return true;
+      });
+    this.prepTold.set(ticketId, next);
+    void next.finally(() => {
+      if (this.prepTold.get(ticketId) === next) this.prepTold.delete(ticketId);
+    });
+    return next;
   }
 
   /** A person stopped this landing (#1168): its report says who, not "fix the cause". The folder is made afresh at each start. */
@@ -317,19 +370,19 @@ export class Landings {
     }
   }
 
-  stopped(ticketId: number): { by: string; at: number; via?: string } | null {
+  async stopped(ticketId: number): Promise<{ by: string; at: number; via?: string } | null> {
     try {
-      return JSON.parse(readFileSync(join(this.dir(ticketId), STOPPED), 'utf8'));
+      return JSON.parse(await readFile(join(this.dir(ticketId), STOPPED), 'utf8'));
     } catch {
       return null;
     }
   }
 
   /** The pid of the land.sh a minion's running landing started (its wrapper's child), or null when none runs. */
-  landPid(ticketId: number, children = (pid: number) => readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8'), cmdline = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8')): number | null {
-    if (this.get(ticketId)?.code !== null) return null;
+  async landPid(ticketId: number, children = (pid: number) => readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8'), cmdline = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8')): Promise<number | null> {
+    if ((await this.look(ticketId))?.code !== null) return null;
     try {
-      const wrapper = Number(readFileSync(join(this.dir(ticketId), 'pid'), 'utf8'));
+      const wrapper = Number(await readFile(join(this.dir(ticketId), 'pid'), 'utf8'));
       // Only land.sh itself: the wrapper's own mv and rm run just after its pid file appears, and a stop sent to one of them missed the ship.
       return (
         children(wrapper)
@@ -359,16 +412,20 @@ export class Landings {
     return this.jobs.running();
   }
 
-  /** The landing a minion started last, from its folder, whichever server started it. */
-  get(ticketId: number): Landing | null {
-    const r = this.jobs.state(this.dir(ticketId), MAX_OUTPUT);
-    return r && r.code === -1 ? { output: r.output + NO_CODE, code: 1 } : r;
-  }
-
-  /** get(), read off the server's thread (#1463): the hand-off poll's read, every few seconds for each landing. */
+  /** The landing a minion started last, from its folder, whichever server started it: read off the server's thread (#1463, #2135). */
   async look(ticketId: number): Promise<Landing | null> {
     const r = await this.jobs.look(this.dir(ticketId), MAX_OUTPUT);
-    return r && r.code === -1 ? { output: r.output + NO_CODE, code: 1 } : r;
+    const now = r && r.code === -1 ? { output: r.output + NO_CODE, code: 1 } : r;
+    this.seen.set(ticketId, now);
+    return now;
+  }
+
+  /** What the last look() found for each minion: for a sync answer between the polls' reads (the Releases page's rows). */
+  private readonly seen = new Map<number, Landing | null>();
+
+  /** The landing as the last look() found it, or undefined if none has looked since this server started. */
+  lastLook(ticketId: number): Landing | null | undefined {
+    return this.seen.get(ticketId);
   }
 
   /**
@@ -715,7 +772,7 @@ export interface HandoffDeps {
   /** Wake the minion with `text` once `commit` (null: the next deploy) is live, the way wake_when_live does, as a success notice (low effort, #951); false when it is live already. */
   wakeWhenLive?(id: number, commit: string | null, text: string): Promise<boolean>;
   /** The minion's scheme's apps a clean land on main deploys (#712): its home contraptions; none where deploys can't run. */
-  apps?(id: number): string[];
+  apps?(id: number): string[] | Promise<string[]>;
   deployOps?: DeployOps;
   /** A clean land on main moved it to `commit` (fast mode's testing behind, src/fast-mode.ts, #1017). */
   landed?(id: number, commit: string): void;
@@ -751,13 +808,13 @@ export class LandHandoffs {
       if (this.busy.has(id) || !this.d.landings.isWaiting(id)) continue;
       if (h && run && run.code === null) {
         this.showLanding(id, run);
-        this.tellPrep(id, run);
+        await this.tellPrep(id, run);
       }
       if (!h || !run || run.code === null) continue;
       this.busy.add(id);
       try {
         // A re-queued one (#2030) is a new hand-off already: settling it now would drop that one.
-        if (!(await this.settle(id, run, h))) this.d.landings.settled(id);
+        if (!(await this.settle(id, run, h))) await this.d.landings.settled(id);
       } catch (err) {
         console.error(`Reporting minion ${id}'s land failed: ${thrown(err).message ?? err}`);
       } finally {
@@ -780,9 +837,9 @@ export class LandHandoffs {
   }
 
   /** A ship in line that will conflict once the train ahead ships (#1366): its minion records the fix now, once per train top and head. */
-  private tellPrep(id: number, run: Landing) {
+  private async tellPrep(id: number, run: Landing) {
     const p = prepConflict(run.output);
-    if (!p || !this.d.landings.prepNew(id, `${p.top} ${p.head}`)) return;
+    if (!p || !(await this.d.landings.prepNew(id, `${p.top} ${p.head}`))) return;
     // fyi: it still runs a turn, but isn't someone writing in line (Landings.talked), so a clean ship still closes it.
     this.d.runner.send(id, this.d.from, prepMessage(p), [], { fyi: true });
   }
@@ -824,7 +881,7 @@ export class LandHandoffs {
       console.error(`Recording minion ${id}'s flakes failed: ${thrown(err).message ?? err}`);
     }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
-    const stop = r.kind === 'failed' ? this.d.landings.stopped?.(id) : null;
+    const stop = r.kind === 'failed' ? await this.d.landings.stopped?.(id) : null;
     if (stop) {
       // A person stopped it, from the Status page or by stopping the minion (#1168): not the minion's red, so no failure count and no "fix the cause".
       store.updateTicket(id, { state: null, note: 'ship stopped' });
@@ -873,7 +930,7 @@ export class LandHandoffs {
       // It landed, but only locally. The minion can't push the default branch itself (the kit's guard.sh, pre-push and
       // the tripwire all refuse it, KT1 #1519): a passing failure ships again, a lasting one goes to a person.
       const what = r.commit ? `${r.commit}${r.subject === undefined ? '' : ` "${r.subject}"`}` : `the branch's new tip`;
-      const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
+      const apps = h.deploy !== false && this.d.deployOps ? ((await this.d.apps?.(id)) ?? []) : [];
       store.updateTicket(id, { state: null, note: 'shipped locally; push to origin failed' });
       runner.broadcastTicket(id);
       await once('noted', () => runner.emit(id, 'note', { text: `Shipped ${what}: ${h.summary.trim().replace(/[.\s]+$/, '')}. Risk ${h.risk}. Shipped locally, not pushed to origin: the push failed.` }));
@@ -894,7 +951,7 @@ export class LandHandoffs {
     const where = r.kind === 'live' ? 'Live now.' : held ? `Waiting for the restart, held while the box is starved (${held[1]}): ${held[2]} at the latest.` : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
     // On main, the scheme's apps go out now rather than at auto-deploy's next tick (#712), and the line says how.
-    const apps = !into && h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
+    const apps = !into && h.deploy !== false && this.d.deployOps ? ((await this.d.apps?.(id)) ?? []) : [];
     if (apps.length) {
       store.updateTicket(id, { note: `shipped: deploying ${apps.join(', ')}` });
       runner.broadcastTicket(id);
@@ -940,7 +997,7 @@ export class LandHandoffs {
       if (await once('probe', () => this.d.probe!(id, h.probe!, r.commit ?? null, when))) return;
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
-    if (this.d.landings.wasTalked(id)) {
+    if (await this.d.landings.wasTalked(id)) {
       if (r.kind !== 'restart' || h.stayOpen) {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
@@ -998,7 +1055,7 @@ export class LandHandoffs {
       return;
     }
     store.updateTicket(id, { state: null, note: into ? `merged into Build ${into.slice('build/'.length)}` : null });
-    this.d.landings.settled(id);
+    await this.d.landings.settled(id);
     await runner.close(id, `${why}, so the server dismissed this minion.`);
   }
 }

@@ -92,7 +92,7 @@ export interface TrailDeps {
     setSetting(key: string, value: unknown): void;
     addWaitRecord(ticketId: number, kind: 'ship', step: ShipStep): void;
   };
-  landings: { pending(): Promise<number[]>; look(id: number): Promise<Landing | null>; stopped(id: number): { by: string } | null };
+  landings: { pending(): Promise<number[]>; look(id: number): Promise<Landing | null>; stopped(id: number): Promise<{ by: string } | null> };
   /** Every ship line there is. */
   lines(): Promise<ShipLine[]>;
   now?: () => number;
@@ -130,6 +130,8 @@ export class ShipTrail {
     const before = JSON.stringify([...this.open]);
     const ids = [...new Set([...ours, ...steps.keys(), ...this.open.keys()])];
     const runs = await Promise.all(ids.map((id) => (ours.has(id) || this.open.get(id)?.ours ? this.d.landings.look(id) : null)));
+    // Who stopped each ended one, read off the server's thread before the loop (#2135).
+    const stops = await Promise.all(runs.map((run, i) => (run && run.code !== null ? this.d.landings.stopped(ids[i]) : null)));
     for (const [i, id] of ids.entries()) {
       let o = this.open.get(id);
       const run = runs[i];
@@ -154,7 +156,7 @@ export class ShipTrail {
       } else if (run && run.code !== null) {
         // Never seen running: its last line still says where it got to.
         if (!o.key) this.step(id, o, at, outputStep(run.output));
-        this.end(id, o, at, shipEnd(run, this.d.landings.stopped(id)));
+        this.end(id, o, at, shipEnd(run, stops[i]));
       } else if (o.missed) this.end(id, o, at, { outcome: 'left' });
       else o.missed = true;
     }

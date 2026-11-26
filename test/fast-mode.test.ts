@@ -42,7 +42,7 @@ function world() {
         runs.push({ sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: j.cwd, encoding: 'utf8' }).trim(), env: j.env });
         answer = { output: '', code: null };
       },
-      state: () => answer,
+      look: async () => answer,
     },
     dir: (p) => join(repo + '-run', String(p)),
     env: (_p, t) => ({ WHO: String(t) }),

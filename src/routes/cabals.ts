@@ -1,10 +1,10 @@
 // A cabal's board (#2090, src/cabal-board.ts): read by people (the lead's chat panel and its own page), its lead and its
 // members (cabal_board); written by the lead (roster rows, answers, its log, the red-run line) and each member (its own
 // note and files, its asks). An ask is held mail to the lead unless it is blocking, which wakes it.
-import { type Board, boardText, readBoard } from '../cabal-board.ts';
+import { type Board, boardText, readBoard, timelineText } from '../cabal-board.ts';
 import type { Store } from '../db.ts';
 import { cabalBoardFor } from '../access.ts';
-import { APPROVED_FIELDS, cabalChanged, memberJoined, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
+import { APPROVED_FIELDS, cabalChanged, memberJoined, retroCheck, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
 import { schemeTarget } from './projects.ts';
 import { EFFORTS, MODELS } from '../db.ts';
 import type { CabalRowFields } from '../db/cabals.ts';
@@ -76,6 +76,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
     if (was != null) {
       runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
       cabalChanged(app, was);
+      retroCheck(app, was);
     }
     return;
   }
@@ -106,7 +107,8 @@ export const cabalRoutes: Route[] = [
       const whole = lead == null ? null : await boardFor(app, lead);
       // Who sees a row in another scheme (#2094): an agent reads as its scheme's people would, a person as they are.
       const board = whole && cabalBoardFor(whole, caller ? (p) => p === caller.project_id : (p) => app.store.canSee(session, p));
-      return json(res, 200, { lead, board, ...(url.searchParams.get('text') === '1' ? { text: board ? boardText(board, ticket) : null } : {}) });
+      const want = url.searchParams.get('timeline') === '1' ? () => timelineText(app.store, board!) : url.searchParams.get('text') === '1' ? () => boardText(board!, ticket) : null;
+      return json(res, 200, { lead, board, ...(want ? { text: board ? want() : null } : {}) });
     },
   },
   {
@@ -235,6 +237,7 @@ export const cabalRoutes: Route[] = [
           store.updateCabalRow(row.id, fields);
         }
         changed(app, ticket, ticket.id);
+        if (body.remove === true) retroCheck(app, ticket.id);
         return json(res, 200, { row: row.id, removed: body.remove === true });
       }
       if (action === 'log') {
@@ -247,7 +250,11 @@ export const cabalRoutes: Route[] = [
         return json(res, 200, r);
       }
       if (action === 'red') {
-        store.setCabalRed(ticket.id, body.text == null || body.text === '' ? null : line(body.text, 'Red-run line', 500));
+        const red = body.text == null || body.text === '' ? null : line(body.text, 'Red-run line', 500);
+        const was = store.getCabal(ticket.id)!.red;
+        store.setCabalRed(ticket.id, red);
+        // Kept on the log too: the retro's timeline needs when each red started and cleared (#2096).
+        if (red !== was) store.addCabalLog(ticket.id, author, red == null ? 'Red cleared' : `Red: ${red}`.slice(0, 500));
         changed(app, ticket, ticket.id);
         return json(res, 200, { ok: true });
       }

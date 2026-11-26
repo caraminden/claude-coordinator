@@ -1403,12 +1403,12 @@ test('a folder app (#1136): a ship that changes nothing in its folder holds its 
     writeFileSync(join(dir, 'README.md'), 'x');
     git('add', '-A');
     git('commit', '-qm', 'start');
-    assert.equal(manifestOn(dir, 'apps/notes'), false, 'registered before its folder ships: not deployed yet');
+    assert.equal(await manifestOn(dir, 'apps/notes'), false, 'registered before its folder ships: not deployed yet');
     mkdirSync(join(dir, 'apps', 'notes'), { recursive: true });
     writeFileSync(join(dir, 'apps', 'notes', 'citadel-app.json'), '{}');
     git('add', '-A');
     git('commit', '-qm', 'the app');
-    assert.equal(manifestOn(dir, 'apps/notes'), true);
+    assert.equal(await manifestOn(dir, 'apps/notes'), true);
     const deployed = git('rev-parse', 'HEAD');
     writeFileSync(join(dir, 'README.md'), 'y');
     git('commit', '-qam', 'outside the folder');

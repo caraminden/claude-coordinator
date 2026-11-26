@@ -35,7 +35,7 @@ export interface StateDeps {
   uploads: (t: Ticket) => string;
   shared: (p: Project) => string;
   /** A landing of the minion's runs: its worktree is land.sh's. */
-  landing: (ticketId: number) => boolean;
+  landing: (ticketId: number) => Promise<boolean>;
   note: (ticketId: number, text: string) => unknown;
   /** Say something the minion itself must read at its next turn (an open one's starts it). */
   tell: (ticketId: number, text: string) => unknown;
@@ -185,7 +185,7 @@ async function look(d: StateDeps, dir: string, at: string, s: TurnState, t: Tick
 }
 
 async function lookGit(d: StateDeps, dir: string, at: string, t: Ticket, w: Work, start: boolean) {
-  const shipping = d.landing(t.id);
+  const shipping = await d.landing(t.id);
   if (!shipping) await finish(d, dir, at, w, t.id);
   const last = await refAt(w.common, mark(t.id));
   const base = { repo: w.repo, cwd: w.cwd, name: basename(w.gitDir), last };
@@ -228,7 +228,7 @@ async function commit(d: StateDeps, dir: string, at: string, t: Ticket, w: Work,
   const refs = (Array.isArray(body.refs) ? body.refs : []) as { name: string; old: string | null; sent: string[]; sha: string }[];
   const bad = (r: (typeof refs)[number]) => !isSha(r?.sha) || !(r.old === null || isSha(r.old)) || !Array.isArray(r.sent) || !r.sent.every(isSha) || typeof r.name !== 'string' || !/^refs\/(heads|tags|stash)\/[^\s~^:?*[\\\x00-\x1f]+$/.test(r.name) || r.name.includes('..');
   if (!isSha(snap) || !isSha(prev) || refs.some(bad)) throw new HttpError(400, 'Not a checkpoint');
-  if (!d.landing(t.id)) await finish(d, dir, at, w, t.id);
+  if (!(await d.landing(t.id))) await finish(d, dir, at, w, t.id);
   if (!(await complete(w.common, [snap, ...refs.map((r) => r.sha)]))) return { need: true };
   const incoming = await snapHead(w.common, snap);
   const elsewhere = await branchesElsewhere(w.common, w.gitDir);
@@ -251,7 +251,7 @@ async function commit(d: StateDeps, dir: string, at: string, t: Ticket, w: Work,
       applied = true;
       break;
     }
-    if (d.landing(t.id)) {
+    if (await d.landing(t.id)) {
       await aside('shipping', 'is being shipped');
       break;
     }

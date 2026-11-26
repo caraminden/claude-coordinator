@@ -201,6 +201,8 @@ export interface TurnState {
   github?: string | null;
   /** The person's Claude container it runs in (#213); absent on the host. */
   container?: string;
+  /** The connected machine it runs on, null on this server: saved at its start, so following it reads no `machine` file (Build 7). A row saved before has none. */
+  machine?: { id: number; name: string; host?: true } | null;
   /** The people's own machines it got at its start (#306): the only owned ones it may open (routes/machines.ts). */
   owned?: number[];
   /** A Taskmaster's fresh-start step (#406): messages wait behind it rather than steer in. */
@@ -231,6 +233,7 @@ export interface LiveTurn {
   configDir: string;
   chosenEffort: boolean;
   container: string | null;
+  machine: { id: number; name: string; host?: true } | null;
   timer: NodeJS.Timeout;
   ticks: number;
   stopTimer?: ClockTimer;
@@ -943,8 +946,7 @@ export class Runner {
 
   /** The machine whose host this minion's running turn reaches (Build 7 T8, src/host-reach.ts), or null: placed there with host reach. */
   hostReachOf(ticketId: number): { id: number; name: string } | null {
-    const dir = this.turns.get(ticketId)?.dir;
-    const at = dir ? placedAt(dir) : null;
+    const at = this.turns.get(ticketId)?.machine;
     return at?.host ? { id: at.id, name: at.name } : null;
   }
 
@@ -1598,7 +1600,7 @@ export class Runner {
           this.lendWorker(ticketId);
           return live.ended;
         },
-        (!turn.unit && placedAt(turn.dir!)?.id) || 0,
+        live.machine?.id ?? 0,
       ),
     );
     if (turn.card) this.endLive(live, ticketId);
@@ -3129,6 +3131,7 @@ export class Runner {
       ...(Object.keys(retries).length ? { retries } : {}),
       dir,
       unit,
+      machine: plan.spawn.how === 'machine' && worker ? { ...worker, ...(env.COORDINATOR_HOST_REACH ? { host: true as const } : {}) } : null,
       offset: 0,
       startedAt: Date.now(),
       configDir,
@@ -3558,6 +3561,8 @@ export class Runner {
       configDir: turn.configDir ?? claudeConfigDir(process.env),
       chosenEffort: !!turn.chosenEffort,
       container: turn.container ?? null,
+      // A row from before Build 7 saved it has its folder's `machine` file read once, at the restart that follows it.
+      machine: turn.machine !== undefined ? turn.machine : turn.unit || turn.container ? null : (placedAt(turn.dir!) ?? null),
       ticks: 0,
       timer: setInterval(() => this.poll(ticketId), this.pollMs),
       ended,
@@ -3745,7 +3750,7 @@ export class Runner {
     clearInterval(live.timer);
     this.unfollow(live);
     // A host turn's one line on what it wrote to its machine's folders (T8).
-    const reach = live.dir ? placedAt(live.dir) : null;
+    const reach = live.machine;
     if (reach?.host) void writesLine(live.dir, reach.name).then((wrote) => wrote && this.emit(ticketId, 'note', { text: wrote }));
     this.clock.clearTimeout(live.stopTimer);
     this.clock.clearTimeout(live.stopGraceTimer);

@@ -5,7 +5,7 @@
 // (tests, a dev copy) or when systemd-run fails, it runs as the server's child, which a restart would cut
 // off: only those count as running(), which feeds the runner's interruptible().
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { open, readdir, readFile, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fallbacks } from './fallbacks.ts';
@@ -179,27 +179,9 @@ export class HostJobs {
     return this.children.size;
   }
 
-  /** How the job in `dir` stands, whichever server started it; null if there is none. */
-  state(dir: string, maxOutput: number): JobState | null {
-    let code = readCode(dir);
-    // Liveness first: the wrapper writes its code, then exits.
-    if (code === null && !this.alive(dir)) {
-      code = readCode(dir);
-      if (code === null) {
-        try {
-          readFileSync(join(dir, 'started'));
-        } catch {
-          return null;
-        }
-        code = lost(dir);
-      }
-    }
-    return { output: tail(join(dir, 'output.log'), maxOutput), code };
-  }
-
   /**
-   * state(), read off the server's thread (#1463): the ship hand-off poll reads every handed-off job each few seconds,
-   * and its blocking reads were in the stall stacks.
+   * How the job in `dir` stands, whichever server started it; null if there is none. Read off the server's thread
+   * (#1463, #2135): the ship hand-off poll and the Releases reads ask for every running job each few seconds.
    */
   async look(dir: string, maxOutput: number): Promise<JobState | null> {
     let code = await readCodeAsync(dir);
@@ -220,26 +202,6 @@ export class HostJobs {
   }
 
   /** Whether a job's wrapper may still run: its pid is a live process on its folder, or it is still starting. */
-  private alive(dir: string): boolean {
-    if (this.starting.has(dir)) return true;
-    let pid: number;
-    try {
-      pid = Number(readFileSync(join(dir, 'pid'), 'utf8'));
-      if (!(pid > 0)) throw new Error('no pid');
-    } catch {
-      try {
-        return Date.now() - Number(readFileSync(join(dir, 'started'), 'utf8')) < START_GRACE_MS;
-      } catch {
-        return false;
-      }
-    }
-    try {
-      return onFolder(readFileSync(`/proc/${pid}/cmdline`, 'utf8'), dir);
-    } catch {
-      return false;
-    }
-  }
-
   private async aliveAsync(dir: string): Promise<boolean> {
     if (this.starting.has(dir)) return true;
     const pid = Number(await readFile(join(dir, 'pid'), 'utf8').catch(() => ''));
@@ -268,34 +230,6 @@ function lost(dir: string): number {
   return -1;
 }
 
-function readCode(dir: string): number | null {
-  try {
-    const text = readFileSync(join(dir, 'code'), 'utf8').trim();
-    return text === '' ? null : Number(text);
-  } catch {
-    return null;
-  }
-}
-
-/** The last `max` bytes of a file, or '' with none yet. */
-function tail(file: string, max: number): string {
-  let fd: number;
-  try {
-    fd = openSync(file, 'r');
-  } catch {
-    return '';
-  }
-  try {
-    const size = fstatSync(fd).size;
-    const len = Math.min(size, max);
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    return buf.toString('utf8');
-  } finally {
-    closeSync(fd);
-  }
-}
-
 async function readCodeAsync(dir: string): Promise<number | null> {
   const text = await readFile(join(dir, 'code'), 'utf8').then(
     (t) => t.trim(),
@@ -304,6 +238,7 @@ async function readCodeAsync(dir: string): Promise<number | null> {
   return text === '' ? null : Number(text);
 }
 
+/** The last `max` bytes of a file, or '' with none yet. */
 async function tailAsync(file: string, max: number): Promise<string> {
   const fh = await open(file, 'r').catch(() => null);
   if (!fh) return '';

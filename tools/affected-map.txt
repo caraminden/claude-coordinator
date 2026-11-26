@@ -130,6 +130,7 @@ tools/test-deps.sh: test/test-deps.test.ts test/land-train-early.test.ts test/la
 tools/test-alone.sh: test/land-train-early.test.ts test/land.test.ts test/land-verdicts.test.ts
 tools/light-check-run.sh: test/light-check-run.test.ts
 tools/land.sh: test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts test/land-size-list.test.ts
+tools/land/*.sh: test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts test/land-size-list.test.ts
 kit/skills/scheme-setup/templates/land.sh: test/land-size-list.test.ts test/land-numbers.test.ts
 tools/land.local.sh: test/land-size-list.test.ts test/land-numbers.test.ts
 tools/ship-numbers.attributes: test/land-size-list.test.ts test/land-numbers.test.ts
@@ -193,6 +194,7 @@ test/turn-cost.json: test/turn-cost.test.ts
 
 # Tests that read a source file's text, so an edit to it alone can turn them red (#2037): test/pinned-tests.test.ts finds them.
 tools/land.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
+tools/land/*.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
 tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts test/land.test.ts
 public/sw.js: test/backup.test.ts test/shell.test.ts
 tools/deploy-queue.sh: test/ci-runner-choice.test.ts

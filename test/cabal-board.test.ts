@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { boardText, doubledFiles, parseClaims, readBoard } from '../src/cabal-board.ts';
+import { cabalBoardFor } from '../src/access.ts';
+import { boardText, doubledFiles, parseClaims, readBoard, timelineText } from '../src/cabal-board.ts';
 import { Store } from '../src/db.ts';
 import { git, makeRepo } from './git.ts';
 
@@ -153,4 +154,36 @@ test("Build 7's shape (18 rows, 1 ask) reads under 6k tokens", async () => {
   const tokens = Math.ceil(text.length / 4); // about 4 characters a token for this English and paths
   assert.ok(tokens < 6000, `${tokens} tokens`);
   assert.equal(text.split('\n').filter((l) => /^\d+ · M\d+ /.test(l)).length, 18);
+});
+
+test("the timeline shows a reader outside the lead's scheme no log, no other asks and no ship words (#2096)", async () => {
+  const store = new Store(':memory:');
+  const home = store.createProject('Home', null);
+  const away = store.createProject('Away', null);
+  const mk = (project_id: number, title: string) => store.createTicket({ project_id, title, permission_mode: 'default', created_by: 'Cara' });
+  const lead = mk(home.id, 'Lead');
+  const [mine, theirs] = [mk(away.id, 'Away part'), mk(home.id, 'Home part')];
+  store.ensureCabal(lead.id, home.id);
+  store.addCabalRow(lead.id, { ticket_id: mine.id, project_id: away.id });
+  store.addCabalRow(lead.id, { ticket_id: theirs.id });
+  store.addCabalLog(lead.id, '#1', 'SECRET-LOG');
+  store.addCabalAsk(lead.id, theirs.id, 'SECRET-ASK', false);
+  store.addCabalAsk(lead.id, mine.id, 'AWAY-ASK', false);
+  store.addEvent(theirs.id, 'note', { text: 'Shipped abc1234 SECRET-SHIP' });
+  const whole = (await readBoard(store, lead.id, { parked: () => false }))!;
+
+  const outside = timelineText(
+    store,
+    cabalBoardFor(whole, (p) => p === away.id),
+  );
+  assert.match(outside, /AWAY-ASK/);
+  assert.doesNotMatch(outside, /SECRET/);
+  // The lead's own scheme sees every ask, other schemes' named, and the log.
+  const inside = timelineText(
+    store,
+    cabalBoardFor(whole, (p) => p === home.id),
+  );
+  assert.match(inside, /SECRET-LOG/);
+  assert.match(inside, /Away #\d+: AWAY-ASK/);
+  assert.match(inside, /SECRET-SHIP/);
 });

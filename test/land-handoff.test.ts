@@ -101,8 +101,8 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   };
   const land = async (out: string, code = 0, h: object = H, args: string[] = []) => {
     writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(out)}\nexit ${code}\n`);
-    assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
-    await until('land.sh ends', () => landings.get(1)?.code !== null);
+    assert.ok(await landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
+    await until('land.sh ends', async () => (await landings.look(1))?.code !== null);
   };
   return { owned, waits, landings, ticket, did, sent, light, fyi, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
 }
@@ -241,7 +241,7 @@ test('stay_open with a restart and a person who wrote in line: the message never
   const s = setup('stay-talked');
   await s.land(RESTART, 0, { stayOpen: true });
   s.landings.talked(1);
-  assert.ok(s.landings.wasTalked(1));
+  assert.ok(await s.landings.wasTalked(1));
   await s.handoffs.poll();
   assert.ok(!s.sent.some((m) => /pending-deploy/.test(m)), s.sent.join('\n'));
 });
@@ -278,7 +278,7 @@ test('a passed-alone refusal goes back in line by itself with a note and no wake
   const s = setup('requeue', {
     requeue: async (_id, h) => {
       asked.push(h);
-      s.landings.settled(1); // as the server's hand-off does, so the next one can start
+      await s.landings.settled(1); // as the server's hand-off does, so the next one can start
       return null;
     },
   });
@@ -562,12 +562,12 @@ test('exit 75 (no CI verdict) parks the minion until the runners are back, or wa
 test('a person who wrote while the land was in line keeps the minion open: it is told, not dismissed', async () => {
   const s = setup('talked');
   writeFileSync(join(s.cwd, 'tools', 'land.sh'), `sleep 0.3\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
-  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
-  assert.ok(!s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H), 'one landing at a time');
+  assert.ok(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  assert.ok(!(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H)), 'one landing at a time');
   // A relay or a person's message (runner.send calls talked for any message but an fyi notice).
 
   s.landings.talked(1);
-  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  await until('land.sh ends', async () => (await s.landings.look(1))?.code !== null);
   await s.handoffs.poll();
   assert.equal(s.notes.length, 1, 'the shipped line still posts');
   assert.equal(s.sent.length, 1);
@@ -580,10 +580,10 @@ test("a feeder's merge into its build dismisses it as folded in; an unreported h
   mkdirSync(join(s.cwd, 'test'), { recursive: true });
   writeFileSync(join(s.cwd, 'test', 'a.test.ts'), '');
   writeFileSync(join(s.cwd, 'tools', 'land.sh'), "echo 'land: merged into build/3'\n");
-  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], H));
-  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
-  assert.ok(!s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H), 'ended but not reported: refused, not wiped');
-  assert.equal(s.landings.start(1, s.cwd, { PATH: process.env.PATH! }).code, 0, 'the land tool reads that one instead of starting afresh');
+  assert.ok(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], H));
+  await until('land.sh ends', async () => (await s.landings.look(1))?.code !== null);
+  assert.ok(!(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H)), 'ended but not reported: refused, not wiped');
+  assert.equal((await s.landings.start(1, s.cwd, { PATH: process.env.PATH! })).code, 0, 'the land tool reads that one instead of starting afresh');
   await s.handoffs.poll();
   assert.match(s.notes[0], /^Merged into build\/3: .* Merged into build\/3, not live until the build ships\.$/);
   assert.equal(s.ticket.note, 'merged into Build 3');
@@ -713,8 +713,8 @@ test('a ship with a live probe hands it over with when it is live, and a fail ke
     return false;
   };
   writeFileSync(join(into.cwd, 'tools', 'land.sh'), "echo 'land: merged into build/3'\n");
-  assert.ok(into.landings.handOff(1, into.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], { ...H, probe }));
-  await until('land.sh ends', () => into.landings.get(1)?.code !== null);
+  assert.ok(await into.landings.handOff(1, into.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], { ...H, probe }));
+  await until('land.sh ends', async () => (await into.landings.look(1))?.code !== null);
   await into.handoffs.poll();
   assert.ok(!calls.includes('into'), 'a merge into a build is not live: no probe');
 
@@ -1342,14 +1342,14 @@ test('a smoke refusal (#1012) is a failed land that says it never got in line', 
 test('while a handed-off land runs, each poll keeps the minion in outside with its phase, across a restart too', async () => {
   const s = setup('landing-state');
   writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'queue: 2nd in line (ahead: #12)' >&2\nwhile [ ! -e ci ]; do sleep 0.05; done\necho 'land: waiting for CI on abc1234' >&2\nwhile [ ! -e done ]; do sleep 0.05; done\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
-  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
-  await until('land.sh is in line', () => /queue:/.test(s.landings.get(1)?.output ?? ''));
+  assert.ok(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  await until('land.sh is in line', async () => /queue:/.test((await s.landings.look(1))?.output ?? ''));
   // The minion's closing status line, or a person's turn, cleared it.
   Object.assign(s.ticket, { state: null, note: null });
   await s.handoffs.poll();
   assert.deepEqual([s.ticket.state, s.ticket.note], ['outside', 'landing: in line']);
   writeFileSync(join(s.cwd, 'ci'), '');
-  await until('land.sh waits on CI', () => /waiting for CI/.test(s.landings.get(1)?.output ?? ''));
+  await until('land.sh waits on CI', async () => /waiting for CI/.test((await s.landings.look(1))?.output ?? ''));
   await s.handoffs.poll();
   assert.deepEqual([s.ticket.state, s.ticket.note], ['outside', 'landing: waiting on CI']);
   const writes = s.did.length;
@@ -1363,7 +1363,7 @@ test('while a handed-off land runs, each poll keeps the minion in outside with i
   assert.deepEqual([s.ticket.state, s.ticket.note], ['outside', 'landing: waiting on CI']);
 
   writeFileSync(join(s.cwd, 'done'), '');
-  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  await until('land.sh ends', async () => (await s.landings.look(1))?.code !== null);
   await next.poll();
   assert.equal(s.ticket.status, 'closed');
   assert.notEqual(s.ticket.state, 'outside');
@@ -1433,8 +1433,8 @@ test('a prep line from a running land wakes the minion once, with the scratch-wo
   const s = setup('prep');
   const gate = join(s.cwd, 'gate');
   writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'queue: 2nd in line (ahead: #2)' >&2\necho ${JSON.stringify(line)} >&2\nuntil [ -e ${JSON.stringify(gate)} ]; do sleep 0.05; done\nexit 1\n`);
-  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
-  await until('the prep line', () => /land: prep:/.test(s.landings.get(1)?.output ?? ''));
+  assert.ok(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  await until('the prep line', async () => /land: prep:/.test((await s.landings.look(1))?.output ?? ''));
   await s.handoffs.poll();
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1, 'once per train top');
@@ -1447,7 +1447,7 @@ test('a prep line from a running land wakes the minion once, with the scratch-wo
   assert.equal(s.ticket.state, 'outside', 'still landing');
   assert.deepEqual(s.landings.handoffs(), [1]);
   writeFileSync(gate, '');
-  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  await until('land.sh ends', async () => (await s.landings.look(1))?.code !== null);
 });
 
 test('a land stopped from the Status page says who stopped it and that nothing landed, not "fix the cause", and counts no failure (#1168)', async () => {
@@ -1457,24 +1457,17 @@ test('a land stopped from the Status page says who stopped it and that nothing l
     failed.push(id);
   };
   writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'land: rebasing onto main'\nsleep 300\n`);
-  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  assert.ok(await s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
   let pid: number | null = null;
-  await until('land.sh runs', () => (pid = s.landings.landPid(1)) !== null);
+  await until('land.sh runs', async () => (pid = await s.landings.landPid(1)) !== null);
   const cmd = (p: number) => (p === 5 ? 'mv\0pid.tmp\0pid' : 'bash\0tools/land.sh\0');
-  assert.equal(
-    s.landings.landPid(1, () => '5\n', cmd),
-    null,
-    "the wrapper's mv, just after its pid file appears, is not the ship",
-  );
-  assert.equal(
-    s.landings.landPid(1, () => '5 6\n', cmd),
-    6,
-  );
+  assert.equal(await s.landings.landPid(1, () => '5\n', cmd), null, "the wrapper's mv, just after its pid file appears, is not the ship");
+  assert.equal(await s.landings.landPid(1, () => '5 6\n', cmd), 6);
   s.landings.markStopped(1, 'Josh', Date.UTC(2026, 10, 20, 21, 5));
   signalTree(pid!);
-  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
-  assert.equal(s.landings.get(1)?.code, 143);
-  assert.equal(s.landings.landPid(1), null, 'nothing runs any more');
+  await until('land.sh ends', async () => (await s.landings.look(1))?.code !== null);
+  assert.equal((await s.landings.look(1))?.code, 143);
+  assert.equal(await s.landings.landPid(1), null, 'nothing runs any more');
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1);
   assert.match(s.sent[0], /stopped by Josh from the Status page at \w{3} \d+, 1:05 PM PST\. Nothing landed and main is untouched\./);

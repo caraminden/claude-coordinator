@@ -1,6 +1,6 @@
 // A source file past LIMIT lines is hard for a minion to navigate: it can't read it whole and can't find the seam (#1786).
 // This fails when a file in src/, public/ or tools/ is over LIMIT, or when an allowed giant grows past its listed size.
-// Big files already here are in ALLOWED at their size, each with its reason; they can shrink but not grow.
+// Big files already here are in ALLOWED at their size, each with its reason; they can shrink, and grow only SLACK lines past it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
@@ -11,9 +11,14 @@ const root = join(import.meta.dirname, '..');
 const ROOTS = ['src', 'public', 'tools', 'kit'];
 const CODE = /\.(ts|js|mjs|sh|html|css|ps1|py)$/;
 export const LIMIT = 1500;
+// How far a file in ALLOWED may grow past its listed size before this fails (Josh, 2026-11-26, #2118: "Big files may grow
+// 50 lines past their listed size"), so ships in line together that each grow a big file a little don't refuse each other.
+// The LIMIT for files not in ALLOWED has none.
+export const SLACK = 50;
 
 // path -> [lines it may have, why it is allowed]. A split that shrinks a file lowers its number in the same commit.
 // Two ships that change an entry merge by rule: the changes to its number add up and both reasons stay (count, MERGES in tools/land.local.sh, #1917).
+// A ship that grows a listed file still raises its number by what it adds: the SLACK is room for the ships in line beside it.
 // Add your reason at the end. One line per entry (the runner's is older), so the formatter must not break a long one.
 // biome-ignore format: one line per entry is what the merge rule reads
 export const ALLOWED: Record<string, [number, string]> = {
@@ -25,7 +30,7 @@ export const ALLOWED: Record<string, [number, string]> = {
     4931,
     'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+42: main\'s poll and stop off the thread, #2134, and its cabal leads, #2095, taken into Build 7 with a machine turn\'s async lookup) (+13: a marked minion reaching its machine host, Build 7 T8, #2070) (+23: a turn placed on a machine, #1962) (+2: a cabal member is offered cabal_board, #2090) (+1: a word on the quick lane with a message, #1986) (+11: busy and a recorded answer its chat reads next turn, #1930) (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920) (+18: a stop settles the outbox rows it dropped, #1904) (+15: what a killed turn spent and kills together, #1938) (+6: a seal set during a cut-off turn stays, #1958) (+17: where a turn runs, its Stop and its prompt line for the jobs it hands over, #1890) (+6: Start now wiring; the holds are start-now.ts, #1957) (+4: claims pass on at live, two delegations to src/closing.ts, #1985) (+6: the list line for a minion whose CI run is held, #1984) (+3: one call that hands each raw event to the cut-off record; the record is cut-offs.ts, #1992)',
   ],
-  'tools/land.sh': [3188, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918) (+177: no-verdict runs, checks for riders and light ships, #1864) (+10: riders heard of their restart, #1865) (+11: the quick-train line, #1912) (+13: a suite stopped at its limit, missing packages, #1863) (+20: a stop finds the run it just pushed, #1894) (+51: a burn-in red names the ship that added the case, #2019) (+5: titles checked before the line, #1983) (+17: the main .gitattributes on git before 2.40, #2071) (+2: a build\'s --full run checks the schema against its own base, #2067) (+36: a guess refuses nobody, its ship ships alone, #2098) (+5: the parts loader and a re-exec check over every part, #2099, after step 0 took 8 off)'],
+  'tools/land.sh': [2606, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918) (+177: no-verdict runs, checks for riders and light ships, #1864) (+10: riders heard of their restart, #1865) (+11: the quick-train line, #1912) (+13: a suite stopped at its limit, missing packages, #1863) (+20: a stop finds the run it just pushed, #1894) (+51: a burn-in red names the ship that added the case, #2019) (+5: titles checked before the line, #1983) (+17: the main .gitattributes on git before 2.40, #2071) (+2: a build\'s --full run checks the schema against its own base, #2067) (+36: a guess refuses nobody, its ship ships alone, #2098) (+5: the parts loader and a re-exec check over every part, #2099, after step 0 took 8 off) (-589: step 2 moved the common, prepare, build and guards functions into tools/land/, #2099) (+8: the size room on a train\'s refusal; its smoke check is in tools/land/prepare.sh, #2139)'],
   'kit/skills/scheme-setup/templates/land.sh': [3081, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted (+8: the count merge rule, #1917) (+2: ships a person placed, #1827) (+121: wrong refusals, #1866) (+8: the same for a landing, #1894) (+5: titles checked before the line, #1983) (+24: the main .gitattributes on git before 2.40, #2071) (+2: a build\'s --full run checks the schema against its own base, #2067) (+32: the rows merge rule for a Layout table, #2104)'],
   'public/machine-agent.mjs': [2805, 'standalone agent a person runs on their own computer: one file so it can be copied alone (+88: the programs its owner lists for marked minions, and their starts, refused while a writable folder holds them, Build 7 T8, #2070) (+22: loads the worker file, which is its own, #1962) (+146: --join swaps a join code for its token, and the report of what the PC can do, Build 7 M2, #2053) (+31: a role\'s Set up and Test run role-setup-agent.mjs, taken from the app, Build 7 M4, #2055) (raised once for the Biome reformat, #1792) (+43: jobs keep their state across reconnect, Pause and Stop, #1956) (+1: a tick skips a job that ended during its GPU sample, #1964)'],
   'src/routes/projects.ts': [2127, 'every /projects route; split by page is queued (+4: runs_on, #1973) (+3: create_ticket puts a minion on a cabal board, #2090) (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859) (+3: the claim keep checks and who ships beside it, #1985) (+4: a first open answers with the folder of its Taskmaster while that write is queued, #1903) (+8: createMinion, the create path a card pick shares, #2050)'],
@@ -54,14 +59,15 @@ export function lineCounts(dir = root): Record<string, number> {
 export function overBudget(counts: Record<string, number>, allowed = ALLOWED, limit = LIMIT): string[] {
   const bad: string[] = [];
   for (const [path, n] of Object.entries(counts)) {
-    const cap = allowed[path]?.[0] ?? limit;
-    if (n > cap) bad.push(`${path}: ${n} lines, limit ${cap}${allowed[path] ? ' (its ALLOWED size)' : ''}`);
+    const listed = allowed[path]?.[0];
+    const cap = listed === undefined ? limit : listed + SLACK;
+    if (n > cap) bad.push(`${path}: ${n} lines, limit ${cap}, ${n - cap} over${listed === undefined ? '' : ` (its ALLOWED size ${listed} + ${SLACK} slack)`}`);
   }
   return bad;
 }
 
 const HELP = `Split the file along a seam (one concern per module, then add its row to the README Layout table), or, if a split truly doesn't fit,
-add or raise its entry in ALLOWED in test/size-budget.test.ts with a one-line reason.`;
+add or raise its entry in ALLOWED in test/size-budget.test.ts with a one-line reason. node tools/size-room.ts says the same after main and the ships in line.`;
 
 test(`no source file in src, public, tools or kit is over ${LIMIT} lines unless ALLOWED lists it`, () => {
   assert.deepEqual(overBudget(lineCounts()), [], HELP);
@@ -78,7 +84,7 @@ test('an ALLOWED entry names a file that exists and is still over the limit', ()
 test('the check fails on growth past the limit or past an allowed size, and passes at or under them', () => {
   assert.deepEqual(overBudget({ 'a.ts': 1500 }, {}, 1500), []);
   assert.equal(overBudget({ 'a.ts': 1501 }, {}, 1500).length, 1);
-  assert.equal(overBudget({ 'big.ts': 3001 }, { 'big.ts': [3000, 'x'] }, 1500).length, 1);
+  assert.equal(overBudget({ 'big.ts': 3001 + SLACK }, { 'big.ts': [3000, 'x'] }, 1500).length, 1);
   assert.deepEqual(overBudget({ 'big.ts': 2000 }, { 'big.ts': [3000, 'x'] }, 1500), []);
 });
 
@@ -89,7 +95,7 @@ test('the check fails on growth past the limit or past an allowed size, and pass
 // Raising one needs the decision quoted beside it. A part with no row here fails: give it one.
 export const SHIP_LIMITS = {
   files: {
-    'tools/land.sh': 235_000,
+    'tools/land.sh': 190_000,
     'tools/land/common.sh': 10_000,
     'tools/land/prepare.sh': 30_000,
     'tools/land/guards.sh': 20_000,
@@ -150,4 +156,11 @@ test('the ship script and every part parse as bash', () => {
     const r = spawnSync('bash', ['-n', join(root, f)], { encoding: 'utf8' });
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
   }
+});
+
+test(`an ALLOWED file may grow ${SLACK} lines past its listed size; an unlisted one not one line past the limit`, () => {
+  assert.equal(SLACK, 50);
+  assert.deepEqual(overBudget({ 'big.ts': 3000 + SLACK }, { 'big.ts': [3000, 'x'] }, 1500), []);
+  assert.deepEqual(overBudget({ 'big.ts': 3001 + SLACK }, { 'big.ts': [3000, 'x'] }, 1500), [`big.ts: ${3001 + SLACK} lines, limit ${3000 + SLACK}, 1 over (its ALLOWED size 3000 + ${SLACK} slack)`]);
+  assert.deepEqual(overBudget({ 'a.ts': 1501 }, {}, 1500), ['a.ts: 1501 lines, limit 1500, 1 over']);
 });

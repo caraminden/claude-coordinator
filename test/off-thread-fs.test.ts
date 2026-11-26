@@ -41,6 +41,11 @@ import { gzipSync } from 'node:zlib';
 import { fillPinSpares, readySpares, SPARES } from '../src/pin-spares.ts';
 import { fakeClaude, stopTurns, testPins, until, followed, runnerInsides } from './helpers.ts';
 import { SideAsks, SIDE_IDLE_MS, SIDE_LIMIT_MS } from '../src/side-ask.ts';
+import { syncCallsUnder } from './sync-trap.ts';
+import { Landings } from '../src/land.ts';
+import { ApkBuilds, type ApkBuildDeps } from '../src/apk-build.ts';
+import { manifestOn } from '../src/app-services.ts';
+import { FastMode } from '../src/fast-mode.ts';
 
 type FlakeDeps = ConstructorParameters<typeof FlakeFixes>[0];
 const root = mkdtempSync(join(tmpdir(), 'off-thread-fs-'));
@@ -48,44 +53,6 @@ after(async () => {
   await stopTurns(root);
   rmSync(root, { recursive: true, force: true }); // timing-ok: own temp dir
 });
-
-/** Runs `fn` and returns the synchronous fs calls made under `dir` before it returned its promise's result. */
-async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>, fds = false): Promise<string[]> {
-  const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'realpathSync', 'readlinkSync', 'utimesSync'] as const;
-  const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
-  const seen: string[] = [];
-  // A blocking process start holds the thread the same way, wherever it runs (#2111).
-  const starts = ['execFileSync', 'execSync', 'spawnSync'] as const;
-  const realStarts = Object.fromEntries(starts.map((n) => [n, childProcess[n]]));
-  for (const n of starts)
-    (childProcess as Record<string, unknown>)[n] = (cmd: unknown, ...rest: unknown[]) => {
-      seen.push(`${n} ${String(cmd)}`);
-      return (realStarts[n] as (...args: unknown[]) => unknown)(cmd, ...rest);
-    };
-  for (const n of names)
-    (fs as Record<string, unknown>)[n] = (p: unknown, ...rest: unknown[]) => {
-      if (typeof p === 'string' && p.startsWith(dir)) seen.push(`${n} ${p.slice(dir.length)}`);
-      return (real[n] as (...args: unknown[]) => unknown)(p, ...rest);
-    };
-  // With `fds`, calls on an open file too, whatever file it is: a kept-open stream asked or read on the thread (#2134).
-  const onFds = fds ? (['fstatSync', 'readSync'] as const) : [];
-  const realFds = Object.fromEntries(onFds.map((n) => [n, fs[n]]));
-  for (const n of onFds)
-    (fs as Record<string, unknown>)[n] = (...args: unknown[]) => {
-      seen.push(n);
-      return (realFds[n] as (...args: unknown[]) => unknown)(...args);
-    };
-  syncBuiltinESMExports();
-  try {
-    await fn();
-  } finally {
-    for (const n of onFds) (fs as Record<string, unknown>)[n] = realFds[n];
-    for (const n of names) (fs as Record<string, unknown>)[n] = real[n];
-    for (const n of starts) (childProcess as Record<string, unknown>)[n] = realStarts[n];
-    syncBuiltinESMExports();
-  }
-  return seen;
-}
 
 test("a card reaches a running turn's snapshot with no synchronous file call on the server's thread", async () => {
   const fake = join(root, 'claude');
@@ -380,7 +347,7 @@ function shipLine(name: string, n: number) {
   };
   for (let i = 1; i <= n; i++) add(i);
   const target = { id: 'ci:w:r', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: null };
-  const lands = new LandsInFlight({ store, finder: { list: () => [target] } as never, landings: { handoffs: () => ids, get: () => ({ output: 'queue: next in line\n', code: null }) } });
+  const lands = new LandsInFlight({ store, finder: { list: () => [target] } as never, landings: { handoffs: () => ids, look: async () => ({ output: 'queue: next in line\n', code: null }), lastLook: () => ({ output: 'queue: next in line\n', code: null }) } });
   const reader = { read: () => [{ target, current: null, next: null, line: [], recent: [] }] };
   const releases = new Releases({ store, readers: [reader as never], testCopies: () => new Map(), broadcast: () => {}, lines: () => lands.refresh(), inFlight: (v, fresh) => lands.attach(v, fresh) });
   const line = () => releases.view(() => true)[0].targets.flatMap((t) => t.line.map((e) => e.name));
@@ -591,7 +558,7 @@ test("kit sync's look at the templates starts no blocking git and makes no synch
   const dir = mkdtempSync(join(root, 'kit-look-'));
   // Nothing changed since the last round: the look every 10 minutes that finds no work.
   const head = childProcess.execFileSync('git', ['rev-parse', 'HEAD'], { cwd: kit, encoding: 'utf8' }).trim();
-  let saved: KitSyncState | undefined = { blobs: templateBlobs(kit, head) };
+  let saved: KitSyncState | undefined = { blobs: await templateBlobs(kit, head) };
   const deps = fake<ConstructorParameters<typeof KitSync>[0]>({ kitDir: kit, projectsDir: dir, runDir: dir, load: () => saved, save: (s: KitSyncState) => (saved = s), projects: () => [], home: () => 2 });
   const calls = await syncCallsUnder(kit, () => new KitSync(deps).poll());
   assert.deepEqual(calls, []);
@@ -895,4 +862,105 @@ test("an approval card's tripwire verdict resolves paths and runs git off the se
   const broken = await judge(calls[0], Object.assign({ ...cfg }, { clone: () => '' }));
   assert.ok('failed' in broken, JSON.stringify(broken));
   assert.deepEqual(await judge(calls[1], cfg, 0), { failed: 'no verdict in 0 s' });
+});
+
+test("the ship reporter's reads of a handed-off landing make no blocking call, while it runs and once it ended (#2135)", async () => {
+  const data = join(root, 'landings-data');
+  const cwd = join(root, 'landings-repo');
+  mkdirSync(join(cwd, 'tools'), { recursive: true });
+  writeFileSync(join(cwd, 'tools', 'land.sh'), `echo 'land: rebasing onto main'\nuntil [ -e ${JSON.stringify(join(cwd, 'gate'))} ]; do sleep 0.05; done\nexit 1\n`);
+  const landings = new Landings(data);
+  await landings.scanned;
+  assert.ok(await landings.handOff(1, cwd, { PATH: process.env.PATH! }, [], { summary: 'x', risk: 'low', reason: 'test' }));
+  await until('land.sh runs', async () => (await landings.look(1))?.output.includes('rebasing'));
+  // Every few seconds, for each running ship: the reporter's poll, its prep notes and the ship trail, and every message sent.
+  const reads = async () => {
+    await landings.look(1);
+    landings.lastLook(1);
+    landings.hasHandoff(1);
+    landings.talked(1);
+    await landings.wasTalked(1);
+    await landings.prepNew(1, 'top abc');
+    await landings.stopped(1);
+  };
+  assert.deepEqual(await syncCallsUnder(data, reads), []);
+  writeFileSync(join(cwd, 'gate'), '');
+  await until('land.sh ends', async () => (await landings.look(1))?.code === 1);
+  assert.deepEqual(await syncCallsUnder(data, reads), []);
+  assert.equal(await landings.wasTalked(1), true, 'the message it was told of is kept');
+  assert.equal(await landings.prepNew(1, 'top abc'), false, 'and the prep note it already sent');
+  assert.deepEqual(await syncCallsUnder(data, () => landings.settled(1)), []);
+  assert.equal(landings.hasHandoff(1), false);
+  // The next server reads the same answers off its folder.
+  const next = new Landings(data);
+  await next.scanned;
+  assert.equal((await next.look(1))?.code, 1);
+  assert.equal(next.hasHandoff(1), false, 'settled is settled');
+});
+
+test("a Releases read's key check on an app makes no blocking call (#2135)", async () => {
+  const base = join(root, 'apk-keyless');
+  const keyDir = join(base, 'keys');
+  const cacheDir = join(base, 'cache');
+  mkdirSync(keyDir, { recursive: true });
+  mkdirSync(join(cacheDir, 'reader'), { recursive: true });
+  writeFileSync(join(cacheDir, 'reader', 'key-missing-told'), '');
+  const b = new ApkBuilds(fake<ApkBuildDeps>({ cacheDir, keyDir, home: base }));
+  const seen = await syncCallsUnder(base, async () => {
+    b.keyless('reader');
+    return b.readKeyless('reader');
+  });
+  assert.deepEqual(seen, []);
+  assert.equal(b.keyless('reader'), true, 'told and still no key: the Releases page offers to make one');
+  writeFileSync(join(keyDir, 'reader-release.jks'), 'jks');
+  writeFileSync(join(keyDir, 'reader-release.pass'), 'pw');
+  assert.equal(await b.readKeyless('reader'), false);
+  assert.equal(b.keyless('reader'), false);
+});
+
+test("a ship's report reads whether a folder app's manifest is on main with no blocking git (#2135)", async () => {
+  const repo = join(root, 'manifest-on');
+  mkdirSync(join(repo, 'apps', 'notes'), { recursive: true });
+  const g = (...a: string[]) => childProcess.execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...a], { cwd: repo });
+  g('init', '-q', '-b', 'main');
+  writeFileSync(join(repo, 'apps', 'notes', 'citadel-app.json'), '{}');
+  g('add', '-A');
+  g('commit', '-qm', 'app');
+  let on: boolean[] = [];
+  const seen = await syncCallsUnder(repo, async () => {
+    on = await Promise.all([manifestOn(repo, 'apps/notes'), manifestOn(repo, 'apps/other'), manifestOn(join(root, 'no-such-clone'), 'apps/notes')]);
+  });
+  assert.deepEqual(seen, []);
+  assert.deepEqual(on, [true, false, false]);
+});
+
+test("fast mode's tick starts a verify run with no blocking call (#2135)", async () => {
+  const repo = join(root, 'fast-repo');
+  const g = (...a: string[]) => childProcess.execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' }).trim();
+  mkdirSync(repo);
+  g('init', '-q', '-b', 'main');
+  writeFileSync(join(repo, 'f.txt'), 'one');
+  g('add', '-A');
+  g('commit', '-qm', 'one');
+  const sha = g('rev-parse', 'HEAD');
+  const kv = new Map<string, unknown>();
+  const started: string[] = [];
+  const fm = new FastMode({
+    schemes: () => [{ id: 3, repo }],
+    get: (k) => kv.get(k) as never,
+    set: (k, v) => kv.set(k, v),
+    jobs: { start: (j) => started.push(j.cwd), look: async () => null },
+    dir: (p) => join(root, 'fast-run', String(p)),
+    env: () => ({}),
+    ticketOf: () => null,
+    numberOf: () => null,
+    tell: () => {},
+    taskmaster: () => {},
+    green: () => {},
+    flakes: () => {},
+    now: () => 1_000_000,
+  });
+  assert.deepEqual(await syncCallsUnder(root, () => fm.tick()), []);
+  assert.deepEqual(started, [join(root, 'fast-run', '3', 'wt')]);
+  assert.equal(g('-C', started[0], 'rev-parse', 'HEAD'), sha, 'its worktree is on the commit it verifies');
 });

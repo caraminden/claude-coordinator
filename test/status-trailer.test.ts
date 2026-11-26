@@ -134,10 +134,13 @@ test('an over-long note or reply is clipped to its limit, not refused', () => {
 });
 
 test('while a handed-off land is unreported, a turn start and the closing status line leave its landing state alone (#962)', async () => {
-  // The hand-off as Landings writes it: the landing's folder with its handoff.json.
+  // The hand-off as Landings writes it: the landing's folder with its handoff.json. The server knows of hand-offs from
+  // its own handOff or its start's scan of that folder, not a disk read per question (#2135), so it restarts on it.
   const dir = join(srv.data, 'run', 'landings', String(ticketId));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'handoff.json'), JSON.stringify({ summary: 's', risk: 'low', reason: 'r', args: [] }));
+  await srv.stop({ keepTurns: true });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
   const store = new Store(join(srv.data, 'coordinator.db'));
   try {
     store.updateTicket(ticketId, { state: 'outside', note: 'landing: waiting on CI' });
@@ -146,8 +149,11 @@ test('while a handed-off land is unreported, a turn start and the closing status
     assert.deepEqual([t.state, t.note], ['outside', 'landing: waiting on CI']);
     assert.deepEqual(t.replies, ['Thanks'], 'the rest of the line still applies');
   } finally {
-    rmSync(join(dir, 'handoff.json'));
+    rmSync(join(dir, 'handoff.json'), { force: true });
   }
+  // Reported: gone from the folder, and so from what the next start's scan finds.
+  await srv.stop({ keepTurns: true });
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
   await turn('Back to it.\n<!-- status: {"state":null} -->');
   assert.equal((await ticket()).state, null, "once reported, the state is the minion's again");
 });

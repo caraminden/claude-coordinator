@@ -176,8 +176,8 @@ function landEnv(app: App, ticket: Ticket, h: Handoff, token?: string): Record<s
 }
 
 /** Start it: land.sh runs and the minion shows as landing. False when a landing already runs for it. `again`: a re-queue (#2030), in its ended hand-off's place. */
-export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy, again = false): boolean {
-  if (!app.landings.handOff(ticket.id, cwd, env, args, h, again)) return false;
+export async function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy, again = false): Promise<boolean> {
+  if (!(await app.landings.handOff(ticket.id, cwd, env, args, h, again))) return false;
   app.store.claims.handedOff(ticket.id);
   app.store.deleteSetting(armedKey(ticket.id)); // a ship that started outdates one armed before it (#2046)
   app.runner.places.refused(ticket.id, false);
@@ -227,15 +227,15 @@ export function brokenTest(files: string[], branch: string, env: Record<string, 
 export async function requeueShip(app: App, ticketId: number, h: Handoff & { args: string[] }, output: string): Promise<string | null> {
   const t = app.store.getTicket(ticketId);
   if (!t || t.kind !== 'ticket' || !t.cwd) return 'it has no worktree';
-  const why = () => {
+  const why = async () => {
     const now = app.store.getTicket(ticketId);
     if (!now || now.status === 'closed') return 'you were dismissed';
     if (app.runner.parked(now)) return 'you were sealed';
     if (app.runner.busy(ticketId)) return 'your turn was running';
-    if (app.landings.wasTalked(ticketId)) return 'someone wrote to you while it was in line';
+    if (await app.landings.wasTalked(ticketId)) return 'someone wrote to you while it was in line';
     return null;
   };
-  const early = why();
+  const early = await why();
   if (early) return early;
   if (!h.head) return "its hand-off didn't record the commit it was at";
   if (!(await sameChange(t.cwd, h.head))) return 'your branch moved since the hand-off';
@@ -254,11 +254,11 @@ export async function requeueShip(app: App, ticketId: number, h: Handoff & { arg
   const broken = alone.length ? await brokenTest(alone, t.branch ?? '', { ...env, LAND_FLAKE_DB: join(app.dataDir, 'coordinator.db') }) : '';
   if (broken === null) return "it couldn't tell whether the failed files are broken tests (tools/known-flakes.ts gave no answer)";
   if (broken) return `${broken} is a broken test, not a flake: red in too many of the last hours' runs`;
-  const late = why();
+  const late = await why();
   if (late) return late;
   const { args, ...rest } = h;
   try {
-    if (!startHandoff(app, t, { cwd: t.cwd, env, args, h: { ...rest, requeued: true } }, { kind: 'server' }, true)) return 'a ship of yours already ran';
+    if (!(await startHandoff(app, t, { cwd: t.cwd, env, args, h: { ...rest, requeued: true } }, { kind: 'server' }, true))) return 'a ship of yours already ran';
   } catch (err) {
     return `starting it again failed (${thrown(err).message})`;
   }
@@ -374,7 +374,7 @@ export async function shipPrepared(app: App, ticket: Ticket, prepared: Prepared,
     if (late) return late;
     clear();
     if (held && !holdsLane(app.store.claims, ticket)) return 'the pipeline lane moved on while the checks ran';
-    if (!startHandoff(app, ticket, ready, o.by)) return 'a ship of yours already ran';
+    if (!(await startHandoff(app, ticket, ready, o.by))) return 'a ship of yours already ran';
     // A ship that fails wakes it on that login, as the turn it stands in for would have run on it.
     if (o.person != null && o.person !== ticket.person_id) app.store.updateTicket(ticket.id, { person_id: o.person });
     return null;

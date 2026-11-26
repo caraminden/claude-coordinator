@@ -70,7 +70,7 @@ async function scheme(o: { landing?: () => boolean } = {}) {
     files: () => join(server, 'shared', '7'),
     uploads: () => join(server, 'uploads', '7'),
     shared: () => join(server, 'shared', 'project'),
-    landing: () => o.landing?.() ?? false,
+    landing: async () => o.landing?.() ?? false,
     note: (_id: number, text: string) => notes.push(text),
   } as unknown as StateDeps;
   const dir = join(server, 'turns', 'turn-1');

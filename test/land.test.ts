@@ -6,7 +6,7 @@ import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc, stopShip } from './land-fixture.ts';
 import { until } from './wait.ts';
-import { copyLand } from './land-files.ts';
+import { copyLand, landText } from './land-files.ts';
 const repo = join(import.meta.dirname, '..');
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
@@ -62,7 +62,7 @@ test('a rebase that changes only a part of land.sh hands over to the rebased cop
   git(r.wt, 'rebase', '-q', 'main');
   r.commit(r.wt, 'b.txt', 'mine\n');
   // Main gains a part the worktree's copy never sourced; it rewords one line, so the copy that sources it shows.
-  mkdirSync(join(r.source, 'tools', 'land'));
+  mkdirSync(join(r.source, 'tools', 'land'), { recursive: true });
   writeFileSync(join(r.source, 'tools', 'land', 'extra.sh'), `say() { [ "$*" != "running the tests" ] || set -- "running the tests (a part's say)"; echo "land: $*" >&2; }\n`);
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'a part');
@@ -303,7 +303,7 @@ test('a landing leaves one timing line with every phase; CI that answers fills t
   assert.match(landLog(shared), /^# Retro log: land\.sh\n\nWritten by .*`timing` line per landing.*`restart` line per queued restart/s, 'the header names the new lines');
   // Whichever writer makes the day's file writes the header, so the three copies are one text.
   const header = (f: string) =>
-    readFileSync(join(import.meta.dirname, '..', 'tools', f), 'utf8')
+    (f === 'land.sh' ? landText() : readFileSync(join(import.meta.dirname, '..', 'tools', f), 'utf8'))
       .split('\n')
       .find((l) => l.includes("'# Retro log: land.sh'"))
       ?.trim();
@@ -821,8 +821,8 @@ test("a run red only in the check of the PC's own ports counts as green, and say
 
 // The step's name in land.sh is the workflow's.
 test('the ports step land.sh counts as green is the one tests.yml runs after a green suite', () => {
-  const name = (f: string) => /^(?:CITADEL_)?CI_PORTS_STEP='([^']+)'/m.exec(readFileSync(join(import.meta.dirname, '..', f), 'utf8'))?.[1];
-  const step = name('tools/land.sh')!;
+  const name = (text: string) => /^(?:CITADEL_)?CI_PORTS_STEP='([^']+)'/m.exec(text)?.[1];
+  const step = name(landText())!;
   assert.match(readFileSync(join(import.meta.dirname, '..', '.github', 'workflows', 'tests.yml'), 'utf8'), new RegExp(`- name: ${step}\n {8}if: \\$\\{\\{ success\\(\\) \\}\\}`));
 });
 
@@ -1540,9 +1540,9 @@ test("a plain git revert of another minion's landing names it, so the undo guard
 });
 
 test("the undo guard is the kit template's, line for line, so a fix to one reaches the other (#677)", () => {
-  const guard = (f: string) => readFileSync(f, 'utf8').match(/^# The undo guard \(#677[^]*?\n\}\n/m)?.[0];
-  assert.ok(guard(land));
-  assert.equal(guard(land), guard(join(import.meta.dirname, '..', 'kit/skills/scheme-setup/templates/land.sh')));
+  const guard = (text: string) => text.match(/^# The undo guard \(#677[^]*?\n\}\n/m)?.[0];
+  assert.ok(guard(landText()));
+  assert.equal(guard(landText()), guard(readFileSync(join(import.meta.dirname, '..', 'kit/skills/scheme-setup/templates/land.sh'), 'utf8')));
 });
 
 test('a conflict aborts the rebase and lands nothing', () => {
@@ -1824,8 +1824,9 @@ test('a branch over the file size limit is refused by the smoke check, before th
   const own = { CITADEL_TEST_EXTRA: '0', TMPDIR: r.dir };
   const res = r.run(own);
   assert.equal(res.status, 1, res.stderr);
-  assert.match(res.stderr, /^land: smoke: .*tools\/big\.sh: 1501 lines, limit 1500/m);
-  assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\), before the line/m);
+  // The size room (#2139) refuses it first, ahead of the size test, with the same file and limit.
+  assert.match(res.stderr, /^land: smoke: size room: tools\/big\.sh would be 1501 lines, 1 over its limit 1500 \(unlisted\)/m);
+  assert.match(res.stderr, /^land: smoke: a file it grows would be over its size limit after the ships in line, before the line/m);
   assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   r.commit(r.wt, 'tools/big.sh', ':\n'.repeat(1500));

@@ -8,7 +8,7 @@
 // path (src/apk-release.ts): this skips it. Nothing here touches the live slot, so a failed build changes nothing that runs.
 import { execResult, runLogged } from './exec.ts';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { constants } from 'node:os';
 import { androidEnv } from './claude-link.ts';
@@ -161,9 +161,48 @@ export class ApkBuilds {
     return this.d.keyDir;
   }
 
-  /** Whether `name` is a Capacitor app whose last check found no release key: the Releases page offers to make it. */
+  /** keyless() as last read, by app; and the apps being read now. */
+  private keylessSeen = new Map<string, boolean>();
+  private keylessReads = new Map<string, Promise<boolean>>();
+
+  /**
+   * Whether `name` is a Capacitor app whose last check found no release key: the Releases page offers to make it. Its
+   * read every 2 s answers from the last look and starts the next one off the server's thread, so the button shows a
+   * poll later; a check and makeKey set it from what they found before they return.
+   */
   keyless(name: string): boolean {
-    return existsSync(join(this.d.cacheDir, name, 'key-missing-told')) && !hasKey(this.d.keyDir, name);
+    void this.readKeyless(name);
+    return this.keylessSeen.get(name) ?? false;
+  }
+
+  /** What a check or makeKey just found: a read already under way, begun before, doesn't put its older answer over it. */
+  private knowKeyless(name: string, now: boolean) {
+    this.keylessSeen.set(name, now);
+    this.keylessReads.delete(name);
+  }
+
+  /** keyless(), read now: for an action that acts on it (the Make release key button). */
+  readKeyless(name: string): Promise<boolean> {
+    const reading = this.keylessReads.get(name);
+    if (reading) return reading;
+    const read: Promise<boolean> = this.keylessNow(name)
+      .then((now) => {
+        if (this.keylessReads.get(name) === read) this.keylessSeen.set(name, now);
+        return now;
+      })
+      .finally(() => {
+        if (this.keylessReads.get(name) === read) this.keylessReads.delete(name);
+      });
+    this.keylessReads.set(name, read);
+    return read;
+  }
+
+  private async keylessNow(name: string): Promise<boolean> {
+    const told = await access(join(this.d.cacheDir, name, 'key-missing-told')).then(
+      () => true,
+      () => false,
+    );
+    return told && !(await hasKey(this.d.keyDir, name));
   }
 
   /**
@@ -173,7 +212,8 @@ export class ApkBuilds {
    */
   async makeKey(row: ContraptionRow, by: string): Promise<{ building: Promise<void> }> {
     await makeReleaseKey(this.d.keyDir, row.name, { home: this.d.home, keytool: this.d.keytool });
-    for (const f of ['key-missing-told', 'failed-at']) rmSync(join(this.d.cacheDir, row.name, f), { force: true });
+    await Promise.all(['key-missing-told', 'failed-at'].map((f) => rm(join(this.d.cacheDir, row.name, f), { force: true })));
+    this.knowKeyless(row.name, false);
     return { building: this.schedule(row, by) };
   }
 
@@ -189,7 +229,7 @@ export class ApkBuilds {
     if (!cap) {
       // A keyed contraption whose Capacitor project isn't where it's looked for would never get an APK, unheard: told once.
       const told = join(this.d.cacheDir, row.name, 'not-capacitor-told');
-      if (hasKey(this.d.keyDir, row.name) && !existsSync(told)) {
+      if ((await hasKey(this.d.keyDir, row.name)) && !existsSync(told)) {
         mkdirSync(dirname(told), { recursive: true });
         writeFileSync(told, '');
         this.d.tell(
@@ -239,9 +279,14 @@ export class ApkBuilds {
     // A missing key is told once, not per commit (a night of deploys woke the Taskmaster ten times): the marker stays until a check finds the key.
     const keyTold = join(dir, 'key-missing-told');
     const there = [key, pass].filter((f) => existsSync(f));
-    if (there.length === 2) rmSync(keyTold, { force: true });
-    else {
-      if (existsSync(keyTold)) return { skipped: 'no release key yet, already told' };
+    if (there.length === 2) {
+      rmSync(keyTold, { force: true });
+      this.knowKeyless(row.name, false);
+    } else {
+      if (existsSync(keyTold)) {
+        this.knowKeyless(row.name, !there.length);
+        return { skipped: 'no release key yet, already told' };
+      }
       // Half a pair is a key that was lost, not one never made: restore it, never make a new one (phones would have to uninstall).
       const out = fail(
         there.length
@@ -249,6 +294,7 @@ export class ApkBuilds {
           : `it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`,
       );
       writeFileSync(keyTold, commit);
+      this.knowKeyless(row.name, !there.length);
       return out;
     }
     const count = Number((await git(live, 'rev-list', '--count', commit)).out);

@@ -173,7 +173,7 @@ export const proposalRoutes: Route[] = [
       const { req, res, app, ticket } = ctx;
       // make_release_key (#837; Cara, 2026-11-17, "Both"): a card a member approves, which makes the key on the server.
       // Neither the key nor its password goes through the chat; the card only names where they are.
-      const c = homeApp(app, ticket.project_id, str((await readJson(req))?.contraption, 'contraption', 100));
+      const c = await homeApp(app, ticket.project_id, str((await readJson(req))?.contraption, 'contraption', 100));
       const { jks, pass } = keyFiles(app.apkBuilds.keyDir, c.name);
       const event = postPlan(app, ticket.id, {
         summary: `Make ${c.title}'s release key`,

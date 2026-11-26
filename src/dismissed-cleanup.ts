@@ -2,13 +2,12 @@
 // worktrees, and a reopen's restore. The rules are in src/worktree-sweep.ts and src/build-output.ts; this runs them.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `CleanupDeps`.
 import { dropMachineRefs } from './machine-sync.ts';
-import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
 import type { Lanes } from './lanes.ts';
 import { projectDir, recoverTicketDir, restoreTicketDir } from './workspace.ts';
 import { thrown } from './thrown.ts';
-import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
+import { clearBuildOutput, exists, size, ticketWorktree } from './build-output.ts';
 import { clearTrash, GRACE_MS, GRUNT_AGE_MS, isGrunt, madeAt, ownCheckout, removeWorktree, saveWork, savedRef, worktrees, type Worktree } from './worktree-sweep.ts';
 import { pacificDay } from './pacific.ts';
 
@@ -33,9 +32,9 @@ export class DismissedCleanup {
    * belongs and is a git checkout: never a Taskmaster's (it works in the scheme's main checkout), nor a
    * preview's (its copied rows point at the live worktrees). Null when there is nothing to look at.
    */
-  clearBuild(ticket: Ticket) {
+  async clearBuild(ticket: Ticket) {
     const dir = ticketWorktree(this.d.dataDir, ticket.project_id, ticket.id);
-    if (ticket.kind === 'coordinator' || resolve(ticket.cwd) !== dir || !existsSync(join(dir, '.git'))) return Promise.resolve(null);
+    if (ticket.kind === 'coordinator' || resolve(ticket.cwd) !== dir || !(await exists(join(dir, '.git')))) return null;
     return clearBuildOutput(dir);
   }
 
@@ -109,7 +108,7 @@ export class DismissedCleanup {
     try {
       for (const p of this.d.store.listProjects()) {
         // Only a repo in this data folder: a dev copy's rows point at the live repos, whose turns it can't see.
-        if (!p.repo_dir || resolve(p.repo_dir) !== join(projectDir(this.d.dataDir, p.id), 'repo') || !existsSync(p.repo_dir)) continue;
+        if (!p.repo_dir || resolve(p.repo_dir) !== join(projectDir(this.d.dataDir, p.id), 'repo') || !(await exists(p.repo_dir))) continue;
         const log = { removed: [] as string[], kept: [] as string[], bytes: 0 };
         const keep = (what: string, why: string) => {
           const key = `worktree-kept:${what}`;
@@ -133,7 +132,7 @@ export class DismissedCleanup {
         for (const t of this.d.store.listTickets(p.id)) {
           if (t.kind === 'coordinator' || t.status !== 'closed' || !t.branch || t.updated_at > now - GRACE_MS || this.d.turns.has(t.id) || this.d.lanes.busy(t.id)) continue;
           const dir = ticketWorktree(this.d.dataDir, p.id, t.id);
-          if (resolve(t.cwd) !== dir || !existsSync(dir)) continue;
+          if (resolve(t.cwd) !== dir || !(await exists(dir))) continue;
           await this.d.lanes.run(t.id, 'worktree sweep', async () => {
             const now2 = this.d.store.getTicket(t.id);
             // updated_at only moves on: a reopen and a new dismissal restart the clock.
@@ -142,7 +141,7 @@ export class DismissedCleanup {
             if (listed.find((w) => w.path === dir)?.locked) return keep(what, 'locked');
             try {
               // Half a folder, its .git gone: a removal by the first version of this sweep that failed or was cut short.
-              if (!existsSync(join(dir, '.git'))) return removed(what, await removeWorktree(p.repo_dir!, dir), ', left half-removed earlier');
+              if (!(await exists(join(dir, '.git')))) return removed(what, await removeWorktree(p.repo_dir!, dir), ', left half-removed earlier');
               if (!(await ownCheckout(dir))) return;
               const ref = savedRef(String(t.id));
               const s = await saveWork(dir, ref, t.branch, `Citadel: #${t.number}'s work not on its branch, saved before its worktree was removed`);

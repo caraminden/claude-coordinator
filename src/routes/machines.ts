@@ -27,7 +27,7 @@ import { thrown } from '../thrown.ts';
 import { request } from 'node:http';
 import { projectSharedDir } from '../workspace.ts';
 import { readsDisk, stateCall, syncScript, type StateDeps } from '../machine-sync.ts';
-import { askCheckpoint, AWAY_MS, endAway, heardAt, liveOn, machineLink, owned, placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
+import { askCheckpoint, AWAY_MS, endAway, heardAt, liveOn, machineLink, owned, placedNow, sendFolder, syncTurns } from '../machine-turn.ts';
 import { UNINSTALL } from '../machine-away.ts';
 import { BLOB_BYTES } from '../worker-join.ts';
 import { joinState, makeJoin, redeemJoin } from '../machine-join.ts';
@@ -242,7 +242,7 @@ const stateDeps = (app: App): StateDeps => ({
   files: (t) => app.sharedDir(t),
   uploads: (t) => uploadsDir(app, t),
   shared: (p) => projectSharedDir(app.dataDir, p.id),
-  landing: (id) => app.landings.get(id)?.code === null,
+  landing: async (id) => (await app.landings.look(id))?.code === null, // off the thread (#2135)
   note: (id, text) => app.runner.emit(id, 'note', { text }),
   // Work a machine sent home aside: an open minion hears it as a message (it may act on it), a closed one keeps a line.
   tell: (id, text) => (app.store.getTicket(id)?.status === 'closed' ? app.runner.emit(id, 'note', { text }) : app.runner.send(id, 'System', text)),
@@ -300,7 +300,7 @@ async function turnCall({ req, res, url, params, app }: Ctx, machine: Machine) {
   const bearer = String(req.headers['x-turn-authorization'] ?? '');
   const ticketId = Number(/^Bearer (\d+)\./.exec(bearer)?.[1]);
   const dir = ticketId ? app.runner.turnDir(ticketId) : null;
-  if (!dir || placedAt(dir)?.id !== machine.id) throw new HttpError(403, 'Not a turn running on this machine');
+  if (!dir || (await placedNow(dir))?.id !== machine.id) throw new HttpError(403, 'Not a turn running on this machine');
   const headers: Record<string, string> = { authorization: bearer };
   for (const h of ['content-type', 'content-length', 'accept', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id']) if (typeof req.headers[h] === 'string') headers[h] = req.headers[h];
   const reads = req.method !== 'GET' && readsDisk(params.rest);
@@ -387,7 +387,7 @@ export const agentRoutes: Route[] = [
     // A copy whose turn has ended (T6, src/machine-away.ts) may only send home what it holds, and be cleared: also one
     // whose folder is still here, ended while its machine was away.
     const copy = app.machineCopies && (app.machineCopies.held(machine.id, dir) || !(await owned(machine.id, dir))) ? app.machineCopies.copyAt(machine.id, dir) : null;
-    const at = copy ?? ((await owned(machine.id, dir)) ? placedAt(dir) : null);
+    const at = copy ?? ((await owned(machine.id, dir)) ? await placedNow(dir) : null);
     if (!at) throw new HttpError(410, 'Not a turn placed on this machine');
     return stateCall(stateDeps(app), params.rest, dir, at, req, res, !!copy);
   }),

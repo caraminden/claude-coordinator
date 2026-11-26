@@ -122,7 +122,7 @@ const ending = new Set<string>();
 
 /** End the turn in `dir` here because its machine is away, or came back without it (`home` false: it restarted). `since` defaults to when it was last heard from. */
 export async function endAway(dir: string, since: number | null, home: boolean, signal: string | null = null) {
-  const at = placedAt(dir);
+  const at = await placedNow(dir);
   if (!at || ending.has(dir)) return;
   ending.add(dir);
   try {
@@ -244,7 +244,7 @@ export class MachineTurn implements RunningTurn {
   readonly dir: string;
   readonly machine: number;
 
-  constructor(dir: string, at: Placed) {
+  constructor(dir: string, at: { id: number; name: string }) {
     this.dir = dir;
     this.machine = at.id;
     this.where = `machine ${at.name}`;
@@ -292,6 +292,10 @@ export class MachineTurn implements RunningTurn {
     } catch {
       return null;
     }
+    return this.aliveAt(age);
+  }
+
+  private aliveAt(age: number) {
     return age < BEAT_STALE_MS || !machineLink.online(this.machine) || Date.now() - (contact.get(this.machine)?.since ?? began) < awayTimes.back;
   }
 
@@ -306,9 +310,10 @@ export class MachineTurn implements RunningTurn {
     return true;
   }
 
-  /** alive(), still read on the server's thread. shortcut: its files aren't moved off the thread as #2134 did a host turn's; do that once machine turns are many. */
+  /** alive(), its beat read off the server's thread (#2134). */
   async aliveOff() {
-    return this.alive();
+    const beat = await stat(join(this.dir, 'beat')).catch(() => null);
+    return beat && this.aliveAt(Date.now() - beat.mtimeMs);
   }
 
   async keepUp(_ensureSupervisor: () => void) {}
@@ -372,7 +377,7 @@ const asked = new Map<string, { id: number; done: (problem: string | null) => vo
 
 /** Bring home what the turn in `dir` has changed, for something here that is about to read it. Null once it is here, else why not. */
 export async function askCheckpoint(dir: string, timeout = 60_000): Promise<string | null> {
-  const at = placedAt(dir);
+  const at = await placedNow(dir);
   if (!at?.state) return null;
   if (!machineLink.online(at.id)) return `${at.name}, where this turn runs, is not connected`;
   const waiting = asked.get(dir) ?? [];

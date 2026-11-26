@@ -41,7 +41,7 @@ export async function approveHostTool(app: App, askingId: number, t: HostTool, b
     runner.emit(id, 'note', {
       text: `This minion ships one line: ${label} in ${MANIFEST}, which ${by} approved for ${scheme?.name ?? '?'} #${asking?.number ?? '?'} (${byHand ? 'an Arch package a person installs by hand' : 'installed already'}). Its commit is on this branch; if the ship fails, rebase onto main keeping every other line of the list, and hand it off again.`,
     });
-    const handed = app.landings.handOff(id, cwd, runner.hostEnv(chore), [], { summary: `List host tool ${label}`, risk: 'low', reason: `one line in ${MANIFEST}; the tool is ${byHand ? 'installed by hand' : 'installed already'}`, deploy: false });
+    const handed = await app.landings.handOff(id, cwd, runner.hostEnv(chore), [], { summary: `List host tool ${label}`, risk: 'low', reason: `one line in ${MANIFEST}; the tool is ${byHand ? 'installed by hand' : 'installed already'}`, deploy: false });
     if (handed) {
       store.updateTicket(id, { state: 'outside', note: landPhase('') });
       runner.broadcastTicket(id);

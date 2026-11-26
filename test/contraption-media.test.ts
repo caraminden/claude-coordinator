@@ -56,13 +56,13 @@ test('the sweep takes files older than the keep, notes too, and leaves the rest'
   const old = (now - MEDIA_KEEP_MS - 60_000) / 1000;
   utimesSync(join(dir, 'old.png'), old, old);
   utimesSync(join(dir, 'old.png.json'), old, old);
-  assert.equal(sweepMedia(join(root, 'sweep'), now), 2);
+  assert.equal(await sweepMedia(join(root, 'sweep'), now), 2);
   assert.deepEqual(
     (await listMedia(dir)).map((f) => f.path),
     ['new.png'],
   );
   assert.ok(!existsSync(join(dir, 'old.png.json')));
-  assert.equal(sweepMedia(join(root, 'none')), 0);
+  assert.equal(await sweepMedia(join(root, 'none')), 0);
 });
 
 test("a tool call writes to the turn person's folder on their account, tells the app with a media event, and the agent with text", async () => {

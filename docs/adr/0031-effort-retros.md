@@ -43,3 +43,10 @@ The picks the brief left to the minion (#1751):
 - **A moved ask** (Josh, 2026-11-25, on #2065's retro card: "Effort follows moved asks"; #2080): a close as `replaced` names the
   minion that has the work (`into`). That minion takes the closed one's effort when it has none, and the effort's retro waits
   until it has closed and stayed quiet, whatever effort it is in.
+
+## A led cabal (#2096)
+
+An effort whose minions are mostly one led cabal (a lead and its board's members) gets no effort retro: the lead writes
+the cabal's one retro from the board's timeline (`citadel:cabal`, "Closing") and logs `Retro: <path>` on the board,
+and the effort is recorded as a skip like a build's. While the lead is open without that line the effort waits; a lead
+dismissed without it leaves the effort retro to run.

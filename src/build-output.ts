@@ -7,8 +7,7 @@
  * symlinks inside what it removes.
  */
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { lstat, realpath } from 'node:fs/promises';
+import { access, lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { thrown } from './thrown.ts';
@@ -21,6 +20,13 @@ const GRADLE_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'se
 // Lowest best-effort IO class and lowest CPU priority, so a sweep never hogs the box. Not the idle
 // class: under steady IO it can starve, holding the minion's lane (and a reopen) behind it.
 const LOW = ['ionice', '-c2', '-n7', 'nice', '-n19'];
+
+/** Whether `path` is there (existsSync's answer, without blocking the thread). */
+export const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 /** The worktree a minion of `projectId` must have for its build output to be cleared: nothing else is ever touched. */
 export function ticketWorktree(dataDir: string, projectId: number, ticketId: number): string {
@@ -46,7 +52,7 @@ export async function findBuildOutput(worktree: string): Promise<string[]> {
     .sort()) {
     if (found.some((f) => rel.startsWith(f + '/'))) continue;
     const dir = join(real, rel);
-    if (!NAMES.has(basename(rel)) && !(GRADLE_NAMES.has(basename(rel)) && GRADLE_FILES.some((f) => existsSync(join(dirname(dir), f))))) continue;
+    if (!NAMES.has(basename(rel)) && !(GRADLE_NAMES.has(basename(rel)) && (await Promise.all(GRADLE_FILES.map((f) => exists(join(dirname(dir), f))))).some(Boolean))) continue;
     // Reached through no symlink, and a real folder itself.
     if (!dir.startsWith(real + sep) || (await realpath(dirname(dir))) !== dirname(dir) || !(await lstat(dir)).isDirectory()) continue;
     found.push(rel);

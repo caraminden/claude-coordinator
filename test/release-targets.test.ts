@@ -1794,7 +1794,7 @@ test('handed-off lands list in line order, not minion-number order (#766)', asyn
     outs.set(x.id, o);
   });
   const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
-  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => ids, get: (id) => ({ output: outs.get(id)!, code: null }) }, now: () => 1000 });
+  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => ids, look: async (id) => ({ output: outs.get(id)!, code: null }), lastLook: (id) => ({ output: outs.get(id)!, code: null }) }, now: () => 1000 });
   const vs = [{ target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }];
   lands.attach(vs as never); // files not read yet: it goes on the first target, in this order either way
   const got = (vs[0].next as { changes: { title: string; brief?: string }[] } | null)?.changes ?? [];
@@ -1829,7 +1829,7 @@ test("a minion's second ship waits in the line while its first waits to go out, 
   const me = `${process.pid} ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
   const row = (got: number) => writeFileSync(join(queue, '0000000001'), [me, got, 'ticket/1-overlay', 'waiting', '-', '-', '-', 'order'].join('\n') + '\n');
   const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main' };
-  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => [x.id], get: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
+  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => [x.id], look: async () => ({ output: 'queue: next in line\n', code: null }), lastLook: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
   const first = { ticketId: x.id, number: x.number, title: x.title, stage: 'ci', since: 1, usual: null, waitingOn: null, text: 'Build running' };
   const at = () => {
     const tv = { target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: { number: 2, stage: 'ci', since: 1, usual: null, waitingOn: null, text: '', eta: null, stages: [], changes: [first] }, line: [] as { ticketId: number; holds: boolean }[], recent: [] };
@@ -1866,7 +1866,7 @@ test('a handed-off land is on its targets from the hand-off: in line, then landi
   const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
   let output = 'queue: 2nd in line for the land lock, about 9 min (ahead: ticket/441-x)\n';
   let code: number | null = null;
-  const lands = new LandsInFlight({ store, finder: finderOf([app, ci]), landings: { handoffs: () => [x.id], get: () => ({ output, code }) }, now: () => 1000 });
+  const lands = new LandsInFlight({ store, finder: finderOf([app, ci]), landings: { handoffs: () => [x.id], look: async () => ({ output, code }), lastLook: () => ({ output, code }) }, now: () => 1000 });
   const views = () =>
     [app, ci].map((t) => ({
       target: { id: t.id, projectId: t.projectId, name: t.name, kind: t.kind, link: null, ...(t.numbering ? { numbering: t.numbering } : {}) },
@@ -2017,7 +2017,7 @@ test("each target's part of a scheme's land line, in the line's order, with why 
   // Their outputs lag the line (a move since): the line itself says the order.
   const outs = ['queue: got the land lock\n', 'queue: next in line for the land lock\n', 'queue: 2nd in line for the land lock\n', 'queue: 3rd in line for the land lock\n', 'queue: 4th in line for the land lock\n'];
   const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
-  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => ids, get: (id) => ({ output: outs[ids.indexOf(id)], code: null }) }, now: () => 1000 });
+  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => ids, look: async (id) => ({ output: outs[ids.indexOf(id)], code: null }), lastLook: (id) => ({ output: outs[ids.indexOf(id)], code: null }) }, now: () => 1000 });
   const views = () => [{ target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }] as unknown as TargetView[];
   const look = () => {
     const vs = views();

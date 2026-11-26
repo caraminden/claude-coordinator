@@ -6,9 +6,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { until } from './wait.ts';
-import { spawnSync } from 'node:child_process';
-import { type KitSyncDeps, type KitSyncState, byHandNote, CHECK_SCRIPT, dupCaseLabels, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { type KitSyncDeps, type KitSyncState, byHandNote, CHECK_SCRIPT, dupCaseLabels, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
 
+const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 });
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const LAND = KIT_FILES[0];
 const GUARD = KIT_FILES[1];
@@ -64,26 +65,26 @@ function fixture() {
   return { root, kit, v1, v2, g1, c1, c2, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test('a copy that is a past version byte for byte takes that version as its base', () => {
+test('a copy that is a past version byte for byte takes that version as its base', async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
     commit(s, { [LAND.path]: f.v1 }, 'setup');
-    const base = pickBase(f.kit, templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
+    const base = await pickBase(f.kit, await templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
     assert.deepEqual(base && { commit: base.commit, how: base.how }, { commit: f.c1, how: 'exact' });
   } finally {
     f.done();
   }
 });
 
-test("an adapted copy's base is the closest past version, and the merge keeps the scheme's edit", () => {
+test("an adapted copy's base is the closest past version, and the merge keeps the scheme's edit", async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
     // Adapted at setup from v1: its own line 30, which the kit never changes.
     const ours = edit(f.v1, 30, 'line 30 this scheme only');
     commit(s, { [LAND.path]: ours, [GUARD.path]: f.g1 }, 'setup');
-    const [land, guard] = planScheme(f.kit, 'HEAD', { [LAND.template]: templateHistory(f.kit, 'HEAD', LAND.template) }, s);
+    const [land, guard] = await planScheme(f.kit, 'HEAD', { [LAND.template]: await templateHistory(f.kit, 'HEAD', LAND.template) }, s);
     assert.equal(land.base, 'closest');
     assert.equal(land.status, 'merged');
     assert.equal(land.text, edit(f.v2, 30, 'line 30 this scheme only'));
@@ -93,26 +94,26 @@ test("an adapted copy's base is the closest past version, and the merge keeps th
   }
 });
 
-test('the Kit-Sync trailer names the base, so a kit change the scheme undid on purpose after a sync stays undone', () => {
+test('the Kit-Sync trailer names the base, so a kit change the scheme undid on purpose after a sync stays undone', async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
     commit(s, { [LAND.path]: f.v2 }, `sync\n\n${TRAILER}: ${f.c2}`);
     // Undone by hand after the sync: the file is v1 again, byte for byte, which an exact match would take as its base.
     commit(s, { [LAND.path]: f.v1 }, 'we do not want the line 5 fix');
-    const history = templateHistory(f.kit, 'HEAD', LAND.template);
-    const base = pickBase(f.kit, history, s, 'HEAD', LAND);
+    const history = await templateHistory(f.kit, 'HEAD', LAND.template);
+    const base = await pickBase(f.kit, history, s, 'HEAD', LAND);
     assert.deepEqual(base && { commit: base.commit, how: base.how }, { commit: f.c2, how: 'trailer' });
     const v3 = edit(f.v2, 20, 'line 20 newer kit fix');
     commit(f.kit, { [LAND.template]: v3 }, 'v3');
-    const [land] = planScheme(f.kit, 'HEAD', { [LAND.template]: templateHistory(f.kit, 'HEAD', LAND.template) }, s);
+    const [land] = await planScheme(f.kit, 'HEAD', { [LAND.template]: await templateHistory(f.kit, 'HEAD', LAND.template) }, s);
     assert.equal(land.text, edit(f.v1, 20, 'line 20 newer kit fix'));
   } finally {
     f.done();
   }
 });
 
-test('a trailer base keeps an edit to the very lines the kit changed, since that change is already in', () => {
+test('a trailer base keeps an edit to the very lines the kit changed, since that change is already in', async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
@@ -120,7 +121,7 @@ test('a trailer base keeps an edit to the very lines the kit changed, since that
     commit(s, { [LAND.path]: ours }, `sync\n\n${TRAILER}: ${f.c2}`);
     const v3 = edit(f.v2, 20, 'line 20 newer kit fix');
     commit(f.kit, { [LAND.template]: v3 }, 'v3');
-    const [land] = planScheme(f.kit, 'HEAD', { [LAND.template]: templateHistory(f.kit, 'HEAD', LAND.template) }, s);
+    const [land] = await planScheme(f.kit, 'HEAD', { [LAND.template]: await templateHistory(f.kit, 'HEAD', LAND.template) }, s);
     assert.equal(land.base, 'trailer');
     assert.equal(land.text, edit(v3, 5, 'line 5 our own take on the kit fix'));
   } finally {
@@ -128,12 +129,12 @@ test('a trailer base keeps an edit to the very lines the kit changed, since that
   }
 });
 
-test('the scheme and the kit changing the same lines is a conflict, with no text to commit', () => {
+test('the scheme and the kit changing the same lines is a conflict, with no text to commit', async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
     commit(s, { [LAND.path]: edit(f.v1, 5, 'line 5 the scheme went its own way') }, 'setup');
-    const [land] = planScheme(f.kit, 'HEAD', { [LAND.template]: templateHistory(f.kit, 'HEAD', LAND.template) }, s);
+    const [land] = await planScheme(f.kit, 'HEAD', { [LAND.template]: await templateHistory(f.kit, 'HEAD', LAND.template) }, s);
     assert.equal(land.status, 'conflict');
     assert.equal(land.text, undefined);
   } finally {
@@ -141,7 +142,7 @@ test('the scheme and the kit changing the same lines is a conflict, with no text
   }
 });
 
-test('a file the scheme does not have is left alone, and the repo holding the templates is no scheme', () => {
+test('a file the scheme does not have is left alone, and the repo holding the templates is no scheme', async () => {
   const f = fixture();
   try {
     const projects = join(f.root, 'projects');
@@ -151,10 +152,10 @@ test('a file the scheme does not have is left alone, and the repo holding the te
     commit(own, { [LAND.template]: f.v2, [LAND.path]: 'its own\n' }, 'citadel');
     mkdirSync(join(projects, '4'), { recursive: true });
     assert.deepEqual(
-      schemeRepos(projects, [2, 3, 4]).map((r) => r.project),
+      (await schemeRepos(projects, [2, 3, 4])).map((r) => r.project),
       [3],
     );
-    const plan = planScheme(f.kit, 'HEAD', { [LAND.template]: templateHistory(f.kit, 'HEAD', LAND.template) }, s);
+    const plan = await planScheme(f.kit, 'HEAD', { [LAND.template]: await templateHistory(f.kit, 'HEAD', LAND.template) }, s);
     assert.deepEqual(
       plan.map((p) => p.status),
       ['merged', 'missing', 'missing', 'missing'],
@@ -164,9 +165,9 @@ test('a file the scheme does not have is left alone, and the repo holding the te
   }
 });
 
-test('merge3 and lineDistance on their own', () => {
-  assert.deepEqual(merge3('a\nB\nc\nd\ne\n', 'a\nb\nc\nd\ne\n', 'a\nb\nc\nd\nE\n'), { text: 'a\nB\nc\nd\nE\n', conflict: false });
-  assert.equal(merge3('a\nX\nc\n', 'a\nb\nc\n', 'a\nY\nc\n').conflict, true);
+test('merge3 and lineDistance on their own', async () => {
+  assert.deepEqual(await merge3('a\nB\nc\nd\ne\n', 'a\nb\nc\nd\ne\n', 'a\nb\nc\nd\nE\n'), { text: 'a\nB\nc\nd\nE\n', conflict: false });
+  assert.equal((await merge3('a\nX\nc\n', 'a\nb\nc\n', 'a\nY\nc\n')).conflict, true);
   assert.equal(lineDistance('a\nb\n', 'a\nb\n'), 0);
   assert.equal(lineDistance('a\nb\n', 'a\nc\n'), 2);
 });
@@ -357,26 +358,26 @@ test('a guard self-test that fails only on the sync does not say main fails it',
   assert.doesNotMatch(r.out, /main fails it too/);
 });
 
-test('a byte copy of the newest kit version is its own base, though only an older trailer is in the log (#1730)', () => {
+test('a byte copy of the newest kit version is its own base, though only an older trailer is in the log (#1730)', async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
     commit(s, { [LAND.path]: f.v1 }, `old machine sync\n\n${TRAILER}: ${f.c1}`);
     // A hand sync: byte-equal to v2, with the trailer in a paragraph of its own, so git reads no trailer from it.
     commit(s, { [LAND.path]: f.v2 }, `hand sync\n\n${TRAILER}: ${f.c2}\n\nCo-Authored-By: X <x@example.com>`);
-    const base = pickBase(f.kit, templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
+    const base = await pickBase(f.kit, await templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
     assert.deepEqual(base && { commit: base.commit, how: base.how }, { commit: f.c2, how: 'exact' });
   } finally {
     f.done();
   }
 });
 
-test('a Kit-Sync line outside the last paragraph is found by a body grep when the copy is not an exact version (#1730)', () => {
+test('a Kit-Sync line outside the last paragraph is found by a body grep when the copy is not an exact version (#1730)', async () => {
   const f = fixture();
   try {
     const s = repo(f.root, 'scheme');
     commit(s, { [LAND.path]: edit(f.v2, 30, 'ours') }, `hand sync\n\n${TRAILER}: ${f.c2}\n\nCo-Authored-By: X <x@example.com>`);
-    const base = pickBase(f.kit, templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
+    const base = await pickBase(f.kit, await templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
     assert.deepEqual(base && { commit: base.commit, how: base.how }, { commit: f.c2, how: 'trailer' });
   } finally {
     f.done();
@@ -388,18 +389,18 @@ test('a Kit-Sync line outside the last paragraph is found by a body grep when th
 const CASE_BASE = ['#!/usr/bin/env bash', 'case "$1" in', '  a) echo a ;;', ...Array.from({ length: 12 }, (_, i) => `  # filler ${i}`), '  *) echo other ;;', 'esac', ''].join('\n');
 const withArm = (text: string, after: string, arm: string) => text.replace(after, `${after}\n${arm}`);
 
-test('a clean merge that leaves two arms with one label in a case is a conflict naming the label', () => {
+test('a clean merge that leaves two arms with one label in a case is a conflict naming the label', async () => {
   const f = fixture();
   try {
     const base = CASE_BASE;
     const ours = withArm(base, '  a) echo a ;;', '  files) echo scheme block ;;');
     const theirs = withArm(base, '  # filler 11', '  files) echo kit block ;;');
-    assert.equal(merge3(ours, base, theirs).conflict, false, 'git merge-file takes both');
+    assert.equal((await merge3(ours, base, theirs)).conflict, false, 'git merge-file takes both');
     commit(f.kit, { [GUARD.template]: base }, 'guard base');
     const s = repo(f.root, 'scheme');
     commit(s, { [GUARD.path]: ours }, `sync\n\n${TRAILER}: ${git(f.kit, ['rev-parse', 'HEAD']).trim()}`);
     commit(f.kit, { [GUARD.template]: theirs }, 'guard v2');
-    const g = planScheme(f.kit, 'HEAD', { [GUARD.template]: templateHistory(f.kit, 'HEAD', GUARD.template) }, s).find((p) => p.path === GUARD.path)!;
+    const g = (await planScheme(f.kit, 'HEAD', { [GUARD.template]: await templateHistory(f.kit, 'HEAD', GUARD.template) }, s)).find((p) => p.path === GUARD.path)!;
     assert.equal(g.status, 'conflict');
     assert.deepEqual(g.dupes, ['files']);
     assert.equal(g.text, undefined);
@@ -408,7 +409,7 @@ test('a clean merge that leaves two arms with one label in a case is a conflict 
   }
 });
 
-test('a label the scheme already had twice does not turn a clean merge into a conflict', () => {
+test('a label the scheme already had twice does not turn a clean merge into a conflict', async () => {
   const f = fixture();
   try {
     const base = withArm(CASE_BASE, '  a) echo a ;;', '  a) echo dead arm ;;');
@@ -418,7 +419,7 @@ test('a label the scheme already had twice does not turn a clean merge into a co
     const s = repo(f.root, 'scheme');
     commit(s, { [GUARD.path]: ours }, `sync\n\n${TRAILER}: ${git(f.kit, ['rev-parse', 'HEAD']).trim()}`);
     commit(f.kit, { [GUARD.template]: theirs }, 'guard v2');
-    const g = planScheme(f.kit, 'HEAD', { [GUARD.template]: templateHistory(f.kit, 'HEAD', GUARD.template) }, s).find((p) => p.path === GUARD.path)!;
+    const g = (await planScheme(f.kit, 'HEAD', { [GUARD.template]: await templateHistory(f.kit, 'HEAD', GUARD.template) }, s)).find((p) => p.path === GUARD.path)!;
     assert.equal(g.status, 'merged');
   } finally {
     f.done();
@@ -459,7 +460,7 @@ test("a round is saved as each scheme's check starts, so a restart mid-round fin
     type Saved = { round?: { schemes: { name: string; state: string }[] } };
     let saved: Saved | undefined;
     const seen: string[][] = [];
-    const watching = { start: (o: Parameters<typeof jobs.start>[0]) => (seen.push((saved?.round?.schemes ?? []).map((x) => `${x.name}:${x.state}`)), jobs.start(o)), state: jobs.state.bind(jobs) };
+    const watching = { start: (o: Parameters<typeof jobs.start>[0]) => (seen.push((saved?.round?.schemes ?? []).map((x) => `${x.name}:${x.state}`)), jobs.start(o)), look: jobs.look.bind(jobs) };
     const ks = new KitSync({
       kitDir: kit,
       projectsDir,
@@ -501,7 +502,7 @@ test("a scheme's check runs in a citadel-heavy slot, so a round with several sch
     commit(repo(projectsDir, '3/repo'), { [LAND.path]: land1 }, 'setup');
     commit(kit, { [LAND.template]: land1.replace('# v1', '# v2') }, 'v2');
     const argvs: string[][] = [];
-    const watching = { start: (o: Parameters<typeof jobs.start>[0]) => (argvs.push(o.argv), jobs.start(o)), state: jobs.state.bind(jobs) };
+    const watching = { start: (o: Parameters<typeof jobs.start>[0]) => (argvs.push(o.argv), jobs.start(o)), look: jobs.look.bind(jobs) };
     let saved: unknown;
     const ks = new KitSync({
       kitDir: kit,

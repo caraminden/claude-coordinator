@@ -3,7 +3,7 @@
 // runs on what shipped, over files of the sizes the list names. NOT_JUDGES, the same one-line shape, rides the same rule.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, setup, write } from './land-fixture.ts';
@@ -46,17 +46,22 @@ function start() {
   return r;
 }
 const shownList = (r: R) => git(r.source, 'show', `main:${LIST}`);
-/** The size check on main as it shipped, and (strict) that one more line in <path> fails it. */
+const SLACK = Number(/^export const SLACK = (\d+);$/m.exec(list)![1]); // how far a listed file may grow past its number (#2139)
+/** The size check on main as it shipped, and (strict) that SLACK more lines in <path> pass it and one more fails it. */
 function check(r: R, path: string) {
   const dir = join(r.dir, 'check');
   git(r.source, 'worktree', 'add', '-q', '--detach', dir, 'main');
   const run = () => spawnSync(process.execPath, ['--no-warnings', '--test', join(dir, LIST)], { cwd: dir, encoding: 'utf8', env, timeout: 60_000 });
   const ok = run();
   assert.equal(ok.status, 0, ok.stdout);
+  const n = size(shownList(r), path);
+  writeFileSync(join(dir, path), `${readFileSync(join(dir, path), 'utf8')}${body(SLACK)}`);
+  const slack = run();
+  assert.equal(slack.status, 0, slack.stdout);
   writeFileSync(join(dir, path), `${readFileSync(join(dir, path), 'utf8')}// one more\n`);
   const no = run();
   assert.equal(no.status, 1, no.stdout);
-  assert.match(no.stdout, new RegExp(`${path.replaceAll('.', '\\.')}: ${size(shownList(r), path) + 1} lines, limit ${size(shownList(r), path)}`));
+  assert.match(no.stdout, new RegExp(`${path.replaceAll('.', '\\.')}: ${n + SLACK + 1} lines, limit ${n + SLACK}, 1 over`));
 }
 /** Ships <mine> from the base, after <theirs> went onto main: each [by, note] for its path. */
 function both(path: string, theirs: [number, string], mine: [number, string], minePath = path) {
@@ -145,6 +150,64 @@ test('in a ship train: two riders that raise the entry the front raised all ship
   shipped(l, done[2]!, 3, 2, 3);
   shipped(l, done[3]!, 4, 2, 3);
   assert.equal(shownList(l.r) + '\n', entry(list, ONE, 11, ' (+5: ship 2, #2) (+3: ship 3, #3) (+3: ship 4, #4)'));
+  l.done();
+});
+
+// #2139: on 2026-11-25 ships that each grew a big file a little passed alone and went red together, and each was sent
+// back from the train in turn. A ship that fits alone but not after the ships in line hears so before the line.
+test('a ship that fits alone but not after the ships in line is refused before the line: the file, how far over, and who used the room (#2139)', () => {
+  const r = start();
+  const ahead = join(r.dir, 'ahead');
+  git(r.source, 'worktree', 'add', '-q', '-b', 'ticket/9-ahead', ahead);
+  write(ahead, { [ONE]: resized(ONE, SLACK - 10, 'top') }, '#9: ahead');
+  write(r.wt, { [ONE]: resized(ONE, 20, 'bottom') }, '#1: mine');
+  // Its ticket in the line, this test's process standing in for its land.sh.
+  const queue = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'queue');
+  mkdirSync(queue, { recursive: true });
+  writeFileSync(join(queue, '0000000001'), `${process.pid} 1\n0\nticket/9-ahead\nwaiting\norder\ntrain\n`);
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  const n = sizes.get(ONE)!;
+  assert.match(res.stderr, new RegExp(`^land: smoke: size room: ${ONE.replaceAll('.', '\\.')} would be ${n + SLACK + 10} lines, 10 over its limit ${n + SLACK} .* the ships ahead: ticket/9-ahead \\+${SLACK - 10}, and ticket/1-x adds 20`, 'm'));
+  assert.match(res.stderr, /smoke: a file it grows would be over its size limit after the ships in line, before the line/);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  rmSync(join(queue, '0000000001'));
+  const alone = r.run();
+  assert.equal(alone.status, 0, alone.stderr);
+});
+
+// The size test as a stand-in citadel-test runs it for the guards (land.sh's guard_run), naming the file it fails.
+const sizeGuard = (r: R) => {
+  write(
+    r.source,
+    {
+      ...base(),
+      'tools/citadel-test': `#!/usr/bin/env bash
+case " $* " in *" ${LIST} "*) ;; *) exit 0 ;; esac
+out=$("${process.execPath}" --no-warnings --test ${LIST} 2>&1) && exit 0
+grep 'lines, limit' <<<"$out"
+echo "✖ ${LIST}:1 › over"
+exit 1
+`,
+    },
+    'the list, its files and the guard',
+  );
+  chmodSync(join(r.source, 'tools/citadel-test'), 0o755);
+  git(r.source, 'commit', '-qam', 'the guard runs');
+};
+
+test('in a ship train, the rider whose growth takes a file over is the one refused, told how far over and which ships ahead used the room (#2139)', async () => {
+  const grow = (by: number, end: 'top' | 'bottom') => ({ change: [ONE, resized(ONE, by, end)] as [string, string] });
+  const l = await line([{}, grow(30, 'top'), grow(30, 'bottom'), {}], { LAND_SMOKE: '0' }, sizeGuard);
+  const done = await l.go();
+  const n = sizes.get(ONE)!;
+  assert.equal(done[2]!.status, 1, done[2]!.stderr);
+  assert.match(done[2]!.stderr, /the guard tests failed on ticket\/2-x's ship train in test\/size-budget\.test\.ts with ticket\/3-x on it and passed on the train before it/);
+  assert.match(done[2]!.stderr, new RegExp(`size room: ${ONE.replaceAll('.', '\\.')} would be ${n + 60} lines, 10 over its limit ${n + SLACK} .* the ships ahead: ticket/2-x \\+30, and ticket/3-x adds 30`));
+  for (const i of [1, 2, 4]) assert.equal(done[i - 1]!.status, 0, `ship ${i}: ${done[i - 1]!.stderr}`);
+  shipped(l, done[3]!, 4, 2, 2);
   l.done();
 });
 

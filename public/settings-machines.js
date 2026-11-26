@@ -2,6 +2,7 @@
 import { account, ago, api, h, icon, view } from './base.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { machineJobsSection } from './jobs.js';
+import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
 import { forgetWorkerLink, workerReason, workerSection, workerWord } from './machine-worker-row.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { copyText } from './ui/markdown.js';
@@ -127,6 +128,7 @@ export function machinesPage(main = {}) {
     h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add.toggle),
     add.form,
     h('div', { id: 'machine-setup' }),
+    h('div', { id: 'machine-removals' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { id: 'emulator-lease', class: 'muted small', role: 'status' }, 'Android emulator: checking…'),
     // The CI desktop's load moved to the CI page (#968, Cara: "move the CI box performance page from machines into here"), since #1423 the Releases page's Overview tab.
@@ -268,6 +270,7 @@ function renderMachineList() {
   const el = document.getElementById('machine-list');
   if (!el) return;
   view.machineOpen ??= new Set();
+  renderRemovals(document.getElementById('machine-removals'), renderMachineList);
   const scheme = view.project?.name ?? 'This scheme';
   const runners = view.machines.filter((m) => m.runners);
   const ours = view.machines.filter(oursHere);
@@ -305,18 +308,9 @@ async function newMachineToken(m) {
 
 function removeMachine(m) {
   if (!confirm(`Remove ${m.name}? Minions lose its tools and its token stops working.`)) return;
-  const at = view.machines.findIndex((x) => x.id === m.id);
-  optimistic({
-    key: `machine:${m.id}`,
-    apply: () => {
-      if (view.machineToken?.id === m.id) view.machineToken = null;
-      onMachinesUpdate(view.machines.filter((x) => x.id !== m.id));
-      renderMachineSetup();
-    },
-    send: () => api(`api/machines/${m.id}`, { method: 'DELETE' }),
-    undo: () => view.machines.some((x) => x.id === m.id) || onMachinesUpdate(view.machines.toSpliced(at, 0, m)),
-    label: `remove ${m.name}`,
-  });
+  if (view.machineToken?.id === m.id) view.machineToken = null;
+  renderMachineSetup();
+  sendRemoval(m, { redraw: renderMachineList, drop: () => onMachinesUpdate(view.machines.filter((x) => x.id !== m.id)) });
 }
 
 /** Check now (#437): its result can't be guessed, so only its own button shows it is busy. */
@@ -534,10 +528,11 @@ function machineLine(m) {
     view.machineOpen.add(m.id);
     renderMachineList();
   };
-  const [workWord, workHue] = workerWord(m) ?? [];
+  const gone = removing(m.id);
+  const [workWord, workHue] = gone ? ['Removing…', 'waiting'] : (workerWord(m) ?? []);
   const word = workWord ?? { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
-  const fix = fixButton(m, open);
+  const fix = !gone && fixButton(m, open);
   const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
   if (fix) sum.after(h('span', { class: 'machine-fix' }, fix));
@@ -555,7 +550,7 @@ function machineBody(m) {
   const check = h('button', { type: 'button', class: 'secondary small', disabled: !m.online || m.checking, title: m.online ? "Start its tools and list them, as a minion's turn would" : 'It is offline' }, m.checking ? 'Checking…' : 'Check now');
   check.onclick = () => checkMachine(m, check);
   const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects', onclick: () => newMachineToken(m) }, 'New token');
-  const remove = h('button', { type: 'button', class: 'secondary small', onclick: () => removeMachine(m) }, 'Remove');
+  const remove = h('button', { type: 'button', class: 'secondary small', disabled: removing(m.id), onclick: () => removeMachine(m) }, removing(m.id) ? 'Removing…' : 'Remove');
   const alwaysOn = h('input', { type: 'checkbox', checked: m.always_on });
   alwaysOn.onchange = () => patchMachine(m, { always_on: alwaysOn.checked }, `mark ${m.name} as ${alwaysOn.checked ? '' : 'not '}always on`, renderMachineList);
   const kv = (label, ...value) => [h('span', { class: 'muted' }, label), h('div', {}, ...value)];

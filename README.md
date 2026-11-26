@@ -210,6 +210,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `public/machine-sync.mjs` | The same, the part both sides share and the program a machine runs: worktree snapshots as git commits, packs, and folders by file list |
 | `public/machine-worker.mjs` | The agent's worker: starts placed turns in a container on that computer, syncs their folders, forwards their tools' calls home; `--self-test` checks the container |
 | `public/worker-agent.mjs` | A worker's own program on its owner's PC (Build 7): keeps its image current, holds the owner's caps, says which sign-ins are there, runs the self-test |
+| `public/machine-remove.js` | Removing a machine on the Machines page: the Removing… row and the command that takes a worker off its PC |
 | `src/worker-join.ts`, `public/machine-worker-row.js` | Joining a machine as a worker: the server's side of that program and its self-test, and Minion turns on the machine's row of the Machines page |
 | `tools/worker/` | What makes a PC a worker, served at `/worker-setup/`: `install-worker.ps1` (Windows, a WSL distro of its own), `install-worker.sh` (Linux and inside that distro), and `citadel-worker`, the owner's sign-ins and caps there |
 | `public/refstate.js` | Paints minion links in chat (`a.thread-ref`) by their minion's state: waiting, working, deployed (`refBucket` in `public/threadstate.js`) |

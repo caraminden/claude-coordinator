@@ -56,7 +56,7 @@ import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
-import { MachineBalancer } from './src/machine-balancer.ts';
+import { MachineBalancer, runnerShares } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs } from './src/long-jobs.ts';
@@ -727,6 +727,24 @@ const balancer = new MachineBalancer({
   now: Date.now,
 });
 if (!BOOT_CHECK) every('machine balancer', MachineBalancer.TICK_MS, () => balancer.tick());
+// Runners awake (Build 7 M6b): each PC's CI runner agents hear their part of its plan every step, so one that stops
+// hearing it wakes its runners. The repos each agent has runners for are kept since boot: a runner asleep leaves its samples.
+const planRepos = new Map<string, Set<string>>();
+const sendRunnerPlans = () => {
+  for (const m of new Map([...machines.runnerMachines('windows'), ...machines.runnerMachines('linux')].map((m) => [m.id, m])).values()) {
+    const plan = balancer.current(m.id);
+    if (!plan) continue;
+    const agents = machines.runnersOn(m.id).map(({ os }) => {
+      const repos = planRepos.get(`${m.id}:${os}`) ?? new Set<string>();
+      planRepos.set(`${m.id}:${os}`, repos);
+      for (const r of ciLoad.reposOf(m.id, os)) repos.add(r);
+      return { key: os, repos };
+    });
+    for (const [os, share] of runnerShares(plan.runners, agents, ciQueued)) machines.sendRunnerPlan(m.id, os as 'windows' | 'linux', share);
+  }
+};
+if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);
+machines.agentUrl = MACHINES_URL?.origin ?? null;
 const jobs = new MachineJobs({
   store,
   broadcast,

@@ -567,7 +567,7 @@ const SLEPT_FILE = 'slept.json';
  * else stopped is never started.
  */
 export class RunnerWake {
-  constructor({ os = defaultOs(), dir, run = runCommand, units = '/etc/systemd/system', procs = linuxProcs, windowsProcs = () => [], identity = runnerIdentity, roots = windowsRoots, now = Date.now, log = () => {} } = {}) {
+  constructor({ os = defaultOs(), dir = '.', run = runCommand, units = '/etc/systemd/system', procs = linuxProcs, windowsProcs = () => /** @type {{ path?: string }[]} */ ([]), identity = runnerIdentity, roots = windowsRoots, now = Date.now, log = () => {} } = {}) {
     Object.assign(this, { os, dir, run, units, procs, windowsProcs, identity, roots, now, log, plan: null, until: 0, ships: [], said: '', queue: Promise.resolve() });
   }
 

@@ -17,6 +17,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { lendsRole } from './access.ts';
 import type { Ship } from './ci-ships.ts';
+import type { RunnerShare } from './machine-balancer.ts';
 import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
@@ -505,6 +506,8 @@ export class MachineRelay {
       runners: runnerRow,
       /** Its CI runner agents connected now, beside its agent (Build 7 M2b). */
       runner_agents: runnersHere.map(({ os, host, since }) => ({ os, host, since })),
+      /** Its CI runner agents from before the balancer (M6b), which keep every runner up and the 30% ship squeeze: the row offers their update line. */
+      runner_update: runnersHere.some((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false) ? { os: runnersHere.filter((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false).map((r) => r.os), url: this.agentUrl } : null,
       /** Other rows its owner has for this PC (one hostname, M2b): "These are one computer: merge". */
       same_pc: this.samePc(machine).map((m) => ({ id: m.id, name: m.name })),
       /** A merge waiting on this row's runner agents connecting to the kept row (src/machine-merge.ts). */
@@ -694,6 +697,16 @@ export class MachineRelay {
     runner.res.end();
     if (this.store.getMachine(machineId)) this.store.updateMachine(machineId, { last_seen_at: Date.now() });
     this.onChange();
+  }
+
+  /** Whether each CI runner agent, by `<machine id>:<os>`, applies the balancer's plan (Build 7 M6b): set as it connects. */
+  readonly runnerPlans = new Map<string, boolean>();
+  /** The address agents dial (MACHINES_URL), for an old CI runner agent's update line; null: the page's own. */
+  agentUrl: string | null = null;
+
+  /** Its part of the balancer's plan, to a machine's CI runner agent for `os` (Build 7 M6b); one from before ignores it. */
+  sendRunnerPlan(machineId: number, os: 'windows' | 'linux', plan: RunnerShare) {
+    this.runnerAgents.get(`${machineId}:${os}`)?.res.write(`data: ${JSON.stringify({ plan })}\n\n`);
   }
 
   /** A machine's CI runner agents connected now. */

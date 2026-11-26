@@ -461,6 +461,11 @@ export class CiLoad {
     return pcs;
   }
 
+  /** The repos (owner/name, lowercase) a machine's runner agent for `os` has runners up for, by its newest sample (Build 7 M6b). */
+  reposOf(machineId: number, os: 'windows' | 'linux'): string[] {
+    return [...new Set((this.latest.get(`${machineId}:${os}`)?.runners ?? []).map((r) => r.repo).filter(Boolean))];
+  }
+
   /** A deleted machine's samples go with it (its rows cascade). */
   forget(machineId: number) {
     for (const k of this.latest.keys()) if (k.startsWith(`${machineId}:`)) this.latest.delete(k);

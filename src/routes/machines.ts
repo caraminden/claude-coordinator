@@ -348,6 +348,8 @@ export const agentRoutes: Route[] = [
   },
   agent('GET', '/api/machines/connect', ({ url, res, app }, machine) => {
     const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
+    // Whether a CI runner agent applies the balancer's plan (Build 7 M6b): one from before shows its row's update line.
+    if (url.searchParams.get('kind') === 'runners') app.machines.runnerPlans.set(`${machine.id}:${url.searchParams.get('os') === 'linux' ? 'linux' : 'windows'}`, url.searchParams.get('plans') === '1');
     return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2', os: url.searchParams.get('os') === 'linux' ? 'linux' : 'windows' });
   }),
   agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {

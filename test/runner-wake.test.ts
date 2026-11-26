@@ -3,12 +3,16 @@
 // list are faked here, and keep-runners.ps1's half runs in pwsh with Stop-Service and Start-Service faked.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import type { ServerResponse } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake } from '../public/runner-agent.mjs';
+import { Store } from '../src/db.ts';
 import { balance, runnerShares } from '../src/machine-balancer.ts';
+import { MachineRelay } from '../src/machines.ts';
 
 type R = { key: string; repo: string; name: string; busy: boolean; ship: boolean; awake: boolean };
 const runner = (key: string, repo: string, more: Partial<R> = {}): R => ({ key, repo, name: key, busy: false, ship: false, awake: true, ...more });
@@ -65,8 +69,8 @@ function linux() {
     dir,
     units: dir,
     now: () => clock,
-    identity: (d: string) => ({ name: d.split('/').at(-1), repo: `o/${d.split('/').at(-1)!.replace(/-2$/, '')}` }),
-    procs: () => working.map((d, i) => ({ pid: i, ppid: 1, path: `/opt/r/${d}/bin/Runner.Worker` })),
+    identity: (d: string) => ({ name: d.split('/').at(-1)!, repo: `o/${d.split('/').at(-1)!.replace(/-2$/, '')}` }),
+    procs: () => working.map((d, i) => ({ pid: i, ppid: 1, path: `/opt/r/${d}/bin/Runner.Worker`, cpu: 0, mem: 0, reaped: 0 })),
     run: async ({ args }: { args: string[] }) => {
       if (args[0] === 'is-active') {
         const lines = args.slice(1).map((u) => (up.get(u) ? 'active' : 'inactive'));
@@ -229,4 +233,39 @@ test("the server splits a PC's runners between its Windows and Linux agents by t
     { runners: 1, queued: { 'o/peek': 1 } },
     'each hears every repo waiting',
   );
+});
+
+test('the relay sends each runner agent its part, and a row whose runner agent is from before offers its update line', () => {
+  const store = new Store(':memory:');
+  const relay = new MachineRelay(store, () => {});
+  relay.agentUrl = 'http://perigee:8574';
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const pc = store.createMachine('desk', 'x', 'Josh', josh.id);
+  const stream = () => {
+    const sent: string[] = [];
+    const r = new EventEmitter() as EventEmitter & ServerResponse;
+    Object.assign(r, { writeHead() {}, write: (d: string) => (sent.push(d), true), end: () => r.emit('close') });
+    return { r, sent };
+  };
+  const win = stream();
+  const wsl = stream();
+  // As the connect route does: the new agent says plans=1, the one from before says nothing.
+  relay.runnerPlans.set(`${pc.id}:windows`, true);
+  relay.connectAgent(pc, win.r, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  relay.runnerPlans.set(`${pc.id}:linux`, false);
+  relay.connectAgent(pc, wsl.r, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'linux' });
+  try {
+    relay.sendRunnerPlan(pc.id, 'windows', { runners: 2, queued: { 'o/peek': 1 } });
+    assert.deepEqual(
+      win.sent.filter((d) => d.includes('"plan"')),
+      [`data: ${JSON.stringify({ plan: { runners: 2, queued: { 'o/peek': 1 } } })}\n\n`],
+    );
+    assert.ok(!wsl.sent.some((d) => d.includes('"plan"')));
+    assert.deepEqual(relay.view(store.getMachine(pc.id)!).runner_update, { os: ['linux'], url: 'http://perigee:8574' });
+    relay.runnerPlans.set(`${pc.id}:linux`, true);
+    assert.equal(relay.view(store.getMachine(pc.id)!).runner_update, null);
+  } finally {
+    win.r.end();
+    wsl.r.end();
+  }
 });

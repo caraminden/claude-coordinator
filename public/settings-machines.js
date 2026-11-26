@@ -9,7 +9,7 @@ import { pauseButton, roleCards } from './machine-role-cards.js';
 import { forgetWorkerLink, workerReason, workerWord } from './machine-worker-row.js';
 import { emptyCard } from './look.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
-import { copyText } from './ui/markdown.js';
+import { copyText, markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 
@@ -557,7 +557,9 @@ function machineLine(m) {
   const other = !gone && tokenIsMine(m) && m.same_pc?.find((x) => view.machines.some((y) => y.id === x.id && tokenIsMine(y) && !removing(y)));
   const merge = other && h('button', { type: 'button', class: 'secondary small', title: `${m.name} and ${other.name} report one hostname. Opens the line that moves the CI runner agent onto one row`, onclick: () => mergeMachines(m, other) }, m.merging ? 'Merging: show the line' : 'These are one computer: merge');
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
-  if (fix || update || merge) sum.after(h('span', { class: 'machine-fix' }, merge || '', update || '', fix || ''));
+  // A CI runner agent from before the balancer (Build 7 M6b): the button opens the row at its update line.
+  const ciUpdate = m.runner_update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: "Its CI runner agent is from before: it keeps every runner awake instead of following this PC's balance. Opens the line that updates it", onclick: open }, 'Update CI agent');
+  if (fix || update || merge || ciUpdate) sum.after(h('span', { class: 'machine-fix' }, merge || '', update || '', ciUpdate || '', fix || ''));
   row.classList.add('machine-row', 'machine-line', m.status);
   row.dataset.name = m.name;
   row.addEventListener('toggle', () => {
@@ -594,11 +596,38 @@ function machineBody(m) {
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on')),
       ),
       m.screen ? kv('Screen', machineScreen(m.screen)) : [],
+      m.runner_update && managesHere(m) ? kv('CI agent', ciAgentUpdate(m)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : [],
     ),
     m.jobs ? machineJobsSection(m) : '',
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, removing(m) ? null : pauseButton(m, renderMachineList), remove),
+  );
+}
+
+/** An old CI runner agent's update line, per OS: its install again, with the token already on that PC, so nothing else is cut off. */
+const CI_AGENT_UPDATE = {
+  windows: {
+    tag: 'powershell-admin',
+    where: 'On that PC, open PowerShell as administrator (Run as administrator) and paste this:',
+    line: (u) =>
+      `$u = '${u}'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-runner-agent.ps1" -CitadelUrl $u -MachineToken (Get-Content "$env:ProgramData\\citadel-runner-agent\\machine-token" -Raw).Trim()`,
+  },
+  linux: {
+    tag: 'wsl',
+    where: "In a root shell in the CI runners' WSL distro on that PC (wsl -d citadel-ci -u root), or sudo -i on a Linux PC, paste this:",
+    line: (u) => `u='${u}'; f=$(mktemp) && curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f" && CC_MACHINE_TOKEN=$(cat /opt/citadel-runner-agent/machine-token) bash "$f" "$u"`,
+  },
+};
+
+/** Why an old CI runner agent wants updating (Build 7 M6b), and the line for each one there. */
+function ciAgentUpdate(m) {
+  const u = (m.runner_update.url ?? location.origin).replace(/\/$/, '');
+  return h(
+    'div',
+    {},
+    h('div', { class: 'cui-notice', 'data-tone': 'warn', role: 'status' }, h('strong', {}, 'Its CI runner agent is from before.'), " It keeps every runner awake and squeezes the others to 30% while a ship runs, instead of following this PC's balance. Run its install again to update it; its runners and token stay."),
+    m.runner_update.os.map((os) => [h('p', { class: 'small' }, CI_AGENT_UPDATE[os].where), markdownElement(`\`\`\`${CI_AGENT_UPDATE[os].tag}\n${CI_AGENT_UPDATE[os].line(u)}\n\`\`\``)]),
   );
 }
 

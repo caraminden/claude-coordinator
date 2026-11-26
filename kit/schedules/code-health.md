@@ -27,5 +27,5 @@ Worth reporting: a bug, or a fix a minion could make in under a day that would s
 
 Output:
 - Nothing past the bar: reply in one line with the window's numbers (commits, files read, shortcut count) and close.
-- Otherwise write reports/code-health-<YYYY-MM-DD>.md in this scheme's shared folder (ranked; each finding with file:line, why it matters, size S/M) and at most 3 handoffs in handoffs/ for the top ones; the card gives each handoff its model, risk and payoff.
+- Otherwise write reports/code-health-<YYYY-MM-DD>.md in this scheme's shared folder (ranked; each finding with file:line, why it matters, size S/M) and at most 3 handoffs in handoffs/ for the top ones; the card gives each handoff its model, risk and payoff. A handoff labels its Risk and Proof as the reviewer's guess, and tells its minion to re-rate both once the fix is known.
 - A small, certain dead-code removal (nothing references it anywhere, strings included) may ship from this run by this scheme's usual landing route, after citadel:self-review. List what shipped with its commit and risk label.

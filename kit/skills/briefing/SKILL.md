@@ -33,6 +33,9 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    (checked 2026-11-19)". A minion that starts on work already shipped repeats it. For anything
    bigger than a one-file fix, first send a `citadel:scout` Grunt the area or your draft: its
    "Touched" lines go here, its "Tried or ruled out" and "Reusable" lines in part 6.
+   Look in the minions list for an open minion deciding or building the same mechanism too (a design
+   minion has no files yet). When there is one, send it the new ask as a message instead, or name the
+   seam in both briefs (message it its half): which piece each builds, which ships second.
 5. **Leave alone**: what the minion must not touch (files, lanes, another minion's branch, live
    data). "Nothing in particular" when true.
    Run `who-touches <the files it will edit>` (on every turn's PATH) and name each open minion

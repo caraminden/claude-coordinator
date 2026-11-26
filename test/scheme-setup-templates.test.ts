@@ -44,6 +44,21 @@ test('the size-budget template passes in a repo with other folders and extension
   }
 });
 
+test('the size-budget template lets a listed file grow 50 lines past its number, and not one more (#2139)', () => {
+  const listed = sizeBudget("['server']", '/\\.py$/').replace(/^(export const ALLOWED: .*\{)$/m, "$1\n  'server/big.py': [1600, 'one file'],");
+  const s = scheme({ 'package.json': '{"type":"module"}', 'test/size-budget.test.ts': listed, 'server/big.py': 'x\n'.repeat(1650) });
+  try {
+    const ok = s.run('size-budget.test.ts');
+    assert.equal(ok.status, 0, ok.out);
+    writeFileSync(join(s.dir, 'server/big.py'), 'x\n'.repeat(1651));
+    const red = s.run('size-budget.test.ts');
+    assert.equal(red.status, 1, red.out);
+    assert.match(red.out, /server\/big\.py: 1651 lines, limit 1650, 1 over \(its ALLOWED size 1600 \+ 50 slack\)/);
+  } finally {
+    s.done();
+  }
+});
+
 test("the format template passes in a repo with another style and includes, and still fails on that repo's unformatted file", () => {
   // Edited as text: Biome formats biome.json too.
   const template = readFileSync(join(templates, 'biome.config.json'), 'utf8');

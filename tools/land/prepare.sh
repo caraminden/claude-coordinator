@@ -126,6 +126,14 @@ smoke() {
   # What waited in line to hear it (#1983). A plain ship's without the same patches on main, and under_of's, which its rebase leaves out; one it would empty is named.
   [ "$mode" != land ] || left=(--cherry-pick --right-only main...HEAD ${under:+"^$under"})
   lost_title "${left[@]}" || { say "smoke: $lost. If main already has that commit's change, git rebase main drops it"; smoke_fail "a commit title is wrong"; }
+  # Size room (#2139): each file it grows, added up with main and every ship in line (tools/size-room.ts, its own
+  # by-hand check), so a file only the ships together take over is refused here, naming them, not on their train.
+  if [ "$mode" != full ] && [ -f "$tools/size-room.ts" ] && [ -f test/size-budget.test.ts ]; then
+    out=$("$tools/citadel-node" --no-warnings "$tools/size-room.ts" --queue "$state/queue" 2>&1) && rc=0 || rc=$?
+    [ -z "$out" ] || sed 's/^/land: smoke: /' <<<"$out" >&2
+    [ "$rc" != 1 ] || smoke_fail "a file it grows would be over its size limit after the ships in line"
+    rc=0
+  fi
   if [ -f tools/parse-check.ts ]; then
     out=$("$tools/citadel-node" --no-warnings tools/parse-check.ts 2>/dev/null) || true
     [ -z "$out" ] || { sed 's/^/land: smoke: /' <<<"$out" >&2; smoke_fail "a .ts file does not parse"; }

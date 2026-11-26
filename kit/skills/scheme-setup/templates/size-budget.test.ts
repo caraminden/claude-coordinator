@@ -1,7 +1,7 @@
 // Size budget (from the Citadel kit's scheme-setup templates). A source file past LIMIT lines is hard for a minion to
 // navigate: it can't read it whole and can't find the seam. This fails when a file under ROOTS is over LIMIT, or when an
 // allowed giant grows past its listed size. Set ROOTS and CODE to this repo's source folders and extensions.
-// Big files already here are in ALLOWED at their size, each with its reason; they can shrink but not grow.
+// Big files already here are in ALLOWED at their size, each with its reason; they can shrink, and grow only SLACK lines past it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, lstatSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -12,6 +12,10 @@ const root = join(import.meta.dirname, '..');
 const ROOTS = ['src'];
 const CODE = /\.(ts|js|mjs|sh|html|css|ps1|py)$/;
 export const LIMIT = 1500;
+// How far a file in ALLOWED may grow past its listed size before this fails (Josh, 2026-11-26, #2118: "Big files may grow
+// 50 lines past their listed size"), so ships in line together that each grow a big file a little don't refuse each other.
+// The LIMIT for files not in ALLOWED has none.
+export const SLACK = 50;
 
 // Files the Citadel kit syncs into a scheme (src/kit-sync.ts KIT_FILES). A scheme can't usefully edit them and the kit's own
 // size budget (Citadel's test/size-budget.test.ts, which counts the kit's copies) owns their size, so a kit sync that grows
@@ -45,8 +49,9 @@ export function lineCounts(dir = root, roots = ROOTS, code = CODE): Record<strin
 export function overBudget(counts: Record<string, number>, allowed = ALLOWED, limit = LIMIT): string[] {
   const bad: string[] = [];
   for (const [path, n] of Object.entries(counts)) {
-    const cap = allowed[path]?.[0] ?? limit;
-    if (n > cap) bad.push(`${path}: ${n} lines, limit ${cap}${allowed[path] ? ' (its ALLOWED size)' : ''}`);
+    const listed = allowed[path]?.[0];
+    const cap = listed === undefined ? limit : listed + SLACK;
+    if (n > cap) bad.push(`${path}: ${n} lines, limit ${cap}, ${n - cap} over${listed === undefined ? '' : ` (its ALLOWED size ${listed} + ${SLACK} slack)`}`);
   }
   return bad;
 }
@@ -69,8 +74,14 @@ test('an ALLOWED entry names a file that exists and is still over the limit', ()
 test('the check fails on growth past the limit or past an allowed size, and passes at or under them', () => {
   assert.deepEqual(overBudget({ 'a.ts': 1500 }, {}, 1500), []);
   assert.equal(overBudget({ 'a.ts': 1501 }, {}, 1500).length, 1);
-  assert.equal(overBudget({ 'big.ts': 3001 }, { 'big.ts': [3000, 'x'] }, 1500).length, 1);
+  assert.equal(overBudget({ 'big.ts': 3001 + SLACK }, { 'big.ts': [3000, 'x'] }, 1500).length, 1);
   assert.deepEqual(overBudget({ 'big.ts': 2000 }, { 'big.ts': [3000, 'x'] }, 1500), []);
+});
+
+test(`an ALLOWED file may grow ${SLACK} lines past its listed size; an unlisted one not one line past the limit`, () => {
+  assert.deepEqual(overBudget({ 'big.ts': 3000 + SLACK }, { 'big.ts': [3000, 'x'] }, 1500), []);
+  assert.deepEqual(overBudget({ 'big.ts': 3001 + SLACK }, { 'big.ts': [3000, 'x'] }, 1500), [`big.ts: ${3001 + SLACK} lines, limit ${3000 + SLACK}, 1 over (its ALLOWED size 3000 + ${SLACK} slack)`]);
+  assert.deepEqual(overBudget({ 'a.ts': 1501 }, {}, 1500), ['a.ts: 1501 lines, limit 1500, 1 over']);
 });
 
 test("a kit-synced file over the limit is not counted, and the scheme's own big file still is", () => {

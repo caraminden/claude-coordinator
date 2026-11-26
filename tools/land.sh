@@ -1567,7 +1567,7 @@ train_guards() {
   phase_ticker_end
 }
 train_guards_run() {
-  local t0 lo hi mid i rc out files keep was t v
+  local t0 lo hi mid i rc out files keep was t v k room ahead
   while [ ${#train_n[@]} -gt 0 ]; do
     t0=$SECONDS rc=0
     guard_at "$tip" || rc=$?
@@ -1586,10 +1586,18 @@ train_guards_run() {
       [ "$rc" = 0 ] || { say "the guard tests failed on the ship train's top ($short), but $branch's own run of them didn't decide, then or now (exit $guard_rc), so they name no ship: CI runs them"; return 0; }
       front_guards=0
     fi
-    i=$((hi - 1)) guard_out=$out files=$(guard_files)
+    i=$((hi - 1)) guard_out=$out files=$(guard_files) room=''
+    # A size red (#2139): how far over, and the ships on the train before it that used the room, each by its own step.
+    if [[ ,$files, == *,test/size-budget.test.ts,* ]] && [ -f "$tools/size-room.ts" ]; then
+      ahead=(--ahead "$branch=$(git merge-base main "$own")..$own")
+      for ((k = 0; k < i; k++)); do ahead+=(--ahead "${train_br[$k]}=$(train_at "$k")..$(train_at $((k + 1)))"); done
+      ahead+=(--self "${train_br[$i]}=$(train_at "$i")..$(train_at "$hi")")
+      room=$("$tools/citadel-node" --no-warnings "$tools/size-room.ts" "${ahead[@]}" 2>/dev/null | grep ' over its limit ') || : # exit 1: over
+    fi
     say "the guard tests failed on the ship train's top ($short) in ${files:-the guard tests}, and on the train first with ${train_br[$i]} on it, so it is refused before any CI run and the train is built again without it"
+    [ -z "$room" ] || say "$room"
     retro_log "guard · ${train_br[$i]} · on $label's train · $files · $((SECONDS - t0))s"
-    train_say "$i" "refused $branch guard-tests guard ${files:-guards}" "$(grep -v '^full output: ' <<<"$out" | tail -n 40)"
+    train_say "$i" "refused $branch guard-tests guard ${files:-guards}" "$(grep -v '^full output: ' <<<"$out" | tail -n 40)" ${room:+"$room"}
     train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
     keep=("${train_n[@]:0:$i}" "${train_n[@]:$hi}") was=("${train_n[@]}")
     train_tip=() train_br=() train_n=() train_was=()

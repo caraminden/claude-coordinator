@@ -1824,8 +1824,9 @@ test('a branch over the file size limit is refused by the smoke check, before th
   const own = { CITADEL_TEST_EXTRA: '0', TMPDIR: r.dir };
   const res = r.run(own);
   assert.equal(res.status, 1, res.stderr);
-  assert.match(res.stderr, /^land: smoke: .*tools\/big\.sh: 1501 lines, limit 1500/m);
-  assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\), before the line/m);
+  // The size room (#2139) refuses it first, ahead of the size test, with the same file and limit.
+  assert.match(res.stderr, /^land: smoke: size room: tools\/big\.sh would be 1501 lines, 1 over its limit 1500 \(unlisted\)/m);
+  assert.match(res.stderr, /^land: smoke: a file it grows would be over its size limit after the ships in line, before the line/m);
   assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   r.commit(r.wt, 'tools/big.sh', ':\n'.repeat(1500));

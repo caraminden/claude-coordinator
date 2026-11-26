@@ -217,7 +217,7 @@ test('a replay store reads the real database, keeps its own writes, and shows mi
       store.listTickets(p.id).map((x) => [x.id, x.status]),
       [
         [-1, 'new'],
-        [early.id, 'working'],
+        [early.id, 'running'],
       ],
       'at 200: the early one still open, the late one not made',
     );

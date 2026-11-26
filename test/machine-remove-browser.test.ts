@@ -143,9 +143,8 @@ test('a reload while it drains keeps Removing… and the command, from the serve
   // A real 202: its agent is connected and a minion's copy is there.
   const agent = new AbortController();
   const stream = await fetch(`${srv.base}/api/machines/connect?v=2&host=MY-PC`, { headers: { Authorization: `Bearer ${pc.token}` }, signal: agent.signal });
-  const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
   try {
-    db.exec('PRAGMA busy_timeout = 5000');
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(`machine-copies:${pc.id}`, JSON.stringify({ '/nonexistent/t': { ticket: 999, name: 'drain-pc', wrapper: ['node'], home: '/h', roots: [], cwd: '/w/1/repo' } }));
     assert.equal((await srv.call(`/api/machines/${pc.id}`, undefined, 'DELETE')).status, 202);
     await page.send('Page.reload', {});

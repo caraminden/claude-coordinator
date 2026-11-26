@@ -11,6 +11,13 @@
 // startUpload() is the client; mountUpload() is the drop zone with file and folder pickers, a row per file
 // with its progress, pause and resume, a total, and a "left out" line for what it skipped.
 
+/** @import { Upload, UploadResult, UploadOptions, DroppedFile, MountUploadOptions } from './upload.js' */
+/** @typedef {{ -readonly [K in keyof Upload]: Upload[K] }} Handle  The handle this module builds, before it's handed out read-only. */
+/** @typedef {{ error?: string, offset?: number, done?: boolean, id?: string, chunk?: number }} Reply  What the server answers a call or a chunk. */
+/** @typedef {Error & { status: number }} Failure */
+/** @typedef {'waiting' | 'sending' | 'paused' | 'done' | 'cancelled'} RowState */
+/** @typedef {{ file: File, folder: string, up: Upload | null, held: boolean, queued?: boolean, cancelled?: boolean, parts: { bar: HTMLProgressElement, meta: HTMLElement, error: HTMLElement, toggle: HTMLButtonElement, cancel: HTMLButtonElement }, node: HTMLLIElement }} Row */
+
 const KEY = 'cui-upload:';
 const KEEP = 3 * 24 * 3600 * 1000; // the server gives up an untouched upload after 3 days too
 const CHUNK = 8 * 1024 * 1024;
@@ -30,6 +37,7 @@ export function formatBytes(n) {
 }
 
 const store = {
+  /** @param {string} key */
   get(key) {
     try {
       const v = JSON.parse(localStorage.getItem(key) ?? 'null');
@@ -38,11 +46,16 @@ const store = {
       return null;
     }
   },
+  /**
+   * @param {string} key
+   * @param {string} id
+   */
   set(key, id) {
     try {
       localStorage.setItem(key, JSON.stringify({ id, at: Date.now() }));
     } catch {}
   },
+  /** @param {string} key */
   drop(key) {
     try {
       localStorage.removeItem(key);
@@ -50,8 +63,19 @@ const store = {
   },
 };
 
+/**
+ * @param {number} status
+ * @param {{ error?: string }} [data]
+ * @returns {Failure}
+ */
 const failure = (status, data) => Object.assign(new Error(data?.error || (status ? `HTTP ${status}` : 'The connection broke off')), { status });
 
+/**
+ * @param {string} method
+ * @param {string} url
+ * @param {Record<string, unknown>} [body]
+ * @returns {Promise<Reply>}
+ */
 async function call(method, url, body) {
   let r;
   try {
@@ -72,10 +96,14 @@ async function call(method, url, body) {
 export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
   const base = endpoint.replace(/\/+$/, '');
   const key = `${KEY}${base}|${folder}|${file.name}|${file.size}|${file.lastModified}`;
+  /** @type {string | null} */
   let id = null;
+  /** @type {XMLHttpRequest | null} */
   let xhr = null;
   let run = 0; // a pause or cancel leaves the run it interrupted to notice it's stale
+  /** @type {(result: UploadResult | null) => void} */
   let settle;
+  /** @type {Handle} */
   const u = {
     file,
     folder,
@@ -105,29 +133,39 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
       settle(null);
     },
   };
+  /**
+   * @param {Upload['state']} state
+   * @param {string} [error]
+   */
   const set = (state, error = '') => {
     Object.assign(u, { state, error });
     onChange?.(u);
   };
 
+  /**
+   * @param {number} offset
+   * @param {number} chunk
+   * @returns {Promise<Reply>}
+   */
   function put(offset, chunk) {
     return new Promise((resolve, reject) => {
-      xhr = new XMLHttpRequest();
-      xhr.open('PUT', `${base}/${id}?offset=${offset}`);
-      xhr.upload.onprogress = (e) => {
+      const req = new XMLHttpRequest();
+      xhr = req;
+      req.open('PUT', `${base}/${id}?offset=${offset}`);
+      req.upload.onprogress = (e) => {
         u.sent = Math.min(u.size, offset + e.loaded);
         onChange?.(u);
       };
-      xhr.onload = () => {
+      req.onload = () => {
         let data = {};
         try {
-          data = JSON.parse(xhr.responseText);
+          data = JSON.parse(req.responseText);
         } catch {}
-        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-        else reject(failure(xhr.status, data));
+        if (req.status >= 200 && req.status < 300) resolve(data);
+        else reject(failure(req.status, data));
       };
-      xhr.onerror = xhr.onabort = () => reject(failure(0));
-      xhr.send(file.slice(offset, Math.min(u.size, offset + chunk)));
+      req.onerror = req.onabort = () => reject(failure(0));
+      req.send(file.slice(offset, Math.min(u.size, offset + chunk)));
     });
   }
 
@@ -139,15 +177,16 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
       try {
         let offset = 0;
         let chunk = CHUNK;
+        /** @type {Reply} */
         let r = {};
         id ??= store.get(key);
         if (id) {
           try {
             // ?finished: one whose last answer was lost gets it now.
             r = await call('GET', `${base}/${id}?finished=1`);
-            offset = r.offset;
+            offset = /** @type {number} */ (r.offset);
           } catch (err) {
-            if (err.status !== 404) throw err;
+            if (/** @type {Failure} */ (err).status !== 404) throw err;
             // Gone from the server: it sat too long. Start afresh.
             store.drop(key);
             id = null;
@@ -157,22 +196,24 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
         if (!id) {
           const made = await call('POST', base, { name: file.name || 'file', size: u.size, folder });
           if (me !== run) return void call('DELETE', `${base}/${made.id}`).catch(() => {});
-          ({ id, chunk = CHUNK } = made);
+          ({ id, chunk = CHUNK } = /** @type {{ id: string, chunk?: number }} */ (made));
           store.set(key, id);
         }
         while (!r.done) {
           u.sent = offset;
           r = await put(offset, chunk);
           if (me !== run) return;
-          offset = r.offset;
+          offset = /** @type {number} */ (r.offset);
           tries = 0;
         }
         store.drop(key);
-        u.result = r;
+        const result = /** @type {UploadResult} */ (r);
+        u.result = result;
         u.sent = u.size;
         set('done');
-        return settle(r);
-      } catch (err) {
+        return settle(result);
+      } catch (caught) {
+        const err = /** @type {Failure} */ (caught);
         if (me !== run) return;
         // 409: a retry raced a chunk still landing, or the offset moved; the loop asks where it is and goes on.
         const again = err.status === 409 || err.status === 0 || (err.status >= 500 && err.status !== 507);
@@ -189,7 +230,11 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
 
 // ---------- the drop zone ----------
 
-/** Whether `file` fits an <input accept> list: ".jpg", "image/*", "video/mp4". Empty accepts all. */
+/**
+ * Whether `file` fits an <input accept> list: ".jpg", "image/*", "video/mp4". Empty accepts all.
+ * @param {string} accept
+ * @param {File} file
+ */
 function accepts(accept, file) {
   const list = accept
     .split(',')
@@ -200,7 +245,9 @@ function accepts(accept, file) {
   return !list.length || list.some((a) => (a.startsWith('.') ? name.endsWith(a) : a.endsWith('/*') ? type.startsWith(a.slice(0, -1)) : type === a));
 }
 
+/** @param {string} path */
 const dirOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+/** @param {string} path */
 const hidden = (path) => path.split('/').some((p) => p.startsWith('.'));
 
 /**
@@ -209,24 +256,28 @@ const hidden = (path) => path.split('/').some((p) => p.startsWith('.'));
  * @type {typeof import('./upload.js').droppedFiles}
  */
 export async function droppedFiles(dataTransfer) {
-  const entries = [...(dataTransfer.items ?? [])].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+  const entries = /** @type {FileSystemEntry[]} */ ([...(dataTransfer.items ?? [])].map((i) => i.webkitGetAsEntry?.()).filter(Boolean));
   if (!entries.length) return { files: [...dataTransfer.files].map((file) => ({ file, path: file.name })), skipped: [] };
+  /** @type {DroppedFile[]} */
   const files = [];
+  /** @type {{ path: string, why: string }[]} */
   const skipped = [];
+  /** @param {FileSystemEntry} entry */
   const walk = async (entry) => {
     const path = entry.fullPath.replace(/^\/+/, '');
     if (entry.name.startsWith('.')) return void skipped.push({ path: entry.isFile ? path : `${path}/`, why: 'hidden' });
     if (entry.isFile) {
       try {
-        files.push({ file: await new Promise((res, rej) => entry.file(res, rej)), path });
+        const fileEntry = /** @type {FileSystemFileEntry} */ (entry);
+        files.push({ file: await /** @type {Promise<File>} */ (new Promise((res, rej) => fileEntry.file(res, rej))), path });
       } catch {
         skipped.push({ path, why: "couldn't be read" });
       }
       return;
     }
-    const reader = entry.createReader();
+    const reader = /** @type {FileSystemDirectoryEntry} */ (entry).createReader();
     for (;;) {
-      const batch = await new Promise((res, rej) => reader.readEntries(res, rej)).catch(() => []);
+      const batch = /** @type {FileSystemEntry[]} */ (await new Promise((res, rej) => reader.readEntries(res, rej)).catch(() => []));
       if (!batch.length) break;
       for (const e of batch) await walk(e);
     }
@@ -235,12 +286,19 @@ export async function droppedFiles(dataTransfer) {
   return { files, skipped };
 }
 
+/**
+ * @template {keyof HTMLElementTagNameMap} T
+ * @param {T} tag
+ * @param {Record<string, unknown>} [attrs]
+ * @param {(string | Node)[]} kids
+ * @returns {HTMLElementTagNameMap[T]}
+ */
 function el(tag, attrs = {}, ...kids) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
-    if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    if (k.startsWith('on')) node.addEventListener(k.slice(2), /** @type {EventListener} */ (v));
     else if (v === true) node.setAttribute(k, '');
-    else if (v !== false && v != null) node.setAttribute(k, v);
+    else if (v !== false && v != null) node.setAttribute(k, String(v));
   }
   node.append(...kids);
   return node;
@@ -253,7 +311,8 @@ const STATE = { waiting: 'Waiting', sending: '', paused: 'Paused', done: 'Done',
  * with its progress, Pause and Resume, and Cancel; a total over them; and a line naming what it left out.
  * @type {typeof import('./upload.js').mountUpload}
  */
-export function mountUpload(root, { endpoint, folder = '', accept = '', folders = true, label = 'Drop files or folders here', onDone } = {}) {
+export function mountUpload(root, { endpoint, folder = '', accept = '', folders = true, label = 'Drop files or folders here', onDone } = /** @type {MountUploadOptions} */ ({})) {
+  /** @type {Row[]} */
   const rows = []; // { file, folder, up: the handle once started, held: paused before its turn, node }
   const pickFiles = el('input', { type: 'file', multiple: true, hidden: true, accept: accept || false });
   const pickFolder = el('input', { type: 'file', hidden: true, webkitdirectory: true });
@@ -272,9 +331,10 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   const box = el('div', { class: 'cui-upload' }, zone, pickFiles, pickFolder, left, total, list);
   root.append(box);
 
+  /** @param {HTMLInputElement} input */
   const picked = (input) => {
     add(
-      [...input.files].map((file) => ({ file, path: file.webkitRelativePath || file.name })),
+      [.../** @type {FileList} */ (input.files)].map((file) => ({ file, path: file.webkitRelativePath || file.name })),
       [],
     );
     input.value = '';
@@ -282,6 +342,7 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   pickFiles.addEventListener('change', () => picked(pickFiles));
   pickFolder.addEventListener('change', () => picked(pickFolder));
   let depth = 0;
+  /** @param {DragEvent} e */
   const dragging = (e) => e.dataTransfer?.types?.includes('Files');
   zone.addEventListener('dragenter', (e) => dragging(e) && (depth++, zone.classList.add('cui-dropping')));
   zone.addEventListener('dragleave', () => --depth <= 0 && ((depth = 0), zone.classList.remove('cui-dropping')));
@@ -291,9 +352,13 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     e.preventDefault();
     depth = 0;
     zone.classList.remove('cui-dropping');
-    droppedFiles(e.dataTransfer).then(({ files, skipped }) => add(files, skipped));
+    droppedFiles(/** @type {DataTransfer} */ (e.dataTransfer)).then(({ files, skipped }) => add(files, skipped));
   });
 
+  /**
+   * @param {DroppedFile[]} files
+   * @param {{ path: string, why: string }[]} skipped
+   */
   function add(files, skipped) {
     // A new batch clears the finished rows of the last one.
     for (const r of rows.filter((r) => ['done', 'cancelled'].includes(stateOf(r)))) {
@@ -316,8 +381,12 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     next();
   }
 
+  /**
+   * @param {File} file
+   * @param {string} dir
+   */
   function row(file, dir) {
-    const r = { file, folder: dir, up: null, held: false };
+    const r = /** @type {Row} */ ({ file, folder: dir, up: null, held: false });
     const bar = el('progress', { class: 'cui-upload-bar', max: 1, value: 0 });
     const meta = el('span', { class: 'cui-upload-meta' });
     const error = el('span', { class: 'cui-upload-error', hidden: true });
@@ -357,9 +426,14 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     return r;
   }
 
+  /**
+   * @param {Row} r
+   * @returns {RowState}
+   */
   const stateOf = (r) => (r.cancelled ? 'cancelled' : r.up ? (r.up.state === 'paused' && r.queued ? 'waiting' : r.up.state) : r.held ? 'paused' : 'waiting');
   const anyRunning = () => rows.some((r) => ['sending', 'waiting'].includes(stateOf(r)));
 
+  /** @param {Row} r */
   function draw(r) {
     const s = stateOf(r);
     const sent = r.up?.sent ?? 0;

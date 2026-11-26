@@ -51,13 +51,18 @@ function adoptStyles() {
   } catch {}
 }
 
+/** @param {string} key */
 const loadDraft = (key) => {
   try {
-    return JSON.parse(localStorage.getItem(key)) ?? null;
+    return JSON.parse(localStorage.getItem(key) ?? 'null') ?? null; // JSON.parse(null) read "null" too
   } catch {
     return null;
   }
 };
+/**
+ * @param {string} key
+ * @param {string} value
+ */
 const saveDraft = (key, value) => {
   try {
     if (value) localStorage.setItem(key, JSON.stringify(value));
@@ -73,13 +78,14 @@ export function fitHeight(box) {
   // Text only got longer (a key typed): the box can only grow, so one read says whether it must, with no collapse.
   // That keeps typing to one layout a key in a long chat (#1531: 154 layouts for 49 keys before).
   // shortcut: a longer paste over lines it removes leaves the box tall until the text next gets shorter.
+  const fitted = /** @type {HTMLTextAreaElement & { fitLen?: number }} */ (box); // the length it was last fitted at
   const len = box.value.length,
-    grew = len > (box.fitLen ?? Infinity);
-  box.fitLen = len;
+    grew = len > (fitted.fitLen ?? Infinity);
+  fitted.fitLen = len;
   if (grew && box.style.height && box.scrollHeight <= box.clientHeight) return;
   // Collapsing to 'auto' can shorten the page for a moment and move the scroll: put it back after,
   // and keep a chat that was at its end there, so the growing box doesn't cover the last message.
-  const scrolled = [document.scrollingElement, box.closest('.chat')].filter(Boolean).map((el) => [el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]);
+  const scrolled = /** @type {Element[]} */ ([document.scrollingElement, box.closest('.chat')].filter(Boolean)).map((el) => /** @type {[Element, number, boolean]} */ ([el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]));
   box.style.height = 'auto';
   // Not laid out (a collapsed panel, or a phone's drawer still tucked away): keep the CSS height.
   if (!box.scrollHeight) box.style.height = '';
@@ -134,8 +140,9 @@ export function continueList(textarea, e, enterAddsLine = false) {
 
 // A scripted insert doesn't scroll the box the way a typed newline does, so the new item could sit
 // below its bottom edge: measure the text up to the caret in a hidden copy and scroll down to it.
+/** @param {HTMLTextAreaElement} textarea */
 function revealCaret(textarea) {
-  const copy = textarea.cloneNode();
+  const copy = /** @type {HTMLTextAreaElement} */ (textarea.cloneNode());
   copy.removeAttribute('id');
   copy.style.cssText += `;position:absolute;visibility:hidden;box-sizing:border-box;height:0;min-height:0;width:${textarea.offsetWidth}px`;
   copy.value = textarea.value.slice(0, textarea.selectionEnd);
@@ -155,9 +162,11 @@ function revealCaret(textarea) {
 // dialog. Nothing else moves it: not a redraw, a new message or loading earlier ones.
 
 const COARSE = '(pointer: coarse)';
+/** @type {HTMLTextAreaElement[]} */
 const live = []; // boxes mounted with autofocus, oldest first
 let listening = false;
 
+/** @param {boolean} opening */
 function caretIsFree(opening) {
   if (matchMedia(COARSE).matches || narrow()) return false;
   const a = document.activeElement;
@@ -166,6 +175,7 @@ function caretIsFree(opening) {
   return opening && !!a.matches?.('a[href], button') && !a.closest('dialog, [role=menu], [role=dialog], [contenteditable]');
 }
 
+/** @param {HTMLTextAreaElement} t */
 const takesCaret = (t) => t.isConnected && !t.disabled && !t.closest('[inert]') && t.getClientRects().length > 0;
 
 /** Put the caret in the newest box that can take it, if it is free. */
@@ -185,11 +195,15 @@ function listen() {
   // After the browser has put back whatever had the caret before (a window coming back, a dialog closing).
   const later = () => setTimeout(autofocus);
   window.addEventListener('focus', later);
-  document.addEventListener('close', (e) => e.target?.tagName === 'DIALOG' && later(), true);
+  document.addEventListener('close', (e) => /** @type {Element | null} */ (e.target)?.tagName === 'DIALOG' && later(), true);
   document.addEventListener('citadel-drawer-close', later);
 }
 
 /** Once `textarea` is on the page (a caller may build the box elsewhere first), focus it if the caret is free. */
+/**
+ * @param {HTMLTextAreaElement} textarea
+ * @param {number} [frames]
+ */
 function focusOnceShown(textarea, frames = 60) {
   if (textarea.isConnected) {
     textarea.dataset.cuiSeen = '';
@@ -207,10 +221,14 @@ function focusOnceShown(textarea, frames = 60) {
 
 /** A send that hasn't settled by now is taken as stuck: it stops holding the reload. Long enough for a video to upload. */
 const SEND_HOLD_MS = 10 * 60_000;
+/** @typedef {{ form: HTMLFormElement, canSend: (text: string) => boolean, shown: boolean }} SendingBox */
+/** @type {Set<{ at: number }>} */
 const inFlight = new Set(); // one { at } per send not settled yet
+/** @type {Set<SendingBox>} */
 const boxes = new Set(); // every box that can send without words; one off the page stays while it has something to
 let asked = false;
 
+/** @param {SendingBox} b */
 const waiting = (b) => {
   try {
     return !!b.canSend('');
@@ -230,6 +248,13 @@ function answerReload() {
 
 // ---------- the composer ----------
 
+/**
+ * @template {keyof HTMLElementTagNameMap} K
+ * @param {K} tag
+ * @param {Partial<HTMLElementTagNameMap[K]>} props
+ * @param {...(Node | string)} children
+ * @returns {HTMLElementTagNameMap[K]}
+ */
 const make = (tag, props, ...children) => {
   const el = Object.assign(document.createElement(tag), props);
   el.append(...children);
@@ -255,7 +280,7 @@ export function mountComposer(el, opts) {
   // whileBusy 'send': Stop is its own button, shown beside Send while busy, and Send keeps sending.
   const stopBeside = !!opts.stop && opts.whileBusy === 'send';
   const stopButton = stopBeside ? make('button', { type: 'button', className: 'cui-btn cui-danger cui-composer-stop', hidden: true }, 'Stop') : null;
-  stopButton?.addEventListener('click', () => opts.stop());
+  stopButton?.addEventListener('click', () => opts.stop?.()); // there only with a stop()
   const row = make('div', { className: 'cui-composer-row' }, ...(stopButton ? [stopButton] : []), sendButton);
   const form = make('form', { className: 'cui-composer' }, error, textarea, row);
   el.append(form);
@@ -277,7 +302,7 @@ export function mountComposer(el, opts) {
     if (!stopping()) return;
     // Cancelled first: stop() may end busy at once, and this click would then submit as Send.
     e.preventDefault();
-    opts.stop();
+    opts.stop?.(); // stopping() says there is one
   });
 
   const fit = () => fitHeight(textarea);

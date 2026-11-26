@@ -43,12 +43,19 @@ export function placeTip(t, w, h, vw, vh) {
  * load is forgotten so the next hover asks again. Least recently used out past `max`.
  */
 export class TipCache {
+  /** @type {Map<string, Promise<unknown>>} */
   #got = new Map();
+  /** @type {number} */
   #max;
   constructor(max = 300) {
     this.#max = max;
   }
 
+  /**
+   * @param {string} key
+   * @param {string | number} revision
+   * @param {() => unknown} load
+   */
   get(key, revision, load) {
     const k = `${revision} ${key}`;
     let hit = this.#got.get(k);
@@ -61,7 +68,7 @@ export class TipCache {
     hit = Promise.resolve().then(load);
     this.#got.set(k, hit);
     hit.catch(() => this.#got.get(k) === hit && this.#got.delete(k));
-    if (this.#got.size > this.#max) this.#got.delete(this.#got.keys().next().value);
+    if (this.#got.size > this.#max) this.#got.delete(/** @type {string} */ (this.#got.keys().next().value));
     return hit;
   }
 
@@ -73,10 +80,16 @@ export class TipCache {
 /** A tip's body while it loads: a few skeleton lines, so it opens at once at about its size. */
 const LOADING = '<div class="cui-tip-skel" aria-busy="true"><span class="cui-skeleton" data-width="medium" aria-hidden="true"></span><span class="cui-skeleton" aria-hidden="true"></span><span class="cui-skeleton" data-width="long" aria-hidden="true"></span></div>';
 
-/** Its text doesn't fit: an ellipsis or a clamp cut it off. */
+/**
+ * Its text doesn't fit: an ellipsis or a clamp cut it off.
+ * @param {HTMLElement} el
+ */
 const cutOff = (el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
 
-/** Without a `body`: the element's data-tip, as text (line breaks kept); with data-tip-overflow, only while cut off. */
+/**
+ * Without a `body`: the element's data-tip, as text (line breaks kept); with data-tip-overflow, only while cut off.
+ * @param {HTMLElement} el
+ */
 const textBody = (el) => {
   const text = el.dataset.tip;
   if (!text || (el.hasAttribute('data-tip-overflow') && !cutOff(el))) return null;
@@ -96,11 +109,12 @@ const SLOP = 10;
 
 /** Things a tap acts on: on a touch screen their tip waits for a long press. */
 const ACTS = 'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="tab"], [role="checkbox"], [role="switch"], [role="menuitem"], [role="option"]';
+/** @type {(() => void) | null} */
 let shown = null;
 let lastClosed = 0;
 
 /** The data-tip* attributes, which say which thing an element is about: a redraw's copy has the same. */
-const sameThing = (a, b) => a.id === b.id && [...a.attributes, ...b.attributes].every((at) => !at.name.startsWith('data-tip') || a.getAttribute(at.name) === b.getAttribute(at.name));
+const sameThing = /** @type {(a: Element, b: Element) => boolean} */ ((a, b) => a.id === b.id && [...a.attributes, ...b.attributes].every((at) => !at.name.startsWith('data-tip') || a.getAttribute(at.name) === b.getAttribute(at.name)));
 
 /** @type {typeof import('./tip.js').mountTips} */
 export function mountTips(root = document.body, o = {}) {
@@ -115,32 +129,44 @@ export function mountTips(root = document.body, o = {}) {
   if (o.label) pop.setAttribute('aria-label', o.label);
   document.body.append(pop);
 
+  /** @type {HTMLElement | null} */
   let at = null;
   /** Opened by a click, tap or long press: stays open when the pointer leaves. */
   let pinned = false;
   /** Opened by the mouse resting on it: Escape closes it and still reaches a dialog around it. */
   let hovered = false;
-  let timer = 0;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
   let drawn = 0;
   /** Set while Escape hands focus back, so focusing doesn't reopen it. */
   let quiet = false;
+  /** @type {{ el: HTMLElement | null, x: number, y: number, fired: boolean, timer: ReturnType<typeof setTimeout> | undefined } | null} */
   let press = null;
   const watch = new MutationObserver(() => {
     if (!at || at.isConnected) return;
     // The view redrew under the tip: follow the same thing's new element, or close.
-    const same = [...root.querySelectorAll(selector)].find((el) => sameThing(el, at));
+    const same = [...root.querySelectorAll(selector)].find((el) => sameThing(el, /** @type {HTMLElement} */ (at)));
     if (!same) return close();
-    at = same;
+    at = /** @type {HTMLElement} */ (same);
     describe(at, true);
     place();
   });
 
-  const tipOf = (t) => (t instanceof Element ? t.closest(selector) : null);
+  /** @param {EventTarget | null} t */
+  const tipOf = (t) => (t instanceof Element ? /** @type {HTMLElement | null} */ (t.closest(selector)) : null);
+  /**
+   * @param {() => void} fn
+   * @param {number} ms
+   */
   const later = (fn, ms) => {
     clearTimeout(timer);
     timer = setTimeout(fn, ms);
   };
   /** Add or take our id from the thing's aria-describedby, keeping any of the page's own. */
+  /**
+   * @param {HTMLElement} el
+   * @param {boolean} on
+   */
   function describe(el, on) {
     const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id && id !== pop.id);
     if (on) ids.push(pop.id);
@@ -157,7 +183,9 @@ export function mountTips(root = document.body, o = {}) {
     pop.style.maxHeight = `${p.maxHeight}px`;
   }
 
+  /** @param {Node | string} content */
   const fill = (content) => (typeof content === 'string' ? (pop.innerHTML = content) : pop.replaceChildren(content));
+  /** @param {unknown} e */
   function failed(e) {
     const p = document.createElement('p');
     p.className = 'cui-tip-error';
@@ -169,6 +197,7 @@ export function mountTips(root = document.body, o = {}) {
     if (!at) return;
     const el = at;
     const n = ++drawn;
+    /** @type {import('./tip.js').TipContent | Promise<import('./tip.js').TipContent>} */
     let content;
     try {
       content = body(el);
@@ -176,22 +205,28 @@ export function mountTips(root = document.body, o = {}) {
       failed(e);
       return place();
     }
+    /** @param {import('./tip.js').TipContent} c */
     const show = (c) => {
       if (c === undefined) c = textBody(el);
       if (c === null) return close();
       fill(c);
       place();
     };
-    if (typeof content?.then !== 'function') return show(content);
+    if (typeof (/** @type {Partial<PromiseLike<unknown>> | null | undefined} */ (content)?.then) !== 'function') return show(/** @type {import('./tip.js').TipContent} */ (content));
     // Only the skeleton the first time: a redraw keeps what's there until the new body comes.
     if (!pop.firstChild) pop.innerHTML = LOADING;
     place();
-    content.then(
+    /** @type {Promise<import('./tip.js').TipContent>} */ (content).then(
       (c) => n === drawn && at === el && show(c),
       (e) => n === drawn && at === el && (failed(e), place()),
     );
   }
 
+  /**
+   * @param {HTMLElement} el
+   * @param {boolean} [pin]
+   * @param {boolean} [hover]
+   */
   function open(el, pin = false, hover = false) {
     clearTimeout(timer);
     if (shown && shown !== close) shown();
@@ -204,9 +239,10 @@ export function mountTips(root = document.body, o = {}) {
     hovered = hover;
     describe(at, true);
     // Inside the topmost open modal dialog, if any: everything outside one is inert, so the tip's links couldn't be clicked.
+    /** @type {HTMLElement} */
     let home = document.body;
     try {
-      home = [...document.querySelectorAll('dialog:modal')].at(-1) ?? home;
+      home = /** @type {HTMLElement | undefined} */ ([...document.querySelectorAll('dialog:modal')].at(-1)) ?? home;
     } catch {}
     if (pop.parentNode !== home) home.append(pop); // moving it closes it, so it opens again below
     if (!pop.matches(':popover-open')) pop.showPopover();
@@ -232,7 +268,14 @@ export function mountTips(root = document.body, o = {}) {
   }
 
   const off = new AbortController();
-  const on = (el, type, fn, opts = {}) => el.addEventListener(type, fn, { signal: off.signal, ...opts });
+  /**
+   * @template {keyof GlobalEventHandlersEventMap} K
+   * @param {EventTarget} el
+   * @param {K} type
+   * @param {(e: GlobalEventHandlersEventMap[K]) => unknown} fn
+   * @param {AddEventListenerOptions} [opts]
+   */
+  const on = (el, type, fn, opts = {}) => el.addEventListener(type, /** @type {EventListener} */ (fn), { signal: off.signal, ...opts });
 
   on(root, 'pointerover', (e) => {
     if (e.pointerType !== 'mouse') return;
@@ -243,7 +286,7 @@ export function mountTips(root = document.body, o = {}) {
   for (const el of [root, pop]) {
     on(el, 'pointerout', (e) => {
       if (e.pointerType !== 'mouse' || pinned) return;
-      const to = e.relatedTarget;
+      const to = /** @type {Node | null} */ (e.relatedTarget);
       if (at && to && (pop.contains(to) || at.contains(to))) return;
       if (!at) return void clearTimeout(timer);
       later(close, CLOSE_MS);
@@ -257,7 +300,7 @@ export function mountTips(root = document.body, o = {}) {
   });
   for (const el of [root, pop]) {
     on(el, 'focusout', (e) => {
-      const to = e.relatedTarget;
+      const to = /** @type {Node | null} */ (e.relatedTarget);
       if (at && !pinned && !(to && (pop.contains(to) || at.contains(to)))) close();
     });
   }
@@ -282,7 +325,7 @@ export function mountTips(root = document.body, o = {}) {
       press = null;
     }
   });
-  for (const type of ['pointerup', 'pointercancel']) {
+  for (const type of /** @type {Array<'pointerup' | 'pointercancel'>} */ (['pointerup', 'pointercancel'])) {
     on(root, type, () => {
       if (press && !press.fired) clearTimeout(press.timer);
     });
@@ -305,10 +348,11 @@ export function mountTips(root = document.body, o = {}) {
       }
       press = null;
       if (!el) return;
-      const actor = e.target.closest(acts);
+      const t = /** @type {Element} */ (e.target);
+      const actor = t.closest(acts);
       if (!o.tapOpens && actor && el.contains(actor)) return;
       // A link inside a tap-to-open thing is its own action (a wait chip's "⇢ #N" opens that minion).
-      if (o.tapOpens && e.target.closest('a[href]') && el.contains(e.target.closest('a[href]'))) return;
+      if (o.tapOpens && t.closest('a[href]') && el.contains(t.closest('a[href]'))) return;
       if (o.tapOpens) e.preventDefault();
       // A click or tap on a thing that only shows something: open and keep it, or close it again.
       if (at === el && pinned) return close();
@@ -321,7 +365,7 @@ export function mountTips(root = document.body, o = {}) {
     press = null; // a click from the keyboard isn't the end of a long press
     if (!at) return;
     // Tab from the open thing goes into a dialog tip's links (the tip sits at the end of the page).
-    const first = pop.querySelector('a[href], button');
+    const first = /** @type {HTMLElement | null} */ (pop.querySelector('a[href], button'));
     if (e.key === 'Tab' && !e.shiftKey && document.activeElement === at && first) {
       e.preventDefault();
       first.focus();
@@ -337,10 +381,10 @@ export function mountTips(root = document.body, o = {}) {
     quiet = false;
   });
   on(document, 'pointerdown', (e) => {
-    if (at && !pop.contains(e.target) && !at.contains(e.target)) close();
+    if (at && !pop.contains(/** @type {Node} */ (e.target)) && !at.contains(/** @type {Node} */ (e.target))) close();
   });
   // Scrolling anything but the tip moves the thing out from under it.
-  on(document, 'scroll', (e) => at && !pop.contains(e.target) && close(), { capture: true, passive: true });
+  on(document, 'scroll', (e) => at && !pop.contains(/** @type {Node} */ (e.target)) && close(), { capture: true, passive: true });
   on(window, 'resize', () => at && close());
 
   return {

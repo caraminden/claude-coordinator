@@ -18,6 +18,8 @@
 // says something in passing in the top layer, so it takes no room at all, with a button (Retry) when it has one,
 // and with Undo, Ctrl-Z (Cmd-Z) presses it too.
 
+/** @import { StatusTone } from './status.js' */
+/** @type {Set<string | null | undefined>} */
 const TONES = new Set(['ok', 'warn', 'danger', 'info', 'violet', 'neutral']);
 
 /**
@@ -27,6 +29,11 @@ const TONES = new Set(['ok', 'warn', 'danger', 'info', 'violet', 'neutral']);
 export function statusSlot(el) {
   el.classList.add('cui-status');
   if (!el.hasAttribute('role')) el.setAttribute('role', 'status');
+  /**
+   * @param {string} text
+   * @param {StatusTone | null} [tone]
+   * @param {boolean} [working]
+   */
   const show = (text, tone, working) => {
     if (tone && TONES.has(tone)) el.dataset.tone = tone;
     else delete el.dataset.tone;
@@ -67,11 +74,12 @@ export function steadyLabel(el, labels, current) {
     stack.append(part);
   }
   el.replaceChildren(stack);
-  let shown = null;
+  let shown = ''; // set below before anyone can read it (set() throws otherwise)
+  /** @param {string | undefined} key */
   const set = (key) => {
     if (!parts.has(key)) throw new Error(`steadyLabel: no label "${key}"`);
     for (const [k, part] of parts) part.hidden = k !== key;
-    shown = key;
+    shown = /** @type {string} */ (key); // one of the labels' keys: has() said so
   };
   set(current ?? parts.keys().next().value);
   return {
@@ -84,8 +92,11 @@ export function steadyLabel(el, labels, current) {
 }
 
 // The same markup as strings, for views that draw HTML. Text is escaped here; `inner` is HTML you made.
+/** @type {Record<string, string>} */
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+/** @param {unknown} s */
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+/** @param {StatusTone | undefined} tone */
 const toneAttr = (tone) => (TONES.has(tone) ? ` data-tone="${tone}"` : '');
 
 /**
@@ -121,9 +132,13 @@ export function steadyLabelHtml(labels, current) {
   return `<span class="cui-steady">${parts.join('')}</span>`;
 }
 
+/** @type {HTMLElement | null} */
 let pop = null;
+/** @type {HTMLElement | null} */
 let say = null;
+/** @type {ReturnType<typeof setTimeout> | number} */
 let timer = 0;
+/** @type {(() => void) | null} */
 let onHide = null;
 let up = false; // shown, and not yet gone (hideToast)
 let shown = 0; // which toast is the latest, for its hide()
@@ -140,10 +155,13 @@ function topModal() {
 // Ctrl-Z (Cmd-Z on a Mac) beside a toast's Undo (Josh, 2026-11-12: "We should support Ctrl-Z for undo in
 // addition to the toast"; lifted from The Trans Agenda's undo-state.ts). Every Undo offered, newest last; the key
 // runs the newest that hasn't run and still makes sense, then the one before. Each runs once, by key or button.
+/** @typedef {{ text: string, run: () => void, live?: () => boolean, done: boolean }} Undo */
+/** @type {Undo[]} */
 const undos = [];
 let keyed = false;
 
 /** Ctrl-Z or Cmd-Z, not with Shift (redo) or Alt: the letter Z, or on a layout with no Latin letters the key where Z sits. */
+/** @param {KeyboardEvent} e */
 function isUndoKey(e) {
   const k = (e.key ?? '').toLowerCase();
   return (k === 'z' || (!/^[a-z]$/.test(k) && e.code === 'KeyZ')) && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
@@ -152,7 +170,9 @@ function isUndoKey(e) {
 // Input types with no text to undo: Ctrl-Z there is the app's.
 const NO_TEXT = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
 /** Focus is in something with its own text undo (a text field, a textarea, contenteditable): Ctrl-Z is the browser's. */
-function isTyping(el) {
+/** @param {EventTarget | undefined} target */
+function isTyping(target) {
+  const el = /** @type {Partial<HTMLInputElement> | undefined} */ (target);
   if (!el?.tagName) return false;
   if (el.isContentEditable) return true;
   const tag = el.tagName.toLowerCase();
@@ -160,6 +180,7 @@ function isTyping(el) {
 }
 
 /** Take `u` off the stack; true if it hasn't run and still makes sense, so it's the caller's to run now. */
+/** @param {Undo} u */
 function take(u) {
   const i = undos.indexOf(u);
   if (i >= 0) undos.splice(i, 1);
@@ -167,6 +188,7 @@ function take(u) {
   return (u.done = true);
 }
 
+/** @param {KeyboardEvent} e */
 function onUndoKey(e) {
   // composedPath()[0]: a field inside a shadow root, where e.target is only its host.
   if (e.defaultPrevented || e.repeat || !isUndoKey(e) || isTyping(e.composedPath()[0])) return;
@@ -220,7 +242,7 @@ export function toast(text, opts = {}) {
     pop.className = 'cui-toast';
     pop.setAttribute('popover', 'manual');
     // Its action's button hides its own toast, not the one the action may have shown.
-    pop.addEventListener('click', (e) => e.target.closest('.cui-toast-action') || hideToast());
+    pop.addEventListener('click', (e) => /** @type {Element} */ (e.target).closest('.cui-toast-action') || hideToast());
     say = document.createElement('div');
     say.className = 'cui-toast-say';
     say.setAttribute('role', 'status');
@@ -229,15 +251,16 @@ export function toast(text, opts = {}) {
   hideToast();
   // Inside the topmost open modal dialog, if any: everything outside one is inert, so its button couldn't be clicked nor its words heard.
   const home = topModal() ?? document.body;
-  if (pop.parentNode !== home) home.append(pop, say);
+  if (pop.parentNode !== home) home.append(pop, /** @type {HTMLElement} */ (say));
   // Out again as the dialog closes (before it may be removed), so the toast and its Retry outlive it.
   if (home !== document.body) {
     home.addEventListener(
       'close',
       () => {
-        if (pop.parentNode !== home) return;
-        document.body.append(pop, say); // moving it hides it
-        if (up) pop.showPopover();
+        const p = /** @type {HTMLElement} */ (pop); // made above, and never unset
+        if (p.parentNode !== home) return;
+        document.body.append(p, /** @type {HTMLElement} */ (say)); // moving it hides it
+        if (up) p.showPopover();
       },
       { once: true, capture: true },
     );
@@ -276,7 +299,9 @@ export function toast(text, opts = {}) {
   up = true;
   onHide = opts.onHide ?? null;
   // A frame later, so a live region made just now is in place before it changes and is heard.
-  requestAnimationFrame(() => pop.matches(':popover-open') && (say.textContent = text));
+  requestAnimationFrame(() => {
+    if (/** @type {HTMLElement} */ (pop).matches(':popover-open')) /** @type {HTMLElement} */ (say).textContent = text;
+  });
   timer = setTimeout(hideToast, opts.ms ?? 4000);
   return { hide };
 }

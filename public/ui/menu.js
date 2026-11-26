@@ -19,6 +19,8 @@
 // from a touch is answered the same way. A sheet has a grab bar, rows 44 px tall and a dimmed page behind it: a tap
 // on the dim or a swipe down on the head closes it.
 
+/** @import { MenuItem, MenuSpec, MountMenusOptions } from './menu.js' */
+
 /** Kept clear at the window's edges. */
 const EDGE = 8;
 
@@ -48,7 +50,8 @@ export function placeMenu(x, y, w, h, vw, vh) {
   return { left, top, maxHeight, flipX, flipY };
 }
 
-let open = null; // { el, close }
+/** @type {{ el: HTMLElement, close: (refocus: boolean) => void } | null} */
+let open = null;
 
 /**
  * Close the open menu, if any. Focus goes back where it was unless `refocus` is false.
@@ -64,6 +67,11 @@ export function closeMenu(refocus = true) {
  */
 export const menuOpen = () => !!open;
 
+/**
+ * @param {string} tag
+ * @param {string} [cls]
+ * @param {string | null} [text]
+ */
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -115,8 +123,9 @@ export function openMenu(spec, x, y) {
     head.append(name);
   }
   menu.append(head);
+  /** @type {string | null} */
   let from = null;
-  const items = (spec.items ?? []).filter(Boolean);
+  const items = /** @type {Array<MenuItem | '-'>} */ ((spec.items ?? []).filter(Boolean));
   items.forEach((it, i) => {
     if (it === '-') {
       if (i && i < items.length - 1 && items[i - 1] !== '-') menu.append(el('hr', 'cui-menu-sep'));
@@ -125,7 +134,7 @@ export function openMenu(spec, x, y) {
     // An app's own items sit under a "From <app>" line.
     if (it.from && it.from !== from) menu.append(el('div', 'cui-menu-from', `From ${it.from}`));
     from = it.from ?? null;
-    const b = el('button', `cui-menu-item${it.point ? ' cui-menu-point' : ''}${it.danger ? ' cui-menu-danger' : ''}`);
+    const b = /** @type {HTMLButtonElement} */ (el('button', `cui-menu-item${it.point ? ' cui-menu-point' : ''}${it.danger ? ' cui-menu-danger' : ''}`));
     b.type = 'button';
     b.setAttribute('role', 'menuitem');
     b.tabIndex = -1;
@@ -155,6 +164,7 @@ export function openMenu(spec, x, y) {
     menu.dataset.origin = `${p.flipY ? 'bottom' : 'top'} ${p.flipX ? 'right' : 'left'}`;
   } else {
     // Swipe down on the head to close: it follows the finger, and past 60 px (or let go) it closes or springs back.
+    /** @type {{ y: number, id: number, dy: number } | null} */
     let drag = null;
     head.addEventListener('pointerdown', (e) => {
       drag = { y: e.clientY, id: e.pointerId, dy: 0 };
@@ -166,6 +176,7 @@ export function openMenu(spec, x, y) {
       menu.style.transition = 'none';
       menu.style.transform = `translateY(${drag.dy}px)`;
     });
+    /** @param {PointerEvent} e */
     const end = (e) => {
       if (!drag || e.pointerId !== drag.id) return;
       const far = drag.dy > 60;
@@ -178,14 +189,16 @@ export function openMenu(spec, x, y) {
     head.addEventListener('pointercancel', end);
   }
 
-  const buttons = () => [...menu.querySelectorAll('.cui-menu-item')];
+  const buttons = () => [.../** @type {NodeListOf<HTMLElement>} */ (menu.querySelectorAll('.cui-menu-item'))];
+  /** @param {number} n */
   const focusAt = (n) => {
     const list = buttons();
     if (list.length) list[(n + list.length) % list.length].focus({ preventScroll: true });
   };
+  /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     const list = buttons();
-    const i = list.indexOf(document.activeElement);
+    const i = list.indexOf(/** @type {HTMLElement} */ (document.activeElement));
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -208,18 +221,21 @@ export function openMenu(spec, x, y) {
     }
   };
   // On a sheet the dim handles its own tap (a pointerdown that closed it would let the click fall through).
+  /** @param {Event} e */
   const onPress = (e) => {
-    if (!menu.contains(e.target) && e.target !== scrim) close(false);
+    if (!menu.contains(/** @type {Node} */ (e.target)) && e.target !== scrim) close(false);
   };
   // A scroll that moves what the menu is about (or the page) closes it; a redraw's scroll elsewhere (a list
   // rebuilt by a live update) doesn't, or menus would vanish in a busy scheme. A wheel always does.
+  /** @param {Event} e */
   const onScroll = (e) => {
     const s = e.target;
     if (s instanceof Node && menu.contains(s)) return;
     if (!(s instanceof Element) || s === document.documentElement || !returnTo?.isConnected || s.contains(returnTo)) close(false);
   };
+  /** @param {Event} e */
   const onWheel = (e) => {
-    if (!menu.contains(e.target)) close(false);
+    if (!menu.contains(/** @type {Node} */ (e.target))) close(false);
   };
   // A phone's address bar sliding away resizes the window's height: that isn't a reason to close a sheet.
   const width = innerWidth;
@@ -235,6 +251,7 @@ export function openMenu(spec, x, y) {
   addEventListener('blur', onBlur);
   addEventListener('hashchange', onBlur);
   addEventListener('popstate', onBlur);
+  /** @param {boolean} refocus */
   const close = (refocus) => {
     if (open?.el !== menu) return;
     open = null;
@@ -268,7 +285,11 @@ function topModal() {
   }
 }
 
-/** The element a redraw put in place of `gone`: same tag, same id or data-id. Null when there's none to tell by. */
+/**
+ * The element a redraw put in place of `gone`: same tag, same id or data-id. Null when there's none to tell by.
+ * @param {HTMLElement | null | undefined} gone
+ * @returns {HTMLElement | null}
+ */
 function redrawnCopy(gone) {
   if (!gone) return null;
   if (gone.id) return document.getElementById(gone.id);
@@ -285,12 +306,19 @@ const EDITABLE = 'input:not([type=button], [type=submit], [type=reset], [type=ch
  * get the browser's own. Returns a function that unmounts it.
  * @type {typeof import('./menu.js').mountMenus}
  */
-export function mountMenus({ root = document, menuFor, longPress = false } = {}) {
+export function mountMenus({ root = document, menuFor, longPress = false } = /** @type {MountMenusOptions} */ ({})) {
   let keyed = 0; // when the keyboard last opened one, so the contextmenu that follows the key is swallowed
+  /** @param {Element} target */
   const at = (target) => {
     const r = target.getBoundingClientRect();
     return [Math.max(0, r.left) + 12, Math.max(0, r.top) + Math.min(r.height, 28)];
   };
+  /**
+   * @param {Element} target
+   * @param {Event | null} e
+   * @param {number} x
+   * @param {number} y
+   */
   const show = (target, e, x, y) => {
     const spec = menuFor(target, e);
     if (!spec) return false;
@@ -300,13 +328,19 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
   // A touch long press (see the head of this file). `press.fired` also marks the contextmenu and click it leads to.
   const PRESS_MS = 450;
   const SLOP = 10;
+  /** @type {{ t: Element, x: number, y: number, fired: boolean, timer: ReturnType<typeof setTimeout> | 0 } | null} */
   let press = null;
+  /** @param {Element} t */
   const sheetFor = (t) => {
     // A tipped thing (ui/tip.js) has its own 450 ms long press: leave that to it.
     if (t.closest('.cui-menu, .cui-menu-scrim, [data-tip]') || t.closest(EDITABLE)) return null;
     const spec = menuFor(t, null);
     return spec && (typeof longPress === 'function' ? longPress(t, spec) : longPress) ? spec : null;
   };
+  /**
+   * @param {Element} t
+   * @param {MenuSpec} spec
+   */
   const showSheet = (t, spec) => {
     openMenu({ returnTo: t instanceof HTMLElement ? t : undefined, ...spec, sheet: true, foot: undefined }, 0, 0);
     navigator.vibrate?.(10);
@@ -317,7 +351,9 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
       press = null;
     }
   };
-  const onDown = (e) => {
+  /** @param {Event} ev */
+  const onDown = (ev) => {
+    const e = /** @type {PointerEvent} */ (ev);
     if (e.pointerType === 'mouse' || !longPress || !e.isPrimary) return;
     const t = e.target instanceof Element ? e.target : null;
     if (!t) return;
@@ -331,17 +367,22 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
     }, PRESS_MS);
     press = p;
   };
-  const onMove = (e) => {
+  /** @param {Event} ev */
+  const onMove = (ev) => {
+    const e = /** @type {PointerEvent} */ (ev);
     if (press && !press.fired && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) cancelPress();
   };
   // The tap that ends a fired press must not act on the thing underneath.
+  /** @param {Event} e */
   const onClick = (e) => {
     if (!press?.fired) return;
     e.preventDefault();
     e.stopPropagation();
     press = null;
   };
-  const onMenu = (e) => {
+  /** @param {Event} ev */
+  const onMenu = (ev) => {
+    const e = /** @type {MouseEvent & { pointerType?: string }} */ (ev);
     if (press?.fired) {
       e.preventDefault();
       return;
@@ -360,7 +401,7 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
       e.preventDefault();
       return;
     }
-    const t = e.target instanceof Element ? e.target : e.target?.parentElement;
+    const t = e.target instanceof Element ? e.target : /** @type {Node | null} */ (e.target)?.parentElement;
     if (!t) return;
     if (t.closest('.cui-menu')) {
       e.preventDefault();
@@ -373,7 +414,9 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
     const [x, y] = keyboard ? at(t) : [e.clientX, e.clientY];
     if (show(t, e, x, y)) e.preventDefault();
   };
-  const onKey = (e) => {
+  /** @param {Event} ev */
+  const onKey = (ev) => {
+    const e = /** @type {KeyboardEvent} */ (ev);
     if (!((e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) || e.key === 'ContextMenu')) return;
     const t = document.activeElement instanceof Element ? document.activeElement : document.body;
     if (t.closest('.cui-menu') || t.closest(EDITABLE) || !root.contains(t)) return;

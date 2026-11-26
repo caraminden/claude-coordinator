@@ -376,3 +376,54 @@ test("a tracked script's escapes are in the table only when SCRIPTS names it, an
     done();
   }
 });
+
+test('--update resolves a conflicted baseline from the stage-2 copy, lowered, and still never raises a count (#2159)', () => {
+  const two = 'export let a: any;\nexport let b: any;\n';
+  const { dir, check, done } = scratch({ 'main.ts': two, 'mine.ts': two });
+  const git = (...args: string[]) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.hooksPath=/dev/null', ...args], { cwd: dir, encoding: 'utf8' });
+  const ok = (...args: string[]) => assert.equal(git(...args).status, 0, `git ${args.join(' ')}`);
+  const baseline = () => readFileSync(join(dir, 'typecheck-baseline.json'), 'utf8');
+  /** One side's commit: one `any` fewer in a file, and the baseline lowered. */
+  const lower = (file: string) => {
+    writeFileSync(join(dir, file), 'export let a: any;\n');
+    assert.equal(check('--update').code, 0);
+    ok('commit', '-qam', file);
+  };
+  try {
+    assert.equal(check('--init').code, 0);
+    ok('add', 'typecheck-baseline.json');
+    ok('commit', '-qm', 'base');
+    ok('branch', 'work');
+    lower('main.ts');
+    ok('branch', '-M', 'onto');
+    ok('checkout', '-q', 'work');
+    lower('mine.ts');
+    assert.notEqual(git('rebase', 'onto').status, 0);
+    assert.match(baseline(), /^<{7} /m);
+
+    const plain = check();
+    assert.equal(plain.code, 1, plain.out);
+    assert.match(plain.out, /has conflict markers: run `node tools\/typecheck\.ts --update`/);
+
+    // A count above the stage-2 copy's is refused, and the file is left as it was.
+    const conflict = baseline();
+    writeFileSync(join(dir, 'main.ts'), two);
+    const up = check('--update');
+    assert.equal(up.code, 1, up.out);
+    assert.match(up.out, /main\.ts: escapes 1 → 2/);
+    assert.equal(baseline(), conflict);
+    ok('checkout', '-q', '--', 'main.ts');
+
+    // A source file still unmerged (git lists it once per stage) counts once.
+    const blob = git('rev-parse', 'HEAD:mine.ts').stdout.trim();
+    const stages = [1, 2, 3].map((n) => `100644 ${blob} ${n}\tmine.ts\n`).join('');
+    assert.equal(spawnSync('git', ['update-index', '--index-info'], { cwd: dir, input: `0 ${'0'.repeat(40)}\tmine.ts\n${stages}` }).status, 0);
+
+    const fixed = check('--update');
+    assert.equal(fixed.code, 0, fixed.out);
+    assert.match(fixed.out, /resolved the conflict/);
+    assert.equal(baseline(), '{\n  "main.ts": [0, 1],\n  "mine.ts": [0, 1]\n}\n');
+  } finally {
+    done();
+  }
+});

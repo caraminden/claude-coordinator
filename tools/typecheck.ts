@@ -17,13 +17,15 @@
  *   node tools/typecheck.ts --update   lower the baseline to today's counts (refuses while anything went up)
  *   node tools/typecheck.ts --update --moved   after moving or splitting code: take today's counts file by file,
  *                                      refused if the repo's total errors or escapes went up
+ *                                       A baseline with conflict markers (a rebase or merge): --update starts from
+ *                                       git's stage-2 copy and measures again, then `git add` the file.
  *   node tools/typecheck.ts <file>...  tsc's errors and the escapes in those files
  */
 import { execFile, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as nodeModule from 'node:module';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 // --- config: set these to this repo (everything below is the kit's, the same in every scheme) ---
@@ -321,10 +323,8 @@ const SCRIPT = /\.(?:[cm]?js|jsx)$/;
 /** The TypeScript files git tracks and the JavaScript SCRIPTS names, the escape count's files. */
 export async function tsFiles(root = ROOT, scripts = SCRIPTS): Promise<string[]> {
   const { stdout } = await run('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.cts', ...scripts], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
-  return stdout
-    .split('\0')
-    .filter(Boolean)
-    .filter((f) => existsSync(join(root, f)));
+  // An unmerged file is listed once per stage: counting each would multiply its escapes mid-rebase.
+  return [...new Set(stdout.split('\0'))].filter(Boolean).filter((f) => existsSync(join(root, f)));
 }
 
 /** Today's counts: every file with an error or an escape, and nothing else. */
@@ -385,8 +385,17 @@ function sorted(t: Table): Table {
   );
 }
 
+const conflicted = (path: string) => existsSync(path) && /^<{7} /m.test(readFileSync(path, 'utf8'));
+
+/** Git's stage-2 copy of a conflicted file: in a rebase the branch being rebased onto, in a merge the current one. */
+function stage2(path: string): string {
+  const r = spawnSync('git', ['show', `:2:./${basename(path)}`], { cwd: dirname(path), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(`${relative(ROOT, path)} has conflict markers and git has no stage-2 copy of it (was it added or committed that way?): put a whole copy back, then run --update.\n${r.stderr}`);
+  return r.stdout;
+}
+
 export function readBaseline(path = BASELINE): Table {
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, [number, number]>;
+  const raw = JSON.parse(conflicted(path) ? stage2(path) : readFileSync(path, 'utf8')) as Record<string, [number, number]>;
   return Object.fromEntries(Object.entries(raw).map(([f, [errors, escapes]]) => [f, { errors, escapes }]));
 }
 
@@ -446,6 +455,15 @@ async function main(args: string[]) {
     console.log(`wrote ${relative(ROOT, BASELINE)}`);
     return;
   }
+  const unresolved = conflicted(BASELINE);
+  if (unresolved && !args.includes('--update')) {
+    console.log(`typecheck: ${relative(ROOT, BASELINE)} has conflict markers: run \`node tools/typecheck.ts --update\`, which starts from git's stage-2 copy and measures again`);
+    process.exitCode = 1;
+    return;
+  }
+  const resolved = () => {
+    if (unresolved) console.log(`typecheck: resolved the conflict in ${relative(ROOT, BASELINE)}: \`git add\` it and carry on`);
+  };
   if (args.includes('--update') && args.includes('--moved')) {
     const next = moved(baseline, table);
     if (!next) {
@@ -455,6 +473,7 @@ async function main(args: string[]) {
     }
     writeFileSync(BASELINE, formatBaseline(next));
     console.log(`typecheck: re-filed the counts in ${relative(ROOT, BASELINE)} (totals did not rise)`);
+    resolved();
     return;
   }
   if (up.length) {
@@ -466,6 +485,7 @@ async function main(args: string[]) {
   if (args.includes('--update')) {
     writeFileSync(BASELINE, formatBaseline(lowered(baseline, table)));
     console.log(`typecheck: lowered ${down.length} count(s) in ${relative(ROOT, BASELINE)}`);
+    resolved();
   }
 }
 

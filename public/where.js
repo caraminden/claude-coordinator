@@ -137,7 +137,7 @@ export function usagePage() {
       settingsTabs(),
       h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.'),
     ),
-    settingsJump(['usage-claude', 'Claude'], ['usage-models', 'Models'], ['usage-codex', 'Codex'], ...(account?.admin ? [['usage-server', 'Server login']] : [])),
+    settingsJump(['usage-claude', 'Claude'], ['usage-models', 'Models'], ['usage-codex', 'Codex'], ...(account?.admin ? [/** @type {[string, string]} */ (['usage-server', 'Server login'])] : [])),
     h('h3', { class: 'settings-section settings-anchor', id: 'usage-claude' }, 'Claude spend'),
     pick,
     slot,

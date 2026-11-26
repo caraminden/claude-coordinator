@@ -1014,7 +1014,7 @@ const tints = new Map();
 
 /** Give `row` its scheme's tint (Cara, 2026-11-12: "Tint per scheme"), reading each icon once. */
 function tint(row, id) {
-  const src = schemeOf(id) && iconSrc(schemeOf(id));
+  const src = schemeOf(id) && iconSrc(/** @type {import('./types.js').Scheme} */ (schemeOf(id)));
   if (!src) return row;
   if (tints.get(src)) row.style.setProperty('--tint', tints.get(src));
   if (tints.has(src)) return row;

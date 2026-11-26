@@ -77,9 +77,9 @@ export const BY_TYPE = {
  */
 export const FALLBACK = { model: 'claude-opus-5-5', effort: 'medium' };
 
-/** The model and effort for a minion of this type (a fresh object). @param {string} type */
+/** The model and effort for a minion of this type (a fresh object). @param {string | null | undefined} type */
 export function pickFor(type) {
-  return { ...(BY_TYPE[type] ?? FALLBACK) };
+  return { ...(BY_TYPE[/** @type {string} */ (type)] ?? FALLBACK) };
 }
 
 // Words that give a first message's kind of work away, checked in this order; the first hit wins.

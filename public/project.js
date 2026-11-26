@@ -56,7 +56,7 @@ const PAGE_MODULES = {
   'properties.js': properties,
 };
 /** The function that draws a Settings or Orders page, from its row. */
-const pageFn = (kind) => PAGE_MODULES[pageRow(kind).module][pageRow(kind).page];
+const pageFn = (kind) => PAGE_MODULES[/** @type {import('./settings-pages.js').PageRow} */ (pageRow(kind)).module][/** @type {import('./settings-pages.js').PageRow} */ (pageRow(kind)).page];
 
 /**
  * The Releases page (#626) on `scope` ('all' or a scheme's id), `hl` a change to highlight. On the scheme already on
@@ -188,8 +188,8 @@ function renderCrumbs(main) {
           ? [projectLink, ' / ', 'Settings']
           : main.kind === 'orders'
             ? [projectLink, ' / ', 'Orders']
-            : pageRow(main.kind) && !pageRow(main.kind).own
-              ? [projectLink, ' / ', settingsLink, ' / ', pageRow(main.kind).crumb ?? pageRow(main.kind).label]
+            : pageRow(main.kind) && !(/** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).own)
+              ? [projectLink, ' / ', settingsLink, ' / ', /** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).crumb ?? /** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).label]
               : main.kind === 'artifact'
                 ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
                 : main.kind === 'releases'
@@ -420,7 +420,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
           ? settingsHome()
           : main.kind === 'orders'
             ? settingsHome(true)
-            : pageRow(main.kind) && !pageRow(main.kind).own
+            : pageRow(main.kind) && !(/** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).own)
               ? pageFn(main.kind)(main)
               : main.kind === 'releases'
                 ? releasesShell()

@@ -252,14 +252,21 @@ export class MachineTurn implements RunningTurn {
 
   /** Stopped before its claude started, as far as this copy knows: ended here, and the agent drops the start (it has its SIGTERM). */
   async endStart() {
-    // The runner doesn't wait on it (its next poll reads the end); a folder gone meanwhile has nothing left to end.
-    if (
-      !(await put(this.dir, 'exit.json', JSON.stringify({ code: null, signal: null, stopped: true })).then(
-        () => true,
-        () => false,
-      ))
-    )
-      return;
+    // The runner doesn't wait on it (its next poll reads the end); a folder gone meanwhile has nothing left to end. It holds
+    // `ending` while it writes, so the away end its own SIGTERM starts (machine away) finds it ending and writes nothing.
+    if (ending.has(this.dir)) return;
+    ending.add(this.dir);
+    try {
+      if (
+        !(await put(this.dir, 'exit.json', JSON.stringify({ code: null, signal: null, stopped: true })).then(
+          () => true,
+          () => false,
+        ))
+      )
+        return;
+    } finally {
+      ending.delete(this.dir);
+    }
     if (!machineLink.online(this.machine)) machineAway.left(this.machine, this.dir);
   }
 
@@ -298,9 +305,11 @@ export class MachineTurn implements RunningTurn {
 
 /** Write a file the runner may read at any moment: renamed into place. Off the server's thread (test/sync-calls.test.ts). */
 async function put(dir: string, name: string, data: string) {
-  await writeFile(join(dir, `${name}.tmp`), data);
-  await rename(join(dir, `${name}.tmp`), join(dir, name));
+  const tmp = join(dir, `${name}.${++puts}.tmp`); // its own, so two puts at once can't move each other's
+  await writeFile(tmp, data);
+  await rename(tmp, join(dir, name));
 }
+let puts = 0;
 
 /** Appends still on their way to a turn folder, so a SIGINT, SIGTERM, SIGKILL sent back to back reach the file in that order. */
 const appending = new Map<string, Promise<boolean>>();

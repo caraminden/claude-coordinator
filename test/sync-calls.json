@@ -379,11 +379,13 @@
  },
  "src/running-turn.ts": {
   "wrapperAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
-  "pids": ["rare",1,"POST /api/tickets/:ticket/check \"still going?\" chip, via ChildTurn.look"],
+  "pids": ["owed",1,"sync-disk-turn-stream.md: stop and kill timers (signalClaude), Runner.poll every 20 ticks per supervisor turn (keepUp), and the \"still going?\" chip (ChildTurn.look)"],
   "ChildTurn.look": ["proc",1,"reads /proc children only (\"still going?\" chip)"],
-  "ContainerTurn.endStart": ["owed",1,"sync-disk-turn-start-end.md: a Stop before a container turn's claude started (Runner stop path)"],
+  "ContainerTurn.endStart": ["owed",1,"sync-disk-turn-start-end.md: a Stop before a container turn's claude started (Runner.endLive)"],
   "ContainerTurn.reattachable": ["boot",1,"Runner.recover re-attach at startup"],
-  "hostAlive": ["owed",3,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
+  "hostAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
+  "procCmdline": ["proc",1,"reads /proc only (a host turn's wrapper check, hostAlive)"],
+  "procMounted": ["proc",1,"reads /proc only (a host turn's wrapper check, hostAlive)"],
   "containerAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
   "wrapperInProc": ["proc",2,"reads /proc cmdlines only (stale heartbeat)"]
  },

@@ -201,11 +201,16 @@ function hostAlive(dir: string): boolean | null {
     return null; // not started yet, or never will be
   }
   try {
-    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(dir);
+    return procCmdline(pid).includes(dir);
   } catch {
-    return existsSync('/proc/self') ? false : alive(pid);
+    return procMounted() ? false : alive(pid);
   }
 }
+
+/** A process's argv as /proc holds it: no disk (the proc class in test/sync-calls.json). */
+const procCmdline = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+/** Whether /proc is mounted here: no disk either. */
+const procMounted = () => existsSync('/proc/self');
 
 /**
  * A container turn's heartbeat says whether it still runs, since its pids are the container's; a stale one is only gone

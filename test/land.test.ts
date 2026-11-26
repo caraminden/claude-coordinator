@@ -1976,10 +1976,19 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
 test("--check reads main's .gitattributes, so both appending to a union file is no conflict", () => {
   const r = setup();
   r.commit(r.wt, 'log.md', 'base\nmine\n');
+  for (const d of [r.wt, r.source]) mkdirSync(join(d, 'docs'));
+  r.commit(r.wt, 'docs/notes.md', 'base\nmine\n');
   r.commit(r.source, '.gitattributes', 'log.md merge=union\n');
   r.commit(r.source, 'log.md', 'base\ntheirs\n');
-  const res = r.run({}, ['--check']);
-  assert.equal(res.status, 0, res.stderr);
+  r.commit(r.source, 'docs/.gitattributes', 'notes.md merge=union\n'); // a folder's own, as git reads it
+  r.commit(r.source, 'docs/notes.md', 'base\ntheirs\n');
+  // Conflict prep off: its rebase in a scratch checkout reads main's .gitattributes either way, so it would hide a wrong
+  // verdict from the merge-tree trial itself (git before 2.40 ignores attr.tree, #2071).
+  for (const prep of ['1', '0']) {
+    const res = r.run({ LAND_PREP: prep }, ['--check']);
+    assert.equal(res.status, 0, `LAND_PREP=${prep}: ${res.stderr}`);
+    assert.doesNotMatch(res.stderr, /conflicts with main/, `LAND_PREP=${prep}`);
+  }
 });
 
 // #1361 (Cara 2026-11-20, "Wait for a busy desktop"): while a runner is online, a ship waits LAND_CI_START_ONLINE for

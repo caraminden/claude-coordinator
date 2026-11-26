@@ -758,8 +758,12 @@ test('a land-queue/.seq that holds no number is named, and the next ticket still
 test("--check reads main's .gitattributes, so both appending to a union file is no conflict", () => {
   const r = setup();
   r.commit(r.wt, 'log.md', 'base\nmine\n');
+  for (const d of [r.wt, r.main]) mkdirSync(join(d, 'docs'));
+  r.commit(r.wt, 'docs/notes.md', 'base\nmine\n');
   r.commit(r.main, '.gitattributes', 'log.md merge=union\n');
   r.commit(r.main, 'log.md', 'base\ntheirs\n');
+  r.commit(r.main, 'docs/.gitattributes', 'notes.md merge=union\n'); // a folder's own, as git reads it
+  r.commit(r.main, 'docs/notes.md', 'base\ntheirs\n');
   const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh'), '--check'], { cwd: r.wt, encoding: 'utf8', env });
   assert.equal(res.status, 0, res.stderr);
 });

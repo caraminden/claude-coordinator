@@ -1202,12 +1202,27 @@ prep_say() {
   base=${under:-$(git merge-base "$1" "$pre")}
   say "prep: $branch will conflict with $Q_PREDNAME once $Q_PREDNAME ships; conflicted files: ${files:-none named}; record the fix against $1 from $base to $pre"
 }
+# <onto>: a scratch folder holding <onto>'s .gitattributes files (nested ones too), printed, for trial()'s merge-tree to
+# run in. git reads attributes from the worktree it runs in, then its index, and git before 2.40 ignores attr.tree, which
+# read the branch's there (#2071): so trial() runs it in this folder with an empty index, and every git reads <onto>'s
+# as the rebase onto it will. Removed after the trial.
+attrs_of() {
+  local d p
+  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") || return 1
+  while IFS= read -r -d '' p; do
+    case /$p in */.gitattributes) ;; *) continue ;; esac
+    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$1:$p" >"$d/$p" || { rm -rf "$d"; return 1; }
+  done < <(git ls-tree -r -z --name-only "$1")
+  echo "$d"
+}
 # trial <onto> <commit>: git merge-tree's trial of that commit's rebase onto <onto> (from $under, with land_under). 1 on a
 # conflict, its files (comma-separated) in $mt_files; a git that can't tell (exit 2 and up) counts as clean.
 trial() {
-  local out rc=0
+  local out rc=0 at gd
   mt_files=''
-  out=$(land_git ours -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" "$2" 2>/dev/null) || rc=$?
+  gd=$(git rev-parse --absolute-git-dir) && at=$(attrs_of "$1") || return 0
+  out=$(cd "$at" && GIT_INDEX_FILE=$at/.index land_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" "$2" 2>/dev/null) || rc=$?
+  rm -rf "$at"
   [ "$rc" = 1 ] || return 0
   mt_files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
   return 1

@@ -398,11 +398,26 @@ conflict_fix() {
 # branch whose commit main already has as a cherry-pick, with a later commit on the same lines, is refused here though
 # the rebase would skip it: the git rebase the refusal names then goes through clean. Upgrade to a replay if that bites.
 # A conflict the fix recorded with git rerere resolves counts as clean (conflict prep, above): rerere_covers replays it.
+# <onto>: a scratch folder holding <onto>'s .gitattributes files (nested ones too), printed, for trial()'s merge-tree to
+# run in. git reads attributes from the worktree it runs in, then its index, and git before 2.40 ignores attr.tree, which
+# read the branch's there (#2071): so trial() runs it in this folder with an empty index, and every git reads <onto>'s
+# as the rebase onto it will. Removed after the trial.
+attrs_of() {
+  local d p
+  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") || return 1
+  while IFS= read -r -d '' p; do
+    case /$p in */.gitattributes) ;; *) continue ;; esac
+    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$1:$p" >"$d/$p" || { rm -rf "$d"; return 1; }
+  done < <(git ls-tree -r -z --name-only "$1")
+  echo "$d"
+}
 # <onto>: git merge-tree's trial of that rebase. 1 on a conflict, its files (comma-separated) in $mt_files.
 trial() {
-  local out rc=0
+  local out rc=0 at gd
   mt_files=''
-  out=$(numbers_git ours -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
+  gd=$(git rev-parse --absolute-git-dir) && at=$(attrs_of "$1") || return 0
+  out=$(cd "$at" && GIT_INDEX_FILE=$at/.index numbers_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
+  rm -rf "$at"
   [ "$rc" = 1 ] || return 0
   mt_files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
   return 1

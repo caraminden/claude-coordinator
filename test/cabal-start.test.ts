@@ -36,9 +36,16 @@ after(async () => {
   await tmp.teardown();
 });
 
+const idle = (id: number) => until(`#${id} idle`, async () => (await s.call(`/api/tickets/${id}`)).data.ticket.status !== 'running');
+/** Dismiss a minion once its turn is over: a running one is refused with 409, and under load a first turn is still going (#2162). */
+async function dismiss(id: number) {
+  await idle(id);
+  const r = await s.call(`/api/tickets/${id}/status`, { status: 'closed' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+}
 /** A minion's call, once its turn is over (a wake mints a new token). */
 async function as(id: number, path: string, body: object) {
-  await until(`#${id} idle`, async () => (await s.call(`/api/tickets/${id}`)).data.ticket.status !== 'running');
+  await idle(id);
   const r = await fetch(`${s.base}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return { status: r.status, data: await json<Record<string, unknown> & { error?: string }>(r) };
 }
@@ -130,9 +137,7 @@ test('cabal_start starts an approved row in the build and Goal, with the lead as
   assert.equal(b.data.next, 1);
   assert.ok(rowOf('B').next_at && !minion('Do b'));
   assert.match(String((await s.call(`/api/tickets/${lead.id}/cabal?text=1`)).data.text), /B roster Do b \| next up \|/, 'the board shows it next up');
-  await until(`#${a.number} idle`, async () => (await s.call(`/api/tickets/${a.id}`)).data.ticket.status !== 'running');
-  const closed = await s.call(`/api/tickets/${a.id}/status`, { status: 'closed' });
-  assert.equal(closed.status, 200, JSON.stringify(closed.data));
+  await dismiss(a.id);
   await until('B starts from next up', () => !!minion('Do b') && rowOf('B').ticket_id != null);
   assert.equal(rowOf('B').next_at, null);
   assert.ok(!(await events(minion('Do b')!.id)).some((e) => e.kind === 'note' && /held until/.test(JSON.parse(e.data).text)), 'A is closed, so nothing to wait on');
@@ -202,8 +207,8 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   assert.equal((await board(chief.id, { action: 'red', text: 'full run red' })).status, 200);
   assert.equal((await board(chief.id, { action: 'red', text: null })).status, 200);
   const asked = async () => (await events(chief.id)).filter((e) => e.kind === 'user_message' && /Write the cabal's retro/.test(e.data)).length;
-  assert.equal((await s.call(`/api/tickets/${one.id}/status`, { status: 'closed' })).status, 200);
-  assert.equal((await s.call(`/api/tickets/${two.id}/status`, { status: 'closed' })).status, 200);
+  await dismiss(one.id);
+  await dismiss(two.id);
   await until('the lead is asked for the retro', async () => (await asked()) === 1);
   // Dismissed again: no second ask.
   await s.call(`/api/tickets/${two.id}/status`, { status: 'open' });
@@ -220,15 +225,13 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   const three = await make('Sweep three');
   const added = await board(chief.id, { action: 'row', label: 'M3', title: 'M3', minion: three.number });
   assert.equal(added.status, 200, JSON.stringify(added.data));
-  await until('#3 idle', async () => (await s.call(`/api/tickets/${three.id}`)).data.ticket.status !== 'running');
-  assert.equal((await s.call(`/api/tickets/${three.id}/status`, { status: 'closed' })).status, 200);
+  await dismiss(three.id);
   await until('asked again', async () => (await asked()) === 2);
   // A planned piece dropped after the last member went: removing its row asks too.
   const four = await make('Sweep four');
   assert.equal((await board(chief.id, { action: 'row', label: 'M4', title: 'M4', minion: four.number })).status, 200);
   const planned = await board(chief.id, { action: 'row', label: 'P', title: 'Dropped piece' });
-  await until('#4 idle', async () => (await s.call(`/api/tickets/${four.id}`)).data.ticket.status !== 'running');
-  assert.equal((await s.call(`/api/tickets/${four.id}/status`, { status: 'closed' })).status, 200);
+  await dismiss(four.id);
   assert.equal(await asked(), 2, 'the planned piece still holds it');
   assert.equal((await board(chief.id, { action: 'row', row: planned.data.row, remove: true })).status, 200);
   await until('asked once the piece is dropped', async () => (await asked()) === 3);

@@ -199,7 +199,9 @@ export class Claims {
     const from = this.get(projectId, name);
     if (!from) return undefined;
     const next = from.beside || this.waiting(projectId, name)[0];
-    this.db.exec('BEGIN');
+    // deleteTicket passes claims on inside its own transaction.
+    const nested = this.db.isTransaction;
+    if (!nested) this.db.exec('BEGIN');
     try {
       this.db.prepare('INSERT INTO claim_spans (project_id, name, holder, since, until, how) VALUES (?, ?, ?, ?, ?, ?)').run(projectId, name, from.holder, from.since, now, how);
       if (next == null) {
@@ -211,9 +213,9 @@ export class Claims {
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket IN (?, ?)').run(projectId, name, next, from.holder);
         this.db.prepare('INSERT INTO claim_queue (project_id, name, ticket, pos, added_by, added_at, done_at, how) VALUES (?, ?, ?, -1, ?, ?, ?, ?)').run(projectId, name, from.holder, from.taken_by, from.since, now, how);
       }
-      this.db.exec('COMMIT');
+      if (!nested) this.db.exec('COMMIT');
     } catch (err) {
-      this.db.exec('ROLLBACK');
+      if (!nested) this.db.exec('ROLLBACK');
       throw err;
     }
     return { from, ...(next != null && { to: this.get(projectId, name)! }) };

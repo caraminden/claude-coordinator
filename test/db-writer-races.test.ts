@@ -383,6 +383,29 @@ const manyRecords: { what: string; refuse: [on: string, when?: string]; ready: (
         .all()
         .map((r) => r.key),
   },
+  {
+    what: "a schedule's slot and its place in the history",
+    refuse: ['UPDATE ON schedules'],
+    ready: (s) => {
+      s.createProject('p', null);
+      s.schedules.create({ project_id: 1, name: 'Nightly', cron: '0 3 * * *', brief: 'b', type: 'chore', created_by: 'cara' }, 1_000);
+    },
+    act: (s) => s.schedules.ran(1, { skip: 'nothing moved' }, 2_000),
+    see: (s) => s.schedules.runs(1).map((r) => r.skip),
+  },
+  {
+    what: 'a minion and its chat, deleted',
+    refuse: ['DELETE ON tickets'],
+    ready: (s) => {
+      const p = s.createProject('p', null);
+      const t = s.createTicket({ project_id: p.id, title: 'a minion', permission_mode: 'default', created_by: 'cara' });
+      s.addEvent(t.id, 'note', { text: 'kept' });
+      // A held claim passes on inside the delete, in the delete's own transaction.
+      s.claims.take(p.id, 'lane', t.id, 'cara');
+    },
+    act: (s) => s.deleteTicket(1),
+    see: (s) => [s.listEvents(1).length, s.claims.get(1, 'lane')?.holder],
+  },
 ];
 for (const c of manyRecords)
   test(`all or nothing: ${c.what}`, async () => {

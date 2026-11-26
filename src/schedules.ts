@@ -562,18 +562,26 @@ export class Schedules {
       // The calendar is a trigger's fallback (Cara, 2026-11-24): a triggered run takes the coming slot's place.
       if ('ticketId' in outcome && outcome.triggered) next = nextRun(s.cron, next!);
     } catch {}
-    if ('ticketId' in outcome || 'skip' in outcome) {
-      this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
-    }
-    if ('ticketId' in outcome) {
-      const done = !!s.once;
-      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
-    } else if ('skip' in outcome) {
-      // The gate was reached, so an older "didn't start" is stale.
-      this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
-    } else {
-      // Never earlier than it was: a triggered run's error keeps the slot that run took.
-      this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next == null ? null : Math.max(next, s.next_run_at ?? 0), id);
+    // One commit: a crash between the history row and the schedule would leave the slot owed, and a second row for it.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if ('ticketId' in outcome || 'skip' in outcome) {
+        this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
+      }
+      if ('ticketId' in outcome) {
+        const done = !!s.once;
+        this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
+      } else if ('skip' in outcome) {
+        // The gate was reached, so an older "didn't start" is stale.
+        this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
+      } else {
+        // Never earlier than it was: a triggered run's error keeps the slot that run took.
+        this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next == null ? null : Math.max(next, s.next_run_at ?? 0), id);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw err;
     }
   }
 

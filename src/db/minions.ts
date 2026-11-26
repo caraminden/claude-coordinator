@@ -298,35 +298,43 @@ export const minionQueries = {
   picksOf(this: Store, ticketId: number) {
     return this.db.prepare('SELECT at, model, effort, by, reason FROM ticket_picks WHERE ticket_id = ? ORDER BY id').all(ticketId) as { at: number; model: string | null; effort: string | null; by: string; reason: string }[];
   },
+  /** The minion, its chat and every row of it, in one commit: a crash between can't leave a minion with no chat. */
   deleteTicket(this: Store, id: number) {
-    this.deleteSetting(askerKey(id));
-    this.deleteSetting(planKey(id));
-    this.deleteSetting(pagePlanKey(id));
-    this.deleteSetting(ownMemoryKey(id));
-    this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
-    // The main file's copy from before the move (#1169) still links to tickets, so its rows go too, or the delete below fails.
-    if (this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'events_old'").get()) this.db.prepare('DELETE FROM main.events_old WHERE ticket_id = ?').run(id);
-    this.forgetCards(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
-    this.db.prepare('DELETE FROM card_fates').run();
-    this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM turn_models WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
-    this.db.prepare('DELETE FROM turn_grunts WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
-    this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM ticket_picks WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM wait_records WHERE ticket_id = ?').run(id);
-    this.db.prepare('DELETE FROM time_log_explains WHERE ticket_id = ?').run(id);
-    this.deleteCabalOf(id);
-    this.memory.deleteTicket(id);
-    this.minionIndex.deleteTicket(id);
-    this.claims.releaseHeldBy(id);
-    this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.deleteSetting(askerKey(id));
+      this.deleteSetting(planKey(id));
+      this.deleteSetting(pagePlanKey(id));
+      this.deleteSetting(ownMemoryKey(id));
+      this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
+      // The main file's copy from before the move (#1169) still links to tickets, so its rows go too, or the delete below fails.
+      if (this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'events_old'").get()) this.db.prepare('DELETE FROM main.events_old WHERE ticket_id = ?').run(id);
+      this.forgetCards(); // events.id has no AUTOINCREMENT: a deleted newest card's id can come back as a new card
+      this.db.prepare('DELETE FROM card_fates').run();
+      this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM turn_models WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
+      this.db.prepare('DELETE FROM turn_grunts WHERE turn_id IN (SELECT id FROM turns WHERE ticket_id = ?)').run(id);
+      this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM ticket_picks WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM wait_records WHERE ticket_id = ?').run(id);
+      this.db.prepare('DELETE FROM time_log_explains WHERE ticket_id = ?').run(id);
+      this.deleteCabalOf(id);
+      this.memory.deleteTicket(id);
+      this.minionIndex.deleteTicket(id);
+      this.claims.releaseHeldBy(id);
+      this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw err;
+    }
   },
 
   /** Record what a ticket last ran with, without counting as activity (updated_at stays). */

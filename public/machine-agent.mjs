@@ -2232,7 +2232,7 @@ async function installService(name, argv) {
 // ---------- connect with a join code (Build 7 M2) ----------
 
 /** This agent's version, in its report. A row whose agent reports nothing is from before and offers Update. */
-export const AGENT_VERSION = 3;
+export const AGENT_VERSION = 4;
 
 /** A program's output, or null when it isn't there, fails or takes too long. Windows' wsl.exe writes UTF-16. */
 function probe(command, args, timeout = 8000) {
@@ -2556,6 +2556,31 @@ async function main() {
   let reported = [];
   if (managed) setInterval(() => JSON.stringify(found()) !== JSON.stringify(reported) && sendInfo(), FOUND_EVERY_MS).unref();
 
+  /** A role's Set up or Test (Build 7 M4): its steps are role-setup-agent.mjs's, taken from the app at each press as the worker's are. */
+  async function runRoleSetup(ask) {
+    const res = await fetch(new URL('/role-setup-agent.mjs', appUrl));
+    if (!res.ok) throw new Error(`could not download role-setup-agent.mjs (${res.status})`);
+    writeFileSync(join(dirname(fileURLToPath(import.meta.url)), 'role-setup-agent.mjs'), await res.text());
+    const { runSetup, exec } = await import(`./role-setup-agent.mjs?at=${Date.now()}`);
+    const send = (path, body, type) => fetch(new URL(path, appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': type }, body }).catch((err) => log(`Set up ${ask.role}: ${err.message}`));
+    log(`${ask.kind === 'test' ? 'Testing' : 'Setting up'} the ${ask.role} role, as its owner asked on the Machines page.`);
+    await runSetup({
+      ask,
+      platform: process.platform,
+      configFile,
+      appUrl,
+      token,
+      exec,
+      capture: captureScreen,
+      start: (command) => spawn(command, [], { detached: true, stdio: 'ignore' }).unref(),
+      screenBusy: () => !!(host?.screenLock && screenHolder(host.screenLock)),
+      tmp: nodeOs.tmpdir(),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      post: (body) => send('/api/machines/role-setup', JSON.stringify(body), 'application/json'),
+      upload: (bytes) => send(`/api/machines/role-setup/shot?id=${encodeURIComponent(ask.id)}`, bytes, 'image/png'),
+    });
+  }
+
   /** The app says what is ticked for this machine: on connect, and whenever a person changes a tick. */
   function setLend(lend) {
     if (!managed) return;
@@ -2727,6 +2752,12 @@ async function main() {
         setLend(msg.lend);
       } else if (msg.worker) {
         worker?.poke();
+      } else if (msg.setup) {
+        const ask = msg.setup;
+        runRoleSetup(ask).catch((err) => {
+          log(`Set up ${ask.role}: ${err.message}`);
+          fetch(new URL('/api/machines/role-setup', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ask.id, done: { ok: false, why: `The agent couldn't run it: ${err.message}` } }) }).catch(() => {});
+        });
       } else if (msg.job) {
         runner.handle(msg.job).catch((err) => log(`Job ${msg.job.id}: ${err.message}`));
       } else if (msg.host_start) {

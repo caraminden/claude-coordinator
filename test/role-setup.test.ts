@@ -102,8 +102,8 @@ test('CI is refused until one row per PC; an unknown role or kind too', () => {
 });
 
 test('an agent from before Set up is asked to Update; the screen needs Windows; offline refuses', () => {
-  assert.throws(() => world({ agent: 3 }).setups.start(world({ agent: 3 }).machine(), 'screen', 'setup', world().josh), /from before Set up/);
   const old = world({ agent: 3 });
+  assert.throws(() => old.setups.start(old.machine(), 'screen', 'setup', old.josh), /from before Set up/);
   assert.throws(() => old.setups.start(old.machine(), 'gpu', 'setup', old.josh), /press Update/);
   const linux = world({ os: 'linux' });
   assert.throws(() => linux.setups.start(linux.machine(), 'screen', 'setup', linux.josh), /needs a Windows PC.*Ubuntu/);

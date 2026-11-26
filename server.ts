@@ -2967,7 +2967,7 @@ if (MACHINES_URL) {
       try {
         const url = requestUrl(req);
         if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
-        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/machine-worker.mjs' || url.pathname === '/worker-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
+        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/machine-worker.mjs' || url.pathname === '/worker-agent.mjs' || url.pathname === '/runner-agent.mjs' || url.pathname === '/role-setup-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
         else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
         else throw new HttpError(404, 'Not found');
       } catch (err) {

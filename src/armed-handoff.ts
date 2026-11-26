@@ -68,13 +68,14 @@ export function armForLane(app: App, ticket: Ticket, args: Record<string, unknow
 }
 
 /**
- * A person or Taskmaster sets a claim's queue (the page, the queue tool). One taken out of the pipeline lane's queue with
+ * A person or Taskmaster sets a claim's queue (the page, the queue tool), and the page hears. One taken out of the pipeline lane's queue with
  * a hand-off armed for it would wait for a lane that never comes: it is disarmed and woken to say so.
  */
 export function setClaimQueue(app: App, projectId: number, name: string, queue: number[], by: string) {
   const { store } = app;
   const before = name === LANE ? store.claims.waiting(projectId, LANE) : [];
   store.claims.setQueue(projectId, name, queue, by);
+  app.broadcast({ type: 'claims', projectId });
   for (const id of before) {
     const t = store.getTicket(id);
     if (!t || queue.includes(id) || holdsLane(store.claims, t) || !store.getSetting(armedKey(id))) continue;

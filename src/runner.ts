@@ -1423,8 +1423,7 @@ export class Runner {
   /** The list's line for a minion whose own CI run is held off the desktop (CiHold.noteFor); set by server.ts. */
   heldLine?: (ticketId: number) => string | null;
 
-  /** A claim passed to a minion: ship its armed hand-off (#2046, src/armed-handoff.ts fireArmed). Set in server.ts. */
-  armed?: (ticketId: number, claim: string, fallback: (why: string) => void) => boolean;
+  armed?: (ticketId: number, claim: string, fallback: (why: string) => void) => boolean; // a claim passed: ship its armed hand-off (#2046, fireArmed); set in server.ts
   /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
   probeHold?: (ticketId: number) => boolean;
 

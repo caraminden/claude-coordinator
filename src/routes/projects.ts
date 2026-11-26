@@ -1939,7 +1939,6 @@ export const projectRoutes: Route[] = [
       // Only a queue (#1334): edit the line of a claim someone else holds, or start a free one with the first in line, who is told.
       if (queue && body.minion == null && held && held.holder !== holder?.id) {
         setClaimQueue(app, project.id, name, queue, session.name);
-        app.broadcast({ type: 'claims', projectId: project.id });
         return json(res, 200, { claim: claimView(app, held) });
       }
       const first = queue?.length && body.minion == null && !held;
@@ -1969,7 +1968,6 @@ export const projectRoutes: Route[] = [
       const held = app.store.claims.get(project.id, name);
       if (!held) throw new HttpError(404, `Nobody holds ${name}, so it has no queue`);
       setClaimQueue(app, project.id, name, queue, session.name);
-      app.broadcast({ type: 'claims', projectId: project.id });
       return json(res, 200, { claim: claimView(app, held) });
     },
   },

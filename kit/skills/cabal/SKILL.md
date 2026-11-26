@@ -57,7 +57,7 @@ A red run, a review finding or a person's report on a member's work goes, in thi
    message it the fix;
 3. **you**, only for a merge conflict or a fix of about 20 lines or fewer.
 
-Set the red line (`cabal_board` red) while a full run is red, and clear it once green. Your context is the cabal's
+Set the red line (`cabal_board` red) while a full run is red, and clear it once green, logging who fixed it. Your context is the cabal's
 most expensive: a fix past 20 lines in it costs more than the same fix in a fresh member.
 
 ## 4. A build cabal's branch
@@ -116,7 +116,9 @@ A cabal gets **one retro**, yours; no separate build retro, and the server start
   retro-log lines and the diff only where the timeline raises a question. A build cabal's also says whether the claims
   helped (refusals, moved claims, conflicts they missed). Write `cabal-<slug>.md` in the retro folder CLAUDE.md's
   Project facts name (the retro skill's default otherwise), linking the board by the address on the timeline's first
-  line, and ship it by the scheme's usual route for a doc change (a build cabal's lead: straight to main now).
+  line, and ship it by the scheme's usual route for a doc change (a build cabal's lead: straight to main now). Then
+  log `Retro: <its path>` on the board: a cabal whose lead is dismissed without that line gets the server's effort
+  retro instead.
 - **Then close:** every open ask answered, the log's last line says how it ended, and your handoffs deleted from the
   shared folder. The board stays, read-only. A retro that posts a start card keeps you open until it is answered.
 - A member closes as "merged into Build <n>" in a build cabal, as today.

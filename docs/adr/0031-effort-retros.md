@@ -47,5 +47,6 @@ The picks the brief left to the minion (#1751):
 ## A led cabal (#2096)
 
 An effort whose minions are mostly one led cabal (a lead and its board's members) gets no effort retro: the lead writes
-the cabal's one retro from the board's timeline (`citadel:cabal`, "Closing"), recorded as a skip like a build's. A lead
-dismissed before writing it leaves that cabal with none.
+the cabal's one retro from the board's timeline (`citadel:cabal`, "Closing") and logs `Retro: <path>` on the board,
+and the effort is recorded as a skip like a build's. While the lead is open without that line the effort waits; a lead
+dismissed without it leaves the effort retro to run.

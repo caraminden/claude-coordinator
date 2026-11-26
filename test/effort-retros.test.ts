@@ -204,7 +204,7 @@ test('every retro brief ends on the same start card step (#2140)', () => {
   }
 });
 
-test('an effort mostly one led cabal gets no effort retro: its lead writes the cabal retro (#2096)', async () => {
+test('an effort mostly one led cabal gets no effort retro once its lead wrote the cabal retro, waits while it is due, and gets one if none came (#2096)', async () => {
   const store = new Store(':memory:');
   const peek = store.createProject('Peek', null);
   const mk = (effort: string) => {
@@ -213,13 +213,16 @@ test('an effort mostly one led cabal gets no effort retro: its lead writes the c
     store.updateTicket(x.id, { status: 'closed' });
     return x;
   };
-  const [lead, a, b] = [mk('Led'), mk('Led'), mk('Led')];
-  store.ensureCabal(lead.id, peek.id);
-  store.addCabalRow(lead.id, { ticket_id: a.id });
-  store.addCabalRow(lead.id, { ticket_id: b.id });
-  mk('Unled');
-  mk('Unled');
-  mk('Unled');
+  const cabal = (name: string) => {
+    const [lead, a, b] = [mk(name), mk(name), mk(name)];
+    store.ensureCabal(lead.id, peek.id);
+    store.addCabalRow(lead.id, { ticket_id: a.id });
+    store.addCabalRow(lead.id, { ticket_id: b.id });
+    return lead;
+  };
+  store.addCabalLog(cabal('Led').id, '#1', 'Retro: docs/retros/cabal-led.md');
+  cabal('Dropped'); // its lead is dismissed with no retro
+  store.updateTicket(cabal('Waiting').id, { status: 'idle' });
   const made: string[] = [];
   const retros = new EffortRetros({
     store,
@@ -234,10 +237,11 @@ test('an effort mostly one led cabal gets no effort retro: its lead writes the c
     mode: 'act',
   });
   const said = await retros.tick();
-  assert.deepEqual(made, ['Retro: Unled']);
+  assert.deepEqual(made, ['Retro: Dropped']);
   assert.ok(
     said.some((l) => /"Led": no retro, .*one led cabal/.test(l)),
     said.join('\n'),
   );
   assert.ok(store.getSetting(doneKey(peek.id, 'Led')));
+  assert.equal(store.getSetting(doneKey(peek.id, 'Waiting')), null, 'not due yet: checked again later');
 });

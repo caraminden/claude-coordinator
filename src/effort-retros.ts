@@ -46,8 +46,18 @@ export function movedTo(store: Store, t: Ticket): Ticket[] {
   return out;
 }
 
-/** The lead of the cabal `t` leads or is on. */
-export const ledBy = (store: Store, t: Ticket): number | null => (store.getCabal(t.id) ? t.id : (store.cabalRowOf(t.id)?.lead_id ?? null));
+/** A cabal's retro: written (its lead logged "Retro: <file>"), still due from an open lead, or never coming. */
+export interface CabalRetro {
+  lead: number;
+  retro: 'written' | 'due' | 'none';
+}
+export function cabalRetroOf(store: Store, t: Ticket): CabalRetro | null {
+  const lead = store.getCabal(t.id) ? t.id : (store.cabalRowOf(t.id)?.lead_id ?? null);
+  if (lead == null) return null;
+  if (store.cabalLog(lead, 1000).some((l) => l.text.startsWith('Retro:'))) return { lead, retro: 'written' };
+  const open = store.getTicket(lead);
+  return { lead, retro: open && open.status !== 'closed' ? 'due' : 'none' };
+}
 
 export const doneKey = (projectId: number, name: string) => `effort-retro:${projectId}:${name}`;
 
@@ -83,7 +93,7 @@ export const TRIES = 3;
  * mostly one led cabal gets that lead's retro (#2096), not a second one. It waits while the lead is open, and a lead
  * dismissed without writing one leaves the effort retro to run.
  */
-export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => [], leadOf: (t: Ticket) => number | null = () => null): EffortVerdict[] {
+export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => [], cabalOf: (t: Ticket) => CabalRetro | null = () => null): EffortVerdict[] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
     const name = effortOf.get(t.id);
@@ -103,9 +113,11 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
     members.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
     // A major build's retro (citadel:retro, the build minion's step 5) already covers an effort that is mostly that build.
     const [top, n] = most(members, (t) => (t.build != null && majorBuild(t.build) ? t.build : null));
-    const [lead, led] = most(members, leadOf);
+    const [lead, led] = most(members, (t) => cabalOf(t)?.lead ?? null);
+    const cabal = lead != null && led * 2 > members.length ? members.map(cabalOf).find((c) => c?.lead === lead) : null;
+    if (cabal?.retro === 'due') continue;
     if (top != null && n * 2 > members.length) out.push({ name, members, act: 'skip', why: `${n} of its ${members.length} minions are Build ${top}, whose retro covers them` });
-    else if (lead != null && led * 2 > members.length) out.push({ name, members, act: 'skip', why: `${led} of its ${members.length} minions are one led cabal, whose lead writes its retro` });
+    else if (cabal?.retro === 'written') out.push({ name, members, act: 'skip', why: `${led} of its ${members.length} minions are one led cabal, whose lead wrote its retro` });
     else out.push({ name, members, act: 'start', why: `${members.length} minions, the last closed ${pacific(last)}` });
   }
   return out;
@@ -208,7 +220,7 @@ export class EffortRetros {
         now,
         majorBuild,
         (t) => movedTo(store, t),
-        (t) => ledBy(store, t),
+        (t) => cabalRetroOf(store, t),
       )) {
         const before = store.getSetting<Marker>(doneKey(project.id, v.name));
         // Marked before the start: a crash between the two loses one retro rather than starting it twice.

@@ -4,7 +4,7 @@
 // hostname, which can be changed here. An agent from before reports nothing: its row's Update opens the same panel
 // for that row.
 import { api, h } from './base.js';
-import { copyText, markdownElement } from './ui/markdown.js';
+import { markdownElement } from './ui/markdown.js';
 import { toast } from './ui/status.js';
 import { machineJoinPosix, machineJoinWindows } from './machine-setup.js';
 
@@ -86,19 +86,17 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
   const draw = () => {
     const way = OSES.find((w) => w.os === st.os);
     const command = st.join && (st.os === 'windows' ? machineJoinWindows : machineJoinPosix)(st.join.agent_url, st.join.code);
-    const copy = h('button', { type: 'button', class: 'secondary small', disabled: !command }, 'Copy');
-    copy.onclick = async () => (copy.textContent = (await copyText(command)) ? 'Copied' : "Couldn't copy");
     const done = st.state === 'connected';
     el.replaceChildren(
       h(
         'div',
         { class: 'machine-setup machine-connect', role: 'region', 'aria-label': machine ? `Update ${machine.name}` : 'Connect a computer' },
         h('div', { class: 'row' }, h('strong', {}, machine ? `Update ${machine.name}` : 'Connect a computer'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: done ? 'small' : 'secondary small', onclick: close }, done ? 'Done' : 'Close')),
-        done ? connected() : steps(way, command, copy),
+        done ? connected() : steps(way, command),
       ),
     );
   };
-  const steps = (way, command, copy) => [
+  const steps = (way, command) => [
     h(
       'div',
       { class: 'row machine-setup-ways' },
@@ -121,8 +119,6 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
           ),
         ),
       ),
-      h('span', { class: 'spacer' }),
-      copy,
     ),
     h('p', { class: 'small' }, way.where),
     command ? markdownElement(`\`\`\`${way.tag}\n${command}\n\`\`\``) : h('pre', { class: 'muted' }, st.state === 'failed' ? `Couldn't make a code: ${st.failed}` : 'Making a code…'),

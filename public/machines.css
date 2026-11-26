@@ -119,7 +119,7 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
   .mjobs-row { grid-template-columns: 14px 1fr; }
   .mjobs-row .right { grid-column: 2; }
 }
-.machine-fix { display: block; margin-top: 0.3rem; }
+.machine-fix { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }
 /* Minion turns on a machine's row (Build 7 T5, machine-worker-row.js): the tone of how it stands runs down its left. */
 .worker { --w: var(--line); display: grid; gap: 0.7rem; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-left: 3px solid var(--w); border-radius: 8px; background: color-mix(in srgb, var(--w) 5%, transparent); transition: border-color var(--citadel-motion, 120ms), background var(--citadel-motion, 120ms); }
 .worker[data-tone='ok'] { --w: var(--done); }

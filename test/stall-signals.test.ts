@@ -151,6 +151,11 @@ test('a handed-off run that gave no exit code or no CI verdict is read as one th
   assert.equal(refusalKind(`${red}${NO_CODE}`, 1), 'cut-off', 'a red printed before the cut still counts as cut off');
   assert.equal(refusalKind(red, 75), 'no-answer');
   assert.equal(refusalKind('something else', 1), null);
+  // Run by the minion, the exit code is only in the text.
+  for (const head of ['tools/land.sh exited 75 (read its output).', 'Exit code 75']) assert.equal(refusalKind(`${head}\n${red}`), 'no-answer', head);
+  // A conflict the recorded fix resolved did not refuse the ship: what came after it did.
+  const resolved = "CONFLICT (content): Merge conflict in a.ts\nland: the fix recorded ahead of time (git rerere, conflict prep) resolved the rebase's conflicts";
+  assert.equal(refusalKind(`${resolved}\n${red}`, 1), 'own-test');
 });
 
 test('a count saved before these kinds stopped counting does not fire on one real failure', () => {

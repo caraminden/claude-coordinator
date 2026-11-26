@@ -22,8 +22,12 @@ const NOT_THE_MODELS = new Set(['conflict', 'passed-alone', 'boot-copy', 'cut-of
  * ended with no exit code, whatever it printed first (as the ship trail reads it).
  */
 export function refusalKind(output: string, code: number | null = null): string | null {
-  if (code === 75) return 'no-answer';
-  return output.trimEnd().endsWith(NO_CODE.trim()) ? 'cut-off' : (classifyLandFailure(output)?.kind ?? null);
+  // A ship the minion ran itself says its exit code only in the text.
+  if (code === 75 || /^(tools\/land\.sh exited|Exit code) 75\b/.test(output)) return 'no-answer';
+  if (output.trimEnd().endsWith(NO_CODE.trim())) return 'cut-off';
+  // A conflict the recorded fix resolved (land.sh's rerere_on) didn't refuse the ship: read the rest.
+  const read = output.includes("resolved the rebase's conflicts") ? output.replace(/^CONFLICT \(.*$/gm, '') : output;
+  return classifyLandFailure(read)?.kind ?? null;
 }
 
 // A tool name only counts as the command a segment runs (at the start, or after ;, &, |, a bracket or a newline), past any

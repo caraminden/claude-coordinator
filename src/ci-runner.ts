@@ -297,7 +297,8 @@ export interface Listed {
 }
 
 /** Runner names start with their PC's hostname (add-runner.sh, .ps1). shortcut: a hostname that is another's name plus -something (desk, desk-2) is told apart by the dash only, fix when two PCs are named like that. */
-function onHost(name: string, host: string | undefined): boolean {
+/** A runner of the PC `host`: its name is the hostname, or starts with it and a dash (DESK-2). */
+export function onHost(name: string, host: string | undefined): boolean {
   const h = host?.toLowerCase();
   return !h || name.toLowerCase() === h || name.toLowerCase().startsWith(`${h}-`);
 }

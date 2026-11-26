@@ -3,13 +3,16 @@
 // run that ends well is the role's green tick. Tools and Minion turns run here (check_machine; T5's worker self-test,
 // unchanged); the Windows screen and GPU jobs, and a Windows PC's worker install, run on the PC's agent
 // (public/machine-agent.mjs, the `setup` message), which says how each step went. What needs an administrator comes
-// back as fixed needs, never a command (public/role-setup.js). CI's Set up is #2064's, once a PC is one row.
-// The last run of each role is kept in its machine_roles.setup, as `run`, beside what else is there (CI's runner_host).
+// back as fixed needs, never a command (public/role-setup.js). CI runners (#2064, on one row per PC) run here: Set up
+// shows the runner agent's administrator install and waits for it to connect, and its test asks each runner agent for
+// a job and GitHub for each lent scheme's runners there.
+// The last run of each role is kept in its machine_roles.setup, as `run`, beside what else is there (CI's runner_agent).
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cleanAdmin, SETUP_ROLES } from '../public/role-setup.js';
-import type { Machine, Store } from './db.ts';
+import { type Listed, onHost, schemeLabels } from './ci-runner.ts';
+import type { Machine, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
 import { storedReport } from './machine-join.ts';
 import { ROLE_NAMES, type Role } from './machine-roles.ts';
@@ -26,7 +29,7 @@ const MAX_STEPS = 30;
 /** The most bytes of the screen test's screenshot. */
 export const MAX_SHOT = 20 * 1024 * 1024;
 
-export type SetupRole = 'tools' | 'screen' | 'turns' | 'gpu';
+export type SetupRole = 'tools' | 'screen' | 'turns' | 'gpu' | 'ci';
 export type StepState = 'waiting' | 'running' | 'ok' | 'fail';
 export type Step = { text: string; state: StepState };
 export type Admin = { needs: string[]; pm: string | null };
@@ -42,7 +45,7 @@ export type Run = {
   why: string | null;
   /** What the PC lacks that needs an administrator; the card makes the one command (public/role-setup.js adminCommand). */
   admin: Admin | null;
-  /** Minion turns on a PC whose agent can't install the worker: the card shows T5's install command, which holds the token. */
+  /** The card shows an install command its owner runs, which holds the token: T5's worker (Minion turns on a PC whose agent can't install it), or the runner agent (CI runners). */
   worker_install: boolean;
   steps: Step[];
   /** One line on what passed: "12 tools", "RTX 4080". */
@@ -51,7 +54,7 @@ export type Run = {
   shot: number | null;
 };
 
-type Phase = 'server' | 'agent' | 'worker' | 'test';
+type Phase = 'server' | 'agent' | 'worker' | 'test' | 'runner';
 type Active = { run: Run; machineId: number; phase: Phase; heard: number; test?: string };
 
 export type RoleSetupDeps = {
@@ -63,6 +66,13 @@ export type RoleSetupDeps = {
   workers: { here(id: number): boolean; testing(id: number): boolean; startTest(m: Machine): SelfTest; view(m: Machine): { test: SelfTest | null } } | null;
   lendsWorker(m: Machine): boolean;
   ships(machineId: number): boolean;
+  /** CI runners: the runner agents connected on the row, a list job through one, the schemes its CI is lent to, and GitHub's runners of one. */
+  ci?: {
+    agents(machineId: number): { os: 'windows' | 'linux'; host: string }[];
+    list(machineId: number, os: 'windows' | 'linux'): Promise<{ ok: boolean; output: string }>;
+    lent(m: Machine): Project[];
+    listed(project: Project): Promise<Listed[]>;
+  };
   shotDir: string;
   changed(): void;
   now(): number;
@@ -101,7 +111,7 @@ export class RoleSetups {
 
   /** Start a role's Set up or Test on the owner's press. Throws an HttpError when it can't start, before anything runs. */
   start(machine: Machine, role: unknown, kind: unknown, person: { id: number; name: string; admin: boolean }): Run {
-    if (!isSetupRole(role)) throw new HttpError(400, role === 'ci' ? "CI runners' Set up comes with one row per PC; until then a CI runner host sets itself up" : `role must be one of ${SETUP_ROLES.join(', ')}`);
+    if (!isSetupRole(role)) throw new HttpError(400, `role must be one of ${SETUP_ROLES.join(', ')}`);
     if (kind !== 'setup' && kind !== 'test') throw new HttpError(400, 'kind must be setup or test');
     const name = ROLE_NAMES[role];
     // It runs installers and programs on that PC: its owner's press (a shared machine's: an admin's).
@@ -113,7 +123,17 @@ export class RoleSetups {
     const online = this.d.online(machine.id);
     let phase: Phase = 'server';
     let workerInstall = false;
-    if (role === 'turns') {
+    if (role === 'ci') {
+      // The runner agent is its own program (as administrator), so the machine agent may be off or absent.
+      if (!this.d.ci) throw new HttpError(503, 'No CI runners here');
+      if (report?.os === 'macos') throw new HttpError(409, 'CI runners need Windows or Linux');
+      if (this.d.ci.agents(machine.id).length) phase = 'test';
+      else if (kind === 'test') throw new HttpError(409, `No runner agent is connected to ${machine.name}: press Set up`);
+      else {
+        phase = 'runner';
+        workerInstall = true;
+      }
+    } else if (role === 'turns') {
       const w = this.d.workers;
       if (!w) throw new HttpError(503, 'No worker machines here');
       if (w.here(machine.id)) {
@@ -138,12 +158,14 @@ export class RoleSetups {
     const run: Run = { id: randomBytes(6).toString('hex'), role, kind, at: now, by: person.name, done: null, ok: null, why: null, admin: null, worker_install: workerInstall, steps: [], report: null, shot: null };
     const a: Active = { run, machineId: machine.id, phase, heard: now };
     this.active.set(machine.id, a);
-    if (workerInstall) run.steps.push({ text: 'Run the install command below on that PC, as its owner', state: 'running' }, { text: "The worker connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
+    if (workerInstall && role === 'ci') run.steps.push({ text: 'Run the install command below on that PC, as administrator', state: 'running' }, { text: "The runner agent connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
+    else if (workerInstall) run.steps.push({ text: 'Run the install command below on that PC, as its owner', state: 'running' }, { text: "The worker connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
     this.save(machine.id, run);
     if (phase === 'agent') {
       const caps = this.d.store.machineRoles(machine.id).find((r) => r.role === 'turns')?.caps ?? {};
       if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' ? { caps } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
-    } else if (phase === 'test') this.startTest(a, machine);
+    } else if (phase === 'test' && role === 'ci') void this.ciTest(a, machine);
+    else if (phase === 'test') this.startTest(a, machine);
     else if (role === 'tools') void this.tools(a);
     return { ...run };
   }
@@ -176,6 +198,55 @@ export class RoleSetups {
     const ok = results.every((r) => r.ok);
     run.report = ok ? `${results.reduce((n, r) => n + r.tools.length, 0)} tools` : null;
     this.finish(a, ok, ok ? null : 'A server failed to list its tools: its line says why.');
+  }
+
+  /**
+   * CI runners' self-test: each runner agent connected answers a list job, and for each scheme its CI is lent to, GitHub
+   * lists this PC's runners registered and idle (or busy). A scheme with none yet passes: one registers when its CI first
+   * asks (src/ci-auto.ts).
+   */
+  private async ciTest(a: Active, machine: Machine) {
+    const ci = this.d.ci!;
+    a.phase = 'test';
+    const agents = ci.agents(machine.id);
+    const kinds = (os: string) => (os === 'linux' ? 'Linux' : 'Windows');
+    for (const g of agents) this.step(a, a.run.steps.length, { text: `${kinds(g.os)} runner agent connected, from ${clean(g.host, 80)}`, state: 'ok' });
+    let ok = true;
+    for (const g of agents) {
+      const at = a.run.steps.length;
+      this.step(a, at, { text: `The ${kinds(g.os)} runner agent answers a job (it lists its runners)`, state: 'running' });
+      const r = await ci.list(machine.id, g.os).catch((err: Error) => ({ ok: false, output: err.message }));
+      if (this.active.get(a.machineId) !== a) return;
+      const last = clean(r.output.trim().split('\n').at(-1), 160);
+      this.step(a, at, { text: `The ${kinds(g.os)} runner agent answers a job${r.ok ? '' : `: ${last || 'it failed'}`}`, state: r.ok ? 'ok' : 'fail' });
+      ok &&= r.ok;
+    }
+    let runners = 0;
+    const schemes = ci.lent(machine);
+    for (const p of schemes) {
+      const at = a.run.steps.length;
+      this.step(a, at, { text: `${p.name}: asking GitHub for its runners here`, state: 'running' });
+      let mine: Listed[];
+      try {
+        const labels = new Set(schemeLabels(p.name));
+        // Its labels and their role labels (land, side, long, check) all start with one of the scheme's labels.
+        const ofScheme = (l: string) => [...labels].some((x) => l === x || l.startsWith(`${x}-`));
+        mine = (await ci.listed(p)).filter((x) => agents.some((g) => onHost(x.name, g.host)) && x.labels.some(ofScheme));
+      } catch (err) {
+        if (this.active.get(a.machineId) !== a) return;
+        this.step(a, at, { text: `${p.name}: ${clean((err as Error).message, 240)}`, state: 'fail' });
+        ok = false;
+        continue;
+      }
+      if (this.active.get(a.machineId) !== a) return;
+      runners += mine.length;
+      const off = mine.filter((x) => x.status !== 'online');
+      const words = mine.map((x) => `${clean(x.name, 60)} ${x.status !== 'online' ? x.status : x.busy ? 'busy' : 'idle'}`).join(', ');
+      this.step(a, at, { text: mine.length ? `${p.name}: ${words}` : `${p.name}: no runner here yet; one registers by itself when its CI first asks`, state: off.length ? 'fail' : 'ok' });
+      ok &&= !off.length;
+    }
+    a.run.report = ok ? `${runners} runner${runners === 1 ? '' : 's'} for ${schemes.length} scheme${schemes.length === 1 ? '' : 's'}` : null;
+    this.finish(a, ok, ok ? null : 'A check failed: its line says why.');
   }
 
   private startTest(a: Active, machine: Machine) {
@@ -224,7 +295,14 @@ export class RoleSetups {
           }
           this.startTest(a, machine);
         } else if (now - a.heard > WORKER_WAIT_MS) this.finish(a, false, `No worker came up on ${machine.name} in ${WORKER_WAIT_MS / 60_000} minutes: run the install command there, then press Set up again`);
-      } else if (a.phase === 'test') this.mirror(a, machine);
+      } else if (a.phase === 'runner') {
+        if (this.d.ci?.agents(a.machineId).length) {
+          a.run.steps = a.run.steps.map((s) => ({ ...s, state: 'ok' }));
+          a.run.steps[1] = { text: 'The runner agent connected to Citadel', state: 'ok' };
+          a.run.worker_install = false;
+          void this.ciTest(a, machine);
+        } else if (now - a.heard > WORKER_WAIT_MS) this.finish(a, false, `No runner agent connected to ${machine.name} in ${WORKER_WAIT_MS / 60_000} minutes: run the install command there as administrator, then press Set up again`);
+      } else if (a.phase === 'test' && a.run.role !== 'ci') this.mirror(a, machine);
     }
   }
 

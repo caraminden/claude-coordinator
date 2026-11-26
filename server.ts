@@ -58,7 +58,7 @@ import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
-import { CiAuto, noMachineCard, PASS_MS as CI_AUTO_PASS_MS } from './src/ci-auto.ts';
+import { CiAuto, lendsCi, noMachineCard, PASS_MS as CI_AUTO_PASS_MS } from './src/ci-auto.ts';
 import { MachineBalancer } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
@@ -790,6 +790,17 @@ machines.roleSetups = new RoleSetups({
   workers,
   lendsWorker: (m) => machines.lendsWorker(m),
   ships: (id) => machines.shipsAtWorker(id),
+  // CI runners (#2064): the runner agents on the row, a list job through one, and GitHub's runners of each lent scheme.
+  ci: {
+    agents: (id) =>
+      (['windows', 'linux'] as const).flatMap((os) => {
+        const host = machines.runnerHost(id, os);
+        return host ? [{ os, host }] : [];
+      }),
+    list: (id, os) => machines.runnerJob(id, { op: 'list' }, os),
+    lent: (m) => store.listProjects().filter((p) => repoSlug(p.repo_url) && lendsCi(store, m, p)),
+    listed: (project) => runnerTokens.listed(project),
+  },
   shotDir: join(DATA_DIR, 'role-shots'),
   changed: () => broadcast({ type: 'machines', machines: machines.list() }),
   now: Date.now,

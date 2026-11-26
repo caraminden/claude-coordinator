@@ -10,6 +10,8 @@ import type { CheckResult } from '../src/machines.ts';
 import { agentRoutes } from '../src/routes/machines.ts';
 import { QUIET_MS, RoleSetups, storedRun, WORKER_WAIT_MS, type RoleSetupDeps } from '../src/role-setup.ts';
 import type { SelfTest } from '../src/worker-join.ts';
+import type { Listed } from '../src/ci-runner.ts';
+import type { Project } from '../src/db.ts';
 
 // A role's Set up and self-test (Build 7 M4): the owner's press, the steps the card shows, and the run kept on the role.
 const dir = mkdtempSync(join(tmpdir(), 'role-setup-'));
@@ -28,6 +30,8 @@ function world(o: { os?: 'windows' | 'linux' | 'macos'; agent?: number; online?:
   store.updateMachine(m.id, { report: report(o.os ?? 'windows', o.agent ?? 4) });
   const sent: unknown[] = [];
   const w = { here: false, testing: false, test: null as SelfTest | null };
+  // CI runners (#2064): the runner agents on the row, what a list job answers, the lent schemes and GitHub's runners.
+  const ci = { agents: [] as { os: 'windows' | 'linux'; host: string }[], list: { ok: true, output: 'actions.runner.x Running' }, lent: [] as Project[], runners: new Map<number, Listed[] | Error>() };
   let now = 1_000_000;
   const deps: RoleSetupDeps = {
     store,
@@ -42,6 +46,16 @@ function world(o: { os?: 'windows' | 'linux' | 'macos'; agent?: number; online?:
     },
     lendsWorker: () => true,
     ships: () => false,
+    ci: {
+      agents: () => ci.agents,
+      list: async () => ci.list,
+      lent: () => ci.lent,
+      listed: async (p) => {
+        const r = ci.runners.get(p.id) ?? [];
+        if (r instanceof Error) throw r;
+        return r;
+      },
+    },
     shotDir: join(dir, `shots-${n}`),
     changed: () => {},
     now: () => now,
@@ -49,7 +63,7 @@ function world(o: { os?: 'windows' | 'linux' | 'macos'; agent?: number; online?:
   const setups = new RoleSetups(deps);
   const machine = () => store.getMachine(m.id)!;
   const as = (u: typeof josh) => ({ id: u.id, name: u.name, admin: !!u.admin });
-  return { store, setups, deps, sent, w, machine, josh: as(josh), mike: as(mike), cara: as(cara), tick: (ms = 0) => ((now += ms), setups.tick()), run: (role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci') => storedRun(store, m.id, role) };
+  return { store, setups, deps, sent, w, ci, machine, josh: as(josh), mike: as(mike), cara: as(cara), tick: (ms = 0) => ((now += ms), setups.tick()), run: (role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci') => storedRun(store, m.id, role) };
 }
 
 const settle = () => new Promise((r) => setImmediate(r));
@@ -96,9 +110,11 @@ test("only the owner presses it, a shared machine's an admin; one run at a time"
   assert.equal(t.setups.start(t.store.getMachine(shared.id)!, 'gpu', 'test', t.cara).role, 'gpu');
 });
 
-test('CI is refused until one row per PC; an unknown role or kind too', () => {
+test('an unknown role or kind is refused; CI on a Mac, or Test with no runner agent, too', () => {
   const t = world();
-  assert.throws(() => t.setups.start(t.machine(), 'ci', 'setup', t.josh), /one row per PC/);
+  const mac = world({ os: 'macos' });
+  assert.throws(() => mac.setups.start(mac.machine(), 'ci', 'setup', mac.josh), /Windows or Linux/);
+  assert.throws(() => t.setups.start(t.machine(), 'ci', 'test', t.josh), /No runner agent is connected to josh-pc: press Set up/);
   assert.throws(() => t.setups.start(t.machine(), 'disk', 'setup', t.josh), /role must be/);
   assert.throws(() => t.setups.start(t.machine(), 'tools', 'go', t.josh), /kind must be/);
 });
@@ -232,4 +248,58 @@ test('the admin command comes from fixed words only, one shell for one OS', () =
   const other = adminCommand({ needs: ['podman'], pm: 'pacman' })!;
   assert.equal(other.command, null);
   assert.match(other.after, /neither apt nor dnf/);
+});
+
+test('CI runners: Set up shows the install command and waits for the runner agent, then tests it with the PC offline', async () => {
+  const t = world({ online: false });
+  const delve = t.store.createProject('Delve', 'https://github.com/caraminden/delve.git', t.josh.id);
+  const run = t.setups.start(t.machine(), 'ci', 'setup', t.josh);
+  assert.equal(run.worker_install, true, 'the card shows the runner agent install');
+  assert.match(run.steps[0].text, /as administrator/);
+  assert.deepEqual(t.sent, [], 'nothing goes to the machine agent');
+  t.tick(5000);
+  assert.equal(t.run('ci')!.done, null);
+  t.ci.agents = [{ os: 'linux', host: 'JOSH-PC' }];
+  t.ci.lent = [delve];
+  t.ci.runners.set(delve.id, [
+    { id: 1, name: 'JOSH-PC', status: 'online', busy: false, labels: ['self-hosted', 'delve-ci-linux'] },
+    { id: 2, name: 'JOSH-PC-2', status: 'online', busy: true, labels: ['delve-ci-linux-side'] },
+    { id: 3, name: 'OTHER-PC', status: 'offline', busy: false, labels: ['delve-ci-linux'] },
+  ]);
+  t.tick(5000);
+  await settle();
+  const kept = t.run('ci')!;
+  assert.equal(kept.worker_install, false);
+  assert.deepEqual(
+    kept.steps.map((x) => `${x.state} ${x.text}`),
+    ['ok Run the install command below on that PC, as administrator', 'ok The runner agent connected to Citadel', 'ok Linux runner agent connected, from JOSH-PC', 'ok The Linux runner agent answers a job', 'ok Delve: JOSH-PC idle, JOSH-PC-2 busy'],
+    "another PC's runner, offline, isn't this PC's",
+  );
+  assert.equal(kept.ok, true);
+  assert.equal(kept.report, '2 runners for 1 scheme');
+});
+
+test("CI runners' Test fails on a runner GitHub shows offline, a GitHub refusal or a job the agent fails; a scheme with none yet passes", async () => {
+  const t = world();
+  const [a, b, c] = ['Delve', 'Peek Auras', 'Cantrips'].map((n) => t.store.createProject(n, `https://github.com/caraminden/${n.toLowerCase().replace(' ', '-')}.git`, t.josh.id));
+  t.ci.agents = [{ os: 'windows', host: 'JOSH-PC' }];
+  t.ci.lent = [a, b, c];
+  t.ci.runners.set(a.id, [{ id: 1, name: 'JOSH-PC', status: 'offline', busy: false, labels: ['delve-ci'] }]);
+  t.ci.runners.set(b.id, new Error("Cara's GitHub login can't reach caraminden/peek-auras"));
+  t.ci.list = { ok: false, output: 'line one\nThe agent is busy with another job' };
+  t.setups.start(t.machine(), 'ci', 'test', t.josh);
+  await settle();
+  await settle();
+  const kept = t.run('ci')!;
+  assert.deepEqual(
+    kept.steps.map((x) => `${x.state} ${x.text}`),
+    [
+      'ok Windows runner agent connected, from JOSH-PC',
+      'fail The Windows runner agent answers a job: The agent is busy with another job',
+      'fail Delve: JOSH-PC offline',
+      "fail Peek Auras: Cara's GitHub login can't reach caraminden/peek-auras",
+      'ok Cantrips: no runner here yet; one registers by itself when its CI first asks',
+    ],
+  );
+  assert.equal(kept.ok, false);
 });

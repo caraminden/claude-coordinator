@@ -225,7 +225,7 @@ export interface SetupAdmin {
 /** A role's Set up or Test run, in the role's setup.run (src/role-setup.ts Run). */
 export interface SetupRun {
   id: string;
-  role: 'tools' | 'screen' | 'turns' | 'gpu';
+  role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci';
   kind: 'setup' | 'test';
   at: number;
   by: string;

@@ -1,6 +1,6 @@
 # One ship script and one way of batching ships, for every scheme
 
-Status: accepted, 2026-11-21. Decided on #1304's cards; step 2 of its five (#1321) turns batching on in the kit's template and adds the `land_deploy` and `land_rebased` hooks; step 3 (#1322) adds Citadel's other extras as hooks and ship-time merges; the later steps move Citadel onto the template. Supersedes ADR 0020's "Where it lives". Design: the shared folder's `specs/one-ship-batching.md`.
+Status: accepted, 2026-11-21; Citadel's move onto the kit's script superseded 2026-11-26 (#2099). The switch (`SHIP_CORE`) was never turned on, and Josh picked "Delete it" on #1921's card (2026-11-26): Citadel ships on its own `tools/land.sh`, whose train stands (ADR 0020), and `tools/land.local.sh` keeps only the ship-time merge rules land.sh's merge driver reads. The kit's batches for every other scheme stand, and so does "Keep both, port by rule" (Cara, 2026-11-22). Was: Decided on #1304's cards; step 2 of its five (#1321) turns batching on in the kit's template and adds the `land_deploy` and `land_rebased` hooks; step 3 (#1322) adds Citadel's other extras as hooks and ship-time merges; the later steps move Citadel onto the template. Supersedes ADR 0020's "Where it lives". Design: the shared folder's `specs/one-ship-batching.md`.
 
 Citadel's own `tools/land.sh` batched ships with a train (ADR 0020) and every other scheme's copy of the kit's
 template batched them with `CI_BATCH`. The two are one idea: stack the waiting ships on each other, run CI once on

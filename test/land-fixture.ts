@@ -25,7 +25,6 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const quiet = quietProc(join(root, 'proc'));
 export const env = {
   ...scriptEnv(),
-  LAND_CORE: process.env.CITADEL_TEST_LAND_CORE,
   COORDINATOR_CONTAINER: undefined,
   COORDINATOR_SHARED_DIR: undefined,
   CITADEL_HEAVY_DIR: join(root, 'heavy'),

@@ -69,14 +69,6 @@
 # Paths can be overridden with DEPLOY_LIVE and DEPLOY_SOURCE, as for deploy.sh (how it is tested).
 set -euo pipefail
 
-# The switch (#1323, one ship batching step 4): 1 ships on the kit's core script instead of the rest of this file:
-# tools/land-core.sh, a link to kit/skills/scheme-setup/templates/land.sh, with Citadel's tools/land.local.sh. 0 runs
-# this file as it was, the fallback. LAND_CORE=0 or 1 sets it for one run (tests; a person putting one ship back).
-# Not when this file re-ran itself mid-landing (LAND_REBASED: the copy a rebase brought in, holding this script's
-# lock and ticket): that landing ends on this script.
-SHIP_CORE=0
-if [ "${LAND_CORE:-$SHIP_CORE}" = 1 ] && [ -z "${LAND_REBASED:-}" ]; then exec bash "$(dirname "${BASH_SOURCE[0]}")/land-core.sh" "$@"; fi
-
 LIVE=${DEPLOY_LIVE:-$HOME/claude-coordinator}
 SOURCE=${DEPLOY_SOURCE:-$HOME/.local/share/claude-coordinator/projects/2/repo}
 

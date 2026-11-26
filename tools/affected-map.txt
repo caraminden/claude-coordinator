@@ -125,6 +125,13 @@ desktop/**: test/desktop-route.test.ts test/desktop-keys.test.ts test/desktop-ap
 kit/desktop-launcher/**: test/desktop-launcher-trial.test.ts test/desktop-feed.test.ts
 tools/skill-evals/**: test/skill-evals.test.ts
 
+# Guards that scan a whole source tree and take seconds (effort retro "Push failure gaps": #1881 waited 105 min in line,
+# then CI refused it on one-pacific, which no rule picked). The fast ones are in tools/always-tests.txt; either way a
+# new guard of this kind goes in REPO_WIDE in test/affected.test.ts.
+src/**: test/worker-tla.test.ts
+server.ts: test/worker-tla.test.ts
+public/**: test/frontend-syntax.test.ts
+
 # Test code: the guards over every test file.
 test/**: test/one-until.test.ts test/raw-log-read.test.ts
 

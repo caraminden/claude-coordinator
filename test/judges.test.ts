@@ -92,7 +92,11 @@ test('every pinned symbol is found, and every judge with a replay matches its la
     if (j.replay !== true) continue;
     const rec = records[j.id];
     assert.ok(rec, `${j.id} has a replay but none is recorded: run node tools/judge-replay.ts ${j.id} --record`);
-    assert.equal(rec.hash, judgeHash(j, ROOT), `${j.name}'s code changed since its last replay (${rec.at}; pinned code: ${j.pins.map((p) => p.path).join(' ')}). Run node tools/judge-replay.ts ${j.id}, read what it would do now beside what it did, then add --record and commit test/judge-replays.json`);
+    assert.equal(
+      rec.hash,
+      judgeHash(j, ROOT),
+      `${j.name}'s code changed since its last replay (${rec.at}; pinned code: ${j.pins.map((p) => p.path).join(' ')}). Run node tools/judge-replay.ts ${j.id}, read what it would do now beside what it did, then add --record and commit test/judge-replays.json (in a container turn, the host_check tool with what: "judge_replay" does both on the host)`,
+    );
   }
 });
 

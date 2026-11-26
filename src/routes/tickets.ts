@@ -1602,10 +1602,14 @@ export const ticketRoutes: Route[] = [
     async handler({ req, res, app, caller }) {
       const body = await readJson(req);
       // The database holds every scheme's chat, so only a turn whose person sees every scheme reads it (db.ts canSee).
-      const refused = body?.what === 'db' ? adminAskRefusal(app.store, caller!.id) : null;
+      // A judge replay reads it too (#2074), and runs in the caller's worktree with the environment a land gets.
+      const reads = body?.what === 'db' || body?.what === 'judge_replay';
+      const refused = reads ? adminAskRefusal(app.store, caller!.id) : null;
       if (refused) throw new HttpError(403, refused);
       const { systemctl, journalctl } = app.services.opts;
-      return json(res, 200, { output: await hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl }, body) });
+      const own = body?.what === 'judge_replay' && caller!.kind === 'ticket' && caller!.cwd ? caller! : null;
+      const worktree = own ? { cwd: own.cwd!, env: app.runner.hostEnv(own, bearer(req)) } : null;
+      return json(res, 200, { output: await hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl, worktree }, body) });
     },
   },
   {

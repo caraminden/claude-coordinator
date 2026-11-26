@@ -130,7 +130,8 @@ tools/skill-evals/**: test/skill-evals.test.ts
 # new guard of this kind goes in REPO_WIDE in test/affected.test.ts.
 src/**: test/worker-tla.test.ts
 server.ts: test/worker-tla.test.ts
-public/**: test/frontend-syntax.test.ts
+# worker-tla follows a worker's imports into public/ (src/reader.ts imports public/progress.js through src/runner.ts).
+public/**: test/frontend-syntax.test.ts test/worker-tla.test.ts
 
 # Test code: the guards over every test file.
 test/**: test/one-until.test.ts test/raw-log-read.test.ts

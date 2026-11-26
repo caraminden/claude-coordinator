@@ -25,7 +25,7 @@ Times are Pacific.
    - **Shipped:**
      - The five that take under 0.3 s each go on `tools/always-tests.txt`, which the smoke check and every
        `citadel-test` run read.
-     - The two that take seconds (worker-tla 9.9 s, frontend-syntax 4.3 s[^t]) go on the map.
+     - The two that take seconds (worker-tla 7.5 to 9.9 s, frontend-syntax 4.3 s[^t]) go on the map.
      - All seven go on `REPO_WIDE` in `test/affected.test.ts`, which fails when one is dropped from both lists.
    - **Still open:** `REPO_WIDE` is hand-kept (its own `shortcut:` comment), so a new guard can be missed again. No
      heuristic separated the source-tree scans from the 60-odd tests that read their own temp folders[^g], so
@@ -49,8 +49,8 @@ Times are Pacific.
      - "nobody saw it until I read the cgroups by hand";
      - "the oomd and hold-schemes code".
 
-   The Taskmaster sent corrections 2 s after making each minion, at 18:05:15 and 18:05:17, before either
-   started[^m]. So the rule fired on re-reading the brief, not while writing it. This time it cost nothing; held
+   The Taskmaster sent corrections 36 s and 25 s after making them (at 18:05:15 and 18:05:17), while both were
+   still sealed[^m]. So the rule fired on re-reading the brief, not while writing it. This time it cost nothing; held
    mail reached both before their first turn.
    - #1881 still found that one clause of its brief was moot: no Citadel code freezes units, so the "frozen on
      purpose" flag it was told to honour is never set.
@@ -63,7 +63,7 @@ Times are Pacific.
    - Its line wait was 4806 s and its CI run 808 s, from the hand-off at 20:17 PST to live at 23:42 PST[^l].
    - On Nov 25 (UTC day), `size-budget.test.ts` was in 63 of the 101 rebase and train-prep conflicts[^s].
    - #1917's count rule (size-list edits merge by themselves) shipped about 02:13 PST. The last size-budget
-     conflict was at 02:46 PST, and none since, including all of Nov 26 UTC[^s]. No action.
+     conflict was at 02:46 PST, and none in Nov 26 UTC's log up to when this ran (about 16:30 PST Nov 25)[^s]. No action.
 5. **#1881's screenshots couldn't show a frozen row.**
    - The dev copy passes no fixture for a frozen ship, and the Releases row needs a deploy target. The critic judged
      a static page, failed round 1, and was never shown the fix[^m].
@@ -105,9 +105,9 @@ events mentioning `1880` between 18:04 and 19:50 PST. The trial numbers and crit
 appears in `tools/affected-map.txt` or `tools/always-tests.txt`. The seven were confirmed by reading each file's scan.
 [^t]: `tools/citadel-node --no-warnings --test test/<name>.test.ts`, timed wall-clock on perigee, 2026-11-25:
 one-pacific 297 ms, one-home 275, css-has-cost 189, help-words 193, unit-thp 219, frontend-syntax 4296, worker-tla
-9897.
+9897 (7.5 s at the re-check).
 [^s]: `grep -E 'conflict' retro-log/<day>/land.md | grep -c size-budget` against `grep -c -E 'conflict'`, for days
-2026-11-25 (63 of 101) and 2026-11-26 (0 of 12), run 2026-11-25. The last one is the 10:46:41Z line. #1917's land
+2026-11-25 (63 of 101) and 2026-11-26 (0 of 12 when first run, 0 of 13 at the re-check; that log was still growing), run 2026-11-25. The last one is the 10:46:41Z line. #1917's land
 conflict at 10:12:58Z dates its ship.
 [^c]: `host_check db`, 2026-11-25: the last `result` event's `total_cost_usd` per minion (ticket ids 3837 and 3838).
 That it is cumulative within a minion is my reading of the rising values (1.91, 11.25, … 15.34), not checked against

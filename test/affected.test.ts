@@ -109,6 +109,13 @@ test('the route test runs for the paths that can move the route table, and not o
   assert.ok(!picked('test/ports.test.ts').includes('test/access-matrix.test.ts'));
 });
 
+// Effort retro "Push failure gaps" (#2065): the slow source-tree guards ride the map, so each path that can break one picks it.
+test('the slow source-tree guards are picked by every path they scan', () => {
+  const picked = (path: string) => lines([path]).run.map((r) => r.test);
+  for (const path of ['server.ts', 'src/runner.ts', 'src/routes/x.ts', 'public/progress.js']) assert.ok(picked(path).includes('test/worker-tla.test.ts'), path);
+  for (const path of ['public/core.js', 'public/ui/chat.js']) assert.ok(picked(path).includes('test/frontend-syntax.test.ts'), path);
+});
+
 test('the command prints which rule picked each test', () => {
   const r = spawnSync('node', ['tools/affected.ts', '--paths', 'src/db.ts', 'NOTES.txt'], { cwd: repo, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);

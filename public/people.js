@@ -9,23 +9,47 @@ import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { loadingLine } from './ui/state.js';
 
+/** @import { Child } from './base.js' */
+/** @import { View } from './types.js' */
+/** @typedef {{ slug: string, state?: string, error?: string, failed?: boolean, login?: string }} MemberGithub */
+/** @typedef {{ id: number, name: string, login: string, owner: boolean, github?: MemberGithub | null }} Member */
+/** @typedef {{ id: number, name: string, login: string }} Who */
+/** @typedef {{ id: number, name: string, login: string, admin?: boolean, disabled?: boolean, invite_open?: boolean, has_password?: boolean, server_login?: boolean, server_login_owner?: boolean, claude_accounts: number, claude?: string, week?: { utilization: number }, github?: { login: string, failed?: boolean } | null }} Person */
+/** @typedef {Record<string, unknown>} Patch */
+
+/**
+ * @param {string} title
+ * @param {Child} meta
+ */
 function head(title, meta) {
-  return h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), h('div', { class: 'meta' }, meta));
+  return h(
+    'div',
+    { class: 'ticket-head' },
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    settingsTabs(),
+    h('div', { class: 'meta' }, meta),
+  );
 }
 
 // Rows left open, by key, across the redraws every change here causes.
+/** @type {Set<string>} */
 const openRows = new Set();
+/**
+ * @param {string} key
+ * @param {Parameters<typeof settingsRow>[0]} opts
+ * @param {...Child} body
+ */
 function personRow(key, opts, ...body) {
   const [row] = settingsRow({ ...opts, open: openRows.has(key) }, ...body);
   row.addEventListener('toggle', () => openRows[row.open ? 'add' : 'delete'](key));
   return row;
 }
 
-const page = (...children) => h('section', { class: 'artifacts-main people-main' }, ...children);
-const fail = (err) => alert(err.message);
+const page = (/** @type {Child[]} */ ...children) => h('section', { class: 'artifacts-main people-main' }, ...children);
+const fail = (/** @type {Error} */ err) => alert(err.message);
 
 /** What Citadel did for a member on the scheme's GitHub repo (#310), or nothing. */
-function githubLine(m) {
+function githubLine(/** @type {Member} */ m) {
   const g = m.github;
   if (!g) return '';
   const repo = h('a', { href: `https://github.com/${g.slug}`, target: '_blank', rel: 'noopener' }, g.slug);
@@ -44,18 +68,28 @@ function githubLine(m) {
 
 /** Main panel: who is in this scheme. Anyone in it (or an admin) adds and removes people (#621). */
 export function membersPage() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const owns = !!account;
   const list = h('div', { class: 'people-list settings-rows' });
   const pick = h('select', { 'aria-label': 'Person to add' });
   const add = h('form', { class: 'row people-add' }, pick, h('button', { type: 'submit' }, 'Add'));
   const addRow = h('div', { class: 'settings-rows', hidden: true }, settingsRow({ icon: 'plugplus', hue: 'done', title: 'Add someone', summary: 'Someone already in Citadel' }, add)[0]);
+  /** @type {Member[]} */
   let shown = [];
   // Adding and removing show at once; the server's list replaces ours when it answers. A refusal puts the list
   // back as it was, unless a later click changed it, then reloads it, since a GitHub refusal still took the
   // person out of the scheme.
+  /**
+   * @param {(list: Member[]) => Member[]} next
+   * @param {() => Promise<Member[]>} send
+   * @param {string} label
+   * @param {Who[]} people
+   */
   const change = (next, send, label, people) => {
-    let was, mine;
+    /** @type {Member[]} */
+    let was;
+    /** @type {Member[]} */
+    let mine;
     optimistic({
       key: `members:${p.id}`,
       apply: () => {
@@ -76,6 +110,10 @@ export function membersPage() {
       () => {},
     );
   };
+  /**
+   * @param {Member[]} members
+   * @param {Who[]} people
+   */
   const render = (members, people) => {
     shown = members;
     const inIt = new Set(members.map((m) => m.id));
@@ -149,7 +187,7 @@ export function membersPage() {
 }
 
 /** The link an invite or reset token makes, with a Copy button: shown once, since only its hash is kept. */
-function linkBox(who, token, what, origin = location.origin) {
+function linkBox(/** @type {Who} */ who, /** @type {string} */ token, /** @type {string} */ what, origin = location.origin) {
   const url = `${origin}${location.pathname}#/invite/${token}`;
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
@@ -172,29 +210,32 @@ export function peoplePage() {
   const status = h('span', { class: 'muted', role: 'status' });
   const link = h('div');
   const list = h('div', { class: 'people-list settings-rows' });
-  const show = (who, token, what, origin) => link.replaceChildren(linkBox(who, token, what, origin));
+  const show = (/** @type {Who} */ who, /** @type {string} */ token, /** @type {string} */ what, /** @type {string} */ origin) => link.replaceChildren(linkBox(who, token, what, origin));
+  /** @type {Person[]} */
   let shown = [];
-  const render = (people) => (
+  const render = (/** @type {Person[]} */ people) => (
     (shown = people),
     list.replaceChildren(
-      ...people.map((u) => {
+      ...people.map((/** @type {Person} */ u) => {
         // An admin with no password of their own signs in with the shared one (COORDINATOR_PASSWORD).
         const state = u.disabled ? 'disabled' : u.invite_open ? (u.has_password ? 'reset link open' : 'invited') : u.has_password ? '' : u.admin ? 'shared password only' : 'invite expired';
         // Shows at once and sends behind; a refusal puts the old value back, unless a later click changed it again.
-        const patch = (body, label) => {
+        const patch = (/** @type {Patch} */ body, /** @type {string} */ label) => {
           const now = () => shown.find((x) => x.id === u.id);
-          const was = Object.fromEntries(Object.keys(body).map((k) => [k, (now() ?? u)[k]]));
-          const set = (vals) => now() && render(shown.map((x) => (x.id === u.id ? { ...x, ...vals } : x)));
+          const was = Object.fromEntries(Object.keys(body).map((k) => [k, /** @type {Patch} */ (now() ?? u)[k]]));
+          const set = (/** @type {Patch} */ vals) => now() && render(shown.map((x) => (x.id === u.id ? { ...x, ...vals } : x)));
           optimistic({
             key: `person:${u.id}`,
             sets: `person:${u.id}:${Object.keys(body)}`,
             apply: () => set(body),
             send: () => api(`api/people/${u.id}`, { method: 'PATCH', body }),
-            undo: () => Object.entries(body).every(([k, v]) => now()?.[k] === v) && set(was),
+            undo: () => Object.entries(body).every(([k, v]) => /** @type {Patch | undefined} */ (now())?.[k] === v) && set(was),
             label,
           });
         };
-        const turns = u.server_login_owner && h('input', { type: 'checkbox', checked: u.server_login, onchange: (e) => patch({ server_login: e.target.checked }, `switch ${u.name}'s turns to ${e.target.checked ? 'the server login' : 'their own Claude'}`) });
+        const turns =
+          u.server_login_owner &&
+          h('input', { type: 'checkbox', checked: u.server_login, onchange: (/** @type {Event} */ e) => patch({ server_login: /** @type {HTMLInputElement} */ (e.target).checked }, `switch ${u.name}'s turns to ${/** @type {HTMLInputElement} */ (e.target).checked ? 'the server login' : 'their own Claude'}`) });
         const claude = u.server_login ? `Claude: server login${u.claude_accounts > 1 ? ` (${u.claude_accounts})` : ''}` : u.claude === 'linked' ? `Claude linked${u.claude_accounts > 1 ? ` (${u.claude_accounts})` : ''}` : u.claude === 'expired' ? 'Claude needs linking again' : 'Claude not linked';
         const self = u.id === account?.id;
         // One status chip leads the row (#492): the first thing that needs someone, else Ready.
@@ -273,7 +314,7 @@ export function peoplePage() {
       status.textContent = '';
       render(await api('api/people'));
     } catch (err) {
-      status.textContent = err.message;
+      status.textContent = /** @type {Error} */ (err).message;
     }
   };
   api('api/people').then(render).catch(fail);
@@ -292,7 +333,7 @@ export function peoplePage() {
           ),
         ),
     )
-    .catch((err) => refused.replaceChildren(h('p', { class: 'error', role: 'status' }, `Couldn't check for refused GitHub links (${err.message}); reload the page to try again.`)));
+    .catch((err) => refused.replaceChildren(h('p', { class: 'error', role: 'status' }, `Couldn't check for refused GitHub links (${/** @type {Error} */ (err).message}); reload the page to try again.`)));
   return page(
     head('People', settingsHelp('Everyone who can sign in to Citadel.', 'Each person sees only the schemes they own or were added to, and can make schemes of their own.')),
     refused,
@@ -308,7 +349,7 @@ export function peoplePage() {
  * One account card as a row that opens (#995): the card's own heading moves into the row's title, its status chip into
  * the summary, kept in step as the card redraws itself.
  */
-function accountRow(ic, hue, title, card, fallback = '', { part } = {}) {
+function accountRow(/** @type {string} */ ic, /** @type {string} */ hue, /** @type {string} */ title, /** @type {HTMLElement} */ card, fallback = '', /** @type {{ part?: string }} */ { part } = {}) {
   const [row, sum] = settingsRow({ part, icon: ic, hue, title }, card);
   const sync = () => {
     const chip = card.querySelector(':scope > h3 .link-chip');
@@ -345,7 +386,7 @@ export function accountPage() {
       form.reset();
       status.textContent = 'Changed.';
     } catch (err) {
-      status.textContent = err.message;
+      status.textContent = /** @type {Error} */ (err).message;
     }
   };
   return page(
@@ -371,7 +412,7 @@ function replayCard() {
   const box = h('input', { type: 'checkbox', checked: account?.keepChats !== false });
   box.onchange = () => {
     const keep = box.checked;
-    const set = (v) => {
+    const set = (/** @type {boolean} */ v) => {
       box.checked = v;
       if (account) account.keepChats = v;
     };
@@ -397,15 +438,20 @@ function replayCard() {
   );
 }
 
+/** @typedef {{ utilization: number, resetsAt?: number }} Meter */
+/** @typedef {{ session?: Meter, weekly?: Meter, account?: number, accounts?: { n: number, usage?: Usage | null, same?: string }[] }} Usage */
+/** @typedef {{ n: number, email?: string, expired?: boolean, ready?: boolean, limitedUntil: number, plan?: string }} ClaudeAccount */
+/** @typedef {{ error?: string, accounts?: ClaudeAccount[], host?: boolean, state?: string, linking: number, url?: string, pinned?: number, inUse?: number, usage?: Usage }} ClaudeState */
+
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
-const weekText = (w) => (w ? `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}` : null);
+const weekText = (/** @type {Meter | null | undefined} */ w) => (w ? `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}` : null);
 
 /** A window's use as of its account's last turn: "41%". */
-const pctText = (w) => `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%`;
-const clock = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+const pctText = (/** @type {Meter} */ w) => `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%`;
+const clock = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 
 /** One account's meters: "5 hours 41% · week 62%, resets Thu 9:00 AM", or nothing before its first turn. */
-const meterText = (u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.weekly && `week ${weekText(u.weekly)}`].filter(Boolean).join(' · ');
+const meterText = (/** @type {Usage | null | undefined} */ u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.weekly && `week ${weekText(u.weekly)}`].filter(Boolean).join(' · ');
 
 /**
  * Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. Up to three
@@ -413,28 +459,30 @@ const meterText = (u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.week
  */
 function claudeCard() {
   const card = h('div', { class: 'account-card' }, loadingLine('Loading Claude…'));
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let poll = null;
-  const render = (st) => {
-    clearTimeout(poll);
+  const render = (/** @type {ClaudeState} */ st) => {
+    clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (poll));
     if (!card.isConnected && poll) return;
-    const title = (chip, cls = '') => h('h3', {}, 'Claude', h('span', { class: `link-chip ${cls}` }, chip));
+    const title = (/** @type {string} */ chip, cls = '') => h('h3', {}, 'Claude', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
-    const act = (label, method, path, body, cls = '') =>
+    const act = (/** @type {string} */ label, /** @type {string} */ method, /** @type {string} */ path, /** @type {unknown} */ body, cls = '') =>
       h(
         'button',
         {
           type: 'button',
           class: `small ${cls}`,
-          onclick: async (e) => {
-            e.target.disabled = true;
+          onclick: async (/** @type {Event} */ e) => {
+            /** @type {HTMLButtonElement} */ (e.target).disabled = true;
             render(await api(path, { method, body }).catch((err) => ({ ...st, error: err.message })));
           },
         },
         label,
       );
+    /** @type {(label: string, account?: number) => HTMLButtonElement} */
     const link = (label, account) => act(label, 'POST', 'api/me/claude', account ? { account } : {});
     const accounts = st.accounts ?? [];
-    const unlink = (a) =>
+    const unlink = (/** @type {ClaudeAccount} */ a) =>
       h(
         'button',
         {
@@ -458,7 +506,7 @@ function claudeCard() {
       "Link only accounts of your own: sharing one breaks Anthropic's terms.",
     );
     // One failed poll is tried again while the card shows: a restart or a dropped request mustn't end it (#1856).
-    const again = (ms = 2000) => (poll = setTimeout(() => api('api/me/claude').then(render, () => card.isConnected && again(5000)), ms));
+    const again = (/** @type {number} */ ms = 2000) => (poll = setTimeout(() => api('api/me/claude').then(render, () => card.isConnected && again(5000)), ms));
     if (st.state === 'starting') {
       again();
       return card.replaceChildren(title('Starting', 'off'), errLine, h('p', {}, st.host ? "Starting Anthropic's sign-in." : "Starting your container and Anthropic's sign-in. The first time builds Citadel's image, which can take a few minutes."));
@@ -494,9 +542,9 @@ function claudeCard() {
     if (!accounts.length) {
       return card.replaceChildren(title('Not linked', 'off'), errLine, h('p', {}, 'Link your Claude plan so the turns your messages start run on it. Until then your messages wait in the chat.'), h('div', { class: 'row' }, link('Link Claude')), note);
     }
-    const usageFor = (n) => st.usage?.accounts?.find((a) => a.n === n)?.usage ?? (n === (st.usage?.account ?? st.inUse) ? st.usage : null);
+    const usageFor = (/** @type {number} */ n) => st.usage?.accounts?.find((a) => a.n === n)?.usage ?? (n === (st.usage?.account ?? st.inUse) ? st.usage : null);
     // Pin and Unpin (#793) show at once and send behind; a refusal puts the pin back.
-    const pin = (a, on) =>
+    const pin = (/** @type {ClaudeAccount} */ a, /** @type {boolean} */ on) =>
       h(
         'button',
         {
@@ -537,7 +585,7 @@ function claudeCard() {
     const full = accounts.length >= 3;
     const chip = st.host ? ['Server login', 'ok'] : allExpired ? ['Needs linking again', 'warn'] : accounts.length > 1 ? [`${ready} of ${accounts.length} ready`, ready ? 'ok' : 'warn'] : ['Linked', 'ok'];
     return card.replaceChildren(
-      title(...chip),
+      title(.../** @type {[string, string]} */ (chip)),
       errLine,
       allExpired ? h('p', {}, 'Anthropic stopped accepting your sign-in (signed out or expired). Your messages wait in the chat until you link again.') : '',
       accounts.length > 1
@@ -559,8 +607,8 @@ function claudeCard() {
             class: 'small',
             disabled: full,
             title: full ? 'Three accounts at most' : 'Sign in another Claude account of yours',
-            onclick: (e) => {
-              e.target.disabled = true;
+            onclick: (/** @type {Event} */ e) => {
+              /** @type {HTMLButtonElement} */ (e.target).disabled = true;
               api('api/me/claude', { method: 'POST', body: {} })
                 .then(render)
                 .catch((err) => render({ ...st, error: err.message }));
@@ -579,31 +627,34 @@ function claudeCard() {
   return card;
 }
 
+/** @typedef {{ error?: string, state?: string, override?: { on?: boolean }, url?: string, code?: string }} CodexState */
+
 /** Your own Codex (#330): a second-opinion reviewer on your ChatGPT plan, signed in inside your Claude container. */
 function codexCard() {
   const card = h('div', { class: 'account-card' }, loadingLine('Loading Codex…'));
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let poll = null;
-  const render = (st) => {
-    clearTimeout(poll);
+  const render = (/** @type {CodexState} */ st) => {
+    clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (poll));
     if (!card.isConnected && poll) return;
-    const title = (chip, cls = '') => h('h3', {}, 'Codex', h('span', { class: `link-chip ${cls}` }, chip));
+    const title = (/** @type {string} */ chip, cls = '') => h('h3', {}, 'Codex', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
-    const act = (label, method, cls = '', ask = '', path = 'api/me/codex') =>
+    const act = (/** @type {string} */ label, /** @type {string} */ method, cls = '', ask = '', path = 'api/me/codex') =>
       h(
         'button',
         {
           type: 'button',
           class: `small ${cls}`,
-          onclick: async (e) => {
+          onclick: async (/** @type {Event} */ e) => {
             if (ask && !confirm(ask)) return;
-            e.target.disabled = true;
+            /** @type {HTMLButtonElement} */ (e.target).disabled = true;
             render(await api(path, { method }).catch((err) => ({ ...st, error: err.message })));
           },
         },
         label,
       );
     const note = h('p', { class: 'muted small' }, 'Self-review asks Codex for a second opinion on your ChatGPT plan, counting against its limits. ', 'You sign in with OpenAI inside your own container on the server: Citadel never sees your password or token.');
-    const again = (ms = 2000) => (poll = setTimeout(() => api('api/me/codex').then(render, () => card.isConnected && again(5000)), ms));
+    const again = (/** @type {number} */ ms = 2000) => (poll = setTimeout(() => api('api/me/codex').then(render, () => card.isConnected && again(5000)), ms));
     if (st.override !== undefined) setCodex(st.override);
     // Josh, 2026-11-05: the override lives here, beside the sign-in, not in view all the time.
     const override =
@@ -658,16 +709,20 @@ function codexCard() {
   return card;
 }
 
+/** @typedef {{ scope: string, project?: number, project_name?: string, name: string, updated_by?: string, updated_at: number }} Secret */
+/** @typedef {{ person: Secret[], schemes: Secret[] }} SecretsState */
+
 /**
  * Saved secrets (#838): your own, and those of the schemes you're in, by name. A value goes in (Add, Replace) and
  * never comes back out, not even to you; turns get them as $CITADEL_SECRET_<NAME>, contraptions by name.
  */
 function secretsCard() {
   const card = h('div', { class: 'account-card secrets-card' }, loadingLine('Loading secrets…'));
+  /** @type {{ id: number, name: string }[]} */
   let schemes = [];
-  const where = (s) => (s.scope === 'scheme' ? { scope: 'scheme', project: s.project } : { scope: 'person' });
+  const where = (/** @type {Secret} */ s) => (s.scope === 'scheme' ? { scope: 'scheme', project: s.project } : { scope: 'person' });
   const valueInput = () => h('input', { type: 'password', ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', placeholder: 'The value', required: true, 'data-draft': true, 'aria-label': 'The value' });
-  const row = (s, st) => {
+  const row = (/** @type {Secret} */ s, /** @type {SecretsState} */ st) => {
     const status = h('span', { class: 'muted small', role: 'status' });
     const replace = h('button', { type: 'button', class: 'secondary small' }, 'Replace');
     const del = h('button', { type: 'button', class: 'secondary small' }, 'Delete');
@@ -688,7 +743,7 @@ function secretsCard() {
           value.value = ''; // saved: the reload must not open this form again
           load();
         } catch (err) {
-          status.textContent = err.message;
+          status.textContent = /** @type {Error} */ (err).message;
         }
       };
       el.querySelector('.secret-form')?.remove();
@@ -717,16 +772,17 @@ function secretsCard() {
         status.textContent = '';
         load();
       } catch (err) {
-        status.textContent = err.message;
+        status.textContent = /** @type {Error} */ (err).message;
       }
     };
     return form;
   };
+  /** @type {HTMLFormElement | null} */
   let add = null; // built once: a reload for another secret's Replace or Delete must not empty a half-typed new one
-  const render = (st) => {
+  const render = (/** @type {SecretsState} */ st) => {
     const all = [...st.person, ...st.schemes];
     // A half-typed Replace on another secret is opened again on its new row.
-    const typed = new Map([...card.querySelectorAll('.secret-item')].map((el) => [el.dataset.key, el.querySelector('.secret-form input')?.value]).filter(([, v]) => v));
+    const typed = new Map(/** @type {[string, string][]} */ ([.../** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll('.secret-item'))].map((el) => [el.dataset.key, /** @type {HTMLInputElement | null} */ (el.querySelector('.secret-form input'))?.value]).filter(([, v]) => v)));
     add ??= addForm();
     const was = document.activeElement;
     card.replaceChildren(
@@ -738,10 +794,10 @@ function secretsCard() {
             { class: 'secret-list' },
             all.map((s) => {
               const el = row(s, st);
-              const v = typed.get(el.dataset.key);
+              const v = typed.get(/** @type {string} */ (el.dataset.key));
               if (v) {
-                [...el.querySelectorAll('button')][0].onclick();
-                el.querySelector('.secret-form input').value = v;
+                /** @type {() => void} */ ([...el.querySelectorAll('button')][0].onclick)();
+                /** @type {HTMLInputElement} */ (el.querySelector('.secret-form input')).value = v;
               }
               return el;
             }),
@@ -749,12 +805,12 @@ function secretsCard() {
         : h('p', { class: 'muted small' }, 'None saved yet.'),
       add,
     );
-    if (was && add.contains(was)) was.focus(); // the add form is moved, not rebuilt, but a move drops focus
+    if (was && add.contains(was)) /** @type {HTMLElement} */ (was).focus(); // the add form is moved, not rebuilt, but a move drops focus
   };
   const load = () =>
     Promise.all([api('api/secrets'), api('api/projects')])
       .then(([st, projects]) => {
-        schemes = projects.filter((p) => p.member);
+        schemes = projects.filter((/** @type {{ member: boolean }} */ p) => p.member);
         render(st);
       })
       .catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
@@ -762,16 +818,18 @@ function secretsCard() {
   return card;
 }
 
+/** @typedef {{ connected: boolean, failed?: boolean, cap_usd: number, default_cap_usd?: number, spent_usd: number, left_usd: number, or_limit?: number | null, or_limit_reset?: string, resets: string, linked_at: number }} OpenRouterState */
+
 /** Your own OpenRouter key and monthly cap (#717): minions working for you make images and sounds on it, never past the cap. */
 function openrouterCard() {
   const card = h('div', { class: 'account-card openrouter-card' }, loadingLine('Loading OpenRouter…'));
-  const usd = (n) => `$${Number(n).toFixed(2)}`;
-  const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
-  const title = (chip, cls = '') => h('h3', {}, 'OpenRouter', h('span', { class: `link-chip ${cls}` }, chip));
+  const usd = (/** @type {number} */ n) => `$${Number(n).toFixed(2)}`;
+  const ext = (/** @type {string} */ href, /** @type {string} */ text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+  const title = (/** @type {string} */ chip, cls = '') => h('h3', {}, 'OpenRouter', h('span', { class: `link-chip ${cls}` }, chip));
   const keysPage = () => ext('https://openrouter.ai/settings/keys', "OpenRouter's keys page");
-  const capInput = (value) => h('input', { type: 'number', name: 'cap', min: '1', max: '1000', step: '1', value: String(value), inputmode: 'decimal', class: 'cap-input', 'aria-label': 'Monthly cap in dollars' });
+  const capInput = (/** @type {number} */ value) => h('input', { type: 'number', name: 'cap', min: '1', max: '1000', step: '1', value: String(value), inputmode: 'decimal', class: 'cap-input', 'aria-label': 'Monthly cap in dollars' });
   // Connecting asks OpenRouter whether the key works, so it shows busy on this card until it answers.
-  const connectForm = (st, again) => {
+  const connectForm = (/** @type {OpenRouterState} */ st, /** @type {boolean} */ again) => {
     const key = h('input', { type: 'password', ...noAutofill('openrouter-key', 'new-password'), spellcheck: 'false', placeholder: 'sk-or-v1-…', required: true });
     const cap = capInput(st.cap_usd ?? st.default_cap_usd ?? 10);
     const status = h('span', { class: 'muted small', role: 'status' });
@@ -784,13 +842,13 @@ function openrouterCard() {
       try {
         render(await api('api/me/openrouter', { method: 'POST', body: { key: key.value.trim(), cap: Number(cap.value) } }));
       } catch (err) {
-        status.textContent = err.message;
+        status.textContent = /** @type {Error} */ (err).message;
         button.disabled = false;
       }
     };
     return form;
   };
-  const render = (st) => {
+  const render = (/** @type {OpenRouterState} */ st) => {
     const note = h('p', { class: 'muted small' }, 'The key is kept encrypted on the server and never shown again, not even to you; minions never see it. ', "For a hard stop on OpenRouter's side too, give the key a credit limit on ", keysPage(), '.');
     if (!st.connected) {
       return card.replaceChildren(
@@ -808,7 +866,7 @@ function openrouterCard() {
         class: 'secondary small',
         onclick: () => {
           if (!confirm("Disconnect OpenRouter? Citadel forgets the key; minions working for you can't make media until you connect again.")) return;
-          optimistic({ apply: () => render({ connected: false, default_cap_usd: st.cap_usd }), send: () => api('api/me/openrouter', { method: 'DELETE' }), undo: () => render(st), label: 'disconnect OpenRouter' }).then(render, () => {});
+          optimistic({ apply: () => render(/** @type {OpenRouterState} */ ({ connected: false, default_cap_usd: st.cap_usd })), send: () => api('api/me/openrouter', { method: 'DELETE' }), undo: () => render(st), label: 'disconnect OpenRouter' }).then(render, () => {});
         },
       },
       'Disconnect',
@@ -864,15 +922,18 @@ function openrouterCard() {
   return card;
 }
 
+/** @typedef {{ failed?: boolean, login: string, name?: string, email?: string, limited?: boolean, reach?: string[], linked_at: number }} GithubLink */
+/** @typedef {{ configured: boolean, full: boolean, limited: boolean, install_url?: string, error?: string | null, link?: GithubLink | null }} GithubState */
+
 /** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
 function githubCard() {
   const card = h('div', { class: 'account-card' }, loadingLine('Loading GitHub…'));
-  const render = ({ configured, full, limited, install_url, error, link }) => {
-    const title = (chip, cls = '') => h('h3', {}, 'GitHub', h('span', { class: `link-chip ${cls}` }, chip));
+  const render = (/** @type {GithubState} */ { configured, full, limited, install_url, error, link }) => {
+    const title = (/** @type {string} */ chip, cls = '') => h('h3', {}, 'GitHub', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = error ? h('p', { class: 'error', role: 'status' }, error) : '';
     // Two ways to link (#464): the OAuth App's full access, and the GitHub App's limited one. Linking again replaces the link.
-    const linkBtn = (label, kind, cls = '') => h('a', { class: `button small ${cls}`, href: `api/github/link?project=${view.projectId}${kind === 'limited' ? '&kind=limited' : ''}` }, label);
-    const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+    const linkBtn = (/** @type {string} */ label, /** @type {string} */ kind, cls = '') => h('a', { class: `button small ${cls}`, href: `api/github/link?project=${/** @type {View} */ (view).projectId}${kind === 'limited' ? '&kind=limited' : ''}` }, label);
+    const ext = (/** @type {string} */ href, /** @type {string} */ text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
     const install = "installs Citadel's GitHub App"; // text only: the one install link is installBlock (#1557)
     // GitHub hands the install link's state to the App's Setup URL, which brings the person back to this scheme (#670).
     // The one install link, in every state that doesn't already show it as step 1 of the two steps (#1557).
@@ -880,7 +941,7 @@ function githubCard() {
       ? h(
           'div',
           { class: 'link-install' },
-          h('a', { class: 'button small secondary install-app', href: `${install_url}?state=${view.projectId}`, target: '_blank', rel: 'noopener' }, 'Install the GitHub app on a repo ↗'),
+          h('a', { class: 'button small secondary install-app', href: `${install_url}?state=${/** @type {View} */ (view).projectId}`, target: '_blank', rel: 'noopener' }, 'Install the GitHub app on a repo ↗'),
           h('p', { class: 'muted small' }, 'On GitHub pick your account, choose "Only select repositories" and pick the repo. If the app is already installed, the same page opens its settings, where you add repos. Only a repo\'s owner (or an org admin) can install it there. Installing alone doesn\'t link you.'),
         )
       : '';
@@ -948,7 +1009,7 @@ function githubCard() {
         h('div', { class: 'row' }, ...linkRow(' again').childNodes, unlink),
       );
     }
-    const repoLinks = (link.reach ?? []).flatMap((slug, i) => [i ? ', ' : '', ext(`https://github.com/${slug}`, slug)]);
+    const repoLinks = (link.reach ?? []).flatMap((/** @type {string} */ slug, /** @type {number} */ i) => [i ? ', ' : '', ext(`https://github.com/${slug}`, slug)]);
     const reach = !link.limited ? 'Every repo your GitHub account can reach' : !link.reach ? ['Only repos where the owner ', install, " (GitHub didn't say which just now)"] : link.reach.length ? repoLinks : 'No repos yet';
     const other = link.limited ? (full ? linkBtn('Switch to full access', 'full', 'secondary') : '') : limited ? linkBtn('Switch to limited', 'limited', 'secondary') : '';
     return card.replaceChildren(

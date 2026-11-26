@@ -1,16 +1,20 @@
 // The Minion rules page's pickers (#1041, Cara 2026-11-19: "make as much of it as possible into toggles and buttons and
 // pickers, with manual text entry as a fallback"). Each row reads the same stored text the old text box did and writes it
 // back at once (settings.js's saveProject: optimistic, a toast with Retry on a refusal); typed entry stays as "Add by hand".
+/** @import { Child } from './base.js' */
+/** @import { Scheme, View } from './types.js' */
 import { toast } from './ui/status.js';
 import { account, h, icon, listGroupsOf, view } from './base.js';
 import { kindLabel, NEVER_HOLD_KINDS } from './heldmsg.js';
 import { GO_FROM, label, MERGE_RULES, shippingGate, SHIP_PATHS, TRY_FIRST } from './shipping.js';
 
+/** @param {string | null | undefined} text */
 export const lines = (text) =>
   (text ?? '')
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
+/** @param {Iterable<string>} list */
 const text = (list) => [...new Set(list)].join('\n');
 
 /** Actions a person can tick to be asked first, each the permission rules it stands for (Claude Code's rule syntax). */
@@ -24,23 +28,29 @@ export const APPROVALS = [
   { id: 'close', what: 'Close a pull request or issue', rules: ['Bash(gh pr close:*)', 'Bash(gh issue close:*)'] },
 ];
 /** A box is ticked when all its rules are stored. */
+/** @param {string[]} stored */
 export const ticked = (stored) => APPROVALS.filter((a) => a.rules.every((r) => stored.includes(r)));
 /** Tick or untick one box in a stored rule list; returns the new stored text. */
+/** @param {string} stored @param {string} id @param {boolean} on */
 export function toggleApproval(stored, id, on) {
-  const rules = APPROVALS.find((a) => a.id === id).rules;
+  const rules = /** @type {(typeof APPROVALS)[number]} */ (APPROVALS.find((a) => a.id === id)).rules;
   const kept = lines(stored).filter((r) => !rules.includes(r));
   return text(on ? [...lines(stored), ...rules] : kept);
 }
 /** The stored rules no ticked box owns: what "Add by hand" shows. */
+/** @param {string} stored */
 export const handRules = (stored) => {
   const owned = new Set(ticked(lines(stored)).flatMap((a) => a.rules));
   return lines(stored).filter((r) => !owned.has(r));
 };
 
 /** Where a plugin folder is stored: 'off', 'picked' (optional_plugin_dirs) or 'every' (plugin_dirs). */
+/** @param {Pick<Scheme, 'plugin_dirs' | 'optional_plugin_dirs'>} p @param {string} dir */
 export const pluginMode = (p, dir) => (lines(p.plugin_dirs).includes(dir) ? 'every' : lines(p.optional_plugin_dirs).includes(dir) ? 'picked' : 'off');
 /** The two stored lists after moving `dir` to `mode`. */
+/** @param {Pick<Scheme, 'plugin_dirs' | 'optional_plugin_dirs'>} p @param {string} dir @param {string} mode */
 export function setPluginMode(p, dir, mode) {
+  /** @param {string} s */
   const drop = (s) => lines(s).filter((d) => d !== dir);
   return {
     plugin_dirs: text(mode === 'every' ? [...lines(p.plugin_dirs), dir] : drop(p.plugin_dirs)),
@@ -49,20 +59,24 @@ export function setPluginMode(p, dir, mode) {
 }
 
 /** A workflow is on (wakes the Taskmaster) unless it is quiet and not also watched, as ci-health's snapshot reads it. */
+/** @param {Pick<Scheme, 'ci_quiet' | 'ci_watch'>} p @param {string} file */
 export const ciOn = (p, file) => !lines(p.ci_quiet).includes(file) || lines(p.ci_watch).includes(file);
 /** The two stored lists after switching `file`: on leaves the quiet list, off joins it and leaves the watch list. */
+/** @param {Pick<Scheme, 'ci_quiet' | 'ci_watch'>} p @param {string} file @param {boolean} on */
 export function setCi(p, file, on) {
   const quiet = lines(p.ci_quiet).filter((f) => f !== file),
     watch = lines(p.ci_watch).filter((f) => f !== file);
   return on ? { ci_quiet: text(quiet), ci_watch: text(lines(p.ci_watch)) } : { ci_quiet: text([...quiet, file]), ci_watch: text(watch) };
 }
 
+/** @param {string | null | undefined} c */
 const verdictClass = (c) => (c === 'success' ? 'ready' : c === 'failure' ? 'down' : c ? 'asleep' : 'running');
 
 /**
  * The rows, built with the page's own parts: settingsRow and settingsHelp (settings.js) and saveProject, which sends a
  * PATCH of `body` behind an optimistic `mine` (what view.project then holds).
  */
+/** @type {[number, string][]} */
 const SHOT_WIDTHS = [
   [1440, 'Desktop 1440'],
   [1024, 'Laptop 1024'],
@@ -70,29 +84,50 @@ const SHOT_WIDTHS = [
   [390, 'Phone 390'],
 ];
 /** src/msg-settings.ts's defaults and bounds; test/held-list.test.ts keeps them equal. */
+/** @typedef {'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h'} MsgField */
+/** @type {Record<MsgField, number>} */
 export const MSG_DEFAULTS = { msg_loop_limit: 6, msg_loop_min: 10, msg_cold_min: 55, msg_hold_h: 3 };
+/** @type {Record<MsgField, [number, number]>} */
 export const MSG_BOUNDS = { msg_loop_limit: [3, 20], msg_loop_min: [5, 60], msg_cold_min: [10, 55], msg_hold_h: [1, 12] };
 /** What a control is called, whichever way it is switched. */
+/** @param {Element} el */
 const nameOf = (el) => `${el.closest('[role=group]')?.ariaLabel ?? ''}|${el.ariaLabel ?? (el.closest('label') ?? el).textContent.replace(/^\+/, '').trim()}`;
+/** @param {string | null | undefined} text */
 const shotList = (text) =>
   (text ?? '')
     .split(',')
     .map(Number)
     .filter((w) => w > 0);
 
+/** @typedef {{ icon?: string, hue?: string | null, title: Child, summary?: Child, open?: boolean, key?: string | null, part?: string | null }} RowMeta */
+/** @typedef {{ sync: () => boolean, begin: () => { from: string, sent: () => number, answered: () => void, refused: () => void } }} TypedDraft */
+/** @typedef {{ dir: string, name: string, description: string, missing?: boolean }} PluginDir */
+/** @typedef {{ file: string, name: string, verdict: { status?: string, conclusion?: string | null } | null }} Workflow */
+/** @typedef {{ found: PluginDir[], registry: { key: string, values: string[] }[], workflows: Workflow[], failed: { plugins?: boolean, ci?: boolean } }} PickerData */
+/**
+ * @param {{
+ *   settingsRow: (row: RowMeta, ...body: Child[]) => [HTMLDetailsElement, HTMLSpanElement],
+ *   settingsHelp: (first: Child, ...rest: Child[]) => HTMLElement,
+ *   saveProject: (p: Scheme, mine: Record<string, unknown>, body: Record<string, unknown>, label: string, shown: (ok?: boolean, err?: unknown) => void, draft?: ReturnType<TypedDraft['begin']>) => Promise<unknown>,
+ *   typedDraft: (el: HTMLInputElement | HTMLTextAreaElement, saved: () => string, dirty?: () => boolean) => TypedDraft,
+ * }} deps
+ */
 export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) {
-  const p = view.project;
-  const stored = () => (view.project?.id === p.id ? view.project : p); // a save can outlast the page
+  const p = /** @type {View} */ (view).project;
+  const stored = () => (/** @type {View} */ (view).project?.id === p.id ? /** @type {View} */ (view).project : p); // a save can outlast the page
   // Read once the page opens (settings.js), then every row redraws.
+  /** @type {PickerData} */
   const data = { found: [], registry: [], workflows: [], failed: {} };
   /** A row that redraws its body from view.project whenever the project changes (onProjectUpdate dispatches settings-refresh). */
+  /** @param {RowMeta} meta @param {Child} help @param {(mount: HTMLDivElement) => string} draw @param {...Child} after */
   const live = (meta, help, draw, ...after) => {
     const mount = h('div', { class: 'rules-body' });
     const [row, sum] = settingsRow(meta, help, mount, ...after);
     // What a redraw would take the focus from keeps it: the same control, or the one drawn in its place.
-    const named = (el) => [...mount.querySelectorAll(el.tagName)].filter((x) => nameOf(x) === nameOf(el));
+    /** @param {Element} el */
+    const named = (el) => /** @type {HTMLElement[]} */ ([...mount.querySelectorAll(el.tagName)].filter((x) => nameOf(x) === nameOf(el)));
     const paint = () => {
-      const at = mount.contains(document.activeElement) && document.activeElement;
+      const at = /** @type {HTMLElement | false | null} */ (mount.contains(document.activeElement) && document.activeElement);
       const nth = at ? named(at).indexOf(at) : -1;
       sum.textContent = draw(mount);
       if (at && document.activeElement !== at) (at.isConnected ? at : named(at)[nth])?.focus({ preventScroll: true });
@@ -106,13 +141,16 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
     for (const el of document.querySelectorAll('[data-rules-row]')) el.dispatchEvent(new Event('settings-refresh'));
   };
   /** Save these fields at once. `fields` are the stored strings; list_groups goes as a list. */
+  /** @param {Record<string, string | number | boolean>} fields @param {string} label @param {Record<string, string>} [was] @param {ReturnType<TypedDraft['begin']>} [draft] */
   const save = (fields, label, was, draft) => {
+    /** @type {Record<string, unknown>} */
     const body = { ...fields, ...(was && { was }) };
-    if ('list_groups' in fields) body.list_groups = JSON.parse(fields.list_groups);
-    if ('msg_never_hold' in fields) body.msg_never_hold = fields.msg_never_hold.split(',').filter(Boolean);
+    if ('list_groups' in fields) body.list_groups = JSON.parse(/** @type {string} */ (fields.list_groups));
+    if ('msg_never_hold' in fields) body.msg_never_hold = /** @type {string} */ (fields.msg_never_hold).split(',').filter(Boolean);
     return saveProject(p, fields, body, label, refreshAll, draft);
   };
   /** `disabled` is true, false, or a test of each option's value. */
+  /** @param {string[][]} opts @param {string} cur @param {(v: string) => unknown} onPick @param {boolean | ((v: string) => boolean)} [disabled] @param {string} [label] */
   const seg = (opts, cur, onPick, disabled = false, label = '') =>
     h(
       'div',
@@ -120,6 +158,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
       opts.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': String(cur === v), disabled: typeof disabled === 'function' ? disabled(v) : disabled, onclick: () => cur !== v && onPick(v) }, l)),
     );
   /** "Add by hand": a button that opens one line to type in; Enter or Add sends it. */
+  /** @param {string} placeholder @param {(v: string) => unknown} onAdd @param {string} [label] */
   const handLine = (placeholder, onAdd, label = 'Add by hand') => {
     const input = h('input', { type: 'text', class: 'rules-hand-input', placeholder, spellcheck: 'false', 'aria-label': label, hidden: true });
     const add = h('button', { type: 'button', hidden: true, onclick: () => go() }, 'Add');
@@ -207,7 +246,12 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
               return h(
                 'label',
                 { class: `rules-check${byShipping ? ' locked' : ''}` },
-                h('input', { type: 'checkbox', checked: on.includes(a), disabled: byShipping, onchange: (e) => save({ [key]: toggleApproval(stored()[key], a.id, e.target.checked) }, `${e.target.checked ? 'ask before' : 'stop asking before'}: ${a.what.toLowerCase()}`) }),
+                h('input', {
+                  type: 'checkbox',
+                  checked: on.includes(a),
+                  disabled: byShipping,
+                  onchange: (/** @type {Event} */ e) => save({ [key]: toggleApproval(stored()[key], a.id, /** @type {HTMLInputElement} */ (e.target).checked) }, `${/** @type {HTMLInputElement} */ (e.target).checked ? 'ask before' : 'stop asking before'}: ${a.what.toLowerCase()}`),
+                }),
                 h('span', { class: 'rules-what' }, h('span', {}, a.what), h('code', {}, byShipping ? "set by Shipping: A person's go" : a.rules.join('  '))),
               );
             }),
@@ -267,21 +311,22 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
   const listGroups = () => {
     let key = '';
     const hand = handLine('area: balance', (line) => {
-      const groups = listGroupsOf(stored());
+      const groups = /** @type {string[]} */ (listGroupsOf(stored()));
       save({ list_groups: JSON.stringify([...groups.filter((g) => g !== line), line]) }, `add the group ${line}`);
     });
     return live({ part: 'list-groups', icon: 'rows', hue: 'teal', title: 'List groups' }, settingsHelp('Minions outside a build that carry one of these get their own group at the top of the minions list.', 'A minion that matches two sits in the first.'), (mount) => {
       const registry = data.registry;
       if (!registry.some((k) => k.key === key)) key = registry[0]?.key ?? '';
-      const groups = listGroupsOf(stored());
+      const groups = /** @type {string[]} */ (listGroupsOf(stored()));
       const values = registry.find((k) => k.key === key)?.values ?? [];
+      /** @param {string[]} next @param {string} label */
       const commit = (next, label) => save({ list_groups: JSON.stringify(next) }, label);
       const select = h(
         'select',
         {
           'aria-label': 'Property',
-          onchange: (e) => {
-            key = e.target.value;
+          onchange: (/** @type {Event} */ e) => {
+            key = /** @type {HTMLSelectElement} */ (e.target).value;
             refreshAll();
           },
         },
@@ -387,6 +432,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
     });
 
   /** A row that is one pick of a few, saved at once (#1045): `pick` is the project field, `opts` its [value, label] choices. */
+  /** @param {RowMeta} meta @param {Child} help @param {'fable_ok' | 'builds' | 'grill' | 'gh_runners'} field @param {string[][]} opts @param {string} fallback @param {string} label */
   const choice = (meta, help, field, opts, fallback, label) =>
     live(meta, help, (mount) => {
       const cur = stored()[field] ?? fallback;
@@ -502,7 +548,9 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
           widths = shotList(s.shot_widths),
           themes = (s.shot_themes ?? '').split(',').filter(Boolean);
         const all = [...new Set([...SHOT_WIDTHS.map(([w]) => w), ...widths])].sort((a, b) => b - a);
+        /** @param {number} w */
         const label = (w) => SHOT_WIDTHS.find(([x]) => x === w)?.[1] ?? `${w}`;
+        /** @param {boolean} on @param {string} text @param {() => unknown} onclick @param {boolean} disabled */
         const chip = (on, text, onclick, disabled) => h('button', { type: 'button', class: 'rules-chip', 'aria-pressed': String(on), disabled, onclick }, on ? icon('check') : '+', ' ', text);
         mount.replaceChildren(
           h(
@@ -544,10 +592,12 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
   };
 
   /** Save Shipping fields with what the gate makes of them (go_from, the merge approval) shown at once, as the server will store them. */
+  /** @param {Partial<Pick<Scheme, 'ship_path' | 'go_from' | 'try_first'>>} fields @param {string} what */
   const saveShipping = (fields, what) => {
     const gate = shippingGate({ ...stored(), ...fields }),
+      /** @type {Record<string, unknown>} */
       mine = { ...fields };
-    for (const k of ['go_from', 'approval_rules']) if (gate[k] !== stored()[k]) mine[k] = gate[k];
+    for (const k of /** @type {const} */ (['go_from', 'approval_rules'])) if (gate[k] !== stored()[k]) mine[k] = gate[k];
     return saveProject(p, mine, fields, what, refreshAll);
   };
   const SHIP_HELP = {
@@ -571,7 +621,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
               ['pr-person', 'PR, a person merges'],
             ],
             cur,
-            (v) => saveShipping({ ship_path: v }, 'set how a change ships'),
+            (v) => saveShipping({ ship_path: /** @type {Scheme['ship_path']} */ (v) }, 'set how a change ships'),
             false,
             'How a change ships',
           ),
@@ -597,7 +647,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
               ['all', 'Every change'],
             ],
             cur,
-            (v) => saveShipping({ go_from: v }, "set when a person's go is needed"),
+            (v) => saveShipping({ go_from: /** @type {Scheme['go_from']} */ (v) }, "set when a person's go is needed"),
             (v) => person && v !== 'all',
             "A person's go",
           ),
@@ -620,7 +670,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
               ['features', 'Features wait'],
             ],
             cur,
-            (v) => saveShipping({ try_first: v }, 'set what waits for a try'),
+            (v) => saveShipping({ try_first: /** @type {Scheme['try_first']} */ (v) }, 'set what waits for a try'),
             false,
             'Try it first',
           ),
@@ -633,6 +683,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
    * Messages (#1059): the loop guard's count and window, and which kinds never wait (the cold hold went in #1603).
    * A number box inside MSG_BOUNDS (the server refuses the rest: src/msg-settings.ts), saved when it changes.
    */
+  /** @param {RowMeta} meta @param {Child} help @param {MsgField} field @param {string} label @param {string} unit */
   const number = (meta, help, field, label, unit) => {
     const [min, max] = MSG_BOUNDS[field];
     const now = () => stored()[field] ?? MSG_DEFAULTS[field];
@@ -647,7 +698,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
       onchange: () => {
         const v = Number(input.value);
         if (!Number.isInteger(v) || v < min || v > max) {
-          input.value = now();
+          input.value = String(now());
           return toast(`${label} is a whole number from ${min} to ${max}`);
         }
         shown = input.value; // sent, no longer being typed: a refusal puts the old number back
@@ -710,8 +761,10 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
 }
 
 /** Link rows to pages that live elsewhere (N9). */
+/** @param {number | null | undefined} scheduleCount */
 export function elsewhereRows(scheduleCount) {
-  const id = view.projectId;
+  const id = /** @type {View} */ (view).projectId;
+  /** @param {string} ic @param {string} hue @param {Child} title @param {Child} sum @param {string} href @param {(e: MouseEvent) => void} [onclick] */
   const link = (ic, hue, title, sum, href, onclick) =>
     h(
       'a',

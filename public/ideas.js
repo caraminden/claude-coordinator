@@ -1,21 +1,32 @@
 // Orders → Ideas (#1150): the scheme's ideas ledger. Every idea a choices page showed with a Later option, and every
 // handoff in the shared folder, as one row: its pick in the picker's words, its handoff and the minion that built it.
 // Rows fill themselves (src/ideas.ts); a person can fix a status or a minion link by hand, and that sticks.
+/** @import { Child } from './base.js' */
 import { api, h, icon, view, pacificDate } from './base.js';
 import { emptyCard, toneChip } from './look.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { toast } from './ui/status.js';
 
+/** @import { View } from './types.js' */
+/** @typedef {'proposed' | 'picked' | 'later' | 'skipped' | 'started' | 'built' | 'declined'} IdeaStatus */
+/** An idea as the ideas route sends it (src/ideas.ts's Idea, plus the page and minion links it draws): the fields this page reads. */
+/** @typedef {{ id: number, title: string, card: string, page?: string, page_label?: string, page_href?: string, source_number: number | null, pick: string | null, pick_label: string | null, decided_by: string | null, decided_at: number | null, words: string | null, handoff: string | null, handoff_href?: string, minion?: { number: number, title?: string } | null, link_manual: number, status: IdeaStatus, status_manual: IdeaStatus | null, manual_by: string | null, manual_at: number | null }} IdeaRow */
+
 const STATUSES = ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined'];
+/** @type {Record<string, string>} */
 const HUE = { proposed: 'accent', picked: 'running', later: 'waiting', skipped: 'held', started: 'teal', built: 'done', declined: 'held' };
+/** @type {Record<string, string>} */
 const TONE = { proposed: 'neutral', picked: 'info', later: 'warn', skipped: 'neutral', started: 'violet', built: 'ok', declined: 'danger' };
 const day = pacificDate;
+/** @param {string} s */
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 let status = '';
+/** @type {Set<number>} */
 const openRows = new Set();
 
 export function ideasPage() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
+  /** @type {{ ideas: IdeaRow[], waiting: number[], counts: Record<string, number> } | null} */
   let data = null;
   const meta = h('p', { class: 'meta' }, 'Reading the pages and handoffs…');
   const search = h('input', { type: 'search', placeholder: 'Search ideas', 'aria-label': 'Search ideas', oninput: () => filter() });
@@ -26,8 +37,10 @@ export function ideasPage() {
   const list = h('div', { class: 'settings-rows idea-list' });
   const empty = h('p', { class: 'muted', hidden: true }, 'No idea matches.');
   const none = h('div', { hidden: true }, emptyCard('No ideas yet', 'A choices page with Build it / Later / Cut bars, or a handoff in the shared folder, starts the ledger.', { mark: '·', hue: 'accent' }));
+  /** @type {{ el: HTMLDetailsElement, r: IdeaRow, pin?: boolean }[]} */
   const rows = [];
 
+  /** @param {IdeaRow} r @param {Record<string, unknown>} body @param {() => void} undo @returns {Promise<void>} */
   const save = (r, body, undo) =>
     api(`api/projects/${p.id}/ideas/${r.id}`, { method: 'POST', body }).then(
       (res) => {
@@ -35,14 +48,16 @@ export function ideasPage() {
       },
       (err) => {
         undo();
-        toast(`Couldn't save ${r.card}: ${err.message}`, { action: { label: 'Retry', run: () => save(r, body, undo) } });
+        toast(`Couldn't save ${r.card}: ${/** @type {Error} */ (err).message}`, { action: { label: 'Retry', run: () => save(r, body, undo) } });
       },
     );
 
   /** Swap one idea in place after a save, keeping its row open. */
+  /** @param {IdeaRow} idea */
   const replace = (idea) => {
-    const i = data.ideas.findIndex((x) => x.id === idea.id);
-    if (i >= 0) data.ideas[i] = idea;
+    const d = /** @type {NonNullable<typeof data>} */ (data);
+    const i = d.ideas.findIndex((x) => x.id === idea.id);
+    if (i >= 0) d.ideas[i] = idea;
     // Only this idea's row is rebuilt: a number being typed in another row keeps its field (WP6, #1858).
     const mine = rows.filter((x) => x.r.id === idea.id);
     if (!mine.length || mine.some((x) => x.pin && idea.status !== 'later')) return render();
@@ -55,6 +70,7 @@ export function ideasPage() {
     filter();
   };
 
+  /** @param {IdeaRow} r */
   const row = (r) => {
     const statusPick = h(
       'select',
@@ -62,7 +78,7 @@ export function ideasPage() {
         'aria-label': `Status of ${r.card}`,
         onchange: () => {
           const was = r.status_manual;
-          const next = statusPick.value || null;
+          const next = /** @type {IdeaStatus | null} */ (statusPick.value || null);
           chip.textContent = cap(next ?? r.status);
           chip.dataset.tone = TONE[next ?? r.status];
           save(r, { status: next }, () => {
@@ -76,10 +92,11 @@ export function ideasPage() {
       STATUSES.map((s) => h('option', { value: s, selected: r.status_manual === s }, cap(s))),
     );
     const minionIn = h('input', { type: 'text', inputmode: 'numeric', placeholder: '#N', 'aria-label': `Minion for ${r.card}`, value: r.minion ? `#${r.minion.number}` : '', size: 6 });
-    const link = (ticket) => (ev) => {
+    /** @param {'set' | 'auto' | null} ticket */
+    const link = (ticket) => (/** @type {Event} */ ev) => {
       ev.preventDefault();
       const n = ticket === 'set' ? Number(minionIn.value.replace(/^#/, '')) : ticket;
-      if (ticket === 'set' && !(n > 0)) {
+      if (ticket === 'set' && !(Number(n) > 0)) {
         toast('Type a minion number, like #1150');
         return;
       }
@@ -92,6 +109,7 @@ export function ideasPage() {
     const chip = toneChip(TONE[r.status], cap(r.status));
     const who = r.decided_by ? `${r.pick_label ?? r.pick ?? 'Picked'} · ${r.decided_by}, ${day(r.decided_at)}` : r.handoff ? 'Handoff written, no pick on a page' : 'Not picked yet';
     const summary = `${who}${r.minion ? ` · #${r.minion.number}` : ''}${r.status_manual ? ' · set by hand' : ''}`;
+    /** @type {Child[]} */
     const body = [
       r.words ? h('blockquote', { class: 'decision-quote' }, `“${r.words}”`) : '',
       h(
@@ -127,7 +145,7 @@ export function ideasPage() {
       el.hidden = (!pin && status && r.status !== status) || !words.every((w) => hay.includes(w));
       if (!el.hidden && !pin) shown++;
     }
-    pinHead.hidden = ![...pinned.children].some((c) => !c.hidden);
+    pinHead.hidden = ![...pinned.children].some((c) => !(/** @type {HTMLElement} */ (c).hidden));
     allHead.hidden = pinHead.hidden;
     empty.hidden = shown > 0 || !data.ideas.length;
     none.hidden = data.ideas.length > 0;
@@ -135,10 +153,11 @@ export function ideasPage() {
   };
 
   const drawPick = () => {
-    const counts = Object.fromEntries(STATUSES.map((s) => [s, data.ideas.filter((r) => r.status === s).length]));
+    const d = /** @type {NonNullable<typeof data>} */ (data);
+    const counts = Object.fromEntries(STATUSES.map((s) => [s, d.ideas.filter((r) => r.status === s).length]));
     if (status && !counts[status]) status = ''; // its last idea moved away: the filter goes back to all
     pick.replaceChildren(
-      ...[['', `All ${data.ideas.length}`], ...STATUSES.filter((s) => counts[s]).map((s) => [s, `${cap(s)} ${counts[s]}`])].map(([key, label]) =>
+      .../** @type {[string, string][]} */ ([['', `All ${d.ideas.length}`], ...STATUSES.filter((s) => counts[s]).map((s) => [s, `${cap(s)} ${counts[s]}`])]).map(([key, label]) =>
         h(
           'button',
           {
@@ -158,9 +177,10 @@ export function ideasPage() {
   };
 
   const render = () => {
+    const d = /** @type {NonNullable<typeof data>} */ (data);
     rows.length = 0;
-    const waiting = new Set(data.waiting);
-    const pins = data.ideas.filter((r) => waiting.has(r.id) && r.status === 'later');
+    const waiting = new Set(d.waiting);
+    const pins = d.ideas.filter((r) => waiting.has(r.id) && r.status === 'later');
     pinned.replaceChildren(
       ...pins.map((r) => {
         const el = row(r);
@@ -169,7 +189,7 @@ export function ideasPage() {
       }),
     );
     list.replaceChildren(
-      ...data.ideas.map((r) => {
+      ...d.ideas.map((r) => {
         const el = row(r);
         rows.push({ el, r });
         return el;
@@ -185,14 +205,14 @@ export function ideasPage() {
       render();
     },
     (err) => {
-      meta.textContent = `Couldn't read the ideas: ${err.message}`;
+      meta.textContent = `Couldn't read the ideas: ${/** @type {Error} */ (err).message}`;
     },
   );
 
   return h(
     'section',
     { class: 'artifacts-main people-main decisions-main ideas-main' },
-    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
     h('div', { class: 'row decision-tools' }, search, h('a', { href: `#/p/${p.id}/decisions`, class: 'small' }, 'Decisions')),
     pick,
     pinHead,

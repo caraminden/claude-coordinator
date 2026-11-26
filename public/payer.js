@@ -1,5 +1,6 @@
 // Whose Claude plan a minion's turns run on (#219, take A): a line over the composer only when your
 // message would switch it, or the payer's limit is hit. The head's chip went (Josh, 2026-11-13).
+/** @import { Ticket } from './types.js' */
 import { account, api, h, me } from './base.js';
 import { usage } from './core.js';
 import { optimistic } from './ui/optimistic.js';
@@ -23,7 +24,11 @@ export function otherOwner(t) {
   return owner && owner.toLowerCase() !== me?.toLowerCase() ? owner : null;
 }
 
-/** Make the minion yours: shown at once, put back if the server refuses. Its notes say so in both chats. */
+/**
+ * Make the minion yours: shown at once, put back if the server refuses. Its notes say so in both chats.
+ * @param {Ticket} t
+ * @param {(done: boolean) => void} [shown] told true once it shows as yours, false if that is put back
+ */
 export function takeOver(t, shown = () => {}) {
   const was = t.properties?.assigned ?? null;
   return optimistic({

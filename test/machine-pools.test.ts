@@ -24,6 +24,7 @@ function setup() {
   store.addMember(project.id, cara.id);
   const m = store.createMachine('desk', 'h', 'Josh', josh.id);
   store.setMachineProjects(m.id, [project.id]);
+  store.setMachineRole(m.id, 'turns', { on: true, projects: [project.id] }); // its Minion turns role (Build 7 M1): what `lends` stands for
   const s = { online: true, lends: true, ships: false, claude: '2.1.0' as string | null, now: T, info: { claude: '2.1.0 (Claude Code)', max: 4, at: T, load: { cpu: 12, mem: 1, freeGb: 20 }, signedIn: true } as WorkerInfo | null, hold: null as string | null, changed: 0 };
   const build = () => new MachinePools({ store, online: () => s.online, lends: () => s.lends, info: () => s.info, ships: () => s.ships, hold: () => s.hold, claude: () => Promise.resolve(s.claude && `${s.claude} (Claude Code)`), changed: () => void s.changed++, now: () => s.now });
   const pools = build();

@@ -21,6 +21,7 @@ getSetting
 groupByType
 keyRange
 lendingLists
+machineRoleTables
 moveSharedViews
 noteSchemaVersion
 numberTickets

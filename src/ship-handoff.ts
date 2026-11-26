@@ -133,17 +133,9 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   const unread = reviewRefusal(app.store, ticket, args, hasGo);
   if (unread) throw new HttpError(400, unread);
   if (typeof caller === 'function') caller();
-  const env = app.runner.hostEnv(ticket, typeof caller === 'string' ? caller : undefined);
-  if (body.fix === true) env.LAND_FIX = '1';
-  env.LAND_RISK = h.risk; // land.sh logs whether the ship would ride the quick train (#1912)
-  if (body.outage === true) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
-  // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
-  const scheme = app.store.getProject(ticket.project_id);
-  if (scheme?.land_mode === 'fast') {
-    if (h.risk !== 'high') env.LAND_FAST = '1';
-    const known = app.fastMode?.knownRed(ticket.project_id);
-    if (known) env.LAND_KNOWN_RED = known;
-  }
+  if (body.fix === true) h.fix = true;
+  if (body.outage === true) h.outage = true;
+  const env = landEnv(app, ticket, h, typeof caller === 'string' ? caller : undefined);
   if (body.into === undefined) {
     const shares = await besideRefusal(app, ticket);
     if (shares) throw new HttpError(409, `Not handed off: ${shares}, so it doesn't ship beside it. You are told when the lane is yours; hand off then`);
@@ -151,6 +143,9 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
   const clash = await landConflict(ticket.cwd, env, args);
   if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
+  // The commit a re-queue (#2030) checks the branch still holds, read after the last check that waits.
+  const head = await gitOut(['rev-parse', 'HEAD'], ticket.cwd);
+  if (head) h.head = head;
   // Its three lines (#1119) ride with the hand-off and queue on a clean land; they never refuse it.
   const learned = parseLearned(body.learned);
   if (learned !== null) {
@@ -160,14 +155,73 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   return { cwd: ticket.cwd, env, args, h };
 }
 
-/** Start it: land.sh runs and the minion shows as landing. False when a landing already runs for it. */
-export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy): boolean {
-  if (!app.landings.handOff(ticket.id, cwd, env, args, h)) return false;
+/** land.sh's environment for a hand-off: the turn's (`token` its own, when one calls), and the hand-off's flags. */
+function landEnv(app: App, ticket: Ticket, h: Handoff, token?: string): Record<string, string> {
+  const env = app.runner.hostEnv(ticket, token);
+  if (h.fix) env.LAND_FIX = '1';
+  env.LAND_RISK = h.risk; // land.sh logs whether the ship would ride the quick train (#1912)
+  if (h.outage) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
+  // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
+  const scheme = app.store.getProject(ticket.project_id);
+  if (scheme?.land_mode === 'fast') {
+    if (h.risk !== 'high') env.LAND_FAST = '1';
+    const known = app.fastMode?.knownRed(ticket.project_id);
+    if (known) env.LAND_KNOWN_RED = known;
+  }
+  return env;
+}
+
+/** Start it: land.sh runs and the minion shows as landing. False when a landing already runs for it. `again`: a re-queue (#2030), in its ended hand-off's place. */
+export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy, again = false): boolean {
+  if (!app.landings.handOff(ticket.id, cwd, env, args, h, again)) return false;
   app.store.claims.handedOff(ticket.id);
   app.runner.places.refused(ticket.id, false);
   app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') }, by);
   app.runner.broadcastTicket(ticket.id);
   return true;
+}
+
+/**
+ * Whether the branch at `cwd` holds the same change as `head`, its commit at the hand-off: the same commit, or land.sh's
+ * rebase of it (each commit's patch the same, by git cherry, both ways). A commit added, dropped or edited is a move.
+ */
+export async function sameChange(cwd: string, head: string): Promise<boolean> {
+  const now = await gitOut(['rev-parse', 'HEAD'], cwd);
+  if (!now) return false;
+  if (now === head) return true;
+  const sides = await Promise.all([gitOut(['cherry', head, 'HEAD', 'main'], cwd), gitOut(['cherry', 'HEAD', head, 'main'], cwd)]);
+  return sides.every((out) => out !== null && out.split('\n').every((l) => !l || l.startsWith('- ')));
+}
+
+/**
+ * Put a hand-off refused on load alone back in line, as its minion handed it off, with no turn (#2030, Josh, 2026-11-25,
+ * "Yes, re-queue it"). At the end of the line, like any hand-off: land.sh's own keeps in place (flake_keep) are used up by
+ * now, and the time behind the others is time for the load to pass. Null once it is in line; else why not, for the wake.
+ */
+export async function requeueShip(app: App, ticketId: number, h: Handoff & { args: string[] }): Promise<string | null> {
+  const t = app.store.getTicket(ticketId);
+  if (!t || t.kind !== 'ticket' || !t.cwd) return 'it has no worktree';
+  const why = () => {
+    const now = app.store.getTicket(ticketId);
+    if (!now || now.status === 'closed') return 'you were dismissed';
+    if (app.runner.parked(now)) return 'you were sealed';
+    if (app.runner.busy(ticketId)) return 'your turn was running';
+    if (app.landings.wasTalked(ticketId)) return 'someone wrote to you while it was in line';
+    return null;
+  };
+  const early = why();
+  if (early) return early;
+  if (!h.head) return "its hand-off didn't record the commit it was at";
+  if (!(await sameChange(t.cwd, h.head))) return 'your branch moved since the hand-off';
+  const dirty = await gitOut(['status', '--porcelain', '--untracked-files=no'], t.cwd);
+  if (dirty !== '') return 'your worktree has uncommitted changes or a rebase in progress';
+  const lane = await laneRefusal(app, t);
+  if (lane) return lane;
+  const late = why();
+  if (late) return late;
+  const { args, ...rest } = h;
+  if (!startHandoff(app, t, { cwd: t.cwd, env: landEnv(app, t, h), args, h: { ...rest, requeued: true } }, { kind: 'server' }, true)) return 'a ship of yours already ran';
+  return null;
 }
 
 /** A ship card's prepared hand-off: hand_off_land's arguments but the go, and the commit they were tested and reviewed at. */

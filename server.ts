@@ -22,6 +22,7 @@ import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from '.
 import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
+import { requeueShip } from './src/ship-handoff.ts';
 import { everyLine, ShipTrail } from './src/ship-trail.ts';
 import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
@@ -1845,6 +1846,7 @@ const landHandoffs = new LandHandoffs({
   runner,
   from: APP_NAME,
   probe: (id, probe, commit, when) => liveProbes.shipped(id, probe, commit, when),
+  requeue: (id, h) => requeueShip(app, id, h), // app is set by the time a land ends
   flakes: (id, output) => {
     const t = store.getTicket(id);
     if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output);

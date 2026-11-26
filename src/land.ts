@@ -56,6 +56,13 @@ export interface Handoff {
   touched?: string[];
   /** Its live probe (#1741, src/live-probe.ts): run once the ship is live, with no model. */
   probe?: Probe;
+  /** The branch's commit when it was handed off, before land.sh's rebase: a re-queue (#2030) needs the same change. */
+  head?: string;
+  /** hand_off_land's fix and outage, kept for a re-queue's land.sh (LAND_FIX, LAND_URGENT). */
+  fix?: true;
+  outage?: true;
+  /** The server put this hand-off back in line itself after a refusal on load alone (#2030): its next refusal wakes the minion. */
+  requeued?: true;
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -196,9 +203,12 @@ export class Landings {
    * (LandHandoffs). The hand-off sits in the landing's folder, so a restart mid-land (the deploy's own,
    * most often) still reports it. False when a landing already runs for this minion.
    */
-  handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff): boolean {
+  handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff, again = false): boolean {
     const now = this.get(ticketId);
-    if ((now && now.code === null) || existsSync(join(this.dir(ticketId), HANDOFF))) return false;
+    if (now && now.code === null) return false;
+    // A re-queue (#2030) takes the ended, unreported hand-off's place with no await between, so a restart can't lose both.
+    if (again) this.settled(ticketId);
+    if (existsSync(join(this.dir(ticketId), HANDOFF))) return false;
     this.start(ticketId, cwd, env, args);
     writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
     this.waiting.add(ticketId);
@@ -483,6 +493,15 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   return null;
 }
 
+/**
+ * Whether a refused hand-off goes back in line with no turn (#2030, Josh, 2026-11-25, "Yes, re-queue it"): a red of load
+ * alone (the passed-alone kind), once a hand-off, and not past what already says it isn't load: a broken test (#1487) or
+ * land.sh's own keeps in place used up (flake_keep).
+ */
+export function loadOnly(output: string, cls: { kind: string } | null, h: Handoff): boolean {
+  return cls?.kind === 'passed-alone' && !h.requeued && !/^land: broken test, not a flake: /m.test(output) && !/has kept its place \d+ times already/.test(output);
+}
+
 /** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
 const PHASES: [RegExp, string][] = [
   [/^(deploy: |land: (?!build\/)\S+ is now at )/, 'deploying'],
@@ -675,6 +694,8 @@ export interface HandoffDeps {
   failed?(id: number, kind: string | null): void;
   /** A clean land, wherever it went (main or a build): queue the minion's lines (#1119). Its errors are caught. */
   learned?(id: number, h: Handoff): void;
+  /** Put a refused hand-off back in line with no turn (#2030): null once it is, else why not, said in the wake. */
+  requeue?(id: number, h: Handoff & { args: string[] }): Promise<string | null>;
   /** A ship on main with a live probe (#1741, LiveProbes.shipped): true when it failed and woke the minion. */
   probe?(id: number, probe: Probe, commit: string | null, when: 'live' | 'later' | 'nowhere'): Promise<boolean>;
 }
@@ -706,8 +727,8 @@ export class LandHandoffs {
       if (!h || !run || run.code === null) continue;
       this.busy.add(id);
       try {
-        await this.settle(id, run, h);
-        this.d.landings.settled(id);
+        // A re-queued one (#2030) is a new hand-off already: settling it now would drop that one.
+        if (!(await this.settle(id, run, h))) this.d.landings.settled(id);
       } catch (err: any) {
         console.error(`Reporting minion ${id}'s land failed: ${err?.message ?? err}`);
       } finally {
@@ -754,7 +775,8 @@ export class LandHandoffs {
     runner.relayMinion(id, owner, `${by} ${t.title}`, `${by} ${t.title} merged into ${into}: ${what}`, true, true, parked);
   }
 
-  private async settle(id: number, run: Landing, h: Handoff & { args: string[] }) {
+  /** True when the hand-off was put back in line (#2030), so it is the new one's and not to be settled. */
+  private async settle(id: number, run: Landing, h: Handoff & { args: string[] }): Promise<boolean | void> {
     const { store, runner, from } = this.d;
     const r = landResult(run.output, run.code!);
     // Each step that says, counts or deploys something runs once per hand-off, even when a throw or a kill cuts the
@@ -790,16 +812,23 @@ export class LandHandoffs {
       return;
     }
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land sealed because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
-      store.updateTicket(id, { state: null, note: null });
-      runner.broadcastTicket(id);
-      const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
       try {
         await once('failed', () => this.d.failed?.(id, cls?.kind ?? null));
       } catch (err: any) {
         console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
       }
-      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
+      // Not in once(): the new hand-off starts in a fresh folder, and a step marked done would carry over into it.
+      const notAgain = r.kind === 'failed' && loadOnly(run.output, cls, h) && this.d.requeue && !('told' in done) ? await this.d.requeue(id, h) : '';
+      if (notAgain === null) {
+        runner.emit(id, 'note', { text: `Shipping was refused on load alone (the failed test files passed when rerun alone), so the server put this ship back in line by itself, once, with no turn. It wakes you only if it is refused again.` });
+        return true;
+      }
+      store.updateTicket(id, { state: null, note: null });
+      runner.broadcastTicket(id);
+      const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
+      const kept = notAgain ? ` It wasn't put back in line by itself: ${notAgain}.` : '';
+      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}${kept}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).

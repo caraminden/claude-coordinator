@@ -7,6 +7,7 @@ import { Store } from '../src/db.ts';
 import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { addReview, agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
+import { sameChange } from '../src/ship-handoff.ts';
 import { git } from './git.ts';
 import { spawnSync } from 'node:child_process';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
@@ -268,7 +269,8 @@ test('a failed land leads its wake with the kind of red (#1013), and an unknown 
 });
 
 // #2030 (Josh, 2026-11-25, "Yes, re-queue it"): a refusal on load alone goes back in line with no turn, once a hand-off.
-const ALONE = 'run-tests: test/b.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 44.13)\nland: tests failed on the rebased branch in CI again (https://github.com/o/r/actions/runs/1), on the one fresh run after a red whose files all passed alone (test/a.test.ts), so main is untouched. A second red refuses whatever its labels say\n';
+const ALONE =
+  'run-tests: test/b.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 44.13)\nland: tests failed on the rebased branch in CI again (https://github.com/o/r/actions/runs/1), on the one fresh run after a red whose files all passed alone (test/a.test.ts), so main is untouched. A second red refuses whatever its labels say\n';
 
 test('a passed-alone refusal goes back in line by itself with a note and no wake; refused again, the minion is woken as before (#2030)', async () => {
   const asked: { requeued?: true }[] = [];
@@ -894,6 +896,64 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
   } finally {
     await srv.stop();
   }
+});
+
+test('the server puts a passed-alone refusal back in line with no turn, and wakes the minion when the same commit is refused again (#2030)', async () => {
+  const srv = await bootServer();
+  try {
+    const store = new Store(join(srv.data, 'coordinator.db'));
+    const project = store.createProject('P', null);
+    const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+    const cwd = join(srv.root, 'wt-again');
+    const runs = join(srv.root, 'runs');
+    mkdirSync(join(cwd, 'tools'), { recursive: true });
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\necho run >>${JSON.stringify(runs)}\nprintf '%b' ${JSON.stringify(ALONE)}\nexit 1\n`);
+    git(cwd, 'init', '-q', '-b', 'main');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'init');
+    store.setTicketDir(minion.id, cwd, null);
+    addReview(store, minion.id);
+    const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(srv.data, minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'Usage bar', risk: 'low', risk_reason: 'front end only' }) });
+    assert.equal(res.status, 202);
+    const said = () => store.listEvents(minion.id).map((e) => String(e.data));
+    await until('the refusal after the re-queue wakes the minion', () => said().some((d) => d.includes("didn't go through")));
+    assert.equal(readFileSync(runs, 'utf8'), 'run\nrun\n', 'land.sh ran twice: the hand-off and the one re-queue');
+    assert.equal(said().filter((d) => d.includes('put this ship back in line by itself')).length, 1, 'one note for the re-queue');
+    assert.equal(said().filter((d) => d.includes("didn't go through")).length, 1, 'one wake, only after the second refusal');
+  } finally {
+    await srv.stop();
+  }
+});
+
+test('sameChange: the same commit or a rebase of it is no move; a commit added or edited is (#2030)', () => {
+  const cwd = join(root, 'same-change');
+  mkdirSync(cwd, { recursive: true });
+  git(cwd, 'init', '-q', '-b', 'main');
+  writeFileSync(join(cwd, 'a.txt'), '1\n');
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'base');
+  git(cwd, 'checkout', '-qb', 'ticket/1-x');
+  writeFileSync(join(cwd, 'b.txt'), 'mine\n');
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'mine');
+  const head = git(cwd, 'rev-parse', 'HEAD').trim();
+  return (async () => {
+    assert.equal(await sameChange(cwd, head), true, 'the same commit');
+    git(cwd, 'checkout', '-q', 'main');
+    writeFileSync(join(cwd, 'c.txt'), 'theirs\n');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'theirs');
+    git(cwd, 'checkout', '-q', 'ticket/1-x');
+    git(cwd, 'rebase', '-q', 'main');
+    assert.notEqual(git(cwd, 'rev-parse', 'HEAD').trim(), head);
+    assert.equal(await sameChange(cwd, head), true, "land.sh's rebase of it");
+    writeFileSync(join(cwd, 'b.txt'), 'mine, fixed\n');
+    git(cwd, 'commit', '-qam', 'fix');
+    assert.equal(await sameChange(cwd, head), false, 'a commit added');
+    git(cwd, 'reset', '-q', '--soft', 'HEAD~2');
+    git(cwd, 'commit', '-qm', 'squashed and edited');
+    assert.equal(await sameChange(cwd, head), false, 'a commit edited');
+  })();
 });
 
 // #1741: a ship to main of 600 lines or more names a live probe; the route checks it, and the server runs it once live.

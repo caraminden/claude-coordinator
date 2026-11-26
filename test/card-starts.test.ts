@@ -61,7 +61,7 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
     // A plain pick, by Josh: both picked options start; the owner and the Taskmaster hear it as held mail.
     const ok = await posted([opt('a', { model: 'claude-sonnet-5-5', effort: 'medium' }, true), opt('b', { handoff: 'handoffs/b.md' }), none]);
     assert.equal(await asJosh(`/api/tickets/${owner.id}/answer`, { questionId: ok, answers: [{ selected: ['Start a', 'Start b'] }] }), 202);
-    const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true });
+    const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     try {
       const minion = (title: string) => db.prepare('SELECT * FROM tickets WHERE title = ? AND project_id = ?').get(title, p.id) as unknown as Row | undefined;
       const a = minion('Do a')!;

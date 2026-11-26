@@ -40,7 +40,8 @@
 # really failing tests name is pulled at once (train_suspects, #1918; Josh, 2026-11-24: "we bisect out the likely failures
 # and run 1, 2, 4, 6, 7 if they are green they get shipped and we send 5 and 3 back to debug their failures"), and the rest
 # runs again with nobody from the line in the empty seats; a pulled ship is refused only once it failed the test run alone
-# on main, or no pulled ship did and the train without them passed it. A ship that adds the case a burn-in failed needs no
+# on main. One only guessed goes back in line, to ship alone unless its tests are known flakes (#2098: refuse only on
+# proof; the train passing without it proved nothing). A ship that adds the case a burn-in failed needs no
 # such proof (burn_new, #2019). With nobody named, it is split (train_bisect,
 # #1899): its front half is tested and ships as soon as it is green; the next front tests part of what is left, until one
 # ship is red by itself. Only that one is refused. The rest and the line then form a full train again. Each rider waits in line
@@ -615,9 +616,11 @@ QUEUE_EXIT='land_timing $? || true; queue_done' # queue_lock's EXIT trap here (d
 #   refused <front> guard-tests guard <tests>    the guard tests failed on the train with it and passed without it (#1479)
 #   refused <front> <the red CI run> likely|burn <tests> pinned|new|alone|joined|unrun   the real failures in <tests> (comma-
 #                                                separated; burn: in their burn-in) name this ship: with pinned, run alone
-#                                                here they passed on main and failed with it on main (#1403); else it was
-#                                                pulled on a guess, no ship pulled for them failed them alone, and the train
-#                                                without them passed (#1918); The failure's last lines follow
+#                                                here they passed on main and failed with it on main (#1403); new: it adds
+#                                                the case a burn-in failed (#2019); alone|joined|unrun: an older front's
+#                                                refusal on a guess (#1918, none since #2098); The failure's last lines follow
+#   alone <front> <tests>                        it was pulled on a guess and nothing proved it (#2098): back in line, to
+#                                                ship by itself, so its own CI run decides
 # No file: on no train. <held>: this holds the lock now, so a riding is what a front that was killed left, and so is a
 # moving whose front is gone. A moving whose front still runs is its restart being judged, after deploy.sh let go of
 # the line (#566): this hands the line on and waits for the verdict outside it, and gets back in line if it is back.
@@ -670,6 +673,18 @@ train_verdict() {
       # Before its branch moves, which the front waits for: who its deploy's restart reports to too (#1865).
       [ "$at" != "$c" ] || { train_reporter "$d" "$a"; git reset -q --keep "$a" || true; }
       return 1 ;;
+    alone)
+      # Pulled on a guess that nothing proved (#2098): back in line, to ship by itself, so its own CI run decides. It
+      # rides no train and takes no riders, through a re-exec too (LAND_TRAIN), and its ticket says so before the
+      # verdict goes, so no front takes it in between.
+      export LAND_TRAIN=0
+      QUEUE_TRAIN=''
+      riding=''
+      queue_phase waiting
+      rm -f "$f"
+      say "back in line to ship alone: $a's ship train passed ${b//,/, } without $branch, but nothing proved $branch the cause, so its own CI run decides"
+      [ -z "$requeue" ] || queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
+      return 0 ;;
     back)
       [ "$at" != "$a" ] || git reset -q --keep "$b" || true
       rm -f "$f"
@@ -2066,7 +2081,7 @@ train_build() {
     tried[${t##*/}]=1
     # A waiting ship that holds the line (QUEUE_TRAIN=hold): nobody behind it rides ahead of it.
     { [ "${l[5]:-}" = hold ] || [ "${l[8]:-}" = hold ]; } && [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && break
-    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
+    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused || $x = alone ]] && continue # still on the train before this one, refused by this one, or sent to ship alone (#2098)
     [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
     [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has; train_suspects, pull_look: what is left of a red train
     if [[ $split_rest == *" ${t##*/} "* ]]; then [ -n "$split_of" ] || continue; else [ -z "$split_of" ] || continue; fi # the split's ships ride together only
@@ -2473,9 +2488,12 @@ train_failing() {
   tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\|killed (exit [0-9]*) when rerun alone\).*/\1/p' | sort -u
 }
 # The ships held off the train on a guess, now that the train without them has a verdict. <files>: every file it was
-# red on (train_failing): a held ship with one of its tests among them goes back in line (the guess was wrong), the
-# others are refused (their tests passed without them, and no ship pulled for them failed alone). No files: it was
-# green, so they are all refused. A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
+# red on (train_failing). Nobody is refused here (#2098; Josh, 2026-11-26, "Have we not analyzed the guessing at all?"):
+# a held ship was not red alone, so the train passing without it is no proof (6 of the first 10 refused that way were
+# innocent, 3 on flaky tests). One with a test among <files> goes back in line (the guess was wrong). One whose tests
+# are all known flakes (train_flaky) goes back in line too: their pass without it says nothing. The rest go back in line
+# to ship alone (`alone`, train_verdict), so their own CI run is the proof, and a guess can't pull them off train after
+# train. No files: it was green. A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
 train_settle() {
   local i f t red=" $* " again n=("${held_n[@]}") br=("${held_br[@]}") w=("${held_was[@]}") fs=("${held_files[@]}") run=("${held_run[@]}") kind=("${held_kind[@]}") how=("${held_how[@]}") log=("${held_log[@]}")
   held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()
@@ -2489,14 +2507,27 @@ train_settle() {
       rm -f "$train_dir/${n[$i]}"
     elif [ $# -gt 0 ] && [ -n "$burn_red" ] && [ "${kind[$i]}" != burn ]; then
       train_hold "${n[$i]}" "${br[$i]}" "${w[$i]}" "${fs[$i]}" "${run[$i]}" "${kind[$i]}" "${how[$i]}" "${log[$i]}"
+    elif train_flaky "${fs[$i]}" "${br[$i]}"; then
+      say "$t goes back in line: ${fs[$i]//,/, } flaked on other ships, so the train passing without it proves nothing"
+      retro_log "ship train verdict · $label · $t back in line on a guess: ${fs[$i]//,/, } known flakes, so the pass without it proves nothing · ${fs[$i]} · ${run[$i]}"
+      rm -f "$train_dir/${n[$i]}"
     else
-      say "$t is refused: it was pulled on a guess, no ship pulled for ${fs[$i]} failed it alone, and the train without it passed it"
-      retro_log "ship train verdict · $label · $t refused on a guess: no ship pulled for it failed alone, and the train without it passed · ${fs[$i]} · ${run[$i]}"
-      train_tell "${n[$i]}" "refused $branch ${run[$i]} ${kind[$i]} ${fs[$i]} ${how[$i]}" "${log[$i]}"
-      split_over
-      train_refused+="${n[$i]} " train_refused_tips+=" ${w[$i]}"
+      say "$t goes back in line to ship alone: it was pulled on a guess, and the train without it passed ${fs[$i]//,/, }, but no ship pulled for it failed it alone, so its own CI run decides"
+      retro_log "ship train verdict · $label · $t back in line to ship alone on a guess: the train without it passed, and nothing proves it · ${fs[$i]} · ${run[$i]}"
+      train_tell "${n[$i]}" "alone $branch ${fs[$i]}"
     fi
   done
+}
+# <files, comma-separated> <the held ship's branch>: every one a known flake (tools/known-flakes.ts, as known_flakes reads
+# it: sightings on other branches in the retro log, or an open fix minion, and no broken test). A sighting from a run the
+# held ship was in doesn't count. Anything it can't tell is no flake: the ship ships alone.
+train_flaky() {
+  local files=()
+  [ -f "$tools/known-flakes.ts" ] || return 1
+  IFS=, read -ra files <<<"$1"
+  [ ${#files[@]} -gt 0 ] || return 1
+  LAND_FLAKE_DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} \
+    "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$2" "${files[@]}" >/dev/null 2>&1 </dev/null
 }
 # <ticket> <branch> <tip> <files> <run> <kind> <how> <log>: held off the train until the train without it has a verdict.
 train_hold() {

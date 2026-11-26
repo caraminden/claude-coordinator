@@ -497,7 +497,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     // Pulled off a red train on a guess: it waits for the verdict on the train without it, and fills no train's count.
     const off = pulledOf(t.phase);
     if (off) {
-      const text = `pulled off ${name(off.front)}'s train on a guess (${off.tests} failed): the train runs again without it, and that decides whether it goes back to its minion`;
+      const text = `pulled off ${name(off.front)}'s train on a guess (${off.tests} failed): the train runs again without it, then it goes back in line`;
       out.set(t.label, { kind: 'land', stage: 'line', label: 'Pulled', chip: 'line · pulled', text, brief: `pulled off ${name(off.front)}'s train on a guess`, since: t.mtime, usual: null, train: { role: 'waiting', label: 'Pulled' } });
       return;
     }

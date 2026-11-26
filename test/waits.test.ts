@@ -477,7 +477,7 @@ test('a ship pulled off a red train on a guess says whose train, which test and 
   await waits.poll();
   const off = waits.wait(p.id)!;
   assert.deepEqual([off.stage, off.label, off.chip], ['line', 'Pulled', 'line · pulled']);
-  assert.match(off.text, new RegExp(`^pulled off #${f.number}'s train on a guess \\(test/a\\.test\\.ts, test/b\\.test\\.ts failed\\): the train runs again without it, and that decides`));
+  assert.match(off.text, new RegExp(`^pulled off #${f.number}'s train on a guess \\(test/a\\.test\\.ts, test/b\\.test\\.ts failed\\): the train runs again without it, then it goes back in line$`));
   assert.equal(waits.wait(w.id)!.train?.label, 'Releasing next', 'the pulled ship fills no train');
   assert.match(waits.wait(w.id)!.text, /2nd in line, behind #\d+ \(waiting for CI\)$/);
 });

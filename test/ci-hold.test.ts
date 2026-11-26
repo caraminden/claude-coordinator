@@ -298,8 +298,7 @@ test('night: a ship still stops optional work, and the settle time is shorter', 
 test('a job held 2 hours is told once, with since when, why and who waits; at 1 hour nothing is', async () => {
   const w = world();
   w.line = 1;
-  w.heavy();
-  w.main(); // waits for ships too, and keeps the job held past OWN_CAP_MS
+  w.heavy({ repo: 'o/peek' }); // Citadel's own goes at OWN_CAP_MS
   await w.tick();
   await w.tick(3600_000);
   assert.equal(w.reports.length, 0, 'held 1 hour');
@@ -308,7 +307,7 @@ test('a job held 2 hours is told once, with since when, why and who waits; at 1 
   await w.tick(MIN);
   await w.for(10 * MIN);
   assert.equal(w.reports.length, 1);
-  assert.match(w.reports[0], /heavy job \(heavy h0-1-x, https:\/\/gh\/1\), first held Nov 24, 12:00 PM PST, #107 waits on it: main's full test run goes first\./);
+  assert.match(w.reports[0], /heavy job \(heavy h0-1-x, https:\/\/gh\/1\), first held Nov 24, 12:00 PM PST, #107 waits on it: a ship is in line\./);
   const again = world(w.now, w.settings.get('ci-hold'));
   again.runs = w.runs;
   again.line = 1;
@@ -319,12 +318,11 @@ test('a job held 2 hours is told once, with since when, why and who waits; at 1 
 test('one note takes every job that fell due, and the next one waits an hour', async () => {
   const w = world();
   w.line = 1;
-  w.heavy();
-  w.heavy();
+  w.heavy({ repo: 'o/peek' });
+  w.heavy({ repo: 'o/peek' });
   await w.tick();
   await w.tick(10 * MIN);
-  w.heavy();
-  w.main(); // keeps them held past OWN_CAP_MS
+  w.heavy({ repo: 'o/peek' });
   await w.tick();
   await w.tick(REPORT_MS - 10 * MIN);
   assert.equal(w.reports.length, 1);
@@ -357,17 +355,17 @@ test("another scheme's held job is noted apart, to its own repo", async () => {
   const w = world();
   const to = new Map<string, string>();
   (w.hold as unknown as { d: { report: (repo: string, text: string) => void } }).d.report = (repo, text) => void to.set(repo, text);
+  await w.ask(w.heavy()); // runs, and keeps Citadel's next one held past OWN_CAP_MS
   w.line = 1;
   w.heavy();
   w.heavy({ repo: 'o/peek' });
-  w.main(); // keeps Citadel's own held past OWN_CAP_MS
   await w.tick();
   await w.tick(REPORT_MS);
   assert.deepEqual([...to.keys()].sort(), [OWN, 'o/peek']);
-  assert.match(to.get(OWN)!, /heavy h0-1-x/);
-  assert.doesNotMatch(to.get(OWN)!, /heavy h1-1-x/);
-  assert.match(to.get('o/peek')!, /heavy h1-1-x/);
-  assert.doesNotMatch(to.get('o/peek')!, /heavy h0-1-x/);
+  assert.match(to.get(OWN)!, /heavy h1-1-x/);
+  assert.doesNotMatch(to.get(OWN)!, /heavy h2-1-x/);
+  assert.match(to.get('o/peek')!, /heavy h2-1-x/);
+  assert.doesNotMatch(to.get('o/peek')!, /heavy h1-1-x/);
 });
 
 test('a heavy job held before it has a run is told once, and shows on its minion', async () => {
@@ -386,11 +384,10 @@ test('a heavy job held before it has a run is told once, and shows on its minion
 });
 
 test('a hold saved before the change and already past 2 hours is told in the first note', async () => {
-  const saved = [{ repo: OWN, run: 1, kind: 'heavy', what: 'heavy old', url: 'https://gh/1', ticket: 7, since: DAY - 3 * 3600_000, why: 'a ship is in line', phase: 'held', at: DAY, attempt: 1 }];
+  const saved = [{ repo: 'o/peek', run: 1, kind: 'heavy', what: 'heavy old', url: 'https://gh/1', ticket: 7, since: DAY - 3 * 3600_000, why: 'a ship is in line', phase: 'held', at: DAY, attempt: 1 }];
   const w = world(DAY, saved);
   w.line = 1;
-  w.add('heavy old', { file: 'citadel-heavy.yml', status: 'completed', conclusion: 'cancelled' });
-  w.main(); // keeps it held past OWN_CAP_MS
+  w.add('heavy old', { file: 'citadel-heavy.yml', repo: 'o/peek', status: 'completed', conclusion: 'cancelled' });
   await w.tick();
   await w.tick();
   assert.equal(w.reports.length, 1);
@@ -705,15 +702,22 @@ test("Citadel's own job with no run yet is not told as stuck the moment its two 
   assert.equal(w.reports.length, 1);
 });
 
-test("a job past its two hours still waits for main's full run that waits its turn", async () => {
+test("a job past its two hours runs while main's run only waits for ships, and gives way once main can go", async () => {
   const w = world();
   const job = w.heavy();
   w.line = 1;
   await w.for(MIN);
   const main = w.main({ status: 'queued' });
   await w.for(OWN_CAP_MS + 10 * MIN);
-  assert.deepEqual([main.conclusion, job.conclusion], ['cancelled', 'cancelled'], 'main is still held, and goes before it');
-  assert.equal(w.hold.why(OWN, w.now - OWN_CAP_MS, w.now), "main's full test run goes first");
+  assert.deepEqual([main.conclusion, job.status, job.conclusion], ['cancelled', 'queued', null], 'main is still held, which holds the job no longer');
+  job.status = 'in_progress';
+  assert.equal(await w.ask(job), true);
+  await w.for(10 * MIN);
+  assert.equal(job.status, 'in_progress');
+  w.line = 0;
+  await w.for(MAIN_SETTLE_MS + MIN);
+  assert.equal(job.conclusion, 'cancelled', 'a gap main can use stops it');
+  assert.ok(w.posts.includes(`rerun ${main.id}`), 'and main goes');
 });
 
 test('CI health reads a held run as one that waits, never as a red, and everything else as it is', async () => {
@@ -855,9 +859,10 @@ test('a run GitHub leaves queued for over an hour holds up no check', async () =
 test("main's full run held for hours still goes before optional work in the first gap", async () => {
   const w = world();
   w.line = 1;
-  const heavy = w.heavy();
   const main = w.main({ status: 'queued' });
-  await w.for(3 * 60 * MIN);
+  await w.for(2 * 60 * MIN);
+  const heavy = w.heavy(); // under OWN_CAP_MS when the gap comes
+  await w.for(60 * MIN);
   const check = w.check({ head_branch: 'check/2' });
   assert.equal(await w.ask(check), true, 'meanwhile a ship checks itself');
   await w.tick();

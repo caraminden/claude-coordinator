@@ -8,7 +8,8 @@
 //    "After 4 h, ships wait"; mainAlone, server.ts's mainCap).
 //  - A ship's run (land/) is never touched.
 //  - A heavy job or hand-started suite held OWN_CAP_MS runs beside ships and is not stopped for them again (Josh,
-//    2026-11-25, picked "2 hours"). It still waits for main's full run and for the one-job slot.
+//    2026-11-25, picked "2 hours"). Main's run stops it
+//    only once main can go itself, as it stops a proof, and it still takes the one-job slot.
 // One job at a time (#1906; Josh, 2026-11-24, picked "One Citadel job, one Peek build": "Citadel never runs two heavy jobs at
 // once"): the runs of Citadel's own repo go one by one, in the order ship, main's full run, a ship's own check (check/, a
 // light check's heavy job) or the early next train (early/), then optional work. A run takes the slot when it asks and is let
@@ -338,7 +339,7 @@ export class CiHold {
     const capped = this.capped(r, since, now);
     if (!this.repos().includes(r) || (capped && !mine)) return null;
     const { why, busy, off } = this.state(now);
-    const first = capped && !off ? this.mainWhy(now) : why;
+    const first = capped && !off ? this.shipsFirst('heavy', undefined, true, now, since) : why;
     return first ?? (mine && !(since !== undefined && now - since >= SLOT_WAIT_MS) ? busy : null);
   }
 
@@ -426,11 +427,9 @@ export class CiHold {
       return this.shipWhy(now) ?? (start && h && !this.gap(now) ? 'the ship line only just emptied' : null);
     }
     // No ship stops a proof; main's run does, as it stops any lower job, once it may go itself.
-    if (kind === 'proof') return this.mainMay(now) && (start || this.seen.main || this.gap(now) || this.mainDue(now)) ? this.mainWhy(now) : null;
-    if (!sideRun(kind)) {
-      if (this.capped(this.d.own()!.toLowerCase(), since, now)) return this.mainWhy(now);
-      return start ? this.gate(now, h?.stops) : this.stopWhy(now);
-    }
+    // A job past its cap is no longer stopped for ships either, so main stops it as it does a proof.
+    if (kind === 'proof' || (!sideRun(kind) && this.capped(this.d.own()!.toLowerCase(), since, now))) return this.mainMay(now) && (start || this.seen.main || this.gap(now) || this.mainDue(now)) ? this.mainWhy(now) : null;
+    if (!sideRun(kind)) return start ? this.gate(now, h?.stops) : this.stopWhy(now);
     if (!this.fresh(now)) return null;
     // While main's run waits for ships it keeps no ship's own check or early run from starting (hours, at most).
     return this.seen.ship ? "a ship's tests are running" : start && this.mainMay(now) ? this.mainWhy(now) : null;
@@ -760,7 +759,7 @@ export class CiHold {
     if (!had && h.ticket !== null && !sideRun(kind))
       this.d.tell(
         h.ticket,
-        taken || kind === 'proof'
+        taken || kind === 'proof' || this.capped(repo, h.since, now)
           ? `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why}. Citadel starts it again by itself${kind === 'proof' ? ', its clean runs counted from zero,' : ' from the start'} once that has ended. Nothing to do; don't start it again, and the cancelled run isn't a failure.`
           : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself from the start once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again)${kind === 'heavy' || kind === 'suite' ? `, or once it has been held ${(mine ? OWN_CAP_MS : OTHERS_CAP_MS) / 3600_000} hours, ships or not` : ''}. Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
       );

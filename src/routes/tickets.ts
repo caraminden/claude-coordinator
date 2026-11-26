@@ -28,6 +28,7 @@ import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs } from '../land.ts';
 import { checkHandoff, laneHold, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { cleanStart, startPicked, type CardStart } from '../card-starts.ts';
 import { reviewRefusal } from '../review-gate.ts';
 import { criticRefusal } from '../critic-gate.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
@@ -189,6 +190,8 @@ interface CardOption {
   description?: string;
   image?: string;
   recommended?: true;
+  /** A pick starts this minion with no turn (#2050, src/card-starts.ts). */
+  start?: CardStart;
 }
 /** A question card's question as stored. */
 interface CardQuestion {
@@ -203,6 +206,7 @@ interface RawOption {
   description?: unknown;
   image?: unknown;
   recommended?: unknown;
+  start?: unknown;
 }
 interface RawQuestion {
   question?: unknown;
@@ -255,6 +259,7 @@ async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknow
         ...(description ? { description: str(description, `${n} option ${j + 1} description`, 300) } : {}),
         ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
         ...(o?.recommended === true || o?.recommended === 'true' || says || described ? { recommended: true } : {}),
+        ...(o?.start != null ? { start: o.start as CardStart } : {}),
       };
     });
     if (new Set(options.map((o) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
@@ -277,6 +282,8 @@ async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknow
   });
   for (const [i, q] of questions.entries()) {
     for (const [j, o] of q.options.entries()) {
+      // Checked here, not in the map above: it reads the file system (#2050).
+      if (o.start) o.start = await cleanStart(app, ticket.project_id, o.start, `Question ${i + 1} option ${j + 1}`);
       const problem = o.image && (await optionImageProblem(o.image, ticket.cwd, ticketRoots(app, ticket)));
       if (problem) throw new HttpError(400, `Question ${i + 1} option ${j + 1} image ${problem}`);
     }
@@ -929,6 +936,8 @@ export const ticketRoutes: Route[] = [
       // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
       const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
       const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
+      // A start (#2050) is a minion's plain card: a Taskmaster starts its own with create_ticket, and a ship card's pick is a go.
+      if (questions.some((q) => q.options.some((o) => o.start)) && (kind || ticket.kind === 'coordinator' || body.for_everyone === true)) throw new HttpError(400, "start goes on a minion's own question card, not a ship card or a Taskmaster's (a Taskmaster starts minions with create_ticket)");
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
       const card: Card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // A card that repeats one open or just answered is refused once; not_duplicate posts it. Both are counted (settings
@@ -1196,18 +1205,24 @@ export const ticketRoutes: Route[] = [
           // Ship It on a card with its hand-off prepared ships now, with no turn (#1930); else the minion gets the answer, with why.
           const mine = `My answers to your question card:\n\n${text}`;
           const images = await saveImages(app, ticket, body.images);
-          const why = await shipOnClick(
-            app,
-            store.getTicket(id)!,
-            { event: card.id, data },
-            {
-              by: session.name,
-              uid: session.uid ?? null,
-              picked: answers.flatMap((a) => a.selected),
-              added: images.length + files.length > 0 || answers.some((a) => a.other),
-              record: (held) => runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: held }),
-            },
-          );
+          // A pick of an option carrying a start (#2050) starts that minion with no turn; held mail for the owner when that was all.
+          const starts = (questions as CardQuestion[]).some((q) => q.options.some((o) => o.start)) ? await startPicked(app, store.getTicket(id)!, questions, answers, session, images.length + files.length > 0 || answers.some((a) => a.other)) : null;
+          if (starts?.held) runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: `${mine}\n\n${starts.text}` });
+          else if (starts) deliverAnswer(app, id, session.name, `${mine}\n\n${starts.text}`, answer, images, files);
+          const why = starts
+            ? null
+            : await shipOnClick(
+                app,
+                store.getTicket(id)!,
+                { event: card.id, data },
+                {
+                  by: session.name,
+                  uid: session.uid ?? null,
+                  picked: answers.flatMap((a) => a.selected),
+                  added: images.length + files.length > 0 || answers.some((a) => a.other),
+                  record: (held) => runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: held }),
+                },
+              );
           if (why !== null) deliverAnswer(app, id, session.name, `${mine}${why ? `\n\n(${APP_NAME} didn't ship it by itself: ${why}.)` : ''}`, answer, images, files);
         }
       } finally {

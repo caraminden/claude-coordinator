@@ -72,6 +72,7 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
   `wake_when_live`). Neither chore is a reason for `stay_open`, or goes in a brief as an after-ship step.
 - An idea or research minion ends in one handoff per piece of work it proposes, then the card that
   asks which to start (past four handoffs, a choices page: the Citadel-wide card rule (Asking and picking)).
+  Give each handoff's option its `start` (ask_question): a plain pick then starts that minion with no turn.
 
 ## Idea minions and process-only changes
 

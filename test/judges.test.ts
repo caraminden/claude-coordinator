@@ -29,6 +29,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits (and asks whether that test is alive); judges nothing", calls: 3 },
   'kit/skills/scheme-setup/templates/starter-ci/boot-check.ts': { why: 'stops the app it started itself, in a CI job; judges nothing', calls: 1 },
   'src/worktree-deps.ts': { why: 'stops its own npm install past its time limit; judges nothing', calls: 1 },
+  'src/card-starts.ts': { why: "a person's pick on a card decides what starts (#2050); it only tells the Taskmaster what did", calls: 1 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
   'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674)", calls: 11 },
   'src/routes/projects.ts': { why: "tells the Taskmaster a person started a minion; a new scheme's kickoff, a tune-up and a brief a person sent", calls: 4 },

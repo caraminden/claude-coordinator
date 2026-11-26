@@ -11,7 +11,7 @@ import { cleanPluginDirs, cleanPluginPicks, cleanRules, cleanShotNote, cleanShot
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
-import { AGENT_NAME } from '../auth.ts';
+import { AGENT_NAME, type Session } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type TicketFields, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
@@ -58,7 +58,7 @@ import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { addArchitectureCheck, addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
-import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
@@ -251,6 +251,183 @@ export function kickoff(name: string, code: string, by: string, about: string): 
 /** Minion hits with each one's owner (its `assigned`, for the duplicate checks' "Josh's") and whether it's close enough to be a twin. */
 function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string | null; twin: boolean })[] {
   return hits.map((h) => ({ ...h, owner: String(app.store.props.forTarget('minion', h.ticket_id).assigned ?? '') || null, twin: h.score >= TWIN_SCORE }));
+}
+
+/**
+ * A new minion, as create_ticket and the New minion form make it: a person (`caller` null) or a Taskmaster (`caller`
+ * its ticket). `picked` (#2050) is a person's pick on a minion's card whose option carries a start: `caller` is that
+ * minion and `session` the person who picked, so the agent's checks run (duplicate handoff, start card, brief
+ * warnings) while the minion is the picker's own and runs on their login.
+ */
+export async function createMinion(app: App, project: Project, body: Awaited<ReturnType<typeof readJson>>, session: Session, caller: Ticket | null, picked = false): Promise<TicketView & { notes: string[] }> {
+  if (app.preview) throw new HttpError(403, "A preview can't start minions");
+  const { store, runner, waiters } = app;
+  // Every new minion gets a git worktree in the scheme's real repo.
+  const message = str(body.message, 'First message', 100_000);
+  // Without a title (the New thread form sends none) start from the message's opening words;
+  // the thread renames itself once it knows what the work is.
+  const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
+  // Insert first so concurrent creates get distinct ids, then build the working dir.
+  // Every start names its model and effort (#698): the Taskmaster picks them from its table, a person's start with none gets the table's pick for its type below.
+  if (caller && !picked && (body.model == null || body.effort == null)) throw new HttpError(400, MODEL_REQUIRED('create_ticket'));
+  let model = oneOf(body.model ?? null, MODELS, 'Model');
+  let effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
+  const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
+  // Its expected cost (#1674): the larger of create_ticket's expected_cost and the brief's (or its handoff's) "Expected cost: $N" line,
+  // so a low param can't slip a big brief past its start card.
+  const briefText = `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`;
+  const givenCost = body.expected_cost == null ? null : Number(body.expected_cost);
+  if (givenCost != null && !(Number.isFinite(givenCost) && givenCost > 0 && givenCost <= 100_000)) throw new HttpError(400, 'expected_cost must be dollars, more than 0');
+  const lineCost = expectedCost(briefText);
+  const estimate = givenCost == null || lineCost == null ? (givenCost ?? lineCost) : Math.max(givenCost, lineCost);
+  let plugins = '';
+  try {
+    plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);
+  } catch (err) {
+    throw new HttpError(400, thrown(err).message!);
+  }
+  // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
+  const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
+  if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
+  // Spelled as the registry matches keys (src/properties.ts `loose`): effort_name is effortName.
+  const loose = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const given = (key: string) => Object.keys(props).some((k) => loose(k) === loose(key));
+  if ((!caller || picked) && !given('requestedBy')) props.requestedBy = session.name;
+  // The minion it is started for (#273): `parent` (#N, null for none), else the minion whose relay the Taskmaster's turn answers.
+  const parent = body.parent !== undefined ? parentMinion(store, project.id, body.parent) : caller ? sameScheme(store, project.id, runner.relayedBy(caller.id)) : null;
+  // A new minion is its starter's: the person, or for the Taskmaster the minion that asked for it, else the person of its turn.
+  if (!given('assigned')) {
+    const assigned = !caller || picked ? session.name : (parent && store.props.forTarget('minion', parent.id).assigned) || (caller.person_id && store.getUser(caller.person_id)?.name);
+    if (assigned) props.assigned = assigned;
+  }
+  const planned = store.props.check(project.id, props);
+  if (caller && !planned.type?.length) {
+    throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
+  }
+  // #1488: a Taskmaster's second start from one handoff (Nov 20: two flake minions) is refused, memory index or not; not_duplicate overrides.
+  if (caller && body.not_duplicate !== true) {
+    const shared = projectSharedDir(app.dataDir, project.id);
+    // A closed minion's handoff is tidied into handoffs/shipped/ or not-picked/ (#1371): the same file either way.
+    const fileOf = (text: string) => handoffIn(text, shared)?.replace(/^handoffs\/(?:shipped|not-picked)\//, 'handoffs/') ?? null;
+    const rel = fileOf(message);
+    const held = new Map(waiters.chains().map((c) => [c.ticket, c.message]));
+    const textOf = (data: string | null) => {
+      try {
+        return String(JSON.parse(data ?? '{}').text ?? '');
+      } catch {
+        return '';
+      }
+    };
+    const twins = rel ? store.briefsSince(project.id, Date.now() - 3 * 86_400_000).filter((t) => fileOf(held.get(t.id) ?? textOf(t.data)) === rel) : [];
+    if (twins.length) {
+      throw new HttpError(
+        409,
+        `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). ` + 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.',
+      );
+    }
+  }
+  const table = pickFor(planned.type?.[0]);
+  // Why it runs on this model (#1061): the table's pick for its type (the Taskmaster picks from the table), or a person's own choice.
+  const chosen = model !== null || effort !== null;
+  const byHand = !caller && chosen;
+  model ??= table.model;
+  effort ??= table.effort;
+  // A card's start (#2050) carries the model its author picked from the table, or none for the table's pick by type.
+  const pickBy = byHand ? session.name : picked ? (chosen ? `#${caller!.number}'s card` : 'table') : caller ? 'Taskmaster' : 'table';
+  let because = pickReason(byHand || (picked && chosen) ? pickBy : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+  // Third fix (#1157): a bug that looks like 2+ earlier fixes of the last 14 days starts with "diagnose first", one tier up from the table's pick.
+  const repeat = planned.type?.[0] === 'bug' ? await findRepeats(store, project, { title, brief: ownBrief(message), at: Date.now() }).catch(() => []) : [];
+  const stepped = repeat.length ? steppedTier({ model: model!, effort: effort! }, table, project.fable_ok !== 'off') : null;
+  const tierWas = tierLabel(model, effort);
+  if (stepped) {
+    ({ model, effort } = stepped);
+    because = `third fix (${repeat.map((m) => `#${m.number}`).join(', ')}): one tier up → ${tierLabel(model, effort)}`;
+  }
+  const brief0 = repeat.length ? `${flagBlock(repeat)}${FLAG_RULE}${message}` : message;
+  // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
+  let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
+  let leader: Ticket | undefined;
+  if (body.start_after != null) {
+    const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
+    leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
+    if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
+    const f = await waiters.follow(leader.id, when);
+    if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work shipping, so nothing can start after it`);
+    if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
+  }
+  // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
+  const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : (parent?.build ?? leader?.build ?? null);
+  // Its effort (#1751, src/effort-retros.ts): its own, else its leader's, else its parent's; an unnamed chain is named after its leader.
+  const effortOf = (t: Ticket | null | undefined) => (t ? ((store.props.forTarget('minion', t.id)[EFFORT_KEY] as string | undefined) ?? null) : null);
+  const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number!, effort: effortOf(leader) } : null, effortOf(parent));
+  if (joins?.name) props[EFFORT_KEY] = joins.name;
+  if (joins?.stampLeader && leader) store.props.set('minion', leader.id, project.id, { [EFFORT_KEY]: joins.name }, session.name);
+  // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
+  const owner = body.build_owner === true;
+  if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
+  const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
+  // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
+  store.addPick(id, model, effort, pickBy, because);
+  store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+  await ownWrites(); // its build owner and the reply read the row back (#1244)
+  const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
+  if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
+  // And it is that turn's asker's ask (#255), so its messages back count as theirs.
+  const asker = caller && !picked && store.turnAsker(caller.id);
+  if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);
+  // The ideas ledger (#1150): a minion started from a handoff (a brief naming one) marks its idea started, a chained one too.
+  try {
+    const shared = projectSharedDir(app.dataDir, project.id);
+    const rel = handoffIn(message, shared);
+    if (rel) store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
+  } catch (e) {
+    console.error(`ideas: linking #${id}: ${(e as Error).message}`);
+  }
+  // A split scheme's other Taskmasters read it in their next turn's digest (#919).
+  if (store.isSplit(project.id)) {
+    const by = caller?.kind === 'coordinator' ? caller : null;
+    const who = !by ? session.name : by.coordinator_of == null ? 'The Overlord' : `${store.getUser(by.coordinator_of)?.name ?? 'Someone'}'s ${AGENT_NAME}`;
+    store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
+  }
+  if (estimate) store.setSetting(budgetKey(id), { estimate } satisfies BudgetState);
+  // Over $30, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
+  // to it is held meanwhile (runner.send), a chained one's brief too.
+  if (caller && estimate && estimate > START_CARD_USD) {
+    const t = store.getTicket(id)!;
+    const owner = store.minionOwner(t);
+    const to = owner != null ? store.getUser(owner)?.name : undefined;
+    const card = postCard(app, t, { questions: [startCard(t.number!, title, estimate)], startCost: estimate, ...(to ? { to } : {}) });
+    store.setSetting(startHoldKey(id), { usd: estimate, card: card.id });
+    // Not sealed (#1757): it waits on a person, so it lists and counts as needing one; the setting above holds its turns.
+    if (!follow) store.updateTicket(id, { note: startNote(estimate) });
+    notes.push(
+      `Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). It isn't sealed: it shows as waiting on a person. Link that card in your reply; you can't answer it or start it yourself.`,
+    );
+  }
+  if (follow) {
+    const { leader, when } = follow;
+    waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
+    store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` }, { kind: session.agent === undefined ? 'person' : 'agent', name: session.name });
+    runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unseal starts it now.` });
+    runner.broadcastTicket(id);
+    notes.push(`Sealed: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with \`unpark\` starts it now.`);
+  } else {
+    runner.send(id, session.name, brief0, [], { brief: true });
+  }
+  if (repeat.length) {
+    const tier = stepped ? { from: tierWas, to: tierLabel(model, effort) } : null;
+    notes.push(flagNote(repeat, tier));
+    runner.emit(id, 'note', { text: `Third-fix flag: looks like ${repeat.map((m) => `#${m.number}`).join(', ')}, so its brief starts with "diagnose first"${tier ? ` and it runs on ${tier.to}` : ''}.` });
+  }
+  // A brief an agent wrote (the Taskmaster's) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
+  if (caller) {
+    const warning = briefWarning(briefText);
+    if (warning) notes.push(warning);
+    if (estimate == null) notes.push(`Cost check: the brief has no "Expected cost: $N" line (citadel:briefing, part 8), so its budget marks use the usual cost for its type. Put one in your next brief.`);
+  }
+  // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
+  void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);
+  return { ...ticketView(app, id), notes };
 }
 
 /**
@@ -1378,173 +1555,7 @@ export const projectRoutes: Route[] = [
     path: '/api/projects/:project/tickets',
     who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
-      const { store, runner, waiters } = app;
-      // Every new minion gets a git worktree in the scheme's real repo.
-      if (app.preview) throw new HttpError(403, "A preview can't start minions");
-      const body = await readJson(req);
-      const message = str(body.message, 'First message', 100_000);
-      // Without a title (the New thread form sends none) start from the message's opening words;
-      // the thread renames itself once it knows what the work is.
-      const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
-      // Insert first so concurrent creates get distinct ids, then build the working dir.
-      // Every start names its model and effort (#698): the Taskmaster picks them from its table, a person's start with none gets the table's pick for its type below.
-      if (caller && (body.model == null || body.effort == null)) throw new HttpError(400, MODEL_REQUIRED('create_ticket'));
-      let model = oneOf(body.model ?? null, MODELS, 'Model');
-      let effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
-      const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
-      // Its expected cost (#1674): the larger of create_ticket's expected_cost and the brief's (or its handoff's) "Expected cost: $N" line,
-      // so a low param can't slip a big brief past its start card.
-      const briefText = `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`;
-      const givenCost = body.expected_cost == null ? null : Number(body.expected_cost);
-      if (givenCost != null && !(Number.isFinite(givenCost) && givenCost > 0 && givenCost <= 100_000)) throw new HttpError(400, 'expected_cost must be dollars, more than 0');
-      const lineCost = expectedCost(briefText);
-      const estimate = givenCost == null || lineCost == null ? (givenCost ?? lineCost) : Math.max(givenCost, lineCost);
-      let plugins = '';
-      try {
-        plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);
-      } catch (err) {
-        throw new HttpError(400, thrown(err).message!);
-      }
-      // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
-      const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
-      if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
-      // Spelled as the registry matches keys (src/properties.ts `loose`): effort_name is effortName.
-      const loose = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const given = (key: string) => Object.keys(props).some((k) => loose(k) === loose(key));
-      if (!caller && !given('requestedBy')) props.requestedBy = session.name;
-      // The minion it is started for (#273): `parent` (#N, null for none), else the minion whose relay the Taskmaster's turn answers.
-      const parent = body.parent !== undefined ? parentMinion(store, project.id, body.parent) : caller ? sameScheme(store, project.id, runner.relayedBy(caller.id)) : null;
-      // A new minion is its starter's: the person, or for the Taskmaster the minion that asked for it, else the person of its turn.
-      if (!given('assigned')) {
-        const assigned = !caller ? session.name : (parent && store.props.forTarget('minion', parent.id).assigned) || (caller.person_id && store.getUser(caller.person_id)?.name);
-        if (assigned) props.assigned = assigned;
-      }
-      const planned = store.props.check(project.id, props);
-      if (caller && !planned.type?.length) {
-        throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
-      }
-      // #1488: a Taskmaster's second start from one handoff (Nov 20: two flake minions) is refused, memory index or not; not_duplicate overrides.
-      if (caller && body.not_duplicate !== true) {
-        const shared = projectSharedDir(app.dataDir, project.id);
-        // A closed minion's handoff is tidied into handoffs/shipped/ or not-picked/ (#1371): the same file either way.
-        const fileOf = (text: string) => handoffIn(text, shared)?.replace(/^handoffs\/(?:shipped|not-picked)\//, 'handoffs/') ?? null;
-        const rel = fileOf(message);
-        const held = new Map(waiters.chains().map((c) => [c.ticket, c.message]));
-        const textOf = (data: string | null) => {
-          try {
-            return String(JSON.parse(data ?? '{}').text ?? '');
-          } catch {
-            return '';
-          }
-        };
-        const twins = rel ? store.briefsSince(project.id, Date.now() - 3 * 86_400_000).filter((t) => fileOf(held.get(t.id) ?? textOf(t.data)) === rel) : [];
-        if (twins.length) {
-          throw new HttpError(
-            409,
-            `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). ` + 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.',
-          );
-        }
-      }
-      const table = pickFor(planned.type?.[0]);
-      // Why it runs on this model (#1061): the table's pick for its type (the Taskmaster picks from the table), or a person's own choice.
-      const byHand = !caller && (model !== null || effort !== null);
-      model ??= table.model;
-      effort ??= table.effort;
-      const pickBy = byHand ? session.name : caller ? 'Taskmaster' : 'table';
-      let because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
-      // Third fix (#1157): a bug that looks like 2+ earlier fixes of the last 14 days starts with "diagnose first", one tier up from the table's pick.
-      const repeat = planned.type?.[0] === 'bug' ? await findRepeats(store, project, { title, brief: ownBrief(message), at: Date.now() }).catch(() => []) : [];
-      const stepped = repeat.length ? steppedTier({ model: model!, effort: effort! }, table, project.fable_ok !== 'off') : null;
-      const tierWas = tierLabel(model, effort);
-      if (stepped) {
-        ({ model, effort } = stepped);
-        because = `third fix (${repeat.map((m) => `#${m.number}`).join(', ')}): one tier up → ${tierLabel(model, effort)}`;
-      }
-      const brief0 = repeat.length ? `${flagBlock(repeat)}${FLAG_RULE}${message}` : message;
-      // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
-      let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
-      let leader: Ticket | undefined;
-      if (body.start_after != null) {
-        const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
-        leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
-        if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
-        const f = await waiters.follow(leader.id, when);
-        if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work shipping, so nothing can start after it`);
-        if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
-      }
-      // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
-      const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : (parent?.build ?? leader?.build ?? null);
-      // Its effort (#1751, src/effort-retros.ts): its own, else its leader's, else its parent's; an unnamed chain is named after its leader.
-      const effortOf = (t: Ticket | null | undefined) => (t ? ((store.props.forTarget('minion', t.id)[EFFORT_KEY] as string | undefined) ?? null) : null);
-      const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number!, effort: effortOf(leader) } : null, effortOf(parent));
-      if (joins?.name) props[EFFORT_KEY] = joins.name;
-      if (joins?.stampLeader && leader) store.props.set('minion', leader.id, project.id, { [EFFORT_KEY]: joins.name }, session.name);
-      // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
-      const owner = body.build_owner === true;
-      if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
-      const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
-      // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
-      store.addPick(id, model, effort, pickBy, because);
-      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
-      await ownWrites(); // its build owner and the reply read the row back (#1244)
-      const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
-      if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
-      // And it is that turn's asker's ask (#255), so its messages back count as theirs.
-      const asker = caller && store.turnAsker(caller.id);
-      if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);
-      // The ideas ledger (#1150): a minion started from a handoff (a brief naming one) marks its idea started, a chained one too.
-      try {
-        const shared = projectSharedDir(app.dataDir, project.id);
-        const rel = handoffIn(message, shared);
-        if (rel) store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
-      } catch (e) {
-        console.error(`ideas: linking #${id}: ${(e as Error).message}`);
-      }
-      // A split scheme's other Taskmasters read it in their next turn's digest (#919).
-      if (store.isSplit(project.id)) {
-        const by = caller?.kind === 'coordinator' ? caller : null;
-        const who = !by ? session.name : by.coordinator_of == null ? 'The Overlord' : `${store.getUser(by.coordinator_of)?.name ?? 'Someone'}'s ${AGENT_NAME}`;
-        store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
-      }
-      if (estimate) store.setSetting(budgetKey(id), { estimate } satisfies BudgetState);
-      // Over $30, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
-      // to it is held meanwhile (runner.send), a chained one's brief too.
-      if (caller && estimate && estimate > START_CARD_USD) {
-        const t = store.getTicket(id)!;
-        const owner = store.minionOwner(t);
-        const to = owner != null ? store.getUser(owner)?.name : undefined;
-        const card = postCard(app, t, { questions: [startCard(t.number!, title, estimate)], startCost: estimate, ...(to ? { to } : {}) });
-        store.setSetting(startHoldKey(id), { usd: estimate, card: card.id });
-        // Not sealed (#1757): it waits on a person, so it lists and counts as needing one; the setting above holds its turns.
-        if (!follow) store.updateTicket(id, { note: startNote(estimate) });
-        notes.push(
-          `Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). It isn't sealed: it shows as waiting on a person. Link that card in your reply; you can't answer it or start it yourself.`,
-        );
-      }
-      if (follow) {
-        const { leader, when } = follow;
-        waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
-        store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` }, { kind: session.agent === undefined ? 'person' : 'agent', name: session.name });
-        runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unseal starts it now.` });
-        runner.broadcastTicket(id);
-        notes.push(`Sealed: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with \`unpark\` starts it now.`);
-      } else {
-        runner.send(id, session.name, brief0, [], { brief: true });
-      }
-      if (repeat.length) {
-        const tier = stepped ? { from: tierWas, to: tierLabel(model, effort) } : null;
-        notes.push(flagNote(repeat, tier));
-        runner.emit(id, 'note', { text: `Third-fix flag: looks like ${repeat.map((m) => `#${m.number}`).join(', ')}, so its brief starts with "diagnose first"${tier ? ` and it runs on ${tier.to}` : ''}.` });
-      }
-      // A brief an agent wrote (the Taskmaster's) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
-      if (caller) {
-        const warning = briefWarning(briefText);
-        if (warning) notes.push(warning);
-        if (estimate == null) notes.push(`Cost check: the brief has no "Expected cost: $N" line (citadel:briefing, part 8), so its budget marks use the usual cost for its type. Put one in your next brief.`);
-      }
-      // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
-      void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);
-      return json(res, 201, { ...ticketView(app, id), notes });
+      return json(res, 201, await createMinion(app, project, await readJson(req), session, caller));
     },
   },
 

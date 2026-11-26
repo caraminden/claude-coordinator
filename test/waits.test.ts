@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -7,6 +9,7 @@ import type { Ship } from '../src/branch.ts';
 import { earlyCi } from '../src/land-news.ts';
 import { flockedInodes, heldIn, heldSlotsA, landPhase, median, moveIn, procAlive, ridingOf, trainLabel, Waits } from '../src/waits.ts';
 import { tempRoot } from './helpers.ts';
+import { until } from './wait.ts';
 import type { CiRuns } from '../src/ci-wait.ts';
 import { fake } from './typed.ts';
 
@@ -168,7 +171,7 @@ test('the restart: while the ship line says deploying, with the turns it waits f
   assert.equal(after.usual('restart'), 45);
 });
 
-test('median, and a live process told apart from a reused pid', async () => {
+test('median, and a live process told apart from a reused pid or a zombie', async () => {
   assert.equal(median([]), null);
   assert.equal(median([5, 1, 3]), 3);
   assert.equal(median([4, 1, 3, 2]), 3);
@@ -177,6 +180,18 @@ test('median, and a live process told apart from a reused pid', async () => {
   assert.ok(procAlive(`${process.pid} ${start}`));
   assert.ok(!procAlive(`${process.pid} 1`));
   assert.ok(!procAlive(''));
+  // A landing that died but wasn't reaped yet (a zombie: its parent never waited) holds no lock: its start time still matches.
+  const parent = spawn('sh', ['-c', 'true & echo $!; exec sleep 30'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    const [pid] = (await once(parent.stdout!, 'data')).map(String);
+    const zombie = pid.trim();
+    const fields = () => readFileSync(`/proc/${zombie}/stat`, 'utf8').split(') ')[1].split(' ');
+    await until('the child to exit unreaped', () => fields()[0] === 'Z');
+    assert.ok(!procAlive(`${zombie} ${fields()[19]}`));
+  } finally {
+    parent.kill();
+    if (parent.exitCode === null && parent.signalCode === null) await once(parent, 'exit');
+  }
 });
 
 test('the lock list counts holders, not waiters or other lock kinds, and none to read trusts every slot (#1562)', async () => {
@@ -462,7 +477,7 @@ test('a ship whose CI started early on the train ahead reads "CI · started earl
   assert.deepEqual([held.stage, held.label, held.chip], ['line', 'Held', 'line · held']);
   assert.match(held.text, /^held: main is broken \(12 min\)/);
   assert.equal(waits.wait(w.id)!.train?.label, 'Releasing next', 'the held ship fills no train');
-  assert.doesNotMatch(waits.wait(w.id)!.text, /behind .*\(waiting\).*and 1 more/);
+  assert.match(waits.wait(w.id)!.text, /2nd in line, behind #\d+ \(waiting for CI\)$/, 'the held ship is not counted ahead');
   early.clear();
   await waits.poll();
   assert.equal(waits.wait(f.id)!.label, 'CI');

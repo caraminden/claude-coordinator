@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { armedKey, proofKey } from '../src/db-keys.ts';
+import { startHoldKey } from '../src/minion-budget.ts';
+import { closeCancelledKey } from '../src/turn-keys.ts';
 import { writeOffThread } from '../src/db-writer.ts';
 import { Runner } from '../src/runner.ts';
 import { testPins } from './helpers.ts';
@@ -27,6 +30,9 @@ test('dismissing a minion names its held mail in the chat and deletes its queue 
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.updateTicket(t.id, { status: 'idle' });
   for (const k of KEYS(t.id)) store.setSetting(k, 1);
+  // Nor does it wait on its start card, ship an armed hand-off or keep a cancelled close once dismissed: a reopen starts clean.
+  const gone = [startHoldKey(t.id), armedKey(t.id), proofKey(t.id), closeCancelledKey(t.id)];
+  for (const k of gone) store.setSetting(k, { usd: 60 });
   store.setSetting(`minion_budget:${t.id}`, { asked: 1, woke: 2 });
   const runner = new Runner(
     store,
@@ -35,15 +41,14 @@ test('dismissing a minion names its held mail in the chat and deletes its queue 
     '/bin/false',
   );
   runner.queue.hold(t.id, { author: 'Held mail from Taskmaster', text: 'build 3 merged', images: [] }, Date.now());
+  // An fyi (a shipped line, a note for its own record) asked nothing of it: nothing to name.
+  runner.queue.hold(t.id, { author: 'Held mail from Josh', text: 'shipped, fyi', images: [], fyi: true }, Date.now());
   await runner.close(t.id, 'Dismissed.');
   assert.equal(store.getSetting(`minion-queue:${t.id}`), null);
-  for (const k of KEYS(t.id)) assert.equal(store.getSetting(k), null, k);
+  for (const k of [...KEYS(t.id), ...gone]) assert.equal(store.getSetting(k), null, k);
   // Its budget marks stay (2R1): each is once ever, so a reopen past them isn't asked again.
   assert.deepEqual(store.getSetting(`minion_budget:${t.id}`), { asked: 1, woke: 2 });
-  assert.ok(
-    notes(store, t.id).some((n) => n.startsWith('Dismissed before this message was read: Held mail from Taskmaster: build 3 merged')),
-    notes(store, t.id).join('\n'),
-  );
+  assert.ok(notes(store, t.id).includes('Dismissed before this message was read: Held mail from Taskmaster: build 3 merged'), notes(store, t.id).join('\n'));
   store.db.close();
 });
 

@@ -298,7 +298,11 @@ export const minionQueries = {
   picksOf(this: Store, ticketId: number) {
     return this.db.prepare('SELECT at, model, effort, by, reason FROM ticket_picks WHERE ticket_id = ? ORDER BY id').all(ticketId) as { at: number; model: string | null; effort: string | null; by: string; reason: string }[];
   },
-  /** The minion, its chat and every row of it, in one commit: a crash between can't leave a minion with no chat. */
+  /**
+   * The minion, its chat and every row of it, in one transaction: an error or a crash between the deletes keeps all of it.
+   * It spans three files (main, events, state) and SQLite in WAL mode commits each on its own, so a crash during COMMIT
+   * can still split them.
+   */
   deleteTicket(this: Store, id: number) {
     this.db.exec('BEGIN IMMEDIATE');
     try {

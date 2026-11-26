@@ -291,8 +291,9 @@ test('a pipeline change armed on its proof goes to the lane once the proof is gr
   await armedFor(m, 'proof', PROOF_NOTE);
   assert.ok(!store.claims.waiting(projectId, LANE).includes(m.id), 'not queued before its proof');
   await proofRun(m, head(m), 'success');
-  await until('it joins the lane', () => store.claims.waiting(projectId, LANE).includes(m.id));
-  assert.equal(m.state().note, ARMED_NOTE);
+  // The queue is written before the note: wait on the note, the arm's last step.
+  await until('it joins the lane', () => m.state().note === ARMED_NOTE);
+  assert.ok(store.claims.waiting(projectId, LANE).includes(m.id));
   await lane.passOn();
   await until('it ships and closes', () => m.state().status === 'closed');
 });

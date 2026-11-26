@@ -567,7 +567,8 @@ function machineBody(m) {
         h('span', {}, [m.host ?? m.worker?.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : m.worker?.host ? 'runs only minion turns' : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on')),
       ),
-      m.worker ? h('div', { class: 'machine-wide' }, workerSection(m, renderMachineList)) : [],
+      // Not while it drains: its Minion turns switch would turn it back on.
+      m.worker && !removing(m) ? h('div', { class: 'machine-wide' }, workerSection(m, renderMachineList)) : [],
       m.screen ? kv('Screen', machineScreen(m.screen)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : [],

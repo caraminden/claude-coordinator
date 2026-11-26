@@ -95,6 +95,7 @@ test('while it drains (202) the row stays, Removing…, with the command and its
   await wait('the command', `!!${panel('busy-pc')}?.querySelector('pre.cui-shell[data-tone=powershell]')`);
   assert.equal(await page.eval(`${panel('busy-pc')}.querySelector('pre').textContent`), reply.powershell);
   assert.match(await page.eval<string>(`${row('busy-pc')}.querySelector('summary').textContent`), /Removing…/);
+  assert.equal(await page.eval(`!!${row('busy-pc')}.querySelector('.rules-switch')`), false, 'no switch to turn minion turns back on');
   // Its copies are cleared (here: removed now, from outside this page): the row goes and the command stays.
   const listed = ok(await srv.call('/api/machines'));
   const machines: { id: number; name: string }[] = listed.machines ?? listed;

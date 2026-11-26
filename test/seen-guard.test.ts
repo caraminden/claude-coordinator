@@ -9,6 +9,9 @@ import { afterCompact, fileRuns, seenHook } from '../kit/hooks/seen.ts';
 import { jsonLines } from './helpers.ts';
 import { logPath } from '../kit/hooks/retro-log.ts';
 
+// A turn's own shared folder never gets this file's escape notes (#1920: they reached the live retro log).
+delete process.env.COORDINATOR_SHARED_DIR;
+
 const HOOKS = join(import.meta.dirname, '../kit/hooks');
 const lineAt = (i: number) => (i % 50 === 1 ? `export function part${i}(value: number) {` : `  const result${i} = compute(${i}, 'some text to make the line long enough');`);
 const body = (n: number) => Array.from({ length: n }, (_, i) => lineAt(i + 1));

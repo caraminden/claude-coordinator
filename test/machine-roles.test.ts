@@ -185,6 +185,8 @@ test('PATCH roles: owner and admins only; on with no list is every scheme its ow
   await assert.rejects(patchRoles(app, as(dana), m, { role: 'turns', on: true }), /No such machine/);
   await assert.rejects(patchRoles(app, as(josh), m, { role: 'wifi', on: true }), /role must be one of/);
   await assert.rejects(patchRoles(app, as(cara), m, { role: 'turns', on: true }), /Only its owner can switch Minion turns on/);
+  const removing = { removing: () => true };
+  await assert.rejects(patchRoles({ ...app, machineCopies: removing } as unknown as typeof app, as(josh), m, { role: 'turns', on: true }), /being removed/);
   const on = await patchRoles(app, as(josh), m, { role: 'turns', on: true });
   assert.deepEqual(on.roles.find((r) => r.role === 'turns')?.projects, [mine.id, shared.id], "every scheme he's in, not one he isn't");
   assert.deepEqual(calls, ['told', 'pump']);

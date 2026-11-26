@@ -140,6 +140,7 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   if (role === 'turns' && body.on === true && !was.on && machine.owner_id !== session.uid) {
     throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
   }
+  if (role === 'turns' && body.on === true && !was.on && app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it takes no new turns`);
   // Caps on a person's own machine are set by its owner's own sign-in only (spec section 7, Josh: "On the page").
   if (body.caps !== undefined && machine.owner_id !== null && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can set its caps');
   const owner = machine.owner_id === null ? null : app.store.getUser(machine.owner_id);

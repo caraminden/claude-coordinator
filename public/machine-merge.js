@@ -57,7 +57,7 @@ export function openMergePanel(el, m, other, { onDone = () => {}, machines = () 
         st.failed
           ? notice('danger', h('span', {}, `Couldn't merge them: ${st.failed} `), h('button', { type: 'button', class: 'secondary small', onclick: start }, 'Try again'))
           : !g
-            ? h('pre', { class: 'muted' }, 'Getting the line…')
+            ? notice('info', 'Getting the line…')
             : merged
               ? notice('ok', h('strong', {}, `Merged: ${g.into.name}`), ` is this PC's one row now; ${g.from.name} and its token are gone.`)
               : [

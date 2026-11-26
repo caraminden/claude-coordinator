@@ -937,7 +937,7 @@ dialog.viewer #chat-cabal { display: none; }
 .cabal-sub { color: var(--muted); font-size: 0.85em; }
 .cabal-sub a { color: var(--accent); }
 .cabal-acts { display: inline-flex; gap: var(--space-2); align-items: center; }
-.cabal-acts a.small { font-size: 0.85em; color: var(--accent); }
+.cabal-acts a.small { font-size: 0.85em; color: var(--accent); display: inline-flex; align-items: center; min-height: 24px; }
 .cabal-meter { order: 9; flex-basis: 100%; display: flex; gap: 1px; height: 6px; border-radius: 3px; overflow: hidden; margin-bottom: var(--space-2); }
 .cabal-meter i, .cabal-dot { background: var(--line); }
 .cabal-meter i { flex: 1; }
@@ -951,7 +951,7 @@ dialog.viewer #chat-cabal { display: none; }
 .cabal-red, .cabal-ask, .cabal-more { margin: 0 var(--space-3) var(--space-2); }
 .cabal-red { padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); border-left: 3px solid var(--error); background: color-mix(in srgb, var(--error) 9%, var(--panel)); }
 .cabal-red b, .cabal-ask[data-blocking] b { color: var(--error); }
-.cabal-ask { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--bg); }
+.cabal-ask { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--bg); }
 .cabal-ask[data-blocking] { border-color: color-mix(in srgb, var(--error) 35%, var(--line)); background: color-mix(in srgb, var(--error) 5%, var(--panel)); }
 .cabal-ask > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .cabal-ask > button { margin: 0; flex: none; }
@@ -985,7 +985,9 @@ dialog.viewer #chat-cabal { display: none; }
   .cabal-page { margin: var(--space-2); }
   .cabal-note-col { display: none; }
   .cabal-narrow { display: block; }
-  .cabal-ask { flex-direction: column; }
+  .cabal-ask { flex-direction: column; align-items: flex-start; }
+  .cabal-acts a.small { min-height: 40px; }
+  #chat-cabal .cabal-scroll { max-height: 30vh; } /* the open ledger leaves the chat room above it */
   /* Over the composer, the chat keeps the room: two lines each, the board page has them whole. */
   #chat-cabal :is(.cabal-red, .cabal-ask > div) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 }

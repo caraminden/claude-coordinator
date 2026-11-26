@@ -40,10 +40,17 @@ function boardHead(b, projectId) {
 /** The red-run bar, then the open asks: blocking ones pinned (all of them on the page, the first in a chat). @param {Board} b @param {boolean} all @param {((a: BoardAsk) => void) | null} reply */
 function pinned(b, all, reply) {
   const out = [];
-  if (b.red) out.push(h('div', { class: 'cabal-red', role: 'status' }, h('b', {}, 'Red run '), h('span', { class: 'cabal-when' }, clock(b.red.at)), ' ', b.red.text));
+  if (b.red) out.push(h('div', { class: 'cabal-red', role: 'status', title: b.red.text }, h('b', {}, 'Red run '), h('span', { class: 'cabal-when' }, clock(b.red.at)), ' ', b.red.text));
   const blocking = b.asks.filter((a) => a.blocking);
   for (const a of all ? [...blocking, ...b.asks.filter((x) => !x.blocking)] : blocking.slice(0, 1))
-    out.push(h('div', { class: 'cabal-ask', 'data-blocking': a.blocking ? '' : null }, h('div', {}, h('b', {}, a.blocking ? 'Blocking ask' : 'Ask'), ` · ${a.from}${a.number ? ` #${a.number}` : ''}: `, a.text), reply ? h('button', { type: 'button', class: 'small secondary', onclick: () => reply(a) }, 'Reply') : null));
+    out.push(
+      h(
+        'div',
+        { class: 'cabal-ask', 'data-blocking': a.blocking ? '' : null },
+        h('div', { title: a.text }, h('b', {}, a.blocking ? 'Blocking ask' : 'Ask'), ` · ${a.from}${a.number ? ` #${a.number}` : ''}: `, a.text),
+        reply ? h('button', { type: 'button', class: 'small secondary', onclick: () => reply(a) }, 'Reply') : null,
+      ),
+    );
   const rest = b.asks.length - (all ? b.asks.length : Math.min(1, blocking.length));
   if (!all && rest > 0) out.push(h('div', { class: 'cabal-more' }, `${rest} more open ask${rest === 1 ? '' : 's'} on the board`));
   return out;
@@ -209,7 +216,7 @@ let page = null;
 /** The page at #/p/N/cabal/M, M the lead's #N. @param {number} projectId @param {number} number */
 export function cabalPage(projectId, number) {
   const el = h('section', { class: 'artifacts-main cabal-main' }, loadingLine('Reading the board…'));
-  page = { el, projectId, number, board: null, error: null, s: { filter: 'all', open: null, shown: true } };
+  page = { el, projectId, number, board: null, error: null, s: { filter: 'open', open: null, shown: true } };
   readPage(page);
   return el;
 }

@@ -1,7 +1,7 @@
 // Is each systemd unit, slice, timer and drop-in in the repo's deploy/ installed on this host (#1216)? Units are a by-hand
 // install (symlinks into the live checkout), so a missed step goes unseen: on 2026-11-20 the watchdog had been missing for 16
-// days and both slices for 23. This only reads; it installs nothing.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+// days and both slices for 23. This only reads; it installs nothing. Off the server's thread: a stalled disk held it 15.8 s (#2081).
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,21 +18,21 @@ const KINDS = /\.(service|timer|slice|socket|path|mount|target)$/;
 export const SKIP_FILE = 'not-installed.txt';
 
 /** deploy/'s units, relative to it: top-level unit files and the `.conf` drop-ins in `<unit>.d/`. */
-export function repoUnits(deployDir: string): string[] {
+export async function repoUnits(deployDir: string): Promise<string[]> {
   const out: string[] = [];
-  for (const e of readdirSync(deployDir, { withFileTypes: true })) {
+  for (const e of await readdir(deployDir, { withFileTypes: true })) {
     if (e.isFile() && KINDS.test(e.name)) out.push(e.name);
     else if (e.isDirectory() && /\.(service|timer|slice|socket)\.d$/.test(e.name)) {
-      for (const f of readdirSync(join(deployDir, e.name)).filter((n) => n.endsWith('.conf'))) out.push(`${e.name}/${f}`);
+      for (const f of (await readdir(join(deployDir, e.name))).filter((n) => n.endsWith('.conf'))) out.push(`${e.name}/${f}`);
     }
   }
   return out.sort();
 }
 
-export function skipped(deployDir: string): Set<string> {
+export async function skipped(deployDir: string): Promise<Set<string>> {
   try {
     return new Set(
-      readFileSync(join(deployDir, SKIP_FILE), 'utf8')
+      (await readFile(join(deployDir, SKIP_FILE), 'utf8'))
         .split('\n')
         .map((l) => l.replace(/#.*/, '').trim())
         .filter(Boolean),
@@ -44,17 +44,19 @@ export function skipped(deployDir: string): Set<string> {
 
 const tilde = (p: string, home: string) => (p === home || p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
 
-/** Each unit's state against `installDir` (readFileSync follows a symlink, so a link into any checkout with the same text counts). */
-export function checkUnits(deployDir: string, installDir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user'), home = homedir()): UnitRow[] {
-  const skip = skipped(deployDir);
+/** Each unit's state against `installDir` (stat and readFile follow a symlink, so a link into any checkout with the same text counts). */
+export async function checkUnits(deployDir: string, installDir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user'), home = homedir()): Promise<UnitRow[]> {
+  const skip = await skipped(deployDir);
   const rows: UnitRow[] = [];
-  for (const name of repoUnits(deployDir)) {
+  for (const name of await repoUnits(deployDir)) {
     const unit = name.split('/')[0].replace(/\.d$/, '');
     if (skip.has(name) || skip.has(unit)) continue;
-    const want = readFileSync(join(deployDir, name), 'utf8');
+    const want = await readFile(join(deployDir, name), 'utf8');
     const target = join(installDir, name);
     let state: UnitState = 'missing';
-    if (existsSync(target) && statSync(target).isFile()) state = readFileSync(target, 'utf8') === want ? 'installed' : 'different';
+    // A stat that fails reads as missing, as existsSync did.
+    const there = await stat(target).catch(() => null);
+    if (there?.isFile()) state = (await readFile(target, 'utf8')) === want ? 'installed' : 'different';
     let fix: string | null = null;
     if (state !== 'installed') {
       const src = tilde(join(deployDir, name), home);

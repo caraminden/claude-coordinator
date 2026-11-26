@@ -494,7 +494,7 @@ if (runner.units && !BOOT_CHECK) {
 // Units in deploy/ not installed here, or different (#1216): checked at boot and every 6 h; Citadel's members get one push when a
 // unit newly goes missing or different, and one again if it is fixed and then breaks again. Read-only: it installs nothing.
 async function checkUnitDrift() {
-  const rows = checkUnits(DEPLOY_DIR);
+  const rows = await checkUnits(DEPLOY_DIR);
   const now = problemKeys(rows);
   const seen = new Set(store.getSetting<string[]>('unit_drift_seen') ?? []);
   const fresh = now.filter((k) => !seen.has(k));

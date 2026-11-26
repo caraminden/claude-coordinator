@@ -14,7 +14,7 @@ node tools/review-escapes/run.ts check                               # rebuild w
 `run` takes `--arms sonnet,opus,lens` (the default; `verifier` only when named), `--case <regex>`, `--out <dir>` (default
 `$TMPDIR/review-escapes`), `--kit <dir>`, `--judge-model` and `--budget` (per review, USD). A case
 already reviewed or judged in `--out` is skipped, so a stopped run picks up where it left off. It
-runs `claude -p` on the asker's own Claude login: about $8–10 an arm on Sonnet, $47 on Opus, plus $2 of judging. One pass can swing by 3 named bugs, so run an arm twice before believing a gap.
+runs `claude -p` on the asker's own Claude login: about $32 a Sonnet pass over both sets (escapes $23, planted $9; #2079, 2026-11-25, up from $8–10 when reviews read less), $47 on Opus (older figure), plus $2 of judging. One pass can swing by 3 named bugs, so run an arm twice before believing a gap.
 
 ## Files
 
@@ -57,7 +57,7 @@ node tools/review-escapes/run.ts run --arms sonnet --set all --jobs 3 --addition
 node tools/review-escapes/bench.ts record $TMPDIR/bench-1 $TMPDIR/bench-2 --additions <the same file> --results <where you kept the reports>
 ```
 
-Two Sonnet passes over both sets cost about $20 (the baseline: see its report). If the mean of planted
+Two Sonnet passes over both sets cost about $68 (about $34 each with judging; #2079, 2026-11-25). A fresh pass on main's kit with the 6 lessons of that day named 22 of 22 planted and 10 of 36 escapes, against the record's 18–19 and 2–4 from a day earlier: lessons move the score, so when they grew since the record, run one pass on main's kit (`--kit` a `git archive main kit` copy) before blaming your change for a drop. If the mean of planted
 bugs named fell by 2 or more from the last record, `record` says so and writes `drop` into the record:
 the change is high risk and ships only on a member's go (as prompt-eval's "Drop needs a go"). Commit
 `test/reviewer-benchmark.json` with the change. Measure, don't tune: the benchmark checks a reviewer

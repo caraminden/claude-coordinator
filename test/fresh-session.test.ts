@@ -484,6 +484,62 @@ test("a minion's turn past 150k never hands off", async () => {
   }
 });
 
+test("a cabal lead's turn past 150k starts its shift change: its board comes with the handoff, and its state stays (#2093)", async () => {
+  try {
+    const id = taskmaster('old', null);
+    store.ensureCabal(id, store.getTicket(id)!.project_id);
+    store.addCabalLog(id, 'Cara', 'Picked the narrow path');
+    contextSize(FRESH_CONTEXT_TOKENS + 1);
+    let count = callCount();
+    runner.send(id, 'Cara', 'go');
+    await started(id);
+    // Set by the turn itself, as a lead waiting on a person would: the handoff turn must not clear it.
+    store.updateTicket(id, { state: 'ready' });
+    await endTurn(id, 'ok');
+    const step = await lastCall(++count);
+    assert.match(promptText(step.prompt), /a shift change/);
+    assert.match(promptText(step.prompt), /Put in only what the board doesn't hold/);
+    await started(id);
+    contextSize(null);
+    assert.equal(store.getTicket(id)!.state, 'ready');
+    await endTurn(id, 'ok:Card 3 waits on Cara.');
+    await waitIdle(id);
+    assert.equal(store.getTicket(id)!.session_id, null);
+    const event = store.listEvents(id).find((e) => e.kind === 'fresh')!;
+    assert.equal(JSON.parse(event.data).shift, true);
+    runner.send(id, 'Cara', 'next');
+    const next = await lastCall(++count);
+    assert.match(promptText(next.prompt), /Card 3 waits on Cara\./);
+    assert.match(promptText(next.prompt), /Your cabal's board now \(cabal_board\):[\s\S]*Picked the narrow path/);
+    assert.ok(!next.args.includes('--resume'));
+    await started(id);
+    await endTurn(id, 'ok');
+    await waitIdle(id);
+  } finally {
+    contextSize(null);
+  }
+});
+
+test('the idle sweep starts a cabal lead fresh, not an ordinary minion or a sealed lead (#2093)', async () => {
+  const now = Date.now();
+  const idle = (lead: boolean, state: 'parked' | null = null) => {
+    const id = taskmaster('old', null);
+    if (lead) store.ensureCabal(id, store.getTicket(id)!.project_id);
+    store.updateTicket(id, { state });
+    store.setSetting(`context:${id}`, FRESH_IDLE_CONTEXT_TOKENS + 1);
+    store.recordTurn(id, { event_id: null, session_id: 'old', ended_at: now - FRESH_IDLE_MS, session_cost_usd: 0, duration_ms: 1, usage: {} } as unknown as Parameters<Store['recordTurn']>[1]);
+    return id;
+  };
+  const [lead, plain, sealed] = [idle(true), idle(false), idle(true, 'parked')];
+  runner.freshSweep(now);
+  assert.equal(runner.view(store.getTicket(lead)!).fresh_pending, true);
+  assert.equal(runner.view(store.getTicket(plain)!).fresh_pending, false);
+  assert.equal(runner.view(store.getTicket(sealed)!).fresh_pending, false);
+  await started(lead);
+  await endTurn(lead, 'ok:nothing owed');
+  await waitIdle(lead);
+});
+
 test('messages queued during a big turn run first, and the last of their turns hands off', async () => {
   const id = taskmaster();
   try {

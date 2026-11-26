@@ -794,11 +794,13 @@ function drawEvent(event, scroll) {
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'fresh') {
     // A Taskmaster's or a minion's fresh Claude session (#406, #937), with the handoff it starts from behind the toggle.
+    // A cabal lead's is its shift change (#2093).
+    const began = data.shift ? 'Shift change' : 'Started fresh';
     nodes.push(
       h(
         'details',
         { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null },
-        h('summary', {}, h('span', { class: 'rule' }), data.why ? `Started fresh: ${data.why}` : 'Started fresh', h('span', { class: 'rule' })),
+        h('summary', {}, h('span', { class: 'rule' }), data.why ? `${began}: ${data.why}` : began, h('span', { class: 'rule' })),
         h('div', { class: 'fresh-from' }, 'The handoff it started from:'),
         markdown(data.summary, event.ticket_id),
       ),

@@ -3044,7 +3044,7 @@ export class Runner {
           : promptMessage([
               ...(context ? [{ author: 'System', text: context, images: [] }] : []),
               ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
-              ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []),
+              ...(handoff ? [{ author: 'System', text: freshStartText(await this.fresh.opening(ticket, handoff)), images: [] }] : []),
               ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
               ...handBack,
               ...cancelledLine,
@@ -3109,8 +3109,8 @@ export class Runner {
       if (!resumed) this.statuses.delete(ticket.id);
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
       // A turn that only carries on a cut-off one wakes nobody: a seal set during that one stays (#1958), as it would at its end.
-      // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
-      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'parked' && carriesOn) && !(ticket.state === 'outside' && this.serverWork(ticket.id, true)))
+      // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends. A lead's shift change (#2093) keeps its state.
+      else if (ticket.state && ticket.state !== 'pending-deploy' && !(step && this.store.getCabal(ticket.id)) && !(ticket.state === 'parked' && carriesOn) && !(ticket.state === 'outside' && this.serverWork(ticket.id, true)))
         this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.

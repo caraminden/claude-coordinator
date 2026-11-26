@@ -42,6 +42,10 @@ Do nothing else this turn, and reply in one line.`;
 export const minionHandoffPrompt = (why: string) =>
   `${APP_NAME} is starting you a fresh Claude session (${why}): your next turn begins from a short handoff instead of this whole conversation. People's chat history stays as it is; only your context resets. Before that, commit any work in progress. Then reply with your handoff and nothing else: your whole reply is what your next session starts from. Put in what you were asked and by whom, the decisions made (quoting who made them and when), the branch and what is committed, cards waiting on people, what you are sealed on, and what is left to do. Facts, not history. Do nothing else this turn.`;
 
+/** A cabal lead's shift change (#2093): its board holds the roster, notes, asks and log, so the handoff carries only the rest. */
+export const leadHandoffPrompt = (why: string) =>
+  `${APP_NAME} is starting you a fresh Claude session (${why}), a shift change: your next turn begins from your handoff and your cabal's board instead of this whole conversation. People's chat history stays as it is; only your context resets. Before that, commit any work in progress, and put on the board with cabal_board what belongs there and isn't yet (decisions with who made them and when as log lines, row notes, the red run). Then reply with your handoff and nothing else: your whole reply is what your next session starts from. The board comes with it, so don't repeat the roster, members' states, asks, claims, spend or the log. Put in only what the board doesn't hold: cards waiting on people, what you are sealed on, the branch and any half-done merge or fix, what you promised people, and what you do next. Facts, not history. Do nothing else this turn.`;
+
 /** Where a fresh session's first turn starts (#406). */
 export const freshStartText = (handoff: string) => `This is a fresh Claude session: ${APP_NAME} reset your context (people's chat history is unchanged). Your memory loads as usual. Your previous session's handoff:\n\n${handoff}`;
 

@@ -51,6 +51,7 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
+import { cabalName } from './cabal-board.ts';
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorAlive, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
@@ -3207,6 +3208,14 @@ export class Runner {
               preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
             }
           : null;
+      // Its cabal (#2095): the board it leads or is on, named as people read it, with its Overseer's #N.
+      const leadId = ticket.kind === 'coordinator' ? null : this.store.getCabal(ticket.id) ? ticket.id : (this.store.cabalRowOf(ticket.id)?.lead_id ?? null);
+      const lead = leadId == null ? undefined : this.store.getTicket(leadId);
+      const cabal = lead && {
+        lead: lead.id === ticket.id,
+        name: cabalName(this.store, lead, this.store.getCabal(lead.id)?.name ?? ''),
+        overseer: `${lead.project_id === project.id ? '' : `${this.store.getProject(lead.project_id)?.name ?? 'another scheme'} `}#${lead.number}`,
+      };
       // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
       const everyScheme = this.everySchemeFor(project, ticket, asker);
       const everySchemeView = everyScheme && {
@@ -3240,6 +3249,7 @@ export class Runner {
         ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null,
         jobMachines,
         ticket.kind === 'coordinator' && fableMeter(this.store).over,
+        cabal ?? null,
       );
       // A warm session keeps the prompt it last ran with (#1276): a changed byte would re-write its whole cached conversation.
       // Codex has no such cache to keep.

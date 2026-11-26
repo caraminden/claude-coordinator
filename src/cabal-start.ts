@@ -90,7 +90,7 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
   const head = approved.length ? `${overseerOf({ name: nm })} (#${lead.number}) asks to add ${rows.length} to its cabal of ${approved.length}` : `${overseerOf({ name: nm })} (#${lead.number}) asks to start its cabal of ${rows.length}`;
   const where = lead.build != null ? `merging into Build ${lead.build}'s branch` : 'each shipping to live itself';
   const others = [...new Set(rows.map((r) => rowScheme(lead, r)).filter((p) => p !== lead.project_id))];
-  const elsewhere = others.length ? `\n\nRows marked with another scheme run there and ship to its own main${lead.build != null ? `, never into Build ${lead.build}` : ''}: its Taskmaster starts them when the Overseer asks, and only that scheme's people's go approves them (they get this card too).` : '';
+  const elsewhere = others.length ? `\n\nRows marked with another scheme run there and ship to its own main${lead.build != null ? `, never into Build ${lead.build}` : ''}: its Taskmaster starts them when ${overseerOf({ name: nm })} asks, and only that scheme's people's go approves them (they get this card too).` : '';
   const question: CardQuestion = {
     header: approved.length ? 'Add to the cabal' : 'Start the cabal',
     question:
@@ -120,11 +120,11 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
           header: 'Start cabal members',
           question:
             `${overseerOf({ name: nm })}, #${lead.number} in ${own}, leads a cabal there and asks to start ${theirs.length} of its members in ${project.name}, about ${money(sum)}:\n\n${theirs.map(rosterLine(app, lead)).join('\n')}` +
-            `\n\nThey run and ship here, to ${project.name}'s own main${lead.build != null ? `, never into ${own}'s Build ${lead.build}` : ''}. Your ${AGENT_NAME} starts each when the Overseer asks, and their notes and asks go to the cabal's board. Only a ${project.name} member's go starts them.`,
+            `\n\nThey run and ship here, to ${project.name}'s own main${lead.build != null ? `, never into ${own}'s Build ${lead.build}` : ''}. Your ${AGENT_NAME} starts each when ${overseerOf({ name: nm })} asks, and their notes and asks go to the cabal's board. Only a ${project.name} member's go starts them.`,
           multiSelect: false,
           options: [
-            { label: FORM_GO, description: `Your ${AGENT_NAME} starts them when the Overseer asks.`, recommended: true },
-            { label: FORM_WAIT, description: 'Nothing starts here. Say what to change and the Overseer posts a new card.' },
+            { label: FORM_GO, description: `Your ${AGENT_NAME} starts them when ${overseerOf({ name: nm })} asks.`, recommended: true },
+            { label: FORM_WAIT, description: `Nothing starts here. Say what to change and ${overseerOf({ name: nm })} posts a new card.` },
           ],
         },
       ],
@@ -190,7 +190,7 @@ export function findRow(app: App, leadId: number, row: unknown): CabalMemberRow 
 }
 
 /** Members at work, as the board reads them (building, open or blocked): what the width counts. One sealed on its chain, merged or dismissed holds no place. */
-const atWork = async (app: App, leadId: number) => ((await readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) }))?.counts.working ?? 0) + app.store.cabalRows(leadId).filter((r) => r.asked_at != null && r.ticket_id == null).length; // a row asked of another scheme's Taskmaster holds its place
+const atWork = async (app: App, leadId: number, self: number) => ((await readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) }))?.counts.working ?? 0) + app.store.cabalRows(leadId).filter((r) => r.asked_at != null && r.ticket_id == null && r.id !== self).length; // a row asked of another scheme's Taskmaster holds its place
 
 /** What a row's `after` chains on: a #N, or another row's label whose minion is started. */
 function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | null {
@@ -202,6 +202,7 @@ function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | null {
   if (!other) throw new HttpError(400, `Row ${rowName(r)} waits on "${after}", which is no #N and no label on your board`);
   const t = other.ticket_id != null ? app.store.getTicket(other.ticket_id) : undefined;
   if (!t) throw new HttpError(409, `Row ${rowName(r)} waits on ${after}, which isn't started yet: start ${after} first`);
+  if (t.project_id !== lead.project_id) throw new HttpError(400, `Row ${rowName(r)} waits on ${after}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${after} ships`);
   return t.number!;
 }
 
@@ -221,7 +222,7 @@ export async function cabalStart(app: App, lead: Ticket, rowRef: unknown, text: 
   if (r.approved_at == null) throw new HttpError(403, `Row ${rowName(r)} isn't on the approved roster: add it with a card (cabal_board action form) and start it once ${there ? `a ${schemeName(app, rowScheme(lead, r))} member` : 'a person'} says go`);
   const extra = text == null || text === '' ? '' : String(text).slice(0, 4000);
   if (!there) chainOf(app, lead, r); // refused now, not once it is next up
-  if ((await atWork(app, lead.id)) >= cabal.width) {
+  if ((await atWork(app, lead.id, r.id)) >= cabal.width) {
     if (r.next_at == null) store.updateCabalRow(r.id, { next_at: Date.now() });
     store.addCabalLog(lead.id, `#${lead.number}`, `${rowName(r)} is next up: ${cabal.width} members are open`);
     cabalChanged(app, lead.id);
@@ -293,7 +294,7 @@ export async function fillCabal(app: App, leadId: number): Promise<void> {
         .cabalRows(leadId)
         .filter((r) => r.next_at != null && r.ticket_id == null && r.approved_at != null)
         .sort((a, b) => a.next_at! - b.next_at! || a.id - b.id)[0];
-      if (!next || (await atWork(app, leadId)) >= cabal.width) return;
+      if (!next || (await atWork(app, leadId, next.id)) >= cabal.width) return;
       try {
         await startRow(app, lead, next, '');
       } catch (err) {
@@ -373,7 +374,7 @@ async function askStart(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   const cost = r.cost != null ? `, expected_cost ${Math.round(r.cost)}` : '';
   const ships =
     lead.build != null
-      ? ` It ships in ${there}, to your own main, like any of your minions: it is never merged into Build ${lead.build}, whose branch is in ${own}'s repo. If it must not go live before Build ${lead.build}, the Overseer asks you to seal it.`
+      ? ` It ships in ${there}, to your own main, like any of your minions: it is never merged into Build ${lead.build}, whose branch is in ${own}'s repo. If it must not go live before Build ${lead.build}, ${overseerOf({ name: nm })} asks you to seal it.`
       : ` It ships in ${there}, to your own main, like any of your minions.`;
   const r2 = await askTaskmaster(
     app,
@@ -383,7 +384,7 @@ async function askStart(app: App, lead: Ticket, r: CabalMemberRow, extra: string
     (file) =>
       `${overseerOf({ name: nm })} leads a cabal in ${own} and asks you to start one of its members here, in ${there}: row ${rowName(r)}, "${r.title}". ${r.approved_by} approved it for ${there} on the cabal's forming card.\n\n` +
       `Start it with create_ticket: title "${r.title}" exactly, cabal "${own}#${lead.number}" (that puts it on the cabal's board), model ${r.model}, effort ${r.effort}${cost}, and a message saying its brief is the handoff at ${file} and that it is a member of ${nm}'s cabal: it reads its cabal_board at each wake, sets its note there at milestones and sends its asks there.${ships}` +
-      `\n\nIf you won't start it, tell the ${AGENT_NAME} of ${own} why with message_taskmaster.${extra ? `\n\nThe Overseer adds: ${extra}` : ''}`,
+      `\n\nIf you won't start it, tell the ${AGENT_NAME} of ${own} why with message_taskmaster.${extra ? `\n\n${overseerOf({ name: nm })} adds: ${extra}` : ''}`,
     r.handoff,
   );
   store.updateCabalRow(r.id, { next_at: null, asked_at: Date.now() });
@@ -422,8 +423,8 @@ export async function cabalTaskmaster(app: App, lead: Ticket, body: Record<strin
       ? `unseal your #${t.number} "${t.title}" (message_ticket with unpark)`
       : action === 'stop'
         ? `stop your #${t.number} "${t.title}"'s turn (stop_ticket)`
-        : `seal your #${t.number} "${t.title}" (update_ticket, state sealed) so it doesn't ship yet${lead.build != null ? `: it must not go live before ${schemeName(app, lead.project_id)}'s Build ${lead.build}. The Overseer asks you to unseal it once Build ${lead.build} is live` : ''}`;
-  const r2 = await askTaskmaster(app, lead, r, 'ask', () => `${overseerOf({ name: nm })} asks you to ${what}. It is a member of ${nm}'s cabal in ${schemeName(app, lead.project_id)} (row ${rowName(r)}).${extra ? `\n\nThe Overseer adds: ${extra}` : ''}`);
+        : `seal your #${t.number} "${t.title}" (update_ticket, state sealed) so it doesn't ship yet${lead.build != null ? `: it must not go live before ${schemeName(app, lead.project_id)}'s Build ${lead.build}. ${overseerOf({ name: nm })} asks you to unseal it once Build ${lead.build} is live` : ''}`;
+  const r2 = await askTaskmaster(app, lead, r, 'ask', () => `${overseerOf({ name: nm })} asks you to ${what}. It is a member of ${nm}'s cabal in ${schemeName(app, lead.project_id)} (row ${rowName(r)}).${extra ? `\n\n${overseerOf({ name: nm })} adds: ${extra}` : ''}`);
   store.addCabalLog(lead.id, `#${lead.number}`, `Asked ${there}'s ${AGENT_NAME} to ${action} ${there} #${t.number}${r2.held ? ' (held by the loop guard)' : ''}`);
   cabalChanged(app, lead.id);
   const later = action === 'seal' && lead.build != null ? ` Once Build ${lead.build} is live, ask again with action unseal; relay_when_live to ${there} on your build's ship can queue that note now.` : '';

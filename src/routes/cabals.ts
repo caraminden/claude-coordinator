@@ -231,7 +231,7 @@ export const cabalRoutes: Route[] = [
         if (body.remove === true) store.deleteCabalRow(row.id);
         else {
           // A change to what the forming card showed takes back its go: a changed row needs a new card.
-          if (row.approved_at != null && row.ticket_id == null && APPROVED_FIELDS.some((k) => fields[k] !== undefined && fields[k] !== row[k])) Object.assign(fields, { approved_by: null, approved_at: null, next_at: null });
+          if (row.approved_at != null && row.ticket_id == null && APPROVED_FIELDS.some((k) => fields[k] !== undefined && fields[k] !== row[k])) Object.assign(fields, { approved_by: null, approved_at: null, next_at: null, asked_at: null });
           store.updateCabalRow(row.id, fields);
         }
         changed(app, ticket, ticket.id);

@@ -12,7 +12,7 @@ import { GLOBAL_OWNER } from '../src/properties.ts';
 import { json } from './typed.ts';
 
 type Ev = { id: number; kind: string; data: string };
-type CabalRow = { id: number; label: string; ticket_id: number | null; approved_by: string | null; approved_at: number | null; asked_at: number | null; project_id: number | null };
+type CabalRow = { id: number; label: string; ticket_id: number | null; approved_by: string | null; approved_at: number | null; asked_at: number | null; next_at: number | null; project_id: number | null };
 type Member = { row: number; label: string; number: number | null; project_id: number | null; scheme: string | null; open: boolean; state: string; word: string; note: string };
 type BoardView = { lead: { open: boolean }; members: Member[]; asks: { scheme: string | null; text: string }[]; log: unknown[] };
 
@@ -91,7 +91,7 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   assert.match(String((await as(lead.id, `/api/tickets/${lead.id}/cabal/start`, { row: 'D' })).data.error), /is in Delve: its Taskmaster starts it/);
 
   // The forming card: the lead's lists the Delve row; Delve's Taskmaster chat gets a card of its own rows.
-  const form = await board({ action: 'form' });
+  const form = await board({ action: 'form', width: 1 });
   assert.equal(form.status, 200, JSON.stringify(form.data));
   const mine = (await events(lead.id)).filter((e) => e.kind === 'question').at(-1)!;
   assert.match(JSON.parse(mine.data).questions[0].question, /\[Delve\] D · Delve piece/);
@@ -119,6 +119,10 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   assert.equal(started.status, 200, JSON.stringify(started.data));
   assert.equal(started.data.asked, 'Delve');
   assert.ok(rowOf('D').asked_at);
+  // Asked again (Delve's Taskmaster declined, or never heard): the row's own ask doesn't hold its place against it.
+  const again = await ask({ row: 'D', action: 'start' });
+  assert.equal(again.data.asked, 'Delve', JSON.stringify(again.data));
+  assert.equal(rowOf('D').next_at, null, 'not next up behind itself at width 1');
   await until("Delve's Taskmaster heard the ask", async () => /cabal "Atlas#\d+"/.test(await heard(tmB)));
   const said = await heard(tmB);
   assert.match(said, /never merged into Build 7/);
@@ -166,6 +170,17 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   assert.match(String(seal.data.text), /ask again with action unseal/);
   await until("Delve's Taskmaster heard the seal", async () => /seal your #\d+ "Delve piece"[^\n]*Build 7/.test(await heard(tmB)));
   assert.notEqual((await as(lead.id, `/api/tickets/${lead.id}/cabal/member`, { action: 'stop', minion: member.number })).status, 200, "cabal_member reaches only the lead's own scheme: #N there is another minion or none");
+
+  // A home row can't chain on the Delve member: start_after would look for its #N in Atlas.
+  const h2 = await board({ action: 'row', label: 'H2', title: 'After Delve', after: 'D', handoff: 'handoffs/here.md', model: 'claude-sonnet-5-5', effort: 'medium' });
+  assert.equal(h2.status, 200, JSON.stringify(h2.data));
+  assert.equal((await board({ action: 'form' })).status, 200);
+  await answer(sam, lead.id, (await events(lead.id)).filter((e) => e.kind === 'question').at(-1)!, 'Start the cabal');
+  assert.ok(rowOf('H2').approved_at);
+  const chained = await as(lead.id, `/api/tickets/${lead.id}/cabal/start`, { row: 'H2' });
+  assert.equal(chained.status, 400);
+  assert.match(String(chained.data.error), /runs in Delve/);
+  assert.equal(rowOf('H2').ticket_id, null);
 });
 
 test("message_taskmaster is a lead's only: a minion leading no cabal is refused", async () => {

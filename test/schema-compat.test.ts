@@ -18,13 +18,31 @@ after(() => rmSync(root, { recursive: true, force: true }));
 // left from long ago, which would test a rollback to a release no deploy goes back to (#1169).
 const live = process.env.DEPLOY_LIVE || join(homedir(), 'claude-coordinator');
 const resolves = (dir: string, ref: string) => spawnSync('git', ['-C', dir, 'rev-parse', '-q', '--verify', `${ref}^{commit}`]).status === 0;
-const [prevRepo, prev] = (
-  [
-    [live, 'last-good'],
-    [repo, 'last-good'],
-    [repo, 'origin/main'],
-  ] as const
-).find(([dir, ref]) => resolves(dir, ref)) ?? [repo, undefined];
+// A build's merge of main (tools/land.sh --into build/<n> --full) is checked against the main it took in, not the last
+// release: it ships nothing, and main may ship a newer schema while it waits in line (#2067). --build, its ship, merges
+// main in and meets the last release. land.sh says which commit (LAND_BUILD_BASE); on CI (GITHUB_REF_NAME land/<branch>)
+// it is where HEAD meets the main land.sh pushed beside it (land-base/<branch>), when HEAD isn't on top of that main,
+// which only a build's merge isn't: every other ship is rebased onto it.
+const gitOk = (dir: string, ...args: string[]) => spawnSync('git', ['-C', dir, ...args]).status === 0;
+function buildBase(dir: string, env: NodeJS.ProcessEnv): string | undefined {
+  if (env.LAND_BUILD_BASE) return env.LAND_BUILD_BASE;
+  const name = env.GITHUB_REF_NAME ?? '';
+  if (!name.startsWith('land/')) return undefined;
+  const ref = `origin/land-base/${name.slice('land/'.length)}`;
+  if (!resolves(dir, ref) || gitOk(dir, 'merge-base', '--is-ancestor', ref, 'HEAD')) return undefined;
+  const r = spawnSync('git', ['-C', dir, 'merge-base', 'HEAD', ref], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : undefined;
+}
+const base = buildBase(repo, process.env);
+const [prevRepo, prev] = base
+  ? ([repo, resolves(repo, base) ? base : undefined] as const)
+  : ((
+      [
+        [live, 'last-good'],
+        [repo, 'last-good'],
+        [repo, 'origin/main'],
+      ] as const
+    ).find(([dir, ref]) => resolves(dir, ref)) ?? [repo, undefined]);
 const prevDir = join(root, 'prev');
 mkdirSync(prevDir);
 if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', prevRepo, prev, prevDir]);
@@ -32,12 +50,34 @@ if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -
 // wrong, and the failures that follow look like the change broke compatibility. Say the real cause.
 const staleBase = (ref: string | undefined, releaseVersion: number, branchVersion: number) => (releaseVersion > branchVersion ? `this branch's schema is ${branchVersion}, older than the last release's ${releaseVersion} (${ref}): its base is behind. Rebase onto main.` : undefined);
 const loadPrev = async () => {
+  assert.ok(!base || resolves(repo, base), `LAND_BUILD_BASE ${base} is not a commit in ${repo}`);
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
   const mod = await import(join(prevDir, 'src', 'db.ts'));
   const stale = staleBase(prev, mod.SCHEMA_VERSION ?? 0, SCHEMA_VERSION);
   assert.ok(!stale, stale!);
   return mod;
 };
+
+test("a build's merge of main is checked against the main it took in: land.sh's word, or on CI where HEAD meets land-base, only when HEAD isn't on top of it (#2067)", () => {
+  const dir = join(root, 'base-repo');
+  mkdirSync(dir);
+  const g = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  g('init', '-q', '-b', 'main');
+  const commit = (m: string) => (g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', m), g('rev-parse', 'HEAD'));
+  const took = commit('the main the build took in');
+  const moved = commit('main ships a newer schema');
+  g('checkout', '-q', '-b', 'ticket/9-build', took);
+  commit("the build's own");
+  const ci = { GITHUB_REF_NAME: 'land/ticket/9-build' };
+  assert.equal(buildBase(dir, ci), undefined, 'no land-base pushed: the last release');
+  g('update-ref', 'refs/remotes/origin/land-base/ticket/9-build', moved);
+  assert.equal(buildBase(dir, ci), took, 'main moved past the build while it waited: the main it took in');
+  assert.equal(buildBase(dir, {}), undefined, 'not a land run: the last release');
+  assert.equal(buildBase(dir, { GITHUB_REF_NAME: 'check/ticket/9-build' }), undefined);
+  assert.equal(buildBase(dir, { ...ci, LAND_BUILD_BASE: 'abc' }), 'abc', "land.sh's word wins");
+  g('update-ref', 'refs/remotes/origin/land-base/ticket/9-build', took);
+  assert.equal(buildBase(dir, ci), undefined, 'HEAD on top of land-base (every ship but a build merge): the last release');
+});
 
 test('a base older than the last release says to rebase, with both schema numbers', () => {
   assert.equal(staleBase('last-good', 111, 110), "this branch's schema is 110, older than the last release's 111 (last-good): its base is behind. Rebase onto main.");

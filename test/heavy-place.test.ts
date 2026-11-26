@@ -10,13 +10,14 @@ const REPO = 'cara/peek';
 function world() {
   let now = 1_000_000;
   // Turns running on each PC; 8 threads each, a turn 3: two turns leave 2 threads, too few for an 8-thread build.
+  const threads = new Map<number, number>();
   const running = new Map<number, number>([
     [1, 2],
     [2, 2],
   ]);
   const balancer = new MachineBalancer({
     machines: () => [1, 2],
-    input: (id) => ({ threads: 8, caps: { workers: null, runners: null, turnThreads: null, ciThreads: null }, ship: false, ciWaiting: 0, running: running.get(id) ?? 0 }),
+    input: (id) => ({ threads: threads.get(id) ?? 8, caps: { workers: null, runners: null, turnThreads: null, ciThreads: null }, ship: false, ciWaiting: 0, running: running.get(id) ?? 0 }),
     changed: () => {},
     now: () => now,
   });
@@ -50,7 +51,7 @@ function world() {
   const q: QueuedHeavy = { repo: REPO, id: 501, run: 77, name: 'build', labels: ['self-hosted', 'peek-ci-linux', 'citadel-heavy-apk'] };
   const labelled = () => runners.filter((r) => r.labels.includes('citadel-heavy-apk')).map((r) => r.name);
   const pass = (queued: QueuedHeavy[] = [q]) => placer.pass(queued, new Set([REPO]));
-  return { balancer, placer, running, runners, jobs, log, q, labelled, pass, tick: (ms: number) => (now += ms) };
+  return { balancer, placer, threads, running, runners, jobs, log, q, labelled, pass, tick: (ms: number) => (now += ms) };
 }
 
 test('heavyKind reads the heavy label and its kind, in any case', () => {
@@ -196,4 +197,21 @@ test('with no PC of the owner up, Citadel holds nothing, so heavy-ci falls back 
   for (const r of w.runners) r.status = 'offline';
   await w.pass();
   assert.equal(w.placer.holds(REPO, 77), false);
+});
+
+test('two heavy jobs at once on a PC with room for both go to two of its runners, never both to one', async () => {
+  const w = world();
+  w.threads.set(1, 16);
+  w.running.set(1, 0);
+  w.runners.push({ id: 12, name: 'desk1-linux-2', status: 'online', busy: false, labels: ['self-hosted', 'Linux', 'peek-ci-linux'] });
+  const second: QueuedHeavy = { ...w.q, id: 502, run: 78 };
+  await w.pass([w.q, second]);
+  assert.deepEqual(w.labelled().sort(), ['desk1-linux-1', 'desk1-linux-2']);
+  assert.deepEqual(
+    w.placer
+      .view()
+      .map((v) => v.runner)
+      .sort(),
+    ['desk1-linux-1', 'desk1-linux-2'],
+  );
 });

@@ -287,7 +287,9 @@ export class HeavyPlacer {
 
   /** The label onto one runner there, idle first. False (and its room given back) when none took it. */
   private async hand(h: Held, m: PlaceMachine | null, runners: Listed[], now: number, late: boolean): Promise<boolean> {
-    for (const r of [...runners].sort((a, b) => Number(a.busy) - Number(b.busy))) {
+    // A runner takes one job: one already handed another heavy job (still idle till GitHub assigns it) is not handed a second.
+    const taken = new Set([...this.held.values()].filter((o) => o !== h && o.state === 'handed').map((o) => o.runner?.id));
+    for (const r of [...runners].filter((r) => !taken.has(r.id)).sort((a, b) => Number(a.busy) - Number(b.busy))) {
       try {
         if (!(await this.d.addLabel(h.job.repo, r.id, h.label))) continue;
       } catch (err) {

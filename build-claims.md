@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md server.ts src/routes/machines.ts test/judges.test.ts test/db-areas.test.ts
+shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md server.ts src/routes/machines.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -10,7 +10,7 @@ shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts sr
 #1973: (merged in)
 #2011: (merged in)
 #2006: (merged in)
-#2070: src/tripwire.ts src/tripwire-blocks.ts test/tripwire.test.ts src/machine-mcp.ts public/worker-agent.mjs public/machine-worker-row.js public/machine-worker.mjs src/machine-turn.ts tools/worker/ src/host-reach.ts test/host-reach.test.ts src/worker-join.ts public/machines.css src/runner.ts
+#2070: (merged in)
 #2044: public/settings-machines.js public/machine-remove.js test/machine-remove-browser.test.ts
 #2052: src/machine-roles.ts test/machine-roles.test.ts src/machine-pools.ts test/machine-pools.test.ts src/machine-lend.ts test/machine-relay.test.ts
 
@@ -34,3 +34,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - T6 being in, public/machine-worker.mjs (the container's `extraMounts`) moves to T8 (#2070) now; M1-M6 ask #1935 for it after T8 merges or for lines of their own.
 - 2026-11-25 evening: T8 (#2070) takes src/machine-turn.ts and tools/worker/ (its host launch, WHOLE's host-writes.json); public/settings-machines.js goes to the Remove-a-machine screen (#2044), which builds the uninstall command T6 left out; M1 (#2052) takes src/machine-pools.ts, its test and src/machine-lend.ts. M1 also changes lines other feeders wrote in src/machines.ts and src/routes/machines.ts, and T8 one line in src/runner.ts (placeTurn's call): both stay shared and are lent for that one merge, when the feeder messages #1935 just before it merges.
 - Lent to T8 (#2070) for its merge (2026-11-25): src/runner.ts (placeTurn's call passes `host`); shared again after it.
+- T8 (#2070) merged in on 2026-11-25; src/runner.ts is shared again. Its other files are unclaimed (so #2070's, or their first feeder's): a later piece that changes a line in one asks #1935.

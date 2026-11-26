@@ -501,7 +501,7 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
 /**
  * Why a refused hand-off goes back in line with no turn (#2030, Josh, 2026-11-25, "Yes, re-queue it"), said in its note;
  * null when it wakes the minion. Only a red the box or the pipeline caused: load alone, and since #2051 a cut-off run, a
- * boot-check copy failure, a run on perigee out of time, a second red after one of flakes only. Once a hand-off, never
+ * boot-check copy failure, a run on perigee out of time. Once a hand-off, never
  * with deploy refusing, nor past what already says it isn't load: a broken test (#1487), land.sh's own keeps in place used
  * up (flake_keep), the leak guard's red. requeueShip asks about broken tests too.
  */
@@ -511,8 +511,6 @@ export function requeueReason(output: string, cls: { kind: string } | null, h: H
   if (cls?.kind === 'passed-alone') return 'the failed test files passed when rerun alone';
   if (cls?.kind === 'boot-copy') return 'the boot check failed on its copy of the database';
   if (/^land: the suite on perigee ran out of its time limit and no test is known to be/m.test(output)) return 'the test run on perigee ran out of its time limit';
-  // Not a second red the ship's own change is known to have caused: a file that failed again alone or hung there, a burn-in, a skip.
-  if (/on the one fresh run after a red whose files all passed alone/.test(output) && !/run-tests: \S+: (failed again alone|hung when rerun alone)/.test(output) && !['conflict', 'parse', 'burn-in', 'skipped-test'].includes(cls?.kind ?? '')) return 'a second red after one of flakes only';
   return null;
 }
 

@@ -376,7 +376,8 @@ test("a machine turn's environment carries no Claude or GitHub sign-in", () => {
 });
 
 test('a turn placed on a machine starts, streams, steers, survives a server restart and ends there', async () => {
-  const env = { CLAUDE_BIN: claude, ANTHROPIC_API_KEY: 'the-servers-key', PATH: `${bin}:${process.env.PATH}` };
+  // HOME is the scratch root: a scheme's folder must be under the server's home, and on CI the temp folder isn't under the runner's.
+  const env = { HOME: root, CLAUDE_BIN: claude, ANTHROPIC_API_KEY: 'the-servers-key', PATH: `${bin}:${process.env.PATH}` };
   srv = await bootServer({ root, env });
   procs.push(srv.proc);
   const turnsDir = join(srv.data, 'run', 'turns');
@@ -505,7 +506,7 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   const slug = cwd.replace(/[^a-zA-Z0-9]/g, '-');
   // Here in the server's config folder; there in the machine's own home, which the turn's sign-in is in.
   const jsonl = (at: string) => join(at, 'claude', 'projects', slug, `${session}.jsonl`);
-  const jsonlThere = there(join(process.env.HOME!, '.claude', 'projects', slug, `${session}.jsonl`));
+  const jsonlThere = there(join(root, '.claude', 'projects', slug, `${session}.jsonl`));
   mkdirSync(join(jsonlThere, '..'), { recursive: true });
   writeFileSync(jsonlThere, '{"n":1}\n');
   writeFileSync(there(join(cwd, 'a.txt')), 'two\n');

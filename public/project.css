@@ -965,7 +965,7 @@ dialog.viewer #chat-cabal { display: none; }
 .cabal-panel .empty-card { margin: var(--space-2) var(--space-3); }
 .cabal-ledger { width: 100%; border-collapse: collapse; font-size: 0.9em; }
 .cabal-ledger th { text-align: left; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
-.cabal-ledger td { padding: 5px var(--space-2); border-bottom: 1px solid var(--line); vertical-align: top; }
+.cabal-ledger td { padding: 5px var(--space-2); border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .cabal-ledger td:first-child { width: 8px; padding-right: 0; padding-top: 9px; }
 .cabal-ledger .num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .cabal-ledger td:nth-child(2) .num { text-align: left; }

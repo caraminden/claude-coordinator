@@ -132,6 +132,13 @@ export const CREATE_TICKET = {
         description:
           "Where its turns may run: 'anywhere' (default; its owner's connected machine when perigee is full or someone with no machine waits for it), 'perigee', or a machine's name for work that needs that computer. Only the machine's owner picks it, so their own ask must name it; its turns wait while that computer is off.",
       },
+      cloud: {
+        type: ['object', 'boolean'],
+        description:
+          "A research or ideation minion runs first as a Claude Code cloud session on its sender's own login while one is free (#2153), with only the repo and the web; one whose brief names the shared folder stays at perigee. Pass false when its brief needs anything else a session lacks: the database, Citadel's tools (read_minion and the like), perigee's files or machine tools. For a self-contained test sweep, pass {kind: 'sweep', minutes} to send it too (minutes: its longest single step, at most 25). Its result comes back as a reply, files and at most one card.",
+        properties: { kind: { type: 'string', enum: ['research', 'ideation', 'sweep'] }, minutes: { type: 'number' } },
+        required: ['kind', 'minutes'],
+      },
       workflow: WORKFLOW,
       plugin_folders: PLUGIN_FOLDERS,
       expected_cost: {
@@ -589,6 +596,7 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
         build_owner: args.build_owner === true || undefined,
         runs_on: args.runs_on,
         lead: args.lead === true || undefined,
+        cloud: args.cloud ?? undefined,
         cabal: args.cabal ?? undefined,
         model: args.model ?? null,
         effort: args.effort ?? null,

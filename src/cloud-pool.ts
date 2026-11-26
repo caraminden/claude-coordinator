@@ -1,0 +1,244 @@
+// Cloud sessions as one more place in the worker pool (#2153; Josh, 2026-11-26: "This should be in build 7, essentially these
+// are just another class of worker in the worker pool"). A Claude Code cloud session runs a minion's job in Anthropic's VM on
+// its sender's own login, so it frees a perigee worker and its ~250 MB (#2147's trial, reports/cloud-batch-poc-2026-11-26.md).
+//
+// Which jobs, and where they stand in the line:
+//   - every research and ideation minion create_ticket starts (Cara, 2026-11-26, on #2153's card: "Every research and ideation
+//     minion"), but one it keeps home (`cloud: false`, or a brief naming the shared folder, which a session can't read), and a
+//     self-contained test sweep marked for the cloud (CLOUD_KINDS). A schedule's, a trigger's or a card's start stays home:
+//     its brief reads the shared folder or Citadel's tools;
+//   - the cloud first while it has room, perigee or a machine as usual when it is full (Cara, same answer: "Anything that can
+//     go to the cloud with no loss of value should prioritize running there"; src/turn-line.ts);
+//   - a job whose longest single step runs over CLOUD.stepMinutes is refused: a cloud session stops one background command at
+//     30 minutes, not the session (Cara, 2026-11-26: "I feel like even medium jobs could be moved right? 30m isn't THAT short");
+//   - at most CLOUD.dailyRuns new sessions a day per person, and none once their weekly plan use reaches CLOUD.weekFull;
+//   - never a Taskmaster's turn, the Overlord's or a ship's: only a minion's ordinary turns are ever placed (the line and
+//     src/runner.ts startPlace), and land.sh's CI gate is not a turn at all.
+// Once a minion's first turn ran in the cloud its session is kept on it (`cloud-session:<id>`), and every later turn of it is a
+// follow-up to that session (src/cloud-turn.mjs), on the same person's login: sender pays, never another person's.
+import type { Store } from './db.ts';
+import { windowNow } from './account-pick.ts';
+import { githubRepo } from './github.ts';
+import { pacificDay } from './pacific.ts';
+import type { Usage } from './turn-messages.ts';
+
+/** The line's place for the cloud: perigee is 0, a connected machine its id. */
+export const CLOUD_PLACE = -1;
+
+export const CLOUD = {
+  /** Cloud sessions running at once, across everyone. Each costs plan usage, not perigee's RAM. */
+  size: 3,
+  /** The longest single step a job may have: the VM stops one background command at 30 minutes (#2147). */
+  stepMinutes: 25,
+  /** How long a turn waits for its session's result before reading it back through teleport: a session may run several steps. */
+  turnMinutes: 90,
+  /** New cloud sessions a day per person, Pacific days (#2147: "a fair budget is 10–20 cloud runs a day"). */
+  dailyRuns: 10,
+  /** Weekly plan use from which no new session starts on that person's login. */
+  weekFull: 0.85,
+  /** How often the driver looks for the session's branch. */
+  pollMs: 20_000,
+  /** How long a pty start may take before it gives up (first runs answer onboarding screens: 55 s in the trial). */
+  startMs: 180_000,
+};
+
+/** The minion types that go to the cloud with no mark. */
+export const CLOUD_TYPES: readonly string[] = ['research', 'ideation'];
+
+/** What may be marked for the cloud: the job kinds #2147 proved. */
+export const CLOUD_KINDS = ['research', 'ideation', 'sweep'] as const;
+export type CloudKind = (typeof CLOUD_KINDS)[number];
+
+/** A minion's mark that it may run as a cloud session: what kind of job, and how long it should take. */
+export interface CloudMark {
+  kind: CloudKind;
+  minutes: number;
+  by: string;
+  at: number;
+}
+
+/** A minion's cloud session: started on `person`'s login and `account`; its last turn's result comes back on `branch`. `sha`: the last result read. */
+export interface CloudSession {
+  session: string;
+  url: string | null;
+  branch: string;
+  person: number;
+  /** The Claude account it was started on: its follow-ups run there and nowhere else, as the session lives on it. */
+  account: number | null;
+  sha: string | null;
+  at: number;
+}
+
+export const markKey = (ticketId: number) => `cloud-mark:${ticketId}`;
+export const sessionKey = (ticketId: number) => `cloud-session:${ticketId}`;
+const goKey = (ticketId: number) => `cloud-go:${ticketId}`;
+const runsKey = (person: number) => `cloud-runs:${person}`;
+
+/** A cloud result branch for one turn of a minion's session: `cloud/<id>`, its id the minion's and when the turn started. */
+export const cloudBranch = (ticketId: number, now: number) => `cloud/t${ticketId}-${now.toString(36)}`;
+
+/** Why a mark can't be set, or null. Its scheme's repo having a GitHub origin is checked where it is set (routes): the session clones and pushes there. */
+export function markRefusal(kind: unknown, minutes: unknown): string | null {
+  if (typeof kind !== 'string' || !(CLOUD_KINDS as readonly string[]).includes(kind)) return `cloud kind must be one of ${CLOUD_KINDS.join(', ')}`;
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) return 'cloud minutes must be a positive number: how long its longest single step should take';
+  if (minutes > CLOUD.stepMinutes) return `a cloud session stops a background command at 30 minutes, so a job with a step over ${CLOUD.stepMinutes} minutes is refused for the cloud: this one's is ${minutes}`;
+  return null;
+}
+
+export interface StartIn {
+  mark: CloudMark | null;
+  /** create_ticket let this research or ideation minion go: it started it, and its brief names nothing a session lacks. */
+  go: boolean;
+  /** Its scheme's repo is on GitHub, where a session clones it from. */
+  github: boolean;
+  /** The minion's `type` property. */
+  type: string | null;
+  /** It has run a turn before, on perigee or a machine: its conversation is there, so it stays. */
+  ran: boolean;
+  usage: Usage | null;
+  runsToday: number;
+  now: number;
+}
+
+/** create_ticket's `cloud` for a minion of `type` in a scheme whose repo is `repoUrl`, its brief naming the shared folder or not: the mark,
+ * `go` for a research or ideation minion let go with none, null to keep it home, or why the mark can't be. */
+export function newMark(repoUrl: string | null, cloud: unknown, type: unknown, namesShared: boolean): string | null | { go: true } | { kind: CloudKind; minutes: number } {
+  if (cloud === false) return null;
+  if (cloud == null) return CLOUD_TYPES.includes(typeof type === 'string' ? type : '') && !namesShared ? { go: true } : null;
+  const c = (cloud && typeof cloud === 'object' ? cloud : {}) as Partial<Record<'kind' | 'minutes', unknown>>;
+  const refused = markRefusal(c.kind, c.minutes);
+  if (refused) return refused;
+  const kind = c.kind as CloudKind;
+  if (kind !== 'sweep' && type !== kind) return `cloud kind ${kind} is for a minion of type ${kind}; this one's type is ${typeof type === 'string' ? type : 'unset'} (a test sweep is kind sweep)`;
+  if (!githubRepo(repoUrl ?? '')) return "a cloud session clones the scheme's repo from GitHub, and this scheme's repo isn't on GitHub";
+  return { kind, minutes: c.minutes as number };
+}
+
+/** Why a minion's first turn can't start as a cloud session now, or null: it may. */
+export function startBlock(i: StartIn): string | null {
+  if (!i.mark && !CLOUD_TYPES.includes(i.type ?? '')) return 'not a research or ideation minion, nor marked for the cloud';
+  if (!i.mark && !i.go) return 'kept at perigee: its brief needs the shared folder or Citadel, or create_ticket kept it home';
+  if (i.ran) return 'it has run here before';
+  if (i.mark) {
+    const refused = markRefusal(i.mark.kind, i.mark.minutes);
+    if (refused) return refused;
+    if (i.mark.kind !== 'sweep' && i.type !== i.mark.kind) return `marked ${i.mark.kind} but its type is ${i.type ?? 'unset'}`;
+  }
+  if (!i.github) return "its scheme's repo isn't on GitHub, where a cloud session clones it";
+  if (i.runsToday >= CLOUD.dailyRuns) return `${i.runsToday} cloud sessions today, the most a day`;
+  const week = windowNow(i.usage?.weekly, i.now, 7 * 24 * 3600_000);
+  if (week && week.utilization >= CLOUD.weekFull) return `weekly plan use at ${Math.round(week.utilization * 100)}%`;
+  return null;
+}
+
+/** The cloud pool's saved state: marks, sessions and each person's runs today. */
+export class CloudPool {
+  private store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting'>;
+
+  constructor(store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting'>) {
+    this.store = store;
+  }
+
+  mark(ticketId: number): CloudMark | null {
+    return this.store.getSetting<CloudMark>(markKey(ticketId)) ?? null;
+  }
+
+  /** Mark a minion for the cloud (a test sweep, or a research or ideation one with its step time), or clear it with null; returns why it can't be, or null. */
+  setMark(ticketId: number, mark: Omit<CloudMark, 'at'> | null, now = Date.now()): string | null {
+    if (!mark) {
+      this.store.deleteSetting(markKey(ticketId));
+      return null;
+    }
+    const refused = markRefusal(mark.kind, mark.minutes);
+    if (refused) return refused;
+    this.store.setSetting(markKey(ticketId), { ...mark, at: now });
+    return null;
+  }
+
+  /** What create_ticket decided (newMark): a mark kept, or a research or ideation minion let go. */
+  made(ticketId: number, cloud: { go: true } | { kind: CloudKind; minutes: number }, by: string) {
+    if ('go' in cloud) this.store.setSetting(goKey(ticketId), true);
+    else this.setMark(ticketId, { ...cloud, by });
+  }
+
+  /** Whether the cloud may take it at all, before anything costlier is asked: marked, or let go and still of a type that goes. */
+  may(ticketId: number, type: string | null): boolean {
+    return !!this.mark(ticketId) || (!!this.store.getSetting<boolean>(goKey(ticketId)) && CLOUD_TYPES.includes(type ?? ''));
+  }
+
+  session(ticketId: number): CloudSession | null {
+    return this.store.getSetting<CloudSession>(sessionKey(ticketId)) ?? null;
+  }
+
+  /** Keep a minion's session, or what changed of it (the last result read). */
+  setSession(ticketId: number, s: CloudSession) {
+    this.store.setSetting(sessionKey(ticketId), s);
+  }
+
+  runsToday(person: number, now = Date.now()): number {
+    const r = this.store.getSetting<{ day: string; n: number }>(runsKey(person));
+    return r && r.day === pacificDay(now) ? r.n : 0;
+  }
+
+  /** A new session is starting on `person`'s login: counted when the line sends it to the cloud, before its id is known. */
+  counted(person: number, now = Date.now()) {
+    this.store.setSetting(runsKey(person), { day: pacificDay(now), n: this.runsToday(person, now) + 1 });
+  }
+
+  /** Why `ticketId`'s first turn can't start as a cloud session on `person`'s login now, or null. `usage`: the account it would run on. */
+  takes(ticketId: number, person: number, i: Pick<StartIn, 'type' | 'ran' | 'usage'> & { repoUrl: string | null }, now = Date.now()): string | null {
+    return startBlock({ ...i, github: !!githubRepo(i.repoUrl ?? ''), mark: this.mark(ticketId), go: !!this.store.getSetting<boolean>(goKey(ticketId)), runsToday: this.runsToday(person, now), now });
+  }
+
+  /**
+   * What the driver's stream says of the session (src/cloud-turn.mjs, a `system` event of subtype `cloud`): kept on the
+   * minion. The stream is a turn's output, so only what looks like an id and a result branch is kept.
+   */
+  heard(ticketId: number, person: number, account: number | null, ev: object, now = Date.now()) {
+    const { session, url, branch, sha } = ev as Partial<Record<'session' | 'url' | 'branch' | 'sha', unknown>>;
+    const ok = (v: unknown, re: RegExp): v is string => typeof v === 'string' && re.test(v);
+    if (!ok(session, /^session_[A-Za-z0-9_-]{8,100}$/) || !ok(branch, /^cloud\/[A-Za-z0-9_-]{1,80}$/)) return;
+    const was = this.session(ticketId);
+    const same = was?.session === session;
+    this.setSession(ticketId, {
+      session: session,
+      url: ok(url, /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9_-]+$/) ? url : same ? (was?.url ?? null) : null,
+      branch: branch,
+      person: same ? was!.person : person,
+      account: same ? was!.account : account,
+      sha: ok(sha, /^[0-9a-f]{40,64}$/) ? sha : same ? (was?.sha ?? null) : null,
+      at: same ? was!.at : now,
+    });
+  }
+
+  /** A cloud turn's job for src/cloud-turn.mjs: a new session from the minion's messages, or a follow-up to the one it has. */
+  job(t: { id: number; number: number | null; cwd: string }, batch: { author: string; text: string }[], claude: string, files: string | null, now: number) {
+    const s = this.session(t.id);
+    const branch = cloudBranch(t.id, now);
+    // shortcut: pictures and attached files aren't sent to the session, only the words; send them as links if a cloud job needs them.
+    const messages = batch.map((m) => `[${m.author}]: ${m.text}`).join('\n\n');
+    const text = cloudPrompt({ ticket: t.number ?? t.id, branch, minutes: this.mark(t.id)?.minutes ?? null, first: !s, messages });
+    return { claude, cwd: t.cwd, branch, last: s?.branch ?? null, session: s?.session ?? null, sha: s?.sha ?? null, text, files, limitMs: CLOUD.turnMinutes * 60_000, pollMs: CLOUD.pollMs, startMs: CLOUD.startMs };
+  }
+}
+
+/** How a session sends its result home: the first message's instructions, after the minion's own messages. */
+export function cloudPrompt(o: { ticket: number; branch: string; minutes: number | null; first: boolean; messages: string }): string {
+  const how = [
+    `Send your result home this way (Citadel reads it off the branch; nobody reads this session):`,
+    `1. Write \`.citadel/result.json\`: {"reply": "<markdown for the chat>", "card": null, "files": []}.`,
+    `   - "files": report or other files you made, put under \`.citadel/out/\` and listed by that path; people see them.`,
+    `   - "card": when you need a person's decision, {"questions": [{"question": "...?", "header": "<24 chars>", "options": [{"label": "...", "description": "...", "recommended": true}, {"label": "...", "description": "..."}], "multiSelect": false}]} (2 to 4 options, exactly one recommended), then stop: the answer comes back as your next message here.`,
+    `2. Commit them and push: \`git push origin HEAD:refs/heads/${o.branch}\`. Push once for each result.`,
+    `3. If the push fails, print the same JSON between a line \`CITADEL-RESULT-BEGIN\` and a line \`CITADEL-RESULT-END\` as your last message.`,
+  ].join('\n');
+  if (!o.first) return `${o.messages}\n\n---\n${how}`;
+  return [
+    `You are minion #${o.ticket}'s cloud session: Citadel (a web app that runs Claude Code sessions as workers) sent this job here. You have the repo and the web; you don't have Citadel's tools, its shared folder, its database or its server's files.`,
+    `Run each long command (a build, a test run) in the foreground and keep it under ${CLOUD.stepMinutes} minutes, splitting a longer one into steps: the session stops a background command at 30 minutes, and a job still running when you stop dies.${o.minutes ? ` This job's longest step should take about ${o.minutes} minutes.` : ''}`,
+    `The job:\n\n${o.messages}`,
+    `---\n${how}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}

@@ -19,12 +19,18 @@
 // run, for a person's own words and answers and the server's wake-ups (`quick`, src/line-place.ts). One that runs on past
 // POOL.laneMs counts in the pool from then on, up to POOL.laneOver over its size, and the lane has its worker back.
 // The lane is perigee's and comes last: a forced start or perigee's free worker first, then the person's machine, then the lane.
+//
+// The cloud (#2153, src/cloud-pool.ts) is CLOUD_PLACE, and the first place for a job it may take (Cara, 2026-11-26: "Anything
+// that can go to the cloud with no loss of value should prioritize running there"): such a minion's first turn starts there
+// while it has room, and at perigee or a machine as usual when it is full. One whose session is there runs every later turn
+// there and nowhere else, as one marked for a machine does, waiting while the cloud's sessions are all busy.
 import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
 import { limitsOf, MACHINE_LIMITS, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
 import type { Block, MachineHost, MachinePlace } from './machine-pools.ts';
 import { rank } from './machine-balancer.ts';
+import { CLOUD_PLACE } from './cloud-pool.ts';
 import type { RetryKind } from './turn-outcome.ts';
 import type { WorkerWait } from './worker-wait.ts';
 
@@ -180,8 +186,22 @@ export interface LineHost {
   changed(ids: number[]): void;
   /** The connected machines' pools; left out, perigee is the only place. */
   pools?: MachineHost;
+  /** The cloud's pool (#2153); left out, there is none. */
+  cloud?: CloudHost;
   readonly gapMs: number;
   readonly detached: boolean;
+}
+
+/** What the line needs of the cloud pool (src/cloud-pool.ts, the runner's side of it). */
+export interface CloudHost {
+  /** Its conversation is a cloud session: its turns run there and nowhere else. */
+  bound(ticketId: number): boolean;
+  /** Why its turn can't start as a new cloud session, or null: it may. */
+  takes(ticketId: number, via?: RetryKind): string | null;
+  /** The line is sending it to the cloud now: a new session's start counts toward its person's day here, before the next one is asked. */
+  started(ticketId: number, via?: RetryKind): void;
+  /** Cloud sessions that may run at once. */
+  size(): number;
 }
 
 const inLane = (g: { lent?: true; lane?: { moved?: true } }) => !!g.lane && !g.lane.moved && !g.lent;
@@ -224,7 +244,7 @@ export class TurnLine {
     return [...this.granted.values()].filter((g) => g.place === place && !g.lent && !inLane(g)).length;
   }
 
-  /** Where a turn that holds a worker runs: 0 perigee, else a machine. */
+  /** Where a turn that holds a worker runs: 0 perigee, CLOUD_PLACE the cloud, else a machine. */
   placeOf(ticketId: number): number {
     return this.granted.get(ticketId)?.place ?? 0;
   }
@@ -291,7 +311,7 @@ export class TurnLine {
     if (this.ordered && Date.now() - this.ordered.at < 1000) return this.ordered.line;
     const running = this.byPerson();
     // A turn that waits for its machine takes no place in front of anyone, so those stand last.
-    const there = new Set(this.entries.filter((e) => this.need(e.ticket)).map((e) => e.ticket));
+    const there = new Set(this.entries.filter((e) => this.away(e.ticket)).map((e) => e.ticket));
     const asked = this.asked(this.entries, true);
     let rest = asked.filter((w) => !there.has(w.ticket));
     const line: Waiting[] = [];
@@ -308,7 +328,7 @@ export class TurnLine {
   wait(ticketId: number): WorkerWait | null {
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return null;
-    const quick = !this.need(ticketId) && this.line().find((w) => w.ticket === ticketId)?.quick;
+    const quick = !this.away(ticketId) && this.line().find((w) => w.ticket === ticketId)?.quick;
     return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...(quick ? { quick: true as const } : {}), ...this.machineWait(entry) };
   }
 
@@ -323,6 +343,10 @@ export class TurnLine {
   }
 
   private machineWait(entry: LineEntry): Pick<WorkerWait, 'machine'> {
+    if (this.bound(entry.ticket)) {
+      const [used, size] = [this.used(CLOUD_PLACE), this.size(CLOUD_PLACE)];
+      return { machine: { name: 'its cloud session', why: used >= size ? `busy: ${used} of ${size} cloud sessions` : 'next there' } };
+    }
     const need = this.need(entry.ticket);
     if (!need) return {};
     const { name, block } = this.held(need, entry);
@@ -366,8 +390,8 @@ export class TurnLine {
     this.reordered();
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return;
-    // A machine's size and its owner's cap hold for everyone: there it only goes first.
-    if (this.need(ticketId)) return this.pumpIn(0);
+    // A machine's size and its owner's cap hold for everyone, and so does the cloud's: there it only goes first.
+    if (this.away(ticketId)) return this.pumpIn(0);
     if (this.admitting === null && !this.host.busy(ticketId) && !this.heldBy(entry)) this.admit(entry, 0);
   }
 
@@ -403,6 +427,7 @@ export class TurnLine {
 
   /** A machine's is never over its owner's cap, which its agent holds too. */
   size(place = 0): number {
+    if (place === CLOUD_PLACE) return this.host.cloud?.size() ?? 0;
     if (!place) return this.pool().fixed?.size ?? this.pool().size;
     const m = this.host.pools?.machines().find((x) => x.id === place);
     return m ? this.sizeOf(m) : 0;
@@ -535,7 +560,7 @@ export class TurnLine {
     this.tickMachines(now);
     this.pumpIn(0);
     if (p.fixed) return;
-    const size = nextSize({ ...p, used: this.used(), waiting: this.entries.filter((e) => !this.need(e.ticket)).length }, reading, box, this.limits(), now);
+    const size = nextSize({ ...p, used: this.used(), waiting: this.entries.filter((e) => !this.away(e.ticket)).length }, reading, box, this.limits(), now);
     if (size === p.size) return;
     this.host.store.setSetting(SIZE, { size, at: now, why: size < p.size ? starveWhy(reading, box, this.limits()) : 'perigee is calm and turns wait' });
     this.pump();
@@ -607,6 +632,11 @@ export class TurnLine {
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
     if (!paused && !this.closed && !this.host.busy(ticketId) && !(own?.via && !via)) {
       const me = own ?? { ticket: ticketId, since: Date.now(), via };
+      // The cloud first, for a job it may take (#2153).
+      if (this.cloudFor(me)) {
+        this.host.cloud?.started(ticketId, via);
+        return this.grant(ticketId, via, CLOUD_PLACE);
+      }
       const place = this.placeFor(me, via);
       if (place !== null) return this.grant(ticketId, via, place);
       // Perigee full and no machine of its own free: the quick lane, last.
@@ -618,6 +648,7 @@ export class TurnLine {
 
   /** Where a turn can start at this moment, or null: it waits. */
   private placeFor(me: LineEntry, via?: RetryKind): number | null {
+    if (this.bound(me.ticket)) return null;
     const mark = this.host.pools?.mark(me.ticket) ?? null;
     const full = this.full(this.host.asks(me.ticket, via).person);
     if (!mark && !full && this.forcedFor(me.ticket) !== null) return 0;
@@ -630,7 +661,7 @@ export class TurnLine {
   /** It may start in perigee's quick lane now: a quick turn not marked for a machine, first among those the lane may take. */
   private laneFor(me: LineEntry, via?: RetryKind): boolean {
     const asks = this.host.asks(me.ticket, via);
-    if (!asks.quick || this.need(me.ticket) || this.full(asks.person)) return false;
+    if (!asks.quick || this.away(me.ticket) || this.full(asks.person)) return false;
     if (this.used() < this.size() || this.laneUsed() >= POOL.lane[this.level]) return false;
     return this.isFirst(me, this.laneReady(), true);
   }
@@ -647,10 +678,33 @@ export class TurnLine {
     return this.ranked(me, via).find((m) => this.isFirst(me, this.ready(m)))?.id ?? null;
   }
 
+  /** It may start in the cloud now: bound there, or a job the cloud may take; first among those. */
+  private cloudFor(me: LineEntry): boolean {
+    const ready = this.cloudReady([me, ...this.entries.filter((e) => e.ticket !== me.ticket)]);
+    return ready.some((e) => e.ticket === me.ticket) && this.isFirst(me, ready);
+  }
+
+  /** The waiting turns that could start in the cloud now: none while its sessions are all busy. */
+  private cloudReady(entries = this.entries): LineEntry[] {
+    const cloud = this.host.cloud;
+    if (!cloud || this.used(CLOUD_PLACE) >= cloud.size()) return [];
+    // A minion marked for a machine keeps to it.
+    return entries.filter((e) => !this.host.busy(e.ticket) && (cloud.bound(e.ticket) || (this.host.pools?.mark(e.ticket) == null && cloud.takes(e.ticket, e.via) === null)));
+  }
+
+  private bound(ticketId: number): boolean {
+    return !!this.host.cloud?.bound(ticketId);
+  }
+
+  /** It can't start at perigee: marked for a machine, or its session is in the cloud. */
+  private away(ticketId: number): boolean {
+    return !!this.need(ticketId) || this.bound(ticketId);
+  }
+
   /** The machines a turn may start on now, best first (src/machine-balancer.ts rank): its owner's order, then where it last ran, then the most room. */
   private ranked(me: LineEntry, via = me.via): MachinePlace[] {
     const pools = this.host.pools;
-    if (!pools) return [];
+    if (!pools || this.bound(me.ticket)) return [];
     const open = this.machines().filter((m) => !pools.takes(m.id, me.ticket, via));
     return rank(
       open.map((m) => ({ ...m, free: this.sizeOf(m) - this.used(m.id) })),
@@ -692,7 +746,7 @@ export class TurnLine {
     const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
-    if (this.used() < this.size() || this.forcedFor(ticketId) !== null || this.host.pools?.machines().length || this.laneReady().length) this.pumpIn(0);
+    if (this.used() < this.size() || this.forcedFor(ticketId) !== null || this.host.pools?.machines().length || this.laneReady().length || this.cloudReady().length) this.pumpIn(0);
   }
 
   /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
@@ -742,6 +796,12 @@ export class TurnLine {
   pump() {
     if (this.timer || this.closed || this.host.detached || this.admitting !== null) return;
     if (!this.entries.length || this.paused()) return;
+    // The cloud first, for the jobs it may take (#2153).
+    const cloud = this.best(this.cloudReady());
+    if (cloud) {
+      this.host.cloud?.started(cloud.ticket, cloud.via);
+      return this.admit(cloud, CLOUD_PLACE);
+    }
     const ready = this.ready();
     const forced = (e: LineEntry) => this.forcedFor(e.ticket) !== null;
     const entry = this.best(this.used() < this.size() ? ready : ready.filter(forced), true);
@@ -754,7 +814,7 @@ export class TurnLine {
     }
     // The quick lane last: a quick turn whose machine had room went there above.
     const quick = this.best(this.laneReady(), true);
-    if (quick) this.admit(quick, 0, true);
+    if (quick) return this.admit(quick, 0, true);
   }
 
   private admit(entry: LineEntry, place: number, lane = false) {
@@ -790,7 +850,7 @@ export class TurnLine {
       delete held.lent;
     } else {
       this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined), ...(lane && !place ? { lane: { since: Date.now() } } : {}) });
-      if (place) this.warm.set(ticketId, place);
+      if (place > 0) this.warm.set(ticketId, place);
       else this.warm.delete(ticketId);
     }
     this.leave(ticketId);
@@ -808,11 +868,11 @@ export class TurnLine {
   /** The waiting turns that could start in a place: at perigee all but those marked for a machine, on a machine those marked for it and, while perigee is full or needed, any it may take. */
   private ready(m?: MachinePlace): LineEntry[] {
     const idle = this.entries.filter((e) => !this.host.busy(e.ticket));
-    if (!m) return idle.filter((e) => !this.need(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
+    if (!m) return idle.filter((e) => !this.away(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
     const over = this.used() >= this.size() || this.needed(this.ready());
     return idle.filter((e) => {
       const mark = this.host.pools!.mark(e.ticket);
-      return (mark === m.id || (mark === null && over)) && !this.host.pools!.takes(m.id, e.ticket, e.via);
+      return (mark === m.id || (mark === null && over && !this.bound(e.ticket))) && !this.host.pools!.takes(m.id, e.ticket, e.via);
     });
   }
 

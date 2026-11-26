@@ -27,6 +27,7 @@ import { repoSetup } from '../repo-setup.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
+import { newMark } from '../cloud-pool.ts';
 import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
@@ -367,8 +368,11 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   if (body.cabal != null) cabalLead(store, project.id, body.cabal, null, typeof body.title === 'string' ? body.title : ''); // refused before anything is made
   // Where its turns run (Build 7 T4), checked as the person who asked: only a machine's owner picks it.
   const runsOn = body.runs_on == null ? null : runsOnPick(app, project.id, body.runs_on, caller && !picked ? caller.person_id : (session.uid ?? null));
+  const cloud = newMark(project.repo_url, body.cloud, props.type, message.includes(projectSharedDir(app.dataDir, project.id))); // #2153
+  if (typeof cloud === 'string') throw new HttpError(400, cloud);
   const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
   if (runsOn) app.runner.runsOn.set(id, runsOn, session.name);
+  if (cloud) app.runner.cloud.made(id, cloud, session.name);
   // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
   store.addPick(id, model, effort, pickBy, because);
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });

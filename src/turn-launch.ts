@@ -175,6 +175,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   if (existsSync(REPLAY_BIN)) cpSync(REPLAY_BIN, join(MCP_DIR, 'bin', 'citadel-replay'));
   // citadel-where (#1122): "show me where" links; its shim runs the pinned show-parts.ts beside it.
   pinnedCopy('show-parts.ts');
+  // A cloud turn's driver (#2153), run in claude's place by the turn's wrapper.
+  pinnedCopy('cloud-turn.mjs');
   const WHERE_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-where');
   if (existsSync(WHERE_BIN)) cpSync(WHERE_BIN, join(MCP_DIR, 'bin', 'citadel-where'));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');

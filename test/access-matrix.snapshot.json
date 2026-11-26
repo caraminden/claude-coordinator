@@ -824,10 +824,10 @@
   "person": "403 Only a turn can run host checks",
   "member": "403 Only a turn can run host checks",
   "outsider": "403 Only a turn can run host checks",
-  "tmA": "400 what must be db, journal, status or units",
-  "tmB": "400 what must be db, journal, status or units",
-  "m1": "400 what must be db, journal, status or units",
-  "m2": "400 what must be db, journal, status or units"
+  "tmA": "400 what must be db, journal, status, units or judge_replay",
+  "tmB": "400 what must be db, journal, status, units or judge_replay",
+  "m1": "400 what must be db, journal, status, units or judge_replay",
+  "m2": "400 what must be db, journal, status, units or judge_replay"
  },
  "GET /api/host-load": {
   "anon": "401 Not logged in",

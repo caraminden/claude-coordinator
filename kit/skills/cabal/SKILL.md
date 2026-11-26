@@ -22,7 +22,7 @@ asks, merges since your last wake, then every other open ask, answered together.
 1. Split the work into pieces. Where the brief leaves forks open, grill first (`citadel:grilling`). Size it the way
    Build 5 found works: about four lanes that never wait on each other, no two members writing one file, and a member
    per piece a fresh minion can finish (see `citadel:briefing` for a piece's size and model, and its one-slice-first
-   rule for a split behind a new gate).
+   rule for a split behind a new gate: `cabal_start` only that slice's row and hold the others, with no `after` on it).
 2. Write a handoff per piece with `citadel:briefing`, in the shared folder's `handoffs/`.
 3. Add one roster row per piece (`cabal_board` row): label (T1, M2), title, lane, what it waits on (`after`), the files
    it expects to touch, handoff path, model, effort and expected cost. A row for a member in another scheme names it

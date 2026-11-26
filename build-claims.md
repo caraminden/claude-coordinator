@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/routes/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts server.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts
+shared: src/turn-launch.ts src/machines.ts test/size-budget.test.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts server.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -13,8 +13,8 @@ shared: src/turn-launch.ts src/routes/machines.ts public/machine-agent.mjs src/d
 #2070: (merged in)
 #2044: (merged in)
 #2052: (merged in)
-#2053: public/machine-connect.js src/machine-join.ts test/machine-join.test.ts README.md src/machines.ts test/size-budget.test.ts public/machine-setup.js public/machines.css public/settings-machines.js src/db-schema.ts src/db-writer.ts test/machine-roles.test.ts
-#2054: public/machine-role-cards.js src/machine-pause.ts test/machine-role-cards.test.ts public/machine-worker-row.js public/machine-worker.mjs public/worker-agent.mjs src/worker-join.ts
+#2053: (merged in)
+#2054: public/machine-role-cards.js src/machine-pause.ts test/machine-role-cards.test.ts public/machine-worker-row.js public/machine-worker.mjs public/worker-agent.mjs src/worker-join.ts public/machines.css public/settings-machines.js src/routes/machines.ts README.md
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
 
@@ -41,3 +41,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - Lent to M1 (#2052) for its merge (2026-11-25, after Josh's go): src/machines.ts (#1962's storedLend lines, #2006's lendsWorker) and src/routes/machines.ts (#2011's DELETE line); shared again after it.
 - M1 (#2052) merged in on 2026-11-25 (Josh's go); src/machines.ts and src/routes/machines.ts are shared again. Its files (src/machine-roles.ts, src/machine-pools.ts, src/machine-lend.ts and their tests) are unclaimed again (each counts as the first feeder that merged it in): M2-M6 (#2053-#2057) that change a line in one ask #1935 to put it on their line.
 - 2026-11-25 ~10:55 PM PST: M2 (#2053) and M3 (#2054) both ready; they overlap in README.md, public/machines.css, public/settings-machines.js, src/machines.ts and src/routes/machines.ts, so M2 merges first (Josh's go; M3's Connect button needs it). Lent to M2 for its merge: README.md, src/machines.ts, test/size-budget.test.ts (shared lines of #2052 and #2070), public/machine-setup.js, public/machines.css, public/settings-machines.js (#2006's), src/db-schema.ts, src/db-writer.ts, test/machine-roles.test.ts (#2052's). M3 holds its own new files and #2006's/#1962's machine-worker-row.js, machine-worker.mjs, worker-agent.mjs, worker-join.ts now. Once M2 is in: README.md, src/machines.ts and test/size-budget.test.ts go back to shared, M2's other lent files are free, and public/machines.css, public/settings-machines.js and src/routes/machines.ts go to M3 for its merge.
+- M2 (#2053) merged in on 2026-11-25 (ae4601195, Josh's go). src/machines.ts and test/size-budget.test.ts are shared again; its other files are unclaimed (each counts as the first feeder that merged it in). Lent to M3 (#2054) for its merge: public/machines.css, public/settings-machines.js, src/routes/machines.ts and README.md (its Layout rows); src/routes/machines.ts goes back to shared after it, and README.md is then unclaimed (M2 merged it in first, so a later piece asks #1935).

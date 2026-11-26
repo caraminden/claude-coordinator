@@ -7,8 +7,8 @@
 // scheme whose repo the live checkout is.
 // A scheme's batch is an `alert` row in the outbox (ADR 0021 step 6) that new alerts merge into, sent by the outbox's timer.
 import type { Store } from './db.ts';
-import { deliveriesOf, type Delivery } from './db/deliveries.ts';
-import type { Outbox } from './outbox.ts';
+import type { Delivery } from './db/deliveries.ts';
+import { deliveriesOf, type Outbox } from './outbox.ts';
 import { ZONE } from './pacific.ts';
 
 /** How long a scheme's batch waits for more alerts after its newest one. */

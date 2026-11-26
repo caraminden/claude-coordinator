@@ -3,7 +3,7 @@
 // order per target, the crash rule (waiting → sending → sent, resend at boot), retries and the 3-day rule for a
 // dismissed target. Step 0 moves `wake_at` here (src/wake.ts TimedWakes); later steps add the other kinds.
 import type { Store, Ticket } from './db.ts';
-import type { Delivery, DeliveryKind, NewDelivery } from './db/deliveries.ts';
+import type { Delivery, DeliveryKind, DeliveryQuery, NewDelivery } from './db/deliveries.ts';
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -19,6 +19,16 @@ const RECHECK_MS = 5 * MINUTE;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /** What pokes the outbox: `boot`, `tick` (the timer), `added`, `closed`, `reopened`, and the condition events later kinds read. */
+/** Whether `r` is a row of `kind`. */
+export const ofKind = <K extends DeliveryKind>(r: Delivery | undefined, kind: K): r is Delivery<K> => r?.kind === kind;
+/** listDeliveries of one kind, typed as that kind's rows (Store's methods can't carry a type parameter). */
+export const deliveriesOf = <K extends DeliveryKind>(store: Pick<Store, 'listDeliveries'>, kind: K, q: Omit<DeliveryQuery, 'kind'> = {}): Delivery<K>[] => store.listDeliveries({ ...q, kind }).filter((r) => ofKind(r, kind));
+/** getDelivery, when the row is of `kind`. */
+export const deliveryOf = <K extends DeliveryKind>(store: Pick<Store, 'getDelivery'>, id: number, kind: K): Delivery<K> | undefined => {
+  const r = store.getDelivery(id);
+  return ofKind(r, kind) ? r : undefined;
+};
+
 export type OutboxEvent = { type: string; ticket?: number; [k: string]: unknown };
 
 /**

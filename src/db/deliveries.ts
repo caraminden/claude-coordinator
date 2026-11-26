@@ -56,16 +56,7 @@ type AnyNewDelivery = {
 export type Delivery<K extends DeliveryKind = DeliveryKind> = Extract<AnyDelivery, { kind: K }>;
 export type NewDelivery<K extends DeliveryKind = DeliveryKind> = Extract<AnyNewDelivery, { kind: K }>;
 export type DeliveryPatch = Partial<Pick<DeliveryBase, 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason' | 'event_id'> & Pick<Delivery, 'when_arg' | 'payload'>>;
-/** Whether `r` is a row of `kind`. */
-export const ofKind = <K extends DeliveryKind>(r: Delivery | undefined, kind: K): r is Delivery<K> => r?.kind === kind;
-type DeliveryQuery = { kind?: DeliveryKind; to?: number; toKind?: string; states?: DeliveryState[]; dedupe?: string };
-/** listDeliveries of one kind, typed as that kind's rows (Store's methods can't carry a type parameter). */
-export const deliveriesOf = <K extends DeliveryKind>(store: Pick<Store, 'listDeliveries'>, kind: K, q: Omit<DeliveryQuery, 'kind'> = {}): Delivery<K>[] => store.listDeliveries({ ...q, kind }).filter((r) => ofKind(r, kind));
-/** getDelivery, when the row is of `kind`. */
-export const deliveryOf = <K extends DeliveryKind>(store: Pick<Store, 'getDelivery'>, id: number, kind: K): Delivery<K> | undefined => {
-  const r = store.getDelivery(id);
-  return ofKind(r, kind) ? r : undefined;
-};
+export type DeliveryQuery = { kind?: DeliveryKind; to?: number; toKind?: string; states?: DeliveryState[]; dedupe?: string };
 
 // The states of a row not yet sent or dropped, which a read scope keeps.
 const LIVE: DeliveryState[] = ['waiting', 'held', 'sending'];

@@ -11,6 +11,7 @@ import { Store } from '../src/db.ts';
 import { Outbox, type OutboxRunner } from '../src/outbox.ts';
 import { LiveWaiters, type Relay } from '../src/wake.ts';
 import { testPins } from './helpers.ts';
+import { deliveriesOf } from '../src/outbox.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'relay-outbox-'));
@@ -57,7 +58,7 @@ function server(head: string) {
   waiters.sent = (x) => r.notes.push(x);
   return { r, outbox, waiters };
 }
-const rows = () => store.listDeliveries({ kind: 'relay' });
+const rows = () => deliveriesOf(store, 'relay');
 
 test('a relay is a row; its commit going live delivers it once and the sender gets one grouped note', async () => {
   const before = commit();

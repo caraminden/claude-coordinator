@@ -513,6 +513,40 @@ for (const [what, change, why] of [
   });
 }
 
+// #2138: src/land.ts is in the lane but no pipeline test can read it, so a change to it alone ran ~100 s of pipeline
+// tests for nothing. A `# lane-only:` line keeps it on the list, for the lane, and out of the tier's trigger.
+const LANE_ONLY = `${TIER_LIST}# lane-only: src/land.ts (no pipeline test reads it)\nsrc/land.ts\n`;
+const laneRepo = (change: (dir: string) => void) =>
+  tierRepo(
+    (dir) => {
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      change(dir);
+    },
+    'main',
+    LANE_ONLY,
+  );
+test('a change to a lane-only path alone leaves out the pipeline test files; with a pipeline file beside it, it runs them (#2138)', async () => {
+  const alone = await run(
+    ['pipe.test.mjs', 'product.test.mjs'],
+    {},
+    laneRepo((dir) => writeFileSync(join(dir, 'src', 'land.ts'), 'v2\n')),
+  );
+  assert.equal(alone.code, 0, alone.log);
+  assert.deepEqual(ran(alone.dir), ['product']);
+  assert.match(alone.log.split('\n')[0], /^run-tests: tier product/);
+  const both = await run(
+    ['pipe.test.mjs', 'product.test.mjs'],
+    {},
+    laneRepo((dir) => {
+      writeFileSync(join(dir, 'src', 'land.ts'), 'v2\n');
+      writeFileSync(join(dir, 'tools', 'land.sh'), 'v2\n');
+    }),
+  );
+  assert.equal(both.code, 0, both.log);
+  assert.deepEqual(ran(both.dir), ['pipe', 'product']);
+  assert.equal(both.log.split('\n')[0], 'run-tests: tier all (pipeline test files included): tools/land.sh is a pipeline file');
+});
+
 test('main itself (the nightly, a deploy) and a repo with no main run every test file (#581)', async () => {
   for (const [prep, why] of [
     [tierRepo(), 'nothing changed against main'],

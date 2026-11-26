@@ -43,9 +43,11 @@ Times are Pacific.
      and the reviewer flags an unexplained "no test". It is kit work, not this retro's.
 4. **Ships from parallel minions conflicted on the size list, until #1917 (ledger repeat).**
    - 23 rebase or train-prep conflict lines in the land log name an effort branch. 20 of them are on
-     `test/size-budget.test.ts`, 3 on README's Layout table and 1 on the type-check baseline[^l].
-   - The last size-budget one was at 01:00:59 PST Nov 25. That is before #1917's count rule shipped (about 02:13 PST,
-     the last retro's footnote `[^s]`), and none came after[^l].
+     `test/size-budget.test.ts`, 3 on README's Layout table and 1 on the type-check baseline. One line (06:14Z) names
+     both size-budget and README, so these add up to 24[^l].
+   - The last size-budget one was at 01:04:44 PST Nov 25. That is before #1917's count rule reached main (7c44e64a2, fast-forwarded
+     at 02:44:35 PST[^k]; the last retro dated it by its 02:13 conflict instead). None of the effort's branches had a
+     size-budget conflict after it[^l].
    - Two more cases had the same root, a red blamed on the wrong minion:
      - #1851 and #1858 were burn-in red on size-budget 10 of 10, from two other ships' rows (#1904 set `src/runner.ts`
        to 5574, #1913 added a line). land.sh pinned it on them because they edit that test file[^m].
@@ -53,8 +55,10 @@ Times are Pacific.
        map rule picked it then (it was added since)[^m].
    - **No new edit:**
      - #1917 holds for the size list.
-     - #2037 (not shipped when this ran) makes a test that reads a source file run when that file changes. That is
-       the general fix for #1857's case; a second one here would build the same thing twice.
+     - #2037 (not shipped when this ran) adds `test/pinned-tests.test.ts`, which fails when a test that reads a
+       source file's text has no map row. So the smoke check's and CI's wide pick runs it. That is the general guard
+       for #1857's case, and a second one here would duplicate it. `citadel-test`'s default narrow pick still skips
+       such a test unless it is `@pinned` (#1928's choice, not changed here).
 5. **Waves of simultaneous starts became waves of simultaneous ships.**
    - Wave 1's 11 starts at once on a box at load 178 to 287 killed several turns (#1836, #1851, #1852, and more by
      Josh's "Start 5 now, rest later" at about 23:17 PST)[^m]. #1868's start limit went live at 19:57 PST Nov 24[^l], so
@@ -99,10 +103,12 @@ by subtracting 8 h. The last close is #1941 at 17:26:51Z.
 0c461af63 (16:51:48 -0800, reset).
 [^l]: `shared/project/retro-log/2026-11-2[456]/land.md`, run 2026-11-25. Conflicts: `grep -hE '· (train prep conflict|land conflict) ·'`
 filtered to the effort's branch names, 23 lines, of which 20 name `size-budget`, 3 README and 1 `typecheck-bas`. The
-last size-budget line is 09:00:59Z. Line waits: the `· timing ·` lines ending `landed`. #1868's
+last size-budget line is 09:04:44Z (a land conflict; 09:00:59Z is the same branch's train prep). Line waits: the `· timing ·` lines ending `landed`. #1868's
 `ship train shipped` line is at 03:57:39Z.
 [^m]: `read_minion` on each of the 25 (last 50 entries), read by five Sonnet Grunts on 2026-11-25. Counts are from
 their reports and were not re-checked one by one. The model per minion is from `tickets.model` in [^d]'s query.
 [^g]: `git log main --format='%h %ci %s' -- src/ci-hold.ts`, run 2026-11-25: 89d75ad22 (13:15:41 -0800) "#1984: a job
 held 2 hours is told to its scheme's Taskmaster". `capped()` and `OTHERS_CAP_MS` are at `src/ci-hold.ts` lines 43 and 455
 to 457.
+[^k]: `git reflog show main --date=iso | grep 7c44e64a2`, run 2026-11-25: 02:44:35 -0800, fast-forward (its commit
+date is 02:37:57).

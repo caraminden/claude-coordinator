@@ -112,6 +112,16 @@ test('two Windows machines: a minion sticks to one and moves when it goes away; 
   assert.deepEqual(await pooled(token), { status: 200, machine: 'win-a', from: null, text: '' });
   assert.deepEqual(await pooled(token), { status: 200, machine: 'win-a', from: null, text: '' });
 
+  // A second minion starting while the first has win-a's tools open spreads to win-b, the other free screen.
+  const held = new AbortController();
+  const open = await fetch(`${srv.base}/api/machines/windows/session?server=ws`, { headers: { Authorization: `Bearer ${token}` }, signal: held.signal });
+  assert.equal(open.headers.get('x-citadel-machine'), 'win-a');
+  before = turns().length;
+  await call(`/api/projects/${lent.id}/tickets`, { message: 'windows as well' }, 'POST');
+  const second = (await until('the second minion turn', () => turns().length > before && turns())).at(-1);
+  assert.equal((await pooled(second.token)).machine, 'win-b');
+  held.abort();
+
   // win-a goes away: the next session moves to win-b and says from where; then it stays there.
   a.agent.kill();
   await until('win-a offline', async () => !(await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'win-a').online);

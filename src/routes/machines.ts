@@ -537,7 +537,7 @@ function pickWindows(app: App, caller: Ticket, project: Project | undefined, ser
   const eligible = app.machines
     .online()
     .filter((m) => m.servers.includes('ws') && lendsRole(app.store, m, 'screen', project, asker === null ? [] : [asker]) && (m.owner_id === null || owned.includes(m.id)))
-    .map((m) => ({ id: m.id, name: m.name, busy: app.machines.screenBusy(m.id), priority: m.priority ?? null }));
+    .map((m) => ({ id: m.id, name: m.name, busy: app.machines.screenBusy(m.id, caller.id), priority: m.priority ?? null }));
   const got = app.machines.windows.pick(caller.id, eligible);
   if (!got) throw new HttpError(503, `No Windows machine lent to ${project.name} is online with its workspace tools on`, true);
   return { machine: app.store.getMachine(got.machine.id)!, movedFrom: got.movedFrom === null ? null : (app.store.getMachine(got.movedFrom)?.name ?? 'a machine that was removed') };

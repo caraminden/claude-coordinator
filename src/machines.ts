@@ -571,10 +571,15 @@ export class MachineRelay {
   /** Which Windows machine each minion's pooled tools use (Build 7 M5), so it stays on one while it can. */
   readonly windows = new WindowsPool();
 
-  /** Jobs holding or waiting in line for a machine's screen (#1422), from its last beat: 0 when it says nothing. */
-  screenBusy(machineId: number): number {
+  /**
+   * How busy a machine's screen is for this minion's pooled Windows tools (Build 7 M5): jobs holding or waiting in line
+   * for it (#1422), from its last beat, and the other minions with its workspace tools open, so two minions starting
+   * together spread over two free PCs.
+   */
+  screenBusy(machineId: number, ticketId: number): number {
     const s = this.agents.get(machineId)?.screen;
-    return s ? (s.holder ? 1 : 0) + s.line.length : 0;
+    const others = new Set([...this.sessions.values()].filter((x) => x.machineId === machineId && x.server === 'ws' && x.ticketId !== null && x.ticketId !== ticketId).map((x) => x.ticketId));
+    return (s ? (s.holder ? 1 : 0) + s.line.length : 0) + others.size;
   }
 
   isOnline(machineId: number): boolean {

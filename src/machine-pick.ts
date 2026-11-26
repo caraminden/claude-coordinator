@@ -11,7 +11,7 @@ export const POOLED_WINDOWS = 'windows';
 export type ScreenMachine = {
   id: number;
   name: string;
-  /** Jobs holding or waiting in line for its screen. */ busy: number;
+  /** Jobs holding or waiting in line for its screen, and other minions with its workspace tools open. */ busy: number;
   /** Its owner's order (machines.priority, M6): 1 first, null after every one with an order. */ priority: number | null;
 };
 

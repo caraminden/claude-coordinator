@@ -53,6 +53,8 @@ interface McpMessage {
 }
 
 let session = '';
+// The pooled Windows tools (Build 7 M5): which PC the app picked, said on the session's first tool call, as src/pool-machine.ts does.
+let note = '';
 let markReady: () => void;
 let ready = new Promise<void>((r) => (markReady = r));
 // Claude's MCP handshake, replayed to the new session after a reconnect; the machine's reply to it is dropped.
@@ -105,6 +107,9 @@ createInterface({ input: process.stdin })
 // The stream ends when the app restarts; reconnect, and replay the handshake to the new session.
 for (let first = true; ; first = false) {
   const res = await connect(first);
+  const picked = res.headers.get('x-citadel-machine');
+  const left = res.headers.get('x-citadel-moved-from');
+  if (picked) note = left ? `${NAME} moved to ${picked}: ${left} went away. Its checkout is not this one's, so call workspaces and check out again before you build.` : `${NAME} is on ${picked}.`;
   const decoder = new TextDecoder();
   let buf = '';
   try {
@@ -131,7 +136,12 @@ for (let first = true; ; first = false) {
           if (!first) for (const m of handshake) await post(m.id === undefined ? m : { ...m, id: REPLAY_ID }).catch(() => {});
           markReady!();
         } else if (msg.message !== undefined && msg.message?.id !== REPLAY_ID) {
-          if (msg.message?.id !== undefined && !msg.message.method) pending.delete(msg.message.id);
+          const asked = msg.message?.id !== undefined && !msg.message.method ? pending.get(msg.message.id) : undefined;
+          if (asked) pending.delete(msg.message.id);
+          if (note && asked?.method === 'tools/call' && Array.isArray(msg.message.result?.content)) {
+            msg.message.result.content.unshift({ type: 'text', text: note });
+            note = '';
+          }
           process.stdout.write(`${JSON.stringify(msg.message)}\n`);
         }
       }

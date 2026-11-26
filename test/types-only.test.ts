@@ -31,12 +31,16 @@ test('code changes are refused', () => {
   assert.ok(!same('x = new a.b();', 'x = new (a.b() as T)();'), 'new');
   assert.ok(!same('enum E { A }', 'enum E { A, B }'), 'enum fails to strip');
   assert.ok(!sameCode('a', 'a', 'x.sh').same, 'not a code file');
+  assert.ok(!same('#!/usr/bin/env node\nrun();', '#!/bin/sh\nrun();'), 'the interpreter line');
+  assert.ok(!same('m.delete(k);', 'm.delete\nk;'), 'a method named like a keyword is a call, not delete');
+  assert.ok(same('x = a.in(b).c;', 'x = (a.in(b) as T).c;'), 'a keyword-named property is a plain chain');
 });
 
 test('line breaks count only where semicolon insertion reads them', () => {
   assert.ok(same('() => { return a; }', '() => { return a as T; }'));
   assert.ok(!same('function f() { return a; }', 'function f() { return (\n a as T); }'.replace('(\n', '\n(')), 'return then a break');
   assert.ok(!same('a\n++b', 'a++\nb'), 'postfix');
+  assert.ok(!same('{ using x = r(); }', '{ using\nx = r(); }'), 'using then a break');
   assert.ok(same('x = a\n  .b', 'x = a.b'), 'a break inside a chain');
   assert.ok(!same('const f = (a) => a;', 'const f = (a): \n T => a;'), 'a break before =>');
 });

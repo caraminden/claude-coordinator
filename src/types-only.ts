@@ -22,7 +22,8 @@ export function stripTypes(code: string): string {
 }
 
 /** One token: its kind, its text, whether a line break came before it, and (on `)`) whether it closed a group. */
-export type Token = { kind: 'id' | 'num' | 'str' | 'tpl' | 're' | 'punct'; text: string; nl: boolean };
+// `prop` marks a word after `.` or `?.`: a property name, never a keyword (`m.delete(k)` calls a method).
+export type Token = { kind: 'id' | 'num' | 'str' | 'tpl' | 're' | 'punct' | 'hashbang'; text: string; nl: boolean; prop?: true };
 
 // biome-ignore format: a table, longest first
 const PUNCT = [
@@ -37,7 +38,7 @@ const ID_PART = /[\w$\\\u0080-\uffff]/;
 // After these words an expression starts, so a `/` begins a regex.
 const BEFORE_EXPR = new Set('return typeof instanceof in of new delete void throw case do else yield await extends default'.split(' '));
 // Words after which a line break ends the statement ([no LineTerminator here]), plus a few contextual ones, to be safe.
-const RESTRICTED = new Set('return throw break continue yield async let get set static accessor'.split(' '));
+const RESTRICTED = new Set('return throw break continue yield async let get set static accessor using'.split(' '));
 
 /** The tokens of a JavaScript text, comments and whitespace dropped. Throws on text it can't read for sure. */
 export function tokenize(src: string): Token[] {
@@ -49,11 +50,16 @@ export function tokenize(src: string): Token[] {
   let closedCtrl = false;
   let i = 0;
   let nl = false;
-  if (src.startsWith('#!')) while (i < src.length && !LINE.test(src[i]!)) i++;
   const push = (kind: Token['kind'], text: string) => {
-    out.push({ kind, text, nl });
+    const before = out[out.length - 1];
+    const prop = kind === 'id' && before?.kind === 'punct' && (before.text === '.' || before.text === '?.');
+    out.push(prop ? { kind, text, nl, prop } : { kind, text, nl });
     nl = false;
   };
+  if (src.startsWith('#!')) {
+    while (i < src.length && !LINE.test(src[i]!)) i++;
+    push('hashbang', src.slice(0, i)); // the interpreter line decides how a script runs
+  }
   const template = (start: number) => {
     // From just after "`" or "}": read to the closing "`" or a "${".
     let j = start;
@@ -164,6 +170,7 @@ function braceKind(prev: Token | undefined): 'block' | 'expr' | '?' {
   }
   if (prev.kind === 'id') {
     if (['else', 'try', 'finally', 'do'].includes(prev.text)) return 'block';
+    if (prev.prop) return '?';
     return BEFORE_EXPR.has(prev.text) && prev.text !== 'extends' ? 'expr' : '?';
   }
   return prev.kind === 'tpl' && prev.text.endsWith('${') ? 'expr' : '?';
@@ -180,7 +187,7 @@ function regexAllowed(prev: Token | undefined, closedCtrl: boolean, closedBrace:
     }
     return !['++', '--', ']'].includes(prev.text);
   }
-  if (prev.kind === 'id') return BEFORE_EXPR.has(prev.text);
+  if (prev.kind === 'id') return !prev.prop && BEFORE_EXPR.has(prev.text);
   if (prev.kind === 'tpl') return prev.text.endsWith('${');
   return false;
 }
@@ -236,7 +243,7 @@ export function dropRedundantParens(tokens: Token[]): Token[] {
 function afterOperator(prev: Token | undefined): boolean {
   if (!prev) return true;
   if (prev.kind === 'punct') return ![')', ']', '}', '++', '--', '?.', '.'].includes(prev.text);
-  if (prev.kind === 'id') return BEFORE_EXPR.has(prev.text) && prev.text !== 'new';
+  if (prev.kind === 'id') return !prev.prop && BEFORE_EXPR.has(prev.text) && prev.text !== 'new';
   if (prev.kind === 'tpl') return prev.text.endsWith('${');
   return false;
 }
@@ -257,7 +264,7 @@ function tight(tokens: Token[], from: number, to: number, match: Map<number, num
     }
     if (want === 'atom') {
       if (t.kind === 'id') {
-        if (RESERVED.has(t.text) && !ATOM_WORDS.has(t.text)) return false;
+        if (!t.prop && RESERVED.has(t.text) && !ATOM_WORDS.has(t.text)) return false;
       } else if (t.kind !== 'num' && t.kind !== 'str' && t.kind !== 're') return false;
       want = 'after';
     } else if (t.kind === 'punct' && t.text === '.') want = 'atom';
@@ -271,7 +278,7 @@ function breakCounts(tokens: Token[], k: number): boolean {
   const t = tokens[k]!;
   const prev = tokens[k - 1];
   if (t.kind === 'punct' && (t.text === '++' || t.text === '--' || t.text === '=>')) return true;
-  return prev?.kind === 'id' && RESTRICTED.has(prev.text);
+  return prev?.kind === 'id' && !prev.prop && RESTRICTED.has(prev.text);
 }
 
 /** The tokens to compare for a file: types stripped for TypeScript, then redundant parentheses dropped. */

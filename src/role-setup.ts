@@ -172,7 +172,7 @@ export class RoleSetups {
       this.step(a, at, { text: 'Nothing is ticked to check', state: 'fail' });
       return this.finish(a, false, 'Tick an MCP server or a folder on Tools and folders, then test again.');
     }
-    results.forEach((r, i) => this.step(a, at + i, { text: `${r.server === 'ws' ? 'Workspace tools' : 'MCP server'}: ${r.ok ? `${r.tools.length} tools` : (r.error ?? 'failed')}`, state: r.ok ? 'ok' : 'fail' }));
+    results.forEach((r, i) => this.step(a, at + i, { text: `${r.server === 'ws' ? 'Workspace tools' : 'MCP server'}: ${r.ok ? `${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}${r.tools.length ? `: ${clean(r.tools.join(', '), 240)}` : ''}` : (r.error ?? 'failed')}`, state: r.ok ? 'ok' : 'fail' }));
     const ok = results.every((r) => r.ok);
     run.report = ok ? `${results.reduce((n, r) => n + r.tools.length, 0)} tools` : null;
     this.finish(a, ok, ok ? null : 'A server failed to list its tools: its line says why.');
@@ -223,7 +223,7 @@ export class RoleSetups {
             continue;
           }
           this.startTest(a, machine);
-        } else if (now - a.run.at > WORKER_WAIT_MS) this.finish(a, false, `No worker came up on ${machine.name} in ${WORKER_WAIT_MS / 60_000} minutes: run the install command there, then press Set up again`);
+        } else if (now - a.heard > WORKER_WAIT_MS) this.finish(a, false, `No worker came up on ${machine.name} in ${WORKER_WAIT_MS / 60_000} minutes: run the install command there, then press Set up again`);
       } else if (a.phase === 'test') this.mirror(a, machine);
     }
   }
@@ -271,6 +271,11 @@ export class RoleSetups {
 
   shotFile(machineId: number) {
     return join(this.d.shotDir, `${machineId}-screen.png`);
+  }
+
+  /** The screenshot people may see: only one this machine's own last screen run took, since machine ids are reused. */
+  servedShot(machineId: number): string | null {
+    return storedRun(this.d.store, machineId, 'screen')?.shot ? this.shotFile(machineId) : null;
   }
 
   running(machineId: number): Run | null {

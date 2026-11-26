@@ -143,7 +143,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .worker-part-head button { margin-left: auto; }
 /* A role's Set up and Test (Build 7 M4, role-setup-card.js): its two buttons sit together, its screenshot a thumbnail. */
 .role-setup .worker-part-head button + button { margin-left: 0; }
-.role-setup-shot img { display: block; max-width: min(100%, 22rem); border: 1px solid var(--line); border-radius: 6px; }
+/* Its room is kept before the image loads: a screen's 16:9, the shot fitted inside. */
+.role-setup-shot img { display: block; width: min(100%, 22rem); height: auto; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; }
 .worker-install, .worker-sign { display: grid; gap: 0.5rem; }
 .worker-os { display: flex; gap: 0.4rem; }
 .worker-os .chip { cursor: pointer; }

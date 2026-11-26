@@ -30,6 +30,7 @@ import { askCheckpoint, AWAY_MS, endAway, heardAt, liveOn, machineLink, owned, p
 import { UNINSTALL } from '../machine-away.ts';
 import { BLOB_BYTES } from '../worker-join.ts';
 import { joinState, makeJoin, redeemJoin } from '../machine-join.ts';
+import { roleSetupAgentRoutes } from './role-setup.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -462,6 +463,7 @@ export const agentRoutes: Route[] = [
       return json(res, 200, (await app.ciHold?.ask(claims.repository, claims.runId)) ?? { go: true, why: null });
     },
   },
+  ...roleSetupAgentRoutes,
 ];
 
 // Anyone signed in adds machines; each manages their own, and admins manage all (#306).

@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { adminCommand, cleanAdmin } from '../public/role-setup.js';
 import { Store } from '../src/db.ts';
+import { router } from '../src/http.ts';
 import type { CheckResult } from '../src/machines.ts';
+import { agentRoutes } from '../src/routes/machines.ts';
 import { QUIET_MS, RoleSetups, storedRun, WORKER_WAIT_MS, type RoleSetupDeps } from '../src/role-setup.ts';
 import type { SelfTest } from '../src/worker-join.ts';
 
@@ -68,8 +70,8 @@ test('Tools: Set up says nothing installs, then its test lists each server tools
     run.steps.map((s) => s.state),
     ['ok', 'ok', 'ok'],
   );
-  assert.match(run.steps[1].text, /MCP server: 2 tools/);
-  assert.match(run.steps[2].text, /Workspace tools: 1 tools/);
+  assert.equal(run.steps[1].text, 'MCP server: 2 tools: a, b');
+  assert.equal(run.steps[2].text, 'Workspace tools: 1 tool: c');
 });
 
 test('Tools: nothing ticked fails with what to do', async () => {
@@ -182,6 +184,25 @@ test('Minion turns on Windows: the agent installs it; no worker in time fails', 
   assert.match(t.run('turns')!.why!, /No worker came up/);
 });
 
+test('a long Windows install still gets its whole wait for the worker, counted from when it finished', () => {
+  const t = world({ os: 'windows' });
+  const run = t.setups.start(t.machine(), 'turns', 'setup', t.josh);
+  // 39 minutes of the installer's lines, each heard within the agent's quiet limit, then its end.
+  for (let i = 0; i < 3; i++) t.tick(13 * 60_000), t.setups.heard(t.machine(), { id: run.id, step: { n: 0, text: `installing ${i}`, state: 'running' } });
+  t.setups.heard(t.machine(), { id: run.id, done: { ok: true } });
+  t.tick(5_000);
+  assert.equal(t.run('turns')!.done, null);
+  t.w.here = true;
+  t.tick(5_000);
+  assert.equal(t.w.test?.id, 'tst', "T5's self-test started");
+});
+
+test("the agent's two routes are on the machines' own address, beside its other routes", () => {
+  const agents = router(agentRoutes);
+  assert.ok(agents.knows('/api/machines/role-setup'));
+  assert.ok(agents.knows('/api/machines/role-setup/shot'));
+});
+
 test('Test on Minion turns with no worker asks for Set up', () => {
   const t = world({ os: 'linux' });
   assert.throws(() => t.setups.start(t.machine(), 'turns', 'test', t.josh), /press Set up/);
@@ -194,6 +215,10 @@ test("the screen's screenshot is kept for its run only", async () => {
   assert.equal(await t.setups.shot(t.machine(), run.id, Buffer.from('png')), true);
   assert.equal(readFileSync(t.setups.shotFile(t.machine().id), 'utf8'), 'png');
   assert.ok(t.run('screen')!.shot);
+  assert.equal(t.setups.servedShot(t.machine().id), t.setups.shotFile(t.machine().id));
+  // A machine with no screen shot of its own (a reused id after a removal) is served none, even with the file there.
+  t.store.setMachineRole(t.machine().id, 'screen', { setup: null });
+  assert.equal(t.setups.servedShot(t.machine().id), null);
 });
 
 test('the admin command comes from fixed words only, one shell for one OS', () => {

@@ -3,7 +3,7 @@
 // back as it runs; what needs an administrator goes back as fixed words (public/role-setup.js ADMIN_NEEDS), never as a
 // command. Node only, no other file: it runs on the owner's PC beside machine-agent.mjs.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /**
@@ -100,10 +100,12 @@ async function screen(ctx, say, end) {
   try {
     took = await ctx.capture(whole, '');
   } catch (err) {
+    rmSync(whole, { force: true });
     const why = `The screenshot failed: ${err.message}. The PC must be signed in with its screen unlocked.`;
     return say(n, why, 'fail').then(() => end(false, { why }));
   }
   await ctx.upload(readFileSync(whole));
+  rmSync(whole, { force: true });
   await say(n++, `A screenshot of the whole screen: ${took}`, 'ok');
   // Notepad starts, its window is seen on the screen, and only the Notepad it started is closed.
   await say(n, 'Notepad opens and shows', 'running');
@@ -115,12 +117,15 @@ async function screen(ctx, say, end) {
     await ctx.sleep(500);
     seen = await ctx.capture(win, 'Notepad').catch(() => null);
   }
+  const shot = seen && readFileSync(win);
+  // Both shots leave the PC's temp folder once sent.
+  rmSync(win, { force: true });
   if (!seen) {
     await closeNotepad(ctx, since);
     const why = "Notepad started, but its window didn't show on the screen in 10 s.";
     return say(n, why, 'fail').then(() => end(false, { why }));
   }
-  await ctx.upload(readFileSync(win));
+  await ctx.upload(shot);
   await say(n++, `Notepad opens and shows: ${seen}`, 'ok');
   await say(n, 'Notepad closes', 'running');
   const closed = await closeNotepad(ctx, since);

@@ -47,12 +47,16 @@ export const roleSetupRoutes: Route[] = [
     ...people,
     async handler({ req, res, app, machine, session }) {
       if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
-      const file = setupsOf(app).shotFile(machine.id);
-      const size = (await stat(file).catch(() => null))?.size;
+      const file = setupsOf(app).servedShot(machine.id);
+      const size = file && (await stat(file).catch(() => null))?.size;
       if (!size) throw new HttpError(404, 'No screenshot yet');
       return sendFile(req, res, file, size, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
     },
   },
+];
+
+/** The agent's side, in routes/machines.ts's agentRoutes: on the machines' own address when it has one. */
+export const roleSetupAgentRoutes: Route[] = [
   agent('POST', '/api/machines/role-setup', async ({ req, res, app }, machine) => {
     if (!setupsOf(app).heard(machine, await readJson(req, 50_000))) throw new HttpError(410, 'No such setup running');
     return json(res, 200, { ok: true });

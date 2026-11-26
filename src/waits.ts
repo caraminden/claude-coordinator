@@ -741,6 +741,8 @@ export class Waits {
   private earlyNow = new Map<number, { head: string; next: string }>();
   /** Waiting ships whose early run was thrown away, by minion: what to say, until they leave the line or are stacked again. */
   private earlyDropped = new Map<number, string>();
+  /** The read of the reason each dropped note waits on (#2111), by minion. */
+  private earlyAsked = new Map<number, Promise<string | null>>();
   private d: WaitDeps;
   constructor(d: WaitDeps) {
     this.d = d;
@@ -883,10 +885,12 @@ export class Waits {
     const was = this.earlyNow;
     this.earlyNow = new Map();
     if (off) this.earlyDropped.clear();
+    if (off) this.earlyAsked.clear();
     const watch = new Map<number, { branch: string; top: string; since: number }>();
     if (file && nextId != null) {
       this.earlyNow.set(nextId, { head: file.head, next: file.next });
       this.earlyDropped.delete(nextId);
+      this.earlyAsked.delete(nextId);
       watch.set(nextId, { branch: file.next, top: file.top, since: file.at * 1000 });
     }
     for (const [id, e] of was) {
@@ -900,7 +904,9 @@ export class Waits {
       // The reason is in the head's log, read off the server's thread (#2111): the plain words show until it is in.
       if (why instanceof Promise) {
         say(null);
-        void why.then((w) => void (w && this.earlyDropped.has(id) && say(w))).catch(() => {});
+        // Only this drop's read fills it in: an older one that ends late belongs to a run dropped before.
+        this.earlyAsked.set(id, why);
+        void why.then((w) => void (w && this.earlyAsked.get(id) === why && this.earlyDropped.has(id) && say(w))).catch(() => {});
       } else say(why);
     }
     // A dropped note goes once its ship is no longer waiting in the line.

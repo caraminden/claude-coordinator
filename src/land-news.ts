@@ -182,14 +182,17 @@ export async function readTailA(path: string): Promise<string> {
   const len = Math.min(st.size, TAIL);
   const buf = Buffer.alloc(len);
   let fh;
+  let got = 0;
   try {
     fh = await open(path, 'r');
-    await fh.read(buf, 0, len, st.size - len);
+    got = (await fh.read(buf, 0, len, st.size - len)).bytesRead;
   } catch {
     return was?.output ?? '';
   } finally {
     await fh?.close();
   }
+  // The log was cut between the stat and the read (a ship starting again): what was read is not that size's end.
+  if (got < len) return was?.output ?? '';
   const text = buf.toString('utf8');
   const output = st.size > len ? text.slice(text.indexOf('\n') + 1) : text; // a cut first line is dropped
   tails.delete(path);

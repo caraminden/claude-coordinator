@@ -25,7 +25,7 @@ function minion() {
   return { id: t.id, number: t.number, branch: `ticket/${t.number}-x` };
 }
 
-function setup(why: string | null = 'the train ahead went red') {
+function setup(why: string | null | (() => Promise<string | null>) = 'the train ahead went red') {
   const now = T0 + 60_000;
   const answers = new Map<string, unknown>();
   const get = async (path: string) => {
@@ -47,7 +47,7 @@ function setup(why: string | null = 'the train ahead went red') {
     held: () => false,
     ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: get as never, now: () => now })),
     ciSlug: () => 'o/r',
-    earlyWhy: () => why,
+    earlyWhy: () => (typeof why === 'function' ? why() : why),
   });
   const head = minion(),
     next = minion();
@@ -114,6 +114,28 @@ test('an early run thrown away when the ship ahead failed says so, until the shi
   rmSync(join(state, 'queue', '0000000002'));
   await waits.poll();
   assert.equal(waits.wait(next.id), null);
+});
+
+test("a reason read off the thread fills the dropped note in, and an older run's late reason never replaces a newer one (#2111)", async () => {
+  const reads: ((why: string) => void)[] = [];
+  const { waits, state, head, next, early } = setup(() => new Promise<string | null>((done) => reads.push(done)));
+  const drop = async () => {
+    early();
+    await waits.poll();
+    rmSync(join(state, 'early'));
+    await waits.poll();
+  };
+  await drop();
+  assert.equal(waits.wait(next.id)!.early?.text, `Early test dropped: #${head.number} ahead of it changed`, 'the plain words until the log is read');
+  // A second early run for the same ship is dropped too, while the first read is still out; the reads end in reverse.
+  await drop();
+  assert.equal(reads.length, 2);
+  reads[1]('the train ahead went red');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(waits.wait(next.id)!.early?.text, `Early test dropped: #${head.number} ahead of it failed`);
+  reads[0]('its train was built again');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(waits.wait(next.id)!.early?.text, `Early test dropped: #${head.number} ahead of it failed`);
 });
 
 test('with early tests switched off the row shows none of it', async () => {

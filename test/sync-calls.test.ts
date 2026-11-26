@@ -89,7 +89,10 @@ type Class = 'boot' | 'proc' | 'rare' | 'owed';
 /** file → function → [class, calls, why (owed: the handoff or reason; others: what triggers it)]. */
 type Allow = Record<string, Record<string, [Class | 'unclassed', number, string?]>>;
 
-const IMPORT = /\b(?:import|export)\s+(?!type\b)[^;'"]*?from\s+['"](\.[^'"]+)['"]|\bimport\(\s*['"](\.[^'"]+)['"]\s*\)|\bimport\s+['"](\.[^'"]+)['"]/g;
+const IMPORT = /\b(?:import|export)\s+(?!type\b)[^;'"`]*?from\s+['"](\.[^'"]+)['"]|\bimport\(\s*['"`](\.[^'"`$]+)['"`]\s*\)|\bimport\s+['"](\.[^'"]+)['"]/g;
+
+/** The relative files a file's code imports: `from`, a bare import and `import()` of a plain string or template. An `import()` of a computed path can't be followed. */
+export const importsOf = (text: string): string[] => [...code(text).matchAll(IMPORT)].map((m) => m[1] ?? m[2] ?? m[3]);
 
 /** server.ts and every file it imports, directly or through another (type-only imports left out). */
 function sources(): string[] {
@@ -99,7 +102,7 @@ function sources(): string[] {
     const f = queue.pop()!;
     if (seen.has(f) || !existsSync(f)) continue;
     seen.add(f);
-    for (const m of code(readFileSync(f, 'utf8')).matchAll(IMPORT)) queue.push(resolve(dirname(f), m[1] ?? m[2] ?? m[3]));
+    for (const spec of importsOf(readFileSync(f, 'utf8'))) queue.push(resolve(dirname(f), spec));
   }
   return [...seen].filter((f) => f === join(repo, 'server.ts') || f.startsWith(join(repo, 'src') + sep)).sort();
 }
@@ -186,19 +189,24 @@ test("every blocking call the server's thread can reach is classed, and the ones
   );
   const rows = Object.entries(allowed).flatMap(([file, fns]) => Object.entries(fns).map(([fn, row]) => ({ file, fn, row })));
   const classes: Class[] = ['boot', 'proc', 'rare', 'owed'];
-  assert.deepEqual(
-    rows.filter((r) => !classes.includes(r.row[0] as Class)).map((r) => `${r.file}: ${r.fn}`),
-    [],
-    'each entry has a class: boot, proc, rare or owed',
-  );
-  assert.deepEqual(
-    rows.filter((r) => r.row[0] !== 'boot' && r.row[0] !== 'proc' && !r.row[2]).map((r) => `${r.file}: ${r.fn}`),
-    [],
-    'a rare or owed entry says what triggers it, and an owed one names its handoff',
-  );
-  const total = (c: Class) => rows.filter((r) => r.row[0] === c).reduce((a, r) => a + r.row[1], 0);
+  const named = (bad: typeof rows) => bad.map((r) => `${r.file}: ${r.fn}`);
+  assert.deepEqual(named(rows.filter((r) => !classes.includes(r.row[0] as Class))), [], 'each entry has a class: boot, proc, rare or owed');
+  assert.deepEqual(named(rows.filter((r) => !Number.isInteger(r.row[1]) || r.row[1] < 1)), [], 'each entry counts at least one call');
+  assert.deepEqual(named(rows.filter((r) => r.row[0] !== 'boot' && r.row[0] !== 'proc' && !r.row[2])), [], 'a rare or owed entry says what triggers it, and an owed one names its handoff');
+  // The totals count the calls in the code, not the numbers in the file: a stale or made-up row can't make room for a new call.
+  const total = (c: Class) => rows.filter((r) => r.row[0] === c).reduce((a, r) => a + (found[r.file]?.[r.fn] ?? 0), 0);
   assert.ok(total('rare') <= RARE_MOST, `${total('rare')} rare calls, at most ${RARE_MOST}: a new blocking call on a path that runs after listen is written the async way, not added as rare`);
   assert.ok(total('owed') <= OWED_MOST, `${total('owed')} owed calls, at most ${OWED_MOST}: this list only goes down`);
+});
+
+test('the files the server imports are found through every plain import form', () => {
+  assert.deepEqual(importsOf(["import { a } from './a.ts';", "import type { T } from './types-only.ts';", "export { b } from './b.ts';", "import './c.ts';", "const d = await import('./d.ts');", 'const e = await import(`./e.ts`);', "import fs from 'node:fs'; // import('./in-a-comment.ts')"].join('\n')), [
+    './a.ts',
+    './b.ts',
+    './c.ts',
+    './d.ts',
+    './e.ts',
+  ]);
 });
 
 test('a call is named by the function it sits in', () => {

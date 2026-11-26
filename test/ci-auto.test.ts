@@ -3,8 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { askedIn, BUSY_MS, CiAuto, type CiAutoDeps, osOfLabel, RETRY_MS, type Os } from '../src/ci-auto.ts';
-import type { RunnerAsk } from '../src/ci-runner.ts';
-import { HttpError } from '../src/http.ts';
+import { type RunnerAsk, RunnerBusy } from '../src/ci-runner.ts';
 import { Store } from '../src/db.ts';
 
 function world() {
@@ -154,7 +153,7 @@ test('a queued job with a label no runner has gets one even with no workflow fil
   const shared = new CiAuto({
     ...(w.auto as unknown as { d: CiAutoDeps }).d,
     start: async (p, ask) => {
-      if (busy) throw new HttpError(409, "The runner agent on josh-desktop is busy with another scheme's job");
+      if (busy) throw new RunnerBusy("The runner agent on josh-desktop is busy with another scheme's job");
       w.started.push(`${ask.op} ${p.name} ${ask.os} ${ask.host}`);
     },
   });

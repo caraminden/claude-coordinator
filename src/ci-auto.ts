@@ -11,11 +11,10 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { lendsRole } from './access.ts';
-import { type RunnerAsk, runnerLabel } from './ci-runner.ts';
+import { type RunnerAsk, RunnerBusy, runnerLabel } from './ci-runner.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { CardQuestion } from './ci-armed.ts';
 import { rank } from './machine-balancer.ts';
-import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { thrown } from './thrown.ts';
 
@@ -151,7 +150,7 @@ export class CiAuto {
           out.push(`add ${project.name} ${os} on ${pick.name}`);
           return out;
         } catch (err) {
-          const busy = err instanceof HttpError && err.status === 409;
+          const busy = err instanceof RunnerBusy;
           this.next.set(key, this.now() + (busy ? BUSY_MS : FAILED_MS));
           this.say(`CI runners: couldn't register ${project.name}'s ${os} runner on ${pick.name}: ${thrown(err).message}`);
           if (busy) break;
@@ -179,7 +178,7 @@ export class CiAuto {
             await this.d.start(project, { op: 'remove', count: null, os, host: m.name });
             out.push(`remove ${project.name} ${os} on ${m.name}`);
           } catch (err) {
-            this.next.set(key, this.now() + (err instanceof HttpError && err.status === 409 ? BUSY_MS : FAILED_MS));
+            this.next.set(key, this.now() + (err instanceof RunnerBusy ? BUSY_MS : FAILED_MS));
             this.say(`CI runners: couldn't take ${project.name}'s ${os} runners off ${m.name}: ${thrown(err).message}`);
           }
         }

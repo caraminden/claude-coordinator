@@ -305,6 +305,13 @@ export interface Listed {
 
 /** Runner names start with their PC's hostname (add-runner.sh, .ps1). shortcut: a hostname that is another's name plus -something (desk, desk-2) is told apart by the dash only, fix when two PCs are named like that. */
 /** A runner of the PC `host`: its name is the hostname, or starts with it and a dash (DESK-2). */
+/** A 409 that passes: a runner job is going for the scheme, or on the agent asked. Citadel's own asks (src/ci-auto.ts) try again in minutes. */
+export class RunnerBusy extends HttpError {
+  constructor(message: string) {
+    super(409, message);
+  }
+}
+
 export function onHost(name: string, host: string | undefined): boolean {
   const h = host?.toLowerCase();
   return !h || name.toLowerCase() === h || name.toLowerCase().startsWith(`${h}-`);
@@ -393,7 +400,7 @@ export class RunnerJobs {
     // What GitHub lists before an add: the runners it makes are the ones that aren't there yet, and only those get a role.
     const before = ask.op === 'add' ? await this.tokens.listed(project) : [];
     const running = this.jobs.get(project.id);
-    if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
+    if (running && running.view.ok === null) throw new RunnerBusy(`${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
     const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project, ask.op === 'remove'));
     const named = ask.host?.toLowerCase();
     const machines = named ? online.filter((m) => m.name.toLowerCase() === named || this.relay.runnerHost(m.id, ask.os)?.toLowerCase() === named) : online;
@@ -411,7 +418,7 @@ export class RunnerJobs {
     // An add goes to one PC (the named one, else the first idle); list and remove reach every PC asked, which must all be free.
     const free = machines.filter((m) => !this.busy.has(`${m.id}:${ask.os}`));
     const targets = ask.op === 'add' ? free.slice(0, 1) : free.length === machines.length ? machines : [];
-    if (!targets.length) throw new HttpError(409, `The runner agent on ${(free.length ? machines.filter((m) => this.busy.has(`${m.id}:${ask.os}`)) : machines).map((m) => m.name).join(', ')} is busy with another scheme's job; try again in a few minutes.`);
+    if (!targets.length) throw new RunnerBusy(`The runner agent on ${(free.length ? machines.filter((m) => this.busy.has(`${m.id}:${ask.os}`)) : machines).map((m) => m.name).join(', ')} is busy with another scheme's job; try again in a few minutes.`);
     const machine = targets[0];
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
     const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false, ask.op === 'remove' ? 'remove' : 'register');

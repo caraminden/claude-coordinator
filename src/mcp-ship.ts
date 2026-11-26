@@ -206,7 +206,7 @@ export const RELAY_WHEN_LIVE = {
 
 export const MINION_WAKE_WHEN_LIVE = {
   name: 'wake_when_live',
-  description: `Waiting on another minion's change to be deployed? Call this with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. ${WAKE_DESCRIPTION.replace('the minion', 'this minion')}`,
+  description: `Waiting on another minion's change to be deployed? Call this with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. If all that's left then is to ship, hand off now with hand_off_land's \`when: {"live": ...}\` instead. ${WAKE_DESCRIPTION.replace('the minion', 'this minion')}`,
   inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
 };
 
@@ -249,15 +249,15 @@ export const HAND_OFF_LAND = () => ({
     type: 'object',
     properties: {
       summary: { type: 'string', maxLength: 300, description: 'What ships, in one line' },
-      learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or docs missed or fought you; "nothing" is fine. Never holds the ship' },
-      risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out (no review gives one), it ships as high and needs go" },
+      learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or docs missed or fought you; "nothing" is fine' },
+      risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out, it ships as high and needs go" },
       risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus what you chose not to fix' },
       go: { type: 'string', maxLength: 200, description: 'At or above your go threshold, or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
       fix_proof: { type: 'object', description: "A proven bug fix's proof, instead of go: {test, red_on, red_output, review} (self-review)" },
       stay_open: { type: 'boolean', description: 'Only for more pieces of your brief. Not to delete handoffs (they move on close) or tell a minion (relay_when_live, first)' },
       waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing"); woken once live, do them' },
       probe: { type: 'object', description: 'Live check, for 600+ line ships (self-review)' },
-      when: { description: 'Hand off now, ship later with no turn: "proof" once the flake-proof run on this commit is green; {"live": "#N" or a commit} once that is live' },
+      when: { description: '"proof" or {"live":"#N"|sha}: ships then' },
       ...LAND_PROPS,
       ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
     },

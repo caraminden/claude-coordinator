@@ -76,7 +76,7 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
  * admin is in all of them), an ownerless one if any of its roles that's on is lent there. An ownerless CI runner host
  * from before #438 that was never given a list (machines.scoped 0, which nothing else reads now): with CI on, if an
  * admin owns the scheme, so `ci_runners` keeps working for a new scheme. The token lets a PC run the repo's CI jobs,
- * which a member can already do by pushing a workflow. With `removing` (a removal token, unregister, a list or remove
+ * which a member can already do by pushing a workflow. With `removing` (a removal token, unregister, a remove
  * job), any PC that hosts CI may: taking its own runners off a scheme it no longer lends to only stops it serving there
  * (#2064: unticking a scheme under CI removes its runners).
  */
@@ -386,7 +386,7 @@ export class RunnerJobs {
     const before = ask.op === 'add' ? await this.tokens.listed(project) : [];
     const running = this.jobs.get(project.id);
     if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
-    const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project, ask.op !== 'add'));
+    const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project, ask.op === 'remove'));
     const named = ask.host?.toLowerCase();
     const machines = named ? online.filter((m) => m.name.toLowerCase() === named || this.relay.runnerHost(m.id, ask.os)?.toLowerCase() === named) : online;
     if (online.length && !machines.length) {

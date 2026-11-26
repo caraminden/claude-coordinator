@@ -58,6 +58,7 @@ import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
+import { CiAuto, noMachineCard, PASS_MS as CI_AUTO_PASS_MS } from './src/ci-auto.ts';
 import { MachineBalancer } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
@@ -2091,12 +2092,31 @@ const ciLoad = new CiLoad(store, {
   mandate: (project, person, key, title) => mandateAlert('CI load', project, person, key, title, undefined, true),
 });
 if (!BOOT_CHECK) ciLoad.start();
+// CI runners join schemes by themselves (#2064): a scheme whose workflows or queued jobs ask for its runner gets one on the
+// best PC lending it CI; an unticked scheme's come off; no PC lending while jobs wait is one card in its Taskmaster's chat.
+let ciQueuedLabels = new Map<string, Set<string>>();
+const ciAuto = new CiAuto({
+  store,
+  runnerMachines: (os) => machines.runnerMachines(os),
+  reposOn: (id, os) => ciLoad.reposOn(id, os),
+  queuedLabels: () => ciQueuedLabels,
+  listed: (project) => runnerTokens.listed(project),
+  start: (project, ask) => runnerJobs.start(project, null, ask, APP_NAME),
+  room: (id) => balancer.current(id)?.runners ?? null,
+  card: (project, os, could) => {
+    const taskmaster = store.getOverlord(project.id);
+    if (taskmaster) postCard(app, taskmaster, { questions: [noMachineCard(store, project, os, could)] });
+  },
+});
+if (!BOOT_CHECK && !PREVIEW) every('ci runners by themselves', CI_AUTO_PASS_MS, () => ciAuto.pass(), CI_AUTO_PASS_MS);
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
 // agent's PC go to that PC's runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
 // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
 const runnerRepos = () =>
   [
     ...ciLoad.runnerRepos(),
+    // Before any runner is there (#2064): a scheme whose workflows ask for its runner, so its queued jobs are read.
+    ...ciAuto.asking,
     ...store
       .listProjects()
       .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
@@ -2112,8 +2132,9 @@ const shipWatch = new ShipWatch({
   as: asScheme,
   send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
-  queued: (byRepo) => {
+  queued: (byRepo, labels) => {
     ciQueued = byRepo;
+    ciQueuedLabels = labels;
   },
 });
 if (!BOOT_CHECK) shipWatch.start();

@@ -489,3 +489,19 @@ test("an add whose list of the runners already there can't be read stops before 
   await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', role: 'side' }), { status: 502, message: /can't read/ });
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
 });
+
+test("#2064: Citadel's own add needs no member asking; a PC unticked from a scheme may still take its runners off, never add", async () => {
+  const w = world();
+  const started = await w.jobs.start(w.scheme, null, { op: 'add', count: 1, os: 'windows' }, 'Citadel');
+  assert.equal(started.by, 'Citadel');
+  w.answer(false, 'no room');
+  await w.jobs.wait(w.scheme.id, 5000);
+  assert.match(w.notes[0], /^Peek Auras: .*Citadel/);
+  // Untick Peek Auras under the PC's CI runners: an add is refused there, a remove still reaches it.
+  w.store.writeMachineRoles(w.pc.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [w.other.id] } : r)));
+  await assert.rejects(w.jobs.start(w.scheme, null, { op: 'add', count: 1, os: 'windows' }, 'Citadel'), { status: 409, message: /No CI runner agent/ });
+  const removing = await w.jobs.start(w.scheme, null, { op: 'remove', count: null, os: 'windows' }, 'Citadel');
+  assert.equal(removing.machine, 'cara-desktop-runners');
+  w.answer(true, 'removed');
+  assert.equal((await w.jobs.wait(w.scheme.id, 5000))!.ok, true);
+});

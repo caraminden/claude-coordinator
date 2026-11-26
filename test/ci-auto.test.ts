@@ -171,3 +171,19 @@ test("a scheme someone joins or makes later is lent their PCs' CI; one they unti
   w.store.addMember(later.id, w.josh.id);
   assert.deepEqual(ci(m.id).projects, [w.delve.id], 'joining again (already in) adds nothing back');
 });
+
+test('the no-machine card names the PCs members could ask, by whose they are, and what picking does', async () => {
+  const { noMachineCard } = await import('../src/ci-auto.ts');
+  const w = world();
+  const m = w.pc('josh-desktop', w.josh.id, []);
+  const q = noMachineCard(w.store, w.delve, 'linux', [m]);
+  assert.match(q.question, /Delve's CI jobs are waiting for a Linux runner.*josh-desktop \(Josh's\)/);
+  assert.deepEqual(
+    q.options!.map((o) => o.label),
+    ['Ask Josh to lend josh-desktop', 'Leave the jobs waiting'],
+  );
+  assert.deepEqual(
+    noMachineCard(w.store, w.delve, 'windows', []).options!.map((o) => o.label),
+    ["I'll connect a computer", 'Leave the jobs waiting'],
+  );
+});

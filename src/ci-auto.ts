@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { lendsRole } from './access.ts';
 import { type Listed, type RunnerAsk, runnerLabel } from './ci-runner.ts';
 import type { Machine, Project, Store } from './db.ts';
+import type { CardQuestion } from './ci-armed.ts';
 import { rank } from './machine-balancer.ts';
 import { repoSlug } from './prlinks.ts';
 import { thrown } from './thrown.ts';
@@ -205,4 +206,21 @@ export class CiAuto {
     const could = this.d.store.listMachines().filter((m) => !!this.d.store.machineRoles(m.id).find((r) => r.role === 'ci' && (r.on || r.setup?.runner_agent)) && !lendsCi(this.d.store, m, project));
     this.d.card(project, os, could);
   }
+}
+
+/** The no-machine card's one question, for the scheme's members (in its Taskmaster's chat): the PCs they could ask to be lent, by whose they are. */
+export function noMachineCard(store: Store, project: Project, os: Os, could: Machine[]): CardQuestion {
+  const kind = os === 'linux' ? 'Linux' : 'Windows';
+  const whose = (m: Machine) => (m.owner_id === null ? 'an admin' : (store.getUser(m.owner_id)?.name ?? 'its owner'));
+  const asks = could.slice(0, 3).map((m) => ({
+    label: `Ask ${whose(m)} to lend ${m.name}`.slice(0, 80),
+    description: `${m.name} runs CI for other schemes. Once ${project.name} is ticked under its CI runners, it gets a runner by itself.`,
+  }));
+  return {
+    header: 'CI runners',
+    question: could.length
+      ? `${project.name}'s CI jobs are waiting for a ${kind} runner, and no connected computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
+      : `${project.name}'s CI jobs are waiting for a ${kind} runner, and no computer hosts CI runners yet. A member can connect one (Machines, Connect a computer) and switch its CI runners on; ${project.name} then gets a runner by itself. What do you want to do?`,
+    options: [...(asks.length ? asks : [{ label: "I'll connect a computer", description: 'Connect it on the Machines page and switch on its CI runners.' }]), { label: 'Leave the jobs waiting', description: 'Nothing changes; they run once a computer lends CI here.' }],
+  };
 }

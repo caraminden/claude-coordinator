@@ -147,12 +147,12 @@ check or its failure is in your done note.
 ### 4. Install the push guard
 
 Read `references/push-guard.md` and do it as written: copy `guard.sh`, `pre-push` and `settings.json` from `templates/`, prove the
-guard, then point every workflow job at the scheme's shared runner (`<scheme-slug>-ci`) and call `ci_runners` with `op: "add"`.
-A repo with no workflows, when the plan gives it CI, gets `templates/starter-ci/` instead, on a Linux runner of its own (`os: "linux"`).
+guard, then point every workflow job at the scheme's shared runner (`<scheme-slug>-ci`). Nobody adds the runner: a computer
+lending the scheme CI registers it by itself once a workflow asks for the label. A repo with no workflows, when the plan
+gives it CI, gets `templates/starter-ci/` instead, on its Linux runner (`<scheme-slug>-ci-linux`).
 
 *Done when* `git config core.hooksPath` prints `.githooks`, `tools/guard.sh --self-test` ends `0 failed`, a push to main through
-`.githooks/pre-push` exits 1, no job's `runs-on` is a bare hosted runner and, if the repo has workflows, `ci_runners` came back
-done with the runner Idle (or its failure is in your done note).
+`.githooks/pre-push` exits 1, and no job's `runs-on` is a bare hosted runner.
 
 ### 5. Adapt each skill the plan pulls in
 

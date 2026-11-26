@@ -111,14 +111,12 @@ run) and add a last step `if: success()` with `continue-on-error: true` running
 `tools/ci-numbers.sh suite-time=${secs}s`. Citadel's own `.github/workflows/tests.yml` is the example.
 A scheme's existing workflows are left alone.
 
-Write no workflow the plan doesn't ask for. If the repo has workflows, add the scheme's runner
-yourself: call the `ci_runners` tool with `op: "add"` (one runner unless the plan names a count,
-at most 4). Citadel's runner agent on the desktop installs it, and the tool waits until GitHub
-shows it Idle. Jobs wait in the queue until a runner is there. If the tool says no runner agent
-is online, or the job failed, put its words in your done note and tell the Taskmaster
-(`message_coordinator`); don't install a runner any other way. *Done when* no job's `runs-on` is
-a bare hosted runner and, if the repo has workflows, `ci_runners` came back done with the runner
-Idle (or its failure is in your done note).
+Write no workflow the plan doesn't ask for, and add no runner: once a workflow on the default
+branch asks for the scheme's label, a computer lending the scheme CI registers a runner by
+itself (Citadel, #2064), and jobs wait in the queue until it's there. If no computer lends the
+scheme CI, its members get one card naming computers they could ask; don't install a runner any
+other way. `ci_runners` is only for odd cases a plan names (a second runner, a `role`). *Done
+when* no job's `runs-on` is a bare hosted runner.
 
 **A repo with no CI** starts from this skill's `templates/starter-ci/` when the plan gives it CI: the check on the
 scheme's Linux runner after each ship, and a nightly boot check that starts the app and gets its health page. Its
@@ -129,5 +127,5 @@ fallback. *Done when* each workflow copied has run green on the default branch.
 scheme Windows CI: its `README.md` says where each file goes, and its lint line joins the check
 commands in Project facts. Its workflows run only as a change ships, so they need land.sh's CI gate
 (above): `windows.yml` in `CI_WORKFLOWS`, `desktop.yml` through `CI_STATUS`. Jobs that open windows need the session runner, which a person adds on
-the PC (`add-runner.ps1 -Session -Visible`, not `ci_runners`): name that step in your done note.
+the PC (`add-runner.ps1 -Session -Visible`; it never registers by itself): name that step in your done note.
 

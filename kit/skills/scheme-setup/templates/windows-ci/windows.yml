@@ -2,8 +2,8 @@
 # Copy to .github/workflows/windows.yml, swap <scheme-slug> for the scheme's runner label stem, and fill in the build.
 #
 # Everything that needs no desktop runs here, on the scheme's build runners (<scheme-slug>-ci: Windows services under
-# NETWORK SERVICE on Cara's PC, `ci_runners add`). Jobs that open windows or read the screen are desktop.yml, a
-# workflow of its own on the session runner, so a desktop runner that is gone or busy never holds this workflow's
+# NETWORK SERVICE on a computer lending the scheme CI, which registers one by itself once this asks for the label).
+# Jobs that open windows or read the screen are desktop.yml, a workflow of its own on the session runner, so a desktop runner that is gone or busy never holds this workflow's
 # concurrency group, and a landing gets a build verdict even while the desktop is away (Peek Auras, 2026-11-06).
 # Setting the repository variable CI_RUNNER to `github` sends the runs to GitHub's windows-latest (minutes billed at 2x
 # there). Ask Cara before setting it.

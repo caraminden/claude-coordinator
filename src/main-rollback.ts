@@ -18,7 +18,7 @@ const LIST_MAX = 8;
 export const rollbackMarkKey = (projectId: number) => `main_rollback_seen:${projectId}`;
 type Mark = { at: number; sha: string };
 /** A reflog entry: the value the ref was set to, and when (unix seconds). */
-type Entry = { sha: string; at: number };
+type Entry = { sha: string; at: number; why: string };
 
 export type Rollback = { from: string; to: string; at: number; dropped: Set<string> };
 
@@ -36,12 +36,12 @@ const git = (repo: string, ...args: string[]) => gitOut(args, repo);
 
 /** `ref`'s reflog, newest first; null when git can't read it. */
 export async function reflog(repo: string, ref: string, depth?: number): Promise<Entry[] | null> {
-  const out = await git(repo, 'reflog', 'show', '--date=unix', '--format=%H %gd', ...(depth ? ['-n', String(depth)] : []), ref, '--');
+  const out = await git(repo, 'reflog', 'show', '--date=unix', '--format=%H %gd %gs', ...(depth ? ['-n', String(depth)] : []), ref, '--');
   if (out == null) return null;
   const entries: Entry[] = [];
   for (const line of out.split('\n')) {
-    const m = /^([0-9a-f]{40,}) \S*@\{(\d+)\}$/.exec(line);
-    if (m) entries.push({ sha: m[1], at: Number(m[2]) });
+    const m = /^([0-9a-f]{40,}) \S*@\{(\d+)\} ?(.*)$/.exec(line);
+    if (m) entries.push({ sha: m[1], at: Number(m[2]), why: m[3] });
   }
   return entries;
 }
@@ -120,7 +120,9 @@ export class MainRollbacks {
       const base = await git(repo, 'merge-base', tip, r.from);
       if (!base || !r.dropped.has(base)) continue;
       const first = (await reflog(repo, `refs/heads/${t.branch}`))?.findLast((e) => r.dropped.has(e.sha));
-      if (first && (!mainAt.has(first.sha) || first.at <= mainAt.get(first.sha)!)) continue; // its own ship
+      // Reflog times are whole seconds: in main's own second, only an entry that says it came from main was cut from it.
+      const fromMain = first && new RegExp(`^(branch: Created from|reset: moving to|merge) (origin/)?${name}\\b`).test(first.why);
+      if (first && (!mainAt.has(first.sha) || first.at < mainAt.get(first.sha)! || (first.at === mainAt.get(first.sha) && !fromMain))) continue; // its own ship
       const held = (await git(repo, 'rev-list', '--count', base, `^${r.to}`, `^${log[0].sha}`)) ?? '?';
       list ??= await this.listDropped(repo, r);
       this.d.tell(t.id, rollbackText(name, t.branch, r, list, held));

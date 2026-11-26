@@ -81,7 +81,7 @@
     "summary": "22 as before, 0 new, 0 gone"
   },
   "main-rollbacks": {
-    "hash": "526b282abc4dde87",
+    "hash": "9cfa20214aab5bfc",
     "at": "2026-11-26",
     "days": 6,
     "inputs": "6 resets of main that dropped commits in 1 schemes over 6 days",

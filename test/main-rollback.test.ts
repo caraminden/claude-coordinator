@@ -73,6 +73,9 @@ test('a reset of main tells the minions cut from the dropped commits, and only t
   s.move(151, 'ticket/6-rebased', a, 'branch: Created from main');
   s.move(152, 'ticket/6-rebased', s.commit(152, '#6 own', a), 'commit: #6 own');
   s.move(214, 'ticket/6-rebased', s.commit(214, '#6 own', s2), 'rebase (finish): refs/heads/ticket/6-rebased onto ' + s2);
+  // Cut in main's own second: its entry says it came from main, so it is told; a ship's move in that second isn't.
+  const sameSecond = s.minion('ticket/8-same-second');
+  s.move(200, 'ticket/8-same-second', s2, 'branch: Created from main');
   const closed = s.minion('ticket/7-closed');
   s.move(215, 'ticket/7-closed', s2, 'branch: Created from main');
   s.store.updateTicket(closed, { status: 'closed' });
@@ -81,7 +84,7 @@ test('a reset of main tells the minions cut from the dropped commits, and only t
   await s.sweeper.sweep();
   assert.deepEqual(
     s.told.map((t) => t.id).sort((x, y) => x - y),
-    [fresh, built, moved, rebased],
+    [fresh, built, moved, rebased, sameSecond],
     'not the one cut before, the shipper or the closed one',
   );
   for (const t of s.told) {
@@ -104,7 +107,7 @@ test('a reset of main tells the minions cut from the dropped commits, and only t
   s.run(400, 'checkout', '-q', 'main');
 
   await s.sweeper.sweep();
-  assert.equal(s.told.length, 4, 'a second sweep tells nobody again');
+  assert.equal(s.told.length, 5, 'a second sweep tells nobody again');
 });
 
 test("main moving forward tells nobody, and a scheme's first sweep doesn't read old resets", async () => {

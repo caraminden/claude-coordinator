@@ -26,6 +26,7 @@ import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox, stripWaits, t
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { chainsPage } from './chains.js';
+import { cabalPage } from './cabal.js';
 import { replaceHash } from './navstack.js';
 import * as memory from './memory.js';
 import * as decisions from './decisions.js';
@@ -204,13 +205,15 @@ function renderCrumbs(main) {
                   ? [projectLink, ' / ', 'Releases']
                   : main.kind === 'chains'
                     ? [projectLink, ' / ', main.focus ? h('a', { href: `#/p/${project.id}/chains` }, 'Chains') : 'Chains']
-                    : main.kind === 'schedules'
-                      ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
-                      : main.kind === 'shared'
-                        ? [projectLink, ' / ', filesLink('shared'), ' / ', /** @type {SharedFile} */ (main.file).name]
-                        : v.id !== v.coordinator.id
-                          ? [projectLink, ' / ', `#${/** @type {Ticket} */ (v.ticket).number ?? /** @type {Ticket} */ (v.ticket).id}`]
-                          : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]),
+                    : main.kind === 'cabal'
+                      ? [projectLink, ' / ', `Cabal of #${main.focus}`]
+                      : main.kind === 'schedules'
+                        ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
+                        : main.kind === 'shared'
+                          ? [projectLink, ' / ', filesLink('shared'), ' / ', /** @type {SharedFile} */ (main.file).name]
+                          : v.id !== v.coordinator.id
+                            ? [projectLink, ' / ', `#${/** @type {Ticket} */ (v.ticket).number ?? /** @type {Ticket} */ (v.ticket).id}`]
+                            : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]),
   );
 }
 
@@ -436,11 +439,13 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
                   ? schedulesPage(projectId, main.schedule)
                   : main.kind === 'chains'
                     ? chainsPage(projectId, main.focus)
-                    : main.kind === 'artifact'
-                      ? artifactViewer(/** @type {ArtifactFile} */ (main.artifact))
-                      : main.kind === 'shared'
-                        ? sharedViewer(/** @type {NonNullable<typeof main.file>} */ (main.file))
-                        : chatSection(chatId, ticket);
+                    : main.kind === 'cabal'
+                      ? cabalPage(projectId, Number(main.focus))
+                      : main.kind === 'artifact'
+                        ? artifactViewer(/** @type {ArtifactFile} */ (main.artifact))
+                        : main.kind === 'shared'
+                          ? sharedViewer(/** @type {NonNullable<typeof main.file>} */ (main.file))
+                          : chatSection(chatId, ticket);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.

@@ -20,6 +20,7 @@ import { releaseChip } from './releases.js';
 import { ultraButton } from './ultrareview.js';
 import { payerLine } from './payer.js';
 import { waitingStrip } from './waiting.js';
+import { renderCabalPanel } from './cabal.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { markQueued } from './bubbles.js';
 import { headState, narrow, scheduleProgress } from './progress-ui.js';
@@ -141,6 +142,7 @@ export function renderTicketHead() {
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
     renderWaiting();
+    renderCabalPanel();
     // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
     const unparkSlot = /** @type {HTMLElement | null} */ (form.querySelector('.unpark-slot'));
     if (unparkSlot) {

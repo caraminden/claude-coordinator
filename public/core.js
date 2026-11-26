@@ -34,6 +34,7 @@ import { attachImage, renderModelPicker, uploadsRunning } from './composer.js';
 import { unsentCardWork } from './cards.js';
 import { filesUploading } from './files.js';
 import { onJobUpdate } from './jobs.js';
+import { onCabalNews } from './cabal.js';
 import { linkifyHtml, markdownElement } from './ui/markdown.js';
 import { lightbox } from './ui/media.js';
 import { annotator, canvasBlob, drawable } from './annotate.js';
@@ -487,6 +488,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'claims') onClaims(msg);
+    if (msg.type === 'cabal') onCabalNews(msg);
     if (msg.type === 'releases')
       Promise.resolve(onReleases(msg)).then((rows) => {
         if (rows && view?.kind === 'project') {
@@ -1072,6 +1074,7 @@ export async function route() {
       await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
     else if ((m = hash.match(/^#\/p\/(\d+)\/chains(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'chains', focus: Number(m[2]) || null });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/cabal\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'cabal', focus: Number(m[2]) });
     // Releases, CI and Status are one page's tabs (#1423): their old addresses open it on their tab. CI's All (Home's) opens the
     // last scheme's Overview beside every scheme's dot, since All has no one CI; Status's All lists every app.
     else if ((m = hash.match(/^#\/p\/(\d+)\/status(?:\/(all))?$/))) await showReleases(Number(m[1]), { scope: m[2] ? 'all' : Number(m[1]), tab: 'status' });

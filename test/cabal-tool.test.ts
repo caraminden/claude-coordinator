@@ -79,6 +79,22 @@ test("the lead edits rows, logs and sets the red line; a member can't", async ()
   assert.match(read, /Lend it for one merge/);
 });
 
+test("people read the board by the lead's #N (the page) and from any member's chat (the panel)", async () => {
+  const page = await srv.call(`/api/projects/${A.id}/cabal/${LEAD.number}`);
+  assert.equal(page.status, 200);
+  assert.equal(page.data.board.lead.id, LEAD.id);
+  assert.deepEqual(
+    page.data.board.members.map((m: { title: string }) => m.title),
+    ['Sweep one', 'Sweep two', 'Fixer'],
+  );
+  assert.ok(page.data.board.red, 'the red line set above');
+  assert.equal((await srv.call(`/api/projects/${A.id}/cabal/${M1.number}`)).status, 404, 'a member leads nothing');
+  const chat = await srv.call(`/api/tickets/${M2.id}/cabal`);
+  assert.equal(chat.data.lead, LEAD.id);
+  assert.equal(chat.data.text, undefined, 'the text is only for cabal_board');
+  assert.deepEqual((await srv.call(`/api/tickets/${OUTSIDER.id}/cabal`)).data, { lead: null, board: null });
+});
+
 test("the lead's answer comes back the way it was asked: held mail for a plain ask, a wake for a blocking one", async () => {
   const plain = store.cabalAsks(LEAD.id).find((a) => !a.blocking)!;
   assert.match((await tool(LEAD.id, { action: 'answer', ask: plain.id, text: 'test/helpers.ts' })).text, /reads it as held mail/);

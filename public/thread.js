@@ -372,6 +372,8 @@ export function chatSection(chatId, ticket) {
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
   // The Taskmaster's cards still waiting on people, as links, on top (public/waiting.js).
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
+  // The board this minion leads, as Overseer of a cabal (public/cabal.js, #2090).
+  form.prepend(h('div', { id: 'chat-cabal', hidden: true }));
   selectActions(log, form);
   // A new person's first-day welcome (#1151), over their Taskmaster's chat only.
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), chatWelcome(ticket), log, h('div', { class: 'typing-row' }, openView().typingEl, openView().startNowEl), form);

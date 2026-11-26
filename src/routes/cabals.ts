@@ -81,6 +81,19 @@ export const cabalRoutes: Route[] = [
     },
   },
   {
+    // The board page (#/p/N/cabal/M): the board led by minion #M of this scheme, for people.
+    method: 'GET',
+    path: '/api/projects/:project/cabal/:number',
+    who: ['person', 'taskmaster'],
+    everyScheme: true,
+    async handler({ res, app, project, params }) {
+      const lead = app.store.getTicketByNumber(project.id, Number(params.number));
+      const board = lead && app.store.getCabal(lead.id) ? await boardFor(app, lead.id) : null;
+      if (!board) throw new HttpError(404, `#${String(params.number).slice(0, 20)} leads no cabal in this scheme`);
+      return json(res, 200, { lead: lead!.id, board });
+    },
+  },
+  {
     // cabal_board's writes, by the calling minion: note and ask are a member's, the rest the lead's.
     method: 'POST',
     path: '/api/tickets/:ticket/cabal',

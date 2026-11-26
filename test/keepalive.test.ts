@@ -108,6 +108,9 @@ test('a keepalive that writes more than 5k tokens missed; a fifth of a day missi
   assert.equal(tooManyMisses(4, 4), false, 'too few to judge');
   assert.equal(tooManyMisses(10, 2), false, 'exactly a fifth');
   assert.equal(tooManyMisses(10, 3), true);
+  // #2034 (Josh, 2026-11-25, "Need 3 misses"): one cache flush on Anthropic's side missed 2 of a day's 8 and switched them off.
+  assert.equal(tooManyMisses(8, 2), false, 'two misses are never enough');
+  assert.equal(tooManyMisses(5, 3), true);
 });
 
 test('the week readout counts warm and cold wakes and the reload a warm one saved', () => {

@@ -235,9 +235,10 @@ export type BuildRole = { build: number; branch: string | null; owner: boolean; 
  * that uses the build label without build branches (Delve) sees nothing new; the build minion gets its
  * steps from the start, since making the branch is the first of them.
  */
-export function buildLines(b: BuildRole | null, c: CabalRole | null = null): string[] {
+export function buildLines(b: BuildRole | null, cabal: CabalRole | null = null): string[] {
   if (!b || (!b.owner && !b.branch)) return [];
   const n = b.build;
+  const c = cabal?.build === n ? cabal : null; // a goal cabal's member that also carries a build label is that build's feeder
   const br = `build/${n}`;
   // A cabal's member (#2095) asks its Overseer on the board; a feeder of a build begun before cabals, its build minion.
   const lead = c && !c.lead ? c.overseer : 'the build minion';
@@ -261,13 +262,14 @@ export function buildLines(b: BuildRole | null, c: CabalRole | null = null): str
 
 /**
  * Where a minion stands in a cabal (#2095): `name` is the cabal's ("Build 8", a Goal's name), `overseer` its lead's
- * name as the board writes it ("Build 8's Overseer"), `ref` its #N, or "<scheme> #N" in another scheme. Build lines carry the branch steps; these, the board and the Overseer's rules.
+ * name as the board writes it ("Build 8's Overseer"), `ref` its #N, or "<scheme> #N" in another scheme, `build` its lead's build (a build cabal's). Build lines carry the branch steps; these, the board and the Overseer's rules.
  */
-export type CabalRole = { lead: boolean; name: string; overseer: string; ref: string };
+export type CabalRole = { lead: boolean; name: string; overseer: string; ref: string; build: number | null };
 
-/** A cabal's lines in its Overseer's and members' prompts; a minion on no board gets none. `build`: it is a build cabal here. */
-export function cabalLines(c: CabalRole | null, build: boolean): string[] {
+/** A cabal's lines in its Overseer's and members' prompts; a minion on no board gets none. */
+export function cabalLines(c: CabalRole | null): string[] {
   if (!c) return [];
+  const build = c.build != null;
   if (c.lead) {
     return [
       `You are ${c.overseer}: you lead its cabal, the minions that work on ${build ? 'its build' : 'it'} under you, from its board (cabal_board). Open the \`citadel:cabal\` skill before anything else, and again after a shift change: it holds your steps. People read you as "${c.overseer}", never "the Overseer" alone. What always holds: people approve the roster on its forming card (cabal_board form), and you start members only from approved rows, with cabal_start (message_taskmaster for a row in another scheme); a red run or a review finding goes to the member who made it while it is open, else to the cabal's fixer, and you fix it yourself only for a merge conflict or about 20 lines; members' asks wait on the board and you answer them together at each wake.${build ? ' A full run waits until no member is still merging into the build.' : ''}`,
@@ -388,7 +390,7 @@ export function promptParts(
       // No title (#704): it changes whenever the minion retitles itself; read_ticket has it.
       minion: [`You are a minion working on #${ticket.number} in scheme "${project.name}".`],
       where: [ticket.branch ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.` : 'Your working directory is a dedicated folder for this minion.'],
-      cabal: cabalLines(cabal, !!build),
+      cabal: cabalLines(cabal),
       build: buildLines(build, cabal),
       // Done lines (#1115) open a feature minion's first session (#1574): moved out of every minion's system prompt. `type` is
       // its type property, which the runner (and the prompt-eval rig) pass along on the ticket.

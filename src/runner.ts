@@ -3216,6 +3216,7 @@ export class Runner {
         lead: lead.id === ticket.id,
         name: cabalAs!,
         overseer: overseerOf({ name: cabalAs! }),
+        build: lead.build,
         ref: `${lead.project_id === project.id ? '' : `${this.store.getProject(lead.project_id)?.name ?? 'another scheme'} `}#${lead.number}`,
       };
       // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.

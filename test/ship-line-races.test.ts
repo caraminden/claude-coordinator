@@ -267,7 +267,7 @@ test('a drag that lands while a ship goes back into line for its retry is kept',
   // The drag is the server's own writeOrder, started as the script is about to replace .order; the script goes on once
   // that write is done, or is waiting for the script's lock.
   const waits = resolve(import.meta.dirname, '../src/waits.ts');
-  writeFileSync(join(dir, 'drag.mjs'), `import { writeOrder } from '${waits}';\nwriteOrder('${q}', [2, 3].map((seq) => ({ seq, got: 0, orders: true })), [3, 2], 'Josh moved #3 to ship next');\n`);
+  writeFileSync(join(dir, 'drag.mjs'), `import { readQueue, writeOrder } from '${waits}';\nwriteOrder('${q}', () => readQueue('${q}', 4), [3, 2], 'Josh moved #3 to ship next', 3);\n`);
   const bin = command(
     dir,
     'mv',
@@ -284,8 +284,8 @@ test('a drag that lands while a ship goes back into line for its retry is kept',
   assert.deepEqual(
     readFileSync(join(q, '.order'), 'utf8')
       .split('\n')
-      .filter((l) => /^000000000[23]$/.test(l)),
-    ['0000000003', '0000000002'],
+      .filter((l) => /^\d{10}$/.test(l)),
+    ['0000000003', '0000000001', '0000000002'], // the drag put #3 next; the retrying ship keeps ahead of the rest
   );
 });
 

@@ -167,13 +167,14 @@ queue_ordinal() {
 }
 
 # <queue dir> <ticket>...: these go first in .order. Read and replaced under .order.lock, which the server takes to
-# write a person's drag (src/waits.ts writeOrder), so a drag made meanwhile lands after this, not under it (#2132).
+# write a person's drag (src/waits.ts writeOrder), so a drag made meanwhile lands after this, not under it (#2132). The
+# "#front" line changes with every call: the server, finding .order not as it read it, works the drag out again.
 queue_front() {
   local q=$1
   shift
   (
     flock -w 10 8 || { echo "queue: $q/.order is locked, so the line's order stays as it is" >&2; exit 0; }
-    { grep '^# ' "$q/.order" || true; printf '%s\n' "$@"; grep -v '^# ' "$q/.order" || true; } 2>/dev/null | awk '!seen[$0]++' >"$q/.order.tmp$$" && mv -f "$q/.order.tmp$$" "$q/.order"
+    { grep '^# ' "$q/.order" || true; printf '%s\n' "$@"; grep -v -e '^# ' -e '^#front ' "$q/.order" || true; echo "#front $EPOCHREALTIME"; } 2>/dev/null | awk '!seen[$0]++' >"$q/.order.tmp$$" && mv -f "$q/.order.tmp$$" "$q/.order"
   ) 8>"$q/.order.lock"
 }
 

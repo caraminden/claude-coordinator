@@ -71,6 +71,7 @@
 .cabal-foot { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); font-size: 0.75rem; color: var(--muted); }
 .cabal-asks { color: var(--error); }
 .cabal-build { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 0.75rem; color: var(--muted); }
+.cabal-build a { display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--space-1); } /* tap target: Preview sits apart from the toggle */
 .cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); animation: cabal-open 0.15s ease-out; }
 .cabal-planned { margin: 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; }
 @keyframes cabal-open { from { opacity: 0; } }

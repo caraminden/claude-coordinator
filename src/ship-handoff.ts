@@ -236,7 +236,7 @@ export async function requeueShip(app: App, ticketId: number, h: Handoff & { arg
   if (!(await sameChange(t.cwd, h.head))) return 'your branch moved since the hand-off';
   const dirty = await gitOut(['status', '--porcelain', '--untracked-files=no'], t.cwd);
   if (dirty !== '') return 'your worktree has uncommitted changes or a rebase in progress';
-  const lane = await laneRefusal(app, t);
+  const lane = (await laneRefusal(app, t)) ?? (h.args.length ? null : await besideRefusal(app, t));
   if (lane) return lane;
   const env = landEnv(app, t, h);
   const broken = await brokenTest(aloneFiles(output), t.branch ?? '', { ...env, LAND_FLAKE_DB: join(app.dataDir, 'coordinator.db') });

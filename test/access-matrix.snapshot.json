@@ -1459,6 +1459,26 @@
   "m1": "401 Unknown machine token; make a new one in the Machines panel",
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
+ "GET /api/machines/windows/session": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "404 The pooled Windows tools are workspace tools only",
+  "m2": "404 The pooled Windows tools are workspace tools only"
+ },
+ "POST /api/machines/windows/session/0123456789abcdef01234567": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "503 That machine went offline",
+  "m2": "503 That machine went offline"
+ },
  "POST /api/machines/worker": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
@@ -3539,7 +3559,7 @@
   "outsider": "403 Only a minion queues jobs here",
   "tmA": "403 Only a minion queues jobs here",
   "tmB": "403 Only a minion queues jobs here",
-  "m1": "400 machine is required: the machine's name",
+  "m1": "400 kind must be { name, image, command, reads, gpu, network, resumable, max_limit_h }",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/jobs/1/stop": {

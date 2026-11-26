@@ -22,6 +22,7 @@ import { hookRunMatchers, type HookRunConfig } from './hook-run.ts';
 import { SCHEME_REFS_MATCHER, SIDE_GUARD_MATCHER, TRIPWIRE_MATCHER, WORDING_MATCHER } from './hook-matchers.ts';
 import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
+import { POOLED_WINDOWS } from './machine-pick.ts';
 import { advisedModel } from '../public/model-table.js';
 import { ZONE } from './pacific.ts';
 import { thpProps } from './unit-thp.ts';
@@ -818,6 +819,10 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   for (const m of machines) {
     for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
   }
+  // The pooled Windows tools (Build 7 M5): the app picks the machine when the session opens (routes/machines.ts). A machine
+  // named `windows` before the name was kept for them keeps its own tools there.
+  const windows = machines.some((m) => m.screen) && !servers[POOLED_WINDOWS];
+  if (windows) servers[POOLED_WINDOWS] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), POOLED_WINDOWS, POOLED_WINDOWS, 'ws'] };
   const files: LaunchPlan['files'] = [];
   // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
   // Pooled (#1259): the same servers by name, over HTTP to the place's shared tool server; Claude Code fills in the port
@@ -826,6 +831,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (pooled) {
     const pool = (path: string, extra: object = {}) => ({ type: 'http', url: `http://127.0.0.1:\${CITADEL_POOL_PORT}${path}`, headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, ...extra });
     const http: Record<string, object> = { [role]: pool('/mcp', role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) };
+    if (windows) http[POOLED_WINDOWS] = pool(`/machine/${POOLED_WINDOWS}/ws?name=${POOLED_WINDOWS}`);
     for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}${s.server === 'mcp' && m.lent ? `&lent=${encodeURIComponent(m.lent)}` : ''}`);
     files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: http }) });
     files.push({ name: 'mcp-stdio.json', text: JSON.stringify({ mcpServers: servers }) });

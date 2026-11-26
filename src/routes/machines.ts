@@ -14,7 +14,8 @@ import { heldRows } from '../ci-hold.ts';
 import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
-import type { Machine } from '../db.ts';
+import { POOLED_WINDOWS } from '../machine-pick.ts';
+import type { Machine, Project, Ticket } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
 import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow } from '../machine-roles.ts';
 import { pausedRoles, setPaused, unpause } from '../machine-pause.ts';
@@ -523,6 +524,60 @@ const runnerAskers = { who: ['person', 'minion', 'taskmaster'], refuse: "Only a 
 /** Whose ask a call is: the person signed in, or the person whose turn a minion or Taskmaster runs. */
 const askerOf = ({ session, caller, app }: Ctx) => (caller ? app.store.turnAsker(caller.id) : (session.uid ?? null));
 
+/**
+ * The machine a minion's pooled Windows tools open (Build 7 M5): one whose Windows screen role is lent to its scheme for
+ * this turn's asker, online with its workspace tools up and, if it is a person's own, one the turn got at its start
+ * (runner.machines adds those); the one it last used while it can, else the shortest screen line.
+ */
+function pickWindows(app: App, caller: Ticket, project: Project | undefined, server: string): { machine: Machine; movedFrom: string | null } {
+  if (server !== 'ws') throw new HttpError(404, 'The pooled Windows tools are workspace tools only');
+  if (!project || caller.kind === 'coordinator') throw new HttpError(403, "That machine isn't lent to this scheme");
+  const asker = app.store.turnAsker(caller.id);
+  const owned = app.runner.ownedMachines(caller.id);
+  const eligible = app.machines
+    .online()
+    .filter((m) => m.servers.includes('ws') && lendsRole(app.store, m, 'screen', project, asker === null ? [] : [asker]) && (m.owner_id === null || owned.includes(m.id)))
+    .map((m) => ({ id: m.id, name: m.name, busy: app.machines.screenBusy(m.id, caller.id), priority: m.priority ?? null }));
+  const got = app.machines.windows.pick(caller.id, eligible);
+  if (!got) throw new HttpError(503, `No Windows machine lent to ${project.name} is online with its workspace tools on`, true);
+  return { machine: app.store.getMachine(got.machine.id)!, movedFrom: got.movedFrom === null ? null : (app.store.getMachine(got.movedFrom)?.name ?? 'a machine that was removed') };
+}
+
+/** A minion's MCP proxy opens a session to a machine, held open as a stream; `pooled`: the pooled Windows tools', on the machine Citadel picks. */
+function openTurnSession({ res, url, app, caller, params }: Ctx, pooled: boolean) {
+  const server = url.searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
+  const project = app.store.getProject(caller!.project_id);
+  const picked = pooled ? pickWindows(app, caller!, project, server) : null;
+  const machine = picked ? picked.machine : app.store.getMachine(Number(params.machineId));
+  // A person's own (#306) opens only for a turn that got it at its start (src/runner.ts TurnState.owned),
+  // which its owner asked for: never mid-turn, never for someone else's.
+  // The owner check too: a removed machine's id can come back as someone else's.
+  if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
+    throw new HttpError(403, "That machine is someone else's, or this turn started without it");
+  }
+  // A machine opens only for a minion in a scheme its Tools role is lent to (#438, M1), as at its turn's start
+  // (src/runner.ts): a scheme taken off the list, or Tools switched off, mid-turn can't open it again.
+  // Its Windows screen role for the pooled tools.
+  if (machine && (!project || caller!.kind === 'coordinator' || !app.store.roleGrants(machine.id, pooled ? 'screen' : 'tools', project.id))) {
+    throw new HttpError(403, "That machine isn't lent to this scheme");
+  }
+  const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;
+  if (picked) {
+    // Which PC it got, and the one it left, for the proxy to tell the minion (src/pool-machine.ts).
+    res.setHeader('x-citadel-machine', picked.machine.name);
+    if (picked.movedFrom) res.setHeader('x-citadel-moved-from', picked.movedFrom);
+  }
+  if (!app.machines.openSession(machine?.id ?? Number(params.machineId), { ticketId: caller!.id, projectId: caller!.project_id }, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline', true);
+}
+
+/** A message from a minion's MCP proxy to its open session. */
+async function postTurnSession({ req, res, app, caller, params }: Ctx) {
+  if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
+  const body = await readJson(req, 50_000_000);
+  if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline', true);
+  return json(res, 202, {});
+}
+
 export const machineRoutes: Route[] = [
   {
     method: 'POST',
@@ -952,35 +1007,26 @@ export const machineRoutes: Route[] = [
     method: 'GET',
     path: '/api/machines/:machineId/session',
     ...turns,
-    handler({ res, url, app, caller, params }) {
-      const server = url.searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
-      const project = app.store.getProject(caller!.project_id);
-      const machine = app.store.getMachine(Number(params.machineId));
-      // A person's own (#306) opens only for a turn that got it at its start (src/runner.ts TurnState.owned),
-      // which its owner asked for: never mid-turn, never for someone else's.
-      // The owner check too: a removed machine's id can come back as someone else's.
-      if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
-        throw new HttpError(403, "That machine is someone else's, or this turn started without it");
-      }
-      // A machine opens only for a minion in a scheme its Tools role is lent to (#438, M1), as at its turn's start
-      // (src/runner.ts): a scheme taken off the list, or Tools switched off, mid-turn can't open it again.
-      if (machine && (!project || caller!.kind === 'coordinator' || !app.store.roleGrants(machine.id, 'tools', project.id))) {
-        throw new HttpError(403, "That machine isn't lent to this scheme");
-      }
-      const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;
-      if (!app.machines.openSession(Number(params.machineId), { ticketId: caller!.id, projectId: caller!.project_id }, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline', true);
-    },
+    handler: (ctx) => openTurnSession(ctx, false),
+  },
+  // The pooled Windows tools (Build 7 M5): the same, with Citadel picking the machine, the one this minion last used while it can.
+  {
+    method: 'GET',
+    path: `/api/machines/${POOLED_WINDOWS}/session`,
+    ...turns,
+    handler: (ctx) => openTurnSession(ctx, true),
   },
   {
     method: 'POST',
     path: '/api/machines/:machineId/session/:session',
     ...turns,
-    async handler({ req, res, app, caller, params }) {
-      if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
-      const body = await readJson(req, 50_000_000);
-      if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline', true);
-      return json(res, 202, {});
-    },
+    handler: postTurnSession,
+  },
+  {
+    method: 'POST',
+    path: `/api/machines/${POOLED_WINDOWS}/session/:session`,
+    ...turns,
+    handler: postTurnSession,
   },
   // run_on_host (Build 7 T8, src/host-reach.ts): start one of the PC's owner's listed programs, for a minion whose running
   // turn reaches that PC's host. The agent checks the name against its own list; its refusal names the list.

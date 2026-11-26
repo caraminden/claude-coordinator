@@ -3,9 +3,10 @@
 // on btrfs for up to 2 s while minions' tests and ships wrote to the same disk, and nobody was answered meanwhile.
 import assert from 'node:assert/strict';
 import fs, { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -36,7 +37,8 @@ import { fake } from './typed.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
 import { gzipSync } from 'node:zlib';
 import { fillPinSpares, readySpares, SPARES } from '../src/pin-spares.ts';
-import { stopTurns, testPins, until, followed, runnerInsides } from './helpers.ts';
+import { fakeClaude, stopTurns, testPins, until, followed, runnerInsides } from './helpers.ts';
+import { SideAsks, SIDE_IDLE_MS, SIDE_LIMIT_MS } from '../src/side-ask.ts';
 
 type FlakeDeps = ConstructorParameters<typeof FlakeFixes>[0];
 const root = mkdtempSync(join(tmpdir(), 'off-thread-fs-'));
@@ -46,7 +48,7 @@ after(async () => {
 });
 
 /** Runs `fn` and returns the synchronous fs calls made under `dir` before it returned its promise's result. */
-async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise<string[]> {
+async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>, fds = false): Promise<string[]> {
   const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'realpathSync', 'readlinkSync', 'utimesSync'] as const;
   const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
   const seen: string[] = [];
@@ -63,10 +65,19 @@ async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise
       if (typeof p === 'string' && p.startsWith(dir)) seen.push(`${n} ${p.slice(dir.length)}`);
       return (real[n] as (...args: unknown[]) => unknown)(p, ...rest);
     };
+  // With `fds`, calls on an open file too, whatever file it is: a kept-open stream asked or read on the thread (#2134).
+  const onFds = fds ? (['fstatSync', 'readSync'] as const) : [];
+  const realFds = Object.fromEntries(onFds.map((n) => [n, fs[n]]));
+  for (const n of onFds)
+    (fs as Record<string, unknown>)[n] = (...args: unknown[]) => {
+      seen.push(n);
+      return (realFds[n] as (...args: unknown[]) => unknown)(...args);
+    };
   syncBuiltinESMExports();
   try {
     await fn();
   } finally {
+    for (const n of onFds) (fs as Record<string, unknown>)[n] = realFds[n];
     for (const n of names) (fs as Record<string, unknown>)[n] = real[n];
     for (const n of starts) (childProcess as Record<string, unknown>)[n] = realStarts[n];
     syncBuiltinESMExports();
@@ -682,4 +693,178 @@ test('memory notes are listed, saved and indexed, with no synchronous file call 
   });
   assert.deepEqual(calls, []);
   assert.equal(notes, 1);
+});
+
+/** What a followed turn's poll keeps in hand, for the cases below. */
+interface PolledTurn {
+  dir: string;
+  ticks: number;
+  restart?: () => void;
+}
+const polled = (runner: Runner, id: number) => runnerInsides(runner).turns.get(id) as PolledTurn;
+const texts = (store: Store, id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'claude')
+    .map((e) => e.data);
+
+test("a running turn's poll reads its stream and its folder with no synchronous file call on the server's thread (#2134)", async () => {
+  const { runner, store, turns, minion } = await launchBox('poll');
+  const release = join(root, 'poll', 'release');
+  fakeClaude(join(root, 'poll'), { release, name: 'fake-claude' });
+  runner.pollMs = 10;
+  const t = minion('Polled');
+  runner.send(t.id, 'Cara', 'Go');
+  await until('the turn is running', () => followed(runner, t.id));
+  const live = polled(runner, t.id);
+  await until('its claude has started', () => fs.existsSync(join(live.dir, 'pid.json')));
+  const said = (words: string) => `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: words }] } })}\n`;
+  // While it runs: new lines in its stream, in two writes with a line cut between them, and the every-20th-tick look
+  // at whether its wrapper is alive.
+  const running = await syncCallsUnder(
+    turns,
+    async () => {
+      const [head, tail] = [said('first words').slice(0, 30), said('first words').slice(30)];
+      await appendFile(join(live.dir, 'stream.jsonl'), said('before it') + head);
+      await until('the whole line to be read', () => texts(store, t.id).some((d) => d.includes('before it')));
+      await appendFile(join(live.dir, 'stream.jsonl'), tail + said('second words'));
+      await until('both lines to be read', () => texts(store, t.id).some((d) => d.includes('second words')));
+      const at = live.ticks;
+      await until('two liveness checks', () => live.ticks >= at + 45);
+    },
+    true,
+  );
+  assert.deepEqual(running, []);
+  // Each line reached the chat once, in the order written.
+  const order = texts(store, t.id)
+    .join('\n')
+    .match(/before it|first words|second words/g);
+  assert.deepEqual(order, ['before it', 'first words', 'second words']);
+  // A stop, and the turn's end: the poll's and the stop's own looks at pid.json, exit.json and the stream. What the
+  // turn's wrap-up reads (its stderr, its folder's removal) is the turn-end path's.
+  const ending = await syncCallsUnder(
+    turns,
+    async () => {
+      runner.stop(t.id);
+      await until('the stopped turn to end', () => !runner.isRunning(t.id));
+    },
+    true,
+  );
+  assert.deepEqual(
+    ending.filter((c) => /pid\.json|exit\.json|stream\.jsonl|^fstatSync|^readSync/.test(c)),
+    [],
+  );
+});
+
+test("a turn the supervisor gave back or lost is found with no synchronous file call on the server's thread (#2134)", async () => {
+  const { runner, turns, minion } = await launchBox('rescue');
+  runner.pollMs = 10;
+  const t = minion('Rescued');
+  // A turn still starting: followed, with no wrapper yet.
+  const dir = join(turns, `${t.id}-1`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'stream.jsonl'), '');
+  (runner as unknown as { follow(id: number, turn: { dir: string; startedAt: number }): unknown }).follow(t.id, { dir, startedAt: Date.now() });
+  const live = polled(runner, t.id);
+  let restarts = 0;
+  const calls = await syncCallsUnder(
+    turns,
+    async () => {
+      live.restart = () => restarts++;
+      await writeFile(join(dir, 'handback'), 'no scope');
+      await until('the given-back turn to restart', () => restarts === 1);
+      // Lost: the supervisor that claimed its spec is dead.
+      live.restart = () => restarts++;
+      await writeFile(join(dir, 'spec.json.tmp'), '{}');
+      await rename(join(dir, 'spec.json.tmp'), join(dir, 'spec.json.4194000'));
+      await until('the lost turn to restart', () => restarts === 2);
+    },
+    true,
+  );
+  assert.deepEqual(calls, []);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['spec.json', 'stream.jsonl']);
+  writeFileSync(join(dir, 'exit.json'), '{"code":0,"signal":null}');
+  await until('the turn to end', () => !followed(runner, t.id));
+});
+
+test("the wait for a stray turn to end makes no synchronous file call on the server's thread (#2134)", async () => {
+  const { runner, turns, minion } = await launchBox('stray');
+  const t = minion('Stray');
+  const dir = join(turns, `${t.id}-1`);
+  mkdirSync(dir, { recursive: true });
+  // A process with the folder in its arguments, as a turn's wrapper has.
+  const wrapper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', dir], { stdio: 'ignore' });
+  try {
+    writeFileSync(join(dir, 'pid.json'), JSON.stringify({ wrapper: wrapper.pid }));
+    const inside = runner as unknown as { strayPollMs: number; strayWaits: Set<number>; waitStray(id: number, dir: string): Promise<void> };
+    inside.strayPollMs = 10;
+    const calls = await syncCallsUnder(turns, async () => {
+      await inside.waitStray(t.id, dir);
+      assert.equal(inside.strayWaits.has(t.id), true);
+      await writeFile(join(dir, 'exit.json'), '{"code":0,"signal":null}');
+      await until('the wait to end with the stray', () => !inside.strayWaits.has(t.id));
+    });
+    assert.deepEqual(calls, []);
+  } finally {
+    wrapper.kill('SIGKILL');
+  }
+});
+
+test("a side ask's poll, its answer and its thread's end make no synchronous file call on the server's thread (#2134)", async () => {
+  const dir = mkdtempSync(join(root, 'side-'));
+  const store = new Store(join(dir, 'db.sqlite'));
+  const p = store.createProject('Side', null);
+  const t = store.createTicket({ project_id: p.id, title: 'Asked', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  store.updateTicket(t.id, { session_id: '11111111-1111-4111-8111-111111111111' });
+  const fork = '22222222-2222-4222-8222-222222222222';
+  const config = join(dir, 'config');
+  const forkFile = join(config, 'projects', '-cwd', `${fork}.jsonl`);
+  mkdirSync(join(config, 'projects', '-cwd'), { recursive: true });
+  writeFileSync(forkFile, '{}\n');
+  const answers: { ok: boolean; text: string }[] = [];
+  const signals: string[] = [];
+  let runs = 0;
+  const launch = fake<ConstructorParameters<typeof SideAsks>[1]>({
+    sideLaunch: async () => {
+      const run = join(dir, `run-${++runs}`);
+      await mkdir(run);
+      return { dir: run, configDir: config, cwd: '/cwd', account: 1, container: null };
+    },
+    emit: (_id: number, kind: string, data: unknown) => {
+      if (kind === 'side_answer') answers.push(data as { ok: boolean; text: string });
+      return fake<ReturnType<Runner['emit']>>({ id: answers.length + runs * 100, created_at: Date.now() });
+    },
+    payerOf: () => null,
+    signal: async (_live: unknown, sig: string) => void signals.push(sig),
+  });
+  const sides = new SideAsks(store, launch, () => {}, 10);
+  const threads = (sides as unknown as { threads: Map<number, { run: { dir: string; startedAt: number } | null; lastAt: number }> }).threads;
+  const calls = await syncCallsUnder(dir, async () => {
+    // An answer: its stream is read as it grows, and its exit ends the ask and deletes its folder.
+    const ev = await sides.ask(t.id, 1, 'Cara', 'what now?');
+    const thread = threads.get(ev.thread)!;
+    const run = thread.run!.dir;
+    await writeFile(join(run, 'stream.jsonl'), `${JSON.stringify({ type: 'system', subtype: 'init', session_id: fork })}\n`);
+    await appendFile(join(run, 'stream.jsonl'), JSON.stringify({ type: 'result', is_error: false, result: 'this now' }));
+    await writeFile(join(run, 'exit.json'), '{"code":0,"signal":null}');
+    await until('the answer', () => answers.length === 1);
+    // A follow-up past its limit is stopped.
+    const next = await sides.ask(t.id, 1, 'Cara', 'and then?', ev.thread);
+    assert.equal(next.thread, ev.thread);
+    thread.run!.startedAt = Date.now() - SIDE_LIMIT_MS - 1;
+    await until('the late ask to be stopped', () => answers.length === 2);
+    // The idle thread ends, and its fork's files go.
+    thread.lastAt = Date.now() - SIDE_IDLE_MS - 1;
+    await until("the fork's transcript to go", async () => !(await readFile(forkFile).catch(() => null)));
+  });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(
+    answers.map((a) => [a.ok, a.text]),
+    [
+      [true, 'this now'],
+      [false, 'It took longer than 15 minutes, so it was stopped.'],
+    ],
+  );
+  assert.deepEqual(signals, ['SIGKILL']);
+  await until('both run folders to go', () => !fs.existsSync(join(dir, 'run-1')) && !fs.existsSync(join(dir, 'run-2')));
 });

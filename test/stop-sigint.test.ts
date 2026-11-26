@@ -56,7 +56,7 @@ let sent: string[] = [];
 const signal = runner.signal.bind(runner);
 runner.signal = (live, sig) => {
   sent.push(sig);
-  signal(live, sig);
+  return signal(live, sig);
 };
 
 async function started(text: string) {

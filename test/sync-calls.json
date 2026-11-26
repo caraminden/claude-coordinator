@@ -327,25 +327,14 @@
   "readIn": ["rare",2,"Settings instructions save overlap check"]
  },
  "src/runner.ts": {
-  "wrapperAlive": ["owed",5,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks"],
-  "argInProc": ["proc",2,"reads /proc cmdlines only (rescue)"],
-  "wrapperInProc": ["proc",2,"reads /proc cmdlines only (stale heartbeat)"],
   "unsentSteers": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on every turn end"],
-  "Runner.waitStray": ["owed",1,"sync-disk-turn-stream.md: setTimeout loop every 5 s while a stray turn survives restart"],
   "Runner.noteStrays": ["boot",3,"Runner.recover at startup"],
   "Runner.recover": ["boot",7,"runner.recover() at startup, server.ts:488"],
-  "Runner.reattach": ["boot",1,"Runner.recover re-attach at startup"],
-  "Runner.keepSupervisor": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) per supervisor turn"],
-  "Runner.rescue": ["owed",4,"sync-disk-turn-stream.md: Runner.poll every 250 ms tick, reads only when restart armed"],
-  "Runner.gone": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s); also reattach at boot"],
+  "Runner.reattach": ["boot",2,"Runner.recover re-attach at startup"],
   "Runner.send": ["owed",3,"sync-disk-turn-start-end.md: every message sent to a minion (steer into live turn)"],
   "Runner.checkTurn": ["rare",2,"POST /api/tickets/:ticket/check \"still going?\" chip"],
-  "Runner.endLive": ["owed",2,"sync-disk-turn-stream.md: endCardWaits on 10 s pool tick; Stop and pause"],
-  "Runner.signal": ["owed",1,"sync-disk-turn-stream.md: stop and kill timers; endLive from 10 s endCardWaits tick"],
   "Runner.spawnWrapper": ["rare",1,"writeFileSync only if the wrapper spawn errors; turn start path"],
-  "Runner.poll": ["owed",4,"sync-disk-turn-stream.md: setInterval 250 ms per running turn (pollMs)"],
-  "Runner.dirChanged": ["owed",1,"sync-disk-turn-stream.md: setInterval 250 ms per running turn, fstat on kept fd"],
-  "Runner.readStream": ["owed",3,"sync-disk-turn-stream.md: setInterval 250 ms per running turn, reads stream.jsonl"],
+  "Runner.readStreamAtBoot": ["boot",3,"Runner.reattach at startup, for a turn found ended; the poll reads off the thread (#2134)"],
   "Runner.wrapUp": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on every turn end (reads stderr.log)"],
   "Runner.steerSystem": ["owed",2,"sync-disk-turn-start-end.md: checkBudget on turn result events when ask mark passes"],
   "Runner.keepCodexLog": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on Codex turn end"],
@@ -375,13 +364,6 @@
   "descendants": ["proc",2,"walks /proc/<pid>/stat for signalling a ship"],
   "stopInLine": ["rare",1,"stop-ship from Status page or stopping a minion with a ship"],
   "kitMoved": ["rare",2,"stop-ship check on the kit land line (git merge-base)"]
- },
- "src/side-ask.ts": {
-  "SideAsks.recover": ["boot",1,"SideAsks.recover once at boot (server.ts:781)"],
-  "SideAsks.poll": ["owed",1,"sync-disk-turn-stream.md: setInterval 500 ms in SideAsks.tick while a side ask runs"],
-  "SideAsks.read": ["owed",1,"sync-disk-turn-stream.md: setInterval 500 ms side-ask poll reads stream"],
-  "SideAsks.finish": ["owed",2,"sync-disk-turn-stream.md: side-ask poll on exit or limit, 500 ms timer"],
-  "SideAsks.dropFork": ["owed",1,"sync-disk-turn-stream.md: finish from 500 ms side-ask poll; recover at boot"]
  },
  "src/side-guard.ts": {
   "(module)": ["boot",1,"hook child process (readFileSync stdin)"]
@@ -469,5 +451,12 @@
  "src/worktree-sweep.ts": {
   "removeWorktree": ["owed",3,"sync-disk-polls-and-timers.md: daily build output sweep timer, 24 h"],
   "restoreSaved": ["rare",1,"restoreTicketDir only when worktree folder is gone"]
+ },
+ "src/wrapper-alive.ts": {
+  "wrapperAlive": ["boot",3,"Runner.recover's sweep and reattach at startup; the poll and stray wait use wrapperAliveOff (#2134)"],
+  "pidIsWrapper": ["proc",2,"reads /proc/<pid>/cmdline and /proc/self only"],
+  "claudePidNow": ["owed",1,"sync-disk-turn-start-end.md: waitForKillResume at a killed turn's end; also a cut-off keepalive at boot"],
+  "argInProc": ["proc",2,"reads /proc cmdlines only (rescue)"],
+  "wrapperInProc": ["proc",2,"reads /proc cmdlines only (stale heartbeat)"]
  }
 }

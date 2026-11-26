@@ -177,6 +177,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | --- | --- |
 | `server.ts` | HTTP server, JSON API, SSE stream, static files |
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
+| `src/wrapper-alive.ts` | Whether a turn's wrapper still runs, from its folder and `/proc`: on the thread at boot, off it for a followed turn's poll |
 | `src/claude-events.ts`, `src/stream-events.ts` | Types for the Claude CLI's stream-json events and content blocks, and reading one event (what is stored, what it says the minion is doing) |
 | `src/thrown.ts` | `thrown(err)`: a caught value's error fields (message, code, stderr), typed |
 | `src/gh-bodies.ts` | Types for the fields Citadel reads from GitHub's REST answers (runs, jobs, errors) |

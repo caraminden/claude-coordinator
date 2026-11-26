@@ -18,9 +18,10 @@ import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from '
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { tempRoot } from './helpers.ts';
+import { landText } from './land-files.ts';
 
 const root = resolve(import.meta.dirname, '..');
-const land = readFileSync(join(root, 'tools/land.sh'), 'utf8');
+const land = landText();
 const fixtures = join(root, 'test/fixtures/land-verdicts');
 const tmp = tempRoot('land-verdicts-');
 after(() => tmp.teardown());

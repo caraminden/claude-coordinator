@@ -6,6 +6,7 @@ import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc, stopShip } from './land-fixture.ts';
 import { until } from './wait.ts';
+import { copyLand } from './land-files.ts';
 const repo = join(import.meta.dirname, '..');
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
@@ -24,7 +25,8 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
 test('a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)', () => {
   const r = setup();
   // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
-  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  copyLand(join(r.source, 'tools'));
+  for (const f of ['deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   git(r.wt, 'rebase', '-q', 'main');
@@ -53,7 +55,8 @@ test('a rebase that changes land.sh hands over to the rebased copy, which keeps 
 // that brings a new or changed part hands over to a copy that sources it.
 test('a rebase that changes only a part of land.sh hands over to the rebased copy, which lands with it (#2099)', () => {
   const r = setup();
-  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  copyLand(join(r.source, 'tools'));
+  for (const f of ['deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   git(r.wt, 'rebase', '-q', 'main');
@@ -76,7 +79,8 @@ test("the test run doesn't get the deploy lock's fd 9", () => {
   const r = setup();
   const tools = join(r.dir, 'tools');
   mkdirSync(tools);
-  for (const f of ['land.sh', 'deploy-queue.sh', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(tools, f));
+  copyLand(tools);
+  for (const f of ['deploy-queue.sh', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(tools, f));
   writeFileSync(join(tools, 'run-tests.sh'), '#!/usr/bin/env bash\n[ -e /proc/self/fd/9 ] && echo open >"$FD9_NOTE" || echo closed >"$FD9_NOTE"\n', { mode: 0o755 });
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = spawnSync('bash', [join(tools, 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FD9_NOTE: join(r.dir, 'fd9') } });
@@ -1309,6 +1313,7 @@ test('a perigee red of flakes only goes again once: green lands, red again refus
 // newerLandOnMain: the worktree runs its own tools/land.sh, as a minion does, and main has a newer one its rebase brings in.
 function newerLandOnMain(r: ReturnType<typeof setup>) {
   for (const f of readdirSync(join(repo, 'tools'), { withFileTypes: true })) if (f.isFile() && f.name !== 'deploy.sh') copyFileSync(join(repo, 'tools', f.name), join(r.source, 'tools', f.name));
+  copyLand(join(r.source, 'tools'));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real tools');
   git(r.wt, 'rebase', '-q', 'main');

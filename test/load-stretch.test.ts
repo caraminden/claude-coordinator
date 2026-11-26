@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadStretch, MAX_STRETCH, stepLimit, within } from '../src/load-stretch.ts';
+import { landText } from './land-files.ts';
 
 test('a quiet box keeps each limit as it is and adds nothing to the failure', () => {
   for (const load of [0, 3, 16]) {
@@ -32,7 +33,7 @@ test('every outside limit on the boot check is past its own backstop, armed agai
   const own = (check.match(/^ *arm\(\);/gm)!.length * Number(/\}, ([\d_]+)\)\.unref/.exec(check)![1].replaceAll('_', ''))) / 1000;
   assert.ok(own >= 360, `${own} s read from boot-check.ts`);
   for (const f of ['deploy.sh', 'land.sh']) {
-    const limits = [...read(f).matchAll(/DEPLOY_BOOT_TIMEOUT:-(\d+)/g)].map((m) => Number(m[1]));
+    const limits = [...(f === 'land.sh' ? landText() : read(f)).matchAll(/DEPLOY_BOOT_TIMEOUT:-(\d+)/g)].map((m) => Number(m[1]));
     assert.ok(limits.length && limits.every((l) => l > own), `${f}: ${limits} s, for a check that gives up by itself at ${own} s`);
   }
 });

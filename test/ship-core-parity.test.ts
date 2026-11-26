@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { readQueue, writeOrder } from '../src/waits.ts';
 import { scriptEnv } from './script-env.ts';
+import { landText } from './land-files.ts';
 
 const env = { ...scriptEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 
@@ -180,7 +181,7 @@ const JOBS = {
 const STEP_JQ = '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // (if (.jobs | length) == 0 then "no jobs" else "no failed step" end)';
 const stepOf = (j: { jobs: { steps: { name: string; conclusion: string | null }[] | null }[] }) => j.jobs.flatMap((job) => job.steps ?? []).find((s) => s.conclusion === 'failure')?.name ?? (j.jobs.length === 0 ? 'no jobs' : 'no failed step');
 test('what a failed run means in land.sh: 1 only when a step that runs the tests failed', () => {
-  const land = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
+  const land = landText();
   const cut = (a: string, b: string) => land.slice(land.indexOf(a), land.indexOf(b, land.indexOf(a)));
   const verdict = cut('    failure)\n      # Red only when', '    timed_out) return 1');
   const consts = [...land.matchAll(/^CI_(?:CLOCK_|PORTS_)?STEP=.*$/gm)].map((m) => m[0]).join('\n');

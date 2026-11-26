@@ -8,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { git, setup, ci, env, landAsync } from './land-fixture.ts';
 import { until } from './wait.ts';
+import { copyLand } from './land-files.ts';
 
 type R = ReturnType<typeof setup>;
 const has = (r: R, ref: string) => git(r.source, 'for-each-ref', '--format=%(refname)', ref) !== '';
@@ -311,7 +312,8 @@ test('two feeders merging into one build at once both get in, one after the othe
 test('a merge of main that changes land.sh hands --build over to the merged copy, which lands the build (#500)', () => {
   const r = setup();
   // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
-  for (const f of ['land.sh', 'citadel-heavy', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  copyLand(join(r.source, 'tools'));
+  for (const f of ['citadel-heavy', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   build(r);

@@ -56,7 +56,7 @@ import {
   CLOSE_SELF,
   runMinionsTool,
 } from './mcp-minions.ts';
-import { QUEUE_JOB, JOB_STATUS, STOP_JOB, ARTIFACT_TOOLS, USAGE_SPLIT, LIST_CATALOGUE, LIST_MACHINES, CHECK_MACHINE, SEARCH_MEMORY, SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS, runLookupTool } from './mcp-lookup.ts';
+import { RUN_ON_HOST, QUEUE_JOB, JOB_STATUS, STOP_JOB, ARTIFACT_TOOLS, USAGE_SPLIT, LIST_CATALOGUE, LIST_MACHINES, CHECK_MACHINE, SEARCH_MEMORY, SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS, runLookupTool } from './mcp-lookup.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
 export { handOffResult } from './mcp-ship.ts';
@@ -149,6 +149,7 @@ const THREAD_TOOLS = () => [
   RELAY_WHEN_LIVE,
   MINION_WAKE_WHEN_LIVE,
   WAKE_WHEN_RUNNERS_BACK,
+  ...(C().HOST_REACH ? [RUN_ON_HOST()] : []),
   REPORT_SPEND,
   LOG_LEARNED,
   HAND_OFF_LAND(),

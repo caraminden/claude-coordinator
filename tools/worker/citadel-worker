@@ -3,6 +3,9 @@
 #   citadel-worker signin            sign in to Claude, through Claude Code's own sign-in
 #   citadel-worker signin-github     sign in to GitHub, through gh's own sign-in
 #   citadel-worker caps [--workers N] [--threads N] [--memory GB] [--disk GB]
+#   citadel-worker folder add <name> <path> [--write]   a folder minions marked for this PC may use, at /host/<name>
+#   citadel-worker folder remove <name>
+#   citadel-worker folders           the folders, and whether each is mounted
 #   citadel-worker status            how it stands, and its last lines
 #   citadel-worker remove            take it off this PC (on Windows: wsl --unregister citadel-workers)
 set -euo pipefail
@@ -21,6 +24,72 @@ inside() {
   local tag
   tag=$(as cat "$home/worker/image-tag" 2>/dev/null) || die 'Its image is not built yet: the Machines page says when it is.'
   as podman run --rm -it --init --userns=keep-id --network=host -e HOME=/home/worker -w /home/worker -v citadel-worker-home:/home/worker:U "$tag" "$@"
+}
+
+host_src=$r/mnt/citadel-host
+
+# The folder list's check, as public/worker-agent.mjs hostFolders and folderPath do it (keep them in step;
+# test/host-reach.test.ts runs both). A copy here, never an import: root must not run code from the worker's home.
+FOLDERS_JS='
+const { isAbsolute, normalize } = require("node:path");
+const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const folderPath = (p) => /[\0\n,]/.test(p) ? false : /^[A-Za-z]:\\/.test(p) ? /^[A-Za-z]:\\(?!\\)[^:*?"<>|]*[^\\:*?"<>|\s]$/.test(p) && !/(^|\\)\.\.(\\|$)/.test(p) : isAbsolute(p) && normalize(p) === p && p !== "/" && !p.endsWith("/");
+function hostFolders(raw) {
+  const folders = [], problems = [];
+  if (raw === undefined || raw === null) return { folders, problems };
+  if (typeof raw !== "object" || Array.isArray(raw)) return { folders, problems: ["folders must be { <name>: { path, write } }"] };
+  for (const [name, f = {}] of Object.entries(raw)) {
+    if (!NAME.test(name)) problems.push(`folder "${name}": names are lower-case letters, digits, - and _`);
+    else if (typeof f?.path !== "string" || !folderPath(f.path)) problems.push(`folder ${name}: its path must be a full Windows or Linux path to a folder, not a whole drive`);
+    else if (f.write !== undefined && typeof f.write !== "boolean") problems.push(`folder ${name}: write must be true or false`);
+    else folders.push({ name, path: f.path, write: f.write === true });
+  }
+  return { folders: folders.slice(0, 20), problems: folders.length > 20 ? [...problems, "only the first 20 folders are used"] : problems };
+}
+const cfg = JSON.parse(process.env.CFG || "{}");
+'
+
+# The owner's folders (Build 7 T8): each mounted here as root, read-only unless the owner said --write, owned by the
+# worker's user. Only a minion marked for this PC gets them, at /host/<name> in its own container (machine-worker.mjs).
+mount_folders() {
+  local gid line name path write
+  gid=$(id -g "$user")
+  # What was mounted goes first: a folder taken off the list, or one whose mode changed.
+  while read -r line; do umount -l "$line" 2>/dev/null || true; done < <(awk -v d="$host_src/" 'index($5, d) == 1 { print $5 }' /proc/self/mountinfo | sort -r)
+  mkdir -p "$host_src"
+  chmod 755 "$host_src"
+  while IFS=$'\t' read -r name path write; do
+    [[ -n $name ]] || continue
+    mkdir -p "$host_src/$name"
+    if [[ $path =~ ^[A-Za-z]:\\ ]]; then
+      mount -t drvfs "$path" "$host_src/$name" -o "uid=$uid,gid=$gid,$( [[ $write == true ]] && echo rw || echo ro )" || { echo "Could not mount $path as $name." >&2; continue; }
+    else
+      mount --bind "$path" "$host_src/$name" || { echo "Could not mount $path as $name." >&2; continue; }
+      [[ $write == true ]] || mount -o remount,bind,ro "$host_src/$name"
+    fi
+  done < <(CFG="$(cat "$etc/config.json" 2>/dev/null || echo '{}')" node -e "$FOLDERS_JS"'
+    const { folders, problems } = hostFolders(cfg.folders);
+    for (const p of problems) console.error(p);
+    for (const f of folders) console.log([f.name, f.path, f.write].join("\t"));')
+}
+
+# Change config.json's folders with a script given FOLDERS as JSON, then mount them again and restart the worker.
+edit_folders() {
+  local cfg
+  cfg=$(CFG="$(cat "$etc/config.json" 2>/dev/null || echo '{}')" ARGS="$1" node -e "$FOLDERS_JS"'
+    const [verb, name, path, write] = JSON.parse(process.env.ARGS);
+    const folders = { ...(cfg.folders ?? {}) };
+    if (verb === "add") folders[name] = { path, write };
+    else if (!(name in folders)) { console.error("No folder " + name + " on the list."); process.exit(1); }
+    else delete folders[name];
+    const { problems } = hostFolders(folders);
+    if (problems.length) { console.error(problems.join("\n")); process.exit(1); }
+    console.log(JSON.stringify({ ...cfg, folders }, null, 2));') || exit 1
+  ( umask 077; printf '%s\n' "$cfg" > "$etc/config.json" )
+  chown "root:$user" "$etc/config.json"
+  chmod 640 "$etc/config.json"
+  mount_folders
+  as systemctl --user restart citadel-worker
 }
 
 case ${1:-} in
@@ -61,6 +130,28 @@ case ${1:-} in
     systemctl set-property "user-$uid.slice" "CPUQuota=$((threads * 100))%" "MemoryMax=${memory}G" "MemoryHigh=$((memory * 1024 * 9 / 10))M"
     if $restart; then as systemctl --user restart citadel-worker; fi
     echo "Caps: $(num workers) minions at once, $threads threads, $memory GB of memory, $(num disk_gb) GB of disk." ;;
+  folder)
+    case ${2:-} in
+      add)
+        [[ $# -ge 4 && $# -le 5 && ( $# == 4 || ${5:-} == --write ) ]] || die 'usage: citadel-worker folder add <name> <path> [--write]'
+        write=false
+        [[ ${5:-} != --write ]] || write=true
+        edit_folders "$(node -e 'console.log(JSON.stringify(process.argv.slice(1, 4).concat(process.argv[4] === "true")))' add "$3" "$4" "$write")"
+        echo "Minions marked for this PC now see $4 at /host/$3, $( $write && echo 'and can change and delete what is in it' || echo 'read-only' ). Citadel can't undo what they change there: keep your own backup of it." ;;
+      remove)
+        [[ $# == 3 ]] || die 'usage: citadel-worker folder remove <name>'
+        edit_folders "$(node -e 'console.log(JSON.stringify(["remove", process.argv[1]]))' "$3")"
+        echo "Removed $3. A minion's turn already running there keeps it until that turn ends." ;;
+      *) die 'usage: citadel-worker folder add <name> <path> [--write] | folder remove <name>' ;;
+    esac ;;
+  folders)
+    CFG="$(cat "$etc/config.json" 2>/dev/null || echo '{}')" ON="$(awk -v d="$host_src/" 'index($5, d) == 1 { print substr($5, length(d) + 1) }' /proc/self/mountinfo)" node -e "$FOLDERS_JS"'
+      const { folders, problems } = hostFolders(cfg.folders);
+      const on = new Set(process.env.ON.split("\n"));
+      for (const f of folders) console.log("/host/" + f.name + "  " + f.path + "  " + (f.write ? "read-write" : "read-only") + (on.has(f.name) ? "" : "  (not mounted: run citadel-worker mount-folders)"));
+      if (!folders.length) console.log("No folders: minions here reach none of this PC.");
+      for (const p of problems) console.log("Problem: " + p);' ;;
+  mount-folders) mount_folders ;;
   status)
     as systemctl --user --no-pager status citadel-worker || true
     as tail -n 20 "$home/worker.log" ;;

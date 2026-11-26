@@ -709,6 +709,8 @@ export interface TurnFacts {
   pool?: boolean;
   /** It is placed on a connected machine (Build 7 T2, src/machine-turn.ts): its agent runs the wrapper there, and nothing is spawned here. */
   machine?: boolean;
+  /** Its machine's name when it reaches that PC's host (Build 7 T8, src/host-reach.ts): offered run_on_host. */
+  hostReach?: string;
 }
 
 /** Claude Code refuses a settings file past 2 MiB (2.1.x: "Settings file exceeds the 2MiB limit"). */
@@ -970,6 +972,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // A minion may propose new notes for the machines its turn got (#617).
   if (ticket.kind !== 'coordinator' && machines.length) env.COORDINATOR_MACHINES = machines.map((m) => m.name).join(',');
   if (facts.jobMachines?.length) env.COORDINATOR_JOB_MACHINES = facts.jobMachines.join(',');
+  if (facts.machine && facts.hostReach && ticket.kind !== 'coordinator') env.COORDINATOR_HOST_REACH = facts.hostReach;
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
   if (facts.machine) env = machineEnv(env);
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);

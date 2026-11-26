@@ -29,7 +29,12 @@ const CHECKPOINT_MS = 120_000;
 /** The most of one file's new bytes in one sync: a long stream catches up over several. */
 const CHUNK = 2_000_000;
 const APPENDED = ['stream.jsonl', 'stderr.log'];
-const WHOLE = ['pid.json', 'steer.sent', 'exit.json'];
+// host-writes.json: a host turn's count of files written to its machine's folders (T8), sent before its end.
+const WHOLE = ['pid.json', 'steer.sent', 'host-writes.json', 'exit.json'];
+/** Where a host turn's folders show inside its container, each at /host/<name> (T8). */
+export const HOST_IN = '/host';
+/** Files counted in one host folder at a turn's end; past it the line says "more than". */
+const COUNT_MAX = 100_000;
 /** A wrapper whose beat is older than this no longer runs (it beats every 5 s). */
 const BEAT_STALE_MS = 30_000;
 
@@ -46,20 +51,32 @@ export function workerConfig(raw) {
     claude: typeof c.claude === 'string' ? c.claude : null,
     container: typeof c.container === 'string' ? c.container : 'citadel-worker',
     podman: typeof c.podman === 'string' ? c.podman : 'podman',
+    /** The owner's folders for a host turn (T8, worker-agent.mjs hostMounts): only a marked minion's container has them. */
+    host: hostBinds(c.host),
   };
+}
+
+/** Host folders as binds, each at /host/<name>; anything else is dropped. @param {unknown} raw @returns {{ src: string, dst: string, ro: boolean }[]} */
+export function hostBinds(raw) {
+  return (Array.isArray(raw) ? raw : []).filter((m) => m && typeof m.src === 'string' && isAbsolute(m.src) && !m.src.includes(',') && typeof m.dst === 'string' && /^\/host\/[a-z0-9][a-z0-9_-]{0,39}$/.test(m.dst)).map((m) => ({ src: m.src, dst: m.dst, ro: m.ro !== false }));
+}
+
+/** The container a turn runs in: a marked minion's own, with the host folders, apart from every other turn's (T8). @param {{ container: string }} cfg @param {{ host?: boolean } | null | undefined} launch */
+export function boxOf(cfg, launch) {
+  return launch?.host === true ? `${cfg.container}-host` : cfg.container;
 }
 
 /**
  * podman run's arguments for the worker container, after `run`: the server's own shape (src/containers.ts runArgs), a
  * home volume the sign-in lives in, and each of `roots` from under the worker's root at the path the server has it.
  * Nothing else of this computer is in it: no /mnt/c, no interop socket. `extraMounts` is for a minion its owner gave
- * host folders to (T8, host reach); a plain worker passes none.
- * @param {ReturnType<typeof workerConfig>} cfg @param {{ home: string, roots: string[] }} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts]
+ * host folders to (T8, host reach), in its own container `name`; a plain worker passes none. Both share the home volume, so one sign-in.
+ * @param {ReturnType<typeof workerConfig>} cfg @param {{ home: string, roots: string[] }} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts] @param {string} [name]
  */
-export function containerArgs(cfg, launch, extraMounts = []) {
+export function containerArgs(cfg, launch, extraMounts = [], name = cfg.container) {
   const binds = [...launch.roots.map((r) => ({ src: join(cfg.root, 'fs', r), dst: r, ro: false })), ...extraMounts];
   const spec = JSON.stringify([cfg.image, launch.home, binds]);
-  const args = ['--rm', '--replace', '--name', cfg.container, '--init', '--userns=keep-id', '--network=host', '--pids-limit=32768', '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
+  const args = ['--rm', '--replace', '--name', name, '--init', '--userns=keep-id', '--network=host', '--pids-limit=32768', '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
   args.push('-e', `HOME=${launch.home}`, '-v', `${cfg.container}-home:${launch.home}:U`);
   for (const m of binds) args.push('--mount', `type=bind,src=${m.src},dst=${m.dst}${m.ro ? ',ro' : ''}`);
   args.push(cfg.image, 'sleep', 'infinity');
@@ -67,7 +84,7 @@ export function containerArgs(cfg, launch, extraMounts = []) {
 }
 
 /** A turn as this agent takes it up. @param {{ dir: string, local: string, launch: Launch } & Partial<Turn>} t @returns {Turn} */
-const newTurn = (t) => ({ applied: 0, acked: null, sentWhole: {}, starting: false, dropped: false, seeded: false, script: null, home: 0, homeFailed: null, asked: 0, steering: false, checking: false, checked: Date.now(), nextTry: 0, failures: 0, ref: -1, final: false, ...t });
+const newTurn = (t) => ({ applied: 0, acked: null, sentWhole: {}, starting: false, dropped: false, seeded: false, script: null, home: 0, homeFailed: null, asked: 0, steering: false, checking: false, checked: Date.now(), nextTry: 0, failures: 0, ref: -1, final: false, counting: false, ...t });
 
 /** @param {string} cmd @param {string[]} args @param {number} [timeout] @returns {Promise<{ code: number, out: string, err: string }>} */
 const run = (cmd, args, timeout = 60_000) => new Promise((done) => execFile(cmd, args, { timeout, maxBuffer: 4 << 20 }, (err, out, stderr) => done({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(stderr || err?.message || '') })));
@@ -103,9 +120,9 @@ const read = (/** @type {string} */ file) => {
 };
 
 /**
- * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[], sync?: { at: string, key: string } }} Launch sync: its state comes from the server and goes back (public/machine-sync.mjs); `at` is that program's folder, `key` what one of it at a time runs for
+ * @typedef {{ wrapper: string[], cwd: string | null, home: string, roots: string[], sync?: { at: string, key: string }, host?: boolean }} Launch sync: its state comes from the server and goes back (public/machine-sync.mjs); `at` is that program's folder, `key` what one of it at a time runs for
  * @typedef {{ start?: boolean, git?: boolean, roots?: string[], final?: boolean, mode?: 'rescue' | 'clear', all?: boolean }} SyncAsk
- * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean, seeded: boolean, script: string | null, home: number, homeFailed: string | null, asked: number, steering: boolean, checking: boolean, checked: number, nextTry: number, failures: number, ref: number, final: boolean, boot?: string | null, rescuing?: boolean, rescued?: true | string }} Turn
+ * @typedef {{ dir: string, local: string, launch: Launch, applied: number, acked: Record<string, number> | null, sentWhole: Record<string, string>, starting: boolean, dropped: boolean, seeded: boolean, script: string | null, home: number, homeFailed: string | null, asked: number, steering: boolean, checking: boolean, checked: number, nextTry: number, failures: number, ref: number, final: boolean, boot?: string | null, rescuing?: boolean, rescued?: true | string, counting: boolean }} Turn
  */
 
 export class Worker {
@@ -254,7 +271,7 @@ export class Worker {
     for (const name of WHOLE) {
       const text = read(join(t.local, name));
       // Its end goes last: only once the server holds the whole stream it ends.
-      if (text === null || text === t.sentWhole[name] || (name === 'exit.json' && (!caughtUp || !this.settled(t)))) continue;
+      if (text === null || text === t.sentWhole[name] || (name === 'exit.json' && (!caughtUp || !this.settled(t) || !this.counted(t)))) continue;
       put[name] = text;
     }
     const alive = t.starting || this.beats(t) || !this.settled(t);
@@ -289,7 +306,7 @@ export class Worker {
     const stop = async () => {
       const pid = this.pid(t);
       if (!pid || existsSync(join(t.local, 'exit.json'))) return;
-      await this.exec(this.cfg.podman, ['exec', this.cfg.container, 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
+      await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
       // Its wrapper writes its end once claude is gone: what it wrote last is part of what goes.
       for (let i = 0; i < 20 && !existsSync(join(t.local, 'exit.json')); i++) await sleep(250);
     };
@@ -339,6 +356,38 @@ export class Worker {
     return !t.seeded || t.final;
   }
 
+  /** A host turn's end waits for its count of what it wrote to the machine's folders (T8). @param {Turn} t */
+  counted(t) {
+    return t.launch?.host !== true || existsSync(join(t.local, 'host-writes.json'));
+  }
+
+  /**
+   * The files a host turn wrote to each of the machine's read-write folders, counted once it ends: its chat says so in
+   * one line (src/host-reach.ts). A count that fails says why, and the turn's end goes home all the same.
+   * @param {Turn} t
+   */
+  async countWrites(t) {
+    t.counting = true;
+    /** @type {{ name: string, files: number, more?: true }[]} */
+    const folders = [];
+    let error = null;
+    try {
+      const since = join(t.dir, 'host-began');
+      for (const m of this.cfg.host.filter((b) => !b.ro)) {
+        if (!existsSync(join(t.local, 'host-began'))) throw new Error('its start mark is gone');
+        const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `find "$1" -xdev -type f -newer "$2" 2>/dev/null | head -n ${COUNT_MAX + 1} | wc -l`, 'sh', m.dst, since], 5 * 60_000);
+        const n = Number(r.out.trim());
+        if (r.code || !Number.isFinite(n)) throw new Error(`counting ${m.dst} failed: ${r.err.trim().split('\n').pop() || `exit ${r.code}`}`);
+        if (n) folders.push({ name: m.dst.slice(HOST_IN.length + 1), files: Math.min(n, COUNT_MAX), ...(n > COUNT_MAX ? { more: /** @type {const} */ (true) } : {}) });
+      }
+    } catch (err) {
+      error = err.message;
+    }
+    writeFileSync(join(t.local, 'host-writes.json'), JSON.stringify({ folders, ...(error ? { error } : {}) }));
+    t.counting = false;
+    this.poke();
+  }
+
   /** The program a turn's state is synced by (public/machine-sync.mjs), in the version the app wants. Its path on both sides is under the turns' folder. @param {Turn} t */
   async syncProgram(t) {
     const { at } = /** @type {{ at: string }} */ (t.launch.sync);
@@ -368,7 +417,7 @@ export class Worker {
         // Its container may have stopped with the machine since the turn began.
         if (!ask.start) await this.ensureContainer(t.launch);
         const arg = Buffer.from(JSON.stringify({ app: `http://127.0.0.1:${this.port}`, dir: t.dir, state: at, ...ask })).toString('base64');
-        const r = await this.exec(this.cfg.podman, ['exec', this.cfg.container, this.cfg.node ?? t.launch.wrapper[0], program, arg], ask.start ? 60 * 60_000 : 15 * 60_000);
+        const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), this.cfg.node ?? t.launch.wrapper[0], program, arg], ask.start ? 60 * 60_000 : 15 * 60_000);
         const last = r.out.trim().split('\n').pop() ?? '';
         return r.code || !last.startsWith('{') ? { error: (r.err.trim() || last || `exit ${r.code}`).slice(-300) } : JSON.parse(last);
       } catch (err) {
@@ -391,6 +440,7 @@ export class Worker {
 
   /** Send home what a turn changed: at its end, when the server asks, on a commit, and every couple of minutes. @param {Turn} t */
   checkpointIfDue(t) {
+    if (!this.counted(t) && !t.counting && existsSync(join(t.local, 'exit.json'))) void this.countWrites(t);
     if (!t.seeded || t.starting || t.checking || t.rescuing || t.rescued) return;
     const over = existsSync(join(t.local, 'exit.json')) || !this.beats(t);
     // A machine that slept looks over until its wrapper beats again.
@@ -447,7 +497,7 @@ export class Worker {
     for (const sig of sigs) {
       if (!/^SIG(INT|TERM|KILL)$/.test(sig)) continue;
       const s = sig.slice(3);
-      await this.exec(this.cfg.podman, ['exec', this.cfg.container, 'sh', '-c', `kill -${s} -${pid} 2>/dev/null || kill -${s} ${pid}`]);
+      await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -${s} -${pid} 2>/dev/null || kill -${s} ${pid}`]);
     }
     t.applied += sigs.length;
     this.save();
@@ -458,7 +508,7 @@ export class Worker {
     this.turns.delete(t.dir);
     this.save();
     const pid = this.pid(t);
-    if (pid && !existsSync(join(t.local, 'exit.json'))) await this.exec(this.cfg.podman, ['exec', this.cfg.container, 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
+    if (pid && !existsSync(join(t.local, 'exit.json'))) await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
     rmSync(t.local, { recursive: true, force: true });
   }
 
@@ -474,17 +524,19 @@ export class Worker {
       for (const r of launch.roots) mkdirSync(this.local(r), { recursive: true });
       if (launch.cwd && this.mine(launch.cwd)) mkdirSync(this.local(launch.cwd), { recursive: true });
       this.fitSpec(t);
-      await this.ensureContainer(launch);
+      // A host turn's start (T8): the folders' files written after it are the ones its end counts.
+      if (launch.host === true) writeFileSync(join(t.local, 'host-began'), '');
+      await this.ensureContainer(launch, launch.host === true ? this.cfg.host : [], boxOf(this.cfg, launch));
       if (launch.sync && !t.dropped) await this.bring(t);
       if (t.dropped || !existsSync(join(t.local, 'spec.json'))) return;
       const wrapper = [this.cfg.node ?? launch.wrapper[0], ...launch.wrapper.slice(1)];
-      const r = await this.exec(this.cfg.podman, ['exec', '-d', this.cfg.container, ...wrapper]);
+      const r = await this.exec(this.cfg.podman, ['exec', '-d', boxOf(this.cfg, launch), ...wrapper]);
       if (r.code) throw new Error(`the turn's wrapper did not start: ${r.err.trim()}`);
       this.log(`Turn ${dir.split('/').pop()} started.`);
     } catch (err) {
       this.log(`Turn ${dir.split('/').pop()} could not start: ${err.message}`);
       // Told as the turn's end, the way a container that won't start is at home.
-      if (existsSync(t.local) && !existsSync(join(t.local, 'exit.json'))) writeFileSync(join(t.local, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${this.cfg.container}: ${err.message}` }));
+      if (existsSync(t.local) && !existsSync(join(t.local, 'exit.json'))) writeFileSync(join(t.local, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${boxOf(this.cfg, launch)}: ${err.message}` }));
       else if (!existsSync(t.local)) this.turns.delete(dir);
     } finally {
       t.starting = false;
@@ -540,15 +592,15 @@ export class Worker {
   /**
    * The worker container, running from the spec `launch` needs. One running from another spec is replaced only when no
    * turn runs in it (shortcut: a busy one keeps its old mounts, as a person's container at home does).
-   * @param {Launch} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts]
+   * @param {Launch} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts] @param {string} [container] a host turn's own (boxOf)
    */
-  async ensureContainer(launch, extraMounts = []) {
-    const { podman, container } = this.cfg;
-    const args = containerArgs(this.cfg, launch, extraMounts);
+  async ensureContainer(launch, extraMounts = [], container = this.cfg.container) {
+    const { podman } = this.cfg;
+    const args = containerArgs(this.cfg, launch, extraMounts, container);
     const want = args[args.indexOf('--label') + 1].split('=')[1];
     const st = await this.exec(podman, ['container', 'inspect', '--format', '{{.State.Running}} {{index .Config.Labels "citadel.spec"}}', container]);
     const [running, has] = st.code ? [] : st.out.trim().split(' ');
-    const others = [...this.turns.values()].some((t) => !t.starting && !existsSync(join(t.local, 'exit.json')));
+    const others = [...this.turns.values()].some((t) => boxOf(this.cfg, t.launch) === container && !t.starting && !existsSync(join(t.local, 'exit.json')));
     if (running === 'true' && (has === want || others)) return;
     const r = await this.exec(podman, ['run', '-d', ...args], 15 * 60_000);
     if (r.code) throw new Error(`the worker container did not start: ${r.err.trim().split('\n').pop()}`);

@@ -15,6 +15,7 @@ import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
+import { hostReach, startedLine } from '../host-reach.ts';
 import { HttpError, json, publicOrigin, ownWrites, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { uploadsDir } from './files.ts';
 import { ensureCoordinatorFor } from './projects.ts';
@@ -293,6 +294,11 @@ export const agentRoutes: Route[] = [
   agent('GET', '/api/machines/job-input', ({ req, res, url, app }, machine) => app.jobs.input(machine, req, res, url)),
   agent('POST', '/api/machines/job-state', async ({ req, res, app }, machine) => {
     app.jobs.report(machine, await readJson(req, 100_000));
+    return json(res, 202, {});
+  }),
+  // A start of one of its owner's programs for a marked minion (Build 7 T8, src/host-reach.ts): the agent's word on it.
+  agent('POST', '/api/machines/host-started', async ({ req, res, app }, machine) => {
+    if (!app.machines.hostStarts.answer(machine.id, await readJson(req, 10_000))) throw new HttpError(404, 'No such start waits for this machine');
     return json(res, 202, {});
   }),
   agent('POST', '/api/machines/job-upload', async ({ req, res, url, app }, machine) => json(res, 201, await app.jobs.upload(machine, req, url))),
@@ -790,6 +796,29 @@ export const machineRoutes: Route[] = [
       const body = await readJson(req, 50_000_000);
       if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline', true);
       return json(res, 202, {});
+    },
+  },
+  // run_on_host (Build 7 T8, src/host-reach.ts): start one of the PC's owner's listed programs, for a minion whose running
+  // turn reaches that PC's host. The agent checks the name against its own list; its refusal names the list.
+  {
+    method: 'POST',
+    path: '/api/machines/run-on-host',
+    ...turns,
+    async handler({ req, res, app, caller }) {
+      const at = app.runner.hostReachOf(caller!.id);
+      // Again here, not only at its start: a mark cleared or a machine given away mid-turn ends its reach.
+      const machine = at && app.store.getMachine(at.id);
+      if (!at || !machine || !hostReach(app.runner.runsOn.get(caller!.id), machine, app.store.turnAsker(caller!.id))) {
+        throw new HttpError(403, "This turn doesn't reach a machine's host: only a minion marked to run on a machine, on a turn of that machine's owner, while it runs there");
+      }
+      const body = await readJson(req, 100_000);
+      const program = str(body.program, 'program', 40);
+      const args = body.args === undefined ? [] : body.args;
+      if (!Array.isArray(args) || !args.every((a) => typeof a === 'string')) throw new HttpError(400, 'args must be a list of text');
+      const got = await app.machines.hostStarts.start(machine.id, program, args);
+      if (!got.ok) throw new HttpError(409, `${machine.name}: ${got.error}`);
+      app.runner.emit(caller!.id, 'note', { text: startedLine(program, machine.name, args) });
+      return json(res, 200, { machine: machine.name, pid: got.pid });
     },
   },
 ];

@@ -56,6 +56,7 @@ import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { awayLine, awayResume, nextMark } from './machine-away.ts';
 import { type AwayEnd, MachineTurn, placedAt, placeTurn } from './machine-turn.ts';
+import { hostReach, writesLine } from './host-reach.ts';
 import type { Block, MachineHost, MachinePools } from './machine-pools.ts';
 import { RunsOn, type runsOnCard } from './runs-on.ts';
 import { offSkills, pruneKit } from './skills.ts';
@@ -947,6 +948,13 @@ export class Runner {
   /** A turn launching (startTurn, #1808) counts: it is past the queue's take, so a message now waits for it as for a live one. */
   isRunning(ticketId: number): boolean {
     return this.turns.has(ticketId) || this.launching.has(ticketId);
+  }
+
+  /** The machine whose host this minion's running turn reaches (Build 7 T8, src/host-reach.ts), or null: placed there with host reach. */
+  hostReachOf(ticketId: number): { id: number; name: string } | null {
+    const dir = this.turns.get(ticketId)?.dir;
+    const at = dir ? placedAt(dir) : null;
+    return at?.host ? { id: at.id, name: at.name } : null;
   }
 
   /** How often a start waiting on a turn this server doesn't follow checks whether its wrapper has gone (#1464). */
@@ -2894,6 +2902,8 @@ export class Runner {
     // The place startPlace found a moment ago; one whose machine went since waits there for it. Codex turns, keepalives and fresh-session steps run here (turnAtHome).
     const at = codex || keepalive || step ? 0 : this.turnLine.placeOf(ticket.id);
     const worker = at ? { id: at, name: this.pools!.nameOf(at) } : null;
+    // Host reach (T8): marked for that machine, on its owner's turn. Its tools, container and chat lines follow from it.
+    const reach = worker && hostReach(this.runsOn.get(ticket.id), this.store.getMachine(worker.id) ?? null, person) ? worker.name : null;
     if (!keepalive && !step) this.runsOn.over(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
@@ -2910,6 +2920,7 @@ export class Runner {
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir },
         codex: codex ? { thread: same || null } : null,
         worker,
+        reach,
       });
     } catch (err) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
@@ -3056,7 +3067,7 @@ export class Runner {
     const projects = join(dirname(this.store.path), 'projects');
     const roots = [dirname(dir), projects, ...(project.repo_dir && !project.repo_dir.startsWith(projects + sep) ? [project.repo_dir] : [])];
     const state = { ticket: ticket.id, config: { here: configDir, there: join(env.HOME ?? '', '.claude') } };
-    if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots, state });
+    if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots, state, ...(env.COORDINATOR_HOST_REACH ? { host: true as const } : {}) });
     // Nothing more to await: a stop or a dismissal meanwhile means no turn, and nothing of the minion's changed. A message
     // to a minion already dismissed does run its turn (it reopens it).
     const still = this.store.getTicket(ticket.id);
@@ -3231,6 +3242,8 @@ export class Runner {
       side?: boolean;
       /** The machine it is placed on (startPlace). */
       worker?: { id: number; name: string } | null;
+      /** The machine's name when this turn reaches its host (T8): run_on_host and the /host folders. */
+      reach?: string | null;
     },
   ) {
     const { place, person, asker, machines, model, effort, codex } = f;
@@ -3371,6 +3384,7 @@ export class Runner {
         unit,
         pool: this.pool && !codex && (!!f.worker || !(place.host && !unit && this.units)),
         machine: !!f.worker,
+        ...(f.worker && f.reach ? { hostReach: f.reach } : {}),
         folders: {
           files: filesDir,
           shared: sharedDir,
@@ -3684,6 +3698,9 @@ export class Runner {
   private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string; away?: AwayEnd } | null) {
     clearInterval(live.timer);
     this.unfollow(live);
+    // A host turn's one line on what it wrote to its machine's folders (T8).
+    const reach = live.dir ? placedAt(live.dir) : null;
+    if (reach?.host) void writesLine(live.dir, reach.name).then((wrote) => wrote && this.emit(ticketId, 'note', { text: wrote }));
     this.clock.clearTimeout(live.stopTimer);
     this.clock.clearTimeout(live.stopGraceTimer);
     this.turns.delete(ticketId);

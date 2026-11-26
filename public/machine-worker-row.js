@@ -10,7 +10,7 @@ import { failedLine, loadingLine } from './ui/state.js';
 
 /** What the page holds for a row between redraws, by machine id: its token and address, the picked OS, caps being typed, open blocks. */
 const kept = new Map();
-const keptFor = (id) => kept.get(id) ?? kept.set(id, { link: null, asking: false, error: null, os: null, caps: null, open: new Set() }).get(id);
+const keptFor = (id) => kept.get(id) ?? kept.set(id, { link: null, asking: false, error: null, os: null, caps: null, open: new Set(), folder: { name: '', path: '', write: false } }).get(id);
 
 /** Its token was replaced: the command is made again with the new one. */
 export function forgetWorkerLink(id) {
@@ -242,6 +242,107 @@ function selfTest(m, redraw) {
   );
 }
 
+// ---------- What marked minions reach on that PC (Build 7 T8, src/host-reach.ts) ----------
+
+/** One argument for that PC's shell, quoted. */
+const quoted = (win, text) => (win ? `'${text.replaceAll("'", "''")}'` : `'${text.replaceAll("'", "'\\''")}'`);
+const FOLDER_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+
+/** The folders its owner lets marked minions use, from the worker's own config there, and the command that changes them. */
+function hostFolders(m, k) {
+  const w = m.worker;
+  const win = w.wsl;
+  const tag = win ? 'powershell' : 'bash';
+  const list = w.folders ?? [];
+  const ask = k.folder;
+  const box = h('div', { class: 'worker-command' });
+  const draw = () => {
+    const name = ask.name.trim();
+    const path = ask.path.trim();
+    box.replaceChildren(FOLDER_NAME.test(name) && path ? shell(tag, workerCommand(win, `folder add ${name} ${quoted(win, path)}${ask.write ? ' --write' : ''}`)) : h('p', { class: 'muted small' }, "Type a short name (a-z, 0-9, - and _) and the folder's full path to get the command that adds it."));
+  };
+  const field = (key, label, place) => {
+    const input = h('input', { type: 'text', value: ask[key], placeholder: place, 'aria-label': label, spellcheck: 'false', autocomplete: 'off' });
+    input.oninput = () => {
+      ask[key] = input.value;
+      if (key === 'name') input.setAttribute('aria-invalid', String(!!input.value.trim() && !FOLDER_NAME.test(input.value.trim())));
+      draw();
+    };
+    return h('label', { class: 'worker-cap' }, h('span', {}, label), input);
+  };
+  const write = h('input', { type: 'checkbox', checked: ask.write });
+  write.onchange = () => {
+    ask.write = write.checked;
+    draw();
+  };
+  draw();
+  return h(
+    'section',
+    { class: 'worker-part' },
+    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Folders minions may use')),
+    h('p', { class: 'muted small' }, `Only a minion marked to run on ${m.name}, on its owner's turn, sees these, at /host/<name>. Every other turn there sees none.`),
+    w.folders === null
+      ? h('p', { class: 'muted small' }, 'Shown once that PC is back.')
+      : list.length
+        ? h('ul', { class: 'worker-reach' }, ...list.map((f) => h('li', {}, h('code', {}, `/host/${f.name}`), h('span', { class: 'worker-reach-path' }, f.path), toneChip(f.write ? 'warn' : 'neutral', f.write ? 'read-write' : 'read-only'), f.ready ? null : toneChip('error', 'not mounted'))))
+        : h('p', { class: 'muted small' }, 'None yet.'),
+    ...(w.folder_problems ?? []).map((p) => h('p', { class: 'small worker-reach-problem' }, p)),
+    h('p', { class: 'small worker-reach-warn' }, h('b', {}, "Citadel can't roll these folders back."), ' What a minion changes or deletes there stays changed. Keep a backup of anything in them you care about, and give write access only where you need it.'),
+    mine(m)
+      ? folded(
+          k,
+          'folders',
+          'Add or remove a folder',
+          h(
+            'div',
+            { class: 'worker-install' },
+            h('div', { class: 'worker-caps worker-folder-ask' }, field('name', 'Name', 'docs'), field('path', 'Path on that PC', win ? 'C:\\Users\\you\\Documents' : '/home/you/docs')),
+            h('label', { class: 'small worker-folder-write' }, write, 'Minions may write there (read-only otherwise)'),
+            h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`),
+            box,
+            ...list.map((f) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, `To remove ${f.name}:`), shell(tag, workerCommand(win, `folder remove ${f.name}`)))),
+          ),
+        )
+      : null,
+  );
+}
+
+const PROGRAMS_EXAMPLE = `"programs": {
+  "notepad": { "path": "C:\\Windows\\notepad.exe", "about": "Notepad", "args": true }
+}`;
+
+/** The programs its owner lets marked minions start (run_on_host), from that PC's agent config, and how to change them. */
+function hostPrograms(m, k) {
+  const list = m.programs;
+  return h(
+    'section',
+    { class: 'worker-part' },
+    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Programs minions may start')),
+    list === null || list === undefined
+      ? h('p', { class: 'muted small' }, m.online ? "Its agent doesn't list programs yet: update it with the install command on that machine." : "Shown while that PC's agent is connected.")
+      : list.length
+        ? h('ul', { class: 'worker-reach' }, ...list.map((p) => h('li', {}, h('code', {}, p.name), h('span', { class: 'worker-reach-path' }, p.path), p.args ? toneChip('neutral', 'takes arguments') : null, p.about ? h('span', { class: 'muted small' }, p.about) : null)))
+        : h('p', { class: 'muted small' }, 'None yet.'),
+    mine(m) && list
+      ? folded(
+          k,
+          'programs',
+          'Change the programs',
+          m.config_file
+            ? h(
+                'div',
+                { class: 'worker-install' },
+                h('p', { class: 'small' }, 'In PowerShell on that PC, open its agent config, add a "programs" block like this one and save; the agent picks it up within seconds:'),
+                shell('powershell', `notepad ${quoted(true, m.config_file)}`),
+                markdownElement(`\`\`\`json\n${PROGRAMS_EXAMPLE}\n\`\`\``),
+                h('p', { class: 'muted small' }, 'A minion starts one by its name, with arguments only where "args" is true. The agent starts nothing that is not on this list.'),
+              )
+            : h('p', { class: 'muted small' }, 'Its agent runs without a config file. Install it again with one (the install command on that machine) to list programs.'),
+        )
+      : null,
+  );
+}
+
 /** The Minion turns part of an opened row. */
 export function workerSection(m, redraw) {
   const w = m.worker;
@@ -271,6 +372,8 @@ export function workerSection(m, redraw) {
     owner ? null : h('p', { class: 'muted small' }, 'Its owner sets it up, signs in and changes its caps on that PC.'),
     owner && !w.host ? h('section', { class: 'worker-part' }, h('div', { class: 'worker-part-head' }, h('h4', {}, 'Run once on that PC')), installBlock(m, k, redraw)) : null,
     owner && w.here ? signIns(m, k) : null,
+    w.host ? hostFolders(m, k) : null,
+    w.host && w.wsl ? hostPrograms(m, k) : null,
     w.host ? selfTest(m, redraw) : null,
     owner && w.host ? folded(k, 'caps', 'Change its caps', capsBlock(m, k)) : null,
     // Closed until asked for: its command shows the token, and fetches it only then.

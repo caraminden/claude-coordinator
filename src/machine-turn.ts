@@ -29,6 +29,8 @@ export interface MachineLaunch {
   roots: string[];
   /** What its syncs go by (src/machine-sync.ts): its worktree, session and folders come from here first. */
   state?: TurnState;
+  /** A minion marked for this machine, on its owner's turn (Build 7 T8, src/host-reach.ts): its own container there, with the owner's folders at /host. */
+  host?: true;
 }
 
 /** The part of it the agent is sent. */
@@ -161,8 +163,8 @@ const workers = new Map<number, WorkerInfo>();
 const BEAT_STALE_MS = 30_000;
 /** The agent's copy of these only grows: sent as bytes past the size the server holds. */
 const APPENDED = ['stream.jsonl', 'stderr.log'];
-/** Small files the agent sends whole when they change. exit.json is put last, after the stream it ends. */
-const WHOLE = ['pid.json', 'steer.sent', 'exit.json'];
+/** Small files the agent sends whole when they change. exit.json is put last, after the stream it ends; host-writes.json (T8) before it. */
+const WHOLE = ['pid.json', 'steer.sent', 'host-writes.json', 'exit.json'];
 const SIGNALS = /^SIG(INT|TERM|KILL)$/;
 
 /** The folder's `machine` file, or null: not a machine turn (or its folder is gone). */
@@ -391,7 +393,7 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
       if (placedOn.get(dir)?.id === machineId) placedOn.delete(dir);
     }
     // Not one that has ended here (a stop before it started): there is nothing to run.
-    else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
+    else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.host ? { host: true } : {}), ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
   }
   return { turns, start, ...(clear.length ? { clear } : {}) };
 }

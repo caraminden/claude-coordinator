@@ -11,6 +11,7 @@ import { WORKER_CHECKS } from '../public/machine-setup.js';
 import { imageHashAsync } from './claude-link.ts';
 import type { Machine, Store } from './db.ts';
 import { gitOut } from './git.ts';
+import { cleanFolders, type HostFolder } from './host-reach.ts';
 import { sameClaude, type WorkerInfo } from './machine-turn.ts';
 
 /**
@@ -38,7 +39,7 @@ export type CheckLine = { key: CheckKey; name: string; state: 'waiting' | 'runni
 export type SelfTest = { id: string; at: number; done: number | null; ok: boolean; why: string | null; lines: CheckLine[] };
 export type WorkerCaps = { workers: number; threads: number; memory_gb: number; disk_gb: number };
 type ImageState = { state: 'ready' | 'building' | 'failed' | 'own'; text: string };
-type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean };
+type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean; folders: HostFolder[]; folder_problems: string[] };
 /** Kept over a restart: how the worker was last set up (its newest install, by when that ran) and what its tests said. */
 type Kept = { installed?: number; host: string; wsl: boolean; caps: WorkerCaps | null; seen: number; test: SelfTest | null; passed: number | null };
 /** A machine's worker as its row shows it. */
@@ -58,6 +59,9 @@ export type WorkerView = {
   github: boolean | null;
   disk_gb: number | null;
   full: boolean;
+  /** The owner's folders for marked minions (Build 7 T8, src/host-reach.ts), from the worker's own config; null while away. */
+  folders: HostFolder[] | null;
+  folder_problems: string[];
   test: SelfTest | null;
   /** The last self-test that passed whole. */
   passed: number | null;
@@ -187,6 +191,8 @@ export class WorkerJoin {
       github: facts?.github ?? null,
       disk_gb: facts?.disk_gb ?? null,
       full: facts?.full ?? false,
+      folders: facts?.folders ?? null,
+      folder_problems: facts?.folder_problems ?? [],
       test: running.id ? (running as SelfTest) : (kept?.test ?? null),
       passed: kept?.passed ?? null,
       twice: this.d.now() - (this.twice.get(machine.id) ?? 0) < 60_000,
@@ -227,6 +233,11 @@ export class WorkerJoin {
       github: yes(body.github),
       disk_gb: count(body.disk_gb, 100_000),
       full: body.full === true,
+      folders: cleanFolders(body.folders),
+      folder_problems: (Array.isArray(body.folder_problems) ? body.folder_problems : [])
+        .filter((p): p is string => typeof p === 'string')
+        .slice(0, 20)
+        .map((p) => p.slice(0, 300)),
     };
     this.facts.set(machine.id, facts);
     // seen is saved now and then: it only dates "away since" after a restart of this server.

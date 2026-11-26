@@ -94,12 +94,14 @@ function within(root, target) {
  * servers are MCP servers this computer's owner offers besides Claude Code's (#439): a program and its arguments, no shell.
  * A bad workspace or task is left out with a problem saying why, so one typo doesn't take the rest down.
  * screen_lock and screenshots are for a test box (tools/win-test-box/): one lock file its CI desktop jobs take too.
+ * programs (Build 7 T8): { <name>: { path, about?, args?: true } }, what minions marked for this PC may start (run_on_host).
  */
 export function loadConfig(file, env = process.env) {
   const workspaces = new Map();
   const servers = new Map();
   const problems = [];
-  const none = { workspaces, servers, problems, screenLock: null, screenshots: false, jobs: null };
+  const programs = new Map();
+  const none = { workspaces, servers, problems, screenLock: null, screenshots: false, jobs: null, programs };
   if (!existsSync(file)) return none;
   let raw;
   try {
@@ -167,7 +169,56 @@ export function loadConfig(file, env = process.env) {
     }
     workspaces.set(name, { name, path, read, gitSync, tasks });
   }
-  return { workspaces, servers, problems, screenLock, screenshots, jobs: raw?.jobs === undefined ? null : loadJobs(raw.jobs, problems, env) };
+  loadPrograms(raw?.programs, programs, problems, env);
+  return { workspaces, servers, problems, screenLock, screenshots, jobs: raw?.jobs === undefined ? null : loadJobs(raw.jobs, problems, env), programs };
+}
+
+// ---------- host programs (Build 7 T8, src/host-reach.ts) ----------
+
+const PROGRAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+
+/** The owner's programs block into `into`; a bad one is left out with a problem. Only this file lists them: the app sends a name, never a path. */
+function loadPrograms(raw, into, problems, env) {
+  if (raw === undefined) return;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return void problems.push('"programs" must be { <name>: { path, about?, args? } }, so no program can be started');
+  for (const [name, p] of Object.entries(raw)) {
+    if (!PROGRAM_NAME.test(name)) problems.push(`program "${name}": names use letters, digits, -, _ and .`);
+    else if (typeof p?.path !== 'string') problems.push(`program ${name}: "path" must be the program's full path`);
+    else if (p.args !== undefined && typeof p.args !== 'boolean') problems.push(`program ${name}: "args" must be true or false`);
+    else {
+      try {
+        const path = expand(p.path, env);
+        if (!isAbsolute(path)) throw new Error('"path" must be a full path');
+        into.set(name, { name, path, about: typeof p.about === 'string' ? p.about.slice(0, 300) : '', args: p.args === true });
+      } catch (err) {
+        problems.push(`program ${name}: ${err.message}`);
+      }
+    }
+  }
+}
+
+/**
+ * Start one of the owner's programs for a marked minion (run_on_host): only one on the list, its arguments only where
+ * the owner said args, never through a shell. Resolves with its pid, or throws a ToolError naming the list.
+ * @param {Map<string, { name: string, path: string, args: boolean }>} programs @param {{ program?: unknown, args?: unknown }} ask
+ * @param {(path: string, args: string[], opts: import('node:child_process').SpawnOptions) => { pid?: number, once(event: string, on: (err: Error) => void): unknown, unref(): void }} [run]
+ */
+export function startProgram(programs, ask, run = spawn) {
+  const name = String(ask.program ?? '');
+  const p = programs.get(name);
+  const list = [...programs.keys()];
+  if (!p) throw new ToolError(`"${name}" isn't one of the programs this PC's owner lists for minions. ${list.length ? `They are: ${list.join(', ')}.` : 'They list none (programs in machine-agent.json).'}`);
+  const args = Array.isArray(ask.args) ? ask.args.map(String) : [];
+  if (args.length && !p.args) throw new ToolError(`${name} takes no arguments here: its owner didn't allow them.`);
+  if (!existsSync(p.path)) throw new ToolError(`${name}'s program isn't there any more (${p.path}).`);
+  return new Promise((done, fail) => {
+    const child = run(p.path, args, { cwd: dirname(p.path), detached: true, stdio: 'ignore', shell: false, windowsHide: false });
+    child.once('error', (err) => fail(new ToolError(`${name} could not start: ${err.message}`)));
+    child.once('spawn', () => {
+      child.unref();
+      done(child.pid ?? null);
+    });
+  });
 }
 
 /**
@@ -672,7 +723,7 @@ export class WorkspaceHost {
   }
 
   reload() {
-    ({ workspaces: this.all, servers: this.servers, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots, jobs: this.jobsBlock } = loadConfig(this.configFile, this.env));
+    ({ workspaces: this.all, servers: this.servers, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots, jobs: this.jobsBlock, programs: this.programs } = loadConfig(this.configFile, this.env));
   }
 
   /** The workspaces minions get: every tool reads these, so one that isn't lent is not there for them. */
@@ -689,6 +740,8 @@ export class WorkspaceHost {
   summary() {
     return {
       workspaces: [...this.all.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, git_sync: w.gitSync, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about, args: t.args })) })),
+      programs: [...this.programs.values()].map((p) => ({ name: p.name, path: p.path, about: p.about, args: p.args })),
+      config_file: this.configFile,
       problems: this.problems,
     };
   }
@@ -2509,6 +2562,20 @@ async function main() {
         worker?.poke();
       } else if (msg.job) {
         runner.handle(msg.job).catch((err) => log(`Job ${msg.job.id}: ${err.message}`));
+      } else if (msg.host_start) {
+        // run_on_host (T8): checked against this file's own list, whatever the app asks.
+        const ask = msg.host_start;
+        const answer = (body) => fetch(new URL('/api/machines/host-started', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ask.id, ...body }) }).catch((err) => log(`Could not tell the app about ${ask.program}: ${err.message}`));
+        Promise.resolve()
+          .then(() => startProgram(host?.programs ?? new Map(), ask))
+          .then((pid) => {
+            log(`Started ${ask.program} for a minion (process ${pid}).`);
+            return answer({ ok: true, pid });
+          })
+          .catch((err) => {
+            log(`Refused to start ${ask.program}: ${err.message}`);
+            return answer({ ok: false, error: err.message });
+          });
       } else if (msg.close) {
         stopServer(msg.session);
       } else if (msg.session && msg.server === 'ws') {

@@ -25,6 +25,7 @@ import { UNINSTALL } from './machine-away.ts';
 import { thrown } from './thrown.ts';
 import { asData } from './quote.ts';
 import type { WorkerJoin } from './worker-join.ts';
+import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -208,6 +209,9 @@ interface Agent {
   found: FoundServer[];
   workspaces: { name: string }[];
   problems: string[];
+  /** The programs its owner lets marked minions start there (Build 7 T8, src/host-reach.ts), and the config file that lists them. */
+  programs?: HostProgram[];
+  configFile?: string | null;
   /** The jobs (#857) it last said it holds; null when it named none at all, or hasn't said. */
   jobs?: Set<number> | null;
   /** Its hourly check, and the connect check for an agent that never posts its info (#437). */
@@ -484,6 +488,9 @@ export class MachineRelay {
       runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
+      /** What marked minions may start there (T8), from its owner's config file on that PC; null while offline. */
+      programs: agent && !agent.runners ? (agent.programs ?? []) : null,
+      config_file: agent?.configFile ?? null,
       /** What its owner's machine-agent.json lets jobs use (#857), or null: no jobs there. */
       jobs: storedOffer(machine),
       job_settings: storedSettings(machine),
@@ -532,6 +539,14 @@ export class MachineRelay {
     return storedLend(machine)?.worker === true;
   }
 
+  /** Starts of the owner's programs for marked minions (T8, run_on_host): sent to the agent, which checks its own list. */
+  readonly hostStarts = new HostStarts((machineId, msg) => {
+    const agent = this.agents.get(machineId);
+    if (!agent || agent.runners) return false;
+    agent.res.write(`data: ${JSON.stringify({ host_start: msg })}\n\n`);
+    return true;
+  });
+
   /** Hurry a worker agent's next sync of its turns (src/machine-turn.ts); it syncs by itself anyway. */
   pokeWorker(machineId: number) {
     this.agents.get(machineId)?.res.write(`data: ${JSON.stringify({ worker: 'poke' })}\n\n`);
@@ -577,6 +592,7 @@ export class MachineRelay {
 
   private dropAgent(machineId: number, agent: Agent) {
     this.agents.delete(machineId);
+    this.hostStarts.dropped(machineId);
     // Their MCP servers are gone with the agent; ending the proxies' streams tells claude so.
     for (const id of agent.sessions) this.endSession(id, false);
     for (const [id, j] of this.jobs) if (j.machineId === machineId) j.done({ ok: false, output: 'The runner agent went offline before it answered; what it did so far is on its PC (list shows it).' });
@@ -606,7 +622,7 @@ export class MachineRelay {
   }
 
   /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
-  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown }): boolean {
+  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; programs?: unknown; config_file?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     if (!agent) return false;
     // A runner agent offers no MCP server or workspaces, whatever it says.
@@ -614,6 +630,8 @@ export class MachineRelay {
     agent.managed = body.v === 2;
     agent.found = agent.managed ? cleanFound(body.found) : [];
     agent.workspaces = cleanWorkspaces(body.workspaces);
+    agent.programs = cleanPrograms(body.programs);
+    agent.configFile = typeof body.config_file === 'string' ? body.config_file.slice(0, 500) : null;
     agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])] : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
     // Its owner's jobs block (#857), or none, and the jobs it holds, which the queue reconciles. An agent lists them even

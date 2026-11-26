@@ -11,7 +11,7 @@ import { fake } from './typed.ts';
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
 const BUDGET = {
-  minion: 35_060 /* +160 on 2026-11-25 for citadel-job and a wait the server takes over (#1890); +250 on 2026-11-22 for the callers-and-twins and no-multi-file-dump lines (#1644);  -1,096 on 2026-11-22: the citadel-heavy line moved to the kit's heavy-nudge hook (#1577); +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5); -1,750 on 2026-11-22: seven lines moved to their homes (#1574) */,
+  minion: 35_100 /* +40 on 2026-11-25 for a whole /host/<name> in the tripwire line (#2070, Build 7 T8); +160 on 2026-11-25 for citadel-job and a wait the server takes over (#1890); +250 on 2026-11-22 for the callers-and-twins and no-multi-file-dump lines (#1644);  -1,096 on 2026-11-22: the citadel-heavy line moved to the kit's heavy-nudge hook (#1577); +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5); -1,750 on 2026-11-22: seven lines moved to their homes (#1574) */,
   taskmaster: 42_000 /* +150 on 2026-11-24 for the mark_urgent line (#1888); +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */,
 };
 

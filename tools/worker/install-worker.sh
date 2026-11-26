@@ -101,6 +101,8 @@ Before=systemd-user-sessions.service
 [Service]
 Type=oneshot
 ExecStart=/bin/mount --make-rshared /
+# The owner's host folders (citadel-worker folder add), before the worker starts. Not there yet on a first install.
+ExecStart=-/usr/local/bin/citadel-worker mount-folders
 RemainAfterExit=yes
 
 [Install]

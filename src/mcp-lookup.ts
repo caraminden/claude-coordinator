@@ -3,6 +3,20 @@ import type { ArtifactRow, QueuedJob } from './mcp-types.ts';
 import { memoryText, pastMinionsText, ideasText, decisionsText, ago, checkLines, machineText, usageSplitText, type CheckResult, type MachineInfo, type MemoryHit, type PastHit, type IdeaRow } from './mcp-text.ts';
 import { C, call, NOT_HERE } from './mcp-call.ts';
 
+/** Build 7 T8 (src/host-reach.ts): offered only on a turn that reaches its machine's host. */
+export const RUN_ON_HOST = () => ({
+  name: 'run_on_host',
+  description: `Start one of the Windows (or Linux) programs the owner of ${C().HOST_REACH} listed for minions, on that PC itself, through its agent; it refuses any other and names the list. It starts the program and returns: it doesn't wait for it or show its output. The owner's chosen folders are at /host/<name> in this turn; the program sees them at their own paths on that PC. Each start shows in your chat.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      program: { type: 'string', description: "The program's name as the owner listed it (the Machines page shows the list)" },
+      args: { type: 'array', items: { type: 'string' }, description: 'Its arguments, only for a program the owner let take them; no shell' },
+    },
+    required: ['program'],
+  },
+});
+
 export const QUEUE_JOB = () => ({
   name: 'queue_job',
   description:
@@ -195,6 +209,10 @@ export async function runLookupTool(name: string, args: Record<string, unknown>)
       if (typeof args.status === 'string') q.set('status', args.status);
       const r = await call<Parameters<typeof ideasText>[0]>('GET', `/api/projects/${C().PROJECT}/ideas?${q}`);
       return ideasText(r, Math.min(Math.max(Number(args.limit) || 30, 1), 200));
+    }
+    case 'run_on_host': {
+      const r = await call<{ machine: string; pid: number | null }>('POST', '/api/machines/run-on-host', { program: args.program, ...(args.args === undefined ? {} : { args: args.args }) });
+      return `Started ${String(args.program)} on ${r.machine}${r.pid ? ` (process ${r.pid})` : ''}.`;
     }
     case 'list_machines': {
       const { machines, others } = await call<{ machines: MachineInfo[]; others?: { name: string; owner_name?: string | null }[] }>('GET', `/api/projects/${C().PROJECT}/machines`);

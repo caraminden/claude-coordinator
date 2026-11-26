@@ -1745,3 +1745,12 @@ test("a folder, `.` or another commit's version checked out or restored: its dif
     rmSync(tmp, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });
+
+test("a whole /host/<name> folder of a machine's owner can't be removed, moved or emptied; files inside it can (Build 7 T8)", () => {
+  for (const command of ['rm -rf /host/docs', 'rm -r /host/docs/', 'rm -rf /host/docs/*', 'rm -rf /host', 'rm -rf /host/*', 'mv /host/docs /tmp/docs', 'find /host/docs -delete', 'cd /host && rm -rf docs', 'rmdir /host/docs']) {
+    const v = verdict(command);
+    assert.match(v?.reason ?? '', /whole folder of its owner's PC/, command);
+    assert.ok(!v?.ask, `${command}: a hard block, no card`);
+  }
+  for (const command of ['rm /host/docs/notes.txt', 'rm -rf /host/docs/build', 'mv /host/docs/a.txt /host/docs/b.txt', 'find /host/docs -name "*.tmp" -type f', 'ls /host']) assert.equal(bash(command), null, command);
+});

@@ -1074,6 +1074,11 @@ function schemeFolder(p: string, cfg: TripwireConfig): boolean {
   return p === own || (under(p, own) && !p.slice(own.length + 1).includes('/'));
 }
 
+/** A whole folder of a machine's owner (Build 7 T8, /host/<name> in a marked minion's container), /host itself, or all of one's entries (`/host/docs/*`). */
+function hostFolder(p: string): boolean {
+  return p === '/host' || dirname(p) === '/host' || (/[*?[]/.test(basename(p)) && hostFolder(dirname(p)));
+}
+
 const ENV_WHY = 'Check one variable with `[ -n "$NAME" ] && echo set`, list the names alone with `env | cut -d= -f1`, or print a harmless one with `echo "$PATH"`: a turn\'s environment can hold its tokens.';
 const ENV_ALL = `\`env\` with no command prints the whole environment, values and all. ${ENV_WHY}`;
 
@@ -1474,6 +1479,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       if (why) return { reason: `\`${name}\` would change ${p}. ${why}`, ask: askable(p, name === 'sqlite3' && !sqlShown(args) ? '' : name, cfg) };
       if ((REMOVERS.has(name) || name === 'find') && containsProtected(p, cfg)) return hard(`\`${name}\` on ${p} would take protected folders with it (the live checkout, data, config or keys). Name the exact path you mean.`);
       if ((REMOVERS.has(name) || name === 'find') && schemeFolder(p, cfg)) return hard(`\`${name}\` on ${p} would take a whole part of your scheme's folder with it (its main checkout, every minion's worktree, the shared folder or every TMPDIR). Name the exact path you mean, one level further down.`);
+      if ((REMOVERS.has(name) || name === 'find') && hostFolder(p)) return hard(`\`${name}\` on ${p} would take a whole folder of its owner's PC with it, and Citadel can't roll those back. Name the exact files you mean inside it.`);
     }
   }
   return null;

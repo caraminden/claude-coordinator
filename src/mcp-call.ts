@@ -30,6 +30,8 @@ function config(env: NodeJS.ProcessEnv) {
     // The machines this minion's turn got (#617): it may propose new notes for them (checked at call time, #878).
     MACHINES: (env.COORDINATOR_MACHINES ?? '').split(',').filter(Boolean),
     JOB_MACHINES: (env.COORDINATOR_JOB_MACHINES ?? '').split(',').filter(Boolean),
+    /** The machine whose host this turn reaches (Build 7 T8): it is offered run_on_host. */
+    HOST_REACH: env.COORDINATOR_HOST_REACH ?? '',
     /** The scheme's message settings as this turn launched (#1059): every number in the messaging tool text comes from here. */
     MSG: msgFromEnv(env.COORDINATOR_MSG),
     // propose_host_tool (#1147; Josh, 2026-11-19): the server's own list of host tools, which turn-launch names in the env.

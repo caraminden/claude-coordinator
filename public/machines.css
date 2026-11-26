@@ -169,3 +169,13 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
   .worker-checks li { grid-template-columns: 1.3rem minmax(0, 1fr); }
   .worker-check-text { grid-column: 2; }
 }
+/* What marked minions reach on that PC (Build 7 T8). */
+.worker-reach { list-style: none; display: grid; gap: 0.3rem; margin: 0; padding: 0; }
+.worker-reach li { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; align-items: center; min-width: 0; }
+.worker-reach-path { color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+.worker-reach-warn { padding: 0.45rem 0.6rem; border-radius: 6px; background: color-mix(in srgb, var(--waiting-tint) 16%, transparent); }
+.worker-reach-problem { color: var(--error); }
+.worker-folder-ask { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+.worker-folder-ask input { width: 100%; box-sizing: border-box; margin: 0; }
+.worker-folder-write { display: flex; gap: 0.4rem; align-items: center; margin: 0; cursor: pointer; }
+.worker-folder-write input { width: auto; margin: 0; }

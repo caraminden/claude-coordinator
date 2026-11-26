@@ -26,6 +26,10 @@ const NO_IMAGE = `${IMAGE}:none`;
 const REPLACED = 64;
 /** Where the self-test's folders show inside its container. */
 const TEST_ROOT = '/citadel-self-test';
+/** Where `citadel-worker folder add` mounts each of the owner's host folders in this distro, as root (T8). */
+export const HOST_SRC = '/mnt/citadel-host';
+/** A host folder's name: its place in a marked minion's container, /host/<name>. */
+export const FOLDER_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
 /** @param {string} cmd @param {string[]} args @param {number} [timeout] @returns {Promise<{ code: number, out: string, err: string }>} */
 const run = (cmd, args, timeout = 60_000) => new Promise((done) => execFile(cmd, args, { timeout, maxBuffer: 8 << 20 }, (err, out, stderr) => done({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(stderr || err?.message || '') })));
@@ -46,7 +50,54 @@ export function agentConfig(raw) {
     image: typeof c.image === 'string' && c.image ? c.image : null,
     podman: typeof c.podman === 'string' ? c.podman : 'podman',
     caps: { workers: num('workers', 64), threads: num('threads', 1024), memory_gb: num('memory_gb', 4096), disk_gb: num('disk_gb', 100_000) },
+    ...hostFolders(c.folders),
   };
+}
+
+/**
+ * The owner's host folders (T8, "Chosen folders + programs"): { <name>: { path, write? } } in config.json, which only
+ * `citadel-worker folder` (as root) changes. A bad one is left out with a problem saying why; read-only unless write is true.
+ * @param {unknown} raw @returns {{ folders: { name: string, path: string, write: boolean }[], problems: string[] }}
+ */
+export function hostFolders(raw) {
+  /** @type {{ name: string, path: string, write: boolean }[]} */
+  const folders = [];
+  /** @type {string[]} */
+  const problems = [];
+  if (raw === undefined || raw === null) return { folders, problems };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { folders, problems: ['folders must be { <name>: { path, write } }'] };
+  for (const [name, v] of Object.entries(raw)) {
+    const f = /** @type {Record<string, unknown>} */ (v ?? {});
+    if (!FOLDER_NAME.test(name)) problems.push(`folder "${name}": names are lower-case letters, digits, - and _`);
+    else if (typeof f.path !== 'string' || !folderPath(f.path)) problems.push(`folder ${name}: its path must be a full Windows or Linux path to a folder, not a whole drive`);
+    else if (f.write !== undefined && typeof f.write !== 'boolean') problems.push(`folder ${name}: write must be true or false`);
+    else folders.push({ name, path: f.path, write: f.write === true });
+  }
+  return { folders: folders.slice(0, 20), problems: folders.length > 20 ? [...problems, 'only the first 20 folders are used'] : problems };
+}
+
+/** A folder's path as the owner gives it: C:\\Users\\me\\Photos, or /home/me/photos on Linux. Never a drive's root, nor / . @param {string} p */
+export function folderPath(p) {
+  if (/[\0\n,]/.test(p)) return false;
+  if (/^[A-Za-z]:\\/.test(p)) return /^[A-Za-z]:\\(?!\\)[^:*?"<>|]*[^\\:*?"<>|\s]$/.test(p) && !/(^|\\)\.\.(\\|$)/.test(p);
+  return isAbsolute(p) && normalize(p) === p && p !== '/' && !p.endsWith('/');
+}
+
+/** Which of `folders` are mounted at HOST_SRC now (citadel-worker mount-folders), from this distro's mount table. @param {string} [table] */
+export function mountedFolders(table = safeRead('/proc/self/mountinfo')) {
+  const at = new Set(
+    table
+      .split('\n')
+      .map((l) => l.split(' ')[4] ?? '')
+      .filter((p) => p.startsWith(`${HOST_SRC}/`))
+      .map((p) => p.slice(HOST_SRC.length + 1)),
+  );
+  return at;
+}
+
+/** The binds a marked minion's container gets: each mounted folder at /host/<name>, read-only unless the owner said write. @param {{ name: string, write: boolean }[]} folders @param {Set<string>} mounted */
+export function hostMounts(folders, mounted) {
+  return folders.filter((f) => mounted.has(f.name)).map((f) => ({ src: `${HOST_SRC}/${f.name}`, dst: `/host/${f.name}`, ro: !f.write }));
 }
 
 export class WorkerAgent {
@@ -97,6 +148,7 @@ export class WorkerAgent {
   }
 
   async start() {
+    this.worker.cfg.host = hostMounts(this.cfg.folders, mountedFolders());
     await this.worker.start();
     this.fit();
     this.log(`Minion turns: up to ${this.cfg.caps.workers} at once, in ${this.cfg.root}`);
@@ -141,7 +193,11 @@ export class WorkerAgent {
 
   /** Tell the app how this worker stands, and do what it answers. */
   async report() {
-    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test };
+    // The owner's folders as mounted now: a marked minion's turn starting next gets these (machine-worker.mjs boxOf).
+    const mounted = mountedFolders();
+    this.worker.cfg.host = hostMounts(this.cfg.folders, mounted);
+    const folders = this.cfg.folders.map((f) => ({ ...f, ready: mounted.has(f.name) }));
+    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test, folders, folder_problems: this.cfg.problems };
     const reply = await this.json('/api/machines/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     this.said = null;
     if (!this.code && !reply.replaced) this.log(`Connected to ${this.appUrl} as ${hostname()}`);
@@ -150,6 +206,8 @@ export class WorkerAgent {
       this.stop();
       // The other one is handed these turns: they must not run on both.
       await this.exec(this.cfg.podman, ['rm', '-f', '-t', '0', 'citadel-worker']);
+      // And a marked minion's own container, with the owner's folders (T8).
+      await this.exec(this.cfg.podman, ['rm', '-f', '-t', '0', 'citadel-worker-host']);
       this.worker.turns.clear();
       this.worker.save();
       return this.exit(REPLACED);

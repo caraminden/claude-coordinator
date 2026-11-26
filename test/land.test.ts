@@ -49,6 +49,28 @@ test('a rebase that changes land.sh hands over to the rebased copy, which keeps 
   assert.match(readFileSync(join(state, 'queue', '.took'), 'utf8'), /^\d+\n$/);
 });
 
+// The same when only a part changed (#2099): land.sh's parts (tools/land/*.sh) are read once, up front, so a rebase
+// that brings a new or changed part hands over to a copy that sources it.
+test('a rebase that changes only a part of land.sh hands over to the rebased copy, which lands with it (#2099)', () => {
+  const r = setup();
+  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real land.sh');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  // Main gains a part the worktree's copy never sourced; it rewords one line, so the copy that sources it shows.
+  mkdirSync(join(r.source, 'tools', 'land'));
+  writeFileSync(join(r.source, 'tools', 'land', 'extra.sh'), `say() { [ "$*" != "running the tests" ] || set -- "running the tests (a part's say)"; echo "land: $*" >&2; }\n`);
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'a part');
+  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), COORDINATOR_SHARED_DIR: join(r.dir, 'shared') } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /running the tests \(a part's say\)/);
+  assert.equal(res.stderr.match(/rebasing/g)?.length, 1, res.stderr);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.equal(r.note(), 'locked=1 held=yes', 'the deploy still runs under the lock');
+});
+
 // A killed land.sh must not leave its test run holding the deploy lock (ultra review A4).
 test("the test run doesn't get the deploy lock's fd 9", () => {
   const r = setup();

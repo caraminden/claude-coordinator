@@ -670,6 +670,53 @@ CREATE TABLE IF NOT EXISTS time_log_explains (
   data TEXT NOT NULL,
   at INTEGER NOT NULL
 );
+-- Cabal boards (#2090, src/db/cabals.ts, src/cabal-board.ts): one per lead minion (a cabal's Overseer). Only what is written
+-- lives here: the roster rows (a member's own row once it is started with cabal), notes, asks, the lead's log and its red-run
+-- line. Each member's state, merges, claims, start_after, spend and risk are read from facts when the board is read.
+CREATE TABLE IF NOT EXISTS cabals (
+  lead_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  red TEXT,
+  red_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cabal_rows (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES cabals(lead_id) ON DELETE CASCADE,
+  ticket_id INTEGER UNIQUE REFERENCES tickets(id) ON DELETE SET NULL,
+  label TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  lane TEXT NOT NULL DEFAULT '',
+  after TEXT NOT NULL DEFAULT '',
+  files TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  note_at INTEGER,
+  pos INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cabal_rows_lead ON cabal_rows(lead_id, pos);
+CREATE TABLE IF NOT EXISTS cabal_asks (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES cabals(lead_id) ON DELETE CASCADE,
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  blocking INTEGER NOT NULL DEFAULT 0,
+  opened_at INTEGER NOT NULL,
+  answer TEXT,
+  answered_at INTEGER,
+  answered_by TEXT
+);
+CREATE INDEX IF NOT EXISTS cabal_asks_lead ON cabal_asks(lead_id, answered_at);
+CREATE TABLE IF NOT EXISTS cabal_log (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES cabals(lead_id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  by TEXT NOT NULL,
+  text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cabal_log_lead ON cabal_log(lead_id, id);
 -- Pauses over 2 s people's pages noticed (#1752, src/db/slow-moments.ts): where the time went. The newest SLOW_KEEP kept.
 CREATE TABLE IF NOT EXISTS slow_moments (
   id INTEGER PRIMARY KEY,

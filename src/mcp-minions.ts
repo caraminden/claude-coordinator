@@ -121,6 +121,7 @@ export const CREATE_TICKET = {
         description: 'The #N this minion is started for: it shows as from #N and inherits its build unless build is given. Default: the minion whose message you are answering; null for none.',
       },
       build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any. A build whose branch build/<n> exists sets its base and target: the minion starts from build/<n> and merges into it, never main.` },
+      cabal: { type: 'integer', description: "The #N of the minion that leads this one's cabal: puts it on that lead's board (a roster row with the same title becomes its row)." },
       build_owner: { type: 'boolean', description: 'true for the build minion of a new build: it makes build/<n>, keeps the list of what is in, takes main in daily and ships the build with one go card. Needs build.' },
       model: MODEL,
       effort: EFFORT,
@@ -210,6 +211,7 @@ export const UPDATE_TICKET = {
       reason: PICK_REASON,
       workflow: WORKFLOW,
       plugin_folders: PLUGIN_FOLDERS,
+      cabal: { type: ['integer', 'null'], description: 'The #N of the lead whose cabal board it goes on; null takes it off its board.' },
       start_after: { type: 'null', description: 'Only null: takes a sealed minion off its start_after chain but keeps it sealed. Its brief stays held as mail, it no longer starts when its leader ships, and it starts only when someone unseals it or you message it with unpark.' },
     },
     required: ['ticket_id'],
@@ -572,6 +574,7 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
         parent: args.parent,
         build: args.build,
         build_owner: args.build_owner === true || undefined,
+        cabal: args.cabal ?? undefined,
         model: args.model ?? null,
         effort: args.effort ?? null,
         pick_reason: args.reason,
@@ -613,8 +616,8 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders', 'start_after'], 'update_ticket');
-      return `Updated. ${ticketLine(await call<TicketView>('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
+      needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders', 'start_after', 'cabal'], 'update_ticket');
+      return `Updated. ${ticketLine(await call<TicketView>('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), cabal: args.cabal, model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'set_thread_status':
       needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
       {

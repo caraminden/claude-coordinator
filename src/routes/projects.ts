@@ -59,6 +59,7 @@ import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { addArchitectureCheck, addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
+import { cabalLead, putOnCabal } from './cabals.ts';
 import { afterAllWrites, buildNumber, HttpError, isRecord, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
@@ -363,11 +364,13 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
   const owner = body.build_owner === true;
   if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
+  if (body.cabal != null) cabalLead(store, project.id, body.cabal, null); // refused before anything is made
   const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
   // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
   store.addPick(id, model, effort, pickBy, because);
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
   await ownWrites(); // its build owner and the reply read the row back (#1244)
+  if (body.cabal != null) putOnCabal(app, { id, project_id: project.id, title }, body.cabal, session.name);
   const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
   if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
   // And it is that turn's asker's ask (#255), so its messages back count as theirs.

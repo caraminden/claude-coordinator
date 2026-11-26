@@ -1,0 +1,225 @@
+// A cabal's board (#2090, specs/foreman-crews-proposal.md "The cabal board"): one per lead (its Overseer), read by the
+// lead, its cabal and people in place of the lead's chat. src/db/cabals.ts keeps what is written (rows, notes, asks, the
+// log, the red-run line); everything else on a row is a fact read here: its state from the minions list, merged into
+// build/<n> from git, its claims from build-claims.md on the branch, what it waits on from start_after, spend and risk.
+// Code says cabal and lead; people read "<cabal>'s Overseer" (Josh, 2026-11-25: one Overseer per build).
+import { buildRefs, mergedInto } from './builds.ts';
+import type { Store } from './db.ts';
+import type { CabalAsk, CabalLogLine, CabalMemberRow } from './db/cabals.ts';
+import type { Ticket, TicketFields } from './db-rows.ts';
+import { EFFORT_KEY } from './effort-retros.ts';
+import { gitOut } from './git.ts';
+import { pacificClock } from './pacific.ts';
+import { parseShipNote, type Risk } from './ship-risk.ts';
+
+export type MemberState = 'roster' | 'sealed' | 'running' | 'idle' | 'blocked' | 'merged' | 'shipped' | 'closed';
+/** The word people read for each state. */
+export const STATE_WORD: Record<MemberState, string> = {
+  roster: 'not started',
+  sealed: 'sealed',
+  running: 'building',
+  idle: 'open',
+  blocked: 'blocked',
+  merged: 'merged',
+  shipped: 'shipped',
+  closed: 'dismissed',
+};
+/** Open ones first, the blocked on top (the picked ledger's order). */
+const ORDER: Record<MemberState, number> = { blocked: 0, running: 1, idle: 2, sealed: 3, roster: 4, merged: 5, shipped: 6, closed: 7 };
+const DONE = new Set<MemberState>(['merged', 'shipped', 'closed']);
+
+export interface BoardAsk {
+  id: number;
+  from: string;
+  number: number | null;
+  text: string;
+  blocking: boolean;
+  opened_at: number;
+}
+
+export interface BoardMember {
+  row: number;
+  label: string;
+  title: string;
+  number: number | null;
+  lane: string;
+  role: string;
+  state: MemberState;
+  word: string;
+  /** What it waits on: "#N" from its start_after, else what the lead wrote on its row. */
+  after: string | null;
+  note: string;
+  note_at: number | null;
+  spend: number;
+  risk: Risk | null;
+  /** Its line in build-claims.md on build/<n>, in a build cabal. */
+  claims: string[];
+  /** The files it expects to touch, as listed on its row. */
+  files: string[];
+  /** Its listed files another member lists too. */
+  doubled: string[];
+}
+
+export interface Board {
+  lead: { id: number; number: number | null; title: string; spend: number };
+  /** "Build 7", the Goal's name, or the lead's title. */
+  name: string;
+  kind: 'build' | 'goal';
+  build: number | null;
+  members: BoardMember[];
+  asks: BoardAsk[];
+  log: CabalLogLine[];
+  red: { text: string; at: number } | null;
+  counts: { members: number; started: number; merged: number; open: number; running: number; spend: number };
+}
+
+/** "#4: a.ts b/" lines of build-claims.md, read as land.sh's claims_check does: a list mark, backticks and commas are spaces. */
+export function parseClaims(text: string): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  for (const raw of text.split('\n')) {
+    const l = raw.replace(/^[-*][ \t]+/, '').replace(/[`,]/g, ' ');
+    const m = /^#(\d+):(.*)$/.exec(l);
+    if (m) out.set(Number(m[1]), [...(out.get(Number(m[1])) ?? []), ...m[2].split(/[ \t]+/).filter(Boolean)]);
+  }
+  return out;
+}
+
+/** The files on a row, one a line (commas and spaces split too). */
+export const rowFiles = (files: string): string[] => [
+  ...new Set(
+    files
+      .split(/[\n,\s]+/)
+      .map((f) => f.trim().replace(/^`|`$/g, ''))
+      .filter(Boolean),
+  ),
+];
+
+/** Each member's files that another lists too: the same path, or one inside a folder (ending in /) another lists. */
+export function doubledFiles(lists: string[][]): string[][] {
+  const hit = (a: string, b: string) => a === b || (a.endsWith('/') && b.startsWith(a)) || (b.endsWith('/') && a.startsWith(b));
+  return lists.map((mine, i) => mine.filter((f) => lists.some((other, j) => j !== i && other.some((g) => hit(f, g)))));
+}
+
+export interface BoardDeps {
+  /** Whether a minion is sealed (Runner.parked: state sealed, chained, or waiting on its start card). */
+  parked: (t: TicketFields) => boolean;
+}
+
+/** The lead's board with every fact read now, or null when it leads none. */
+export async function readBoard(store: Store, leadId: number, deps: BoardDeps): Promise<Board | null> {
+  const cabal = store.getCabal(leadId);
+  const lead = store.getTicket(leadId);
+  if (!cabal || !lead) return null;
+  const repoDir = store.getProject(lead.project_id)?.repo_dir ?? null;
+  const ref = lead.build != null && repoDir ? ((await buildRefs(repoDir)).get(lead.build) ?? null) : null;
+  const claims = ref && repoDir ? parseClaims((await gitOut(['show', `${ref}:build-claims.md`], repoDir)) ?? '') : new Map<number, string[]>();
+  const rows = store.cabalRows(leadId);
+  const asks = store.cabalAsks(leadId);
+  const tickets = new Map(rows.filter((r) => r.ticket_id != null).map((r) => [r.ticket_id!, store.getTicket(r.ticket_id!)]));
+  const fileLists = rows.map((r) => rowFiles(r.files));
+  const doubled = doubledFiles(fileLists);
+  const members: BoardMember[] = [];
+  for (const [i, r] of rows.entries()) {
+    const t = r.ticket_id != null ? tickets.get(r.ticket_id) : undefined;
+    const ship = parseShipNote(t ? (store.lastShipNote(t.id) ?? '') : '');
+    const state = await stateOf(t, ship?.kind ?? null, ref, repoDir, asks, deps);
+    members.push({
+      row: r.id,
+      label: r.label,
+      title: r.title || t?.title || '',
+      number: t?.number ?? null,
+      lane: r.lane,
+      role: r.role,
+      state,
+      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : STATE_WORD[state],
+      after: (t && afterOf(store, t)) || r.after || null,
+      note: r.note,
+      note_at: r.note_at,
+      spend: t ? store.ticketCost(t.id) : 0,
+      risk: ship?.risk ?? null,
+      claims: t?.number != null ? (claims.get(t.number) ?? []) : [],
+      files: fileLists[i],
+      doubled: doubled[i],
+    });
+  }
+  members.sort((a, b) => ORDER[a.state] - ORDER[b.state]);
+  const byTicket = new Map(rows.map((r) => [r.ticket_id, r]));
+  const leadSpend = store.ticketCost(leadId);
+  return {
+    lead: { id: lead.id, number: lead.number, title: lead.title, spend: leadSpend },
+    name: cabal.name || (lead.build != null ? `Build ${lead.build}` : String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title),
+    kind: ref ? 'build' : 'goal',
+    build: ref ? lead.build : null,
+    members,
+    asks: asks.map((a) => askOf(a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
+    log: store.cabalLog(leadId),
+    red: cabal.red ? { text: cabal.red, at: cabal.red_at ?? cabal.created_at } : null,
+    counts: {
+      members: members.length,
+      started: members.filter((m) => m.state !== 'roster').length,
+      merged: members.filter((m) => m.state === 'merged' || m.state === 'shipped').length,
+      open: members.filter((m) => !DONE.has(m.state)).length,
+      running: members.filter((m) => m.state === 'running').length,
+      spend: members.reduce((s, m) => s + m.spend, leadSpend),
+    },
+  };
+}
+
+async function stateOf(t: Ticket | undefined, ship: 'shipped' | 'merged' | null, ref: string | null, repoDir: string | null, asks: CabalAsk[], deps: BoardDeps): Promise<MemberState> {
+  if (!t) return 'roster';
+  if (ref && repoDir && (await mergedInto(repoDir, t, ref))) return 'merged';
+  if (ship === 'shipped') return 'shipped';
+  if (t.status === 'closed') return 'closed';
+  if (asks.some((a) => a.ticket_id === t.id && a.blocking)) return 'blocked';
+  if (t.status === 'running') return 'running';
+  if (deps.parked(t)) return 'sealed';
+  return 'idle';
+}
+
+/** "#N" of the minion it starts after, from its chain (start_after), while it still waits. */
+function afterOf(store: Store, t: Ticket): string | null {
+  const chain = store.listDeliveries({ kind: 'chain', to: t.id, states: ['waiting', 'held', 'sending'] })[0];
+  const leader = chain ? store.getTicket(Number(chain.when_arg?.after)) : undefined;
+  return leader?.number != null ? `#${leader.number}` : null;
+}
+
+const askOf = (a: CabalAsk, row: CabalMemberRow | undefined, t: Ticket | undefined): BoardAsk => ({
+  id: a.id,
+  from: row?.label || t?.title || `#${t?.number ?? '?'}`,
+  number: t?.number ?? null,
+  text: a.text,
+  blocking: !!a.blocking,
+  opened_at: a.opened_at,
+});
+
+/** People's name for the lead: "Build 7's Overseer". */
+export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}'s Overseer`;
+
+const money = (n: number) => `$${n.toFixed(2)}`;
+
+/** The board as compact text, for cabal_board's read: what an agent needs, a line a member. */
+export function boardText(b: Board, me: number | null = null): string {
+  const c = b.counts;
+  const out = [`${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.running} building · ${money(c.spend)} spent`];
+  if (b.red) out.push(`RED (${pacificClock(b.red.at)}): ${b.red.text}`);
+  out.push(b.asks.length ? `Open asks (${b.asks.length}):` : 'No open asks.');
+  for (const a of b.asks) out.push(`- ask ${a.id}${a.blocking ? ' BLOCKING' : ''} from ${a.from}${a.number != null ? ` #${a.number}` : ''} (${pacificClock(a.opened_at)}): ${a.text}`);
+  if (!b.members.length) out.push('Roster: empty.');
+  else out.push('Members (row id · label #N title | state | waits on | note | spend | risk | claims or files):');
+  for (const m of b.members) {
+    const files = m.claims.length ? `claims ${m.claims.join(' ')}` : m.files.length ? `files ${m.files.join(' ')}` : '';
+    const cells = [
+      `${m.row} · ${[m.label, m.number != null ? `#${m.number}` : 'roster', m.title].filter(Boolean).join(' ')}${m.number != null && m.number === me ? ' (you)' : ''}${m.role ? ` [${m.role}]` : ''}${m.lane ? ` {${m.lane}}` : ''}`,
+      m.word,
+      m.after ? `after ${m.after}` : '',
+      m.note,
+      m.spend ? money(m.spend) : '',
+      m.risk ? `risk ${m.risk}` : '',
+      files,
+      m.doubled.length ? `DOUBLED: ${m.doubled.join(' ')}` : '',
+    ];
+    out.push(cells.filter(Boolean).join(' | '));
+  }
+  if (b.log.length) out.push(`Log (last ${b.log.length}):`, ...b.log.map((l) => `- ${pacificClock(l.at)} ${l.by}: ${l.text}`));
+  return out.join('\n');
+}

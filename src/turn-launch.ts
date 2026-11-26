@@ -679,6 +679,8 @@ export interface TurnFacts {
   media?: boolean;
   /** The person it runs for has a Codex login this turn can reach: a minion is offered generate_image_codex (#733). */
   codexImages?: boolean;
+  /** It leads a cabal or is on one's board (#2090): offered cabal_board. */
+  cabal?: boolean;
   /** The one person whose own typed message it answers (#295). */
   typer: { id: number; login: string } | null;
   /** The contraptions its scheme is home to (#266). */
@@ -935,6 +937,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // kit/model-tiers.ts leaves Fable out of the tiers citadel:subagents and citadel:briefing show (#1574).
   if (project.fable_ok === 'off') env.CITADEL_FABLE_OFF = '1';
   if (facts.memory) env.COORDINATOR_MEMORY = '1';
+  if (facts.cabal) env.COORDINATOR_CABAL = '1';
   if (facts.media && ticket.kind !== 'coordinator') env.COORDINATOR_MEDIA = '1';
   if (facts.codexImages && ticket.kind !== 'coordinator') env.COORDINATOR_CODEX_IMAGES = '1';
   // The person's own GitHub token (or none, so it can't push).

@@ -15,6 +15,13 @@ import { thrown } from './thrown.ts';
 
 /** The Store's writes the worker runs: none returns a value its callers use, and every argument survives postMessage. */
 export const WRITES = [
+  'setCabalName',
+  'setCabalRed',
+  'updateCabalRow',
+  'deleteCabalRow',
+  'answerCabalAsk',
+  'leaveCabal',
+  'deleteCabalOf',
   'setProjectRepoDir',
   'setProjectUpstream',
   'setProjectInstructions',
@@ -112,6 +119,11 @@ export const ASYNC_WRITES = ['recordTurn', 'markSeen', 'syncArtifacts'];
 
 /** Writes that return a value: they run on the server's thread after the queue, and a write they make inside runs with them. */
 export const VALUE_WRITES = [
+  'ensureCabal',
+  'addCabalRow',
+  'joinCabal',
+  'addCabalAsk',
+  'addCabalLog',
   'createProject',
   'renameProject',
   'createUser',

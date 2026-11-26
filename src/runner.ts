@@ -3401,6 +3401,8 @@ export class Runner {
         media: !!this.mediaFor?.(person),
         // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
         codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
+        // A minion on a cabal board or leading one (#2090) is offered cabal_board; no other turn pays for its text.
+        cabal: ticket.kind !== 'coordinator' && this.store.inCabal(ticket.id),
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         jobMachines,

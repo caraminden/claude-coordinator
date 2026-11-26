@@ -58,6 +58,7 @@ import type { ContentBlock } from '../claude-events.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 import { stopMinionShip } from '../ship-stop.ts';
+import { putOnCabal } from './cabals.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -89,6 +90,11 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
     if (body.start_after !== null) throw new HttpError(400, 'start_after can only be set to null here: it takes a minion off its chain (a chain is made by create_ticket)');
     if (ticket.kind === 'coordinator' || caller === id) throw new HttpError(400, `A minion can't take itself, or the ${AGENT_NAME}, off a chain`);
     if (!takeOffChain(ticket, name, { store, runner, waiters: app.waiters }, body.note === undefined)) throw new HttpError(409, `#${ticket.number} isn't sealed waiting on another minion's work`);
+  }
+  // A cabal's board (#2090): the Taskmaster or a person puts a minion on one, never the minion itself.
+  if (body.cabal !== undefined) {
+    if (caller === id) throw new HttpError(400, "A minion can't put itself on a cabal or take itself off one: ask the Taskmaster");
+    putOnCabal(app, ticket, body.cabal, name);
   }
   // The view's replies are a list; compare the stored JSON.
   const stored = store.getTicket(id)!;

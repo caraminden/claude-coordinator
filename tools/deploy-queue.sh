@@ -166,6 +166,18 @@ queue_ordinal() {
   case $1 in 1) echo next ;; 2) echo 2nd ;; 3) echo 3rd ;; *) echo "${1}th" ;; esac
 }
 
+# <queue dir> <ticket>...: these go first in .order. Read and replaced under .order.lock, which the server takes to
+# write a person's drag (src/waits.ts writeOrder), so a drag made meanwhile lands after this, not under it (#2132). The
+# "#front" line changes with every call: the server, finding .order not as it read it, works the drag out again.
+queue_front() {
+  local q=$1
+  shift
+  (
+    flock -w 10 8 || { echo "queue: $q/.order is locked, so the line's order stays as it is" >&2; exit 0; }
+    { grep '^# ' "$q/.order" || true; printf '%s\n' "$@"; grep -v -e '^# ' -e '^#front ' "$q/.order" || true; echo "#front $EPOCHREALTIME"; } 2>/dev/null | awk '!seen[$0]++' >"$q/.order.tmp$$" && mv -f "$q/.order.tmp$$" "$q/.order"
+  ) 8>"$q/.order.lock"
+}
+
 # QUEUE_KEEP=<its ticket> (land.sh's retry in place, #1360): wait on that ticket, so in the same place in line, instead
 # of a new one at the back. QUEUE_YIELD=yield with it: every other waiter counts as ahead (and they pass over this one)
 # until one of them has taken the lock, nobody else is in line, or QUEUE_YIELD_MAX s went by (a waiter from a branch
@@ -189,9 +201,7 @@ queue_lock() {
     n=${QUEUE_KEEP##*/}
     queue_write "$q/$n" "$me" 0 "$label" waiting
     # First among the ranked too: Releases ranks only waiters, so a reorder while it held the lock left it out.
-    if [ -f "$q/.order" ]; then
-      { grep '^# ' "$q/.order" || true; echo "$n"; grep -vx -e "$n" -e '# .*' "$q/.order" || true; } >"$q/.order.tmp$$" 2>/dev/null && mv -f "$q/.order.tmp$$" "$q/.order"
-    fi
+    [ ! -f "$q/.order" ] || queue_front "$q" "$n"
   else n=$(
     exec 8>"$q/.seq.lock"
     flock 8

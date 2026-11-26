@@ -3,7 +3,9 @@
 // note and files, its asks). An ask is held mail to the lead unless it is blocking, which wakes it.
 import { type Board, boardText, readBoard } from '../cabal-board.ts';
 import type { Store } from '../db.ts';
-import { APPROVED_FIELDS, cabalStart, handoffPath, memberAction, postForming } from '../cabal-start.ts';
+import { cabalBoardFor } from '../access.ts';
+import { APPROVED_FIELDS, cabalChanged, memberJoined, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
+import { schemeTarget } from './projects.ts';
 import { EFFORTS, MODELS } from '../db.ts';
 import type { CabalRowFields } from '../db/cabals.ts';
 import type { Ticket } from '../db-rows.ts';
@@ -31,15 +33,35 @@ const files = (v: unknown) => {
     .join('\n');
 };
 
-/** The lead a cabal: #N names, checked (a 400 says why not); `self` is the minion joining, if it exists yet. */
-export function cabalLead(store: Store, projectId: number, cabal: unknown, self: number | null): Ticket {
-  const n = Number(cabal);
-  const lead = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(projectId, n) : undefined;
-  if (!lead || lead.kind === 'coordinator') throw new HttpError(400, `cabal must be the #N of a minion in this scheme that leads it: no minion #${String(cabal).slice(0, 20)}`);
+/**
+ * The lead a cabal names, checked (a 400 says why not): #N in this scheme, or "<scheme>#N" for a lead in another (#2094),
+ * which takes only a row its forming card approved for this scheme, matched by `title`. `self` is the minion joining, if it exists yet.
+ */
+export function cabalLead(store: Store, projectId: number, cabal: unknown, self: number | null, title = ''): Ticket {
+  const cross = typeof cabal === 'string' ? /^(.+?)\s*#(\d+)$/.exec(cabal.trim()) : null;
+  const scheme = cross ? store.listProjects().find((p) => p.name.toLowerCase() === cross[1].trim().toLowerCase() || String(p.id) === cross[1].trim()) : undefined;
+  if (cross && !scheme) throw new HttpError(400, `cabal "${String(cabal).slice(0, 80)}": no scheme called ${cross[1].slice(0, 60)}`);
+  const n = Number(cross ? cross[2] : cabal);
+  const home = scheme?.id ?? projectId;
+  const lead = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(home, n) : undefined;
+  if (!lead || lead.kind === 'coordinator') throw new HttpError(400, `cabal must be the #N of a minion that leads it, in this scheme or as "<scheme>#N": no minion #${String(cabal).slice(0, 20)}${scheme ? ` in ${scheme.name}` : ''}`);
+  if (home !== projectId) crossRow(store, lead, projectId, title);
   if (lead.id === self) throw new HttpError(400, "A minion can't be on its own cabal: it leads it");
   if (store.cabalRowOf(lead.id)) throw new HttpError(400, `#${n} is on another cabal's board, so it can't lead one`);
   if (self != null && store.getCabal(self)) throw new HttpError(400, "This minion leads a cabal, so it can't join another");
   return lead;
+}
+
+/** The approved, unstarted row a lead in another scheme planned for `projectId`, with this title: only its people's go starts one. */
+function crossRow(store: Store, lead: Ticket, projectId: number, title: string) {
+  const open = store.getCabal(lead.id) ? store.cabalRows(lead.id).filter((r) => r.ticket_id == null && r.project_id === projectId && r.approved_at != null) : [];
+  const row = open.find((r) => r.title.trim().toLowerCase() === title.trim().toLowerCase());
+  if (!row)
+    throw new HttpError(
+      409,
+      `#${lead.number} in ${store.getProject(lead.project_id)?.name} has ${open.length ? `no row titled "${title.slice(0, 120)}" approved for this scheme; its rows waiting here: ${open.map((r) => `"${r.title}"`).join(', ')}` : 'no row approved for this scheme: its people approve one on the forming card first'}`,
+    );
+  return row;
 }
 
 /**
@@ -53,26 +75,25 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
     store.leaveCabal(t.id);
     if (was != null) {
       runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
-      changed(app, t, was);
+      cabalChanged(app, was);
     }
     return;
   }
-  const lead = cabalLead(store, t.project_id, cabal, t.id);
+  const lead = cabalLead(store, t.project_id, cabal, t.id, t.title);
   if (was === lead.id) return;
-  store.joinCabal(t.id, lead.id, t.project_id, t.title, Date.now(), rowId);
-  runner.emit(t.id, 'note', { text: `${by} put this minion on #${lead.number}'s cabal board.` });
-  for (const l of new Set([was, lead.id])) if (l != null) changed(app, t, l);
+  const there = lead.project_id !== t.project_id ? store.getProject(lead.project_id)?.name : undefined;
+  const row = store.joinCabal(t.id, lead.id, lead.project_id, t.title, Date.now(), there ? crossRow(store, lead, t.project_id, t.title).id : rowId, t.project_id);
+  runner.emit(t.id, 'note', { text: `${by} put this minion on ${there ? `${there} ` : ''}#${lead.number}'s cabal board.` });
+  if (there) memberJoined(app, lead, t.id, row, by);
+  for (const l of new Set([was, lead.id])) if (l != null) cabalChanged(app, l);
 }
 
 export async function boardFor(app: App, leadId: number): Promise<Board | null> {
   return readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) });
 }
 
-/** A board was written: its open panels read it again, and the minions list's cards are read again. */
-const changed = (app: App, t: Pick<Ticket, 'project_id'>, lead: number) => {
-  app.broadcast({ type: 'cabal', projectId: t.project_id, lead });
-  void app.cabals.refresh(t.project_id).catch(() => {});
-};
+/** A board was written (src/cabal-start.ts cabalChanged). */
+const changed = (app: App, _t: unknown, lead: number) => cabalChanged(app, lead);
 
 export const cabalRoutes: Route[] = [
   {
@@ -80,10 +101,12 @@ export const cabalRoutes: Route[] = [
     method: 'GET',
     path: '/api/tickets/:ticket/cabal',
     who: ['person', 'taskmaster', 'minion'],
-    async handler({ res, url, app, ticket }) {
+    async handler({ res, url, app, ticket, session, caller }) {
       const lead = cabalLeadOf(app.store, ticket.id);
-      const board = lead == null ? null : await boardFor(app, lead);
-      return json(res, 200, { lead, board, ...(url.searchParams.get('text') === '1' ? { text: board ? boardText(board, ticket.number) : null } : {}) });
+      const whole = lead == null ? null : await boardFor(app, lead);
+      // Who sees a row in another scheme (#2094): an agent reads as its scheme's people would, a person as they are.
+      const board = whole && cabalBoardFor(whole, caller ? (p) => p === caller.project_id : (p) => app.store.canSee(session, p));
+      return json(res, 200, { lead, board, ...(url.searchParams.get('text') === '1' ? { text: board ? boardText(board, ticket) : null } : {}) });
     },
   },
   {
@@ -92,10 +115,11 @@ export const cabalRoutes: Route[] = [
     path: '/api/projects/:project/cabal/:number',
     who: ['person', 'taskmaster'],
     everyScheme: true,
-    async handler({ res, app, project, params }) {
+    async handler({ res, app, project, params, session }) {
       const lead = app.store.getTicketByNumber(project.id, Number(params.number));
-      const board = lead && app.store.getCabal(lead.id) ? await boardFor(app, lead.id) : null;
-      if (!board) throw new HttpError(404, `#${String(params.number).slice(0, 20)} leads no cabal in this scheme`);
+      const whole = lead && app.store.getCabal(lead.id) ? await boardFor(app, lead.id) : null;
+      if (!whole) throw new HttpError(404, `#${String(params.number).slice(0, 20)} leads no cabal in this scheme`);
+      const board = cabalBoardFor(whole, (p) => app.store.canSee(session, p));
       return json(res, 200, { lead: lead!.id, board });
     },
   },
@@ -111,7 +135,8 @@ export const cabalRoutes: Route[] = [
       const action = String(body.action ?? '');
       const leads = !!store.getCabal(ticket.id);
       const own = store.cabalRowOf(ticket.id);
-      const author = `#${ticket.number} ${ticket.title}`;
+      const lead0 = own ? store.getTicket(own.lead_id) : undefined;
+      const author = `${lead0 && lead0.project_id !== ticket.project_id ? `${store.getProject(ticket.project_id)?.name} ` : ''}#${ticket.number} ${ticket.title}`;
       // A minion on no board makes its own with its first lead write: that's how a lead lays out its roster.
       const leadOnly = () => {
         if (own && !leads) throw new HttpError(403, `Only the cabal's lead does ${action}: ask it instead (action ask)`);
@@ -173,7 +198,15 @@ export const cabalRoutes: Route[] = [
           if (c != null && !(Number.isFinite(c) && c > 0 && c <= 10_000)) throw new HttpError(400, 'cost is dollars, more than 0');
           fields.cost = c;
         }
+        // The scheme its member runs in (#2094): another one only if the lead's person is in it, as message_taskmaster reaches.
+        if (body.scheme !== undefined) {
+          const want = String(body.scheme ?? '').trim();
+          const home = store.getProject(ticket.project_id)!;
+          fields.project_id = !want || want.toLowerCase() === home.name.toLowerCase() || want === String(home.id) ? null : schemeTarget(app, ticket, want).project.id;
+        }
         if (body.minion !== undefined) {
+          if (body.minion !== null && rowScheme(ticket, { project_id: fields.project_id !== undefined ? fields.project_id : (store.cabalRow(Number(body.row))?.project_id ?? null) }) !== ticket.project_id)
+            throw new HttpError(400, "A row in another scheme gets its member from that scheme's Taskmaster: ask it with message_taskmaster");
           const t = body.minion === null ? null : store.getTicketByNumber(ticket.project_id, Number(body.minion));
           if (body.minion !== null && (!t || t.kind === 'coordinator')) throw new HttpError(404, `No minion #${String(body.minion).slice(0, 20)} in this scheme`);
           if (t?.id === ticket.id) throw new HttpError(400, 'That is you: the lead has no row of its own');
@@ -193,11 +226,12 @@ export const cabalRoutes: Route[] = [
         if (!row || row.lead_id !== ticket.id) throw new HttpError(404, `No row ${String(body.row).slice(0, 20)} on your board`);
         // A member the lead started stays on its row while open: the row is what makes it the lead's own, and it counts in the width.
         const member = row.approved_at != null && row.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;
+        if (row.ticket_id != null && fields.project_id !== undefined && fields.project_id !== row.project_id) throw new HttpError(409, `Row ${row.id} is started: its scheme stays`);
         if (member && member.status !== 'closed' && (body.remove === true || (fields.ticket_id !== undefined && fields.ticket_id !== row.ticket_id))) throw new HttpError(409, `#${member.number} is open: its row stays on the board until it is dismissed`);
         if (body.remove === true) store.deleteCabalRow(row.id);
         else {
           // A change to what the forming card showed takes back its go: a changed row needs a new card.
-          if (row.approved_at != null && row.ticket_id == null && APPROVED_FIELDS.some((k) => fields[k] !== undefined && fields[k] !== row[k])) Object.assign(fields, { approved_by: null, approved_at: null, next_at: null });
+          if (row.approved_at != null && row.ticket_id == null && APPROVED_FIELDS.some((k) => fields[k] !== undefined && fields[k] !== row[k])) Object.assign(fields, { approved_by: null, approved_at: null, next_at: null, asked_at: null });
           store.updateCabalRow(row.id, fields);
         }
         changed(app, ticket, ticket.id);
@@ -229,6 +263,17 @@ export const cabalRoutes: Route[] = [
     async handler({ req, res, app, ticket }) {
       const body = await readJson(req);
       return json(res, 200, await cabalStart(app, app.store.getTicket(ticket.id)!, body.row, body.text));
+    },
+  },
+  {
+    // A lead's message_taskmaster (#2094): a start, unseal, stop or seal for its own row in another scheme, asked of that scheme's Taskmaster.
+    method: 'POST',
+    path: '/api/tickets/:ticket/cabal/taskmaster',
+    who: ['minion'],
+    refuse: "Only a cabal's lead asks another scheme's Taskmaster about its members",
+    async handler({ req, res, app, ticket }) {
+      const body = await readJson(req);
+      return json(res, 200, await cabalTaskmaster(app, app.store.getTicket(ticket.id)!, body));
     },
   },
   {

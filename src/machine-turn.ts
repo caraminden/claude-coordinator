@@ -180,8 +180,8 @@ export function placedAt(dir: string): Placed | null {
   }
 }
 
-/** placedAt for the agent's routes, which can wait. */
-const placedNow = (dir: string): Promise<Placed | null> => readFile(join(dir, 'machine'), 'utf8').then(asPlaced, () => null);
+/** placedAt off the server's thread: for the agent's routes, a followed turn's poll and stop (#2134). */
+export const placedNow = (dir: string): Promise<Placed | null> => readFile(join(dir, 'machine'), 'utf8').then(asPlaced, () => null);
 
 function asPlaced(text: string): Placed | null {
   const p = JSON.parse(text);
@@ -296,7 +296,12 @@ export class MachineTurn implements RunningTurn {
     return true;
   }
 
-  keepUp(_ensureSupervisor: () => void) {}
+  /** alive(), still read on the server's thread. shortcut: its files aren't moved off the thread as #2134 did a host turn's; do that once machine turns are many. */
+  async aliveOff() {
+    return this.alive();
+  }
+
+  async keepUp(_ensureSupervisor: () => void) {}
 
   async look(): Promise<ProcCheck> {
     return { verdict: 'unknown', text: `This turn runs on ${this.where.replace(/^machine /, '')}, so the server can't look at its process.` };

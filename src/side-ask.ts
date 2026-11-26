@@ -3,7 +3,7 @@
 // src/side-guard.ts) on the asker's own login. The answer goes into a side thread in the chat ('side' and
 // 'side_answer' events, which no turn reads), never into the minion's session, queue or next turn. Follow-ups resume
 // the fork; an idle thread's fork is deleted, and so is every fork at a restart.
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { access, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Store, Turn } from './db.ts';
 import { promptMessage } from './prompts.ts';
@@ -27,6 +27,11 @@ export interface SideThread {
 type Launch = Pick<Runner, 'sideLaunch' | 'emit' | 'payerOf' | 'signal'>;
 
 const SETTING = 'side_threads';
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 /** A thread idle this long loses its fork; a new question starts a new one. */
 export const SIDE_IDLE_MS = 60 * 60_000;
 /** An answer that takes longer than this is stopped. */
@@ -45,6 +50,8 @@ export class SideAsks {
   /** Follow-ups whose fork is launching (#1808): not yet running, but a second one must still wait. */
   private launching = new Set<number>();
   private timer: NodeJS.Timeout | null = null;
+  /** A poll is waiting on the disk: the next tick does nothing, so no stream is read twice at once (#2134). */
+  private polling = false;
   private offsets = new Map<number, number>();
   private found = new Map<number, { forkId?: string; result?: ClaudeEvent }>();
 
@@ -106,8 +113,9 @@ export class SideAsks {
   recover() {
     for (const t of this.store.getSetting<SideThread[]>(SETTING) ?? []) {
       if (t.run) {
-        this.runner.signal({ dir: t.run.dir, unit: null, container: t.run.container }, 'SIGKILL');
-        rmSync(t.run.dir, { recursive: true, force: true });
+        // Its pid is in its folder: the folder goes once the signal is sent.
+        const dir = t.run.dir;
+        void this.runner.signal({ dir, unit: null, container: t.run.container }, 'SIGKILL').finally(() => rm(dir, { recursive: true, force: true }).catch(() => {}));
         this.runner.emit(t.ticketId, 'side_answer', { thread: t.id, ask: t.run.ask, ok: false, text: 'The server restarted before the answer came; ask again.' });
       }
       this.dropFork(t);
@@ -121,45 +129,56 @@ export class SideAsks {
 
   private tick() {
     if (this.timer) return;
-    this.timer = setInterval(() => this.poll(), this.pollMs);
+    this.timer = setInterval(() => void this.poll(), this.pollMs);
     this.timer.unref();
   }
 
-  /** Read each running ask's stream; finish the ones whose wrapper exited, end idle threads. */
-  poll() {
-    const now = Date.now();
-    for (const t of [...this.threads.values()]) {
-      if (!t.run) {
-        if (now - t.lastAt > SIDE_IDLE_MS) this.end(t);
-        continue;
+  /**
+   * Read each running ask's stream; finish the ones whose wrapper exited, end idle threads. Its files are read off the
+   * server's thread (#2134), one poll at a time.
+   */
+  async poll() {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      const now = Date.now();
+      for (const t of [...this.threads.values()]) {
+        const run = t.run;
+        if (!run) {
+          if (now - t.lastAt > SIDE_IDLE_MS) this.end(t);
+          continue;
+        }
+        // Looked for before the read, as the runner's own poll does: once exit.json is there, everything claude wrote is
+        // in the stream, so this tick's read takes the answer with it. Read first and an answer written in between is
+        // lost, and the thread ends saying it stopped without one (#1619).
+        const exited = await exists(join(run.dir, 'exit.json'));
+        await this.read(t, exited);
+        if (!exited && now - run.startedAt > SIDE_LIMIT_MS) {
+          // Its pid is in its folder: sent before finish deletes it.
+          await this.runner.signal({ dir: run.dir, unit: null, container: run.container }, 'SIGKILL');
+          // The read above may have taken an answer printed in the last moment before the deadline: a whole answer counts,
+          // late as it is, rather than a timeout message in its place.
+          const answered = !!this.found.get(run.ask)?.result;
+          await this.finish(t, answered ? undefined : `It took longer than ${SIDE_LIMIT_MS / 60_000} minutes, so it was stopped.`);
+        } else if (exited) {
+          await this.finish(t);
+        }
       }
-      // Looked for before the read, as the runner's own poll does: once exit.json is there, everything claude wrote is
-      // in the stream, so this tick's read takes the answer with it. Read first and an answer written in between is
-      // lost, and the thread ends saying it stopped without one (#1619).
-      const exited = existsSync(join(t.run.dir, 'exit.json'));
-      this.read(t, exited);
-      if (!exited && now - t.run.startedAt > SIDE_LIMIT_MS) {
-        this.runner.signal({ dir: t.run.dir, unit: null, container: t.run.container }, 'SIGKILL');
-        // The read above may have taken an answer printed in the last moment before the deadline: a whole answer counts,
-        // late as it is, rather than a timeout message in its place.
-        const answered = !!this.found.get(t.run.ask)?.result;
-        this.finish(t, answered ? undefined : `It took longer than ${SIDE_LIMIT_MS / 60_000} minutes, so it was stopped.`);
-      } else if (exited) {
-        this.finish(t);
+      if (![...this.threads.values()].length && this.timer) {
+        clearInterval(this.timer);
+        this.timer = null;
       }
-    }
-    if (![...this.threads.values()].length && this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    } finally {
+      this.polling = false;
     }
   }
 
   /** @param toEnd claude has exited, so its last line is all there is, newline or not. */
-  private read(t: SideThread, toEnd = false) {
+  private async read(t: SideThread, toEnd = false) {
     const run = t.run!;
     let text: string;
     try {
-      text = readFileSync(join(run.dir, 'stream.jsonl'), 'utf8');
+      text = await readFile(join(run.dir, 'stream.jsonl'), 'utf8');
     } catch {
       return;
     }
@@ -182,8 +201,13 @@ export class SideAsks {
     this.found.set(run.ask, seen);
   }
 
-  private finish(t: SideThread, failed?: string) {
+  private async finish(t: SideThread, failed?: string) {
     const run = t.run!;
+    // Asked before anything is changed, so the rest runs in one go.
+    const stderr = await readFile(join(run.dir, 'stderr.log'), 'utf8').then(
+      (text) => text.trim().split('\n').slice(-3).join('\n'),
+      () => '',
+    );
     const { forkId, result } = this.found.get(run.ask) ?? {};
     this.offsets.delete(run.ask);
     this.found.delete(run.ask);
@@ -192,13 +216,7 @@ export class SideAsks {
     if (forkId && forkId !== minion) t.forkId = forkId;
     const ok = !failed && !!result && !result.is_error && typeof result.result === 'string';
     let why = failed;
-    if (!ok && !why) {
-      let stderr = '';
-      try {
-        stderr = readFileSync(join(run.dir, 'stderr.log'), 'utf8').trim().split('\n').slice(-3).join('\n');
-      } catch {}
-      why = (typeof result?.result === 'string' && result.result) || stderr || 'It stopped without an answer.';
-    }
+    if (!ok && !why) why = (typeof result?.result === 'string' && result.result) || stderr || 'It stopped without an answer.';
     const cost = typeof result?.total_cost_usd === 'number' ? result.total_cost_usd : null;
     const ev = this.runner.emit(t.ticketId, 'side_answer', { thread: t.id, ask: run.ask, ok, text: ok ? result.result : why, cost_usd: cost });
     // Its cost is the asker's (sender pays), kept apart from the minion's own turns.
@@ -220,7 +238,7 @@ export class SideAsks {
         .then((turn: Turn) => this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(t.ticketId)?.project_id }))
         .catch((e) => console.error(`[side-ask] ${t.id}: its turn's cost was not recorded: ${(e as Error).message}`));
     }
-    rmSync(run.dir, { recursive: true, force: true });
+    void rm(run.dir, { recursive: true, force: true }).catch(() => {});
     t.run = null;
     t.lastAt = Date.now();
     if (!t.forkId) this.end(t);
@@ -234,11 +252,12 @@ export class SideAsks {
     this.save();
   }
 
+  /** Its fork's files go, off the server's thread. */
   private dropFork(t: SideThread) {
     if (!t.forkId || !validSessionId(t.forkId) || t.forkId === this.store.getTicket(t.ticketId)?.session_id) return;
     const base = join(t.configDir, 'projects', projectSlug(t.cwd));
     for (const p of [join(base, `${t.forkId}.jsonl`), join(base, t.forkId), join(t.configDir, 'tasks', t.forkId), join(t.configDir, 'session-env', t.forkId)]) {
-      rmSync(p, { recursive: true, force: true });
+      void rm(p, { recursive: true, force: true }).catch(() => {});
     }
   }
 }

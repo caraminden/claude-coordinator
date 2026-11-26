@@ -363,7 +363,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
   const owner = body.build_owner === true;
   if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
-  if (body.cabal != null) cabalLead(store, project.id, body.cabal, null); // refused before anything is made
+  if (body.cabal != null) cabalLead(store, project.id, body.cabal, null, typeof body.title === 'string' ? body.title : ''); // refused before anything is made
   // Where its turns run (Build 7 T4), checked as the person who asked: only a machine's owner picks it.
   const runsOn = body.runs_on == null ? null : runsOnPick(app, project.id, body.runs_on, caller && !picked ? caller.person_id : (session.uid ?? null));
   const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);

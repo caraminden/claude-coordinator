@@ -6,6 +6,7 @@
 // them; a stalled disk only makes reads stale for as long as it lasts, never stops them.
 // Most writes that return something stay on the server's thread, after the queue; the ones the server waited on most
 // (ASYNC_WRITES) run on the worker too and resolve with their value (#1877, step 2 of #795).
+import { existsSync, readlinkSync } from 'node:fs';
 import type { StatementSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { Store, WRITER_BUSY_MS } from './db.ts';
@@ -180,6 +181,18 @@ export const VALUE_WRITES = [
   'deliveryTransaction',
 ];
 
+/** The longest slice of a wait on the worker: after one that times out, it looks whether the thread is still there. */
+const GONE_CHECK_MS = 100;
+
+/** This thread's id to the kernel, 0 where /proc can't say (not Linux). */
+function threadId() {
+  try {
+    return Number(readlinkSync('/proc/thread-self').split('/').pop());
+  } catch {
+    return 0;
+  }
+}
+
 /** Mark the worker gone and wake everyone waiting on it: readers stop answering on their own. */
 function markGone(shared: BigInt64Array) {
   Atomics.store(shared, 1, -1n);
@@ -221,8 +234,8 @@ export type Writer = {
   queued(): number;
   /** Stop the worker: writes run on the store's connection again. */
   stop(): Promise<number>;
-  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent, [3]: steps closed, [4]: steps opened.
-   * Reader threads wait on it (src/reader.ts). */
+  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent, [3]: steps closed, [4]: steps opened,
+   * [5]: the worker's thread id. Reader threads wait on it (src/reader.ts). */
   shared: BigInt64Array;
 };
 
@@ -238,8 +251,9 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   if (!store.statePath) return null;
   const db = store.db;
   // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent,
-  // [3]: the steps whose every write has run (the worker's), [4]: the steps this thread has opened.
-  const shared = new BigInt64Array(new SharedArrayBuffer(40));
+  // [3]: the steps whose every write has run (the worker's), [4]: the steps this thread has opened, [5]: the worker's
+  // thread id.
+  const shared = new BigInt64Array(new SharedArrayBuffer(48));
   const worker = new Worker(new URL(import.meta.url), { workerData: { writer: { path: store.path, shared, delayMs } } });
   worker.on('error', (err) => console.error(`DB write worker failed: ${thrown(err).stack ?? err}`));
   // Its start is a few ms of opening the file; waiting here keeps the boot's own writes in order.
@@ -262,6 +276,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // get-then-set (merge goes, turn nonces) would write back a list without the update before it.
   const unwritten = new Map<string, { seq: number; json: string | null }>();
   const applied = () => Number(Atomics.load(shared, 0));
+  // Marked gone before its 'exit' reaches this thread: a write sent to it now would be lost.
+  const gone = () => !alive || Atomics.load(shared, 1) !== 1n;
   // A step is one run of this thread's code (#1628): each write commits alone, so a reader thread reads only where no
   // step is half written, between one step's last write and the next one's first (src/reader.ts, atWholeStep). Its
   // first write of any kind opens it, before anything commits; the worker closes it after the step's last write.
@@ -286,7 +302,10 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     for (let done = applied(); done < target; done = applied()) {
       const left = until - Date.now();
       if (left <= 0 || Atomics.load(shared, 1) !== 1n) return false;
-      Atomics.wait(shared, 0, BigInt(done), left);
+      if (Atomics.wait(shared, 0, BigInt(done), Math.min(left, GONE_CHECK_MS)) !== 'timed-out') continue;
+      // A worker that ran out of memory wakes nobody, and its 'exit' can't reach this thread while it waits (#2130).
+      const tid = Number(Atomics.load(shared, 5));
+      if (tid && !existsSync(`/proc/self/task/${tid}`)) markGone(shared);
     }
     return true;
   };
@@ -393,7 +412,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   const getSetting = store.getSetting.bind(store);
   store.getSetting = (<T>(key: string): T | null => {
     const u = unwritten.get(key);
-    if (u && applied() < u.seq) return u.json === null ? null : JSON.parse(u.json);
+    if (u && !gone() && applied() < u.seq) return u.json === null ? null : JSON.parse(u.json);
     if (u) unwritten.delete(key);
     return getSetting<T>(key);
   }) as typeof store.getSetting;
@@ -420,7 +439,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to send to the write worker`);
     obj[method] = function (this: unknown, ...args: unknown[]) {
       openStep();
-      if (!alive || inline || db.isTransaction) return f.apply(this, args);
+      if (gone() || inline || db.isTransaction) return f.apply(this, args);
       const n = send(name, args);
       if (n === null) {
         beforeWrite(name);
@@ -451,7 +470,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     obj[method] = function (this: unknown, ...args: unknown[]) {
       openStep();
       // Inside a transaction or another write on this thread it runs with that, or the worker would wait on our lock.
-      if (!alive || inline || db.isTransaction) return f.apply(this, args);
+      if (gone() || inline || db.isTransaction) return f.apply(this, args);
       const n = send(name, args);
       if (n === null) {
         // An argument postMessage can't copy: run it here, after the queue.
@@ -521,6 +540,7 @@ if (!isMainThread && workerData?.writer) {
   // Sooner than the server's handler, which can't run while that thread is blocked in a drain.
   process.on('exit', () => markGone(shared));
   const store = new Store(path, { writer: true });
+  Atomics.store(shared, 5, BigInt(threadId()));
   Atomics.store(shared, 1, 1n);
   Atomics.notify(shared, 1);
   const pause = delayMs ? new Int32Array(new SharedArrayBuffer(4)) : null;

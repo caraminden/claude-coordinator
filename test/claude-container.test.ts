@@ -1025,7 +1025,8 @@ test("a container turn's claude that starts just after the stop is still signall
     await until('jsonLines(calls).some((c) => c.includes(turnDir))', () => jsonLines(calls).some((c) => c.includes(turnDir))); // podman exec is under way
     r.stop(id);
     assert.ok(!existsSync(join(turnDir, 'pid.json')));
-    assert.ok(existsSync(join(turnDir, 'exit.json')), 'the stop ends the turn at its next poll');
+    // The stop asks the folder off the server's thread (#2134), so its exit.json follows the call.
+    await until('the stop to write its exit.json, which ends the turn at its next poll', () => existsSync(join(turnDir, 'exit.json')));
     await until("existsSync(join(turnDir, 'pid.json'))", () => existsSync(join(turnDir, 'pid.json')));
     const before = jsonLines(calls).length;
     (r as any).poll(id);

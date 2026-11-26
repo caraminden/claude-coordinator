@@ -3,7 +3,7 @@
 // by a write the database's worker holds, a kill after a named step, or a command that does its work at a known point.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -255,6 +255,46 @@ test('two ships take a number at once: the second waits for the first to have it
   assert.deepEqual(ended(dir), ['ticket/1-a 0000000001 in', 'ticket/1-a out', 'ticket/2-b 0000000002 in', 'ticket/2-b out']);
 });
 
+// Found by #1778: the retry rewrites .order from what it read, over whatever was written since.
+// The server's line read before the retry (a list), or by writeOrder itself (a function, as setOrder passes it): with
+// that one the retrying ship, back in line meanwhile, keeps its place too.
+for (const [what, line, want] of [
+  ['is kept', `[2, 3].map((seq) => ({ seq, got: 0, orders: true }))`, ['0000000003', '0000000002']],
+  ['leaves that ship its place', `() => readQueue(@Q, 4)`, ['0000000003', '0000000001', '0000000002']],
+] as const)
+  test(`a drag that lands while a ship goes back into line for its retry ${what}`, { timeout: 120_000 }, async () => {
+    const dir = mkdtempSync(join(root, 'retry-')),
+      q = join(dir, 'queue');
+    mkdirSync(q);
+    // #1 goes back into line for a retry in place; #2 and #3 wait. A person drags #3 ahead of #2 while #1 rewrites the order.
+    for (const n of [2, 3]) writeFileSync(join(q, String(n).padStart(10, '0')), [me, '0', `ticket/${n}-c`, 'waiting', 'order', ''].join('\n'));
+    writeFileSync(join(q, '0000000001'), [me, '0', 'ticket/1-c', 'retrying', 'order', ''].join('\n'));
+    writeFileSync(join(q, '.order'), '# Cara moved #2 to ship next\n0000000002\n0000000003\n');
+    // The drag is the server's own writeOrder, started as the script is about to replace .order; the script goes on once
+    // that write is done, or is waiting for the script's lock.
+    const waits = resolve(import.meta.dirname, '../src/waits.ts');
+    writeFileSync(join(dir, 'drag.mjs'), `import { readQueue, writeOrder } from '${waits}';\nwriteOrder('${q}', ${line.replace('@Q', `'${q}'`)}, [3, 2], 'Josh moved #3 to ship next', 3);\n`);
+    const bin = command(
+      dir,
+      'mv',
+      `case "$*" in *.tmp*/.order) if [ ! -e ${dir}/dragged ]; then : >${dir}/dragged; { PATH=${dir}/server:$PATH ${process.execPath} ${dir}/drag.mjs; echo $? >${dir}/done; } </dev/null >${dir}/drag.log 2>&1 9>&- 8>&- & until [ -e ${dir}/done ] || [ -e ${dir}/waiting ]; do read -rt 0.05 <> <(:) || :; done; fi ;; esac`,
+    );
+    // The server's flock says so when the lock is taken, before it waits for it.
+    command(join(dir, 'held'), 'flock', `"$REAL" -n "$3" true || : >${dir}/waiting`);
+    renameSync(join(dir, 'held', 'bin'), join(dir, 'server'));
+    const p = spawnSync('bash', ['-c', `source ${queueSh}\nqueue_lock ${dir} ticket/1-c`], { env: { PATH: `${bin}:${PATH}`, HOME: dir, QUEUE_KEEP: join(q, '0000000001'), DEPLOY_QUEUE_POLL: '0.1' }, encoding: 'utf8', timeout: 60_000 });
+    assert.equal(p.status, 0, p.stderr);
+    assert.ok(existsSync(join(dir, 'dragged')), 'the drag came between the read of the order and its write');
+    await until('the drag written', () => existsSync(join(dir, 'done')));
+    assert.equal(readFileSync(join(dir, 'done'), 'utf8').trim(), '0', readFileSync(join(dir, 'drag.log'), 'utf8'));
+    assert.deepEqual(
+      readFileSync(join(q, '.order'), 'utf8')
+        .split('\n')
+        .filter((l) => /^\d{10}$/.test(l) && (want as readonly string[]).includes(l)),
+      [...want],
+    );
+  });
+
 // ---- two hand-offs at once, and a restart mid-hand-off
 
 const H = { summary: 'Usage bar.', risk: 'low' as const, reason: 'front end only' };
@@ -418,3 +458,73 @@ test('two hand-offs through the route at once: one is taken, one refused, and la
     await srv.stop();
   }
 });
+
+/** A server that takes the hand-off in a process of its own and is killed at the write of its note: before it, or half way. */
+function killedAt(s: ReturnType<typeof handoff>, half: boolean) {
+  const script = join(s.data, '..', 'server.ts');
+  writeFileSync(
+    script,
+    `import fs from 'node:fs';
+     import { syncBuiltinESMExports } from 'node:module';
+     const real = fs.writeFileSync;
+     fs.writeFileSync = (f, text, ...rest) => {
+       if (!String(f).includes('handoff.json')) return real(f, text, ...rest);
+       ${half ? 'real(f, String(text).slice(0, 10));' : ''}
+       process.kill(process.pid, 'SIGKILL');
+     };
+     syncBuiltinESMExports();
+     const { Landings } = await import(${JSON.stringify(resolve('src/land.ts'))});
+     new Landings(${JSON.stringify(s.data)}).handOff(1, ${JSON.stringify(s.cwd)}, { PATH: process.env.PATH }, [], ${JSON.stringify(H)});`,
+  );
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', timeout: 120_000 });
+  assert.equal(r.signal, 'SIGKILL', r.stderr);
+}
+// Found by #1778: land.sh is started before its hand-off is written down, and not by a rename.
+for (const half of [false, true])
+  test(`a server killed ${half ? 'half way through writing' : 'before it writes'} a hand-off down: its ship is reported, or the minion can hand off again`, { timeout: 120_000 }, async () => {
+    const s = handoff();
+    s.script(`echo ran >>ran\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+    killedAt(s, half);
+    const next = s.server();
+    const started = !!next.landings.get(1);
+    if (started) await until('land.sh ends', () => next.landings.get(1)!.code !== null);
+    await next.handoffs.poll();
+    if (started && existsSync(join(s.cwd, 'ran'))) assert.ok(s.did.includes('closed'), `it shipped, so the minion hears: ${s.did.join(', ') || 'nothing'}`);
+    else assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H));
+  });
+
+for (const when of ['before', 'after'])
+  test(`a server killed just ${when} a hand-off's folder is renamed into place, land.sh not started: the minion is told it ended`, { timeout: 120_000 }, async () => {
+    const s = handoff();
+    s.script('echo ran >>ran\n');
+    const script = join(s.data, '..', 'server.ts');
+    writeFileSync(
+      script,
+      `import fs from 'node:fs';
+     import { syncBuiltinESMExports } from 'node:module';
+     const real = fs.renameSync;
+     fs.renameSync = (from, to) => {
+       const note = String(from).endsWith('.new') && !String(to).includes('.old-');
+       if (note && ${when === 'before'}) process.kill(process.pid, 'SIGKILL');
+       real(from, to);
+       if (note) process.kill(process.pid, 'SIGKILL');
+     };
+     syncBuiltinESMExports();
+     const { Landings } = await import(${JSON.stringify(resolve('src/land.ts'))});
+     new Landings(${JSON.stringify(s.data)}).handOff(1, ${JSON.stringify(s.cwd)}, { PATH: process.env.PATH }, [], ${JSON.stringify(H)});`,
+    );
+    const r = spawnSync(process.execPath, [script], { encoding: 'utf8', timeout: 60_000 });
+    assert.equal(r.signal, 'SIGKILL', r.stderr);
+    // Past the start's grace, as the next server sees it a minute on.
+    writeFileSync(join(s.data, 'run', 'landings', when === 'before' ? '1.new' : '1', 'started'), '0');
+    const next = s.server();
+    assert.deepEqual(await next.landings.pending(), [1]);
+    await next.handoffs.poll();
+    assert.deepEqual(await next.landings.pending(), [], 'reported');
+    assert.ok(
+      s.did.some((d) => d.startsWith('message: ')),
+      `the minion hears: ${s.did.join(', ') || 'nothing'}`,
+    );
+    assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H), 'and can hand off again');
+    await until('land.sh ends', () => next.landings.get(1)!.code !== null);
+  });

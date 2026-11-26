@@ -17,6 +17,7 @@ export const CABAL_BOARD = {
       ask: { type: 'integer', description: 'answer: the ask id the board shows' },
       row: { type: 'integer', description: 'row: the row id to change; left out, a new row' },
       minion: { type: ['integer', 'null'], description: 'row: the #N started for it; null unlinks' },
+      scheme: { type: ['string', 'null'], description: "row: the scheme its member runs and ships in when it isn't yours (a scheme your person is in); null or your own puts it back. Its people approve it on their own copy of the forming card, and its Taskmaster starts it when you ask with message_taskmaster" },
       label: { type: 'string', maxLength: 12, description: 'row: a short label (T1, M2)' },
       title: { type: 'string', maxLength: 120, description: 'row: the piece' },
       lane: { type: 'string', maxLength: 40, description: 'row: its lane' },
@@ -36,7 +37,7 @@ export const CABAL_BOARD = {
 const delivered = (held: unknown, n: number | null | undefined, who: string) =>
   held === true ? `The loop guard held the message to ${who}: finish your turn.` : held === 'parked' ? `#${n} is sealed, so it reads it once unsealed.` : held === 'mail' ? `#${n} reads it as held mail at its next wake.` : `#${n} is woken for it now, or after its current turn.`;
 
-const ROW_KEYS = ['row', 'minion', 'label', 'title', 'lane', 'after', 'role', 'note', 'files', 'remove', 'handoff', 'model', 'effort', 'cost'] as const;
+const ROW_KEYS = ['row', 'minion', 'scheme', 'label', 'title', 'lane', 'after', 'role', 'note', 'files', 'remove', 'handoff', 'model', 'effort', 'cost'] as const;
 
 export const CABAL_START = {
   name: 'cabal_start',
@@ -49,6 +50,23 @@ export const CABAL_START = {
       text: { type: 'string', maxLength: 4000, description: 'Optional words to put above its brief (the handoff is the brief)' },
     },
     required: ['row'],
+  },
+};
+
+/** A lead's message_taskmaster (#2094): its own roster rows in other schemes only; the server writes the ask. */
+export const CABAL_MESSAGE_TASKMASTER = {
+  name: 'message_taskmaster',
+  description:
+    "For your cabal's rows in other schemes only: ask that scheme's Taskmaster to start the row's member (a row that scheme's people approved on the forming card), or to unseal, stop or seal the member it started. You never start or touch minions there yourself. The server writes the ask; the start ask carries the row's handoff into that scheme's shared folder, and the Taskmaster starts it with cabal \"<your scheme>#<your #N>\", which puts it on your board with its scheme's name. A started row holds a place in your width while the ask waits. In a build cabal a member there ships to its own main, never into your build: when it must not go live first, ask seal now and unseal once the build is live. Any other use is refused: other work for a scheme goes to your Taskmaster with message_coordinator.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      row: { type: ['integer', 'string'], description: 'The row id or label the board shows' },
+      action: { type: 'string', enum: ['start', 'unseal', 'stop', 'seal'] },
+      scheme: { type: 'string', description: "Optional: the row's scheme, checked against the row" },
+      text: { type: 'string', maxLength: 4000, description: 'Optional words for that Taskmaster after the ask' },
+    },
+    required: ['row', 'action'],
   },
 };
 
@@ -67,6 +85,12 @@ export const CABAL_MEMBER = {
 
 /** Answers cabal_board; NOT_HERE for any other tool. */
 export async function runCabalTool(name: string, args: Record<string, unknown>): Promise<string | typeof NOT_HERE> {
+  if (name === 'message_taskmaster' && C().CABAL_LEAD) {
+    const r = await call<{ asked?: string; held?: boolean; next?: number; text?: string }>('POST', `/api/tickets/${C().TICKET}/cabal/taskmaster`, { row: args.row, action: args.action, ...(args.scheme ? { scheme: args.scheme } : {}), ...(args.text ? { text: args.text } : {}) });
+    if (r.text) return r.text;
+    if (r.next != null) return `Next up, number ${r.next} in line: your width is full. The ask goes to its Taskmaster by itself once a member merges, is dismissed or is sealed.`;
+    return r.held ? `The loop guard held your ask to ${r.asked}'s Taskmaster: finish your turn.` : `Asked ${r.asked}'s Taskmaster to start it. It shows on your board with ${r.asked}'s name once started; you get a held line then.`;
+  }
   if (name === 'cabal_start') {
     const r = await call<{ started?: number; title?: string; next?: number; notes?: string[] }>('POST', `/api/tickets/${C().TICKET}/cabal/start`, { row: args.row, ...(args.text ? { text: args.text } : {}) });
     if (r.next != null) return `Next up, number ${r.next} in line: your width is full. It starts by itself once a member merges, is dismissed or is sealed.`;

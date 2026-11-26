@@ -167,7 +167,21 @@ export class Landings {
 
   private async scan() {
     try {
-      const names = (await readdir(this.root)).filter((n) => /^\d+$/.test(n));
+      const all = await readdir(this.root);
+      const names = all.filter((n) => /^\d+$/.test(n));
+      // Killed between HostJobs.start's two renames, a hand-off (a re-queue above all, which no turn waits on) is only
+      // in the folder built aside: with its note whole, take it in, so it is reported as a ship that ended.
+      for (const next of all.filter((n) => /^\d+\.new$/.test(n))) {
+        const n = next.slice(0, -'.new'.length);
+        if (names.includes(n)) continue;
+        try {
+          JSON.parse(await readFile(join(this.root, next, HANDOFF), 'utf8'));
+          await rename(join(this.root, next), join(this.root, n));
+          names.push(n);
+        } catch {
+          // No whole note (nothing was handed off), or a new start has the folder: prune's.
+        }
+      }
       for (let i = 0; i < names.length; i += 16) {
         const found = await Promise.all(
           names.slice(i, i + 16).map((n) =>
@@ -196,23 +210,25 @@ export class Landings {
     const now = this.get(ticketId);
     // Nor over a hand-off that ended but isn't reported yet: starting afresh would wipe its output (the land tool then reads that one).
     if (now && (now.code === null || existsSync(join(this.dir(ticketId), HANDOFF)))) return now;
-    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId });
+    this.run(ticketId, cwd, env, args);
     return { output: '', code: null };
+  }
+
+  private run(ticketId: number, cwd: string, env: Record<string, string>, args: string[], files?: Record<string, string>) {
+    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId, files });
   }
 
   /**
    * Start land.sh as a hand-off (#706): the minion ends its turn and the server reports how it went
-   * (LandHandoffs). The hand-off sits in the landing's folder, so a restart mid-land (the deploy's own,
-   * most often) still reports it. False when a landing already runs for this minion.
+   * (LandHandoffs). The hand-off sits in the landing's folder from before land.sh starts, so a restart mid-land (the
+   * deploy's own, most often) or a server death at the start still reports it. False when a landing already runs for this minion.
    */
   handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff, again = false): boolean {
     const now = this.get(ticketId);
     if (now && now.code === null) return false;
-    // A re-queue (#2030) takes the ended, unreported hand-off's place with no await between, so a restart can't lose both.
-    if (again) this.settled(ticketId);
-    if (existsSync(join(this.dir(ticketId), HANDOFF))) return false;
-    this.start(ticketId, cwd, env, args);
-    writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
+    // A re-queue (#2030) takes the ended, unreported hand-off's place: its folder, and note, replace the old one's.
+    if (!again && existsSync(join(this.dir(ticketId), HANDOFF))) return false;
+    this.run(ticketId, cwd, env, args, { [HANDOFF]: JSON.stringify({ ...h, args }) });
     this.waiting.add(ticketId);
     return true;
   }
@@ -370,8 +386,9 @@ export class Landings {
     for (const name of names) {
       if (this.waiting.has(Number(name))) continue;
       try {
-        // A last run a restart cut off mid-delete (HostJobs.start renames it away, #1734) goes whatever its age.
-        if (/\.old-\d+$/.test(name) || now - (await stat(join(this.root, name, 'code'))).mtimeMs > KEEP_MS) await rm(join(this.root, name), { recursive: true, force: true });
+        // A last run a restart cut off mid-delete (HostJobs.start renames it away, #1734) goes whatever its age, and so
+        // does a folder a killed start never renamed in: its env file can hold a token.
+        if (/\.(old-\d+|new)$/.test(name) || now - (await stat(join(this.root, name, 'code'))).mtimeMs > KEEP_MS) await rm(join(this.root, name), { recursive: true, force: true });
       } catch {
         // Still running, or never started: left alone.
       }

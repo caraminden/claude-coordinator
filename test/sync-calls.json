@@ -126,6 +126,10 @@
   "readThrough": ["boot",1,"db-warmer worker thread only"],
   "(module)": ["boot",3,"db-warmer worker thread only"]
  },
+ "src/db-writer.ts": {
+  "threadId": ["proc",1,"readlink /proc/thread-self at the db-writer worker's start"],
+  "writeOffThread": ["proc",1,"exists /proc/self/task/<tid>, after a timed-out slice (at most 100 ms) of a wait on the write worker"]
+ },
  "src/dismissed-cleanup.ts": {
   "DismissedCleanup.clearBuild": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep (also on minion dismissal)"],
   "DismissedCleanup.sweepWorktrees": ["owed",3,"sync-disk-polls-and-timers.md: daily 24 h build output sweep, per scheme repo"]
@@ -164,7 +168,7 @@
  "src/host-job.ts": {
   "heardLost": ["rare",1,"job that ended with no exit code (once per lost job)"],
   "moveAside": ["owed",1,"sync-disk-polls-and-timers.md: HostJobs.start on every land/ship start; fast mode worktree reset"],
-  "HostJobs.start": ["owed",7,"sync-disk-polls-and-timers.md: every ship land start; also kit sync, ultra review, fast mode"],
+  "HostJobs.start": ["owed",5,"sync-disk-polls-and-timers.md: every ship land start; also kit sync, ultra review, fast mode"],
   "HostJobs.child": ["rare",2,"systemd-run failed fallback or spawn error only"],
   "HostJobs.state": ["owed",1,"sync-disk-polls-and-timers.md: landings.get on ticket pages, release reads, ship-stop; 2 s waits poll"],
   "HostJobs.alive": ["owed",3,"sync-disk-polls-and-timers.md: HostJobs.state on landings.get (ticket pages, release reads)"],
@@ -198,7 +202,7 @@
  "src/land.ts": {
   "landArgs": ["rare",3,"ship hand-off or land route checks test files exist"],
   "Landings.start": ["rare",1,"POST land route starts land.sh"],
-  "Landings.handOff": ["rare",2,"ship hand-off (hand_off_land tool)"],
+  "Landings.handOff": ["rare",1,"ship hand-off (hand_off_land tool)"],
   "Landings.hasHandoff": ["owed",1,"sync-disk-polls-and-timers.md: turn start serverWork, status trailer, in-flight list"],
   "Landings.settled": ["owed",1,"sync-disk-polls-and-timers.md: 'land hand-offs' 5 s reporter settles an ended landing"],
   "Landings.talked": ["owed",1,"sync-disk-polls-and-timers.md: runner.onMessage on every message sent to a minion"],
@@ -331,19 +335,13 @@
   "readIn": ["rare",2,"Settings instructions save overlap check"]
  },
  "src/runner.ts": {
-  "argInProc": ["proc",2,"reads /proc cmdlines only (rescue)"],
   "unsentSteers": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on every turn end"],
-  "Runner.waitStray": ["owed",1,"sync-disk-turn-stream.md: setTimeout loop every 5 s while a stray turn survives restart"],
   "Runner.noteStrays": ["boot",3,"Runner.recover at startup"],
   "Runner.recover": ["boot",7,"runner.recover() at startup, server.ts:488"],
-  "Runner.rescue": ["owed",4,"sync-disk-turn-stream.md: Runner.poll every 250 ms tick, reads only when restart armed"],
-  "Runner.gone": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s); also reattach at boot"],
+  "Runner.reattach": ["boot",1,"Runner.recover re-attach at startup"],
   "Runner.send": ["owed",3,"sync-disk-turn-start-end.md: every message sent to a minion (steer into live turn)"],
-  "Runner.endLive": ["owed",1,"sync-disk-turn-stream.md: endCardWaits on 10 s pool tick; Stop and pause"],
   "Runner.spawnWrapper": ["rare",1,"writeFileSync only if the wrapper spawn errors; turn start path"],
-  "Runner.poll": ["owed",4,"sync-disk-turn-stream.md: setInterval 250 ms per running turn (pollMs)"],
-  "Runner.dirChanged": ["owed",1,"sync-disk-turn-stream.md: setInterval 250 ms per running turn, fstat on kept fd"],
-  "Runner.readStream": ["owed",3,"sync-disk-turn-stream.md: setInterval 250 ms per running turn, reads stream.jsonl"],
+  "Runner.readStreamAtBoot": ["boot",3,"Runner.reattach at startup, for a turn found ended; the poll reads off the thread (#2134)"],
   "Runner.wrapUp": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on every turn end (reads stderr.log)"],
   "Runner.steerSystem": ["owed",2,"sync-disk-turn-start-end.md: checkBudget on turn result events when ask mark passes"],
   "Runner.keepCodexLog": ["owed",1,"sync-disk-turn-start-end.md: Runner.wrapUp on Codex turn end"],
@@ -351,16 +349,9 @@
   "Runner.writeSchemeRefs": ["owed",1,"sync-disk-turn-start-end.md: card posted or settled: refreshRefs for the scheme's turns"]
  },
  "src/running-turn.ts": {
-  "wrapperAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
-  "pids": ["owed",1,"sync-disk-turn-stream.md: stop and kill timers (signalClaude), Runner.poll every 20 ticks per supervisor turn (keepUp), and the \"still going?\" chip (ChildTurn.look)"],
+  "pids": ["rare",1,"the \"still going?\" chip (ChildTurn.look); the stop and the poll read pid.json off the thread (pidsOff, #2134)"],
   "ChildTurn.look": ["proc",1,"reads /proc children only (\"still going?\" chip)"],
-  "ContainerTurn.endStart": ["owed",1,"sync-disk-turn-start-end.md: a Stop before a container turn's claude started (Runner.endLive)"],
-  "ContainerTurn.reattachable": ["boot",1,"Runner.recover re-attach at startup"],
-  "hostAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
-  "procCmdline": ["proc",1,"reads /proc only (a host turn's wrapper check, hostAlive)"],
-  "procMounted": ["proc",1,"reads /proc only (a host turn's wrapper check, hostAlive)"],
-  "containerAlive": ["owed",1,"sync-disk-turn-stream.md: Runner.poll every 20 ticks (5 s) via gone; stray checks (moved out of runner.ts, Build 7 T1)"],
-  "wrapperInProc": ["proc",2,"reads /proc cmdlines only (stale heartbeat)"]
+  "ContainerTurn.reattachable": ["boot",1,"Runner.recover re-attach at startup"]
  },
  "src/schedules.ts": {
   "loadTemplates": ["rare",2,"scheme create, ship lesson queued, GET schedule-audits; also once at boot"]
@@ -386,13 +377,6 @@
   "stopInLine": ["rare",1,"stop-ship from Status page or stopping a minion with a ship"],
   "kitMoved": ["rare",2,"stop-ship check on the kit land line (git merge-base)"]
  },
- "src/side-ask.ts": {
-  "SideAsks.recover": ["boot",1,"SideAsks.recover once at boot (server.ts:781)"],
-  "SideAsks.poll": ["owed",1,"sync-disk-turn-stream.md: setInterval 500 ms in SideAsks.tick while a side ask runs"],
-  "SideAsks.read": ["owed",1,"sync-disk-turn-stream.md: setInterval 500 ms side-ask poll reads stream"],
-  "SideAsks.finish": ["owed",2,"sync-disk-turn-stream.md: side-ask poll on exit or limit, 500 ms timer"],
-  "SideAsks.dropFork": ["owed",1,"sync-disk-turn-stream.md: finish from 500 ms side-ask poll; recover at boot"]
- },
  "src/side-guard.ts": {
   "(module)": ["boot",1,"hook child process (readFileSync stdin)"]
  },
@@ -417,18 +401,18 @@
   "relayFile": ["rare",8,"POST relay file between schemes (projects route)"]
  },
  "src/tripwire-git.ts": {
-  "git": ["owed",1,"sync-disk-requests.md: tripwire ask (POST /api/tickets/:id/approvals card), spawnSync git up to 3 s"],
-  "midMerge": ["rare",1,"tripwire ask on git checkout --ours/--theirs only"],
-  "gitHabitReason": ["owed",1,"sync-disk-requests.md: tripwire ask for git commands (approvals card path)"],
-  "inTheWay": ["rare",1,"tripwire ask on file checkout/restore only"],
+  "git": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "midMerge": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "gitHabitReason": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "inTheWay": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
   "writeSaves": ["boot",1,"hook child process only; server passes throwaway saves"]
  },
  "src/tripwire.ts": {
-  "hasDeployScript": ["rare",1,"tripwire ask message on blocked deploy writes only"],
-  "envBelow": ["rare",6,"tripwire ask on grep-for-.env commands only"],
-  "globRoot": ["rare",5,"tripwire ask on globbed .env searches only"],
-  "realPath": ["owed",2,"sync-disk-requests.md: tripwire ask path resolution on every approvals card"],
-  "segmentReason": ["owed",2,"sync-disk-requests.md: tripwire ask on every approvals card (Bash segments)"],
+  "hasDeployScript": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "envBelow": ["boot",6,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "globRoot": ["boot",5,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "realPath": ["boot",2,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "segmentReason": ["boot",2,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
   "(module)": ["boot",1,"hook child process CLI branch (stdin read)"]
  },
  "src/turn-launch.ts": {
@@ -479,5 +463,12 @@
  "src/worktree-sweep.ts": {
   "removeWorktree": ["owed",3,"sync-disk-polls-and-timers.md: daily build output sweep timer, 24 h"],
   "restoreSaved": ["rare",1,"restoreTicketDir only when worktree folder is gone"]
+ },
+ "src/wrapper-alive.ts": {
+  "wrapperAlive": ["boot",3,"Runner.recover's sweep and reattach at startup; the poll and stray wait use wrapperAliveOff (#2134)"],
+  "pidIsWrapper": ["proc",2,"reads /proc/<pid>/cmdline and /proc/self only"],
+  "claudePidNow": ["owed",1,"sync-disk-turn-start-end.md: waitForKillResume at a killed turn's end; also a cut-off keepalive at boot"],
+  "argInProc": ["proc",2,"reads /proc cmdlines only (rescue)"],
+  "wrapperInProc": ["proc",2,"reads /proc cmdlines only (stale heartbeat)"]
  }
 }

@@ -116,14 +116,16 @@ export class HostJobs {
   /**
    * Run `argv` in `cwd` with exactly `env`, keeping its state in `dir` (made afresh, private). `unit` names
    * its unit; `onChildEnd` is called when a job that fell back to the server's child ends. `ticketId` is the
-   * minion it runs for.
+   * minion it runs for. `files` (name to text) are in the folder from its first moment: the folder is built aside and
+   * renamed in, so a server killed here leaves all of it or none, never a half-written file or a job nobody noted.
    */
-  start(job: { dir: string; cwd: string; argv: string[]; env: Record<string, string>; unit: string; description: string; ticketId: number; onChildEnd?: () => void }) {
+  start(job: { dir: string; cwd: string; argv: string[]; env: Record<string, string>; unit: string; description: string; ticketId: number; onChildEnd?: () => void; files?: Record<string, string> }) {
     const { dir } = job;
+    const next = `${dir}.new`;
+    moveAside(next); // a start a kill cut off
     // The last run's folder (a land's keeps thousands of test files) is renamed away and deleted off the server's thread:
     // deleted here, it held the thread 9.9 s under load (#1734).
-    moveAside(dir);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    mkdirSync(next, { recursive: true, mode: 0o700 });
     const lines = Object.entries(job.env)
       .filter(([k, v]) => v !== undefined && VALID.test(k) && !SKIP.test(k))
       .map(([k, v]) => `export ${k}=${quote(String(v))}\n`);
@@ -131,13 +133,20 @@ export class HostJobs {
     // otherwise sit there until the job's end, and for good when it is killed. A TMPDIR already on disk stays.
     if (!onDisk(job.env.TMPDIR)) {
       const tmp = join(dir, 'tmp');
-      mkdirSync(tmp, { mode: 0o700 });
+      mkdirSync(join(next, 'tmp'), { mode: 0o700 });
       lines.push(...['TMPDIR', 'TMP', 'TEMP'].map((k) => `export ${k}=${quote(tmp)}\n`));
     }
-    writeFileSync(join(dir, 'env'), lines.join(''), { mode: 0o600 });
-    writeFileSync(join(dir, 'cmd'), `set -- ${job.argv.map(quote).join(' ')}\n`);
-    writeFileSync(join(dir, 'wrapper.sh'), WRAPPER);
-    writeFileSync(join(dir, 'started'), String(Date.now()));
+    const written = {
+      env: lines.join(''),
+      cmd: `set -- ${job.argv.map(quote).join(' ')}\n`,
+      'wrapper.sh': WRAPPER,
+      started: String(Date.now()),
+      ...job.files,
+    };
+    // The env is private: it can hold a token.
+    for (const [name, text] of Object.entries(written)) writeFileSync(join(next, name), text, { mode: 0o600 });
+    moveAside(dir);
+    renameSync(next, dir);
     const wrapper = ['env', '-i', 'bash', '--noprofile', '--norc', join(dir, 'wrapper.sh'), dir, job.cwd];
     if (!this.units()) return this.child(wrapper, dir, job.onChildEnd);
     writeFileSync(join(dir, 'unit'), job.unit); // for jobLost's journal look (#1325)

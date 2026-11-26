@@ -5,7 +5,7 @@ import { execFile, spawn } from 'node:child_process';
 import { oomKilled } from './host-job.ts';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
-import { appendFileSync, close, existsSync, fstatSync, open, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, close, closeSync, existsSync, fstat, open, mkdirSync, openSync, read, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, type Stats } from 'node:fs';
 import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
@@ -86,7 +86,7 @@ import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outc
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
-import { runningTurn, START_GRACE_MS, wrapperAlive, type TurnAt } from './running-turn.ts';
+import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
@@ -95,6 +95,7 @@ import { describeActivity, DROPPED_TYPES, guessWindow, pushKind, slimEvent } fro
 import { usageWindow, type CodexLimits, type CodexWindow, type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type RateLimitInfo, type Usage } from './turn-messages.ts';
 import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
+import { argInProc, claudePidNow } from './wrapper-alive.ts';
 
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
 const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
@@ -104,6 +105,10 @@ const exists = (path: string) =>
     () => true,
     () => false,
   );
+// A kept-open file asked and read off the server's thread (a followed turn's poll, #2134).
+const openOff = (path: string) => new Promise<number>((res, rej) => open(path, 'r', (err, fd) => (err ? rej(err) : res(fd))));
+const fstatOff = (fd: number) => new Promise<Stats>((res, rej) => fstat(fd, (err, st) => (err ? rej(err) : res(st))));
+const readOff = (fd: number, buf: Buffer, at: number) => new Promise<number>((res, rej) => read(fd, buf, 0, buf.length, at, (err, n) => (err ? rej(err) : res(n))));
 /** A container turn's `container` file and first beat (spawnInContainer): it counts as running while its container starts. */
 const containerFiles = async (dir: string, place: { container: string }) => {
   await writeFile(join(dir, 'container'), place.container);
@@ -252,9 +257,10 @@ export interface LiveTurn {
    * which needs no file-name lookup (the part that blocked in btrfs at load). Closed by unfollow.
    */
   streamFd?: number;
-  /** null while its open is under way (dirChanged). */
-  dirFd?: number | null;
-  /** No longer followed: an open that finishes now closes what it opened. */
+  dirFd?: number;
+  /** Its poll under way, waiting on the disk: the next tick does nothing, so its lines are handled once and in order (#2134). */
+  polling?: Promise<void>;
+  /** No longer followed: a poll that returns now closes what it had open. */
   unfollowed?: boolean;
   /** The folder's mtime at the last look, and whether the next tick looks again (dirChanged). */
   dirSeen?: number;
@@ -263,34 +269,17 @@ export interface LiveTurn {
   exitSeen?: boolean;
 }
 
-/** The stream reader's buffer: one for every followed turn, grown only for a line longer than it (readStream). */
+/** The most the stream reader takes in one read; its buffer grows only for a line longer than this (readStream). */
 const STREAM_CHUNK = 1 << 20;
 
 export { commandsKey, schemeCommandsKey };
+export { wrapperAlive, wrapperInProc }; // kept in src/running-turn.ts; the tests and the turn files' comments know them from here
 export { guessWindow, pushKind, slimEvent };
 export type { LoadedCommands, MessageFile, MessageImage, QueuedMessage, Usage };
 export { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, idleText, type FreshState } from './fresh.ts';
 
 // Kept in src/account-pick.ts, which claude-link.ts reads them from too (#793).
 export { accountUsageKey, usageKey };
-
-// Kept in src/running-turn.ts; the tests and the turn files' comments know them from here.
-export { wrapperAlive, wrapperInProc } from './running-turn.ts';
-
-/** Whether a process this server can see has `arg` as one of its arguments; reads every process's cmdline. */
-function argInProc(arg: string): boolean {
-  try {
-    return readdirSync('/proc').some((pid) => {
-      try {
-        return /^\d+$/.test(pid) && readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(arg);
-      } catch {
-        return false; // ended meanwhile
-      }
-    });
-  } catch {
-    return false;
-  }
-}
 
 /** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.mjs). */
 export function unsentSteers(turn: { steered?: Steer[]; dir?: string }): QueuedMessage[] {
@@ -991,8 +980,8 @@ export class Runner {
   private waitStray(ticketId: number, stray: string): Promise<void> {
     console.error(`Minion ${ticketId}: a turn nothing here follows still runs in ${stray}; its next turn waits for it to end (#1464).`);
     this.strayWaits.add(ticketId);
-    const check = () => {
-      if (wrapperAlive(stray) && !existsSync(join(stray, 'exit.json'))) return void setTimeout(check, this.strayPollMs).unref();
+    const check = async () => {
+      if ((await wrapperAliveOff(stray)) && !(await exists(join(stray, 'exit.json')))) return void setTimeout(check, this.strayPollMs).unref();
       this.strayWaits.delete(ticketId);
       this.next(ticketId);
     };
@@ -1026,8 +1015,7 @@ export class Runner {
     const live: string[] = [];
     for (const d of this.strays.get(ticketId) ?? []) {
       if (await exists(join(d, 'exit.json'))) continue;
-      // shortcut: wrapperAlive's reads are sync, but only a folder the last server left still there gets them; make it async if strays become common.
-      if (wrapperAlive(d) === true) live.push(d);
+      if ((await wrapperAliveOff(d)) === true) live.push(d);
     }
     // One that has ended is never a stray again.
     if (live.length) this.strays.set(ticketId, live);
@@ -1435,7 +1423,7 @@ export class Runner {
         if (kept?.keepalive) {
           this.store.deleteSetting(turnKey(t.id));
           // Its unit outlives the server; killed first (pid.json is in its folder) so it can't race the next real turn on the session.
-          if (kept.dir) this.signal({ dir: kept.dir, unit: kept.unit ?? null, container: kept.container ?? null }, 'SIGKILL');
+          if (kept.dir) this.signalPid({ dir: kept.dir, unit: kept.unit ?? null, container: kept.container ?? null }, claudePidNow(kept.dir), 'SIGKILL');
           if (kept.dir) rmSync(kept.dir, { recursive: true, force: true });
         }
         // A save the last server didn't finish: redone first on the lane, from the config dir its turn used.
@@ -1589,9 +1577,9 @@ export class Runner {
     if (turn.status) this.statuses.set(ticketId, turn.status);
     if (turn.sentBack) this.sentBack.add(ticketId);
     const live = this.follow(ticketId, turn);
-    if (this.gone(live)) {
+    if (!(wrapperAlive(live.dir) ?? Date.now() - live.startedAt < START_GRACE_MS) && !existsSync(join(live.dir, 'exit.json'))) {
       // What it wrote while no server read it reaches the chat before recovery deletes its folder, as poll's does (C8, #1406).
-      this.readStream(ticketId, live, true);
+      this.readStreamAtBoot(ticketId, live);
       clearInterval(live.timer);
       this.unfollow(live);
       this.turns.delete(ticketId);
@@ -1630,40 +1618,37 @@ export class Runner {
    * that won't start is counted there (start). Armed too after a hand-off that timed out, as the supervisor may have
    * taken the turn after all, leaving the wrapper started meanwhile nothing to run.
    */
-  private rescue(ticketId: number, live: LiveTurn, started: boolean) {
+  private async rescue(ticketId: number, live: LiveTurn, started: boolean) {
     if (!live.restart) return;
     const dir = live.dir;
     if (started) {
       live.restart = undefined;
       return;
     }
-    let why: string | null = null;
-    try {
-      why = readFileSync(join(dir, 'handback'), 'utf8');
-      rmSync(join(dir, 'handback'), { force: true });
-    } catch {
-      /* not given back */
-    }
-    if (why !== null) console.error(`Ticket ${ticketId}: its scope from the turn supervisor didn't start (${why}); it starts in its wrapper unit.`);
-    else {
+    // Not given back: null.
+    const why = await readFile(join(dir, 'handback'), 'utf8').catch(() => null);
+    if (why !== null) {
+      await rm(join(dir, 'handback'), { force: true }).catch(() => {});
+      console.error(`Ticket ${ticketId}: its scope from the turn supervisor didn't start (${why}); it starts in its wrapper unit.`);
+    } else {
       // Nothing still names the folder: a systemd-run the dead supervisor left starting the turn's scope would run it yet.
-      const lost = readdirSync(dir).find((n) => /^spec\.json\.\d+$/.test(n) && !alive(Number(n.slice(10))));
+      const lost = (await readdir(dir)).find((n) => /^spec\.json\.\d+$/.test(n) && !alive(Number(n.slice(10))));
       if (!lost || argInProc(dir)) return;
-      renameSync(join(dir, lost), join(dir, 'spec.json'));
+      await rename(join(dir, lost), join(dir, 'spec.json'));
     }
+    // The turn may have ended while the disk was asked.
     const restart = live.restart;
+    if (!restart || this.turns.get(ticketId) !== live) return;
     live.restart = undefined;
     restart();
   }
 
-  /** Whether a followed turn's process may still be running: started, or still starting. */
-  private running(live: LiveTurn): boolean {
-    return runningTurn(live).alive() ?? Date.now() - live.startedAt < START_GRACE_MS;
-  }
-
-  /** A followed turn's process ended without writing exit.json. Liveness goes first: the wrapper writes exit.json, then exits. */
-  private gone(live: LiveTurn): boolean {
-    return !this.running(live) && !existsSync(join(live.dir, 'exit.json'));
+  /**
+   * A followed turn's process ended without writing exit.json: it isn't running (started, or still starting), and
+   * left none. Liveness goes first: the wrapper writes exit.json, then exits. reattach asks the same on the thread, at boot.
+   */
+  private async gone(live: LiveTurn): Promise<boolean> {
+    return !((await (await runningTurnOff(live)).aliveOff()) ?? Date.now() - live.startedAt < START_GRACE_MS) && !(await exists(join(live.dir, 'exit.json')));
   }
 
   /**
@@ -1829,7 +1814,8 @@ export class Runner {
    */
   private waitForKillResume(ticketId: number, live: LiveTurn, retries: Retries, killed: string) {
     // What is left of it goes first: a claude whose wrapper alone was killed (no unit) would race its resume on the session.
-    this.signal(live, 'SIGKILL');
+    // shortcut: its pid is read on the thread, as the turn's folder is dropped in this same step (wrapUp); it moves off with the turn-end path (sync-disk-turn-start-end.md).
+    this.signalPid(live, claudePidNow(live.dir), 'SIGKILL');
     this.resumes.putKill(ticketId, retries);
     this.emit(ticketId, 'note', { text: `${killed}\nCitadel resumes it by itself in a moment, once: killed again, it stops for good. Messages queued behind it go into that resume.` });
     this.store.updateTicket(ticketId, { note: KILL_NOTE });
@@ -2368,15 +2354,23 @@ export class Runner {
     this.endLive(live, ticketId);
   }
 
+  /** Ends a followed turn: its folder is asked off the server's thread (#2134), so its signals go out a moment after the call. */
   private endLive(live: LiveTurn, ticketId: number) {
-    live.stopPending = !existsSync(join(live.dir, 'pid.json'));
-    // claude has a pid: SIGINT first, so it writes its result (cost, usage) before it exits. Not yet: nothing to
-    // interrupt, so as before (this stops its unit); poll sends the SIGINT chain once claude starts.
-    if (live.stopPending) this.signal(live, 'SIGTERM');
-    else this.stopSignals(live, ticketId);
-    if (live.stopPending) runningTurn(live).endStart();
-    // A turn that ignores the stop (or hadn't started claude yet) gets killed.
-    if (live.stopPending) this.armKill(live, ticketId);
+    void exists(join(live.dir, 'pid.json')).then((started) => {
+      if (this.turns.get(ticketId) !== live) return; // ended meanwhile
+      live.stopPending = !started;
+      // claude has a pid: SIGINT first, so it writes its result (cost, usage) before it exits. Not yet: nothing to
+      // interrupt, so as before (this stops its unit); poll sends the SIGINT chain once claude starts.
+      if (live.stopPending) void this.signal(live, 'SIGTERM');
+      else this.stopSignals(live, ticketId);
+      // A container's or machine's turn with no claude yet ends here (RunningTurn.endStart); `stopped` tells poll it is not the wrapper's.
+      if (live.stopPending)
+        runningTurnOff(live)
+          .then((turn) => turn.endStart())
+          .catch((err) => console.error(`Ticket ${ticketId}: could not end its stopped start:`, err));
+      // A turn that ignores the stop (or hadn't started claude yet) gets killed.
+      if (live.stopPending) this.armKill(live, ticketId);
+    });
   }
 
   /** How long a stopped claude has after SIGINT to write its result before SIGTERM, and in all before SIGKILL (ms). */
@@ -2387,7 +2381,7 @@ export class Runner {
 
   private armKill(live: LiveTurn, ticketId: number) {
     this.clock.clearTimeout(live.stopTimer);
-    live.stopTimer = this.clock.setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), this.stopKillMs);
+    live.stopTimer = this.clock.setTimeout(() => void (this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL')), this.stopKillMs);
     live.stopTimer.unref();
   }
 
@@ -2397,9 +2391,9 @@ export class Runner {
    */
   private stopSignals(live: LiveTurn, ticketId: number) {
     if (live.stopGraceTimer) return; // a second Stop must not restart the grace period or push the SIGKILL out
-    this.signal(live, 'SIGINT');
+    void this.signal(live, 'SIGINT');
     this.clock.clearTimeout(live.stopGraceTimer);
-    live.stopGraceTimer = this.clock.setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGTERM'), this.stopGraceMs);
+    live.stopGraceTimer = this.clock.setTimeout(() => void (this.turns.get(ticketId) === live && this.signal(live, 'SIGTERM')), this.stopGraceMs);
     live.stopGraceTimer.unref();
     this.armKill(live, ticketId);
   }
@@ -2409,9 +2403,17 @@ export class Runner {
     return this.turns.get(ticketId)?.dir ?? null;
   }
 
-  /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
-  signal(live: TurnAt, sig: NodeJS.Signals) {
-    runningTurn(live).signal(sig);
+  /**
+   * Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. Its pid is read off
+   * the server's thread (#2134); the promise resolves once the signal is sent, for a caller that then deletes the folder.
+   */
+  signal(live: TurnAt, sig: NodeJS.Signals): Promise<void> {
+    return runningTurnOff(live).then((turn) => turn.signal(sig));
+  }
+
+  /** signal, for a claude whose pid is in hand (0: not started). */
+  private signalPid(live: TurnAt, pid: number, sig: NodeJS.Signals) {
+    void runningTurnOff(live).then((turn) => turn.signal(sig, pid));
   }
 
   // Fresh starts: src/fresh.ts.
@@ -3560,59 +3562,68 @@ export class Runner {
     return live;
   }
 
+  /**
+   * A tick of a followed turn. Everything it asks of the turn's folder is asked off the server's thread (#2134), and one
+   * poll of a turn runs at a time: a tick that finds the last one still waiting on the disk does nothing, so the
+   * stream's lines are handled once and in order.
+   */
   private poll(ticketId: number) {
     const live = this.turns.get(ticketId);
-    if (!live) return;
-    try {
-      // Checked before reading: once exit.json is there, everything claude wrote is in the stream. Only after the folder
-      // changed (dirChanged), so a quiet tick makes no file-name lookup at all (#1562).
-      // Once seen, it is looked for every tick until handled: a tick that failed on it can't leave the turn running.
-      const exited = (live.exitSeen = (live.exitSeen || this.dirChanged(live)) && existsSync(join(live.dir, 'exit.json')));
-      this.readStream(ticketId, live, exited);
-      const exit = exited ? JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')) : null;
-      // Whether its claude has started (pid.json), looked up only while a stop or a rescue waits on it.
-      const started = !!(live.stopPending || live.restart) && existsSync(join(live.dir, 'pid.json'));
-      // stop()'s own exit.json, but claude has started since: the turn ends with its wrapper's, once the signal below lands.
-      if (exit?.stopped && live.stopPending && started) rmSync(join(live.dir, 'exit.json'), { force: true });
-      else if (exit) return this.finish(ticketId, live, exit);
-      // Stopped while still starting: its claude has a pid now (#468 S03-2). The SIGKILL retry still follows.
-      if (live.stopPending && started) {
-        live.stopPending = false;
-        this.stopSignals(live, ticketId);
-      }
-      if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
-      this.rescue(ticketId, live, started);
-      // Gone without a word: killed with its unit (out of memory, say).
-      if (++live.ticks % 20 === 0) {
-        if (this.gone(live)) {
-          this.readStream(ticketId, live, true);
-          this.finish(ticketId, live, null);
-        } else if (this.supervisor) runningTurn(live).keepUp(() => ensureSupervisor(this.supervisorSpec()));
-      }
-    } catch (err) {
-      console.error(`Ticket ${ticketId}: following its turn failed:`, err);
+    if (!live || live.polling) return;
+    live.polling = this.pollOnce(ticketId, live)
+      .catch((err) => console.error(`Ticket ${ticketId}: following its turn failed:`, err))
+      .finally(() => {
+        live.polling = undefined;
+        if (live.unfollowed) this.unfollow(live); // what it had open while the turn stopped being followed
+      });
+  }
+
+  private async pollOnce(ticketId: number, live: LiveTurn) {
+    // Each wait on the disk lets the rest of the server run: a turn no longer followed after one isn't this poll's to end.
+    const over = () => this.turns.get(ticketId) !== live || !!live.unfollowed;
+    // Checked before reading: once exit.json is there, everything claude wrote is in the stream. Only after the folder
+    // changed (dirChanged), so a quiet tick makes no file-name lookup at all (#1562).
+    // Once seen, it is looked for every tick until handled: a tick that failed on it can't leave the turn running.
+    const exited = (live.exitSeen = (live.exitSeen || (await this.dirChanged(live))) && (await exists(join(live.dir, 'exit.json'))));
+    if (over()) return;
+    await this.readStream(ticketId, live, exited);
+    if (over()) return;
+    const exit = exited ? JSON.parse(await readFile(join(live.dir, 'exit.json'), 'utf8')) : null;
+    // Whether its claude has started (pid.json), looked up only while a stop or a rescue waits on it.
+    const started = !!(live.stopPending || live.restart) && (await exists(join(live.dir, 'pid.json')));
+    if (over()) return;
+    // stop()'s own exit.json, but claude has started since: the turn ends with its wrapper's, once the signal below lands.
+    if (exit?.stopped && live.stopPending && started) {
+      await rm(join(live.dir, 'exit.json'), { force: true });
+      if (over()) return;
+    } else if (exit) return this.finish(ticketId, live, exit);
+    // Stopped while still starting: its claude has a pid now (#468 S03-2). The SIGKILL retry still follows.
+    if (live.stopPending && started) {
+      live.stopPending = false;
+      this.stopSignals(live, ticketId);
+    }
+    if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
+    await this.rescue(ticketId, live, started);
+    if (over()) return;
+    // Gone without a word: killed with its unit (out of memory, say).
+    if (++live.ticks % 20 === 0) {
+      if (!(await this.gone(live))) return over() || !this.supervisor ? undefined : (await runningTurnOff(live)).keepUp(() => ensureSupervisor(this.supervisorSpec()));
+      if (over()) return;
+      await this.readStream(ticketId, live, true);
+      if (!over()) this.finish(ticketId, live, null);
     }
   }
 
   /**
    * Whether an entry in the turn's folder was made, renamed or removed since the last look (exit.json, pid.json): its
    * kept-open folder's mtime, by fstat. A change is looked at on that tick and the next, since a file's times are as
-   * coarse as the kernel's tick and a second file made in the same tick leaves the mtime as it was. Until the folder
-   * is open (opened off the thread), or when it can't be, every tick counts as a change, as every tick looked before.
+   * coarse as the kernel's tick and a second file made in the same tick leaves the mtime as it was. When the folder
+   * can't be opened or asked, the tick counts as a change, as every tick looked before.
    */
-  private dirChanged(live: LiveTurn): boolean {
-    if (live.dirFd === undefined) {
-      live.dirFd = null;
-      open(live.dir, 'r', (err, fd) => {
-        if (err)
-          live.dirFd = undefined; // tried again next tick
-        else if (live.unfollowed) close(fd, () => {});
-        else live.dirFd = fd;
-      });
-    }
-    if (live.dirFd === null) return true;
+  private async dirChanged(live: LiveTurn): Promise<boolean> {
     try {
-      const at = fstatSync(live.dirFd).mtimeMs;
+      live.dirFd ??= await openOff(live.dir);
+      const at = (await fstatOff(live.dirFd)).mtimeMs;
       if (at !== live.dirSeen) {
         live.dirSeen = at;
         live.dirAgain = true;
@@ -3626,67 +3637,84 @@ export class Runner {
     return true;
   }
 
-  /** Close what following a turn kept open (#1562): once it's no longer followed. */
+  /** Close what following a turn kept open (#1562): once it's no longer followed, and no poll is reading it (poll closes it then). */
   private unfollow(live: LiveTurn) {
     live.unfollowed = true;
+    if (live.polling) return;
     for (const fd of [live.streamFd, live.dirFd]) if (fd != null) close(fd, () => {});
     live.streamFd = live.dirFd = undefined;
   }
 
-  /** The shared stream buffer, and whether a read is using it: a line's handling that reads a stream again gets its own. */
-  private streamBuf?: Buffer;
-  private streamBusy = false;
-
   /**
    * Handle the stream's new complete lines, and with `toEnd` a last line without its newline. The file stays open
-   * (unfollow closes it) and its size is asked first, so a tick with nothing new reads nothing (#1562).
+   * (unfollow closes it) and its size is asked first, so a tick with nothing new reads nothing (#1562). Asked and read
+   * off the server's thread (#2134); only poll calls it, one call at a time for a turn.
    */
-  private readStream(ticketId: number, live: LiveTurn, toEnd: boolean) {
-    if (live.streamFd === undefined) {
-      try {
-        live.streamFd = openSync(join(live.dir, 'stream.jsonl'), 'r');
-      } catch {
-        return;
-      }
+  private async readStream(ticketId: number, live: LiveTurn, toEnd: boolean) {
+    try {
+      live.streamFd ??= await openOff(join(live.dir, 'stream.jsonl'));
+    } catch {
+      return;
     }
     const fd = live.streamFd;
-    if (fstatSync(fd).size <= live.offset) return;
-    const busy = this.streamBusy;
-    let buf = busy ? Buffer.allocUnsafe(STREAM_CHUNK) : (this.streamBuf ??= Buffer.allocUnsafe(STREAM_CHUNK));
-    this.streamBusy = true;
+    const left = (await fstatOff(fd)).size - live.offset;
+    if (left <= 0) return;
+    // One byte over what is new, so a read that takes it all knows it reached the end.
+    let buf = Buffer.allocUnsafe(Math.min(left + 1, STREAM_CHUNK));
+    for (;;) {
+      const n = await readOff(fd, buf, live.offset);
+      if (this.turns.get(ticketId) !== live || live.unfollowed) return;
+      const next = this.takeLines(ticketId, live, buf, n, toEnd);
+      if (!next) return;
+      if (next !== buf.length) buf = Buffer.allocUnsafe(next);
+    }
+  }
+
+  /** readStream to the stream's end on the thread, for a turn found ended at boot (reattach): its lines reach the chat before recovery goes on. */
+  private readStreamAtBoot(ticketId: number, live: LiveTurn) {
+    let fd: number;
     try {
-      for (;;) {
-        const size = buf.length;
-        const n = readSync(fd, buf, 0, size, live.offset);
-        if (!n) return;
-        const atEnd = n < size;
-        const end = buf.lastIndexOf(10, n - 1) + 1;
-        if (!end && !atEnd) {
-          buf = Buffer.allocUnsafe(size * 2); // one line longer than the buffer: this read's own, the shared one stays
-          continue;
-        }
-        const take = toEnd && atEnd ? n : end;
-        if (!take) return;
-        const base = live.offset;
-        for (let start = 0; start < take; ) {
-          const nl = buf.indexOf(10, start);
-          const stop = nl < 0 || nl >= take ? take : nl;
-          const line = buf.toString('utf8', start, stop);
-          start = stop + 1;
-          try {
-            this.handleLine(ticketId, line, (error, text) => this.saveTurn(ticketId, { result: { error, text } }));
-          } catch (err) {
-            this.emit(ticketId, 'note', { text: `Could not process output line: ${thrown(err).message}` });
-          }
-          // Saved per line, so a restart carries on from the next one: nothing shown twice or skipped.
-          live.offset = base + Math.min(start, take);
-          this.saveTurn(ticketId, { offset: live.offset });
-        }
-        if (atEnd) return;
+      fd = openSync(join(live.dir, 'stream.jsonl'), 'r');
+    } catch {
+      return;
+    }
+    try {
+      for (let buf = Buffer.allocUnsafe(STREAM_CHUNK), next = buf.length; next; next = this.takeLines(ticketId, live, buf, readSync(fd, buf, 0, buf.length, live.offset), true)) {
+        if (next !== buf.length) buf = Buffer.allocUnsafe(next);
       }
     } finally {
-      this.streamBusy = busy;
+      closeSync(fd);
     }
+  }
+
+  /**
+   * Handle the lines in `n` bytes read into `buf` at the turn's offset. Returns the size of buffer to read on with: 0
+   * when the stream's end was reached, a larger one for a line longer than this buffer.
+   */
+  private takeLines(ticketId: number, live: LiveTurn, buf: Buffer, n: number, toEnd: boolean): number {
+    const size = buf.length;
+    if (!n) return 0;
+    const atEnd = n < size;
+    const end = buf.lastIndexOf(10, n - 1) + 1;
+    if (!end && !atEnd) return size * 2;
+    const take = toEnd && atEnd ? n : end;
+    if (!take) return 0;
+    const base = live.offset;
+    for (let start = 0; start < take; ) {
+      const nl = buf.indexOf(10, start);
+      const stop = nl < 0 || nl >= take ? take : nl;
+      const line = buf.toString('utf8', start, stop);
+      start = stop + 1;
+      try {
+        this.handleLine(ticketId, line, (error, text) => this.saveTurn(ticketId, { result: { error, text } }));
+      } catch (err) {
+        this.emit(ticketId, 'note', { text: `Could not process output line: ${thrown(err).message}` });
+      }
+      // Saved per line, so a restart carries on from the next one: nothing shown twice or skipped.
+      live.offset = base + Math.min(start, take);
+      this.saveTurn(ticketId, { offset: live.offset });
+    }
+    return atEnd ? 0 : size;
   }
 
   /** A turn's process has exited (exit is null when it was killed without recording how). */

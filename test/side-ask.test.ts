@@ -158,7 +158,7 @@ test('a follow-up resumes the fork, only its asker may send one, and an ended th
   const forkFile = transcriptPath(config, m.cwd, forkId)!;
   assert.ok(existsSync(forkFile));
   new SideAsks(store, runner, () => {}, 10).recover();
-  assert.ok(!existsSync(forkFile), 'the fork is deleted');
+  await until('the fork to be deleted', () => !existsSync(forkFile));
   assert.ok(existsSync(transcriptPath(config, m.cwd, m.session)!), "the minion's own transcript is kept");
 });
 
@@ -221,14 +221,14 @@ test("an answer that lands between the tick's two looks is not lost (#1619)", as
   rmSync(exit);
   let gaps = 0;
   const read = hand.read.bind(hand);
-  hand.read = (t: unknown, toEnd: boolean) => {
-    read(t, toEnd);
+  hand.read = async (t: unknown, toEnd: boolean) => {
+    await read(t, toEnd);
     if (gaps++) return;
     writeFileSync(stream, printed.trimEnd());
     writeFileSync(exit, '{"code":0,"signal":null}');
   };
-  hand.poll();
-  hand.poll();
+  await hand.poll();
+  await hand.poll();
   assert.ok(gaps >= 1, 'the gap was never exercised: a tick no longer reads the stream');
   const a = answers(m.id).at(-1)!;
   assert.equal(a.ok, true, a.text);
@@ -245,7 +245,7 @@ test('an answer printed just before the deadline counts, not a timeout (#1619)',
   // killed, and the answer it did give is the answer, not "it took longer than 15 minutes".
   rmSync(join(run.dir, 'exit.json'));
   run.startedAt = Date.now() - SIDE_LIMIT_MS - 1;
-  hand.poll();
+  await hand.poll();
   const a = answers(m.id).at(-1)!;
   assert.equal(a.ok, true, a.text);
   assert.match(a.text, /answer to/);

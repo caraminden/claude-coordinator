@@ -40,6 +40,10 @@ export interface CabalMemberRow {
   approved_at: number | null;
   /** Started past the cabal's width: it waits as next up from then. */
   next_at: number | null;
+  /** The scheme it runs in when that isn't the lead's (#2094): its Taskmaster starts it, on its own people's go. */
+  project_id: number | null;
+  /** When the lead asked that scheme's Taskmaster to start it; null until then, and once it is started. */
+  asked_at: number | null;
   created_at: number;
 }
 
@@ -63,8 +67,8 @@ export interface CabalLogLine {
   text: string;
 }
 
-export type CabalRowFields = Partial<Pick<CabalMemberRow, 'ticket_id' | 'label' | 'title' | 'lane' | 'after' | 'files' | 'role' | 'note' | 'note_at' | 'pos' | 'handoff' | 'model' | 'effort' | 'cost' | 'approved_by' | 'approved_at' | 'next_at'>>;
-const ROW_FIELDS = ['ticket_id', 'label', 'title', 'lane', 'after', 'files', 'role', 'note', 'note_at', 'pos', 'handoff', 'model', 'effort', 'cost', 'approved_by', 'approved_at', 'next_at'] as const;
+export type CabalRowFields = Partial<Pick<CabalMemberRow, 'ticket_id' | 'label' | 'title' | 'lane' | 'after' | 'files' | 'role' | 'note' | 'note_at' | 'pos' | 'handoff' | 'model' | 'effort' | 'cost' | 'approved_by' | 'approved_at' | 'next_at' | 'project_id' | 'asked_at'>>;
+const ROW_FIELDS = ['ticket_id', 'label', 'title', 'lane', 'after', 'files', 'role', 'note', 'note_at', 'pos', 'handoff', 'model', 'effort', 'cost', 'approved_by', 'approved_at', 'next_at', 'project_id', 'asked_at'] as const;
 
 export const cabalQueries = {
   getCabal(this: Store, leadId: number): CabalRow | undefined {
@@ -130,17 +134,18 @@ export const cabalQueries = {
   /**
    * Put a minion on a lead's board (create_ticket or update_ticket with cabal): a roster row with its label or title and no
    * minion yet becomes its row (`rowId`'s first: cabal_start's row, #2091), else it gets a new one. Moving cabals keeps its
-   * note. Returns the row's id.
+   * note. Returns the row's id. `projectId` is the lead's scheme; a member in another (#2094, `memberProject`) takes only a
+   * row planned for its scheme.
    */
-  joinCabal(this: Store, ticketId: number, leadId: number, projectId: number, title: string, at = Date.now(), rowId?: number): number {
+  joinCabal(this: Store, ticketId: number, leadId: number, projectId: number, title: string, at = Date.now(), rowId?: number, memberProject = projectId): number {
     this.ensureCabal(leadId, projectId, at);
     const own = this.cabalRowOf(ticketId);
     if (own?.lead_id === leadId) return own.id;
     if (own) this.db.prepare('DELETE FROM cabal_rows WHERE id = ?').run(own.id);
-    const open = this.cabalRows(leadId).filter((r) => r.ticket_id == null);
+    const open = this.cabalRows(leadId).filter((r) => r.ticket_id == null && (r.project_id ?? projectId) === memberProject);
     const planned = open.find((r) => r.id === rowId) ?? open.find((r) => r.title.trim().toLowerCase() === title.trim().toLowerCase());
     if (planned) {
-      this.updateCabalRow(planned.id, { ticket_id: ticketId, ...(own?.note && !planned.note ? { note: own.note, note_at: own.note_at } : {}) });
+      this.updateCabalRow(planned.id, { ticket_id: ticketId, asked_at: null, next_at: null, ...(own?.note && !planned.note ? { note: own.note, note_at: own.note_at } : {}) });
       return planned.id;
     }
     return this.addCabalRow(leadId, { ticket_id: ticketId, title: '', note: own?.note ?? '', note_at: own?.note_at ?? null }, at);

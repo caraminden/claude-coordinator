@@ -5,7 +5,8 @@
 // a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
 import { readTail } from './wait-tail.ts';
 import { median as statsMedian } from './stats.ts';
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, stat as statFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
@@ -315,18 +316,28 @@ export const behindOld = (line: LandTicket[], t: LandTicket) => line.some((o) =>
  * given `moved`, only that one moves, to where `seqs` puts it: moveIn); a
  * holder, a ticket no longer waiting or one from an older branch is left out (an older one waits for every lower
  * ticket, so ranking it ahead of one could deadlock), and so is one behind such a one (behindOld). `note` says who moved
- * what, for the waiters' output. Returns the order written.
+ * what, for the waiters' output. Returns the order written. `at` as a function reads the line: it is read again when
+ * deploy-queue.sh rewrote .order meanwhile (a ship back in line for its retry), so that ship keeps its place (#2132).
  */
-export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: string | ((order: number[]) => string), moved?: number, pins: number[] = []): number[] {
-  const waiting = line.filter((t) => t.got === 0 && t.orders && !behindOld(line, t)).map((t) => t.seq);
-  const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
-  if (!order.length) throw new Error('Nothing is waiting in line to reorder');
+export function writeOrder(q: string, at: LandTicket[] | (() => LandTicket[]), seqs: number[], note: string | ((order: number[]) => string), moved?: number, pins: number[] = []): number[] {
   const f = join(q, '.order'),
     tmp = `${f}.tmp${process.pid}`;
-  // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
-  writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n${pins.length ? `#pin ${pins.join(' ')}\n` : ''}`);
-  renameSync(tmp, f);
-  return order;
+  for (let tries = 1; ; tries++) {
+    const was = read(f) ?? '',
+      line = typeof at === 'function' ? at() : at;
+    const waiting = line.filter((t) => t.got === 0 && t.orders && !behindOld(line, t)).map((t) => t.seq);
+    const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
+    if (!order.length) throw new Error('Nothing is waiting in line to reorder');
+    // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
+    writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n${pins.length ? `#pin ${pins.join(' ')}\n` : ''}`);
+    // Renamed under the lock deploy-queue.sh's queue_front rewrites .order under, and only over what was read above.
+    try {
+      execFileSync('flock', ['-w', '2', join(q, '.order.lock'), 'sh', '-c', '[ "$(cat "$2" 2>/dev/null)" = "$(printf %s "$3")" ] || exit 75; mv -f "$1" "$2"', 'sh', tmp, f, was]);
+      return order;
+    } catch (e) {
+      if ((e as { status?: number }).status !== 75 || tries === 3) throw new Error("Couldn't write the line's order, so nothing moved: try again", { cause: e });
+    }
+  }
 }
 
 /**
@@ -826,8 +837,11 @@ export class Waits {
    */
   setOrder(seqs: number[], note: string | ((order: number[]) => string), moved?: number, pins: number[] = []): number[] {
     if (!this.d.deployState) throw new Error('This server has no ship line');
-    this.pollNow();
-    const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved, pins);
+    const line = () => {
+      this.pollNow();
+      return this.line;
+    };
+    const order = writeOrder(join(this.d.deployState, 'queue'), line, seqs, note, moved, pins);
     this.pollNow();
     return order;
   }

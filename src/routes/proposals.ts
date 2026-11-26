@@ -10,6 +10,7 @@ import { keyFiles } from '../release-key.ts';
 import { originRepo } from '../github.ts';
 import { lineDiff } from '../instructions.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
+import { judge } from '../tripwire-judge.ts';
 import { tripwireConfig } from '../turn-launch.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
 import { claudeConfigDir } from '../sessions.ts';
@@ -366,7 +367,11 @@ export const proposalRoutes: Route[] = [
       if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
       // Judged with the turn's TMPDIR (src/turn-launch.ts), as its hook judged it, not the server's own.
       const cfg = { ...tripwireConfig(project.id, claudeConfigDir(process.env), true), env: { ...process.env, TMPDIR: tmpDirFor(runner.tmpRoot(project.id), id) } };
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, cfg, rules, merge ? { ...merge, pr } : undefined, target, retry, use);
+      // The tripwire's verdict reads the disk and runs git: a worker works it out, so the server's thread never waits on it (#2151).
+      const judged = await judge({ tool_name: tool, tool_input: input, cwd: ticket.cwd }, { ...cfg, ask: true });
+      if (!runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
+      if ('failed' in judged) return json(res, 200, { refused: `The tripwire couldn't check this call (${judged.failed}), so it was not run. Try it once more; if it fails again, hand the commands to a person.` });
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, cfg, rules, merge ? { ...merge, pr } : undefined, target, retry, use, judged);
       return json(res, 'id' in r ? 201 : 200, r);
     },
   },

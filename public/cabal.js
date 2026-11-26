@@ -3,14 +3,14 @@
 // first and a blocking ask pinned on top, a red-run bar when the lead set one, and "Roster of N, nobody started yet"
 // before anyone starts. It only reads: src/cabal-board.ts builds the board, and people answer by writing in the lead's chat.
 import { api, h, icon, threadHref, view } from './base.js';
-import { emptyCard, toneChip } from './look.js';
+import { emptyCard, schemeTag, toneChip } from './look.js';
 import { loadingLine } from './ui/state.js';
 
 /**
  * @typedef {'roster' | 'sealed' | 'running' | 'idle' | 'blocked' | 'merged' | 'shipped' | 'closed'} MemberState
- * @typedef {{ row: number, label: string, title: string, number: number | null, lane: string, role: string, state: MemberState, word: string, after: string | null, note: string, note_at: number | null, spend: number, risk: string | null, claims: string[], files: string[], doubled: string[] }} BoardMember
- * @typedef {{ id: number, from: string, number: number | null, text: string, blocking: boolean, opened_at: number }} BoardAsk
- * @typedef {{ lead: { id: number, number: number | null, title: string, spend: number }, name: string, kind: 'build' | 'goal', build: number | null, members: BoardMember[], asks: BoardAsk[], log: { at: number, by: string, text: string }[], red: { text: string, at: number } | null, counts: { members: number, started: number, merged: number, open: number, running: number, spend: number } }} Board
+ * @typedef {{ row: number, label: string, title: string, number: number | null, project_id: number | null, scheme: string | null, open: boolean, lane: string, role: string, state: MemberState, word: string, after: string | null, note: string, note_at: number | null, spend: number, risk: string | null, claims: string[], files: string[], doubled: string[] }} BoardMember
+ * @typedef {{ id: number, from: string, number: number | null, scheme: string | null, text: string, blocking: boolean, opened_at: number }} BoardAsk
+ * @typedef {{ lead: { id: number, number: number | null, title: string, spend: number, project_id: number, open: boolean }, name: string, kind: 'build' | 'goal', build: number | null, members: BoardMember[], asks: BoardAsk[], log: { at: number, by: string, text: string }[], red: { text: string, at: number } | null, counts: { members: number, started: number, merged: number, open: number, running: number, spend: number } }} Board
  * @typedef {'open' | 'all' | 'done'} Filter
  * @typedef {{ filter: Filter, open: number | null, shown: boolean }} LedgerState
  */
@@ -32,7 +32,17 @@ function boardHead(b, projectId) {
   const k = b.counts;
   const done = b.kind === 'build' ? 'merged' : 'shipped';
   return [
-    h('div', { class: 'cabal-head' }, h('b', {}, `${b.name} cabal`), h('span', { class: 'cabal-sub' }, h('a', { href: threadHref({ id: b.lead.id, project_id: projectId, number: b.lead.number, kind: 'ticket' }) }, overseer(b)), ` · ${k.merged} ${done} · ${k.open} open · ${k.running} running · ${money(k.spend)} spent`)),
+    h(
+      'div',
+      { class: 'cabal-head' },
+      h('b', {}, `${b.name} cabal`),
+      h(
+        'span',
+        { class: 'cabal-sub' },
+        b.lead.open === false ? h('span', {}, overseer(b)) : h('a', { href: threadHref({ id: b.lead.id, project_id: b.lead.project_id ?? projectId, number: b.lead.number, kind: 'ticket' }) }, overseer(b)),
+        ` · ${k.merged} ${done} · ${k.open} open · ${k.running} running · ${money(k.spend)} spent`,
+      ),
+    ),
     h('div', { class: 'cabal-meter', 'aria-hidden': 'true' }, ...b.members.map((m) => h('i', { 'data-s': m.state }))),
   ];
 }
@@ -47,7 +57,7 @@ function pinned(b, all, reply) {
       h(
         'div',
         { class: 'cabal-ask', 'data-blocking': a.blocking ? '' : null },
-        h('div', { title: a.text }, h('b', {}, a.blocking ? 'Blocking ask' : 'Ask'), ` · ${a.from}${a.number ? ` #${a.number}` : ''}: `, a.text),
+        h('div', { title: a.text }, h('b', {}, a.blocking ? 'Blocking ask' : 'Ask'), ` · ${a.from}${a.number ? ` ${a.scheme ? `${a.scheme} ` : ''}#${a.number}` : ''}: `, a.text),
         reply ? h('button', { type: 'button', class: 'small secondary', onclick: () => reply(a) }, 'Reply') : null,
       ),
     );
@@ -89,14 +99,23 @@ function table(rows, b, s, projectId, redraw) {
           'tr',
           { class: `cabal-row${open ? ' open' : ''}`, tabindex: '0', 'aria-expanded': String(open), onclick: () => toggle(m.row), onkeydown: (/** @type {KeyboardEvent} */ e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle(m.row)) },
           h('td', {}, h('span', { class: 'cabal-dot', 'data-s': m.state })),
-          h('td', {}, m.label ? h('b', {}, m.label, ' ') : null, m.title, ' ', h('span', { class: 'num' }, m.number ? `#${m.number}` : 'roster'), m.doubled.length ? h('span', { class: 'cabal-doubled', title: `Another member lists ${m.doubled.join(', ')}` }, ' ⚠ shared file') : null),
-          h('td', {}, toneChip(TONE[m.state], m.word)),
+          h(
+            'td',
+            {},
+            m.label ? h('b', {}, m.label, ' ') : null,
+            m.title,
+            ' ',
+            m.scheme ? [schemeTag(m.scheme), ' '] : null,
+            h('span', { class: 'num' }, m.number ? `#${m.number}` : 'roster'),
+            m.doubled.length ? h('span', { class: 'cabal-doubled', title: `Another member lists ${m.doubled.join(', ')}` }, ' ⚠ shared file') : null,
+          ),
+          h('td', {}, toneChip(m.state === 'roster' && m.word.startsWith('asked ') ? 'warn' : TONE[m.state], m.word)), // asked of another scheme: waiting on its Taskmaster
           h('td', { class: 'cabal-note-col cabal-note' }, noteOf(m)),
           h('td', { class: 'num' }, m.spend ? money(m.spend) : '–'),
         );
         if (!open) return [tr];
         const files = m.claims.length ? m.claims : m.files;
-        const ask = b.asks.find((a) => a.number != null && a.number === m.number);
+        const ask = b.asks.find((a) => a.number != null && a.number === m.number && a.scheme === m.scheme);
         const det = h(
           'td',
           { colspan: '4', class: 'cabal-det' },
@@ -108,7 +127,8 @@ function table(rows, b, s, projectId, redraw) {
           m.risk ? h('div', {}, `Risk ${m.risk}.`) : null,
           m.note && m.note_at ? h('div', {}, `Note set ${clock(m.note_at)}.`) : null,
           ask ? h('div', { class: 'cabal-ask-line' }, h('b', {}, ask.blocking ? 'Ask, blocking: ' : 'Ask: '), ask.text) : null,
-          m.number ? h('a', { href: `#/p/${projectId}/t/${m.number}` }, `Open #${m.number}'s chat →`) : null,
+          m.scheme ? h('div', {}, `Runs and ships in ${m.scheme}${b.kind === 'build' ? `, never into ${b.name}` : ''}.`) : null,
+          m.number && m.open !== false ? h('a', { href: `#/p/${m.project_id ?? projectId}/t/${m.number}` }, `Open ${m.scheme ? `${m.scheme} ` : ''}#${m.number}'s chat →`) : null,
         );
         return [tr, h('tr', { class: 'cabal-det-row' }, h('td', {}), det)];
       }),

@@ -5,7 +5,7 @@ import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { callOf, type CardCall, type ShownCard } from './card-wait.ts';
 import type { MergeCall, PrInfo } from './merge-card.ts';
-import { explanation, tripwire, type TripwireConfig } from './tripwire.ts';
+import { explanation, tripwire, type TripwireConfig, type Verdict } from './tripwire.ts';
 
 /** The thread MCP server's tool that Claude Code calls instead of showing a permission prompt. */
 export const APPROVAL_TOOL = 'mcp__thread__approve';
@@ -337,10 +337,12 @@ export class Approvals {
    * the minion's, so a call whose shell had moved elsewhere may get a refusal, never a wrong card. A
    * tripwire card needs an explanation, shows the whole call, and is one at a time; after a deny, the
    * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
+   * The server passes `judged`, the verdict worked out in a worker (src/tripwire-judge.ts, #2151); left out, it's
+   * worked out here, on the caller's thread.
    */
-  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null, retry?: { target: MergeTarget; command: string } | null, use?: string): { id: string } | { refused: string } {
+  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null, retry?: { target: MergeTarget; command: string } | null, use?: string, judged?: { verdict: Verdict | null }): { id: string } | { refused: string } {
     // A throwaway saves list: the hook already saved what a file checkout throws away (#1716), so it passes here too.
-    const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true }, []);
+    const verdict = judged ? judged.verdict : tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true }, []);
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
     const call = callOf({ id: '', tool, input, tripwire: verdict ?? undefined, merge }, cwd);
     const pass = call && this.usePass(ticketId, call);

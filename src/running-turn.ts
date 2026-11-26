@@ -2,12 +2,15 @@
 // is alive and takes it up again after a restart through RunningTurn, and only this file knows how each kind does that.
 // Starting a turn and reading its stream are the runner's and the turn folder's, the same for every kind.
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MachineTurn, placedAt } from './machine-turn.ts';
+import { MachineTurn, type Placed, placedAt, placedNow } from './machine-turn.ts';
 import { checkProcess, type ProcCheck } from './quiet.ts';
 import { supervisorAlive } from './supervisor-client.ts';
-import { alive } from './turn-launch.ts';
+import { START_GRACE_MS, wrapperAlive as hostOrContainerAlive, wrapperAliveOff as hostOrContainerAliveOff, wrapperInProc } from './wrapper-alive.ts';
+
+export { START_GRACE_MS, wrapperInProc };
 
 /** Where a turn runs, as its saved record says it: in a container, in a unit (or a scope of that name), or as the server's child. */
 export interface TurnAt {
@@ -17,12 +20,17 @@ export interface TurnAt {
 }
 
 export interface RunningTurn {
-  /** Signal its claude and, as it runs in its own process group, its tool subprocesses too. */
-  signal(sig: NodeJS.Signals): void;
+  /**
+   * Signal its claude and, as it runs in its own process group, its tool subprocesses too. Its pid is read off the
+   * server's thread (#2134), unless `pid` hands it in (0: not started); resolves once the signal is sent.
+   */
+  signal(sig: NodeJS.Signals, pid?: number): Promise<void>;
   /** After its SIGTERM, for a turn stopped before its claude started: end it, where nothing else will. */
-  endStart(): void;
-  /** Its wrapper (or the shell a supervisor runs in its place) runs; null: not started yet, or never will be. */
+  endStart(): Promise<void>;
+  /** Its wrapper (or the shell a supervisor runs in its place) runs; null: not started yet, or never will be. Reads on the thread: for boot. */
   alive(): boolean | null;
+  /** alive(), its files read off the server's thread: what a followed turn's poll asks (#2134). */
+  aliveOff(): Promise<boolean | null>;
   /** Whether a server that didn't start it can follow it: false when its start died with the last server. */
   reattachable(): boolean;
   /** It runs on through a restart of this server. */
@@ -30,38 +38,55 @@ export interface RunningTurn {
   /** What it runs in, for the log, when that has a name of its own. */
   readonly where: string | null;
   /** What it needs to go on running, looked at now and then while it's followed: `ensureSupervisor` when its supervisor is gone. */
-  keepUp(ensureSupervisor: () => void): void;
+  keepUp(ensureSupervisor: () => void): Promise<void>;
   /** "Is this still going?" (#906): a look at its process. */
   look(): Promise<ProcCheck>;
 }
 
 /** The running turn at `at`. Holds nothing: made where it's asked, from where the turn runs now (a unit that won't start leaves a child). */
 export function runningTurn(at: TurnAt): RunningTurn {
-  if (at.container) return new ContainerTurn(at.dir, at.container);
   // A turn on a connected machine has neither, and its folder's `machine` file (Build 7 T2): read only then, so a unit's or a container's turn costs no file read.
-  const machine = at.unit ? null : placedAt(at.dir);
+  return turnOf(at, at.container || at.unit ? null : placedAt(at.dir));
+}
+
+/** runningTurn, its `machine` file read off the server's thread: for a followed turn's poll and stop (#2134). */
+export async function runningTurnOff(at: TurnAt): Promise<RunningTurn> {
+  return turnOf(at, at.container || at.unit ? null : await placedNow(at.dir));
+}
+
+function turnOf(at: TurnAt, machine: Placed | null): RunningTurn {
+  if (at.container) return new ContainerTurn(at.dir, at.container);
   if (machine) return new MachineTurn(at.dir, machine);
   return at.unit ? new UnitTurn(at.dir, at.unit) : new ChildTurn(at.dir);
 }
 
-/** A turn whose wrapper hasn't said it runs (no pid.json or beat yet) counts as still starting for this long. */
-export const START_GRACE_MS = 60_000;
-/** A container turn's wrapper beat (src/turn-wrapper.mjs) longer ago than this is stale: checked against /proc then. */
-const BEAT_STALE_MS = 30_000;
-
 /** alive() for a turn's folder alone, as the sweeps and strays know it: a container turn's has the `container` file, a machine's turn the `machine` file. */
 export function wrapperAlive(dir: string): boolean | null {
   const machine = placedAt(dir);
-  if (machine) return new MachineTurn(dir, machine).alive();
-  return (existsSync(join(dir, 'container')) ? containerAlive : hostAlive)(dir);
+  return machine ? new MachineTurn(dir, machine).alive() : hostOrContainerAlive(dir);
 }
 
-/** A turn's pids (pid.json), or {} before it has any. */
+/** wrapperAlive off the server's thread, for the stray wait (#2134). */
+export async function wrapperAliveOff(dir: string): Promise<boolean | null> {
+  const machine = await placedNow(dir);
+  return machine ? new MachineTurn(dir, machine).alive() : hostOrContainerAliveOff(dir);
+}
+
+/** A turn's pids (pid.json), or {} before it has any: read on the thread, for a look a person asked for. */
 function pids(dir: string): { wrapper?: number; claude?: number; supervisor?: unknown } {
   try {
     return JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8')) ?? {};
   } catch {
     return {}; // not started yet, or just ended
+  }
+}
+
+/** pids, read off the server's thread (#2134). */
+async function pidsOff(dir: string): Promise<{ wrapper?: number; claude?: number; supervisor?: unknown }> {
+  try {
+    return JSON.parse(await readFile(join(dir, 'pid.json'), 'utf8')) ?? {};
+  } catch {
+    return {};
   }
 }
 
@@ -74,13 +99,12 @@ class ChildTurn implements RunningTurn {
     this.dir = dir;
   }
 
-  signal(sig: NodeJS.Signals) {
-    this.signalClaude(sig);
+  async signal(sig: NodeJS.Signals, pid?: number) {
+    this.signalClaude(sig, pid ?? (await pidsOff(this.dir)).claude);
   }
 
   /** Signal claude's process group; false when it has no pid yet. */
-  protected signalClaude(sig: NodeJS.Signals): boolean {
-    const pid = pids(this.dir).claude;
+  protected signalClaude(sig: NodeJS.Signals, pid: number | undefined): boolean {
     if (!pid) return false;
     try {
       process.kill(-pid, sig);
@@ -94,17 +118,21 @@ class ChildTurn implements RunningTurn {
     return true;
   }
 
-  endStart() {}
+  async endStart() {}
 
   alive() {
-    return hostAlive(this.dir);
+    return hostOrContainerAlive(this.dir);
+  }
+
+  aliveOff() {
+    return hostOrContainerAliveOff(this.dir);
   }
 
   reattachable() {
     return true;
   }
 
-  keepUp(_ensureSupervisor: () => void) {}
+  async keepUp(_ensureSupervisor: () => void) {}
 
   look() {
     const p = pids(this.dir);
@@ -128,8 +156,8 @@ class UnitTurn extends ChildTurn {
     this.where = unit;
   }
 
-  override signal(sig: NodeJS.Signals) {
-    const signalled = this.signalClaude(sig);
+  override async signal(sig: NodeJS.Signals, pid?: number) {
+    const signalled = this.signalClaude(sig, pid ?? (await pidsOff(this.dir)).claude);
     // Its other processes (claude not started yet, or something it left behind) go with the unit.
     // By pattern: the turn's wrapper unit (name.service) or its scope from the supervisor (name.scope, #1343); a pattern
     // that matches nothing is no error, where a missing unit named outright would stop the whole call.
@@ -140,8 +168,8 @@ class UnitTurn extends ChildTurn {
    * A turn whose supervisor is gone (stopped, or a crash its unit didn't restart) runs on in its scope, but its shared
    * tool server forgets it within 30 s unless a supervisor adopts it: start one, which adopts it at start.
    */
-  override keepUp(ensureSupervisor: () => void) {
-    const sup = pids(this.dir).supervisor;
+  override async keepUp(ensureSupervisor: () => void) {
+    const sup = (await pidsOff(this.dir)).supervisor;
     if (sup !== undefined && !supervisorAlive(sup)) ensureSupervisor();
   }
 }
@@ -157,8 +185,8 @@ class ContainerTurn implements RunningTurn {
     this.container = container;
   }
 
-  signal(sig: NodeJS.Signals) {
-    const pid = pids(this.dir).claude;
+  async signal(sig: NodeJS.Signals, given?: number) {
+    const pid = given ?? (await pidsOff(this.dir)).claude;
     if (!pid) return; // not started yet, and no unit to stop
     const s = sig.replace(/^SIG/, '');
     execFile('podman', ['exec', this.container, 'sh', '-c', `kill -${s} -${pid} 2>/dev/null || kill -${s} ${pid}`], () => {});
@@ -168,12 +196,16 @@ class ContainerTurn implements RunningTurn {
    * With no claude yet it has no pid or unit to signal, and a start that hangs never gets one: this ends it at the next
    * poll. `stopped` tells the runner it is not the wrapper's, should claude start after all.
    */
-  endStart() {
-    writeFileSync(join(this.dir, 'exit.json'), JSON.stringify({ code: null, signal: null, stopped: true }));
+  async endStart() {
+    await writeFile(join(this.dir, 'exit.json'), JSON.stringify({ code: null, signal: null, stopped: true }));
   }
 
   alive() {
-    return containerAlive(this.dir);
+    return hostOrContainerAlive(this.dir);
+  }
+
+  aliveOff() {
+    return hostOrContainerAliveOff(this.dir);
   }
 
   /**
@@ -185,76 +217,9 @@ class ContainerTurn implements RunningTurn {
     return wrapperInProc(this.dir, true) || ['pid.json', 'exit.json'].some((f) => existsSync(join(this.dir, f)));
   }
 
-  keepUp(_ensureSupervisor: () => void) {}
+  async keepUp(_ensureSupervisor: () => void) {}
 
   async look(): Promise<ProcCheck> {
     return { verdict: 'unknown', text: "This turn runs in a container, so the server can't look at its process." };
   }
-}
-
-/** A turn's wrapper on this host still runs: its pid is alive and is that turn's wrapper, not a reused pid. */
-function hostAlive(dir: string): boolean | null {
-  let pid: number;
-  try {
-    pid = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8')).wrapper;
-  } catch {
-    return null; // not started yet, or never will be
-  }
-  try {
-    return procCmdline(pid).includes(dir);
-  } catch {
-    return procMounted() ? false : alive(pid);
-  }
-}
-
-/** A process's argv as /proc holds it: no disk (the proc class in test/sync-calls.json). */
-const procCmdline = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-/** Whether /proc is mounted here: no disk either. */
-const procMounted = () => existsSync('/proc/self');
-
-/**
- * A container turn's heartbeat says whether it still runs, since its pids are the container's; a stale one is only gone
- * once no process here runs that turn's wrapper (wrapperInProc).
- */
-function containerAlive(dir: string): boolean | null {
-  let fresh: boolean;
-  try {
-    fresh = Date.now() - statSync(join(dir, 'beat')).mtimeMs < BEAT_STALE_MS;
-  } catch {
-    return null;
-  }
-  // A container at its MemoryHigh stalls every process in it, heartbeats too, for a minute or more: a stale beat
-  // alone once deleted live turns' folders, pin/tripwire.ts with them, under claudes that ran on (#1255).
-  return fresh || wrapperInProc(dir);
-}
-
-/**
- * Whether a process this server can see runs `dir`'s wrapper (turn-launch's `<node> <pin>/turn-wrapper.mjs <dir>`). A rootless
- * container's processes are in the host's /proc under host pids, so a container turn's wrapper shows here while it lives,
- * stalled or not; once its container or exec dies it doesn't. Only for a stale heartbeat, or a container turn with no pid.json
- * at a restart (reattach): it reads every process's cmdline.
- */
-export function wrapperInProc(dir: string, orStarting = false): boolean {
-  let pids: string[];
-  try {
-    pids = readdirSync('/proc').filter((n) => /^\d+$/.test(n));
-  } catch {
-    // /proc fails to list only where it isn't mounted, not for a moment: the heartbeat's word stands, as before #1255.
-    // (Unknown would be no kinder: running() reads it as gone once the turn is past its start grace.)
-    return false;
-  }
-  for (const pid of pids) {
-    let argv: string[];
-    try {
-      argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
-    } catch {
-      continue; // ended meanwhile
-    }
-    if (argv.at(-1) === '') argv.pop();
-    // `<node> <pin>/turn-wrapper.mjs <dir>` exactly (`.ts` before #1343, still running across that deploy): a podman exec or
-    // conmon whose argv also ends in dir isn't the wrapper, unless `orStarting` asks for the podman exec too (one in its own
-    // scope outlives the server that ran it).
-    if (argv.at(-1) === dir && (/\/turn-wrapper\.(mjs|ts)$/.test(argv.at(-2) ?? '') || (orStarting && argv.includes('exec')))) return true;
-  }
-  return false;
 }

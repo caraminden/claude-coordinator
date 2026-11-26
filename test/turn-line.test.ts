@@ -1100,6 +1100,7 @@ test('a stop while waiting for a worker tells the outbox which queued messages i
 async function shipsAsItStarts() {
   const m = store.listMachines()[0] ?? store.createMachine('desk', 'h', 'Cara', cara.id);
   store.setMachineProjects(m.id, [project.id]);
+  store.setMachineRole(m.id, 'turns', { on: true, projects: [project.id] }); // its Minion turns role (Build 7 M1): what a turn on it needs, not the Tools lend
   const s = { ships: false };
   const pools = new MachinePools({ store, online: () => true, lends: () => true, info: () => ({ claude: '1', max: 1, at: Date.now(), load: { cpu: 0, mem: 0, freeGb: 9 } }), ships: () => s.ships, claude: () => Promise.resolve('1'), changed: () => {}, now: Date.now });
   pools.launch = (...a) => {

@@ -152,6 +152,7 @@ import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
 import { Builds } from './src/builds.ts';
+import { CabalCards } from './src/cabal-cards.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
@@ -1244,6 +1245,8 @@ const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters
 const ticketBranch = ships.branch;
 // Each build branch's header in the minions list (src/builds.ts): feeders folded in and open, commits behind main.
 const builds = new Builds({ store, broadcast });
+// Each open cabal's card in the minions list (src/cabal-cards.ts), polled with the build headers.
+const cabals = new CabalCards({ store, broadcast, parked: (t) => runner.parked(t) });
 runner.ship = ships.ship;
 
 // What each minion waits on (#544): the land line in this checkout's git dir (tools/deploy-queue.sh), the heavy slots.
@@ -1612,6 +1615,7 @@ if (!BOOT_CHECK || PREVIEW) {
   void safely('branch sweep', () => ships.sweep());
   every('ship poll', SHIP_POLL_MS, () => ships.poll());
   every('builds', 2 * SHIP_POLL_MS, () => builds.poll(), 0);
+  every('cabals', 2 * SHIP_POLL_MS, () => cabals.poll(), 0);
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
   every('waits', 2_000, async () => {
     await waits.poll();
@@ -2462,6 +2466,7 @@ const app: App = {
   startChained: startChain,
   ticketBranch,
   builds,
+  cabals,
   sharedFiles: artifacts.sharedFiles,
   sharedDir,
   registryChanged,

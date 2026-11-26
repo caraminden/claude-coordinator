@@ -7,7 +7,8 @@ import { account, ago, openView, todayPacific, api, costText, dismissedWhen, h, 
 import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
-import { threadMatches, threadSections } from './threadgroups.js';
+import { cabalSplit, threadMatches, threadSections } from './threadgroups.js';
+import { cabalCard, openCabals } from './cabal-card.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { othersIn, presenceChip } from './presence.js';
@@ -201,6 +202,27 @@ function buildHeading(s) {
   ];
 }
 
+/** @param {ReturnType<typeof cabalSplit>['cards']} cards */
+function cabalSection(cards) {
+  const view = openView();
+  return h(
+    'section',
+    { class: 'thread-group g-cabal' },
+    h('h3', {}, 'Cabals'),
+    cards.map(({ cabal, rows, mine }) =>
+      cabalCard(cabal, {
+        rows: rows.sort((a, b) => Number(b.id === cabal.lead) - Number(a.id === cabal.lead) || byUrgency(a, b, usage)),
+        mine,
+        tickets: view.tickets,
+        build: view.builds?.find((b) => b.build === cabal.build),
+        preview: !!view.buildPreviews,
+        row: (t) => threadRow(t),
+        redraw: renderSidebar,
+      }),
+    ),
+  );
+}
+
 /** The resting sections' headings (threadgroups.js threadSections). */
 const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Sealed' };
 
@@ -242,7 +264,11 @@ export function renderSidebar() {
     );
   const open = tickets.filter((t) => t.status !== 'closed' || t.release);
   const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
-  const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(openView().project), releaseOrder()).map((s) =>
+  // A cabal is one card holding its minions (#2092). A filter that leaves none of them hides it.
+  const { cards, rest } = cabalSplit(open, openView().cabals ?? []);
+  const shownCards = cards.filter((c) => !picks.size || c.mine.length);
+  const grouped = threadSections(rest, Object.keys(TYPES), listGroupsOf(openView().project), releaseOrder());
+  const sections = grouped.map((s) =>
     h(
       'section',
       { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
@@ -250,6 +276,8 @@ export function renderSidebar() {
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t)),
     ),
   );
+  // The cabals sit where the current build does: under Deploying, over everything else.
+  if (shownCards.length) sections.splice(grouped[0]?.key === 'deploying' ? 1 : 0, 0, cabalSection(shownCards));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
   const pinned = /** @type {Row[]} */ ((openView().pins ?? []).map((id) => byId.get(id)).filter(Boolean));
@@ -441,6 +469,13 @@ export function revealActiveRow() {
   const box = /** @type {HTMLDetailsElement | null | undefined} */ (document.getElementById('threads')?.closest('.sidebar'));
   if (!box?.open) return;
   let row = box.querySelector('#threads .thread-row.active');
+  // Nor is a cabal member's while its card is shut: open the card.
+  const holds = !row && cabalSplit([...openView().tickets.values()], openView().cabals ?? []).cards.find((c) => c.rows.some((t) => t.id === openView().id));
+  if (holds && !openCabals.has(holds.cabal.lead)) {
+    openCabals.add(holds.cabal.lead);
+    renderSidebar();
+    row = box.querySelector('#threads .thread-row.active');
+  }
   // A dismissed minion's row isn't built while its list is shut (renderSidebar): open the list for the one you're on.
   if (!row && !openView().showClosed && openView().tickets?.get(/** @type {number} */ (openView().id))?.status === 'closed') {
     openView().showClosed = true;

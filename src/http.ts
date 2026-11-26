@@ -23,6 +23,7 @@ export { ownPath } from './front.ts';
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
 import type { Builds } from './builds.ts';
+import type { CabalCards } from './cabal-cards.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket, TicketFields } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { MachineJobs } from './machine-jobs.ts';
@@ -453,6 +454,8 @@ export interface App {
   ticketBranch(ticketId: number): Promise<BranchStatus | null>;
   /** Build branches' headers (src/builds.ts). */
   builds: Pick<Builds, 'get'>;
+  /** Open cabals' cards in the minions list (src/cabal-cards.ts). */
+  cabals: Pick<CabalCards, 'get' | 'refresh'>;
   sharedFiles(projectId: number): Promise<SharedFile[]>;
   sharedDir(ticket: TicketFields): string;
   registryChanged(projectId: number, global: boolean): void;

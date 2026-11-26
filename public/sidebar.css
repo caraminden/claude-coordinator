@@ -56,6 +56,25 @@
 .closed-foot { min-height: 1px; padding: 0.25rem 0.4rem; }
 .closed-foot:empty { padding: 0; }
 .g-build { --gc: hsl(205 65% 45%); }
+.g-cabal { --gc: hsl(265 45% 52%); }
+.g-cabal > h3 { color: var(--gc); }
+/* A cabal's card (#2092, public/cabal-card.js): a button for its summary, its members' rows under it. */
+.cabal-card { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: var(--space-1) 0; transition: border-color 0.15s; }
+.cabal-card:hover, .cabal-card[data-open] { border-color: var(--gc); }
+.sidebar .cabal-toggle { display: flex; flex-direction: column; gap: var(--space-1); align-items: stretch; width: 100%; margin: 0; padding: var(--space-2); border: 0; background: none; color: inherit; font: inherit; font-weight: normal; text-align: left; cursor: pointer; }
+.cabal-tag { align-self: flex-start; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
+.cabal-title { overflow-wrap: anywhere; }
+.cabal-title .num { color: var(--muted); font-size: 0.8rem; }
+/* The meter is the board's (project.css); here its segments are taller to point at, painted in a 6px band. */
+.cabal-card .cabal-meter { order: 0; margin: 0; height: 12px; border-radius: 0; }
+.cabal-card .cabal-meter i { border: 0 solid transparent; border-width: 3px 0; background-clip: padding-box; }
+.cabal-foot { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); font-size: 0.75rem; color: var(--muted); }
+.cabal-asks { color: var(--error); }
+.cabal-build { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 0.75rem; color: var(--muted); }
+.cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); animation: cabal-open 0.15s ease-out; }
+.cabal-planned { margin: 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; }
+@keyframes cabal-open { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cabal-card { transition: none; } .cabal-members { animation: none; } }
 .g-build > h3 { color: var(--gc); }
 .g-build > h3 .muted { text-transform: none; font-weight: normal; }
 .g-feature { --gc: hsl(265 55% 55%); }

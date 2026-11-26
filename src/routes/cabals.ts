@@ -51,7 +51,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
     store.leaveCabal(t.id);
     if (was != null) {
       runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
-      app.broadcast({ type: 'cabal', projectId: t.project_id, lead: was });
+      changed(app, t, was);
     }
     return;
   }
@@ -59,14 +59,18 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
   if (was === lead.id) return;
   store.joinCabal(t.id, lead.id, t.project_id, t.title);
   runner.emit(t.id, 'note', { text: `${by} put this minion on #${lead.number}'s cabal board.` });
-  for (const l of new Set([was, lead.id])) if (l != null) app.broadcast({ type: 'cabal', projectId: t.project_id, lead: l });
+  for (const l of new Set([was, lead.id])) if (l != null) changed(app, t, l);
 }
 
 export async function boardFor(app: App, leadId: number): Promise<Board | null> {
   return readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) });
 }
 
-const changed = (app: App, t: Pick<Ticket, 'project_id'>, lead: number) => app.broadcast({ type: 'cabal', projectId: t.project_id, lead });
+/** A board was written: its open panels read it again, and the minions list's cards are read again. */
+const changed = (app: App, t: Pick<Ticket, 'project_id'>, lead: number) => {
+  app.broadcast({ type: 'cabal', projectId: t.project_id, lead });
+  void app.cabals.refresh(t.project_id).catch(() => {});
+};
 
 export const cabalRoutes: Route[] = [
   {

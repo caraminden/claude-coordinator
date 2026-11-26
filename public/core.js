@@ -504,8 +504,9 @@ function connectStream(catchUp = false) {
     if (msg.type === 'workers') onWorkers(msg);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'machine_job') onJobUpdate(msg.job);
-    if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) {
-      view.builds = msg.builds;
+    // Build headers and cabal cards: the message's list is named as its type.
+    if ((msg.type === 'builds' || msg.type === 'cabals') && view?.kind === 'project' && view.projectId === msg.projectId) {
+      Object.assign(view, { [msg.type]: msg[msg.type] });
       scheduleSidebar();
     }
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);

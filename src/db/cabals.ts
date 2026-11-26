@@ -59,6 +59,11 @@ export const cabalQueries = {
     return this.db.prepare('SELECT * FROM cabals WHERE lead_id = ?').get(leadId) as CabalRow | undefined;
   },
 
+  /** The leads of a scheme's open cabals: a board whose lead isn't dismissed. */
+  openCabalLeads(this: Store, projectId: number): number[] {
+    return (this.db.prepare("SELECT c.lead_id AS id FROM cabals c JOIN tickets t ON t.id = c.lead_id WHERE c.project_id = ? AND t.status != 'closed' ORDER BY c.lead_id").all(projectId) as { id: number }[]).map((r) => r.id);
+  },
+
   /** The lead's board, made the first time it is needed. */
   ensureCabal(this: Store, leadId: number, projectId: number, at = Date.now()): CabalRow {
     this.db.prepare('INSERT INTO cabals (lead_id, project_id, created_at) VALUES (?, ?, ?) ON CONFLICT (lead_id) DO NOTHING').run(leadId, projectId, at);

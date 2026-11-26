@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 /** @import { ArtifactFile, SharedFile, Ticket, View } from './types.js' */
-/** @typedef {Pick<View, 'project' | 'coordinator' | 'taskmasters' | 'seen' | 'personNotes' | 'pins' | 'builds' | 'buildPreviews' | 'artifacts' | 'shared' | 'machines'> & { tickets: Ticket[], closed: ReturnType<typeof closedSnapshot> }} Cached A scheme as it was left (rememberScheme). */
+/** @typedef {Pick<View, 'project' | 'coordinator' | 'taskmasters' | 'seen' | 'personNotes' | 'pins' | 'builds' | 'cabals' | 'buildPreviews' | 'artifacts' | 'shared' | 'machines'> & { tickets: Ticket[], closed: ReturnType<typeof closedSnapshot> }} Cached A scheme as it was left (rememberScheme). */
 /** @typedef {{ kind: string, number?: number | null, id?: number, home?: boolean, orders?: boolean, folder?: string, machine?: string, schedule?: number | null, focus?: number | null, artifact?: ArtifactFile, file?: SharedFile & { path: string } }} Main What the route asks the main panel to show. */
 import { account, api, h, isCoordinator, loadPanelState, me, openView, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
@@ -78,7 +78,7 @@ const getApp = () => (offersApp() ? h('a', { class: 'get-app', href: DESKTOP_APP
 export async function showReleases(projectId, to) {
   if (goReleases(projectId, to) && view?.main === 'releases') return;
   if (!(view?.kind === 'project' && view.projectId === projectId && !view.home && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
-  const { kind, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, cabals, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
   setView({
     kind,
     main: 'releases',
@@ -91,6 +91,7 @@ export async function showReleases(projectId, to) {
     personNotes,
     pins,
     builds,
+    cabals,
     buildPreviews,
     artifacts,
     shared,
@@ -267,7 +268,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const filter = preparePropFilter(projectId);
   const firstItems = !stale && stripWaits(projectId) ? fetchInbox(projectId) : null;
   const files = stale || later ? null : shelfFiles(projectId);
-  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, items, projects] = stale
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews, cabals }, items, projects] = stale
     ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, null, known]
     : // The dismissed minions stay on the server until the Dismissed list is opened, searched or linked to: most of a big scheme's payload (#538), 8,000 elements.
       await Promise.all([api(`api/projects/${projectId}?tickets=open`), firstItems, schemes, filter]);
@@ -315,6 +316,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
     builds: builds ?? [], // build branches' headers: { build, merged, open, behind } (src/builds.ts)
+    cabals: cabals ?? [], // open cabals' cards (src/cabal-cards.ts)
     buildPreviews: !!build_previews, // this server runs the scheme's code, so each build branch has a preview (src/previews.ts)
     artifacts: artifacts ?? [],
     shared: shared ?? [],
@@ -494,9 +496,9 @@ const SCHEME_CACHE = 6;
 
 function rememberScheme() {
   if (view?.kind !== 'project' || !view.tickets) return;
-  const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, machines } = view;
+  const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, cabals, buildPreviews, artifacts, shared, machines } = view;
   schemeCache.delete(projectId);
-  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], closed: closedSnapshot(tickets), seen, personNotes, pins, builds, buildPreviews, artifacts, shared, machines });
+  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], closed: closedSnapshot(tickets), seen, personNotes, pins, builds, cabals, buildPreviews, artifacts, shared, machines });
   if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(/** @type {number} */ (schemeCache.keys().next().value));
 }
 
@@ -530,7 +532,7 @@ async function refreshScheme(/** @type {number} */ projectId) {
     if (!got) await new Promise((r) => setTimeout(r, wait));
   }
   panel?.removeAttribute('aria-busy');
-  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, machines] = got;
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews, cabals }, artifacts, shared, machines] = got;
   closedState(list).total = dismissed ?? 0;
   const now = new Set(open.map((/** @type {Ticket} */ t) => t.id));
   // Dismissed since you left: gone until the Dismissed list brings it back as it is now.
@@ -544,7 +546,17 @@ async function refreshScheme(/** @type {number} */ projectId) {
   if (gone) Object.assign(closedState(list), { cursor: null, more: true });
   for (const t of open) if (!((list.get(t.id)?.updated_at ?? 0) > t.updated_at)) list.set(t.id, t);
   if (!(openView().coordinator.updated_at > coordinator.updated_at)) openView().coordinator = coordinator;
-  Object.assign(openView(), { project, taskmasters: taskmasters ?? openView().taskmasters, seen: seen ?? openView().seen, personNotes: person_notes ?? openView().personNotes, pins: pins ?? openView().pins, builds: builds ?? openView().builds, buildPreviews: build_previews ?? openView().buildPreviews, machines });
+  Object.assign(openView(), {
+    project,
+    taskmasters: taskmasters ?? openView().taskmasters,
+    seen: seen ?? openView().seen,
+    personNotes: person_notes ?? openView().personNotes,
+    pins: pins ?? openView().pins,
+    builds: builds ?? openView().builds,
+    cabals: cabals ?? openView().cabals,
+    buildPreviews: build_previews ?? openView().buildPreviews,
+    machines,
+  });
   headUp();
   renderSidebar();
   setArtifacts(artifacts, shared);
@@ -570,7 +582,7 @@ async function switchChat(main, seq) {
   const cached = cachedEvents(merged?.src ?? chatId);
   const page = cached ?? (await loadEvents(merged?.src ?? chatId));
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = openView();
+  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, cabals, buildPreviews, artifacts, shared, showClosed, machines, projects } = openView();
   setView({
     kind,
     home,

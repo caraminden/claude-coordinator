@@ -15,7 +15,7 @@
 // a running or stuck turn or a waiting approval sends it back to its type. Open question cards that don't hold the land up keep
 // it here; its row's question chip still puts it in the Needs-you strip.
 
-/** @import { ListedTicket as Row } from './types.js' */
+/** @import { CabalCard, ListedTicket as Row } from './types.js' */
 import { LOOK } from './threadstate.js';
 
 /** @param {Row} t Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
@@ -29,6 +29,26 @@ const onMainDeploying = (t) => !!t.server_work && t.server_work.kind !== 'job' &
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
 /** @param {Row} t */
 const wakesItself = (t) => !!t.wakes_on;
+
+/**
+ * Each open cabal's minions leave their sections for its card (#2092): the Overseer, its board's members and, with a
+ * build, every minion of that build. A Deploying one stays in Deploying. A cabal whose Overseer isn't open has no card.
+ * @param {Row[]} open
+ * @param {CabalCard[]} cabals
+ */
+export function cabalSplit(open, cabals) {
+  const live = cabals.filter((c) => open.some((t) => t.id === c.lead && t.status !== 'closed'));
+  const taken = new Set();
+  const cards = live.map((cabal) => {
+    const ids = new Set([cabal.lead, ...cabal.members.map((m) => m.id)]);
+    // Another cabal's Overseer keeps to its own card.
+    const mine = open.filter((t) => t.status !== 'closed' && !taken.has(t.id) && (ids.has(t.id) || (cabal.build != null && t.build === cabal.build && !live.some((o) => o.lead === t.id))));
+    for (const t of mine) taken.add(t.id);
+    return { cabal, mine, rows: mine.filter((t) => !isDeploying(t)) };
+  });
+  const listed = new Set(cards.flatMap((c) => c.rows.map((t) => t.id)));
+  return { cards, rest: open.filter((t) => !listed.has(t.id)) };
+}
 
 /**
  * @param {Row[]} all

@@ -8,7 +8,7 @@ import { needsGo } from '../public/shipping.js';
 import { APP_NAME } from './appname.ts';
 import { armedKey } from './db-keys.ts';
 import { criticRefusal } from './critic-gate.ts';
-import { buildOwnerKey, type Ticket } from './db.ts';
+import type { Ticket } from './db.ts';
 import { fixLine, fixProofProblem, parseFixProof } from './fix-proof.ts';
 import { gitOut } from './git.ts';
 import { HANDOFF_FIX, HttpError, oneOf, str, type App } from './http.ts';
@@ -22,7 +22,7 @@ import { defaultBranch } from './release-targets.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
-import { buildBranch } from './workspace.ts';
+import { inBuild } from './workspace.ts';
 import { armForLane, takeFreeLane } from './armed-handoff.ts';
 
 /** A hand-off that passed every check, ready for startHandoff. */
@@ -273,11 +273,8 @@ export interface Prepared {
 /** What a prepared hand-off takes: hand_off_land's arguments for a plain ship to main, less the go, which is the click. */
 const PREPARED_KEYS = ['summary', 'learned', 'risk', 'risk_reason', 'probe', 'fix', 'deploy', 'stay_open', 'waiting_on'];
 const isShipOption = (label: unknown) => /^ship it$/i.test(String(label ?? '').trim());
-/** A branch in a build under way merges there, and the build minion's own go card opens its ship in its turn: both cards go to the minion. */
-const inBuild = (app: App, ticket: Ticket) => !!buildBranch(app.store.getProject(ticket.project_id)?.repo_dir ?? null, ticket.build) || (ticket.build != null && app.store.getSetting<number>(buildOwnerKey(ticket.project_id, ticket.build)) === ticket.id);
-
-/** Whether a ship card here is one the server could ship: a minion on a tools/land.sh ship path, outside a build. A pull-request scheme's card stays the minion's. */
-const serverShips = async (app: App, ticket: Ticket) => ticket.kind === 'ticket' && !!ticket.cwd && (app.store.getProject(ticket.project_id)?.ship_path ?? 'citadel') === 'citadel' && (await hasLand(ticket.cwd)) && !inBuild(app, ticket);
+/** Whether a ship card here is one the server could ship: a minion on a tools/land.sh ship path, outside a build (a build's cards go to its minions). A pull-request scheme's card stays the minion's. */
+const serverShips = async (app: App, ticket: Ticket) => ticket.kind === 'ticket' && !!ticket.cwd && (app.store.getProject(ticket.project_id)?.ship_path ?? 'citadel') === 'citadel' && (await hasLand(ticket.cwd)) && !inBuild(app.store, ticket);
 
 /** A ship card's hand_off, checked as the hand-off itself will be, so what it refuses is fixed in the minion's turn and not after the click. */
 export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, questions: { multiSelect?: boolean; options: { label: string }[] }[], token: string): Promise<Prepared> {

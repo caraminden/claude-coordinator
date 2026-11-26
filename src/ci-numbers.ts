@@ -6,16 +6,25 @@
 //
 // A job sends them with its GitHub run token, as a CI store upload does (src/ci-store.ts): the scheme, workflow, run,
 // commit and ref come from the token, the job sends only names, values and units (kit/skills/ci-store/ci-numbers.sh).
+import { type Sample, trueCpu } from './ci-load.ts';
 import { medianOrNaN as median } from './stats.ts';
 import type { CiNumber, CiNumberStep, Project, Store } from './db.ts';
 import type { RunClaims } from './ci-store.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
+import { inBuild } from './workspace.ts';
 
 const DAY = 24 * 60 * 60_000;
 
 /** The step-up rule: `held` runs in a row each above the median of the `base` runs before by `pct` and by `noise` × their median wobble. */
 export const STEP = { held: 3, base: 10, pct: 0.05, noise: 3 };
+
+/**
+ * A suite-time reading taken while the PC running the scheme's CI averaged more than this Windows CPU is not kept (#2082):
+ * load made it slow, not the code. On 2026-11-25 clean suites read 53-71% and the slow ones 82-97%.
+ */
+export const BUSY_PC = 80;
+const SUITE_TIME = /^suite-time(-pipeline)?$/;
 
 /** Small by rule: numbers, not reports. */
 export const LIMITS = { perUpload: 50, series: 100, bodyBytes: 16_384, keepMs: 400 * DAY };
@@ -74,16 +83,33 @@ export class CiNumbers {
 
   /** Keep a run's numbers, then flag any series of them whose step up has just held. */
   take(project: Project, claims: RunClaims, body: unknown): { stored: number; steps: CiNumberStep[] } {
-    const sent = parseNumbers(body);
+    const at = this.now();
+    const sent = parseNumbers(body).filter((n) => !(SUITE_TIME.test(n.name) && n.unit === 's' && this.busyPc(claims.repository, at - n.value * 1000, at)));
     const names = new Set(this.store.ciNumberNames(project.id));
     const fresh = sent.filter((n) => !names.has(n.name)).length;
     if (names.size + fresh > LIMITS.series) throw new HttpError(413, `${project.name} has ${names.size} series of CI numbers; a scheme keeps at most ${LIMITS.series}, so a new one is refused`);
-    const at = this.now();
     // A ship's land/<branch> run is main's next commit (tools/land.sh pushes the commit it is about to land there), so it is main's line.
-    const ref = claims.ref.startsWith('refs/heads/land/') ? 'refs/heads/main' : claims.ref;
+    // A build's ship run is not (#2082): its commit carries the build branch's own tests and may never reach main, so it keeps its own ref.
+    const ref = claims.ref.startsWith('refs/heads/land/') && !this.buildShip(project.id, claims.ref.slice('refs/heads/land/'.length)) ? 'refs/heads/main' : claims.ref;
     this.store.putCiNumbers(sent.map((n) => ({ project_id: project.id, ...n, workflow: claims.workflow, run_id: claims.runId, run_attempt: claims.runAttempt, sha: claims.sha, ref, created_at: at })));
     const steps = sent.flatMap((n) => this.check(project, n.name, ref) ?? []);
     return { stored: sent.length, steps };
+  }
+
+  private buildShip(projectId: number, branch: string): boolean {
+    const ticket = this.store.ticketByBranch(branch, projectId);
+    return !!ticket && inBuild(this.store, ticket);
+  }
+
+  /** Whether the Windows side of a PC with this repo's runners averaged over BUSY_PC between `from` and `to`; false with no samples. */
+  private busyPc(repository: string, from: number, to: number): boolean {
+    const samples = this.store.runnerLoadSince(from).flatMap((r) => (r.at <= to ? [JSON.parse(r.data) as Sample] : []));
+    const repo = repository.toLowerCase();
+    const hosts = new Set(samples.filter((s) => s.runners.some((r) => r.repo.toLowerCase() === repo)).map((s) => s.host));
+    return [...hosts].some((host) => {
+      const cpu = samples.filter((s) => s.os === 'windows' && s.host === host).map(trueCpu);
+      return cpu.reduce((a, c) => a + c, 0) > BUSY_PC * cpu.length;
+    });
   }
 
   /** The rule on one series' runs of one ref: a new step, recorded and told, or null (none, or that step is flagged already). */

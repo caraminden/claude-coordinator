@@ -1,13 +1,13 @@
 // CI numbers kept per commit, and the step-up flag (#1369, src/ci-numbers.ts).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { CiNumbers, LIMITS, parseNumbers, stepUp } from '../src/ci-numbers.ts';
 import type { RunClaims } from '../src/ci-store.ts';
-import { Store } from '../src/db.ts';
+import { buildOwnerKey, Store } from '../src/db.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ci-numbers-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -250,4 +250,75 @@ test('the overlap check flags crossing windows and open recent ones, not disjoin
   assert.equal(run(['120 150']), true);
   assert.equal(run(['150 0']), true); // still open, file just written
   assert.equal(run(['150 0'], 60), false); // open but untouched for an hour: a killed run, not a live one
+});
+
+test("a build's ship run keeps its own ref, so it never joins main's line (#2082)", () => {
+  const store = new Store(join(root, 'build.db'));
+  const p = store.createProject('Peek', 'https://github.com/caraminden/peek-auras', null);
+  const minion = (branch: string, build: number | null) => {
+    const t = store.createTicket({ project_id: p.id, title: branch, permission_mode: 'default', created_by: 'c' });
+    store.setTicketDir(t.id, '', branch);
+    store.updateTicket(t.id, { build });
+    return t.id;
+  };
+  store.setSetting(buildOwnerKey(p.id, 7), minion('ticket/1-build', 7));
+  minion('ticket/2-fix', null);
+  const numbers = new CiNumbers(store);
+  const send = (run: number, branch: string) => numbers.take(p, claims(run, `refs/heads/land/${branch}`), { numbers: [{ name: 'boot', value: 100, unit: 'ms' }] });
+  send(1, 'ticket/1-build');
+  send(2, 'ticket/2-fix');
+  assert.deepEqual(
+    store.ciNumbers(p.id, 'boot').map((n) => n.ref),
+    ['refs/heads/land/ticket/1-build', 'refs/heads/main'],
+  );
+});
+
+test("a suite time taken while the runners' Windows PC averaged over 80% CPU is not kept (#2082)", () => {
+  const store = new Store(join(root, 'busy.db'));
+  const p = store.createProject('Peek', 'https://github.com/caraminden/peek-auras', null);
+  const now = Date.UTC(2026, 10, 25);
+  const numbers = new CiNumbers(store, () => now);
+  const pc = store.createMachine('pc', 'hash', 'cara').id;
+  const sample = (agoSec: number, os: string, host: string, cpu: number, repo?: string) => store.addRunnerLoad(pc, now - agoSec * 1000, JSON.stringify({ os, host, cpu, hv: null, runners: repo ? [{ repo }] : [] }));
+  // The PC with this repo's runners: busy for the last 100 s, quiet before. Another PC is always busy and doesn't count.
+  sample(300, 'linux', 'DESK', 10, 'CaraMinden/Peek-Auras');
+  sample(50, 'linux', 'DESK', 10, 'caraminden/peek-auras');
+  sample(300, 'windows', 'DESK', 40);
+  sample(200, 'windows', 'DESK', 40);
+  sample(90, 'windows', 'DESK', 95);
+  sample(30, 'windows', 'DESK', 91);
+  sample(50, 'windows', 'OTHER', 99);
+  let run = 1;
+  const kept = (secs: number, name = 'suite-time') =>
+    numbers.take(p, claims(run++), {
+      numbers: [
+        { name, value: secs, unit: 's' },
+        { name: 'size', value: 5, unit: 'B' },
+      ],
+    }).stored;
+  assert.equal(kept(100), 1); // mean 93%: only the size is kept
+  assert.equal(kept(100, 'suite-time-pipeline'), 1);
+  assert.equal(kept(310), 2); // mean 66.5% over the longer suite
+  assert.equal(kept(100, 'boot'), 2); // only suite times are judged
+  assert.equal(kept(10), 2); // no sample in its window
+});
+
+// #2082: what flake-proof.yml and citadel-heavy.yml wrap their heavy step in, read back by tests.yml's own overlap loop.
+test("a proof's or heavy job's window marks the ship suite it crossed as overlapped (#2082)", () => {
+  const d = mkdtempSync(join(root, 'win-'));
+  const win = join(d, 'w');
+  const here = (path: string) => new URL(`../${path}`, import.meta.url);
+  const wstart = Math.floor(Date.now() / 1000);
+  const r = spawnSync('bash', [here('tools/ci-window.sh').pathname, 'bash', '-c', 'cat "$CITADEL_SUITE_WINDOWS"/*; sleep 1.1; exit 3'], {
+    env: { ...process.env, CITADEL_SUITE_WINDOWS: win, GITHUB_RUN_ID: '9' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 3, r.stderr); // the command's own exit
+  assert.match(r.stdout, /^\d+ 0$/m); // open while it ran
+  const loop = readFileSync(here('.github/workflows/tests.yml'), 'utf8').match(/( *)for f in "\$win"\/\*; do\n[\s\S]*?\n\1done\n/)![0];
+  const out = spawnSync('bash', ['-c', `win=${win}; me=${win}/me; wstart=${wstart}; wend=${wstart + 60}; RUNNER_TEMP=${d}\n${loop}`]);
+  assert.equal(out.status, 0, String(out.stderr));
+  assert.ok(existsSync(join(d, 'suite-overlap')));
+  assert.doesNotMatch(readFileSync(join(win, readdirSync(win)[0]), 'utf8'), / 0$/m); // closed
+  for (const f of ['flake-proof.yml', 'citadel-heavy.yml']) assert.match(readFileSync(here(`.github/workflows/${f}`), 'utf8'), /tools\/ci-window\.sh/);
 });

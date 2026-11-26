@@ -134,7 +134,7 @@ test('a GPU job with no machine named goes to a machine whose GPU jobs role is l
   };
   const queued = await until('the agent reported its jobs block', async () => {
     const r = await queue(lent);
-    return r.status === 201 ? r.json() : null;
+    return r.status === 201 ? ((await r.json()) as { machine: string }) : null;
   });
   assert.equal(queued.machine, 'gpu-a');
   const refused = await queue(other);

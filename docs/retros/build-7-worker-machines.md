@@ -25,6 +25,7 @@ The feeders and the build minion cost $389.50 together. The build minion's share
    - #2111's blocking-call check (`test/sync-calls.json`) and #2128's split of `public/types.d.ts` both landed after the build's other take-ins.
    - The take-in at 11-26 10:23 resolved conflicts in ci-armed card fields, size budgets and sync-calls.json. The one at 11:12 resolved the types split[^takeins].
    - sync-calls cost the most. Its 16 new rows were unclassed, the owed total went past main's 253 cap, and two machine-turn writes had to become async (a reviewer then found a race in them, fixed in 414abe7f1).
+   - A third take-in at 12:10 PST, after the go card was up, brought #2142, which started counting `as unknown as` as a type escape. The build's 16 such casts were written before that rule, and recording them in the baseline cost one more full run.
    - This is a repeat of the ledger row on shared counts files (size-budget, the type baseline). sync-calls.json is now a third such file. **Not made:** the row's proposed fix (regenerated files that merge by themselves) is in the same pipeline-lane handoff. This retro and the file are added to the row.
 5. **Two feeders' briefs named a handoff file that didn't exist (#1937, #1962)**[^briefs]. Both found the spec instead, so the cost was one lookup each. This falls under the ledger row on briefs stating a guess as fact. **No new fix:** the briefing skill's part 6 already covers it. The row gets this retro.
 
@@ -41,6 +42,20 @@ This repeats the ledger row "Feeders' self-reviews rate a change by its own file
 ## Did the claims help?
 
 Mostly no; see fix 1. They did make the merge order visible: every lend is a dated bullet in `build-claims.md`. And three late feeders, #2064, #2061 and #2105, each needed `server.ts`; the claims made them take turns instead of colliding. That order would have come from git conflicts anyway, at the cost of one rebase each.
+
+## Pieces that arrived after the go card
+
+- #2120 (M6c: heavy jobs ask the balancer) and #2137 (turn start and end off the server's thread) were picked into Build 7 while it was being reviewed. Both reported ready after the whole-build review, the retro and the go card were done.
+- Merging them would have meant another review and full run under an open go card. So they ship to main by themselves after Build 7 is live. The Taskmaster was asked to take them out of the build.
+- #2147 (Claude Code cloud sessions as a worker class: Josh, 2026-11-26, "essentially these are just another class of worker in the worker pool") is a measured trial that ships nothing. It is counted with the build's effort, and any cloud route it proposes is a follow-up piece.
+- **Not made:** a build has no "closed to new feeders" point. Its step 5 starts "once every feeder on the list is merged in", but nothing stops the list from growing during step 5. This is a first sighting; if a second build sees it, the fix is a refusal at start time for a build whose go card is up.
+
+## Follow-ups
+
+- The four UI critic findings: a double rule under an opened machine's header, no warning for a Runs on pick that can't run, no spinner while a computer connects, and the code block's Copy button position.
+- The line of waiting turns reads `pools.machines()` uncached on every pass.
+- `test/turn-setup.test.ts:159` and `test/machine-setup.test.js:79` fail inside a Fable minion's turn: they read the turn's environment. CI doesn't see it (#2137's report).
+- The claims chain handoff (fix 1) and #2147's trial.
 
 ## Spec gaps (for Josh to judge)
 

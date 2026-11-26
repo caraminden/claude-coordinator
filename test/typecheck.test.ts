@@ -30,6 +30,14 @@ test('an any in a type counts; an any that is a value, a property, a comment or 
   assert.equal(escapes('type T = Record<string, unknown>;\nlet u: unknown;\n'), 0);
 });
 
+test('each `as unknown as` counts, in every way of counting; one in a comment or text, or a lone cast, does not (#2142)', () => {
+  const casts = 'const a = x as unknown as T;\nconst b = (y as unknown\n  as string[]).length + (z as unknown as U<V>).n;\n';
+  assert.equal(escapes(casts), 3);
+  assert.equal(escapes(casts, 'x.tsx'), 3);
+  assert.equal(escapes('const a = x as any as T;\n'), 1, 'the any counts, once');
+  for (const file of ['x.ts', 'x.tsx']) assert.equal(escapes('// as unknown as T\n/* as unknown as T */\nconst s = "x as unknown as T" + `as unknown as`;\nconst u = x as unknown;\nconst v = y as T;\n', file), 0, file);
+});
+
 test('@ts-ignore, @ts-expect-error and @ts-nocheck count; a mention mid-line does not', () => {
   assert.equal(escapes('// @ts-nocheck\n  // @ts-ignore: why\nlet a = 1;\n/* @ts-expect-error */\nlet b = 2;\n'), 3);
   assert.equal(escapes('const s = "see // @ts-ignore";\n'), 0);

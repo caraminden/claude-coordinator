@@ -1,6 +1,6 @@
 /**
  * The any nudge (PostToolUse after Write, Edit and MultiEdit, never blocks; Citadel #1789): when an edit to a
- * TypeScript file leaves it with more explicit `any` types or `@ts-ignore`-style comments than it had before, it adds
+ * TypeScript file leaves it with more explicit `any` types, `as unknown as` casts or `@ts-ignore`-style comments than it had before, it adds
  * one line to Claude's context saying to use real types (Cara, 2026-11-24: "make sure citadel and the rest of our
  * typescript schemes don't cheat and use 'any'"). Every scheme, with or without the type check's gate. Counts with the
  * type check's own counter (scheme-setup/templates/typecheck.ts), on the whole file before and after the edit.
@@ -44,7 +44,7 @@ export function before(input: { tool_name?: unknown; tool_input?: Record<string,
 }
 
 export function nudgeText(file: string, added: number, now: number): string {
-  return `[citadel any-check] This edit added ${added} explicit \`any\` or @ts-ignore-style comment${added === 1 ? '' : 's'} to ${file} (${now} now). Use real types instead: \`unknown\` and a narrowing, a named type, or a generic (Cara, 2026-11-24: "don't cheat and use 'any'"). A scheme with the type check (tools/typecheck.ts) refuses a ship that raises the count.`;
+  return `[citadel any-check] This edit added ${added} explicit \`any\`, \`as unknown as\` or @ts-ignore-style escape${added === 1 ? '' : 's'} to ${file} (${now} now). Use real types instead: \`unknown\` and a narrowing, a named type, or a generic (Cara, 2026-11-24: "don't cheat and use 'any'"). A scheme with the type check (tools/typecheck.ts) refuses a ship that raises the count.`;
 }
 
 /** One hook call; returns what to print (the nudge as context), or null. */

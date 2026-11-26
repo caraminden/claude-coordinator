@@ -35,7 +35,7 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     line pointing at `citadel:diagnosing-bugs`. Once per streak; a green test run, another test command or an
     edit resets it; other Bash calls don't. A file changed from Bash (`sed -i`) is invisible to it.
   - `any-nudge.ts` (PostToolUse on Write, Edit and MultiEdit, never blocks; #1789): when an edit leaves a TypeScript
-    file with more explicit `any` types or `@ts-ignore`-style comments than before, it adds one line saying to use real
+    file with more explicit `any` types, `as unknown as` casts or `@ts-ignore`-style comments than before, it adds one line saying to use real
     types. Every scheme, every time; it counts with the type check's counter (`scheme-setup/templates/typecheck.ts`).
   - `batch-nudge.ts` (a one-week trial from 2026-11-20, #1278; runs inside `flail-brake.ts`'s process, which is also
     registered for Read, Grep and Glob; never blocks): after a minion's third single read-only call in a row (Read,

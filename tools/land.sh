@@ -403,12 +403,14 @@ conflict_fix() {
 # read the branch's there (#2071): so trial() runs it in this folder with an empty index, and every git reads <onto>'s
 # as the rebase onto it will. Removed after the trial.
 attrs_of() {
-  local d p
-  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") || return 1
-  while IFS= read -r -d '' p; do
-    case /$p in */.gitattributes) ;; *) continue ;; esac
-    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$1:$p" >"$d/$p" || { rm -rf "$d"; return 1; }
-  done < <(git ls-tree -r -z --name-only "$1")
+  local d m o p
+  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") && d=$(cd "$d" && pwd -P) || return 1
+  # A symlink's text isn't read as attributes, so only plain files are copied.
+  while IFS=$'\t' read -r -d '' m p; do
+    read -r m _ o <<<"$m"
+    case $m:/$p in 1006??:*/.gitattributes) ;; *) continue ;; esac
+    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$o" >"$d/$p" || { rm -rf "$d"; return 1; }
+  done < <(git ls-tree -r -z "$1")
   echo "$d"
 }
 # <onto>: git merge-tree's trial of that rebase. 1 on a conflict, its files (comma-separated) in $mt_files.
@@ -416,7 +418,7 @@ trial() {
   local out rc=0 at gd
   mt_files=''
   gd=$(git rev-parse --absolute-git-dir) && at=$(attrs_of "$1") || return 0
-  out=$(cd "$at" && GIT_INDEX_FILE=$at/.index numbers_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
+  out=$(top=$(git rev-parse --show-toplevel) && cd "$at" && LAND_TOP=$top GIT_INDEX_FILE=$at/.index numbers_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
   rm -rf "$at"
   [ "$rc" = 1 ] || return 0
   mt_files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')

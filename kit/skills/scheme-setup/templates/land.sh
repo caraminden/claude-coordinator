@@ -447,6 +447,13 @@ merge_driver() {
 if [ "${1:-}" = --merge ]; then
   [ $# = 6 ] || exit 2
   shift
+  # trial()'s merge-tree runs in a scratch folder (attrs_of): its files made whole, the hook runs from the repo's top and
+  # finds the repo as it does in the rebase.
+  if [ -n "${LAND_TOP:-}" ]; then
+    for p in 2 3 4; do [[ ${!p} == /* ]] || set -- "${@:1:p-1}" "$PWD/${!p}" "${@:p+1}"; done
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+    cd "$LAND_TOP" || exit 1
+  fi
   if merge_driver "$@"; then exit 0; else exit 1; fi
 fi
 # land_git <side> <git args>: git with the driver on (side as above). The worktree's own land.sh and land.local.sh
@@ -1207,12 +1214,14 @@ prep_say() {
 # read the branch's there (#2071): so trial() runs it in this folder with an empty index, and every git reads <onto>'s
 # as the rebase onto it will. Removed after the trial.
 attrs_of() {
-  local d p
-  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") || return 1
-  while IFS= read -r -d '' p; do
-    case /$p in */.gitattributes) ;; *) continue ;; esac
-    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$1:$p" >"$d/$p" || { rm -rf "$d"; return 1; }
-  done < <(git ls-tree -r -z --name-only "$1")
+  local d m o p
+  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") && d=$(cd "$d" && pwd -P) || return 1
+  # A symlink's text isn't read as attributes, so only plain files are copied.
+  while IFS=$'\t' read -r -d '' m p; do
+    read -r m _ o <<<"$m"
+    case $m:/$p in 1006??:*/.gitattributes) ;; *) continue ;; esac
+    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$o" >"$d/$p" || { rm -rf "$d"; return 1; }
+  done < <(git ls-tree -r -z "$1")
   echo "$d"
 }
 # trial <onto> <commit>: git merge-tree's trial of that commit's rebase onto <onto> (from $under, with land_under). 1 on a
@@ -1221,7 +1230,7 @@ trial() {
   local out rc=0 at gd
   mt_files=''
   gd=$(git rev-parse --absolute-git-dir) && at=$(attrs_of "$1") || return 0
-  out=$(cd "$at" && GIT_INDEX_FILE=$at/.index land_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" "$2" 2>/dev/null) || rc=$?
+  out=$(top=$(git rev-parse --show-toplevel) && cd "$at" && LAND_TOP=$top GIT_INDEX_FILE=$at/.index land_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" "$2" 2>/dev/null) || rc=$?
   rm -rf "$at"
   [ "$rc" = 1 ] || return 0
   mt_files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')

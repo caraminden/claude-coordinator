@@ -165,7 +165,7 @@ test('with no times file kept, every file starts as before, and a time at other 
   const dir = repo({ 'test/clean.test.ts': CLEAN });
   const times = join(dir, '..', `times-${n}.tsv`);
   writeFileSync(times, '400\ttest/clean.test.ts\t0000\n');
-  for (const env of [{}, { BURN_IN_TIMES: times }]) {
+  for (const env of [{}, { BURN_IN_TIMES: times }] as Record<string, string>[]) {
     const r = ship(dir, { ...env, BURN_IN_COPIES: '2' });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 2 of 2 copies at once passed/m);

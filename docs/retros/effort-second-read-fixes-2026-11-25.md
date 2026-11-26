@@ -31,7 +31,7 @@ database[^t]. The five cost $38.27 together. The briefs' expected costs added up
      - #2037 ("pinning tests always run") adds `size-budget`, `db-writer-lists` and four more, and picks a test that
        reads a source file when that file changes.
      - Both wait in the pipeline lane, and both add `size-budget` to the same list, so the second to ship will
-       conflict there[^w]. The Taskmaster has been told.
+       conflict there[^w]. #2037 has it as held mail.
    - **Still open after those ship:** the slow source-tree guards that #2065 put on the map (`worker-tla`,
      `frontend-syntax`) are also skipped by the narrow pick. A minion meets them only through `--wide` or the ship's
      CI.

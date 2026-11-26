@@ -203,3 +203,41 @@ test('every retro brief ends on the same start card step (#2140)', () => {
     assert.ok(readFileSync(new URL(`../kit/${f}`, import.meta.url), 'utf8').includes(START_CARD_STEP), f);
   }
 });
+
+test('an effort mostly one led cabal gets no effort retro: its lead writes the cabal retro (#2096)', async () => {
+  const store = new Store(':memory:');
+  const peek = store.createProject('Peek', null);
+  const mk = (effort: string) => {
+    const x = store.createTicket({ project_id: peek.id, title: `${effort} part`, permission_mode: 'default', created_by: 'Cara' });
+    store.props.set('minion', x.id, peek.id, { [EFFORT_KEY]: effort, assigned: 'Cara' }, 'test');
+    store.updateTicket(x.id, { status: 'closed' });
+    return x;
+  };
+  const [lead, a, b] = [mk('Led'), mk('Led'), mk('Led')];
+  store.ensureCabal(lead.id, peek.id);
+  store.addCabalRow(lead.id, { ticket_id: a.id });
+  store.addCabalRow(lead.id, { ticket_id: b.id });
+  mk('Unled');
+  mk('Unled');
+  mk('Unled');
+  const made: string[] = [];
+  const retros = new EffortRetros({
+    store,
+    newMinion: async (_p, m) => {
+      made.push(m.title);
+      return store.createTicket({ project_id: peek.id, title: m.title, permission_mode: 'default', created_by: 'x' }) as Ticket & { number: number };
+    },
+    runner: { emit: () => {}, send: () => {} } as never,
+    by: 'Citadel',
+    now: () => Date.now() + QUIET_MS + H,
+    note: () => {},
+    mode: 'act',
+  });
+  const said = await retros.tick();
+  assert.deepEqual(made, ['Retro: Unled']);
+  assert.ok(
+    said.some((l) => /"Led": no retro, .*one led cabal/.test(l)),
+    said.join('\n'),
+  );
+  assert.ok(store.getSetting(doneKey(peek.id, 'Led')));
+});

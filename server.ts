@@ -1,5 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
-import { fillFor } from './src/cabal-start.ts';
+import { fillFor, retroWake } from './src/cabal-start.ts';
 import './src/host-signals.ts'; // first: a test server's fixed zone (TZ) is set before any module reads the clock (#1485)
 import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
@@ -1037,6 +1037,7 @@ if (!BOOT_CHECK) {
     void waiters.check().catch((err) => console.error('Checking waiters after a dismissal failed:', err));
     // A cabal member's dismissal frees a place in its cabal's width: its next-up rows start (#2091).
     fillFor(app, ticketId);
+    retroWake(app, ticketId); // a goal cabal's last member: its lead writes the retro (#2096)
     // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);

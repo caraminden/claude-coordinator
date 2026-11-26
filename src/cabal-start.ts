@@ -272,6 +272,24 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   return { started: made.number!, title: r.title, notes: made.notes };
 }
 
+export const retroKey = (leadId: number) => `cabal-retro:${leadId}`;
+
+/**
+ * A goal cabal's last member was dismissed: its lead is woken once to write the cabal's retro (#2096). A build cabal's
+ * lead is woken by its own ship instead. A fixer never needed doesn't hold it.
+ */
+export function retroWake(app: App, ticketId: number): void {
+  const { store } = app;
+  const leadId = store.cabalRowOf(ticketId)?.lead_id;
+  const lead = leadId != null ? store.getTicket(leadId) : undefined;
+  if (!lead || lead.status === 'closed' || lead.build != null || store.getSetting(retroKey(lead.id)) != null) return;
+  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || r.role !== 'fixer');
+  if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
+  store.setSetting(retroKey(lead.id), Date.now());
+  store.addCabalLog(lead.id, 'Citadel', 'Every member is dismissed: the retro is next');
+  app.runner.send(lead.id, APP_NAME, `Every member of ${name(app, lead)}'s cabal has been dismissed. Write the cabal's retro now and then close: the citadel:cabal skill, "Closing". If you are about to start more members, do that first and write it once they are done too.`);
+}
+
 const filling = new Set<number>();
 
 /** A member's turn ended, it was sealed or stopped, or it was dismissed: a place may be free, so its lead's next-up rows start. */

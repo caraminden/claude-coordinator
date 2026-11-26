@@ -1,7 +1,7 @@
 // The effort-retros judge (src/effort-retros.ts, #1751) over each scheme's real efforts: every hour of the window, the real
 // effortsDue sees the minions as they were then (closed ones closed later read as open), and the retros it would start
 // are set beside the real ones, the effort-retro:* settings rows. Nothing is started: the replay calls effortsDue only.
-import { effortsDue, EFFORT_KEY, movedTo } from '../../src/effort-retros.ts';
+import { effortsDue, EFFORT_KEY, ledBy, movedTo } from '../../src/effort-retros.ts';
 import { buildOwnerKey, type Ticket } from '../../src/db.ts';
 import { Registry } from '../../src/properties.ts';
 import { minionsAsOf, replayStore } from './store.ts';
@@ -35,6 +35,7 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
         now,
         majorBuild,
         (t) => movedTo(store, t),
+        (t) => ledBy(store, t),
       )) {
         done.set(v.name, now);
         hits.push({ at: now, key: `${p.id}:${v.name}`, text: `${p.name} "${v.name}": ${v.act === 'skip' ? 'no retro' : 'start a retro'}, ${v.why}` });

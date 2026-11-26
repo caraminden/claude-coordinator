@@ -85,12 +85,11 @@ Your build is `build/<n>`. In a container, each `tools/land.sh` below is the lan
    `wake_when_runners_back`, set state sealed and end your turn.
 5. **Ship the build** once every member's row shows merged: take main in one last time, self-review the whole diff
    against main with a claude-fable-5-2 reviewer at medium effort, label the build with the highest of its members'
-   labels and that review's, run `citadel:retro` over the cabal (the board's timeline, members' chats, `process`
-   retro-log lines, the diff; it says whether the claims helped: refusals, moved claims, conflicts they missed), commit
-   it to `build/<n>` in CLAUDE.md's retro folder with `git rm build-claims.md` in the same commit (`--build` refuses
-   while it is there), and post one go card (ask_question, kind merge) with the retro's top three findings, the
-   roster, the label and what wasn't verified, whatever the label. On the go, run `tools/land.sh --build` from your
-   worktree with your branch at the build's tip: one CI run, one deploy.
+   labels and that review's, `git rm build-claims.md` and merge that into `build/<n>` (`--build` refuses while it is
+   there), and post one go card (ask_question, kind merge) with the roster, the label and what wasn't verified,
+   whatever the label. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
+   one CI run, one deploy. Stay open for the retro (section 7): the land tool takes `stay_open: true` with
+   `waiting_on: "the cabal retro"`; after a `land.sh` you ran yourself, call `wake_when_live`.
 
 A member in another scheme ships to its own main, never into your build. When it must not go live first, seal it with
 `message_taskmaster` seal, and unseal it once the build is live.
@@ -108,10 +107,18 @@ board and in your handoff. After one, open this skill again and read the board b
 
 ## 7. Closing
 
-- A build cabal closes once its build is live; a goal cabal once every member has closed (its Goal's retro starts
-  once you close too).
-- Before closing: every open ask answered, the log's last line says how it ended, and your handoffs deleted from the
-  shared folder. The board stays, read-only.
+A cabal gets **one retro**, yours; no separate build retro, and the server starts no effort retro for it.
+
+- **When:** a build cabal once its build is live; a goal cabal once every member is dismissed (Citadel wakes you then;
+  if your last open rows were removed instead, write it without waiting).
+- **Retro:** run `citadel:retro` over the cabal from `cabal_board` timeline: starts, merges or ships, asks and how long
+  they waited, reds and who fixed them, and each member's spend against expected. Add members' chats, `process`
+  retro-log lines and the diff only where the timeline raises a question. A build cabal's also says whether the claims
+  helped (refusals, moved claims, conflicts they missed). Write `cabal-<slug>.md` in the retro folder CLAUDE.md's
+  Project facts name (the retro skill's default otherwise), linking the board by the address on the timeline's first
+  line, and ship it by the scheme's usual route for a doc change (a build cabal's lead: straight to main now).
+- **Then close:** every open ask answered, the log's last line says how it ended, and your handoffs deleted from the
+  shared folder. The board stays, read-only. A retro that posts a start card keeps you open until it is answered.
 - A member closes as "merged into Build <n>" in a build cabal, as today.
 
 ## In every scheme

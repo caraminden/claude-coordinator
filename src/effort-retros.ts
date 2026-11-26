@@ -46,6 +46,9 @@ export function movedTo(store: Store, t: Ticket): Ticket[] {
   return out;
 }
 
+/** The lead of the cabal `t` leads or is on. */
+export const ledBy = (store: Store, t: Ticket): number | null => (store.getCabal(t.id) ? t.id : (store.cabalRowOf(t.id)?.lead_id ?? null));
+
 export const doneKey = (projectId: number, name: string) => `effort-retro:${projectId}:${name}`;
 
 /**
@@ -63,7 +66,7 @@ export function effortFor(given: string | null, leader: { number: number; effort
 export interface EffortVerdict {
   name: string;
   members: Ticket[];
-  /** start: its retro starts now; skip: a build retro covers it (recorded, never checked again). */
+  /** start: its retro starts now; skip: a build's or a cabal's retro covers it (recorded, never checked again). */
   act: 'start' | 'skip';
   why: string;
 }
@@ -76,9 +79,10 @@ export const TRIES = 3;
  * `since(name)` is when that name last got a verdict (undefined: never); only minions made after it count, so a name the
  * Taskmaster reuses for a later goal gets its own retro. `majorBuild(n)` says Build n has its own build minion, whose
  * retro covers its feeders: a bare build number (Delve's "found in" build on a bug) doesn't. `movedInto(t)` is where t's ask
- * went: those must be closed and quiet too, in the effort or not.
+ * went: those must be closed and quiet too, in the effort or not. `leadOf(t)` is the lead of the cabal t leads or is on:
+ * an effort mostly one led cabal gets that lead's retro (#2096), not a second one.
  */
-export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => []): EffortVerdict[] {
+export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => [], leadOf: (t: Ticket) => number | null = () => null): EffortVerdict[] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
     const name = effortOf.get(t.id);
@@ -97,13 +101,23 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
     if (now - last < QUIET_MS) continue;
     members.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
     // A major build's retro (citadel:retro, the build minion's step 5) already covers an effort that is mostly that build.
-    const builds = new Map<number, number>();
-    for (const t of members) if (t.build != null && majorBuild(t.build)) builds.set(t.build, (builds.get(t.build) ?? 0) + 1);
-    const [top, n] = [...builds].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+    const [top, n] = most(members, (t) => (t.build != null && majorBuild(t.build) ? t.build : null));
+    const [lead, led] = most(members, leadOf);
     if (top != null && n * 2 > members.length) out.push({ name, members, act: 'skip', why: `${n} of its ${members.length} minions are Build ${top}, whose retro covers them` });
+    else if (lead != null && led * 2 > members.length) out.push({ name, members, act: 'skip', why: `${led} of its ${members.length} minions are one led cabal, whose lead writes its retro` });
     else out.push({ name, members, act: 'start', why: `${members.length} minions, the last closed ${pacific(last)}` });
   }
   return out;
+}
+
+/** The key most members share (null keys don't count), and how many do. */
+function most(members: Ticket[], key: (t: Ticket) => number | null): [number | null, number] {
+  const counts = new Map<number, number>();
+  for (const t of members) {
+    const k = key(t);
+    if (k != null) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
 }
 
 /** The last step of every retro's brief (#2140): kit/schedules/monthly-retro.md, ship-lessons.md and the retro skill carry the same words. */
@@ -193,6 +207,7 @@ export class EffortRetros {
         now,
         majorBuild,
         (t) => movedTo(store, t),
+        (t) => ledBy(store, t),
       )) {
         const before = store.getSetting<Marker>(doneKey(project.id, v.name));
         // Marked before the start: a crash between the two loses one retro rather than starting it twice.

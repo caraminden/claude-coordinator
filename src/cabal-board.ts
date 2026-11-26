@@ -11,6 +11,7 @@ import { EFFORT_KEY } from './effort-retros.ts';
 import { gitOut } from './git.ts';
 import { deliveriesOf } from './outbox.ts';
 import { pacificClock } from './pacific.ts';
+import { pacific } from './schedules.ts';
 import { tierLabel } from '../public/model-table.js';
 import { parseShipNote, type Risk } from './ship-risk.ts';
 
@@ -225,6 +226,44 @@ export const cabalName = (store: Store, lead: Ticket, name: string) => (lead.bui
 export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}${/s$/i.test(board.name) ? "'" : "'s"} Overseer`;
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+
+const when = (at: number) => pacific(at);
+const waited = (ms: number) => (ms < 3_600_000 ? `${Math.round(ms / 60_000)} min` : `${(ms / 3_600_000).toFixed(1)} h`);
+
+/**
+ * What the lead writes its cabal's retro from (#2096): each member's start, ships or merges, dismissal and spend against
+ * its row's expected cost, every ask with how long it waited, and the whole log (starts, reds). `seen` is the board as
+ * the reader may see it: rows it hid stay hidden here.
+ */
+export function timelineText(store: Store, seen: Board): string {
+  const lead = store.getTicket(seen.lead.id)!;
+  const rows = new Map(store.cabalRows(lead.id).map((r) => [r.id, r]));
+  const out = [`${seen.name} cabal timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the cabal ${money(seen.counts.spend)}`, 'Members:'];
+  for (const m of seen.members) {
+    const row = rows.get(m.row);
+    const t = row?.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;
+    const who = [m.label, m.scheme ? `[${m.scheme}]` : '', m.number != null ? `#${m.number}` : 'never started', m.title].filter(Boolean).join(' ');
+    if (!t) {
+      out.push(`- ${who}`);
+      continue;
+    }
+    const ships = store.shipNotes(t.id).map((s) => `${when(s.at)} ${s.text.slice(0, 160)}`);
+    const cells = [who, `started ${when(t.created_at)}`, ...ships, t.closed_at != null ? `dismissed ${when(t.closed_at)}` : 'open', `spent ${money(m.spend)}${row?.cost != null ? ` of ~${money(row.cost)} expected` : ', no expected cost'}`];
+    out.push(`- ${cells.join(' | ')}`);
+  }
+  const asks = store.cabalAsks(lead.id, false);
+  const shown = new Set(seen.members.filter((m) => m.open).map((m) => m.number));
+  out.push(asks.length ? `Asks (${asks.length}):` : 'No asks.');
+  for (const a of asks) {
+    const t = store.getTicket(a.ticket_id);
+    if (t && t.project_id !== seen.lead.project_id && !shown.has(t.number)) continue;
+    const answer = a.answered_at != null ? `answered after ${waited(a.answered_at - a.opened_at)}: ${(a.answer ?? '').slice(0, 160)}` : 'never answered';
+    out.push(`- ${when(a.opened_at)} #${t?.number ?? '?'}${a.blocking ? ' BLOCKING' : ''}: ${a.text.slice(0, 200)} | ${answer}`);
+  }
+  const log = store.cabalLog(lead.id, 1000);
+  out.push(log.length ? 'Log:' : 'Log: empty.', ...log.map((l) => `- ${when(l.at)} ${l.by}: ${l.text}`));
+  return out.join('\n');
+}
 
 /** The board as compact text, for cabal_board's read: what an agent needs, a line a member. */
 /** `me`: the reader, marked "(you)" on its row (a #N alone could be another scheme's). */

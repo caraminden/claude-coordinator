@@ -63,13 +63,13 @@
     "summary": "7 as before, 0 new, 3 gone"
   },
   "effort-retros": {
-    "hash": "c15635bead1aaeee",
+    "hash": "ba86a0c32444100f",
     "at": "2026-11-26",
     "days": 3,
-    "inputs": "35 named or chained efforts in 15 schemes, checked hourly over 3 days",
-    "hits": 5,
-    "real": 5,
-    "summary": "5 as before, 0 new, 0 gone"
+    "inputs": "37 named or chained efforts in 15 schemes, checked hourly over 3 days",
+    "hits": 12,
+    "real": 12,
+    "summary": "12 as before, 0 new, 0 gone"
   },
   "flake-counter": {
     "hash": "239c587ebe72b8bb",

@@ -277,11 +277,6 @@ export class RoleSetups {
     return this.active.get(machineId)?.run ?? null;
   }
 
-  /** The machine is gone: whatever ran there is forgotten. */
-  forget(machineId: number) {
-    this.active.delete(machineId);
-  }
-
   private step(a: Active, n: number, step: Step, save = true) {
     a.run.steps[Math.min(n, a.run.steps.length)] = step;
     if (save) this.save(a.machineId, a.run);

@@ -253,7 +253,6 @@ export async function dropMachine(app: App, machine: Machine) {
   app.store.deleteMachine(machine.id);
   setPaused(app.store, machine.id, []); // ids are reused: a new PC must not inherit its Resume
   app.machineCopies?.forget(machine.id);
-  app.machines.roleSetups?.forget(machine.id);
   app.runner.turnLine.forget(machine.id);
   app.ciLoad.forget(machine.id);
   app.machines.workers?.forget(machine.id);

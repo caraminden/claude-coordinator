@@ -108,7 +108,7 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
 
 /** The last step of every retro's brief (#2140): kit/schedules/monthly-retro.md, ship-lessons.md and the retro skill carry the same words. */
 export const START_CARD_STEP =
-  'End with one multi-select ask_question card, one option per handoff you wrote for this scheme\'s repo, each with its `start` (handoff path, title, type, model, effort) and your recommendation marked (pair a lone one with "None of these"); link the card in your reply, start none yourself, and stay open in state ready until it is answered. A handoff for another scheme\'s repo gets no option: its path goes only to your Taskmaster, and a run with no option posts no card.';
+  'End with one multi-select ask_question card, one option per handoff you wrote for this scheme\'s repo, each with its `start` (handoff path, title, type, model, effort) and your recommendation marked (pair a lone one with "None of these"); link the card in your reply, start none yourself, and stay open in state ready until it is answered. More than four handoffs go on a choices page with its card instead (citadel:docs-and-mocks). A handoff for another scheme\'s repo gets no option: its path goes only to your Taskmaster, and a run with no option posts no card.';
 
 /** The retro minion's first message. */
 export function effortBrief(project: Pick<Project, 'name'>, v: EffortVerdict): string {

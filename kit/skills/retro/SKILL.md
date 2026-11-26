@@ -89,7 +89,7 @@ Create either file when it is first needed.
    already shipped gets a small follow-up PR instead. A process or design rule the owner
    accepts from the retro also goes in the decisions log Project facts names, if any.
    A fix the retro can't ship itself becomes a handoff (citadel:briefing), its path sent to your Taskmaster.
-   End with one multi-select ask_question card, one option per handoff you wrote for this scheme's repo, each with its `start` (handoff path, title, type, model, effort) and your recommendation marked (pair a lone one with "None of these"); link the card in your reply, start none yourself, and stay open in state ready until it is answered. A handoff for another scheme's repo gets no option: its path goes only to your Taskmaster, and a run with no option posts no card.
+   End with one multi-select ask_question card, one option per handoff you wrote for this scheme's repo, each with its `start` (handoff path, title, type, model, effort) and your recommendation marked (pair a lone one with "None of these"); link the card in your reply, start none yourself, and stay open in state ready until it is answered. More than four handoffs go on a choices page with its card instead (citadel:docs-and-mocks). A handoff for another scheme's repo gets no option: its path goes only to your Taskmaster, and a run with no option posts no card.
 
 Done when every finding has an edit in the PR or a line in the retro saying why not, every
 number has its footnote and the five re-runs passed, the ledger is current, the owner has the top three in one reply, and the start card is posted (when there is a handoff for it).

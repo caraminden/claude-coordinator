@@ -40,7 +40,7 @@ export type MachineReport = {
   screen: boolean | null;
   /** The person running it can become an administrator (UAC, sudo): what CI's setup needs once. */
   admin: boolean | null;
-  /** The agent's own version, so a row can say it needs an update. */
+  /** The agent's own version (an agent that reports nothing is from before, and its row offers Update). */
   agent: number;
 };
 
@@ -125,7 +125,7 @@ export function joinState(join: MachineJoin, connected: boolean, now = Date.now(
  * so a second try with it is refused. A new row is named from the hostname and owned by whoever made the code; an
  * Update's row gets a new token, which the new agent's service replaces the old one's with.
  */
-export function redeemJoin(store: Store, issueToken: (machineId: number) => string, body: Record<string, unknown>, now = Date.now()): { id: number; name: string; token: string } {
+export function redeemJoin(store: Store, issueToken: (machineId: number) => string, body: Record<string, unknown>, now = Date.now(), removing: (machineId: number) => boolean = () => false): { id: number; name: string; token: string } {
   const code = typeof body.code === 'string' ? body.code.trim() : '';
   if (!JOIN_CODE.test(code)) throw new HttpError(400, "That isn't a join code: copy the whole command from the Machines page again");
   const report = cleanReport(body.report);
@@ -135,6 +135,8 @@ export function redeemJoin(store: Store, issueToken: (machineId: number) => stri
   if (join.machine_id !== null) {
     machine = store.getMachine(join.machine_id);
     if (!machine) throw new HttpError(410, 'The machine this code updates was removed: press Connect a computer for a new one');
+    // As the token route: a new token would cut the draining agent off before its copies are home.
+    if (removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token until its copies are cleared`);
   } else {
     const host = report?.host || text(body.host, 100);
     const names = new Set(store.listMachines().map((m) => m.name));
@@ -144,11 +146,13 @@ export function redeemJoin(store: Store, issueToken: (machineId: number) => stri
       const name = nameFromHost(host, taken);
       try {
         machine = store.createMachine(name, '', join.created_by, join.owner_id);
-      } catch {
+      } catch (err) {
+        if (!/UNIQUE/.test(String(err))) throw err;
         names.add(name);
       }
     }
-    if (!machine) throw new HttpError(409, 'Could not name this machine: try the command again');
+    // The code is spent by now, so a new one is what works.
+    if (!machine) throw new HttpError(409, 'Could not name this machine: press Connect a computer for a new code');
   }
   const token = issueToken(machine.id);
   if (report) store.updateMachine(machine.id, { report: JSON.stringify(report) });

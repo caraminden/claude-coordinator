@@ -286,7 +286,13 @@ export const agentRoutes: Route[] = [
     path: '/api/machines/join',
     who: 'anyone',
     async handler({ req, res, app }) {
-      const joined = redeemJoin(app.store, (id) => app.machines.issueToken(id), await readJson(req, 20_000));
+      const joined = redeemJoin(
+        app.store,
+        (id) => app.machines.issueToken(id),
+        await readJson(req, 20_000),
+        Date.now(),
+        (id) => !!app.machineCopies?.removing(id),
+      );
       await ownWrites(); // the panel's next look re-reads the row
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       return json(res, 201, joined);

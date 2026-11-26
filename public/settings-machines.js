@@ -174,11 +174,15 @@ export function machinesPage(main = {}) {
   return section;
 }
 
+let connectPanel = null;
+
 /** Connect a computer's panel (Build 7 M2), for a new computer or, with `m`, an Update of an agent from before. */
 function connectComputer(m = null) {
   const el = document.getElementById('machine-connect');
   if (!el) return;
-  openConnectPanel(el, { machine: m });
+  // One panel at a time: the one before stops watching its code, or its next look would draw over this one.
+  connectPanel?.close({ quiet: true });
+  connectPanel = openConnectPanel(el, { machine: m });
   el.scrollIntoView({ block: 'nearest' });
 }
 

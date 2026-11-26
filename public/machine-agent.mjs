@@ -2231,7 +2231,7 @@ async function installService(name, argv) {
 
 // ---------- connect with a join code (Build 7 M2) ----------
 
-/** This agent's version, in its report: a row whose agent reports an older one (or nothing) offers Update. */
+/** This agent's version, in its report. A row whose agent reports nothing is from before and offers Update. */
 export const AGENT_VERSION = 3;
 
 /** A program's output, or null when it isn't there, fails or takes too long. Windows' wsl.exe writes UTF-16. */

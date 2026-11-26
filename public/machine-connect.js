@@ -47,8 +47,10 @@ const when = (at) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minu
  */
 export function openConnectPanel(el, { machine = null, onDone = () => {} } = {}) {
   const st = { os: guessJoinOs(), join: null, state: 'making', got: null, timer: 0, failed: '' };
-  const close = () => {
+  const close = ({ quiet = false } = {}) => {
     clearInterval(st.timer);
+    st.closed = true;
+    if (quiet) return;
     el.replaceChildren();
     onDone();
   };
@@ -59,6 +61,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
     draw();
     api(machine ? `api/machines/${machine.id}/join` : 'api/machines/joins', { method: 'POST' })
       .then((j) => {
+        if (st.closed) return;
         st.join = j;
         st.state = 'waiting';
         draw();
@@ -66,6 +69,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
         st.timer = setInterval(look, 2000);
       })
       .catch((err) => {
+        if (st.closed) return;
         st.state = 'failed';
         st.failed = err.message;
         draw();
@@ -75,6 +79,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
     if (!el.isConnected) return clearInterval(st.timer);
     api(`api/machines/joins/${st.join.id}`)
       .then((r) => {
+        if (st.closed) return; // a look already on its way when the panel closed
         if (r.state === st.state && JSON.stringify(r.machine?.report) === JSON.stringify(st.got?.report)) return;
         st.state = r.state;
         st.got = r.machine;
@@ -91,7 +96,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
       h(
         'div',
         { class: 'machine-setup machine-connect', role: 'region', 'aria-label': machine ? `Update ${machine.name}` : 'Connect a computer' },
-        h('div', { class: 'row' }, h('strong', {}, machine ? `Update ${machine.name}` : 'Connect a computer'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: done ? 'small' : 'secondary small', onclick: close }, done ? 'Done' : 'Close')),
+        h('div', { class: 'row' }, h('strong', {}, machine ? `Update ${machine.name}` : 'Connect a computer'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: done ? 'small' : 'secondary small', onclick: () => close() }, done ? 'Done' : 'Close')),
         done ? connected() : steps(way, command),
       ),
     );

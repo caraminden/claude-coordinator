@@ -25,8 +25,8 @@ asks, merges since your last wake, then every other open ask, answered together.
 2. Write a handoff per piece with `citadel:briefing`, in the shared folder's `handoffs/`.
 3. Add one roster row per piece (`cabal_board` row): label (T1, M2), title, lane, what it waits on (`after`), the files
    it expects to touch, handoff path, model, effort and expected cost. A row for a member in another scheme names it
-   with `scheme`. Add a **fixer** row (`role: fixer`, Sonnet or Opus medium, a handoff that says "takes small fixes
-   across the cabal, one at a time, from the Overseer"): it is started only once a fix needs it.
+   with `scheme`. Add a **fixer** row (`role: fixer`, a handoff that says "takes small fixes across the cabal, one at a
+   time, from <your cabal>'s Overseer"): it is started only once a fix needs it.
 4. Post the **forming card**: `cabal_board` form, with a width (default 4: members at work at once). Link the card in
    your reply. People's go approves the whole roster; end the turn and wait for it.
 5. A build cabal (you were made with `build_owner`, your prompt names the build): make the branch first (section 4,

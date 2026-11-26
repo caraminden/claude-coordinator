@@ -161,7 +161,7 @@ A minion on a cabal's roster, started by its Overseer.
 Code: `cabal`
 
 **Cabal board**:
-The shared page of a cabal's state: its roster, each member's state and note, asks, and the Overseer's log.
+The shared page of a cabal's state: its roster, each member's state and note, asks, and its Overseer's log.
 Code: `cabal_board`
 
 **Roster**:

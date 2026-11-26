@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { Project, Ticket } from '../src/db.ts';
 import { tableText } from '../public/model-table.js';
 import { fake } from './typed.ts';
-import { BUILDS_LINE, minionRulesLines, systemPrompt } from '../src/prompts.ts';
+import { BUILDS_LINE, CABALS_LINE, minionRulesLines, systemPrompt } from '../src/prompts.ts';
 
 // Minion rules switches (#1045): each value of a per-scheme setting changes one prompt line.
 
@@ -26,6 +26,7 @@ test('Fable off drops the Fable tier from the table and tells every minion', () 
 test('Major builds off leaves the builds line out of the Taskmaster prompt', () => {
   assert.ok(prompt(base, taskmaster, true).includes(BUILDS_LINE));
   assert.ok(!prompt({ ...base, builds: 'off' }, taskmaster, true).includes(BUILDS_LINE));
+  assert.ok(prompt({ ...base, builds: 'off' }, taskmaster, true).includes(CABALS_LINE), 'goal cabals run with builds off (#2095)');
 });
 
 test('Grill adds a line naming the Citadel-wide rule only off the default', () => {

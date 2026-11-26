@@ -240,7 +240,7 @@ export function buildLines(b: BuildRole | null, c: CabalRole | null = null): str
   const n = b.build;
   const br = `build/${n}`;
   // A cabal's member (#2095) asks its Overseer on the board; a feeder of a build begun before cabals, its build minion.
-  const lead = c && !c.lead ? `${c.name}'s Overseer` : 'the build minion';
+  const lead = c && !c.lead ? c.overseer : 'the build minion';
   const f = c ? 'member' : 'feeder';
   if (!b.owner) {
     return [
@@ -260,21 +260,21 @@ export function buildLines(b: BuildRole | null, c: CabalRole | null = null): str
 }
 
 /**
- * Where a minion stands in a cabal (#2095): `name` is the cabal's ("Build 8", a Goal's name), `overseer` its lead as
- * #N, or "<scheme> #N" in another scheme. Build lines carry the branch steps; these, the board and the Overseer's rules.
+ * Where a minion stands in a cabal (#2095): `name` is the cabal's ("Build 8", a Goal's name), `overseer` its lead's
+ * name as the board writes it ("Build 8's Overseer"), `ref` its #N, or "<scheme> #N" in another scheme. Build lines carry the branch steps; these, the board and the Overseer's rules.
  */
-export type CabalRole = { lead: boolean; name: string; overseer: string };
+export type CabalRole = { lead: boolean; name: string; overseer: string; ref: string };
 
 /** A cabal's lines in its Overseer's and members' prompts; a minion on no board gets none. `build`: it is a build cabal here. */
 export function cabalLines(c: CabalRole | null, build: boolean): string[] {
   if (!c) return [];
   if (c.lead) {
     return [
-      `You are ${c.name}'s Overseer: you lead its cabal, the minions that work on ${build ? 'its build' : 'it'} under you, from its board (cabal_board). Open the \`citadel:cabal\` skill before anything else, and again after a shift change: it holds your steps. People read you as "${c.name}'s Overseer", never "the Overseer" alone. What always holds: people approve the roster on its forming card (cabal_board form), and you start members only from approved rows, with cabal_start (message_taskmaster for a row in another scheme); a red run or a review finding goes to the member who made it while it is open, else to the cabal's fixer, and you fix it yourself only for a merge conflict or about 20 lines; members' asks wait on the board and you answer them together at each wake.${build ? ' A full run waits until no member is still merging into the build.' : ''}`,
+      `You are ${c.overseer}: you lead its cabal, the minions that work on ${build ? 'its build' : 'it'} under you, from its board (cabal_board). Open the \`citadel:cabal\` skill before anything else, and again after a shift change: it holds your steps. People read you as "${c.overseer}", never "the Overseer" alone. What always holds: people approve the roster on its forming card (cabal_board form), and you start members only from approved rows, with cabal_start (message_taskmaster for a row in another scheme); a red run or a review finding goes to the member who made it while it is open, else to the cabal's fixer, and you fix it yourself only for a merge conflict or about 20 lines; members' asks wait on the board and you answer them together at each wake.${build ? ' A full run waits until no member is still merging into the build.' : ''}`,
     ];
   }
   return [
-    `You are a member of ${c.name}'s cabal, led by ${c.name}'s Overseer (${c.overseer}). On your first turn, read the board with cabal_board before the work: your row, your lane's neighbours and the open asks on your files. At each milestone, set your row's note (cabal_board note, one line such as "built, in review": it wakes nobody). Ask the Overseer on the board (cabal_board ask: a claim, a lend, a question), not by message_minion or the Taskmaster, with blocking true only when you can't go on without the answer.${build ? '' : ' You ship to live yourself, as any minion does.'}`,
+    `You are a member of ${c.name}, a cabal led by ${c.overseer} (${c.ref}). On your first turn, read the board with cabal_board before the work: your row, your lane's neighbours and the open asks on your files. At each milestone, set your row's note (cabal_board note, one line such as "built, in review": it wakes nobody). Ask your Overseer on the board (cabal_board ask: a claim, a lend, a question), not by message_minion or the Taskmaster, with blocking true only when you can't go on without the answer.${build ? '' : ' You ship to live yourself, as any minion does.'}`,
   ];
 }
 

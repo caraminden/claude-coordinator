@@ -551,7 +551,15 @@ export class TurnLine {
       if (p.fixed || m.block || !m.cap || !load) continue;
       const L = this.limits(m.id);
       const capped = { ...L, min: Math.min(L.min, m.cap), max: Math.min(L.max, m.cap) };
-      const auto = nextSize({ ...p, used: this.used(m.id), waiting: this.ready(m).length }, load.reading, load.box, capped, now);
+      // Turns its owner's later machines run count as waiting for it, so machine 1 grows to its limit before 2 is used (Josh, 2026-11-25).
+      const later =
+        m.priority === null
+          ? 0
+          : pools
+              .machines()
+              .filter((x) => x.owner === m.owner && (x.priority ?? Infinity) > m.priority!)
+              .reduce((n, x) => n + this.used(x.id), 0);
+      const auto = nextSize({ ...p, used: this.used(m.id), waiting: this.ready(m).length + later }, load.reading, load.box, capped, now);
       // The balancer's target pulls Auto's size down with it, so the workers grow back on Auto's clock once CI is quiet.
       const size = m.room ? Math.min(auto, m.room.workers) : auto;
       if (size !== p.size)

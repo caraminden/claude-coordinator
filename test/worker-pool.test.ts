@@ -692,16 +692,23 @@ function fleet(priority: [number | null, number | null]) {
   const at = Date.now();
   const mk = (id: number, name: string, prio: number | null): MachinePlace => ({ id, name, owner: 1, cap: 3, block: null, away: null, load: { reading: { cpu: 10, mem: 0 }, box: ok, at }, priority: prio, room: null });
   const [one, two] = [mk(7, 'one', priority[0]), mk(8, 'two', priority[1])];
-  const l = line({}, { machines: () => [one, two], mark: () => null, nameOf: (id) => (id === 7 ? 'one' : 'two'), takes: () => null, stuck: () => {} });
+  const l = line({}, { machines: () => [two, one], mark: () => null, nameOf: (id) => (id === 7 ? 'one' : 'two'), takes: () => null, stuck: () => {} });
   l.turns.setSize(0, 'Cara');
   l.turns.setSize(3, 'Cara', 8);
   return { ...l, one, two, at: (id: number) => l.turns.placeOf(id) };
 }
 
-test('machine 1 is filled to its budget before machine 2, though 2 has more room', () => {
+test('machine 1 is filled to its budget before machine 2, though 2 has more room', async () => {
   const f = fleet([1, 2]);
   for (const id of [1, 2, 3, 4, 5]) f.turns.enter(id);
-  assert.deepEqual([1, 2, 3, 4, 5].map(f.at), [7, 7, 8, 8, 8]);
+  assert.deepEqual([1, 2, 3, 4, 5].map(f.at), [7, 7, 8, 8, 8], "one at Auto's size first, the rest on two");
+  // Nothing waits, but two runs what one could: Auto grows one toward its limit, and the next turn goes there.
+  f.one.load = { ...f.one.load!, at: Date.now() + 3600_000 };
+  f.turns.tick(calm, [], Date.now() + 3600_000, ok);
+  assert.equal(f.turns.pool(7).size, 3);
+  await f.turns.hold(3, () => {});
+  f.turns.enter(6);
+  assert.equal(f.at(6), 7);
   f.turns.stop();
 });
 

@@ -319,6 +319,8 @@ burn_red=1 failed=$(printf 'test at big.test.ts:1:1\\n✖ a racy case (1ms)\\nbu
   assert.equal(run({ script: `${t}\nhas_case "$own" big.test.ts 'a racy case' && echo found\nhas_case "$old" big.test.ts 'a racy case' || echo absent` }).out, 'found\nabsent\n');
   assert.equal(run({ script: `${t}\ntrain_n=() train_tip=()\nburn_new` }).out, '0 big.test.ts\n');
   assert.equal(run({ script: `${t}\ntrain_n=(2) train_tip=("$b")\nburn_new` }).out, '');
+  // A bisect step tested no further than this ship, so the later edit is not in what went red.
+  assert.equal(run({ script: `${t}\ntrain_n=(2) train_tip=("$b")\nburn_new 0` }).out, '0 big.test.ts\n');
 });
 
 // The guard: a function that reads CI's log decides something about the red, so it is benched or says why not.

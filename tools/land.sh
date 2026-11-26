@@ -2250,15 +2250,16 @@ train_labels() {
 # riders). A burn-in race passes when run alone (train_solo), but a case main and the ships before one don't have can only
 # be that ship's, so it needs no proof. The log names each as "test at <file>:<line>:<col>", then "✖ <case> (<ms>)". A
 # case already on main, one a ship only edited, or one whose file a later ship changes too, is left to the guess.
+# [<riders>]: only the train up to that rider, as a bisect step tested it (all by default).
 burn_new() {
-  local f name i j red
+  local f name i j red last=${1:-${#train_n[@]}}
   [ -n "$burn_red" ] || return 0
   red=$(burn_lines | sed 's/: failed in .*//')
   while IFS=$'\t' read -r f name; do
     grep -qxF -- "$f" <<<"$red" && ! has_case "$old" "$f" "$name" || continue
-    for ((i = 0; i <= ${#train_n[@]}; i++)); do
+    for ((i = 0; i <= last; i++)); do
       has_case "$(train_at "$i")" "$f" "$name" || continue
-      for ((j = i + 1; j <= ${#train_n[@]}; j++)); do
+      for ((j = i + 1; j <= last; j++)); do
         git diff --quiet "$(train_at $((j - 1)))" "$(train_at "$j")" -- "$f" || continue 3 # a later ship edits it: a guess
       done
       echo "$i $f"
@@ -2803,7 +2804,7 @@ train_bisect() {
     busy_gate "$(train_at "$lo")"
     if [ "$rc" = 2 ]; then return; fi
     if [ "$rc" = 1 ]; then
-      if [ -n "$(burn_new)" ]; then # the step's red names its ship (#2019): judged as a red train of its own, no more steps
+      if [ -n "$(burn_new "$lo")" ]; then # the step's red names its ship (#2019): judged as a red train of its own, no more steps
         split_over
         train_drop "$lo"
         train_suspects || [ ${#train_n[@]} = 0 ] || train_bisect

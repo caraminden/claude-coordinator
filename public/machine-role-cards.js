@@ -242,8 +242,14 @@ function capsEditor(m, r, redraw) {
       label: `set the ${r.name} caps on ${m.name}`,
     });
   };
-  const over = own && caps.some(([k]) => /** @type {number} */ (capValue(k, typed[k] ?? '').n) > own[k]);
-  const hint = r.role === 'ci' ? 'Blank: no cap here, every runner registered there may be awake.' : own ? `Blank is that PC's own cap. It holds the lower of these and its own${over ? ': a number above its own needs that raised first (below)' : ''}.` : "Blank is that PC's own cap, once it is set up.";
+  // Threads and memory above its own take that PC's root helper (#2085); workers and disk the worker holds itself.
+  const over = own && caps.some(([k]) => (k === 'threads' || k === 'memory_gb') && /** @type {number} */ (capValue(k, typed[k] ?? '').n) > own[k]);
+  const hint =
+    r.role === 'ci'
+      ? 'Blank: no cap here, every runner registered there may be awake.'
+      : own
+        ? `Blank uses that PC's own cap; a number here is held there instead, above it too${over ? ". Threads and memory go up to what that PC has; if they don't take, run that PC's install command again" : ''}.`
+        : "Blank is that PC's own cap, once it is set up.";
   return h('div', { class: 'role-caps-edit' }, h('b', { class: 'small' }, `${r.name} caps, set here`), h('div', { class: 'worker-caps' }, ...fields), h('p', { class: 'muted small' }, hint), h('div', { class: 'row' }, save, cancel));
 }
 

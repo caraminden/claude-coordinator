@@ -100,6 +100,8 @@ export interface MachineWorker {
   host: string | null;
   wsl: boolean;
   caps: MachineWorkerCaps | null;
+  /** What it holds now, while here (#2085): the page's caps where set, else its own. */
+  held: MachineWorkerCaps | null;
   image: { state: 'ready' | 'building' | 'failed' | 'own'; text: string } | null;
   claude: string | null;
   claude_wanted: string | null;

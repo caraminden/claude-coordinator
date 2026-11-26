@@ -459,11 +459,11 @@ const ALWAYS_TESTS = ['access-matrix', 'prompt-budget', 'schema-compat', 'pipeli
  * the wake then keeps its plain text. The first match wins, most specific first.
  */
 export function classifyLandFailure(output: string): { kind: string; line: string } | null {
+  // Indented under the smoke or guard prefix is a failing test's own output, quoted: nothing below may read it (#1961).
+  output = output.replace(/^land: (smoke|guard): {3}.*$/gm, '');
   // After a retry in place (#1360), only the second attempt counts: the first one's flake labels are no proof now.
   const again = output.lastIndexOf('not your change: keeping its place in line');
   if (again >= 0) output = output.slice(again);
-  // Indented under the smoke check's prefix is a failing test's own output, quoted: no pattern below may read it (#1961).
-  output = output.replace(/^land: smoke: {3}.*$/gm, '');
   // citadel-test's `✖ file › name` (the smoke check and the guards), and where the suite itself refused the ship, run-tests.sh's
   // labels in the last run's log: an earlier one can be a train's, with another ship's tests.
   const suiteLog = /^land: tests failed on the rebased branch/m.test(output) ? (output.split(/^land: .*$/m).findLast((s) => /run-tests: \S+\.test\.ts: /.test(s)) ?? '') : '';

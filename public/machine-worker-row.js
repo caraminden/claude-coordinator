@@ -1,7 +1,7 @@
 // A machine's Minion turns on its row of the Machines page (Build 7 T5): the switch, the one command that makes that PC a
 // worker, its caps, the owner's sign-ins there and the self-test. Citadel changes nothing on that PC: every change is a
 // command its owner runs.
-import { account, ago, api, h, view } from './base.js';
+import { account, ago, api, h, pacificStamp, view } from './base.js';
 import { statTiles, toneChip } from './look.js';
 import { machineSetupWorkerLinux, machineSetupWorkerWindows, WORKER_CAPS, WORKER_CHECKS, workerCapsCommand, workerCommand, WORKER_LIMITS } from './machine-setup.js';
 import { markdownElement } from './ui/markdown.js';
@@ -238,7 +238,7 @@ function selfTest(m, redraw) {
         ),
       ),
     ),
-    w.passed ? h('p', { class: 'muted small', title: new Date(w.passed).toLocaleString(undefined, { timeZone: 'America/Los_Angeles', timeZoneName: 'short' }) }, `Last passed whole ${ago(w.passed)}.`) : null,
+    w.passed ? h('p', { class: 'muted small', title: pacificStamp(w.passed) }, `Last passed whole ${ago(w.passed)}.`) : null,
   );
 }
 

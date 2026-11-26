@@ -329,7 +329,7 @@ export async function runCardsTool(name: string, args: Record<string, unknown>):
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
       // A card whose options carry starts (#2050) says once what a pick does, here rather than in the always-loaded schema.
       const starts = (args.questions as { options?: { start?: unknown }[] }[]).some((q) => q.options?.some((o) => o.start))
-        ? ' A plain pick of an option with start starts that minion by itself, with no turn: you and your Taskmaster get held mail naming what started. A pick with typed words wakes you as usual, starting nothing.'
+        ? ' A pick of options with start (no typed words) starts those minions by itself: when that was the whole answer and all started, you and your Taskmaster get it as held mail; else you are woken with what started and what refused. A pick with typed words starts nothing and wakes you as usual.'
         : '';
       if (merged)
         return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href}), "below" this turn, "above" later). End your turn now with a short reply; the answers will come as the next message.${starts}`;

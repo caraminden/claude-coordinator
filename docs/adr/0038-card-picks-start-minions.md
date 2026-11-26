@@ -18,14 +18,19 @@ Status: accepted, 2026-11-25. Built by #2050. Reverses Cara's "Not now" of 2026-
 - An `ask_question` option on a minion's own card can carry `start: {handoff, title, type, model?, effort?, start_after?,
   build?}`. It is checked when the card is posted: the handoff is a `.md` file in the scheme's shared folder, the type a
   type of that scheme, and model and effort from the lists create_ticket takes (left out: the model table's pick for the
-  type). Ship cards and a Taskmaster's cards can't carry one: a Taskmaster starts its own minions with create_ticket.
+  type). Given, the pair must be a tier of the model table (`TIERS` in `public/model-table.js`; no Fable tier where
+  the scheme turned Fable off). Ship cards, cards for everyone and a Taskmaster's cards can't carry one: a Taskmaster starts its own minions with create_ticket.
 - A person's plain pick (no typed words, no picture or file) starts each picked option's minion through the
   Taskmaster's own create path: brief "Start from the handoff <path>", parent the card's owner, the picker's own
   (assigned, requested by, and run on the picker's login), the worker pool's line, the start card over $30, and the
   duplicate-handoff refusal (a handoff an open minion, or one closed in the last 3 days, started from). Two picks of one
-  handoff at once: the second is refused.
+  handoff at once: the second is refused. The handoff is checked again at the pick, so one moved or deleted since the
+  card was posted is refused too. A path with spaces, quotes or brackets is refused when posted: the duplicate check
+  reads the path out of the brief's text.
 - When every pick started, the card's owner hears it as held mail (no turn), with a note in its chat. Anything else (a
   refused start, or other options picked beside the starts) wakes the owner with what started and what didn't.
+- This is an exception to ADR 0036's "card answers … always run": an all-started pick is held, not run, since nothing is
+  left for the owner to do.
 - The scheme's Taskmaster gets held mail (a fyi) naming what started.
 - A pick with typed words or a picture starts nothing: the words may change the brief, so the owner is woken as before
   and passes the picks on.
@@ -33,7 +38,15 @@ Status: accepted, 2026-11-25. Built by #2050. Reverses Cara's "Not now" of 2026-
 ## What the Taskmaster gives up
 
 It no longer reads each brief before it starts: the card's author fills in model, effort, start_after and build, and
-the server refuses duplicates. Ordering against the start limits stays with the worker pool's line.
+the server refuses duplicates. Ordering against the start limits stays with the worker pool's line. A schedule's owner
+that posted the handoff card is no longer woken by an all-started pick, so it tidies the handoffs nobody picked on its
+next turn, when it reads the held mail.
+
+## Scope: a first step
+
+Route A was "any card". This builds it for a minion's own cards only, the source of the 243 messages; the brief left the
+Taskmaster's own starts alone. A Taskmaster's cards can take `start` later on the same path, if their picks turn out to
+cost turns too.
 
 ## Not covered yet
 

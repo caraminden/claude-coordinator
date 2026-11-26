@@ -14,6 +14,7 @@ import { startHoldKey } from './minion-budget.ts';
 import { createMinion } from './routes/projects.ts';
 import { thrown } from './thrown.ts';
 import { projectSharedDir } from './workspace.ts';
+import { TIERS, tierLabel } from '../public/model-table.js';
 
 /** An option's start, as stored on the card once cleanStart has checked it. `handoff` is its path in the shared folder. */
 export interface CardStart {
@@ -28,6 +29,8 @@ export interface CardStart {
 
 /** The handoff's path inside the scheme's shared folder (the folder's own spelling, not a link's target), or why not. */
 async function handoffPath(shared: string, raw: string): Promise<string> {
+  // The duplicate check and the brief's cost line read a handoff's path out of the brief's text, which ends a path at a space or quote.
+  if (/[\s`'"()<>[\]]/.test(raw)) throw new HttpError(400, `start.handoff ${raw}: rename the file without spaces, quotes or brackets, so its brief can name it`);
   const abs = isAbsolute(raw) ? raw : join(shared, raw);
   let real: string;
   let root: string;
@@ -53,9 +56,15 @@ export async function cleanStart(app: App, projectId: number, raw: unknown, wher
   } catch (err) {
     throw new HttpError(400, `${where} start.type: ${thrown(err).message}`);
   }
-  // Checked against the model table's lists, as create_ticket's are; left out, the table's pick for its type (pickFor).
+  // Checked against the model table: a tier it names (TIERS), both or neither; left out, the table's pick for its type (pickFor).
   const model = oneOf(s.model ?? null, MODELS, `${where} start.model`);
   const effort = oneOf(s.effort ?? null, EFFORTS, `${where} start.effort`);
+  if (model || effort) {
+    const fable = app.store.getProject(projectId)?.fable_ok !== 'off';
+    const tiers = TIERS.filter((t) => fable || !t.model.startsWith('claude-fable'));
+    if (!tiers.some((t) => t.model === model && t.effort === effort))
+      throw new HttpError(400, `${where} start: ${model ?? '(no model)'} at ${effort ?? '(no effort)'} isn't a tier of the model table. Give a tier's model and effort (${[...new Set(tiers.map((t) => tierLabel(t.model, t.effort)))].join(', ')}), or leave both out for the table's pick for its type`);
+  }
   if (s.start_after != null && !(Number.isInteger(s.start_after) && (s.start_after as number) > 0)) throw new HttpError(400, `${where} start.start_after must be a minion number`);
   const build = s.build == null ? null : buildNumber(s.build);
   return { handoff, title, type, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(s.start_after != null ? { start_after: s.start_after as number } : {}), ...(build ? { build } : {}) };
@@ -96,6 +105,8 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
     }
     starting.add(s.handoff);
     try {
+      // Again at the pick: a handoff moved or deleted since the card was posted would start a minion with no brief.
+      await handoffPath(projectSharedDir(app.dataDir, owner.project_id), s.handoff);
       const t = await createMinion(
         app,
         project,
@@ -124,7 +135,7 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
   const lines = [...(started.length ? [`Citadel started ${started.join('; ')}, as ${session.name}'s.`] : []), ...(refused.length ? [`Not started: ${refused.join('; ')}.`] : [])];
   if (started.length) {
     app.runner.emit(owner.id, 'note', { text: lines[0] });
-    await tellTaskmaster(app, owner, `(for your tracking; nothing to do) ${session.name} picked on #${owner.number}'s card, and ${lines.join(' ')}`, false, false, 'fyi');
+    await tellTaskmaster(app, owner, `(for your tracking; nothing to do) ${session.name} picked on #${owner.number}'s card, and ${lines.join(' ')}`, false, false, 'fyi', true); // notice: a reply the minion owes another Taskmaster keeps its way back
   }
   // Held only when the pick was all starts and all of them went: anything else is the owner's to act on.
   const held = !refused.length && picks.every((o) => o?.start);

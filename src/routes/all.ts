@@ -22,6 +22,7 @@ import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
 import { urgentRoutes } from './urgent.ts';
 import { workerRoutes } from './workers.ts';
+import { roleSetupRoutes } from './role-setup.ts';
 
 export const apiRoutes = [
   ...usageRoutes,
@@ -45,5 +46,6 @@ export const apiRoutes = [
   ...contraptionRoutes,
   ...skillRoutes,
   ...workerRoutes,
+  ...roleSetupRoutes,
   ...urgentRoutes,
 ];

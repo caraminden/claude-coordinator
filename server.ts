@@ -52,6 +52,7 @@ import { MachinePools } from './src/machine-pools.ts';
 import { MachineCopies, wireCopies } from './src/machine-away.ts';
 import { awayTick, machineLink, workerInfo } from './src/machine-turn.ts';
 import { imageFile, WorkerJoin } from './src/worker-join.ts';
+import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { shipsOn, ShipWatch } from './src/ci-ships.ts';
@@ -732,6 +733,20 @@ const serverClaude = () => new Promise<string | null>((done) => execFile(config.
 const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });
 machines.workers = workers;
 if (!BOOT_CHECK) every('worker rows', 1000, () => workers.tick());
+// A role's Set up and self-test (Build 7 M4).
+machines.roleSetups = new RoleSetups({
+  store,
+  online: (id) => machines.isOnline(id),
+  send: (id, msg) => machines.sendSetup(id, msg),
+  check: (id) => machines.check(id),
+  workers,
+  lendsWorker: (m) => machines.lendsWorker(m),
+  ships: (id) => machines.shipsAtWorker(id),
+  shotDir: join(DATA_DIR, 'role-shots'),
+  changed: () => broadcast({ type: 'machines', machines: machines.list() }),
+  now: Date.now,
+});
+if (!BOOT_CHECK) every('role setups', 5000, () => machines.roleSetups?.tick());
 // A worker's link is its own sync: that computer's agent, if it has one, is another program.
 machineLink.online = (id) => workers.here(id);
 machineLink.poke = (id) => machines.pokeWorker(id);

@@ -25,6 +25,7 @@ import { UNINSTALL } from './machine-away.ts';
 import { thrown } from './thrown.ts';
 import { asData } from './quote.ts';
 import type { WorkerJoin } from './worker-join.ts';
+import type { RoleSetups } from './role-setup.ts';
 import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
 import { ROLE_NAMES } from './machine-roles.ts';
@@ -539,6 +540,8 @@ export class MachineRelay {
 
   /** Workers' own programs and self-tests (src/worker-join.ts); absent in a test that builds none. */
   workers: WorkerJoin | null = null;
+  /** Roles' Set up and self-tests (Build 7 M4, src/role-setup.ts); absent in a test that builds none. */
+  roleSetups: RoleSetups | null = null;
 
   isOnline(machineId: number): boolean {
     return this.agents.has(machineId);
@@ -557,6 +560,14 @@ export class MachineRelay {
     agent.res.write(`data: ${JSON.stringify({ host_start: { ...msg, writable: this.workers?.writable(machineId) ?? null } })}\n\n`);
     return true;
   });
+
+  /** Send a role's Set up or Test to a machine's own agent (Build 7 M4); false when it isn't connected. */
+  sendSetup(machineId: number, msg: unknown): boolean {
+    const agent = this.agents.get(machineId);
+    if (!agent || agent.runners) return false;
+    agent.res.write(`data: ${JSON.stringify(msg)}\n\n`);
+    return true;
+  }
 
   /** Hurry a worker agent's next sync of its turns (src/machine-turn.ts); it syncs by itself anyway. */
   pokeWorker(machineId: number) {

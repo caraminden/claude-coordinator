@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/machines.ts src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts src/routes/machines.ts src/routes/all.ts
+shared: src/turn-launch.ts src/machines.ts src/db.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts src/routes/all.ts public/machine-agent.mjs server.ts test/size-budget.test.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -15,8 +15,8 @@ shared: src/turn-launch.ts src/machines.ts src/db.ts src/db/machines.ts src/mcp.
 #2052: (merged in)
 #2053: (merged in)
 #2054: (merged in)
-#2055: src/role-setup.ts src/routes/role-setup.ts public/role-setup.js public/role-setup-agent.mjs test/role-setup.test.ts test/role-setup-agent.test.ts public/role-setup-card.js README.md public/machine-role-cards.js public/machines.css test/machine-join.test.ts public/machine-agent.mjs server.ts test/size-budget.test.ts
-#2056: src/machine-balancer.ts test/machine-balancer.test.ts src/turn-line.ts public/workers.js test/worker-pool.test.ts test/turn-line.test.ts src/machine-pools.ts test/machine-pools.test.ts src/ci-ships.ts src/machine-jobs.ts src/db-rows.ts
+#2055: (merged in)
+#2056: src/machine-balancer.ts test/machine-balancer.test.ts src/turn-line.ts public/workers.js test/worker-pool.test.ts test/turn-line.test.ts src/machine-pools.ts test/machine-pools.test.ts src/ci-ships.ts src/machine-jobs.ts src/db-rows.ts README.md public/machine-role-cards.js public/machines.css src/db/machines.ts src/routes/machines.ts
 #2088: src/machine-merge.ts test/machine-merge.test.ts src/ci-runner.ts src/ci-load.ts public/machine-setup.js public/machine-merge.js src/routes/machine-merge.ts src/db-writer.ts
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
@@ -48,3 +48,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - 2026-11-25 ~11:35 PM PST: M4 (#2055), M6 (#2056) and M2b (#2088, one row per PC) started on build/7 14ed9f83d; each line above holds its new files and the files only it changes (src/ci-runner.ts and src/machine-jobs.ts were #2052's; T4's turn-line, workers and pool files #1973's). M2b's src/ci-runner.ts is #2064's to ask for after M2b. Lent at each one's merge, when it messages #1935 just before: lines others wrote in the shared files (src/machines.ts and src/db/machines.ts to M2b; public/machine-agent.mjs's AGENT_VERSION line and test/size-budget.test.ts's machine-agent allowance, #2053's, and server.ts's static agent-file line, #2006's, to M4). After M3 merges, src/routes/machines.ts, public/settings-machines.js, public/machine-role-cards.js and README.md are lent in merge order to whichever of M4, M6 and M2b merges next.
 - M3 (#2054) merged in on 2026-11-25; src/routes/machines.ts is shared again; README.md, public/machines.css, public/settings-machines.js and public/machine-role-cards.js are unclaimed (each counts as its first feeder): M4, M6 and M2b ask #1935 to lend the ones whose existing lines they change, just before each merges. src/db-rows.ts (#2053's) is on M6's line and src/db-writer.ts (#2052's) on M2b's: a later piece that needs either asks #1935.
 - 2026-11-26 ~12:40 AM PST: M4 (#2055), M6 (#2056) and M2b (#2088) all ready with Josh's go; they overlap (README.md, public/machines.css, public/machine-role-cards.js, src/routes/machines.ts, src/machines.ts, server.ts), so they merge one at a time in the order they asked: M4, then M6, then M2b. Lent to M4 for its merge: README.md, public/machine-role-cards.js, public/machines.css, test/machine-join.test.ts, and public/machine-agent.mjs, server.ts and test/size-budget.test.ts off the shared line; the three go back to shared after it.
+- M4 (#2055) merged in on 2026-11-26 (Josh's go); public/machine-agent.mjs, server.ts and test/size-budget.test.ts are shared again, its other files unclaimed. Lent to M6 (#2056) for its merge: README.md, public/machine-role-cards.js, public/machines.css, and src/db/machines.ts and src/routes/machines.ts off the shared line (both back to shared after it).

@@ -1,6 +1,6 @@
 // Removing a machine on the Machines page (Build 7 #2044; specs/worker-machines.md §4): its row says Removing… at the click,
 // and a worker's owner gets the command that takes the worker off that PC, in a block that outlives the row.
-import { api, h, view } from './base.js';
+import { account, api, h, view } from './base.js';
 import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
@@ -54,8 +54,8 @@ const WHERE = { powershell: 'in a normal PowerShell window on that PC (not as ad
 /** The commands to run, above the list. */
 export function renderRemovals(el, redraw) {
   if (!el) return;
-  // One draining that this page never clicked (a reload, another tab or person): its command is kept from here on too.
-  for (const m of view.machines) if (m.removing) removals.set(key(m), { name: m.name, command: uninstallFor(m, { removing: true, uninstall: m.removing }) });
+  // One draining that this page never clicked (its owner's reload or other tab): its command is kept from here on too.
+  for (const m of view.machines) if (m.removing && (m.owner_id === null ? account?.admin : m.owner_id === account?.id)) removals.set(key(m), { name: m.name, command: uninstallFor(m, { removing: true, uninstall: m.removing }) });
   const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => key(m) === id)]);
   // Left alone while nothing changed, so a selection in a command survives the list's redraws.
   const drawn = JSON.stringify(shown);

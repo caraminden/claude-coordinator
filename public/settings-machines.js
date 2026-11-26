@@ -549,7 +549,7 @@ function machineLine(m) {
 function machineBody(m) {
   const check = h('button', { type: 'button', class: 'secondary small', disabled: !m.online || m.checking, title: m.online ? "Start its tools and list them, as a minion's turn would" : 'It is offline' }, m.checking ? 'Checking…' : 'Check now');
   check.onclick = () => checkMachine(m, check);
-  const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects', onclick: () => newMachineToken(m) }, 'New token');
+  const newToken = h('button', { type: 'button', class: 'secondary small', disabled: removing(m), title: 'Make a new token; the old one stops working and the machine disconnects', onclick: () => newMachineToken(m) }, 'New token');
   const remove = h('button', { type: 'button', class: 'secondary small', disabled: removing(m), onclick: () => removeMachine(m) }, removing(m) ? 'Removing…' : 'Remove');
   const alwaysOn = h('input', { type: 'checkbox', checked: m.always_on });
   alwaysOn.onchange = () => patchMachine(m, { always_on: alwaysOn.checked }, `mark ${m.name} as ${alwaysOn.checked ? '' : 'not '}always on`, renderMachineList);

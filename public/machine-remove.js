@@ -4,15 +4,15 @@ import { api, h, view } from './base.js';
 import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
-/** The removals this app has started, by machine id, until Done: kept over redraws and page switches. */
+/** The removals this app has started, until Done: kept over redraws and page switches. */
 const removals = new Map();
 const seen = new Set();
 
-// A removed machine's id goes to the next one added, so an entry is that machine's only with its created time too.
-const same = (r, m) => r?.created === m.created_at;
+// A removed machine's id goes to the next one added, so its created time is part of the key.
+const key = (m) => `${m.id}:${m.created_at}`;
 
 /** Its row shows Removing… */
-export const removing = (m) => same(removals.get(m.id), m);
+export const removing = (m) => removals.has(key(m));
 
 /** The command that takes a removed worker off its PC, for the shell that PC's worker ran in; null when it had none. */
 export function uninstallFor(machine, reply) {
@@ -27,20 +27,20 @@ export function sendRemoval(machine, { redraw, drop }) {
   optimistic({
     key: `machine:${machine.id}`,
     apply: () => {
-      removals.set(machine.id, { name: machine.name, created: machine.created_at, command: null });
+      removals.set(key(machine), { name: machine.name, command: null });
       redraw();
     },
     send: () => api(`api/machines/${machine.id}`, { method: 'DELETE' }),
     undo: () => {
-      removals.delete(machine.id);
+      removals.delete(key(machine));
       redraw();
     },
     label: `remove ${machine.name}`,
   }).then(
     (reply) => {
       const command = uninstallFor(machine, reply);
-      if (command) removals.set(machine.id, { name: machine.name, created: machine.created_at, command });
-      else removals.delete(machine.id);
+      if (command) removals.set(key(machine), { name: machine.name, command });
+      else removals.delete(key(machine));
       // A 202 keeps its row until its agent has cleared the copies there.
       if (reply.removing) redraw();
       else drop();
@@ -54,7 +54,7 @@ const WHERE = { powershell: 'in a normal PowerShell window on that PC (not as ad
 /** The commands to run, above the list. */
 export function renderRemovals(el, redraw) {
   if (!el) return;
-  const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => m.id === id && same(r, m))]);
+  const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => key(m) === id)]);
   // Left alone while nothing changed, so a selection in a command survives the list's redraws.
   const key = JSON.stringify(shown);
   if (el.dataset.key === key) return;

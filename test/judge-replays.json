@@ -54,13 +54,13 @@
     "summary": "0 as before, 9 new, 0 gone"
   },
   "deploy-watch": {
-    "hash": "f05597d3b0e10cb6",
-    "at": "2026-11-25",
+    "hash": "7696c5787de82813",
+    "at": "2026-11-26",
     "days": 3,
-    "inputs": "243 deploys of the Citadel server, health_events and turns from the database",
-    "hits": 6,
-    "real": 10,
-    "summary": "6 as before, 0 new, 4 gone"
+    "inputs": "229 deploys of the Citadel server, health_events and turns from the database",
+    "hits": 7,
+    "real": 8,
+    "summary": "7 as before, 0 new, 3 gone"
   },
   "effort-retros": {
     "hash": "89116e3ad924b941",

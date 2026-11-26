@@ -106,6 +106,10 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
   return out;
 }
 
+/** The last step of every retro's brief (#2140): kit/schedules/monthly-retro.md, ship-lessons.md and the retro skill carry the same words. */
+export const START_CARD_STEP =
+  'End with one multi-select ask_question card, one option per handoff you wrote for this scheme\'s repo, each with its `start` (handoff path, title, type, model, effort) and your recommendation marked (pair a lone one with "None of these"); link the card in your reply, start none yourself, and stay open in state ready until it is answered. A handoff for another scheme\'s repo gets no option: its path goes only to your Taskmaster, and a run with no option posts no card.';
+
 /** The retro minion's first message. */
 export function effortBrief(project: Pick<Project, 'name'>, v: EffortVerdict): string {
   const first = v.members[0];
@@ -119,7 +123,8 @@ export function effortBrief(project: Pick<Project, 'name'>, v: EffortVerdict): s
     '',
     "Follow citadel:retro, for an effort. Read the minions with read_minion, a few per Sonnet Grunt, each returning counts and minion numbers, never transcripts: what was asked, corrected or redone, refused ships and land conflicts, hand-offs between the minions, and the steps that took longest. Also read this scheme's retro log for the window (retro-log/<date>/*.md in its shared folder), and the last retro and the ledger in the retro folder its CLAUDE.md names (docs/retros/ if none). The question this retro answers that a per-minion digest can't: what went wrong across the effort (the split into minions, the order, a brief that left the next one guessing, work done twice).",
     `Then: write effort-<slug>.md in that retro folder (slug from "${v.name}", plus the date), update the ledger, and make the few edits the retro calls for in this scheme's own skills, rules and docs, after citadel:self-review, by its usual landing route. A fix for the Citadel kit, the tripwire or Citadel's prompts goes in a handoff in this scheme's handoffs/ (handoff-citadel-<slug>.md); message your Taskmaster its path.`,
-    `Reply with the top three findings and what shipped, linking the retro. Stay open in state complete, the retro named in the note. #${first.number} to #${last.number} are closed: don't reopen them.`,
+    START_CARD_STEP,
+    `Reply with the top three findings and what shipped, linking the retro. With no card, stay open in state complete, the retro named in the note. #${first.number} to #${last.number} are closed: don't reopen them.`,
   ].join('\n');
 }
 

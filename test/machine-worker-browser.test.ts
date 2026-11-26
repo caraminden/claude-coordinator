@@ -97,14 +97,15 @@ test('connected, it asks for the sign-ins that are missing and shows the ones th
   says.signedIn = says.github = true;
   await wait('both sign-ins', `/Claude: signed in/.test(${worker()}.textContent) && /GitHub: signed in/.test(${worker()}.textContent)`);
   // Switched on, it was lent to every scheme its owner is in (M3); untick Delve on its card and it is lent to none.
+  const lent = async () => (ok(await srv.call(`/api/machines/${id}/roles`)).roles as { role: string; projects: number[] }[]).find((r) => r.role === 'turns')!.projects;
   const chip = `[...${card()}.querySelectorAll('.role-schemes .chip')].find((c) => c.textContent === 'Delve')`;
   assert.equal(await page.eval(`${chip}.getAttribute('aria-pressed')`), 'true');
   assert.match(await cardText(), /Not tested yet/);
   await page.eval(`${chip}.click()`);
   await wait('lent to no scheme', `/Lent to no scheme/.test(${card()}.textContent)`);
+  await until('the untick saved', async () => (await lent()).length === 0);
   await page.eval(`${chip}.click()`);
   await wait('the next step', `/Not tested yet/.test(${card()}.textContent)`);
-  const lent = async () => (ok(await srv.call(`/api/machines/${id}/roles`)).roles as { role: string; projects: number[] }[]).find((r) => r.role === 'turns')!.projects;
   await until('Delve lent again, saved', async () => (await lent()).join() === String(projectId));
   assert.match(await page.eval<string>(`${row('my-pc')}.querySelector('summary').textContent`), /Setting up.*Minion turns: not tested yet/);
 });

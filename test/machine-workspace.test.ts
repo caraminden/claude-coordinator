@@ -450,3 +450,35 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
     );
   }
 });
+
+// Build 7 M6c (#2120): a Windows test run asks Citadel for its size on the PC before it joins the screen's line.
+test('a screen task waits for room on the PC, then runs and says done; a build task and a failed ask go straight on', async () => {
+  const asks: string[] = [];
+  let answer: 'wait' | 'start' | 'fail' = 'wait';
+  const roomy = new WorkspaceHost({
+    configFile: boxFile,
+    jobsDir: join(root, 'room-jobs'),
+    linePollMs: 30,
+    roomPollMs: 20,
+    room: async (op: string, key: string) => {
+      asks.push(`${op}:${key}`);
+      if (op === 'ask' && answer === 'fail') throw new Error('HTTP 404');
+      return op === 'ask' ? answer : undefined;
+    },
+  });
+  const call = (tool: string, args: object = {}) => roomy.call(tool, args, '#2120 in Citadel', async () => '');
+  const waiting = await call('run_task', { workspace: 'peek', task: 'shell', args: ['x'], wait: 0 });
+  const id = waiting.text.match(/job (\w+)\)/)![1];
+  assert.match(waiting.text, /waiting for room on this computer/);
+  assert.ok(!existsSync(join(root, 'screen-line')) || !readdirSync(join(root, 'screen-line')).some((f) => f.includes(id)), 'not in the screen line while it waits');
+  await until('a second ask', () => asks.filter((a) => a === `ask:${id}`).length >= 2);
+  answer = 'start';
+  await until('the run to end', () => roomy.jobs.get(id).ended);
+  assert.match((await call('job', { id })).text, /succeeded/);
+  await until('done said', () => asks.includes(`done:${id}`));
+  asks.length = 0;
+  assert.match((await call('run_task', { workspace: 'peek', task: 'build', args: [] })).text, /succeeded/);
+  assert.ok(!asks.some((a) => a.startsWith('ask:')), 'a build task asks for no room');
+  answer = 'fail';
+  assert.match((await call('run_task', { workspace: 'peek', task: 'shell', args: ['y'] })).text, /succeeded/);
+});

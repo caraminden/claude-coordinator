@@ -25,6 +25,7 @@ import { skillRoutes } from './skills.ts';
 import { urgentRoutes } from './urgent.ts';
 import { workerRoutes } from './workers.ts';
 import { roleSetupRoutes } from './role-setup.ts';
+import { heavyRoutes } from './heavy.ts';
 
 export const apiRoutes = [
   ...usageRoutes,
@@ -51,5 +52,6 @@ export const apiRoutes = [
   ...skillRoutes,
   ...workerRoutes,
   ...roleSetupRoutes,
+  ...heavyRoutes,
   ...urgentRoutes,
 ];

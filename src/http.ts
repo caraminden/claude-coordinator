@@ -1,4 +1,5 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
+import type { HeavyPlacer } from './heavy-place.ts';
 import type { MachineCopies } from './machine-away.ts';
 import type { HeldStarts } from './held-starts.ts';
 import type { TestCounts } from './waits.ts';
@@ -408,6 +409,8 @@ export interface App {
   /** Optional work kept off the CI desktop while ships go first (src/ci-hold.ts, #1902); absent in tests that don't need it. */
   ciHold?: Pick<CiHold, 'ask' | 'state'>;
   runnerCap?: Pick<RunnerCap, 'text'>;
+  /** Heavy jobs off the server waiting for room on a PC (src/heavy-place.ts, #2120); absent in tests that don't need it. */
+  heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone'>;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
   /** Each scheme's files by size and by how many minions changed them, counted daily (src/code-counts.ts, #1988). */

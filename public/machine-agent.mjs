@@ -733,8 +733,13 @@ async function captureScreen(file, window) {
 
 /** The workspaces this computer offers, shared by every thread session: one lock and one job list. */
 export class WorkspaceHost {
-  constructor({ configFile, env = process.env, jobsDir, capture = captureScreen, screenWaitS = WAIT_MAX, linePollMs = LINE_POLL_MS }) {
+  constructor({ configFile, env = process.env, jobsDir, capture = captureScreen, screenWaitS = WAIT_MAX, linePollMs = LINE_POLL_MS, room = /** @type {((op: string, key: string, label?: string) => Promise<string | undefined>) | null} */ (null), roomPollMs = 30_000 }) {
     this.configFile = configFile;
+    // A Windows test run asks Citadel for its size on this PC first (Build 7 M6c, #2120): room(op, key, label) → 'start',
+    // 'late' or 'wait', and room('done', key) after. Null: tasks start as they always did (not Windows, or an old setup).
+    /** @type {((op: string, key: string, label?: string) => Promise<string | undefined>) | null} */
+    this.room = room;
+    this.roomPollMs = roomPollMs;
     this.env = env;
     this.jobsDir = jobsDir;
     this.capture = capture;
@@ -952,9 +957,11 @@ export class WorkspaceHost {
       throw new ToolError(`Not run: ${w.name} has moved since your git_sync. You checked out ${mine.sha.slice(0, 10)}; it is now at ${commit.slice(0, 10)}${by ? `, synced since by ${by}` : ', changed on that computer'}. Run git_sync again, then run_task.`);
     }
     let ticket = null;
+    // A run that waits for room on this PC joins the screen's line only once it has room, so it never holds the screen meanwhile.
+    const roomed = !!this.room && task.screen;
     try {
       // Every screen task joins the line, even with the screen free: it is the line that keeps arrival order.
-      if (this.screenLock && task.screen) ticket = joinScreenLine(this.screenLock, `task ${name} in ${w.name}`, who);
+      if (this.screenLock && task.screen && !roomed) ticket = joinScreenLine(this.screenLock, `task ${name} in ${w.name}`, who);
     } catch (err) {
       this.release(w, lock);
       throw new ToolError(`Could not join the screen's line: ${err.message}`);
@@ -970,6 +977,7 @@ export class WorkspaceHost {
       let screen = null;
       let limit = null;
       let poll = null;
+      let renew = null;
       // Why it is being stopped: it may exit while that is under way.
       let stopping = null;
       const finish = (code, error) => {
@@ -977,6 +985,9 @@ export class WorkspaceHost {
         error ??= stopping;
         clearTimeout(limit);
         clearTimeout(poll);
+        clearInterval(renew);
+        if (roomed) this.room('done', job.id).catch(() => {});
+        job.room = null;
         job.ended = Date.now();
         job.code = code;
         job.error = error;
@@ -1022,7 +1033,18 @@ export class WorkspaceHost {
         // A program it started (the game, say) can hold the output open after it exits; don't wait on that.
         child.on('exit', (code) => setTimeout(() => finish(code, null), 1000));
       };
-      if (!ticket) return start();
+      const queue = () => {
+        if (roomed && this.screenLock) {
+          try {
+            ticket = joinScreenLine(this.screenLock, `task ${name} in ${w.name}`, who);
+          } catch (err) {
+            return finish(null, `Could not join the screen's line: ${err.message}`);
+          }
+        }
+        if (!ticket) return start();
+        job.line = { holder: null, ahead: 0, waiting: 1 };
+        look();
+      };
       const look = () => {
         if (job.ended) return;
         let turn;
@@ -1045,8 +1067,34 @@ export class WorkspaceHost {
         poll = setTimeout(look, this.linePollMs);
         poll.unref?.();
       };
-      job.line = { holder: null, ahead: 0, waiting: 1 };
-      look();
+      if (!roomed) return queue();
+      // Asked again every roomPollMs while it waits and while it runs: that keeps its room on Citadel's lease.
+      const ask = () => {
+        if (job.ended) return;
+        this.room('ask', job.id, `${name} in ${w.name}`).then(
+          (go) => {
+            if (job.ended) return;
+            if (go === 'wait') {
+              job.room = { since: job.room?.since ?? Date.now() };
+              poll = setTimeout(ask, this.roomPollMs);
+              poll.unref?.();
+              return;
+            }
+            job.room = null;
+            renew = setInterval(() => this.room('ask', job.id, `${name} in ${w.name}`).catch(() => {}), this.roomPollMs);
+            renew.unref?.();
+            queue();
+          },
+          // No answer (Citadel away, an older server): it goes ahead, as before.
+          () => {
+            if (job.ended) return;
+            job.room = null;
+            queue();
+          },
+        );
+      };
+      job.room = { since: Date.now() };
+      ask();
     });
     return this.report(job, wait, 60);
   }
@@ -1062,6 +1110,11 @@ export class WorkspaceHost {
         job.watching--;
         job.seen = Date.now();
       }
+    }
+    if (job.room) {
+      return {
+        text: `${job.name} in ${job.workspace} is waiting for room on this computer (job ${job.id}), ${secondsSince(job.room.since)} s so far: Citadel holds off new minion turns here until its size is free, and starts it anyway after 30 minutes. Nothing has started yet. Call job with id "${job.id}" to wait for it; stop_job leaves.`,
+      };
     }
     if (job.line) {
       const { holder, ahead, waiting } = job.line;
@@ -2463,7 +2516,17 @@ async function main() {
   const log = (...a) => console.log(new Date().toLocaleTimeString(), ...a);
 
   const configFile = configArg && resolve(configArg);
-  const host = configFile && new WorkspaceHost({ configFile, jobsDir: join(dirname(configFile), 'citadel-jobs') });
+  // A Windows test run asks for its size on this PC (#2120); a non-200 answer (an older server) throws, and the run goes ahead.
+  const room =
+    process.platform === 'win32'
+      ? async (op, key, label) => {
+          const res = await appCall(appUrl, token, 'POST', '/api/machines/heavy', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op, key, label }) });
+          const body = await readBody(res);
+          if (res.statusCode !== 200) throw new Error(`HTTP ${res.statusCode}`);
+          return body?.go ?? 'start';
+        }
+      : null;
+  const host = configFile && new WorkspaceHost({ configFile, jobsDir: join(dirname(configFile), 'citadel-jobs'), room });
   // Nothing is lent until the app says what is ticked.
   if (managed) host.lent = new Set();
   const offered = () => [...(lends ? ['mcp'] : []), ...(host?.workspaces.size ? ['ws'] : [])];

@@ -16,8 +16,9 @@ permissions:
 
 jobs:
   release:
-    # Only the runner with the side label, so the first stays the ships' (#1240, #1347).
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]') }}
+    # Only the runner with the side label, so the first stays the ships' (#1240, #1347); citadel-heavy-desktop: Citadel
+    # puts it on one runner of the PC with room for a build (#2120, src/heavy-place.ts).
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side", "citadel-heavy-desktop"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -28,3 +29,12 @@ jobs:
         run: desktop/build.sh "$RUNNER_TEMP/citadel-desktop.zip"
       - name: Keep the zip as a release
         run: tools/ci-upload.sh --kind release --name citadel-desktop.zip "$RUNNER_TEMP/citadel-desktop.zip"
+      # Its room on the PC is free at once (Citadel #2120): Citadel placed this job there by its heavy label and held room
+      # for it; without this step the room is freed at Citadel's next look at GitHub. The run's own token, no secret.
+      - name: tell Citadel its room is free
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          t=$(curl -fsS -m 15 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+          curl -fsS -m 15 -X POST -H "Authorization: Bearer $t" -H 'content-type: application/json' -d "{\"runner\":\"$RUNNER_NAME\"}" "${CITADEL_STORE_URL:-http://perigee.tail59477f.ts.net:8574}/api/heavy/done" || true

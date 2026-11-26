@@ -12,14 +12,15 @@
 //   - Placing (Josh's pick on #2120's second card, PLACE): the first PC in the owner's order with room takes it. With
 //     none, it waits on the first, which starts no new minion turn meanwhile ("hold off on a build until the worker count
 //     drops"); after HEAVY_WAIT_MS it starts there anyway, late. A job whose PC is no longer eligible waits on the next.
-//   - No PC lends the scheme CI (or none has a runner with its labels): after HEAVY_WAIT_MS the label goes to any online
-//     runner of the repo that has its labels, so a job is never stuck on Citadel's rules alone.
+//   - No PC Citadel balances lends the scheme CI with a runner that has its labels (a runner-only row with no threads
+//     reported, a runner on a PC Citadel doesn't know): the label goes at once to any online runner of the repo with its
+//     labels, as before Citadel placed jobs.
 //   - A label Citadel didn't hand out (one left by a restart) comes off a runner the first time its repo is looked at.
 // Citadel down: queued heavy jobs wait for it, as Peek's capped builds do (src/runner-cap.ts). Perigee keeps its own
 // rules (Josh, "Machines only for now"): only PCs with a balancer plan are placed on.
 // Windows test runs aren't CI jobs: the PC's agent asks for them itself (agentAsk, from public/machine-agent.mjs), and
 // they start late where they are after HEAVY_WAIT_MS, since a workspace's checkout is on that one PC.
-import { HEAVY, HEAVY_WAIT_MS, rank, type MachineBalancer } from './machine-balancer.ts';
+import { HEAVY, rank, type MachineBalancer } from './machine-balancer.ts';
 import { onHost, type Listed } from './ci-runner.ts';
 import { thrown } from './thrown.ts';
 
@@ -57,8 +58,8 @@ export interface PlaceMachine {
   id: number;
   name: string;
   priority: number | null;
-  /** The hostname its runner agent reported: its runners' names start with it. */
-  host: string;
+  /** The hostnames its runner agents reported (Windows, and Linux in WSL): its runners' names start with one. */
+  hosts: string[];
 }
 
 export interface HeavyDeps {
@@ -238,16 +239,15 @@ export class HeavyPlacer {
     if (!list) return;
     const needs = lower(h.job.labels).filter((l) => l !== h.label);
     const fits = (r: Listed) => r.status === 'online' && needs.every((l) => lower(r.labels).includes(l));
-    const on = (m: PlaceMachine) => list.filter((r) => fits(r) && onHost(r.name, m.host));
+    const on = (m: PlaceMachine) => list.filter((r) => fits(r) && m.hosts.some((host) => onHost(r.name, host)));
     const b = this.d.balancer;
-    const eligible = this.d.machines(h.job.repo).filter((m) => m.host && on(m).length);
+    const eligible = this.d.machines(h.job.repo).filter((m) => m.hosts.length && on(m).length);
     const ranked = rank(eligible.map((m) => ({ ...m, free: 1 + (b.current(m.id)?.workers ?? 0) })));
-    const waited = now - h.since >= HEAVY_WAIT_MS;
     if (!ranked.length) {
       if (h.home !== null) b.release(h.home, h.key, null);
       h.home = null;
-      // No PC may take it: after the wait any runner with its labels does, so it never waits on Citadel's rules alone.
-      if (waited) await this.hand(h, null, list.filter(fits), now, true);
+      // No PC Citadel balances may take it: any runner with its labels does, at once, as before Citadel placed jobs.
+      await this.hand(h, null, list.filter(fits), now, false);
       return;
     }
     const job = { key: h.key, label: h.what, size: h.size };

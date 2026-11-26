@@ -138,6 +138,10 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   browser downloads them without Citadel's cookie. The tailnet keeps them private.
 - A signed APK built in CI reaches perigee through Citadel's CI store, not a GitHub artifact: the
   release workflow uploads it as kind `release` (the `citadel:ci-store` skill).
+- A release workflow on self-hosted runners adds `citadel-heavy-apk` to its build job's `runs-on`,
+  and copies the last step "tell Citadel its room is free" from the kit's `citadel-heavy.yml`
+  template (with `id-token: write`): Citadel then hands the job to a PC with room for an 8-thread
+  build, in its owner's order, and holds that room until the step runs (#2120).
 - **Roll back to last green** on the Releases card puts last green on phones as the next version,
   since Android refuses a lower versionCode (ADR 0012). A Capacitor app's APK rolls back with its
   app: one button, the build numbered one past the published one. A CI-signed app's roll back

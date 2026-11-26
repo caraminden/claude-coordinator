@@ -98,6 +98,8 @@ import { queueLesson } from './src/ship-lessons.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
+import { HeavyPlacer } from './src/heavy-place.ts';
+import type { GhJob } from './src/gh-bodies.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, readJson, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
@@ -2186,11 +2188,44 @@ const asScheme = (repo: string) => {
   const p = schemeOf(repo);
   return p ? githubOf(p.repo_dir!) : null;
 };
+// Heavy CI jobs Citadel places on a PC with room (Build 7 M6c, #2120, src/heavy-place.ts): ShipWatch's look hands it the
+// queued ones; it asks the balancer on the PCs lending the scheme CI, and labels a runner on the one that has room.
+const heavyScheme = (repo: string) => {
+  const p = schemeOf(repo);
+  if (!p) throw new HttpError(404, `No scheme has the repo ${repo}`);
+  return p;
+};
+const heavyPlacer = new HeavyPlacer({
+  balancer,
+  machines: (repo) => {
+    const p = schemeOf(repo);
+    const ids = new Set([...machines.runnerMachines('windows'), ...machines.runnerMachines('linux')].map((m) => m.id));
+    return p
+      ? store
+          .listMachines()
+          .filter((m) => ids.has(m.id) && balancer.current(m.id) && lendsCi(store, m, p))
+          .map((m) => ({ id: m.id, name: m.name, priority: m.priority ?? null, hosts: (['windows', 'linux'] as const).flatMap((os) => machines.runnerHost(m.id, os) ?? []) }))
+      : [];
+  },
+  runners: (repo) => runnerTokens.listed(heavyScheme(repo)),
+  addLabel: (repo, id, label) => runnerTokens.addLabel(heavyScheme(repo), id, label),
+  dropLabel: (repo, id, label) => runnerTokens.dropLabel(heavyScheme(repo), id, label),
+  job: async (repo, id) => {
+    const as = asScheme(repo);
+    const r = as ? await ghGet(`repos/${repo}/actions/jobs/${id}`, null, as).catch(() => null) : null;
+    const j = r?.status === 200 ? (r.body as GhJob | null) : null;
+    return j && typeof j.status === 'string' ? { status: j.status, runner: j.runner_name ?? null } : null;
+  },
+  now: Date.now,
+  log: (line) => console.log(line),
+});
+if (!BOOT_CHECK) every('heavy job leases', 15_000, () => heavyPlacer.expire());
 const shipWatch = new ShipWatch({
   repos: runnerRepos,
   as: asScheme,
   send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
+  heavy: (jobs, read) => void heavyPlacer.pass(jobs, read),
   queued: (byRepo, labels) => {
     ciQueued = byRepo;
     ciQueuedLabels = labels;
@@ -2608,6 +2643,7 @@ const app: App = {
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
   runnerCap,
+  heavy: heavyPlacer,
   chunked,
   claude: claudeLink,
   codex: codexLink,

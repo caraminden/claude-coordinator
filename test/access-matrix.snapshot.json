@@ -809,6 +809,16 @@
   "m1": "200",
   "m2": "200"
  },
+ "POST /api/heavy/done": {
+  "anon": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "person": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "member": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "outsider": "401 Send the job's GitHub run token as Authorization: Bearer",
+  "tmA": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "tmB": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "m1": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
+  "m2": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store"
+ },
  "GET /api/home": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -1200,6 +1210,16 @@
   "m2": "403 A minion may only update itself"
  },
  "GET /api/machines/connect": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/heavy": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
   "member": "401 Unknown machine token; make a new one in the Machines panel",

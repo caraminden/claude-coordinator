@@ -21,8 +21,8 @@ function world() {
     now: () => now,
   });
   const machines: PlaceMachine[] = [
-    { id: 2, name: 'second', priority: 2, host: 'desk2' },
-    { id: 1, name: 'first', priority: 1, host: 'desk1' },
+    { id: 2, name: 'second', priority: 2, hosts: ['desk2'] },
+    { id: 1, name: 'first', priority: 1, hosts: ['desk1'] },
   ];
   const runners: Listed[] = [
     { id: 11, name: 'desk1-linux-1', status: 'online', busy: false, labels: ['self-hosted', 'Linux', 'peek-ci-linux'] },
@@ -147,6 +147,15 @@ test('a label no runner took in time comes off and the job is placed again', asy
   assert.ok(w.log.some((l) => /no runner took it/.test(l)));
   await w.pass();
   assert.deepEqual(w.labelled(), ['desk1-linux-1'], 'handed out again');
+});
+
+test('with no PC Citadel balances for the repo, any runner with its labels takes it at once', async () => {
+  const w = world();
+  w.runners[0].name = 'elsewhere-1'; // on no PC Citadel knows
+  w.runners[1].labels = ['self-hosted'];
+  await w.pass();
+  assert.deepEqual(w.labelled(), ['elsewhere-1']);
+  assert.equal(w.balancer.plan(1)!.workers, 2, 'no room held anywhere');
 });
 
 test('a heavy label Citadel did not hand out comes off on the first look', async () => {

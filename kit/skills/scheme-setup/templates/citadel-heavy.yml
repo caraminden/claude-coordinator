@@ -44,10 +44,13 @@ on:
 
 permissions:
   contents: read
+  id-token: write # the run's own token, no secret: the last step's call to Citadel (#2120)
 
 jobs:
   heavy:
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "<runner-label>"]') }}
+    # citadel-heavy-suite (Citadel #2120): no runner carries it by itself; Citadel puts it on one runner of the PC lending
+    # the scheme CI that has room for a full suite, in its owner's order, and takes it off once the job starts there.
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "<runner-label>", "citadel-heavy-suite"]') }}
     timeout-minutes: ${{ fromJSON(inputs.minutes || '60') }}
     steps:
       - uses: actions/checkout@v4
@@ -71,3 +74,12 @@ jobs:
           # A newline first: output with none at its end would hide the marker mid-line (heavy-ci.ts drops this line again).
           printf '\n=== citadel-heavy: the command exited %s ===\n' "$rc"
           exit $rc
+      # Its room on the PC is free at once (Citadel #2120): Citadel placed this job there by its heavy label and held room
+      # for it; without this step the room is freed at Citadel's next look at GitHub. The run's own token, no secret.
+      - name: tell Citadel its room is free
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          t=$(curl -fsS -m 15 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+          curl -fsS -m 15 -X POST -H "Authorization: Bearer $t" -H 'content-type: application/json' -d "{\"runner\":\"$RUNNER_NAME\"}" "${CITADEL_STORE_URL:-http://perigee.tail59477f.ts.net:8574}/api/heavy/done" || true

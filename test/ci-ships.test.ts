@@ -221,6 +221,30 @@ test('queued jobs for self-hosted runners are counted per repo, and shared among
   assert.equal(queuedOn('desk', new Map([[repo, 3]]), pcs), 2, 'rounded up: an odd one shrinks both');
 });
 
+test('a queued heavy job (#2120) comes back as one to place, not as waiting CI nor a label to make runners for', async () => {
+  const repo = 'caraminden/peek';
+  const gh = github({
+    [runs(repo)]: { workflow_runs: [] },
+    [queuedRuns(repo)]: { workflow_runs: [{ id: 5 }] },
+    [jobs(repo, 5)]: {
+      jobs: [
+        { id: 51, name: 'apk', status: 'queued', labels: ['self-hosted', 'peek-ci-linux', 'citadel-heavy-apk'] },
+        { id: 52, name: 'test', status: 'queued', labels: ['self-hosted', 'peek-ci-linux'] },
+      ],
+    },
+  });
+  const got: [Map<string, number>, Map<string, Set<string>>][] = [];
+  const heavy: unknown[] = [];
+  const read: string[][] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: (m, l) => void got.push([m, l]), heavy: (h, r) => void (heavy.push(...h), read.push([...r])) });
+  await w.tick(0);
+  const [counts, labels] = got[0];
+  assert.deepEqual(read, [[repo]]);
+  assert.deepEqual([...counts], [[repo, 1]]);
+  assert.deepEqual([...labels.get(repo)!], ['peek-ci-linux']);
+  assert.deepEqual(heavy, [{ repo, id: 51, run: 5, name: 'apk', labels: ['self-hosted', 'peek-ci-linux', 'citadel-heavy-apk'] }]);
+});
+
 test("a watch with no queued hook never reads queued runs, and a failed read of them doesn't touch the ships", async () => {
   const repo = 'caraminden/claude-coordinator';
   const gh = github({ [runs(repo)]: { workflow_runs: [{ id: 1, head_branch: 'land/1' }] }, [jobs(repo, 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'desk' }] } });

@@ -3,10 +3,11 @@
 // land_suspect, a MERGES hook beside append rules, and CONFLICT_PREP. Each is off by default, which the template's other tests pin
 // by passing unchanged.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { ciSetup, git, GREEN, RED, setup, until } from './scheme-setup-land-fixture.ts';
+import { ciSetup, env, git, GREEN, RED, setup, until } from './scheme-setup-land-fixture.ts';
 
 test('FLAKE_RUNS: a CI red that land_flaky calls flakes only gets that many fresh runs, keeping its place', async () => {
   const c = ciSetup(1, { stack: '1', local: `FLAKE_RUNS=2\nland_flaky() { echo 'ci:tests'; }\n` });
@@ -242,6 +243,27 @@ test('MERGES: a hook beside an append rule renumbers with the hook and appends t
   git(s.wt, 'commit', '-qam', 'branch: #2');
   const no = s.run();
   assert.equal(no.status, 1, no.stderr);
+});
+
+// #2071: --check's merge-tree runs in a scratch folder holding main's .gitattributes, and its driver still runs the hook
+// from the repo's top: a hook that finds its tool by a relative path (the kit's example) or by git merges as in the rebase.
+test('--check: the hook merges in the early check as in the rebase, however it finds its tool', () => {
+  for (const hook of ['"$(git rev-parse --show-toplevel)/tools/ship-numbers.ts"', 'tools/ship-numbers.ts']) {
+    const r = setup('true', {}, HOOK_LOCAL.replace('"$(git rev-parse --show-toplevel)/tools/ship-numbers.ts"', hook));
+    copyFileSync(join(import.meta.dirname, '..', 'tools', 'ship-numbers.ts'), join(r.main, 'tools', 'ship-numbers.ts'));
+    mkdirSync(dirname(join(r.main, DB_FILE)), { recursive: true });
+    writeFileSync(join(r.main, DB_FILE), db(['first'], []));
+    git(r.main, 'add', '-A');
+    git(r.main, 'commit', '-qm', 'shared base');
+    git(r.wt, 'merge', '-q', '--ff-only', 'main');
+    writeFileSync(join(r.main, DB_FILE), db(['first', 'main'], ['b']));
+    git(r.main, 'commit', '-qam', 'main: #9');
+    writeFileSync(join(r.wt, DB_FILE), db(['first', 'branch'], ['c']));
+    git(r.wt, 'commit', '-qam', 'branch: #2');
+    const check = spawnSync('bash', [join(r.wt, 'tools', 'land.sh'), '--check'], { cwd: r.wt, encoding: 'utf8', env });
+    assert.equal(check.status, 0, `${hook}: ${check.stderr}`);
+    assert.doesNotMatch(check.stderr, /conflict/, hook);
+  }
 });
 
 test('CONFLICT_PREP: a stacked ship that conflicts with the one ahead says what fix to record; once recorded, both ship', async () => {

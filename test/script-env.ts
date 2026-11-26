@@ -20,6 +20,7 @@
 //   CITADEL_HEAVY_WHAT            land.sh's CI fallback -> citadel-heavy: how its slot and history name the suite (#1254).
 //   CITADEL_TEST_CONCURRENCY      land.sh's CI fallback -> run-tests.sh: half the usual files at once, on a quiet perigee (#1254).
 //   LAND_MERGE_DIFF3              the kit core (tools/land-core.sh) -> land_merge -> ship-numbers.ts: git's diff3 merge first (#1323).
+//   LAND_TOP                      both ship scripts' trial() -> their merge driver: the repo's top, from merge-tree's scratch folder (#2071).
 //   LAND_KNOWN_RED, LAND_PARK_RETRIED  the kit core -> its --verify run and land_fallback (#1323).
 //   CITADEL_HEAVY_SHIP, CITADEL_HEAVY_CI_QUEUE, CITADEL_HEAVY_WHO  the light check (tools/light-check.sh) -> heavy-ci.ts (#1620).
 //   CITADEL_HEAVY_JUDGE           burn-in.sh off CI -> citadel-heavy: a local burn-in always takes a slot and the load gate (#1725).
@@ -48,6 +49,7 @@ export const SCRIPT_ENV = [
   'CITADEL_HEAVY_WHAT',
   'CITADEL_TEST_CONCURRENCY',
   'LAND_MERGE_DIFF3',
+  'LAND_TOP',
   'LAND_KNOWN_RED',
   'LAND_PARK_RETRIED',
   'CITADEL_HEAVY_SHIP',

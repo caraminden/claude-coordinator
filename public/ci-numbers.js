@@ -47,7 +47,7 @@ function chart(series, commit) {
     <path class="line running" d="${vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('')}"/>
     <line class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
   </svg>`;
-  const svg = el.firstElementChild;
+  const svg = /** @type {SVGSVGElement} */ (el.firstElementChild); // the innerHTML just set
   svg.setAttribute('aria-label', `${series.name} over its last ${n} runs${series.steps.length ? `, stepped up ${series.steps.length === 1 ? 'once' : `${series.steps.length} times`}` : ''}`);
   const left = (i) => `${(x(i) / W) * 100}%`,
     top = (v) => `${(y(v) / H) * 100}%`;
@@ -59,7 +59,7 @@ function chart(series, commit) {
     ...xs.map((i, k) => at(h('span', { class: `x${k === 0 ? ' first' : k === xs.length - 1 && n > 1 ? ' last' : ''}` }, pacificDate(pts[i].at)), { left: left(i) })),
   );
   const tip = h('div', { class: 'ci-tip', hidden: true });
-  const cross = svg.querySelector('.cross');
+  const cross = /** @type {SVGLineElement} */ (svg.querySelector('.cross'));
   // A point is a real link to its commit, its hit box bigger than its dot.
   const dots = pts.map((p, i) =>
     at(h('a', { class: 'ci-pt', href: commit(p.sha), target: '_blank', rel: 'noopener', 'aria-label': `${fmt(p.value, unit)}, ${p.workflow} run ${p.run_id}, commit ${p.sha.slice(0, 9)}`, 'data-step': stepAt.includes(i) ? '' : null, onfocus: () => show(i), onblur: () => hide() }), { left: left(i), top: top(p.value) }),
@@ -69,8 +69,8 @@ function chart(series, commit) {
     near = i;
     const p = pts[i],
       box = el.getBoundingClientRect();
-    cross.setAttribute('x1', x(i));
-    cross.setAttribute('x2', x(i));
+    cross.setAttribute('x1', String(x(i)));
+    cross.setAttribute('x2', String(x(i)));
     cross.setAttribute('visibility', 'visible');
     dots.forEach((d, k) => d.classList.toggle('on', k === i));
     const step = series.steps.find((s) => s.run_id === p.run_id);

@@ -37,16 +37,20 @@ export const STATES = {
   limited: { label: 'Hit the usage limit; waiting for it to reset' },
 };
 
-export let me = null;
-/** The signed-in person as api/me gives it: { name, login, admin, turns }. */
-export let account = null;
-export let view = null; // { kind, id, ... } for the current screen
+/** @import { Account, View } from './types.js' */
 
-// Other modules read `view` live but can't assign it, so they replace it through this.
+/** The signed-in person's name, or null. @type {string | null} */
+export let me = null;
+/** The signed-in person as api/me gives it. @type {Account | null} */
+export let account = null;
+/** What is on screen (types.d.ts View), or null between screens. @type {View | null} */
+export let view = null;
+
+/** Other modules read `view` live but can't assign it, so they replace it through this. @param {View | null} next */
 export function setView(next) {
   view = next;
 }
-/** Signing in or out: `who` as api/me gives it, or null. */
+/** Signing in or out: `who` as api/me gives it, or null. @param {Account | null} who */
 export function setAccount(who) {
   account = who;
   me = who?.name ?? null;
@@ -304,13 +308,35 @@ export function replayKept(kept) {
   replay = kept;
 }
 
+/** A child h() appends: an element or text, nested lists of them, and null, undefined or false for none. @typedef {Node | string | number | boolean | null | undefined | Child[]} Child */
+/**
+ * An element: `attrs` are attributes (true for a bare one, null or false for none), `class`, and `on<event>` listeners.
+ * @template {keyof HTMLElementTagNameMap} K
+ * @overload
+ * @param {K} tag
+ * @param {Record<string, unknown> | null} [attrs]
+ * @param {...Child} children
+ * @returns {HTMLElementTagNameMap[K]}
+ */
+/**
+ * @overload
+ * @param {string} tag
+ * @param {Record<string, unknown> | null} [attrs]
+ * @param {...Child} children
+ * @returns {HTMLElement}
+ */
+/**
+ * @param {string} tag
+ * @param {Record<string, unknown> | null} [attrs]
+ * @param {...Child} children
+ */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
+  for (const [k, v] of Object.entries(attrs ?? {})) {
     if (v == null || v === false) continue;
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'class') el.className = v;
-    else el.setAttribute(k, v === true ? '' : v);
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), /** @type {EventListener} */ (v));
+    else if (k === 'class') el.className = String(v);
+    else el.setAttribute(k, v === true ? '' : String(v));
   }
   for (const c of children.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;

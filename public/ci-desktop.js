@@ -60,16 +60,16 @@ function chart(pc, title, lines, max, unit) {
     ${lines.map((l) => `<path class="line ${l.key}" d="${path(l.values, l.step)}"/>`).join('')}
     <line class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
   </svg>`;
-  const svg = el.firstElementChild;
+  const svg = /** @type {SVGSVGElement} */ (el.firstElementChild); // the innerHTML just set
   svg.setAttribute('aria-label', `${title}, last 24 hours`);
   const axis = h('div', { class: 'ci-axis muted', 'aria-hidden': 'true' }, ...[max, max / 2, 0].map((v, i) => styled(h('span', { class: 'y' }, `${v}${i === 0 ? unit : ''}`), { top: `${(y(v) / H) * 100}%` })), ...hours.map((t) => styled(h('span', { class: 'x' }, clock(t)), { left: `${(xt(t) / W) * 100}%` })));
   const tip = h('div', { class: 'ci-tip', hidden: true });
-  const cross = svg.querySelector('.cross');
+  const cross = /** @type {SVGLineElement} */ (svg.querySelector('.cross'));
   const show = (ev) => {
     const box = svg.getBoundingClientRect();
     const i = Math.min(n - 1, Math.max(0, Math.round(((((ev.clientX - box.left) / box.width) * W - L) / (W - L - 2)) * (n - 1))));
-    cross.setAttribute('x1', x(i));
-    cross.setAttribute('x2', x(i));
+    cross.setAttribute('x1', String(x(i)));
+    cross.setAttribute('x2', String(x(i)));
     cross.setAttribute('visibility', 'visible');
     tip.hidden = false;
     tip.replaceChildren(h('strong', {}, clock(pc.series[i][0])), ...lines.map((l) => h('span', {}, h('i', { class: `key ${l.key}` }), `${l.label} ${l.values[i] === null ? '–' : `${l.values[i]}${unit}`}`)));

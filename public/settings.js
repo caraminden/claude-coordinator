@@ -1,4 +1,5 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs (the Machines page is settings-machines.js).
+/** @import { Child } from './base.js' */
 import { account, ago, api, h, icon, me, schemeIcon, view } from './base.js';
 import { onSkillsChanged } from './skills.js';
 import { openHash } from './core.js';
@@ -698,6 +699,9 @@ function typedDraft(el, saved, dirty = () => el.value.trim() !== saved().trim())
  * A row that opens (#995, Cara picked "Side menu, rows that open"): an icon tile in its own hue, a title, a one-line
  * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
  * line, which its page keeps up to date.
+ * @param {{ icon?: string, hue?: string | null, title: Child, summary?: Child, open?: boolean, key?: string | null, part?: string | null }} row
+ * @param {...Child} body
+ * @returns {[HTMLDetailsElement, HTMLSpanElement]}
  */
 export function settingsRow({ icon: ic, hue, title, summary = '', open = false, key, part }, ...body) {
   const sum = h('span', { class: 'settings-row-sum' }, summary);

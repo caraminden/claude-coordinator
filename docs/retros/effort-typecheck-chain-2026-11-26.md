@@ -43,9 +43,11 @@ ship's train counts once for each train.
    - **A fix already exists, and nothing uses it.** #1827 (live 15:35 PST Nov 24[^h]) lets a ship name a command whose
      output it is, with `Regenerate:` and `Regenerate-files:` commit trailers. land.sh then re-runs the command after
      the rebase instead of stopping on a conflict.
-   - No commit on main since Nov 24 carries either trailer[^z]. No skill, rule or tool output tells a minion they exist.
-   - Even used by hand, it would be the wrong tool for this file. A `Regenerate:` ship goes first in line and rides no
-     train (`tools/deploy-queue.sh`, "holds the line"). Every burn-down ship using it would undo batching.
+   - No commit on main since Nov 24 carries either trailer[^z]. Minions are told about them: land.sh's conflict message
+     (`regen_hint`, line 380) and `citadel:self-review` section 1. That same section says a ship that also changes code
+     must not declare. Such a ship goes first in line and rides no train (`tools/deploy-queue.sh`, "holds the line").
+   - Every burn-down ship and every ship that lowers a count is code plus baseline. So by design none of them can use
+     it, and the conflicts went on.
    - **Fix (handoff):** make `test/typecheck-baseline.json` a built-in regenerated file, the way the prompt baseline
      already is. After the rebase, land.sh re-runs `node tools/typecheck.ts --update` and keeps the ship's place on its
      train.
@@ -59,12 +61,13 @@ ship's train counts once for each train.
      `burn-in` kind in `src/land.ts`) says: "A file that fails when run as copies at once is racy… fix the race".
    - The land logs since Oct 29 hold 64 burn-in results (on 61 `burn-in red` lines; some name several files). 36 of
      them failed in 10 of 10 copies[^b].
-   - When every copy fails, the test is plain red on the rebased train, not racy. #1789's three refusals were that: the
-     counts had moved under it. #1789 read the word "racy" before it found the real cause[^r].
+   - 10 of 10 doesn't prove a plain red on its own. `tools/burn-in.sh`'s header notes flaky files failing up to 10 of 10
+     at once. But #1789's three refusals were plain reds (the counts had moved under it), and the refusal offered only
+     the race reading. #1789 read the word "racy" before it found the real cause[^r].
    - **Fix (same handoff, same files, same lane):**
-     - When every copy failed, say the test is red on the rebased branch.
-     - Point at running it alone after a rebase.
-     - Keep the race advice for the partial cases (1 to 9 of 10).
+     - When every copy failed, land.sh runs the file once, alone, on the rebased train.
+     - The refusal then says which case it is: red alone means a plain red, green alone means a race.
+     - Partial failures (1 to 9 of 10) keep today's advice.
    - The kit's template land.sh has no burn-in step (`grep -c racy` finds 0), so there is nothing to port.
 3. **The ratchet doesn't count double casts, and they rose while the counted escapes fell.**
    - `tools/typecheck.ts` counts an explicit `any` and the `@ts-` comments. `x as unknown as T` gets round the checker
@@ -77,16 +80,17 @@ ship's train counts once for each train.
 4. **The burn-down was split by folder, not by lane, so a no-op change to a few files waited hours.**
    - Round 2 split src+tools+kit (#1816) from `test/` (#1817). Both ran at once on Josh's login and rewrote the same
      baseline file. #1817 left src-side errors for #1816, and the two conflicted in the baseline at 09:18 PST Nov 25[^c].
-   - #1816 carried type annotations for `src/access.ts`, the tripwire, `tools/boot-check.ts` and `src/land.ts`.
+   - #1816 carried type annotations for `src/access.ts`, the tripwire and `tools/boot-check.ts`.
      - Each of those files makes a change high-risk by Project facts' "High risk by file" list.
-     - So those ships each waited on a Josh card and a fresh review. The pipeline-file part also waited about 4 h last
-       in the pipeline lane[^r].
+     - So those ships each waited on a Josh card and a fresh review.
+     - Separately, the part that touched pipeline files (`src/land.ts`, `tools/boot-check.ts` and two more, per
+       `tools/pipeline-files.txt`) waited about 4 h last in the pipeline lane[^r].
    - Node strips types before it runs anything, so none of those ships changed what runs.
      - The one break a types-only edit did cause: #1799's `: Ticket` annotation broke `test/boot-check.test.ts`, which
        pins a line of `src/runner.ts`[^r]. That is a text-pinning test, not a change in behaviour.
    - **Fix (handoff, a rule change for people to decide):**
      - A `tools/types-only.ts` check: is the file's code the same once types are stripped (`module.stripTypeScriptTypes`,
-       whitespace collapsed)?
+       whitespace outside string and template literals ignored)?
      - When it is, Project facts' "High risk by file" line no longer applies. The pipeline lane still orders it.
      - This loosens a gate on auth and tripwire files, so it waits for a member's pick.
      - Handoff: `shared/project/handoffs/handoff-types-only-risk.md`.

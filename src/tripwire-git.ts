@@ -192,29 +192,39 @@ const RAW = ['--binary', '--no-color', '--no-ext-diff', '--no-textconv', '--no-r
 const parts = (head: boolean) => (head ? [['staged', '--cached'], ['unstaged']] : [['unstaged']]);
 const shq = (p: string) => (/^[\w./@:+=-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
 
+/** Each listed path with its mode, from `git ls-files -s -z` or `git ls-tree -r -z`: a NUL-ended `<mode> ...\t<path>` per entry. */
+const entries = (out: string) =>
+  new Map(
+    out
+      .split('\0')
+      .filter(Boolean)
+      .map((e) => [e.slice(e.indexOf('\t') + 1), e.slice(0, e.indexOf(' '))] as const),
+  );
+
 /**
- * `source`'s files under `paths` against the index: `untracked`, the ones the index lacks but the disk has, which a
- * checkout from it overwrites unsaved; `indexOnly`, whether the index has files the source lacks.
+ * What a checkout or restore from `source` (a commit, or the index when null) would write over that no diff holds:
+ * `lost`, each file it writes where the disk has something untracked (a file the index lacks, a folder, or a file
+ * where a folder goes); `indexOnly`, whether the index has files the source lacks.
  */
-function againstIndex(dir: string, source: string, paths: string[]): { untracked: string[]; indexOnly: boolean } | null {
+function inTheWay(dir: string, source: string | null, paths: string[]): { lost: string[]; indexOnly: boolean } | null {
   const top = git(dir, 'rev-parse', '--show-toplevel');
-  const tree = git(dir, 'ls-tree', '-r', '-z', '--name-only', '--full-name', source, '--', ...paths);
-  const index = git(dir, 'ls-files', '-z', '--full-name', '--', ...paths);
+  const index = git(dir, 'ls-files', '-s', '-z', '--full-name', '--', ...paths);
+  const tree = source ? git(dir, 'ls-tree', '-r', '-z', '--full-name', source, '--', ...paths) : index;
   if (top?.status !== 0 || tree?.status !== 0 || index?.status !== 0) return null;
-  const inTree = new Set(tree.out.split('\0').filter(Boolean));
-  const inIndex = new Set(index.out.split('\0').filter(Boolean));
-  // Anything on disk where the source puts a file is in the way, a file where it puts a folder (ENOTDIR) too.
-  const onDisk = (f: string) => {
+  const inTree = entries(tree.out);
+  const inIndex = entries(index.out);
+  const lost = [...inTree].filter(([f, mode]) => {
+    // A submodule is a folder by design.
+    if (mode === '160000') return false;
     try {
-      return !!lstatSync(join(top.out.trim(), f), { throwIfNoEntry: false });
+      const st = lstatSync(join(top.out.trim(), f), { throwIfNoEntry: false });
+      return !!st && (st.isDirectory() || !inIndex.has(f));
     } catch {
+      // ENOTDIR: a file where the source puts a folder.
       return true;
     }
-  };
-  return {
-    untracked: [...inTree].filter((f) => !inIndex.has(f) && onDisk(f)),
-    indexOnly: [...inIndex].some((f) => !inTree.has(f)),
-  };
+  });
+  return { lost: lost.map(([f]) => f), indexOnly: [...inIndex.keys()].some((f) => !inTree.has(f)) };
 }
 
 /**
@@ -233,21 +243,20 @@ function savePaths(cmd: string, paths: Word[], source: Word | undefined, index: 
   if (paths.some((w) => w.unknown || /[*?[{}]/.test(w.text) || w.text.startsWith(':'))) return refused;
   if (!paths.length) return null;
   const texts = paths.map((w) => w.text);
-  let stray = false;
+  if (source && (source.unknown || source.text.startsWith('-') || git(dir, 'rev-parse', '--verify', '--quiet', `${source.text}^{tree}`)?.status !== 0)) return refused;
+  // Untracked things where the files go are written over, which no diff holds.
+  const seen = inTheWay(dir, source?.text ?? null, texts);
+  if (!seen) return refused;
+  const lost = seen.lost;
+  if (lost.length) return hard(`\`${cmd}\` is blocked: it would write over ${lost.length} untracked file(s) (${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', …' : ''}), which the tripwire can't save. Move them aside or commit them first (a WIP commit is fine).`);
+  // A checkout keeps the index's files its source lacks, staged edits and all, so the patches can't recreate them until they're cleared.
+  const stray = overlay && seen.indexOnly;
   if (source) {
-    if (source.unknown || source.text.startsWith('-') || git(dir, 'rev-parse', '--verify', '--quiet', `${source.text}^{tree}`)?.status !== 0) return refused;
-    // A file the source has and the index doesn't is written over even when untracked, which no diff holds.
-    const seen = againstIndex(dir, source.text, texts);
-    if (!seen) return refused;
-    const lost = seen.untracked;
-    // A checkout keeps the index's files its source lacks, staged edits and all, so the patches can't recreate them until they're cleared.
-    stray = overlay && seen.indexOnly;
     // An open conflict's markers and hand edits make no patch `git apply` takes back.
     const open = git(dir, 'diff', '--name-only', '--diff-filter=U', '--', ...texts);
     if (open?.status !== 0) return refused;
     if (open.out.trim())
       return hard(`\`${cmd}\` is blocked: it would write over the open conflict in ${open.out.trim().split('\n').slice(0, 5).join(', ')}, which the tripwire can't save. Take a side with \`git checkout --ours -- path\` or \`--theirs\` (they pass mid-merge), or finish the file and \`git add\` it first.`);
-    if (lost.length) return hard(`\`${cmd}\` is blocked: it would write over ${lost.length} untracked file(s) (${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', …' : ''}), which the tripwire can't save. Move them aside or commit them first (a WIP commit is fine).`);
   }
   const quiet = parts(index).map(([, ...flags]) => git(dir, 'diff', '--quiet', ...flags, '--', ...texts)?.status);
   if (quiet.some((q) => q !== 0 && q !== 1)) return refused;

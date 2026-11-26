@@ -1641,6 +1641,17 @@ test("a folder, `.` or another commit's version checked out or restored: its dif
     writeFileSync(join(wt, 'a.txt'), 'mine\n');
     assert.match(at('git checkout main -- .') ?? '', /untracked file\(s\) \(f\/x\.txt\)/);
     clean();
+    // From the index or HEAD too: an untracked folder where the index has a file, or a file where it has a folder.
+    rmSync(join(wt, 'b.txt'));
+    mkdirSync(join(wt, 'b.txt'));
+    writeFileSync(join(wt, 'b.txt/inner'), 'mine\n');
+    for (const no of ['git checkout -- .', 'git checkout -- b.txt', 'git restore b.txt', 'git checkout HEAD -- .', 'git restore -s HEAD -W b.txt']) assert.match(at(no) ?? '', /untracked file\(s\) \(b\.txt\)/, no);
+    rmSync(join(wt, 'b.txt'), { recursive: true });
+    rmSync(join(wt, 'sub'), { recursive: true });
+    writeFileSync(join(wt, 'sub'), 'a file of mine\n');
+    assert.match(at('git checkout -- sub') ?? '', /untracked file\(s\) \(sub\/c\.txt\)/);
+    rmSync(join(wt, 'sub'));
+    clean();
     // Options come before `--`: a file named like one (`-S`) is a path, so both files' edits are saved.
     writeFileSync(join(wt, '-S'), 's\n');
     sh('git add -- -S && git commit -qm s');

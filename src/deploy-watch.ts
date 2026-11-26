@@ -402,7 +402,9 @@ export class DeployWatch {
           .join('; ')}${unowned.length > 5 ? `; and ${unowned.length - 5} more` : ''}.`
       : '';
     const who = suspects.length
-      ? [woken.length ? `Woke ${nums(woken)}. The readings name files they touched.` : '', noted.length ? `Noted on ${nums(noted)}, not woken: no reading names their files; they are woken if it holds to ${pacific(holdEnd)}.` : ''].filter(Boolean).join(' ')
+      ? [woken.length ? `Woke ${nums(woken)}. The readings name files they touched.` : '', noted.length ? `Noted on ${nums(noted)}, not woken: no reading names their files; they are woken if it holds to ${pacific(holdEnd)} (a deploy before then ends the hold: its own watch covers what follows).` : '']
+          .filter(Boolean)
+          .join(' ')
       : 'No minion to wake: none of its commits names one.';
     this.mailTaskmaster(`Post-deploy watch: after ${when}, ${lines.join('; ')} (${window} after vs before). ${who}${loose} Nothing was reverted.`);
   }

@@ -503,6 +503,8 @@ export class MachineRelay {
       removing: this.store.getSetting<number[]>('machines-removing')?.includes(machine.id) ? UNINSTALL : null,
       /** What its agent last said the PC can do (Build 7 M2), kept while it is offline; null before an agent that reports. */
       report: storedReport(machine),
+      /** Its owner's order among their computers for work (Build 7 M6): 1 first; null, no order. */
+      priority: machine.priority ?? null,
       /** Its agent now has said so since it connected: what turns Connect a computer's panel to Connected. */
       reported: !!agent?.report,
       /** An agent from before reports nothing (Build 7 M2): its row offers Update, with the command. */

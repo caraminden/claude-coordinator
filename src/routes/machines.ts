@@ -81,7 +81,13 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   if ((worker ?? lend?.worker) && !app.machines.lendsWorker(machine) && machine.owner_id !== session.uid) {
     throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
   }
-  const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number } = {};
+  const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number; priority?: number | null } = {};
+  // Its owner's order among their computers (Build 7 M6; Josh, 2026-11-25: "put work on machine 1 before using machine 2"): theirs alone, like caps.
+  if (body.priority !== undefined) {
+    if (machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can set its order');
+    if (!(body.priority === null || (Number.isInteger(body.priority) && (body.priority as number) >= 1 && (body.priority as number) <= 99))) throw new HttpError(400, 'priority must be a whole number from 1 to 99, or null for no order');
+    fields.priority = body.priority as number | null;
+  }
   for (const k of ['workspace_tools', 'always_on'] as const) {
     if (body[k] === undefined) continue;
     if (typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
@@ -98,7 +104,7 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   if (typeof fields.name === 'string') app.runner.runsOn.renamed(machine.id, machine.name, fields.name);
   if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
   if (lend || worker !== undefined) app.machines.setLend(machine.id, lend ?? null, worker);
-  if (worker !== undefined) app.runner.turnLine.pump();
+  if (worker !== undefined || fields.priority !== undefined) app.runner.turnLine.pump();
   await ownWrites(); // what follows re-reads the grants and the machine (#1244)
   // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
   if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');

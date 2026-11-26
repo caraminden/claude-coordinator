@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { Store } from '../src/db.ts';
+import { patchMachine } from '../src/routes/machines.ts';
 import { type BalanceIn, balance, HEAVY_WAIT_MS, MachineBalancer, rank } from '../src/machine-balancer.ts';
 
 // Build 7 M6: one balancer per machine. Josh, 2026-11-25: "so if there is CI to run, we use less workers, or more workers,
@@ -176,4 +181,32 @@ test('the tick tells only the machines whose plan moved', () => {
   ci = 2;
   b.tick();
   assert.deepEqual(told.at(-1), [7]);
+});
+
+test("the order is set on the machine's row by its owner alone, 1 to 99 or none", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'machine-order-'));
+  const store = new Store(join(dir, 'c.db'));
+  try {
+    const josh = store.createUser({ name: 'Josh', login: 'josh' });
+    const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+    const m = store.createMachine('desk', 'h', 'Josh', josh.id);
+    const pumped: number[] = [];
+    const app = {
+      store,
+      runner: { turnLine: { pump: () => void pumped.push(1) } },
+      machines: { list: () => [], view: (x: { priority?: number | null }) => ({ priority: x.priority ?? null }) },
+      broadcast: () => {},
+    } as unknown as Parameters<typeof patchMachine>[0];
+    const as = (u: { id: number; admin?: number | boolean }) => ({ uid: u.id, admin: !!u.admin }) as Parameters<typeof patchMachine>[1];
+    assert.deepEqual(await patchMachine(app, as(josh), m, { priority: 1 }), { priority: 1 });
+    assert.equal(store.getMachine(m.id)!.priority, 1);
+    assert.equal(pumped.length, 1, 'the line looks again');
+    await assert.rejects(patchMachine(app, as(cara), m, { priority: 2 }), /Only its owner can set its order/);
+    for (const bad of [0, 100, 1.5, '1']) await assert.rejects(patchMachine(app, as(josh), m, { priority: bad }), /whole number from 1 to 99/);
+    await patchMachine(app, as(josh), m, { priority: null });
+    assert.equal(store.getMachine(m.id)!.priority, null, 'back to no order');
+  } finally {
+    store.db.close();
+    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });

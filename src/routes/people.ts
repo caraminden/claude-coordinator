@@ -2,7 +2,7 @@
 // scheme's owner picks who else is in it.
 import type { User } from '../db.ts';
 import type { IncomingMessage } from 'node:http';
-import { clientIp, HttpError, isSecure, json, ownWrites, publicOrigin, readJson, SECURITY_HEADERS, send, type App, type Route } from '../http.ts';
+import { clientIp, HttpError, isInt, isSecure, json, ownWrites, publicOrigin, readJson, SECURITY_HEADERS, send, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
@@ -331,7 +331,7 @@ export const peopleRoutes: Route[] = [
       const uid = uidOf(session);
       // Pins account n (#793): new and cold turns run on it while it's ready. { account: null } unpins.
       const n = (await readJson(req)).account;
-      if (n !== null && !Number.isInteger(n)) throw new HttpError(400, 'Which account? Send { account: n }.');
+      if (n !== null && !isInt(n)) throw new HttpError(400, 'Which account? Send { account: n }.');
       try {
         app.claude.use(uid, n);
       } catch (err) {

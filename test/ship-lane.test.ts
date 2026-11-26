@@ -54,6 +54,9 @@ function lane(files: Record<number, string[]>) {
   const woke: [number, string][] = [];
   const mail: [number, string][] = [];
   const passed: { from: Claim; to: Claim }[] = [];
+  /** Armed hand-offs (#2046): null ships, a string is why it can't. */
+  const armed = new Map<number, string | null>();
+  const fired: [number, string][] = [];
   const deps: ShipLaneDeps = {
     store: { claims, listProjects: () => [{ id: 1 }], getTicket: (id) => tickets.get(id), openCardAt: (id) => (cards.has(id) ? 1 : null) },
     busy: (id) => busy.has(id),
@@ -63,9 +66,16 @@ function lane(files: Record<number, string[]>) {
     wake: (id, text) => void woke.push([id, text]),
     leaveMail: (id, _a, text) => void mail.push([id, text]),
     broadcast: () => {},
+    armed: (id, fallback, started) => {
+      if (!armed.has(id)) return false;
+      const why = armed.get(id);
+      fired.push([id, started]);
+      if (why) fallback(why);
+      return true;
+    },
   };
   const it = new ShipLane(deps);
-  return { claims, tickets, busy, shipping, cards, held, woke, mail, passed, sweep: (now: number) => it.sweep(now), claim: () => claims.get(1, SHIP_LANE), waiting: () => claims.waiting(1, SHIP_LANE), write };
+  return { claims, tickets, busy, shipping, cards, held, woke, mail, passed, armed, fired, sweep: (now: number) => it.sweep(now), claim: () => claims.get(1, SHIP_LANE), waiting: () => claims.waiting(1, SHIP_LANE), write };
 }
 
 test('a holder with nothing handed off in 10 min is skipped for the next ready one, and waits first', async () => {
@@ -181,4 +191,21 @@ test('a holder whose branch changes no ship-script file ships alone: nothing to 
   l.shipping.add(1);
   await l.sweep(START + 1);
   assert.equal(l.claim()!.beside, 0);
+});
+
+test('one let in beside with an armed hand-off ships with no wake; one whose ship is ruled out is woken with why (#2046)', async () => {
+  const l = lane({ 1: ['tools/land.sh'], 2: ['src/pipe/a.ts'] });
+  l.armed.set(2, null);
+  l.shipping.add(1);
+  await l.sweep(START + 1);
+  assert.equal(l.claim()!.beside, 2);
+  assert.deepEqual(l.woke, [], 'no turn');
+  assert.match(l.fired[0][1], /^Citadel let you ship beside #1 M1, which holds the pipeline-lane claim .*started your armed hand-off with no turn\.$/);
+
+  const r = lane({ 1: ['tools/land.sh'], 2: ['src/pipe/a.ts'] });
+  r.armed.set(2, 'your branch moved since you armed it');
+  r.shipping.add(1);
+  await r.sweep(START + 1);
+  assert.equal(r.woke.length, 1);
+  assert.match(r.woke[0][1], /^You may ship now, beside #1[^]*\n\nYour armed hand-off didn't ship by itself: your branch moved since you armed it\. Hand it off again once it's ready\.$/);
 });

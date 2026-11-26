@@ -23,7 +23,7 @@ import type { Store, Ticket } from './db.ts';
 import { scoped } from './read-scope.ts';
 import type { Delivery, DeliveryState, NewDelivery } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
-import { HELD_CLOSED, type Outbox, type Outcome, span } from './outbox.ts';
+import { deliveriesOf, deliveryOf, HELD_CLOSED, type Outbox, type Outcome, span } from './outbox.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
@@ -312,6 +312,8 @@ export class LiveWaiters {
   deliver: (r: Relay) => void = () => {};
   /** Relays just delivered together (one minion, same text and commit): the sender's Taskmaster hears of them in one note. */
   sent: (rs: Relay[]) => void = () => {};
+  /** Each check's last step: ship the hand-offs armed on something going live (#2089, src/armed-handoff.ts fireLive; set by the server). */
+  armed: () => Promise<number> = async () => 0;
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
   /** The commit deploy.sh stands by: `head`, or last-good while `head` can still be rolled back (prove). Null: not known yet, so nothing is live. */
@@ -354,7 +356,7 @@ export class LiveWaiters {
     });
   }
 
-  private chainOf = (r: Delivery): Chain => ({
+  private chainOf = (r: Delivery<'chain'>): Chain => ({
     ticket: r.to_id,
     after: r.when_arg.after,
     when: r.when_kind as Chain['when'],
@@ -366,7 +368,7 @@ export class LiveWaiters {
     id: r.id,
   });
 
-  private chainRow(c: Chain, origin?: string): NewDelivery {
+  private chainRow(c: Chain, origin?: string): NewDelivery<'chain'> {
     return {
       project_id: this.store.getTicket(c.ticket)?.project_id ?? 0,
       kind: 'chain',
@@ -388,7 +390,7 @@ export class LiveWaiters {
     const old = this.store.getSetting<Chain[]>(CHAINS);
     if (!old?.length || !this.outbox) return;
     // A follower the table already has (a dev seed wrote the key again) keeps its row; a deleted follower's chain goes, as the old check dropped it.
-    const live = new Set(this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).map((r) => r.to_id));
+    const live = new Set(deliveriesOf(this.store, 'chain', { states: ['waiting', 'held', 'sending'] }).map((r) => r.to_id));
     const move = [...new Map(old.map((c) => [c.ticket, c])).values()].filter((c) => !live.has(c.ticket) && this.store.getTicket(c.ticket));
     this.store.importDeliveries(
       CHAINS,
@@ -398,7 +400,7 @@ export class LiveWaiters {
   }
 
   /** The outbox's send of met chain rows, on the follower's lane: each start's brief event, or retry (a dismissed follower is then held by the outbox). */
-  private async deliverChains(rows: Delivery[], repeat: (r: Delivery) => boolean): Promise<Outcome[]> {
+  private async deliverChains(rows: Delivery<'chain'>[], repeat: (r: Delivery) => boolean): Promise<Outcome[]> {
     const out: Outcome[] = [];
     for (const r of rows) {
       try {
@@ -411,10 +413,10 @@ export class LiveWaiters {
     return out;
   }
 
-  private relayOf = (r: Delivery): Relay => ({ id: r.id, ticket: r.payload.ticket, to: r.payload.to, text: r.payload.text, commit: r.when_arg });
+  private relayOf = (r: Delivery<'relay'>): Relay => ({ id: r.id, ticket: r.payload.ticket, to: r.payload.to, text: r.payload.text, commit: r.when_arg });
 
   /** Hand each relay to `deliver` (held mail); then, once no other relay of its group (one minion, text and commit) waits, the sender's Taskmaster gets its one note. */
-  private deliverRelays(rows: Delivery[], repeat: (r: Delivery) => boolean): Outcome[] {
+  private deliverRelays(rows: Delivery<'relay'>[], repeat: (r: Delivery) => boolean): Outcome[] {
     const outcomes: Outcome[] = rows.map((r) => {
       try {
         this.deliver({ ...this.relayOf(r), ...(repeat(r) ? { repeat: true as const } : {}) });
@@ -423,8 +425,8 @@ export class LiveWaiters {
         return { state: 'retry', reason: String((err as Error)?.message ?? err) };
       }
     });
-    const open = this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held', 'sending'] });
-    const done = this.store.listDeliveries({ kind: 'relay', states: ['sent'] });
+    const open = deliveriesOf(this.store, 'relay', { states: ['waiting', 'held', 'sending'] });
+    const done = deliveriesOf(this.store, 'relay', { states: ['sent'] });
     for (const batch of new Set(rows.filter((_, i) => outcomes[i].state === 'accepted').map((r) => r.payload.batch))) {
       if (rows.some((r, i) => r.payload.batch === batch && outcomes[i].state !== 'accepted')) continue; // one is retrying: the note goes with the last
       if (open.some((o) => o.payload.batch === batch && !rows.some((r) => r.id === o.id))) continue;
@@ -449,7 +451,7 @@ export class LiveWaiters {
     );
   }
 
-  private relayRow(r: Relay, hash?: string): NewDelivery {
+  private relayRow(r: Relay, hash?: string): NewDelivery<'relay'> {
     return {
       ...(hash ? { id: r.id } : {}),
       project_id: this.store.getTicket(r.ticket)?.project_id ?? 0,
@@ -464,11 +466,11 @@ export class LiveWaiters {
     };
   }
 
-  private waiter = (r: Delivery): Waiter => ({ ticket: r.to_id, commit: r.when_arg, reason: r.payload.reason, since: r.payload.since, ...(r.payload.light ? { light: true as const } : {}) });
+  private waiter = (r: Delivery<'wake_when_live'>): Waiter => ({ ticket: r.to_id, commit: r.when_arg, reason: r.payload.reason, since: r.payload.since, ...(r.payload.light ? { light: true as const } : {}) });
 
   /** The table's waiting rows (not yet sent), as waiters. */
-  private rows(states: DeliveryState[] = ['waiting']): Delivery[] {
-    return this.outbox ? this.store.listDeliveries({ kind: 'wake_when_live', states }) : [];
+  private rows(states: DeliveryState[] = ['waiting']): Delivery<'wake_when_live'>[] {
+    return this.outbox ? deliveriesOf(this.store, 'wake_when_live', { states }) : [];
   }
 
   /** Move the old settings key's waits into the table, in one transaction that empties the key: none dropped. */
@@ -503,8 +505,7 @@ export class LiveWaiters {
       ...scoped(this.store.db, 'wake:chains', () => {
         const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
         const rows = this.outbox
-          ? this.store
-              .listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] })
+          ? deliveriesOf(this.store, 'chain', { states: ['waiting', 'held', 'sending'] })
               .filter((r) => r.state !== 'sending' || r.event_id == null)
               .map(this.chainOf)
           : [];
@@ -648,8 +649,8 @@ export class LiveWaiters {
     if (this.outbox) {
       // Taken (sending), so no check or pass starts it too; a kill before the brief goes leaves it for boot to send again.
       this.migrateChains();
-      const [r] = this.store.listDeliveries({ kind: 'chain', to: ticket, states: ['waiting', 'held'] });
-      return r && this.outbox.take(r.id) ? this.chainOf(this.store.getDelivery(r.id)!) : null;
+      const [r] = deliveriesOf(this.store, 'chain', { to: ticket, states: ['waiting', 'held'] });
+      return r && this.outbox.take(r.id) ? this.chainOf(deliveryOf(this.store, r.id, 'chain')!) : null;
     }
     const c = this.chains().find((o) => o.ticket === ticket) ?? null;
     if (!c || this.starting.has(ticket)) return null;
@@ -738,17 +739,17 @@ export class LiveWaiters {
   private async checkChainRows(outbox: Outbox): Promise<number> {
     this.migrateChains();
     // A deleted follower's chain goes, as the old check dropped it (the outbox only holds a dismissed one).
-    for (const r of this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held'] })) if (!this.store.getTicket(r.to_id)) outbox.cancel(r.id, 'its minion was deleted');
+    for (const r of deliveriesOf(this.store, 'chain', { states: ['waiting', 'held'] })) if (!this.store.getTicket(r.to_id)) outbox.cancel(r.id, 'its minion was deleted');
     const open = (r: Delivery) => this.store.getTicket(r.to_id)?.status !== 'closed' && !!this.store.getTicket(r.to_id);
     const ours = (r: Delivery) => (r.state === 'waiting' ? r.met_at == null : r.state === 'held' && r.reason !== HELD_CLOSED) && open(r);
-    const rows = this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held'] }).filter(ours);
+    const rows = deliveriesOf(this.store, 'chain', { states: ['waiting', 'held'] }).filter(ours);
     const states = new Map<number, 'go' | 'wait' | 'unshipped'>();
     for (const r of rows) states.set(r.id, await this.chainState(this.chainOf(r)));
     const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
     let met = 0;
     for (const was of rows) {
       // Read again: a start, cancel or dismissal while git and gh ran wins.
-      const r = this.store.getDelivery(was.id);
+      const r = deliveryOf(this.store, was.id, 'chain');
       if (!r || r.state !== was.state || !ours(r)) continue;
       const c = this.chainOf(r);
       const now = outbox.clock();
@@ -767,7 +768,7 @@ export class LiveWaiters {
 
   /** Pending relays: the table's, and any still in the old key (the dual read). */
   relays(ticket?: number): Relay[] {
-    const rows = this.outbox ? this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held'] }).map(this.relayOf) : [];
+    const rows = this.outbox ? deliveriesOf(this.store, 'relay', { states: ['waiting', 'held'] }).map(this.relayOf) : [];
     return [...(this.store.getSetting<Relay[]>(RELAYS) ?? []), ...rows].filter((r) => ticket === undefined || r.ticket === ticket);
   }
 
@@ -806,7 +807,7 @@ export class LiveWaiters {
       );
       return o;
     }
-    const row = this.outbox && this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held'] }).find((d) => d.id === id && d.payload.ticket === ticket);
+    const row = this.outbox && deliveriesOf(this.store, 'relay', { states: ['waiting', 'held'] }).find((d) => d.id === id && d.payload.ticket === ticket);
     return row && this.outbox!.cancel(row.id) ? this.relayOf(row) : null;
   }
 
@@ -815,8 +816,8 @@ export class LiveWaiters {
     if (this.outbox) {
       this.migrateRelays();
       // The check finds a relay's commit live; the outbox sends it. One batch per minion, text and commit: they share the Taskmaster's note.
-      const found: Delivery[] = [];
-      for (const r of this.store.listDeliveries({ kind: 'relay', states: ['waiting'] })) {
+      const found: Delivery<'relay'>[] = [];
+      for (const r of deliveriesOf(this.store, 'relay', { states: ['waiting'] })) {
         if (r.met_at != null) continue;
         const w = { ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.proven };
         const shipped = (await this.live(w)) ? 'live' : await this.shippedRebased(w, r.created_at);
@@ -1016,7 +1017,14 @@ export class LiveWaiters {
       }
     }
     await this.checkRelays();
-    return met + woken.length + (await this.checkChains());
+    const started = await this.checkChains();
+    return met + woken.length + started + (await this.armed());
+  }
+
+  /** Where an armed hand-off's wait stands (#2089): its commit live, or minion `after`'s work as a start_after chain on it sees it. */
+  liveState(ticket: number, on: { commit: string } | { after: number; base: string | null; since: number }): Promise<'go' | 'wait' | 'unshipped'> {
+    if ('commit' in on) return this.live({ ticket, commit: on.commit, reason: '', since: null }).then((y) => (y ? 'go' : 'wait'));
+    return this.chainState({ ticket, after: on.after, when: 'live', message: '', from: '', base: on.base, since: on.since });
   }
 
   /**
@@ -1179,11 +1187,11 @@ export class TimedWakes {
     });
   }
 
-  private wake = (r: Delivery): TimedWake => ({ id: r.id, ticket: r.to_id, at: Number(r.when_arg), note: r.payload.note, setBy: r.payload.setBy });
+  private wake = (r: Delivery<'wake_at'>): TimedWake => ({ id: r.id, ticket: r.to_id, at: Number(r.when_arg), note: r.payload.note, setBy: r.payload.setBy });
 
   /** Wakes not yet handed to the chat, in id order: every chat's, or one chat's. The ones cancel() can still stop. */
   list(ticket?: number): TimedWake[] {
-    return this.store.listDeliveries({ kind: 'wake_at', to: ticket, states: ['waiting', 'held'] }).map(this.wake);
+    return deliveriesOf(this.store, 'wake_at', { to: ticket, states: ['waiting', 'held'] }).map(this.wake);
   }
 
   /** The soonest wake of `ticket`, for its list note, or null. */

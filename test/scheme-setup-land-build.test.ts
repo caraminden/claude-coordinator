@@ -26,7 +26,7 @@ function buildSetup(config: Record<string, string> = {}, local?: string) {
     const exit = new Promise<number | null>((ok) => child.on('close', ok));
     return { exit, stderr: () => stderr };
   };
-  return { ...q, run, at, has, ranFiles, start };
+  return { ...q, run, at, has, ranFiles, start, ran };
 }
 
 test('--into: a feeder rebases onto the build, runs only its test files, and moves the build; main is untouched', () => {
@@ -166,6 +166,22 @@ test('--build: main comes in by merge, the build ships through the gate, and bui
   assert.equal(b.at('main', b.origin), tip, 'pushed');
   assert.equal(b.has('refs/heads/build/1'), false, 'deleted here');
   assert.equal(b.has('refs/heads/build/1', b.origin), false, 'and on origin');
+});
+
+// #2067: a --full run waits in the lands' line while main ships on, so a check that compares with the last release
+// (Citadel's schema-compat, run by its GUARD_CMD) compares with LAND_BUILD_BASE instead: the main the build took in.
+test("--full gives its checks LAND_BUILD_BASE, the main the build took in, however far main moved; --build doesn't", () => {
+  const b = buildSetup({ CHECK: 'echo "check ${LAND_BUILD_BASE:-none}" >>"$RAN"', GUARD_CMD: 'echo "guard ${LAND_BUILD_BASE:-none}" >>"$RAN"' });
+  b.commit(b.main, 'c.txt', 'main before the merge\n');
+  git(b.wts[2], 'merge', '-q', '--no-edit', 'main');
+  const took = b.at('main');
+  b.commit(b.main, 'd.txt', 'main ships while the build waits\n');
+  assert.equal(b.run(3, '--into', 'build/1', '--full').status, 0);
+  assert.deepEqual(b.ranFiles(), [`check ${took}`], 'its check (no guards: they run on a rebased commit, and --full has none)');
+  writeFileSync(b.ran, '');
+  const res = b.run(3, '--build');
+  assert.equal(res.status, 0, res.stderr);
+  assert.deepEqual(b.ranFiles(), ['guard none', 'check none'], 'the ship to main: the last release, as for every ship');
 });
 
 // #1698: a build holds feeders' commits and the build minion's, some "#N: ..." and some not, and rewording them rewrites the

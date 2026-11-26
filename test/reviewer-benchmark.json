@@ -1,57 +1,62 @@
 {
- "hash": "07dc15dae061ce6e",
+ "hash": "9f2692ed0dc3d01c",
  "parts": {
   "reviewer": "74365b1b33254f33",
-  "self-review §2": "d2990a67150f6f0c",
-  "lenses": "9596884702cab3e6",
+  "self-review §2": "80d6de6fdfcdc758",
+  "lenses": "40c16586ad83c91e",
   "ponytail-review": "9dd27f8bc79cbdf2"
  },
- "at": "2026-11-24",
+ "at": "2026-11-25",
  "model": "sonnet/medium",
  "lessons": [
-  "race with no wrong outcome"
+  "robustness nit without a wrong result",
+  "pre-existing behaviour blamed on the diff",
+  "intended behaviour reported as a bug",
+  "race with no wrong outcome",
+  "unchanged behaviour reported as a defect of the change",
+  "hypothetical input no caller sends"
  ],
  "passes": 2,
  "planted": {
   "named": [
-   18,
-   19
+   21,
+   21
   ],
   "of": 22,
   "casesNamed": [
-   18,
-   19
+   21,
+   21
   ],
   "controlsWith": [
-   2,
-   2
+   5,
+   4
   ],
   "controls": 5,
   "findings": [
-   39,
-   36
+   88,
+   75
   ]
  },
  "escapes": {
   "named": [
-   4,
-   2
+   10,
+   11
   ],
   "of": 36,
   "casesNamed": [
-   4,
-   2
+   10,
+   11
   ],
   "controlsWith": [
-   3,
-   4
+   10,
+   10
   ],
   "controls": 10,
   "findings": [
-   20,
-   18
+   152,
+   160
   ]
  },
- "cost": 26.51,
- "results": "shared/project/reports/reviewer-benchmark-1830-test-habits"
+ "cost": 71.11,
+ "results": "shared/project/reports/reviewer-benchmark-2079-fix-proofs"
 }

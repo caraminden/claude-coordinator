@@ -9,6 +9,11 @@ import type { Claims } from './claims.ts';
 import { gitOut } from './git.ts';
 
 export const SHIP_LANE = 'pipeline-lane';
+/** Whether it may ship a pipeline change now: it holds the lane, or was let in beside its holder. */
+export const holdsLane = (claims: Pick<Claims, 'get'>, t: Pick<Ticket, 'id' | 'project_id'>) => {
+  const lane = claims.get(t.project_id, SHIP_LANE);
+  return lane?.holder === t.id || lane?.beside === t.id;
+};
 /** How long a holder has to hand its change off before one that is ready goes first. */
 export const SKIP_AFTER_MS = 10 * 60_000;
 
@@ -52,6 +57,8 @@ export interface ShipLaneDeps {
   /** One line it reads on its next turn. */
   leaveMail(id: number, author: string, text: string): void;
   broadcast(event: { type: 'claims'; projectId: number }): void;
+  /** Ship its armed hand-off now, with no turn (#2046, fireArmed): true when it had one; `fallback` wakes it with why if that is ruled out. */
+  armed?(id: number, fallback: (why: string) => void, started: string): boolean;
 }
 
 export class ShipLane {
@@ -134,7 +141,11 @@ export class ShipLane {
     if (!next || shared?.length !== 0 || !this.d.shipping(holder.id)) return;
     if (!this.d.store.claims.setBeside(claim, next.id, now)) return;
     this.lastIn.set(claim.project_id, next.id);
-    this.d.wake(next.id, `You may ship now, beside #${holder.number} ${holder.title}, which holds the ${claim.name} claim: you change none of the same ship-script files. Rebase onto main, then hand off (hand_off_land). If its change goes live first, the claim is yours.`);
+    const line = `You may ship now, beside #${holder.number} ${holder.title}, which holds the ${claim.name} claim: you change none of the same ship-script files. Rebase onto main, then hand off (hand_off_land). If its change goes live first, the claim is yours.`;
+    // An armed hand-off (#2046) ships now with no turn; the line wakes it only if that is ruled out, saying why.
+    const started = `${APP_NAME} let you ship beside #${holder.number} ${holder.title}, which holds the ${claim.name} claim (you change none of the same ship-script files), and started your armed hand-off with no turn.`;
+    const fallback = (why: string) => this.d.wake(next.id, `${line}\n\nYour armed hand-off didn't ship by itself: ${why}. Hand it off again once it's ready.`);
+    if (!this.d.armed?.(next.id, fallback, started)) this.d.wake(next.id, line);
     this.d.broadcast({ type: 'claims', projectId: claim.project_id });
   }
 }

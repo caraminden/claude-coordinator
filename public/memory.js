@@ -2,14 +2,27 @@
 // this scheme's Taskmaster and minions keep, read and written in place (src/memory-files.ts). Not search over chats.
 // Only MEMORY.md loads at a start (its first 200 lines or 25 KB); notes are read when needed, so a note the index
 // doesn't list, or one whose recheck date passed, is what "needs tidying" means here. A closed minion it names is history.
+/** @import { View } from './types.js' */
 import { api, h, icon, view, pacificDate } from './base.js';
 import { settingsRow, settingsSection, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
 import { emptyCard, meter, showFirst, statTiles, toneChip } from './look.js';
 import { loadingLine, tabs } from './ui/state.js';
 
+/** @typedef {{ datesPast: string[], datesSoon: string[], closed: (number | string)[] }} NoteFlags */
+/** @typedef {{ file: string, name: string, description?: string, type?: string, text: string, bytes: number, modified: number | string, inIndex: boolean, gone?: boolean, flags: NoteFlags }} MemNote */
+/** @typedef {{ id: string, label: string, reachable: boolean, index?: string, notes: MemNote[] }} MemFolder */
+/** @typedef {{ id: string, action: 'edit' | 'add' | 'delete' | 'index' | 'flag', file: string, reason: string, drifted?: boolean, diff: { op: string, text?: string }[] }} TidyChange */
+/** @typedef {{ id: string, ticket?: number | null, created_at: number | string, approved_by?: string | null, changes: TidyChange[] }} TidyOpen */
+/** @typedef {{ id: string, decided_by: string, decided_at: number | string, until: number | string, counts?: string }} TidyKept */
+/** @typedef {{ open?: TidyOpen | null, kept: TidyKept[] }} TidyView */
+/** @typedef {{ row: HTMLDetailsElement, n: MemNote, f: MemFolder, mark: () => void }} NoteRow */
+/** @typedef {{ g: HTMLDetailsElement, f: MemFolder, kind: string, count: HTMLSpanElement }} GroupRow */
+
+/** @param {number} b */
 const kb = (b) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB`);
 const day = pacificDate;
+/** @param {number} n @param {string} one @param {string} [many] */
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** Claude Code's load limits for MEMORY.md (code.claude.com/docs/en/memory). */
 const INDEX_LINES = 200;
@@ -22,16 +35,20 @@ const KINDS = [
   ['user', 'People', 'accent', 'Who people are and how they like to work'],
   ['', 'Other', 'muted', 'No kind in its frontmatter'],
 ];
+/** @param {MemNote} n */
 const kindOf = (n) => (KINDS.some(([k]) => k && k === n.type) ? n.type : '');
 // Kept across visits to the page, like the rows a person left open.
 const openRows = new Set();
 const folded = new Set();
+/** @type {string | null} */
 let pickedFolder = null;
 
 /** Why a note needs tidying, or '' when it doesn't. */
+/** @param {MemNote} n */
 export const tidyReason = (n) => (!n.inIndex ? 'Not in MEMORY.md, so sessions never find it' : n.flags.datesPast.length ? `Date passed: ${n.flags.datesPast.join(', ')}` : '');
 
 // The curator's changes (#1111): each kind's chip tone and word.
+/** @type {Record<string, [string, string]>} */
 const ACTION = { edit: ['info', 'Edit'], add: ['ok', 'New note'], delete: ['danger', 'Delete'], index: ['violet', 'Index line'], flag: ['warn', 'Flag'] };
 
 /**
@@ -39,14 +56,17 @@ const ACTION = { edit: ['info', 'Edit'], add: ['ok', 'New note'], delete: ['dang
  * ticks each ("Delete, each ticked"), flags only to read. Apply writes the ticked ones; Put back undoes an applied tidy
  * for 30 days. `changed` reloads the notes after either.
  */
+/** @param {{ id: string | number }} p @param {() => void} changed */
 function tidyReview(p, changed) {
   const url = `api/projects/${p.id}/memory-proposals`;
   const box = h('div', { class: 'memory-tidy', hidden: true });
+  /** @param {TidyView} d */
   const draw = (d) => {
     box.hidden = !d.open && !d.kept.length;
     const rows = [];
     if (d.open) {
       const o = d.open;
+      /** @type {Map<string, HTMLInputElement>} */
       const ticks = new Map();
       const apply = h('button', { type: 'button' });
       const count = () => {
@@ -54,11 +74,13 @@ function tidyReview(p, changed) {
         apply.textContent = `Apply ${n} ticked`;
         apply.disabled = !n;
       };
-      const items = o.changes.map((c) => {
+      const items = o.changes.map((/** @type {TidyChange} */ c) => {
         const [tone, word] = ACTION[c.action];
         const tick = c.action === 'flag' ? null : h('input', { type: 'checkbox', checked: c.action !== 'delete' && !c.drifted, disabled: c.drifted, 'aria-label': `${word} ${c.file}`, onchange: count });
         if (tick) ticks.set(c.id, tick);
-        const diff = c.diff.length ? h('details', { class: 'memory-change-diff' }, h('summary', {}, 'Show the change'), h('pre', { class: 'instructions-diff' }, ...c.diff.map((x) => h('div', { class: x.op === '+' ? 'add' : x.op === '-' ? 'del' : 'gap' }, x.op === '…' ? '…' : `${x.op} ${x.text}`)))) : null;
+        const diff = c.diff.length
+          ? h('details', { class: 'memory-change-diff' }, h('summary', {}, 'Show the change'), h('pre', { class: 'instructions-diff' }, ...c.diff.map((/** @type {{ op: string, text?: string }} */ x) => h('div', { class: x.op === '+' ? 'add' : x.op === '-' ? 'del' : 'gap' }, x.op === '…' ? '…' : `${x.op} ${x.text}`))))
+          : null;
         return h(
           'div',
           { class: 'memory-change', 'data-hue': c.action === 'delete' ? 'danger' : c.action === 'flag' ? 'waiting' : 'running' },
@@ -70,6 +92,7 @@ function tidyReview(p, changed) {
       count();
       const status = h('span', { class: 'muted', role: 'status' });
       const buttons = [apply, h('button', { type: 'button', class: 'secondary' }, 'Turn it all down')];
+      /** @param {string[]} ids */
       const decide = (ids) =>
         optimistic({
           key: `memory-tidy:${o.id}`,
@@ -94,7 +117,7 @@ function tidyReview(p, changed) {
       apply.onclick = () => decide([...ticks].filter(([, t]) => t.checked).map(([id]) => id));
       buttons[1].onclick = () => decide([]);
       const kinds = Object.keys(ACTION)
-        .map((a) => [a, o.changes.filter((c) => c.action === a).length])
+        .map((a) => [a, o.changes.filter((/** @type {TidyChange} */ c) => c.action === a).length])
         .filter(([, n]) => n);
       const [row] = settingsRow(
         {
@@ -104,7 +127,7 @@ function tidyReview(p, changed) {
           summary: o.approved_by ? `${o.approved_by} approved it on the card: the curator applies it all, deletes too, in its next turn` : `${plural(o.changes.length, 'change')} waiting: nothing changes until you apply`,
           open: true,
         },
-        statTiles(...kinds.map(([a, n]) => [String(n), ACTION[a][1].toLowerCase() + (n === 1 ? '' : 's'), a === 'delete' ? 'danger' : a === 'flag' ? 'waiting' : 'running'])),
+        statTiles(...kinds.map(([a, n]) => /** @type {[string, string, string]} */ ([String(n), ACTION[a][1].toLowerCase() + (n === 1 ? '' : 's'), a === 'delete' ? 'danger' : a === 'flag' ? 'waiting' : 'running']))),
         showFirst({ key: `memory-tidy:${o.id}`, items: items, n: 8, noun: 'changes', wrap: (xs) => h('div', { class: 'memory-changes' }, ...xs) }),
         h('div', { class: 'memory-actions' }, status, h('span', { class: 'spacer' }), ...buttons),
         h('p', { class: 'muted small look-prose' }, 'Deletes start unticked: tick each one you want gone. Flags are for you to judge and change nothing. A note edited since the proposal is skipped.'),
@@ -155,8 +178,10 @@ function tidyReview(p, changed) {
 }
 
 export function memoryPage() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const url = `api/projects/${p.id}/memory-files`;
+  /** @type {MemFolder[]} */
+  /** @type {MemFolder[] | null} */
   let folders = null;
   let filterBy = 'all';
   const meta = h('div', { class: 'meta memory-head' }, loadingLine());
@@ -166,17 +191,23 @@ export function memoryPage() {
   const list = h('div', { class: 'memory-list' });
   const empty = h('div', { class: 'memory-empty', hidden: true }, emptyCard('No note matches', 'Try another word, or another filter.', { mark: '∅', hue: 'waiting' }));
   // Rows are built once per load and filtered with `hidden`, so a draft in an open editor survives a search, a filter or another note's save.
+  /** @type {NoteRow[]} */
   const rows = [];
+  /** @type {GroupRow[]} */
   const groups = [];
+  /** @type {Map<string, HTMLElement>} */
   const blocks = new Map();
-  const current = () => folders.find((f) => f.id === pickedFolder) ?? folders.find((f) => f.reachable) ?? folders[0];
+  const current = () => /** @type {MemFolder[]} */ (folders).find((f) => f.id === pickedFolder) ?? /** @type {MemFolder[]} */ (folders).find((f) => f.reachable) ?? /** @type {MemFolder[]} */ (folders)[0];
+  /** @param {MemFolder} f */
   const live = (f) => f.notes.filter((n) => !n.gone);
 
+  /** @param {MemFolder} f @param {MemNote} n */
   const note = (f, n) => {
     const key = `${f.id}:${n.file}`;
     const body = h('pre', { class: 'memory-text' }, n.text);
     const edit = h('textarea', { class: 'memory-edit', rows: 14, hidden: true, spellcheck: false, 'aria-label': `Edit ${n.name}` });
     edit.value = n.text;
+    /** @param {boolean} on */
     const editing = (on) => {
       edit.hidden = save.hidden = cancel.hidden = !on;
       body.hidden = editBtn.hidden = on;
@@ -294,10 +325,10 @@ export function memoryPage() {
     const unlisted = h('div', { class: 'memory-warn' }, h('span', {}, "Not listed in MEMORY.md, so sessions don't know it exists."), addBtn);
     const past = h('div', { class: 'memory-warn' });
     const soon = h('p', { class: 'muted small' });
-    const closed = n.flags.closed.length ? h('p', { class: 'muted small' }, `Names ${plural(n.flags.closed.length, 'closed minion')} (${n.flags.closed.map((x) => `#${x}`).join(', ')}): history, not a warning.`) : '';
+    const closed = n.flags.closed.length ? h('p', { class: 'muted small' }, `Names ${plural(n.flags.closed.length, 'closed minion')} (${n.flags.closed.map((/** @type {number | string} */ x) => `#${x}`).join(', ')}): history, not a warning.`) : '';
     const dot = h('span', { class: 'memory-dot' });
     const [row] = settingsRow(
-      { icon: 'doc', hue: KINDS.find(([k]) => k === kindOf(n))[2], title: n.name, summary: `${n.description ? `${n.description} · ` : ''}${day(n.modified)}`, open: openRows.has(key) },
+      { icon: 'doc', hue: /** @type {(typeof KINDS)[number]} */ (KINDS.find(([k]) => k === kindOf(n)))[2], title: n.name, summary: `${n.description ? `${n.description} · ` : ''}${day(n.modified)}`, open: openRows.has(key) },
       statTiles([kb(n.bytes), 'size', 'accent'], [day(n.modified), 'last changed', 'done']),
       unlisted,
       past,
@@ -308,7 +339,7 @@ export function memoryPage() {
       h('div', { class: 'memory-actions' }, editBtn, save, cancel, del),
       h('p', { class: 'muted small look-prose' }, `${n.file}. ${n.inIndex ? 'Reached from MEMORY.md; sessions read it when it matters.' : ''}`),
     );
-    row.querySelector('summary').insertBefore(dot, row.querySelector('.settings-row-chev'));
+    /** @type {Element} */ (row.querySelector('summary')).insertBefore(dot, row.querySelector('.settings-row-chev'));
     const mark = () => {
       const why = tidyReason(n);
       unlisted.hidden = n.inIndex;
@@ -326,6 +357,7 @@ export function memoryPage() {
     return row;
   };
 
+  /** @param {MemFolder} f @param {string} kind @param {string} label @param {string} hue @param {string} blurb @param {MemNote[]} notes */
   const group = (f, kind, label, hue, blurb, notes) => {
     const count = h('span', { class: 'memory-group-count' });
     const g = h('details', { class: 'memory-group', 'data-hue': hue, open: !folded.has(kind) }, h('summary', {}, icon('forward'), h('span', { class: 'memory-group-name' }, label), count, h('span', { class: 'memory-group-why' }, blurb)), h('div', { class: 'settings-rows' }, ...notes.map((n) => note(f, n))));
@@ -352,10 +384,11 @@ export function memoryPage() {
     meta.replaceChildren(
       h('b', {}, 'MEMORY.md loads at every start'),
       h('span', { class: 'memory-meter', 'data-hue': used > 0.8 ? 'waiting' : 'running' }, meter(used, `${lines} of ${INDEX_LINES} lines · ${kb(bytes)} of 25 KB`)),
-      h('span', { class: 'memory-rest' }, h('b', {}, plural(ns.length, 'note')), ` (${kb(ns.reduce((s, n) => s + n.bytes, 0))}) are read when needed`),
+      h('span', { class: 'memory-rest' }, h('b', {}, plural(ns.length, 'note')), ` (${kb(ns.reduce((/** @type {number} */ s, n) => s + n.bytes, 0))}) are read when needed`),
     );
   };
 
+  /** @param {string} key @param {number} n @param {string} label @param {string} hue */
   const stat = (key, n, label, hue) =>
     h(
       'button',
@@ -376,17 +409,17 @@ export function memoryPage() {
   const refresh = () => {
     const f = current();
     header();
-    folderBar.hidden = folders.length < 2;
+    folderBar.hidden = /** @type {MemFolder[]} */ (folders).length < 2;
     folderBar.replaceChildren(
       tabs({
-        items: folders.map((x) => [x.id, x.reachable ? `${x.label} · ${live(x).length}` : x.label]),
+        items: /** @type {MemFolder[]} */ (folders).map((x) => [x.id, x.reachable ? `${x.label} · ${live(x).length}` : x.label]),
         current: f.id,
         label: 'Memory folders',
         className: 'memory-folders',
         onSelect: (id, how) => {
           pickedFolder = id;
           refresh();
-          if (how?.keyboard) folderBar.querySelector('[aria-selected="true"]')?.focus();
+          if (how?.keyboard) /** @type {HTMLElement | null} */ (folderBar.querySelector('[aria-selected="true"]'))?.focus();
         },
       }).element,
     );
@@ -400,6 +433,7 @@ export function memoryPage() {
   };
 
   // A save, delete or add answers with the folder as the server now sees it: take its index and each note's flags from that.
+  /** @param {MemFolder} f @param {{ folders?: MemFolder[] } | null | undefined} d */
   const sync = (f, d) => {
     const fresh = d?.folders?.find((x) => x.id === f.id);
     if (!fresh) return;
@@ -436,7 +470,7 @@ export function memoryPage() {
     rows.length = groups.length = 0;
     blocks.clear();
     list.replaceChildren(
-      ...folders.map((f) => {
+      .../** @type {MemFolder[]} */ (folders).map((f) => {
         const el = h(
           'div',
           { class: 'memory-folder' },
@@ -460,7 +494,7 @@ export function memoryPage() {
     api(url).then(
       (d) => {
         folders = d.folders;
-        if (folders.length) render();
+        if (/** @type {MemFolder[]} */ (folders).length) render();
         else meta.textContent = 'No memory folder yet: the scheme has no repo or no login.';
       },
       (err) => {
@@ -472,7 +506,7 @@ export function memoryPage() {
   return h(
     'section',
     { class: 'artifacts-main people-main memory-main' },
-    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
     review,
     folderBar,
     stats,

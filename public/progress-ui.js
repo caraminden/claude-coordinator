@@ -1,5 +1,8 @@
 // The progress readout under a chat's head: the step line, its meter and the plan's steps. The pure half is progress.js.
-import { api, dismissedWhen, h, isCoordinator, statusLabel, view } from './base.js';
+import { api, dismissedWhen, h, isCoordinator, openView, statusLabel, view } from './base.js';
+
+/** @import { ChatAction, ProgressTask, Ticket } from './types.js' */
+/** A chat readout's own state, kept per chat. @typedef {{ open: boolean, openSteps: Set<string>, cmdsOpen: Set<string>, actsOpen: Set<string>, looseOpen?: boolean, tlSel?: string | null, tlSeg?: number | null, tlAll?: boolean, tlPlain?: boolean }} ProgressUi */
 import { threadRefs, usage } from './core.js';
 import { jobOf, rowState, workingBy } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
@@ -14,8 +17,10 @@ import { actionLabel, heldStep, nowDoing, planEstimate, planTrack, progressLine,
 
 // ---------- work progress (thread-bar readout) ----------
 
+/** @type {Record<string, string>} */
 const STEP_ICON = { completed: '✓', in_progress: '◐', pending: '○' };
 
+/** @param {NonNullable<ChatAction['result']>} result */
 function resultString(result) {
   return typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
 }
@@ -23,14 +28,16 @@ function resultString(result) {
 /**
  * One tool call as a plain sentence ("Edited runner.ts", "Run the tests — failed: …"). The raw
  * command and output sit one click deeper and are only built when opened.
+ * @param {ChatAction} action @param {string | null | undefined} key
  */
 function actionEl(action, key) {
   const { block, result } = action;
+  const ref = ticketActionRef(action);
   const okey = key && block.id ? `${key}|${block.id}` : null;
   const state = !result ? 'pending' : result.is_error ? 'err' : 'ok';
   const why =
     state === 'err'
-      ? resultString(result)
+      ? resultString(/** @type {NonNullable<ChatAction['result']>} */ (result))
           .replace(/<\/?tool_use_error>/g, '')
           .trim()
           .split('\n')[0]
@@ -38,8 +45,15 @@ function actionEl(action, key) {
       : '';
   const el = h(
     'details',
-    { class: `act ${state}`, open: (okey && view.ui.actsOpen.has(okey)) || null },
-    h('summary', {}, stepMark({ pending: 'running', err: 'failed', ok: 'done' }[state]), h('span', { class: 'what' }, threadRefs(actionLabel(block))), why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '', ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''),
+    { class: `act ${state}`, open: (okey && openView().ui.actsOpen.has(okey)) || null },
+    h(
+      'summary',
+      {},
+      stepMark(/** @type {Record<string, 'running' | 'failed' | 'done'>} */ ({ pending: 'running', err: 'failed', ok: 'done' })[state]),
+      h('span', { class: 'what' }, threadRefs(actionLabel(block))),
+      why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '',
+      ref ? [' → ', ...threadRefs(`#${ref.number}`)] : '',
+    ),
   );
   const build = () => {
     if (!el.open || el.querySelector('.body')) return;
@@ -50,14 +64,14 @@ function actionEl(action, key) {
   };
   el.addEventListener('toggle', () => {
     // Kept per action, so a redraw on the next event leaves it open (T2).
-    if (okey) el.open ? view.ui.actsOpen.add(okey) : view.ui.actsOpen.delete(okey);
+    if (okey) el.open ? openView().ui.actsOpen.add(okey) : openView().ui.actsOpen.delete(okey);
     build();
   });
   build();
   return el;
 }
 
-/** An opened action's input and result, with a status line under them while some of it is still cut. */
+/** An opened action's input and result, with a status line under them while some of it is still cut. @param {HTMLElement} body @param {ChatAction} action @param {HTMLElement | null} [status] */
 function actionBody(body, action, status = null) {
   const { block, result } = action;
   const input = block.input || {};
@@ -69,12 +83,13 @@ function actionBody(body, action, status = null) {
 /**
  * The page sent this action's input or result cut (eventcut.js): show the beginning at once and fetch the events
  * whole. A failed fetch leaves the beginning with a retry, never an empty row.
+ * @param {HTMLElement} body @param {ChatAction} action
  */
 async function fullAction(body, action) {
   const { block, result } = action;
   actionBody(body, action, loadingLine('Loading the rest…'));
   try {
-    const from = [block.cut && action.event, result?.cut && result.event].filter(Boolean);
+    const from = /** @type {{ id: number, ticket: number }[]} */ ([block.cut && action.event, result?.cut && result.event].filter(Boolean));
     const rows = await Promise.all(from.map((e) => api(`api/tickets/${e.ticket}/events/${e.id}`)));
     for (const row of rows) {
       for (const b of JSON.parse(row.data).message?.content ?? []) {
@@ -85,13 +100,14 @@ async function fullAction(body, action) {
     if (actionCut(action)) throw new Error('it was not in its event');
     actionBody(body, action);
   } catch (err) {
-    actionBody(body, action, failedLine(`Showing the beginning: couldn't load the rest (${err.message}).`, { retry: () => fullAction(body, action) }));
+    actionBody(body, action, failedLine(`Showing the beginning: couldn't load the rest (${/** @type {Error} */ (err).message}).`, { retry: () => fullAction(body, action) }));
   }
 }
 
 /** "Created #15 · Messaged #12": links to the threads some work created or messaged, or null. */
+/** @param {ChatAction[]} acts */
 function ticketActionLinks(acts) {
-  const refs = acts.map(ticketActionRef).filter(Boolean);
+  const refs = acts.flatMap((a) => ticketActionRef(a) ?? []);
   if (!refs.length) return null;
   return h(
     'li',
@@ -102,11 +118,13 @@ function ticketActionLinks(acts) {
 }
 
 /** Claude's own words from while a step was underway, shortened to a couple of lines. */
+/** @param {string} text */
 function stepNote(text) {
   const short = text.length > 280 ? `${text.slice(0, 279).replace(/\s+\S*$/, '')}…` : text;
   return h('p', { class: 'step-note' }, short.replace(/[*`#]/g, ''));
 }
 
+/** @param {ChatAction[]} actions @param {string | null | undefined} key */
 function actionList(actions, key) {
   return h(
     'div',
@@ -116,22 +134,25 @@ function actionList(actions, key) {
 }
 
 /** Which parts of a ticket's readout are expanded; kept per ticket so re-renders and reconnects don't collapse it. */
+/** @type {Map<number | null, ProgressUi>} */
 const progressUiState = new Map();
+/** @param {number | null} ticketId @returns {ProgressUi} */
 export function progressUi(ticketId) {
   if (!progressUiState.has(ticketId)) progressUiState.set(ticketId, { open: false, openSteps: new Set(), cmdsOpen: new Set(), actsOpen: new Set() });
-  return progressUiState.get(ticketId);
+  return /** @type {ProgressUi} */ (progressUiState.get(ticketId));
 }
 
 /** The phases of some work as rows ("✓ Looked through the code · 4 actions"), plus its commands behind a toggle. */
+/** @param {ChatAction[]} acts @param {boolean} running @param {string | null} [key] @returns {[HTMLUListElement, HTMLDetailsElement]} */
 export function phaseRows(acts, running, key = null) {
   const phases = workPhases(acts, running);
-  const cmds = h('details', { class: 'cmds', open: (key && view.ui.cmdsOpen.has(key)) || null }, h('summary', {}, `Show the ${acts.length} individual action${acts.length === 1 ? '' : 's'}`));
+  const cmds = h('details', { class: 'cmds', open: (key && openView().ui.cmdsOpen.has(key)) || null }, h('summary', {}, `Show the ${acts.length} individual action${acts.length === 1 ? '' : 's'}`));
   const fill = () => {
     if (cmds.open && !cmds.querySelector('.actions')) cmds.append(actionList(acts, key));
   };
   // Only the readout's own rows pass a key; the turn-end rows share this and are rebuilt closed.
   cmds.addEventListener('toggle', () => {
-    if (key) cmds.open ? view.ui.cmdsOpen.add(key) : view.ui.cmdsOpen.delete(key);
+    if (key) cmds.open ? openView().ui.cmdsOpen.add(key) : openView().ui.cmdsOpen.delete(key);
     fill();
   });
   fill();
@@ -147,11 +168,13 @@ export function phaseRows(acts, running, key = null) {
 }
 
 /** One step of Claude's plan: its title, one plain line about it, and on opening, how the work went. `held`: built, and being tested (#1923). */
+/** @param {ProgressTask} t @param {ChatAction[]} acts @param {boolean} running @param {boolean} held */
 function planStep(t, acts, running, held) {
   const now = t.status === 'in_progress';
   const live = now && running;
   const phases = workPhases(acts, live);
   // The one line: what it achieved once done, where it's at while underway, what it's for before then.
+  /** @type {string} */
   let line;
   if (t.status === 'completed') line = t.outcome || (t.note && firstSentence(t.note)) || t.description || phases.map((ph) => ph.text).join(', ');
   else if (held) line = 'Done so far, kept open in case a test sends it back';
@@ -160,27 +183,28 @@ function planStep(t, acts, running, held) {
   else line = t.description || 'Not started yet';
   const el = h(
     'details',
-    { class: `step ${t.status}${now && !running ? ' paused' : ''}${held ? ' held' : ''}`, open: view.ui.openSteps.has(t.id) || null },
+    { class: `step ${t.status}${now && !running ? ' paused' : ''}${held ? ' held' : ''}`, open: openView().ui.openSteps.has(t.id) || null },
     h('summary', {}, h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'), h('span', { class: 'subject' }, t.subject), h('span', { class: 'recap' }, firstSentence(line, 220))),
     t.description && line !== t.description ? h('p', { class: 'step-desc' }, h('span', { class: 'muted' }, 'Plan: '), t.description) : '',
     t.note && !t.outcome ? stepNote(t.note) : '',
     acts.length ? phaseRows(acts, live, `step${t.id}`) : '',
   );
-  el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
+  el.addEventListener('toggle', () => (el.open ? openView().ui.openSteps.add(t.id) : openView().ui.openSteps.delete(t.id)));
   return el;
 }
 
 /** Work done outside any plan step, told as phases. */
+/** @param {ChatAction[]} acts @param {boolean} running @param {boolean} onlyWork */
 function looseWork(acts, running, onlyWork) {
   const phases = workPhases(acts, running);
   const el = h(
     'details',
-    { class: 'step loose', open: (view.ui.looseOpen ?? onlyWork) || null },
+    { class: 'step loose', open: (openView().ui.looseOpen ?? onlyWork) || null },
     h('summary', {}, h('span', { class: 'icon' }, '⋯'), h('span', { class: 'subject' }, !onlyWork ? 'Other work this turn' : running ? 'Work so far' : 'Work last turn'), h('span', { class: 'recap' }, phases.map((ph) => ph.text).join(' → '))),
-    view.turnNote ? stepNote(view.turnNote) : '',
+    openView().turnNote ? stepNote(/** @type {string} */ (openView().turnNote)) : '',
     phaseRows(acts, running, onlyWork ? 'loose-work' : 'loose-other'),
   );
-  el.addEventListener('toggle', () => (view.ui.looseOpen = el.open));
+  el.addEventListener('toggle', () => (openView().ui.looseOpen = el.open));
   return el;
 }
 
@@ -236,13 +260,13 @@ export function renderProgress() {
       class: 'progress-line',
       'aria-expanded': String(view.ui.open),
       onclick: () => {
-        view.ui.open = !view.ui.open;
+        openView().ui.open = !openView().ui.open;
         renderProgress();
       },
       // Read ahead, so the click shows the log at once. A Taskmaster's chat never ends, so it has none.
-      onpointerenter: () => isCoordinator(view.ticket) || readLog(),
-      onfocus: () => isCoordinator(view.ticket) || readLog(),
-      onpointerdown: () => isCoordinator(view.ticket) || readLog(),
+      onpointerenter: () => isCoordinator(openView().ticket) || readLog(),
+      onfocus: () => isCoordinator(openView().ticket) || readLog(),
+      onpointerdown: () => isCoordinator(openView().ticket) || readLog(),
     },
     // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
     h(
@@ -290,7 +314,7 @@ export function renderProgress() {
     const log = timeLogPanel();
     const detail = log.parentElement === prevDetail && prevDetail ? prevDetail : h('div', { class: 'progress-detail timed' }, log);
     // The turn's own actions, which its line in the chat lists only once it ends; kept while none is new or done, as the log is.
-    const old = detail.querySelector(':scope > .cmds');
+    const old = /** @type {HTMLElement | null} */ (detail.querySelector(':scope > .cmds'));
     const acts = live ? view.turnActions : [];
     const sig = acts.map((a) => `${a.block.id}${!!a.result}`).join();
     const cmds = acts.length && (old?.dataset.sig === sig ? old : phaseRows(acts, true, 'turn')[1]);
@@ -299,7 +323,7 @@ export function renderProgress() {
     for (const c of [...detail.children]) if (c !== log && c !== cmds) c.remove();
     detail.prepend(...[waitLine, request].filter(Boolean));
     if (cmds && cmds !== old) detail.append(cmds);
-    if (refocus) cmds?.firstChild.focus({ preventScroll: true });
+    if (refocus) /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (cmds)?.firstChild).focus({ preventScroll: true });
     for (const c of [...progressEl.children]) if (c !== detail) c.remove();
     progressEl.prepend(...[bar, meter, caption, w ? waitTail(view.ticket.id, w) : ''].filter(Boolean));
     if (detail.parentElement !== progressEl) progressEl.append(detail);
@@ -308,12 +332,15 @@ export function renderProgress() {
     detail.scrollTop = scrollTop;
     return;
   }
+  /** @type {HTMLElement | ''} */
   let detail = '';
   if (view.ui.open) {
     const all = [...view.actions.values()];
+    /** @type {Record<string, ProgressTask[]>} */
     const groups = { completed: [], in_progress: [], pending: [] };
     for (const t of p.tasks) (groups[t.status] ?? groups.pending).push(t);
     // A step an earlier turn left underway reads as paused until this turn moves the plan.
+    /** @param {ProgressTask} t */
     const stepEl = (t) =>
       planStep(
         t,
@@ -322,6 +349,7 @@ export function renderProgress() {
         running && !!current,
         heldStep(p, t),
       );
+    /** @param {string} title @param {ProgressTask[]} tasks */
     const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
     detail = h(
@@ -342,13 +370,15 @@ export function renderProgress() {
 }
 
 /** "~26 min left" of the plan's guesses, "~1h 5m left", or past them. */
+/** @param {NonNullable<ReturnType<typeof planEstimate>>} est */
 export function leftText(est) {
   return est.left ? `~${est.left >= 60 ? `${Math.floor(est.left / 60)}h ${est.left % 60}m` : `${est.left} min`} left` : 'past its guess';
 }
 
 /** A chat's state in words, as its head shows it. */
+/** @param {Ticket} t */
 export function headState(t) {
-  const label = isCoordinator(t) && !workingBy(t) ? statusLabel(t) : rowState(t, usage).label;
+  const label = isCoordinator(t) && !workingBy(t) ? statusLabel(t) : rowState(t, usage ?? undefined).label;
   // A dismissed minion says when (#1072).
   const when = label === 'Dismissed' ? dismissedWhen(t.closed_at) : null;
   return (when ? `Dismissed ${when.short}` : label) + (t.asleep && t.status !== 'closed' ? ' · asleep' : '') + (t.queued ? ` · ${t.queued} queued` : '');
@@ -356,7 +386,9 @@ export function headState(t) {
 
 /** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */
 export function initSeen() {
-  return !view.ticket.worker_wait && view.turnInitAt >= view.ticket.turnStartedAt;
+  const v = openView();
+  const t = /** @type {Ticket} */ (v.ticket);
+  return !t.worker_wait && Number(v.turnInitAt) >= Number(t.turnStartedAt);
 }
 
 export const narrow = matchMedia('(max-width: 800px)');

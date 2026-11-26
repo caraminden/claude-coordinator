@@ -824,10 +824,10 @@
   "person": "403 Only a turn can run host checks",
   "member": "403 Only a turn can run host checks",
   "outsider": "403 Only a turn can run host checks",
-  "tmA": "400 what must be db, journal, status or units",
-  "tmB": "400 what must be db, journal, status or units",
-  "m1": "400 what must be db, journal, status or units",
-  "m2": "400 what must be db, journal, status or units"
+  "tmA": "400 what must be db, journal, status, units or judge_replay",
+  "tmB": "400 what must be db, journal, status, units or judge_replay",
+  "m1": "400 what must be db, journal, status, units or judge_replay",
+  "m2": "400 what must be db, journal, status, units or judge_replay"
  },
  "GET /api/host-load": {
   "anon": "401 Not logged in",
@@ -1072,6 +1072,26 @@
  "POST /api/machines/:m/join": {
   "anon": "401 Not logged in",
   "person": "201",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/machines/:m/merge": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/machines/:m/merge": {
+  "anon": "401 Not logged in",
+  "person": "404 No such machine",
   "member": "404 No such machine",
   "outsider": "404 No such machine",
   "tmA": "403 Only people manage machines",
@@ -1438,6 +1458,26 @@
   "tmB": "401 Unknown machine token; make a new one in the Machines panel",
   "m1": "401 Unknown machine token; make a new one in the Machines panel",
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "GET /api/machines/windows/session": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "404 The pooled Windows tools are workspace tools only",
+  "m2": "404 The pooled Windows tools are workspace tools only"
+ },
+ "POST /api/machines/windows/session/0123456789abcdef01234567": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "503 That machine went offline",
+  "m2": "503 That machine went offline"
  },
  "POST /api/machines/worker": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
@@ -1902,6 +1942,16 @@
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "200",
   "m2": "200"
+ },
+ "GET /api/projects/:p/cabal/1": {
+  "anon": "401 Not logged in",
+  "person": "404 #1 leads no cabal in this scheme",
+  "member": "404 #1 leads no cabal in this scheme",
+  "outsider": "404 No such scheme",
+  "tmA": "404 #1 leads no cabal in this scheme",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "GET /api/projects/:p/chains": {
   "anon": "401 Not logged in",
@@ -3262,6 +3312,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/cabal": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/cabal": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal member or its lead writes on its board",
+  "member": "403 Only a cabal member or its lead writes on its board",
+  "outsider": "403 Only a cabal member or its lead writes on its board",
+  "tmA": "403 Only a cabal member or its lead writes on its board",
+  "tmB": "403 Only a cabal member or its lead writes on its board",
+  "m1": "400 action must be read, note, ask, answer, row, log or red",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/check": {
   "anon": "401 Not logged in",
   "person": "409 No turn is running.",
@@ -3489,7 +3559,7 @@
   "outsider": "403 Only a minion queues jobs here",
   "tmA": "403 Only a minion queues jobs here",
   "tmB": "403 Only a minion queues jobs here",
-  "m1": "400 machine is required: the machine's name",
+  "m1": "400 kind must be { name, image, command, reads, gpu, network, resumable, max_limit_h }",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/jobs/1/stop": {
@@ -4189,6 +4259,26 @@
   "outsider": "404 No such minion",
   "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/cabal": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cabal": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal member or its lead writes on its board",
+  "member": "403 Only a cabal member or its lead writes on its board",
+  "outsider": "403 Only a cabal member or its lead writes on its board",
+  "tmA": "403 Only a cabal member or its lead writes on its board",
+  "tmB": "403 Only a cabal member or its lead writes on its board",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

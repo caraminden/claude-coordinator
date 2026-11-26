@@ -295,7 +295,7 @@ function renderMachineSetup() {
 
 /** The setup to show first: the viewer's own kind of computer, as the browser says it (a phone gets Windows). */
 function guessOs() {
-  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+  const platform = /** @type {Navigator & { userAgentData?: { platform?: string } }} */ (navigator).userAgentData?.platform || navigator.platform || '';
   return /mac|linux|x11|cros/i.test(platform) && !/android/i.test(`${platform} ${navigator.userAgent}`) ? 'posix' : 'windows';
 }
 
@@ -361,7 +361,7 @@ function checkMachine(m, button) {
   button.disabled = true;
   button.textContent = 'Checking…';
   api(`api/machines/${m.id}/check`, { method: 'POST' })
-    .catch((err) => toast(`Couldn't check ${m.name}: ${err.message}`, { tone: 'error' }))
+    .catch((err) => toast(`Couldn't check ${m.name}: ${err.message}`, { tone: 'danger' }))
     // The broadcast has redrawn the row by now; this is for one that didn't.
     .finally(() => {
       if (button.isConnected) {
@@ -682,9 +682,9 @@ function machineNotes(m) {
     saved.textContent = '';
   });
   // Keep an open notes editor open (and its draft) when the list re-renders for a status change.
-  const old = document.querySelector(`.machine-notes[data-id="${m.id}"]`);
+  const old = /** @type {HTMLDetailsElement | null} */ (document.querySelector(`.machine-notes[data-id="${m.id}"]`));
   const editing = old?.open;
-  if (editing) notes.value = old.querySelector('textarea').value;
+  if (editing) notes.value = /** @type {HTMLTextAreaElement} */ (old.querySelector('textarea')).value;
   return h('details', { class: 'machine-notes', 'data-id': m.id, open: editing }, summary, notes, h('div', { class: 'row' }, save, saved));
 }
 

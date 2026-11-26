@@ -220,9 +220,9 @@ export function missed(usage: { cache_creation_input_tokens?: number | null } | 
   return (usage?.cache_creation_input_tokens ?? 0) > MISS_WRITE_TOKENS;
 }
 
-/** More than a fifth of a day's keepalives missed, out of enough to judge (5). */
+/** More than a fifth of a day's keepalives missed, out of enough to judge (5), and at least 3: one cache flush on Anthropic's side misses 2 (#2034). */
 export function tooManyMisses(pings: number, misses: number): boolean {
-  return pings >= 5 && misses * 5 > pings;
+  return pings >= 5 && misses >= 3 && misses * 5 > pings;
 }
 
 export interface KeepaliveRow {

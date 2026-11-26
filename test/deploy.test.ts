@@ -836,22 +836,31 @@ test("a rollback stops the running turns only when last-good predates turn units
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   const rollback = (restarts: number, _n: number, { good }: { good: string }) => (restarts >= 2 ? health(good) : 503);
   const stops = (r: { systemctl: string }) => r.systemctl.split('\n').filter((l) => /\bstop citadel-turn-/.test(l)).length;
-  const none = await restartWith('units-none', rollback);
+  // The three restarts share nothing (each its own checkout, stand-in server and systemctl), so they run side by side.
+  const wrappers = ['src/turn-wrapper.ts', 'src/turn-wrapper.mjs'];
+  const [none, ...wrapped] = await Promise.all([restartWith('units-none', rollback), ...wrappers.map((wrapper) => restartWith(`units-${wrapper.split('.').pop()}`, rollback, {}, wrapper))]);
   assert.match(none.stderr, /last-good predates turn units/);
   assert.equal(stops(none), 1);
-  for (const wrapper of ['src/turn-wrapper.ts', 'src/turn-wrapper.mjs']) {
-    const r = await restartWith(`units-${wrapper.split('.').pop()}`, rollback, {}, wrapper);
+  wrapped.forEach((r, i) => {
+    const wrapper = wrappers[i];
     assert.equal(r.head, r.good, r.stderr);
     assert.doesNotMatch(r.stderr, /predates turn units/, wrapper);
     assert.equal(stops(r), 0, `${wrapper}: ${r.systemctl}`);
-  }
+  });
 });
 
 test('the restart checks health again a little after the first OK, and rolls back if it has gone (#520)', { timeout: 60_000 }, async () => {
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   // Healthy once, then gone (crashed in its first minute): the rollback path, as if the first check had failed.
   // Ask 1 is the warm handover's check (#1170), which this server, with no handover field, turns down.
-  const r = await restartWith('gone', (restarts, n, { good, target }) => (restarts >= 2 ? health(good) : n <= 2 ? health(target) : 503));
+  // Two restarts that share nothing run side by side.
+  const [r, back] = await Promise.all([
+    restartWith('gone', (restarts, n, { good, target }) => (restarts >= 2 ? health(good) : n <= 2 ? health(target) : 503)),
+    restartWith('respawned', (restarts, n, { good, target, pidFile }) => {
+      if (restarts === 1 && n === 3) writeFileSync(pidFile, '200'); // ask 1 is the warm handover's check
+      return health(restarts >= 2 ? good : target);
+    }),
+  ]);
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, /rolling back to last-good/);
   assert.equal(r.restarts, 2);
@@ -871,10 +880,6 @@ test('the restart checks health again a little after the first OK, and rolls bac
   assert.ok(r.together(), 'all three reports were in before any was answered: posted at once');
   assert.equal(r.noteLeft, false);
   // Healthy at both checks, but systemd brought it back in between (Restart=always): it died, so it rolls back too.
-  const back = await restartWith('respawned', (restarts, n, { good, target, pidFile }) => {
-    if (restarts === 1 && n === 3) writeFileSync(pidFile, '200'); // ask 1 is the warm handover's check
-    return health(restarts >= 2 ? good : target);
-  });
   assert.equal(back.status, 1, back.stderr);
   assert.equal(back.lastGood, back.good);
   assert.match(back.reports[0].text, /stopped answering or was restarted/);
@@ -884,7 +889,16 @@ test('a server that is only slow at the second check is not rolled back, and the
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   // The second check's first ask goes unanswered past health's limit (1 s here), as in a restart's busy first minute.
   // Ask 1 is the warm handover's check (#1170).
-  const r = await restartWith('slow', (_restarts, n, { target }) => (n === 3 ? new Promise((res) => setTimeout(() => res(health(target)), 1500)) : health(target)), { DEPLOY_TEST_HEALTH_TIMEOUT: '1' });
+  // It answers when the ask after it arrives (curl gave up on it at 1 s and asked again), not on a timer: no guess at how long the wait is.
+  let answerSlow = () => {};
+  const r = await restartWith(
+    'slow',
+    (_restarts, n, { target }) => {
+      if (n === 4) answerSlow();
+      return n === 3 ? new Promise<string>((res) => (answerSlow = () => res(health(target)))) : health(target);
+    },
+    { DEPLOY_TEST_HEALTH_TIMEOUT: '1' },
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.restarts, 1);
   assert.equal(r.lastGood, r.target);

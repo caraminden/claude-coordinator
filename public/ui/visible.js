@@ -12,10 +12,12 @@
  * it yourself for the first load. A hidden page at start waits for its first show. `fn` may be async: a run still going is
  * not stacked under the next tick. Returns a function that stops it for good.
  * `opts.document` is for tests.
+ * @type {typeof import('./visible.js').pollWhileVisible}
  */
 export function pollWhileVisible(fn, ms, opts = {}) {
   const doc = opts.document ?? document;
-  let timer = null;
+  /** @type {ReturnType<typeof setInterval> | undefined} */
+  let timer;
   let busy = false;
   let stopped = false;
   const run = async () => {
@@ -35,7 +37,7 @@ export function pollWhileVisible(fn, ms, opts = {}) {
   };
   const stop = () => {
     clearInterval(timer);
-    timer = null;
+    timer = undefined;
   };
   const onChange = () => {
     if (stopped) return;

@@ -18,6 +18,7 @@ import { desktopRoutes } from './desktop.ts';
 import { pushRoutes } from './push.ts';
 import { timeLogRoutes } from './time-log.ts';
 import { dayStripsRoutes } from './day-strips.ts';
+import { cabalRoutes } from './cabals.ts';
 import { unitRoutes } from './units.ts';
 import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
@@ -34,6 +35,7 @@ export const apiRoutes = [
   ...ticketRoutes,
   ...timeLogRoutes,
   ...dayStripsRoutes,
+  ...cabalRoutes,
   ...proposalRoutes,
   ...memoryCuratorRoutes,
   ...fileRoutes,

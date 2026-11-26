@@ -4,14 +4,28 @@
 import { h, view } from './base.js';
 import { WORDS } from './help-words.js';
 import { settingsTabs, settingsTitle } from './settings.js';
+/** @import { Child } from './base.js' */
 
-/** A word in a sentence: lowercase, but Taskmaster and Grunt are names. */
+/**
+ * A word in a sentence: lowercase, but Taskmaster and Grunt are names.
+ * @param {keyof typeof WORDS} key
+ * @param {string} [tail]
+ */
 const w = (key, tail = '') => h('strong', {}, (/^(taskmaster|grunt)$/.test(key) ? WORDS[key].word : WORDS[key].word.toLowerCase()) + tail);
-const show = (part, text) => h('a', { class: 'help-show', href: `#/p/${view.projectId}?show=${part}` }, text);
-/** The screenshots are real ones from a dev copy (tools/ui-shot.ts), as public/help-<name>.png (the server serves public/ flat). */
+/**
+ * @param {string} part
+ * @param {string} text
+ */
+const show = (part, text) => h('a', { class: 'help-show', href: `#/p/${/** @type {NonNullable<typeof view>} */ (view).projectId}?show=${part}` }, text);
+/**
+ * The screenshots are real ones from a dev copy (tools/ui-shot.ts), as public/help-<name>.png (the server serves public/ flat).
+ * @param {string} name
+ * @param {string} alt
+ */
 const shot = (name, alt) => h('img', { class: 'help-shot', src: `help-${name}.png`, alt, loading: 'lazy' });
 
 /** The steps: [title, words, [screenshot, alt], link]. */
+/** Each step: its title, its words, its screenshot [file, alt] and a Show me link. @type {() => [string, Child[], [string, string], Child?][]} */
 const STEPS = () => [
   ['A scheme is one project', ['A ', w('scheme'), " is one project's workspace. Each has its own Taskmaster, minions, rules and members. The schemes you belong to sit in the strip on the left; click one to switch."], ['schemes', 'The strip of schemes on the left of Citadel'], null],
   ['You ask the Taskmaster', ['Say what you want in the message box. The ', w('taskmaster'), ' reads it, makes a plan and starts a ', w('minion'), ' for each job.'], ['ask', 'The Taskmaster chat with the message box at the bottom'], show('message-box', 'Show me the message box')],

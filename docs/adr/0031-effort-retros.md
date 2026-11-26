@@ -40,3 +40,6 @@ The picks the brief left to the minion (#1751):
   - That was at odds with her "Starts by itself", so it went to her on #1751's card (2026-11-24). She picked "Start for real
     now": the judge acts from the start, on an empty replay. She also kept "4 for an unnamed chain" and "Follow-ups join"
     (minions a minion asks for join its effort).
+- **A moved ask** (Josh, 2026-11-25, on #2065's retro card: "Effort follows moved asks"; #2080): a close as `replaced` names the
+  minion that has the work (`into`). That minion takes the closed one's effort when it has none, and the effort's retro waits
+  until it has closed and stayed quiet, whatever effort it is in.

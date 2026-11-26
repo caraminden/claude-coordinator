@@ -7,6 +7,7 @@ import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { thrown } from './src/thrown.ts';
+import { fireArmed, fireLive, fireProof } from './src/armed-handoff.ts';
 import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { basename, extname, join } from 'node:path';
@@ -22,6 +23,7 @@ import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from '.
 import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
+import { requeueShip } from './src/ship-handoff.ts';
 import { everyLine, ShipTrail } from './src/ship-trail.ts';
 import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
@@ -56,7 +58,9 @@ import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
-import { MachineBalancer, runnerOrder, runnerShares } from './src/machine-balancer.ts';
+import { CiAuto, lendsCi, noMachineCard, PASS_MS as CI_AUTO_PASS_MS } from './src/ci-auto.ts';
+import { MachineBalancer } from './src/machine-balancer.ts';
+import { runnerOrder, runnerShares } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs } from './src/long-jobs.ts';
@@ -78,7 +82,7 @@ import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
 import { Fcm, fcmKeyPath } from './src/fcm.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, chainedStep, fixShipped, githubPrs, touchedSince, LiveWaiters, missingCommits, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
-import { Outbox } from './src/outbox.ts';
+import { deliveriesOf, Outbox } from './src/outbox.ts';
 import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
@@ -95,7 +99,7 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
+import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, readJson, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes, dropRemoved } from './src/routes/machines.ts';
@@ -155,6 +159,7 @@ import { redFixes, UrgentFixes } from './src/urgent-fixes.ts';
 import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
+import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
 import { Builds } from './src/builds.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
@@ -171,7 +176,7 @@ import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
-import { ShipLane } from './src/ship-lane.ts';
+import { SHIP_LANE, ShipLane } from './src/ship-lane.ts';
 import { StallWatch, refusalKind } from './src/stall-signals.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
@@ -500,7 +505,7 @@ if (runner.units && !BOOT_CHECK) {
 // Units in deploy/ not installed here, or different (#1216): checked at boot and every 6 h; Citadel's members get one push when a
 // unit newly goes missing or different, and one again if it is fixed and then breaks again. Read-only: it installs nothing.
 async function checkUnitDrift() {
-  const rows = checkUnits(DEPLOY_DIR);
+  const rows = await checkUnits(DEPLOY_DIR);
   const now = problemKeys(rows);
   const seen = new Set(store.getSetting<string[]>('unit_drift_seen') ?? []);
   const fresh = now.filter((k) => !seen.has(k));
@@ -789,7 +794,13 @@ const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: r
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
-runner.machines = (project, askers) => machines.online().filter((m) => lendsRole(store, m, 'tools', project, askers));
+// A machine whose Windows screen role is lent comes too, for the pooled mcp__windows__ tools (Build 7 M5): its named tools only with its Tools role.
+runner.machines = (project, askers) =>
+  machines.online().flatMap((m) => {
+    const tools = lendsRole(store, m, 'tools', project, askers);
+    const screen = m.servers.includes('ws') && lendsRole(store, m, 'screen', project, askers);
+    return tools || screen ? [{ ...m, servers: tools ? m.servers : [], ...(screen ? { screen: true as const } : {}) }] : [];
+  });
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 const serverClaude = () => new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0])));
 const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });
@@ -804,6 +815,17 @@ machines.roleSetups = new RoleSetups({
   workers,
   lendsWorker: (m) => machines.lendsWorker(m),
   ships: (id) => machines.shipsAtWorker(id),
+  // CI runners (#2064): the runner agents on the row, a list job through one, and GitHub's runners of each lent scheme.
+  ci: {
+    agents: (id) =>
+      (['windows', 'linux'] as const).flatMap((os) => {
+        const host = machines.runnerHost(id, os);
+        return host ? [{ os, host }] : [];
+      }),
+    list: (id, os) => machines.runnerJob(id, { op: 'list' }, os),
+    lent: (m) => store.listProjects().filter((p) => repoSlug(p.repo_url) && lendsCi(store, m, p)),
+    listed: (project) => runnerTokens.listed(project),
+  },
   shotDir: join(DATA_DIR, 'role-shots'),
   changed: () => broadcast({ type: 'machines', machines: machines.list() }),
   now: Date.now,
@@ -1068,7 +1090,7 @@ runner.heldBrief = (id) => waiters.heldBrief(id);
 runner.chains = () => waiters.chains();
 runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
-  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? store.listDeliveries({ kind: 'runners_back', to: id, states: ['waiting'] })[0]?.payload.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
+  return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? deliveriesOf(store, 'runners_back', { to: id, states: ['waiting'] })[0]?.payload.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
 };
 // The list chip's waits (src/waits-readout.ts): the outbox's rows, plus what the old keys still hold until their steps move.
 // A row added or changed re-sends its minion's view, so the chip never shows a wait that already went (a Taskmaster's waits have no chip).
@@ -1151,6 +1173,18 @@ const standingChecks = new StandingChecks({
   procs: async () => (await reaper.owned()).map((x) => ({ pid: x.proc.pid, ticketId: x.ticketId, projectId: x.projectId, command: shownCommand(x.proc.argv) })),
 });
 if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingChecks.run(), 3 * 60_000);
+// Main went back (#2077): each open minion cut from the commits a reset took off its scheme's main is told the rebase that takes them out.
+const mainRollbacks = new MainRollbacks({
+  store,
+  tell: judged(
+    'main-rollbacks',
+    'tell',
+    (id: number, text: string) => void runner.send(id, APP_NAME, text, [], { hold: true }, runner.isRunning(id)),
+    () => {},
+    judgeNote((id) => store.getTicket(id)?.project_id),
+  ),
+});
+if (!BOOT_CHECK && !PREVIEW) every('main roll-backs', ROLLBACK_EVERY_MS, () => mainRollbacks.sweep(), 60_000);
 
 /**
  * A new minion with its properties and its own worktree in the scheme's repo, not started yet: the
@@ -1236,7 +1270,7 @@ const memoryEase = new MemoryEase({
 });
 pressure.useEase(() => memoryEase.get());
 if (!BOOT_CHECK) memoryEase.start();
-// Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
+// Idle Taskmasters and cabal leads with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
 if (!BOOT_CHECK && !PREVIEW) every('fresh sessions', 60_000, () => runner.freshSweep());
 // Waiting minions' prompt caches stay warm in working hours (#862, src/keepalive.ts).
@@ -1766,6 +1800,11 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // CI health (#368): runners offline, jobs that never started, or no verdict on main for hours, in every scheme, make
 // one Mandate alert for every admin (#540), cleared when it's all over (green that skipped jobs, a quiet item from
 // its scheme); no turn runs.
+/** A finished run a minion dispatched (#678): a hand-off armed on its flake proof takes it first (#2089, set once `app` is); else it wakes the minion. */
+let armedProof: ((ticketId: number, run: Run, text: string) => boolean) | null = null;
+const dispatchedRun = (ticketId: number, text: string, fyi?: boolean, run?: Run) => {
+  if (!run || !armedProof?.(ticketId, run, text)) runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {});
+};
 const ciHealth = new CiHealth(store, {
   outbox,
   longs: () => longJobs.list(),
@@ -1780,7 +1819,7 @@ const ciHealth = new CiHealth(store, {
       );
   },
   mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
-  wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
+  wake: (ticketId, text, fyi, run) => dispatchedRun(ticketId, text, fyi, run),
   home: () => store.getProject(alertScheme(0)),
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   // The CI-red judge's one act (#1503): log-only turns every Taskmaster wake and mail from CI health into a retro-log line.
@@ -1944,6 +1983,8 @@ const shipLane = new ShipLane({
   },
   leaveMail: (id, author, text) => runner.leaveMail(id, author, text),
   broadcast,
+  // The first sweep runs a minute after boot, once app is set.
+  armed: (id, fallback, started) => fireArmed(app, id, SHIP_LANE, fallback, started),
 });
 // Not in a preview or a dev copy: they name the live worktrees, and wake nobody.
 if (!runner.noTurns) setInterval(() => void shipLane.sweep().catch((err) => console.error('The ship-script lane:', err)), 60_000).unref();
@@ -1953,6 +1994,7 @@ const landHandoffs = new LandHandoffs({
   runner,
   from: APP_NAME,
   probe: (id, probe, commit, when) => liveProbes.shipped(id, probe, commit, when),
+  requeue: (id, h, output) => requeueShip(app, id, h, output), // app is set by the time a land ends
   flakes: (id, output) => {
     const t = store.getTicket(id);
     if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output);
@@ -2086,12 +2128,30 @@ const ciLoad = new CiLoad(store, {
   mandate: (project, person, key, title) => mandateAlert('CI load', project, person, key, title, undefined, true),
 });
 if (!BOOT_CHECK) ciLoad.start();
+// CI runners join schemes by themselves (#2064): a scheme whose workflows or queued jobs ask for its runner gets one on the
+// best PC lending it CI; an unticked scheme's come off; no PC lending while jobs wait is one card in its Taskmaster's chat.
+let ciQueuedLabels = new Map<string, Set<string>>();
+const ciAuto = new CiAuto({
+  store,
+  runnerMachines: (os) => machines.runnerMachines(os),
+  reposOn: (id, os) => ciLoad.reposOn(id, os),
+  queuedLabels: () => ciQueuedLabels,
+  start: (project, ask) => runnerJobs.start(project, null, ask, APP_NAME),
+  room: (id) => balancer.current(id)?.runners ?? null,
+  card: (project, os, could) => {
+    const taskmaster = store.getOverlord(project.id);
+    if (taskmaster) postCard(app, taskmaster, { questions: [noMachineCard(store, project, os, could)] });
+  },
+});
+if (!BOOT_CHECK && !PREVIEW) every('ci runners by themselves', CI_AUTO_PASS_MS, () => ciAuto.pass(), CI_AUTO_PASS_MS);
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
 // agent's PC go to that PC's runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
 // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
 const runnerRepos = () =>
   [
     ...ciLoad.runnerRepos(),
+    // Before any runner is there (#2064): a scheme whose workflows ask for its runner, so its queued jobs are read.
+    ...ciAuto.asking,
     ...store
       .listProjects()
       .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
@@ -2107,8 +2167,9 @@ const shipWatch = new ShipWatch({
   as: asScheme,
   send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
-  queued: (byRepo) => {
+  queued: (byRepo, labels) => {
     ciQueued = byRepo;
+    ciQueuedLabels = labels;
   },
 });
 if (!BOOT_CHECK) shipWatch.start();
@@ -2177,6 +2238,7 @@ const mainCap = new RunnerCap({
   store,
   report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
 });
+runnerTokens.hostsOf = (m) => (['windows', 'linux'] as const).flatMap((os) => machines.runnerHost(m.id, os) ?? []);
 runnerTokens.owed = (id, label) => runnerCap.owes(id, label) || mainCap.owes(id, label);
 if (!BOOT_CHECK && !PREVIEW) {
   runnerCap.start();
@@ -2560,6 +2622,11 @@ const app: App = {
 };
 // A machine being removed goes once its agent has deleted what it held of each minion (Build 7 T6).
 if (!BOOT_CHECK && !PREVIEW) every('machine removals', 10_000, () => dropRemoved(app));
+// A claim that passes to a minion with an armed hand-off ships it with no turn (#2046).
+runner.armed = (id, claim, fallback) => fireArmed(app, id, claim, fallback);
+// And one armed on its flake proof, or on something going live (#2089).
+armedProof = (id, run, text) => fireProof(app, id, run, text);
+waiters.armed = () => fireLive(app);
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {
   every(
@@ -2694,6 +2761,13 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
       }
       // test/front.test.ts: the client addresses this thread sees, which a client must not be able to set.
       if (SETTLED_ROUTE && req.url?.startsWith('/api/test/peer')) return json(res, 200, connection(req));
+      // test/armed-handoff.test.ts: a finished run a minion dispatched, as CI health hands it on.
+      if (SETTLED_ROUTE && req.url?.startsWith('/api/test/dispatched-run')) {
+        const b = await readJson(req);
+        // GitHub's run as the test hands it: only an object is taken, as GitHub's own answers are.
+        dispatchedRun(Number(b.ticket), String(b.text), !!b.fyi, b.run && typeof b.run === 'object' ? (b.run as Run) : undefined);
+        return json(res, 200, {});
+      }
       // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
       if (apps.onAppHost(req)) {
         const path = (req.url ?? '/').split('?')[0];
@@ -2803,6 +2877,8 @@ const listened = (port: number) => {
   if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST, throughFront ? '/api/status' : undefined);
   console.log(onSocket ? `${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})` : `${APP_NAME} listening on http://${HOST}:${boundPort}`);
   handover?.live();
+  // Only a change of this server's own code moves what it asks for, so once per start (#2004).
+  if (!BOOT_CHECK) void claudeLink.raiseLimits();
 };
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
@@ -2822,6 +2898,13 @@ if (config.front) {
       usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
       setting: (key, value) => {
         if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value);
+      },
+      health: (kind, text) => {
+        try {
+          void store.addHealthEvent(kind, Date.now(), null, text);
+        } catch {
+          /* the health log is best effort */
+        }
       },
     },
   );

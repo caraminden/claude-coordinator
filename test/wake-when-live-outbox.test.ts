@@ -10,6 +10,7 @@ import { Store } from '../src/db.ts';
 import { Outbox, type OutboxRunner, RETRY_MINUTES } from '../src/outbox.ts';
 import { LiveWaiters } from '../src/wake.ts';
 import { testPins } from './helpers.ts';
+import { deliveriesOf } from '../src/outbox.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'wwl-outbox-'));
@@ -66,7 +67,7 @@ function server(head: string) {
   const waiters = new LiveWaiters(store, repo, head, () => assert.fail('the legacy send'), outbox);
   return { r, now, outbox, waiters };
 }
-const rows = (id: number) => store.listDeliveries({ kind: 'wake_when_live', to: id });
+const rows = (id: number) => deliveriesOf(store, 'wake_when_live', { to: id });
 
 test('a wait is a row, found live by the check and sent by the outbox, light kept', async () => {
   const before = commit();

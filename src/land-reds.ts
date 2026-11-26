@@ -93,10 +93,14 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
     return { cause: 'change', rider: !sameShip(culprit, lead), why: `the bisect pinned ${culprit}` };
   }
   const sus = of('ship train suspects');
-  const sure = sus?.parts.find((p) => p.startsWith('failed alone here: '))?.slice('failed alone here: '.length);
-  if (sure) {
-    const ships = sure.split(', ');
-    return { cause: 'change', rider: !ships.some((s) => sameShip(s, lead)), why: `failed alone with ${sure}` };
+  // Proven two ways: it adds the case a burn-in failed (#2019), or it failed run alone.
+  const proven = (label: string) => sus?.parts.find((p) => p.startsWith(label))?.slice(label.length);
+  const added = proven('adds the failing case: ');
+  const sure = proven('failed alone here: ');
+  if (added || sure) {
+    const ships = [added, sure].flatMap((s) => s?.split(', ') ?? []);
+    const why = [added && `${added} adds the failing test case`, sure && `failed alone with ${sure}`].filter(Boolean).join('; ');
+    return { cause: 'change', rider: !ships.some((s) => sameShip(s, lead)), why };
   }
   const burn = own.filter((l) => l.kind === 'burn-in red').flatMap((l) => l.parts.join(' · ').match(/failed in \d+ of \d+ copies/g) ?? []);
   if (

@@ -4,7 +4,7 @@
 // read it. Cara, 2026-11-14: "we should ALWAYS make an intentional choice
 // about model". TIERS is the model rule's one home (src/rule-homes.ts, #1162): citadel:subagents and citadel:briefing carry tierSummary()'s line, held to it by test/model-table.test.ts (#1574), and citadel:subagents ("Minions, Taskmasters and schedules too") points here, moved from the Citadel-wide Settings (#1576). Josh, 2026-11-13, on Fable: "can we tighten the fable usage a bit, maybe use it about half as often? only for really complex or high risk things?" The Fable budget and the "every Taskmaster on Opus high" rule live in the Taskmaster's prompt beside tableText().
 
-/** The Claude models a person can pick, with the names people read. */
+/** The Claude models a person can pick, with the names people read. @type {[string, string][]} */
 export const CLAUDE_MODELS = [
   ['claude-opus-5-5', 'Opus 5.5'],
   ['claude-sonnet-5-5', 'Sonnet 5.5'],
@@ -17,7 +17,12 @@ export const CLAUDE_MODELS = [
 ];
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-/** The tiers, in the order the prompt reads them: the work each covers, its model and effort, and when to move off it. */
+/** @typedef {{ work: string, model: string, effort: string, then?: string, short?: string }} Tier */
+
+/**
+ * The tiers, in the order the prompt reads them: the work each covers, its model and effort, and when to move off it.
+ * @type {Tier[]}
+ */
 export const TIERS = [
   // Known-shape middle work on Sonnet (Cara, 2026-11-14, "Widen to known-shape work"; "a sonnet minion can remove a link or move something somewhere I ask it to, but it cant build new screens").
   {
@@ -44,13 +49,18 @@ export const TIERS = [
  * The model and advisor a model setting launches with: `<model>+<advisor>-advisor` is `--model <model> --advisor <advisor>`
  * (#817). Any other value is the model alone. Read from the id itself, so a minion still set to an advisor
  * row that was taken out of CLAUDE_MODELS keeps launching.
+ * @param {string | null | undefined} id
+ * @returns {{ model: string | null, advisor: string | null }}
  */
 export function advisedModel(id) {
   const m = /^(.+)\+([a-z]+)-advisor$/.exec(id ?? '');
   return m ? { model: m[1], advisor: m[2] } : { model: id ?? null, advisor: null };
 }
 
-/** What a start that knows only the minion's `type` picks: the tier most work of that type falls in. */
+/**
+ * What a start that knows only the minion's `type` picks: the tier most work of that type falls in.
+ * @type {Record<string, { model: string, effort: string }>}
+ */
 export const BY_TYPE = {
   chore: { model: 'claude-sonnet-5-5', effort: 'medium' },
   bug: { model: 'claude-sonnet-5-5', effort: 'medium' },
@@ -61,15 +71,19 @@ export const BY_TYPE = {
   art: { model: 'claude-opus-5-5', effort: 'high' },
 };
 
-/** When nothing tells the type (`other`, or no type yet). */
+/**
+ * When nothing tells the type (`other`, or no type yet).
+ * @type {{ model: string, effort: string }}
+ */
 export const FALLBACK = { model: 'claude-opus-5-5', effort: 'medium' };
 
-/** The model and effort for a minion of this type (a fresh object). */
+/** The model and effort for a minion of this type (a fresh object). @param {string | null | undefined} type */
 export function pickFor(type) {
-  return { ...(BY_TYPE[type] ?? FALLBACK) };
+  return { ...(BY_TYPE[/** @type {string} */ (type)] ?? FALLBACK) };
 }
 
 // Words that give a first message's kind of work away, checked in this order; the first hit wins.
+/** @type {[string, RegExp][]} */
 const CLUES = [
   ['bug', /\b(bugs?|broken|breaks?|crash(es|ed|ing)?|errors?|fails?|failing|failed|doesn'?t work|does not work|not working|wrong|regression|stuck|fix(es)?)\b/i],
   ['chore', /\b(rename|typos?|docs?|readme|changelog|config|clean ?up|bump|tidy|checklist|ledger|update the (text|copy|docs?|prompt))\b/i],
@@ -80,12 +94,12 @@ const CLUES = [
   ['feature', /\b(add|build|make|new|support|show|let (me|people|us)|allow)\b/i],
 ];
 
-/** A guess at a first message's `type` from its words, or null when nothing gives it away. */
+/** A guess at a first message's `type` from its words, or null when nothing gives it away. @param {string | null | undefined} text */
 export function guessType(text) {
   return CLUES.find(([, re]) => re.test(text ?? ''))?.[0] ?? null;
 }
 
-/** "Sonnet 5.5 medium" for a model and effort: the table's tier as people read it. */
+/** "Sonnet 5.5 medium" for a model and effort: the table's tier as people read it. @param {string | null | undefined} [model] @param {string | null | undefined} [effort] */
 export function tierLabel(model, effort) {
   const name = CLAUDE_MODELS.find(([id]) => id === model)?.[1] ?? model ?? 'default model';
   return effort ? `${name} ${effort}` : name;
@@ -94,6 +108,11 @@ export function tierLabel(model, effort) {
 /**
  * The "Picked because" line on a minion (#1061). `by` says who chose: 'table' (the table's pick for its type, from the Taskmaster's
  * call or a start with none), a person's name (they set it by hand), or 'step-up' (the Taskmaster changed it later).
+ * @param {string} by
+ * @param {string | null | undefined} type
+ * @param {string | null | undefined} model
+ * @param {string | null | undefined} effort
+ * @param {string | null} [why]
  */
 export function pickReason(by, type, model, effort, why = '') {
   const line = pickLine(by, type, model, effort);
@@ -103,6 +122,7 @@ export function pickReason(by, type, model, effort, why = '') {
   return w ? `${line}: ${w}` : line;
 }
 
+/** @param {string} by @param {string | null | undefined} type @param {string | null | undefined} model @param {string | null | undefined} effort */
 function pickLine(by, type, model, effort) {
   const tier = tierLabel(model, effort);
   if (by === 'step-up') return `changed by the Taskmaster (a stall step-up or someone's ask): ${tier}`;
@@ -115,6 +135,11 @@ function pickLine(by, type, model, effort) {
  * checks each step it names is a TIERS model): Sonnet → (the advisor, during its
  * trial) → Opus medium → Opus high → Fable medium → Fable xhigh ("xhigh stays for a Fable run that failed twice"). Null at the
  * top, with no model set, or a model outside the Claude families. `fable` false: the scheme has Fable off, so Opus high is the top.
+ * @param {string | null | undefined} model
+ * @param {string | null | undefined} effort
+ * @param {boolean} [fable]
+ * @param {string} [today]
+ * @returns {{ model: string, effort: string } | null}
  */
 export function nextStep(model, effort, fable = true, today = new Date().toISOString().slice(0, 10)) {
   const rank = EFFORT_LEVELS.indexOf(effort ?? 'medium');

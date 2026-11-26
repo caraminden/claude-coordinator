@@ -1,28 +1,49 @@
 // The minions list's property filter: one dropdown per key, listing the values people can pick.
 
+/** @typedef {string | number} PropValue */
+/** @typedef {{ value: PropValue, status: string }} PropRegValue */
+/** @typedef {{ key: string, status: string, value_kind: string, values: PropRegValue[] }} PropKey */
+/** @typedef {{ properties?: Record<string, string | number | string[]> }} Propertied */
+/** @typedef {Map<string, Set<PropValue>>} Picks */
+
 /**
  * [{ key, values }] for the scheme's active keys, keys with nothing to pick left out. A list key
  * offers its registry values, archived and proposed ones left out (nothing can carry a proposed
  * one); a person, text or number key offers the values its minions carry.
+ */
+/**
+ * @param {PropKey[]} keys
+ * @param {Propertied[]} tickets
+ * @returns {{ key: string, values: PropValue[] }[]}
  */
 export function filterChoices(keys, tickets) {
   return keys
     .filter((k) => k.status === 'active')
     .map((k) => ({
       key: k.key,
-      values: k.value_kind === 'enum' ? k.values.filter((v) => v.status === 'active').map((v) => v.value) : [...new Set(tickets.flatMap((t) => [t.properties?.[k.key] ?? []].flat()))].sort((a, b) => (typeof a === 'number' ? a - b : String(a).localeCompare(String(b)))),
+      values: k.value_kind === 'enum' ? k.values.filter((v) => v.status === 'active').map((v) => v.value) : [...new Set(tickets.flatMap((t) => [t.properties?.[k.key] ?? []].flat()))].sort((a, b) => (typeof a === 'number' ? a - /** @type {number} */ (b) : String(a).localeCompare(String(b)))),
     }))
     .filter((c) => c.values.length);
 }
 
 /** Whether a minion matches the ticked values: any ticked value of a key, for every key with ticks. */
+/**
+ * @param {Propertied} t
+ * @param {Picks} picks
+ */
 export function matchesPicks(t, picks) {
   return [...picks].every(([key, set]) => [t.properties?.[key] ?? []].flat().some((v) => set.has(v)));
 }
 
 /** For one key, value → how many minions carry it among those the other keys' picks let through. */
+/**
+ * @param {string} key
+ * @param {Propertied[]} tickets
+ * @param {Picks} picks
+ */
 export function valueCounts(key, tickets, picks) {
   const others = new Map([...picks].filter(([k]) => k !== key));
+  /** @type {Map<PropValue, number>} */
   const counts = new Map();
   for (const t of tickets) {
     if (!matchesPicks(t, others)) continue;
@@ -35,7 +56,13 @@ export function valueCounts(key, tickets, picks) {
  * A saved view's picks as a Map of key → Set, for the scheme's keys as they are now: keys no longer
  * active, and archived or proposed values of a list key, drop out quietly.
  */
+/**
+ * @param {Record<string, PropValue[]>} saved
+ * @param {PropKey[]} keys
+ * @returns {Picks}
+ */
 export function viewPicks(saved, keys) {
+  /** @type {Picks} */
   const picks = new Map();
   for (const k of keys) {
     if (k.status !== 'active' || !Object.hasOwn(saved, k.key)) continue;
@@ -47,6 +74,10 @@ export function viewPicks(saved, keys) {
 }
 
 /** Whether two sets of picks tick the same values. */
+/**
+ * @param {Picks} a
+ * @param {Picks} b
+ */
 export function samePicks(a, b) {
-  return a.size === b.size && [...a].every(([key, set]) => b.get(key)?.size === set.size && [...set].every((v) => b.get(key).has(v)));
+  return a.size === b.size && [...a].every(([key, set]) => b.get(key)?.size === set.size && [...set].every((v) => /** @type {Set<PropValue>} */ (b.get(key)).has(v)));
 }

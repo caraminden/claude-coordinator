@@ -213,7 +213,7 @@ export const appRoutes: Route[] = [
       const body = await readJson(req);
       if (!session.uid) throw new HttpError(400, 'Only a person has a welcome');
       if (body?.dismiss === true) welcomeAct(app.store, session.uid, { dismiss: true });
-      else if (CARD_OPTIONS.includes(body?.card)) welcomeAct(app.store, session.uid, { card: body.card });
+      else if (typeof body.card === 'string' && CARD_OPTIONS.includes(body.card)) welcomeAct(app.store, session.uid, { card: body.card });
       else throw new HttpError(400, "Send dismiss: true or one of the practice card's answers");
       return json(res, 200, { welcome: meView(app, session).welcome });
     },

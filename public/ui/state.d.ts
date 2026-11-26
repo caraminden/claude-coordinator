@@ -16,7 +16,8 @@ export interface Tabs {
   element: HTMLElement;
   /** Pick `key` without calling onSelect. */
   set(key: string): void;
-  readonly current: string;
+  /** The picked tab's key; undefined while none is picked (`current` named a key that isn't in `items`, or there are none). */
+  readonly current: string | undefined;
 }
 
 /** A row of tabs. `items` is [key, label] pairs (a label may be a Node); `onSelect(key)` runs on every click (the picked tab's too) and on an arrow key. */

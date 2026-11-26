@@ -20,4 +20,4 @@ Look for:
 
 For each pattern seen more than once: how many turns, their ids, the likely cause (the prompt, the system text, the model, or the app's own check being too strict) and the change you'd make, as the file and the text to change in the app's repo. A one-off is noise unless it is harmful.
 
-Nothing worth changing: reply in one line with the turn count and dismiss yourself (close_self). Otherwise write each change as a short handoff in this scheme's shared handoffs/, with no players' words in it, and message your Taskmaster their paths with wake: false; then post one multi-select card of which to start, one option per handoff, and stay open in state ready.
+Nothing worth changing: reply in one line with the turn count and dismiss yourself (close_self). Otherwise write each change as a short handoff in this scheme's shared handoffs/, with no players' words in it, and message your Taskmaster their paths with wake: false; then post one multi-select card of which to start, one option per handoff, each with its `start` (a plain pick starts it with no turn), and stay open in state ready.

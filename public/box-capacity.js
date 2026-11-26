@@ -4,31 +4,43 @@
 import { api, h, pacificStamp, poller } from './base.js';
 import { emptyCard, statTiles, toneChip } from './look.js';
 
+/** @import { BoxCapacity, BoxRow } from './types.js' */
+
 const READ_MS = 60_000;
 const SVG = 'http://www.w3.org/2000/svg';
+/**
+ * @param {string} tag
+ * @param {Record<string, string | number>} [attrs]
+ * @param {...(Node | string)} kids
+ */
 const svg = (tag, attrs = {}, ...kids) => {
   const el = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   el.append(...kids);
   return el;
 };
-const plural = (n, word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
-const load = (v) => (v === null ? '–' : v >= 100 ? `${Math.round(v)}` : `${Math.round(v * 10) / 10}`);
-const pct = (r) => (r.stallOf ? `${Math.round((r.stalls / r.stallOf) * 1000) / 10}%` : '–');
+const plural = (/** @type {number} */ n, /** @type {string} */ word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
+const load = (/** @type {number | null} */ v) => (v === null ? '–' : v >= 100 ? `${Math.round(v)}` : `${Math.round(v * 10) / 10}`);
+const pct = (/** @type {Pick<BoxRow, 'stalls' | 'stallOf'>} */ r) => (r.stallOf ? `${Math.round((r.stalls / r.stallOf) * 1000) / 10}%` : '–');
+/** @type {BoxRow} */
 const NONE = { count: 0, typical: null, high: null, stalls: 0, stallOf: 0 };
 const TICKS = [0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000];
 /** A dot this many px from the pointer is the one it means. */
 const REACH = 18;
 
 /** The panel; `page` is the pane it sits on. `resume` starts its reads, `dragging` is true while a person holds the slider. */
-export function capacityPanel(page) {
+export function capacityPanel(/** @type {HTMLElement} */ page) {
+  /** @type {BoxCapacity | null} */
   let d = null;
+  /** @type {string | null} */
   let failed = null;
+  /** @type {number | null} */
   let pool = null;
-  let n = null; // the slider's number; the pool's size until a person moves it
+  let n = 0; // the slider's number; the pool's size until a person moves it (set by draw)
   let moved = false;
   let held = false;
   let owed = false; // news came while a person held the slider: drawn when they let go
+  /** @type {{ pick: () => void } | null} */
   let chart = null; // what a move of the slider updates
   let width = 0;
 
@@ -58,10 +70,12 @@ export function capacityPanel(page) {
   const title = h('h4', {}, 'How many minions fit');
   const el = h('section', { class: 'st-tile wide st-lines st-fit loading', 'data-tile': 'fit' }, title, head, body);
 
-  const near = () => d.near[n] ?? NONE;
-  const most = () => Math.max(d.near.length - 1, pool ?? 0, 1);
+  // Nothing here runs before a read: draw() and the slider come once `d` is in.
+  const data = () => /** @type {BoxCapacity} */ (d);
+  const near = () => data().near[n] ?? NONE;
+  const most = () => Math.max(data().near.length - 1, pool ?? 0, 1);
 
-  const pick = (to) => {
+  const pick = (/** @type {number} */ to) => {
     moved = true;
     n = to;
     drawPick();
@@ -69,6 +83,7 @@ export function capacityPanel(page) {
 
   /** What the slider's number changes: its words, and which dots are near it. */
   const drawPick = () => {
+    const d = data();
     range.max = String(most());
     range.value = String(n);
     range.style.setProperty('--at', `${(n / most()) * 100}%`);
@@ -80,8 +95,8 @@ export function capacityPanel(page) {
       few
         ? emptyCard('Not enough readings', `${plural(r.count, 'reading')} near ${plural(n, 'turn')} at once; ${d.enough} say something.`, { mark: '·', hue: 'waiting' })
         : statTiles(
-            [load(r.typical), 'typical load', r.typical > d.cores ? 'waiting' : 'running'],
-            [load(r.high), '1 in 10 readings above', r.high > d.cores * 2 ? 'waiting' : 'running'],
+            [load(r.typical), 'typical load', /** @type {number} */ (r.typical) > d.cores ? 'waiting' : 'running'],
+            [load(r.high), '1 in 10 readings above', /** @type {number} */ (r.high) > d.cores * 2 ? 'waiting' : 'running'],
             [pct(r), `of readings stalled (${r.stalls} of ${r.stallOf})`, r.stalls > d.stallShare * r.stallOf ? 'danger' : 'running'],
             [r.count, `readings near ${n}`, 'running'],
           ),
@@ -90,6 +105,7 @@ export function capacityPanel(page) {
   };
 
   const drawHead = () => {
+    const d = data();
     const { turns, past } = d.comfortable;
     if (turns === null) {
       const words = past === null ? 'Not enough readings' : `Loaded even at ${plural(past, 'turn')} at once`;
@@ -102,6 +118,7 @@ export function capacityPanel(page) {
   };
 
   const drawNotes = () => {
+    const d = data();
     const old = d.waiting.count;
     const all = d.readings.length;
     notes.replaceChildren(
@@ -119,6 +136,7 @@ export function capacityPanel(page) {
   };
 
   const drawTable = () => {
+    const d = data();
     table.replaceChildren(
       h('summary', {}, 'As a table'),
       h(
@@ -139,6 +157,7 @@ export function capacityPanel(page) {
   const drawChart = () => {
     const W = width;
     if (!W || !d?.readings.length) return;
+    const drawn = d; // not null from here, which the callbacks below can't tell
     const H = W < 520 ? 300 : 340;
     const [L, R, T, B] = [36, 10, 22, 40];
     const max = most();
@@ -146,27 +165,28 @@ export function capacityPanel(page) {
     const lo = Math.max(0.1, Math.min(1, ...loads));
     const hi = Math.max(d.cores * 2, ...loads) * 1.15;
     const step = (W - L - R) / (max + 1);
-    const x = (t) => L + (t + 0.5) * step;
-    const y = (v) => T + (1 - Math.log(Math.max(v, lo) / lo) / Math.log(hi / lo)) * (H - T - B);
+    const x = (/** @type {number} */ t) => L + (t + 0.5) * step;
+    const y = (/** @type {number} */ v) => T + (1 - Math.log(Math.max(v, lo) / lo) / Math.log(hi / lo)) * (H - T - B);
     const base = H - B;
     const every = [1, 2, 5, 10].find((s) => step * s >= 26) ?? 20;
     const { turns: fits } = d.comfortable;
     // Dots by number of turns, so a move of the slider lights whole columns; a spread inside the column keeps them apart.
+    /** @type {Map<number, SVGElement>} */
     const columns = new Map();
     const dots = d.readings.map(([at, turns, l, used, stall], i) => {
       const cx = x(turns) + (((i * 37) % 11) / 11 - 0.45) * step * 0.7;
       const cy = y(l);
-      const bad = stall !== null && stall >= d.stallPct;
+      const bad = stall !== null && stall >= drawn.stallPct;
       if (!columns.has(turns)) columns.set(turns, svg('g', { class: 'st-fit-col' }));
-      columns.get(turns).append(bad ? svg('path', { class: 'st-fit-stall', d: `M${cx.toFixed(1)},${(cy - 6).toFixed(1)}l6,6l-6,6l-6,-6z` }) : svg('circle', { class: 'st-fit-dot', cx: cx.toFixed(1), cy: cy.toFixed(1), r: 3 }));
+      /** @type {SVGElement} */ (columns.get(turns)).append(bad ? svg('path', { class: 'st-fit-stall', d: `M${cx.toFixed(1)},${(cy - 6).toFixed(1)}l6,6l-6,6l-6,-6z` }) : svg('circle', { class: 'st-fit-dot', cx: cx.toFixed(1), cy: cy.toFixed(1), r: 3 }));
       return { cx, cy, at, turns, l, used, stall, bad };
     });
     // The typical load's line: whole where a number has enough readings near it, dashed where it has a few.
-    const path = (least) => {
+    const path = (/** @type {number} */ least) => {
       let out = '';
       let pen = false;
-      d.near.forEach((r, t) => {
-        if (r.count >= least) out += `${pen ? 'L' : 'M'}${x(t).toFixed(1)},${y(r.typical).toFixed(1)}`;
+      drawn.near.forEach((r, t) => {
+        if (r.count >= least) out += `${pen ? 'L' : 'M'}${x(t).toFixed(1)},${y(/** @type {number} */ (r.typical)).toFixed(1)}`;
         pen = r.count >= least;
       });
       return out;
@@ -191,7 +211,7 @@ export function capacityPanel(page) {
       svg('line', { class: 'st-fit-cores', x1: L, x2: W - R, y1: y(d.cores), y2: y(d.cores) }),
       svg('text', { class: 'st-fit-tick halo', x: W - R, y: y(d.cores) - 5, 'text-anchor': 'end' }, `${d.cores} cores`),
       // Only under numbers with enough readings: a gap in them is a gap in the bar.
-      ...d.near.flatMap((r, t) => (fits !== null && t <= fits && r.count >= d.enough ? [svg('rect', { class: 'st-fit-ok', x: L + t * step, y: base + 2, width: step + 0.5, height: 4 })] : [])),
+      ...d.near.flatMap((r, t) => (fits !== null && t <= fits && r.count >= drawn.enough ? [svg('rect', { class: 'st-fit-ok', x: L + t * step, y: base + 2, width: step + 0.5, height: 4 })] : [])),
       ...columns.values(),
       svg('path', { class: 'st-fit-halo', d: path(d.enough) }),
       svg('path', { class: 'st-fit-line few', d: path(4) }),
@@ -200,7 +220,7 @@ export function capacityPanel(page) {
       ring,
     );
     const tip = h('div', { class: 'st-fit-tip', hidden: true });
-    const at = (e) => {
+    const at = (/** @type {MouseEvent} */ e) => {
       const box = root.getBoundingClientRect();
       return [e.clientX - box.left, e.clientY - box.top];
     };
@@ -208,8 +228,9 @@ export function capacityPanel(page) {
       tip.hidden = true;
       ring.setAttribute('visibility', 'hidden');
     };
-    const hover = (e) => {
+    const hover = (/** @type {MouseEvent} */ e) => {
       const [px, py] = at(e);
+      /** @type {(typeof dots)[number] | null} */
       let best = null;
       let gap = REACH;
       for (const dot of dots) {
@@ -217,8 +238,8 @@ export function capacityPanel(page) {
         if (far < gap) [best, gap] = [dot, far];
       }
       if (!best) return hide();
-      ring.setAttribute('cx', best.cx);
-      ring.setAttribute('cy', best.cy);
+      ring.setAttribute('cx', String(best.cx));
+      ring.setAttribute('cy', String(best.cy));
       ring.setAttribute('visibility', 'visible');
       tip.replaceChildren(h('b', {}, pacificStamp(best.at)), h('span', {}, `${plural(best.turns, 'turn')} running, load ${load(best.l)}`), h('span', { class: best.bad ? 'bad' : 'muted' }, `Memory ${Math.round(best.used)}% used${best.stall === null ? '' : `, stall ${best.stall}%`}`));
       tip.hidden = false;
@@ -226,9 +247,9 @@ export function capacityPanel(page) {
       const above = best.cy - tip.offsetHeight - 14;
       tip.style.top = `${above >= 0 ? above : best.cy + 14}px`;
     };
-    root.addEventListener('pointermove', hover);
+    root.addEventListener('pointermove', /** @type {EventListener} */ (hover));
     root.addEventListener('pointerleave', hide);
-    root.addEventListener('click', (e) => {
+    root.addEventListener('click', (/** @type {MouseEvent} */ e) => {
       hover(e);
       pick(Math.max(0, Math.min(max, Math.floor((at(e)[0] - L) / step))));
     });
@@ -272,8 +293,9 @@ export function capacityPanel(page) {
   };
 
   page.addEventListener('pool', (e) => {
-    if (pool === e.detail) return;
-    pool = e.detail;
+    const { detail } = /** @type {CustomEvent<number | null>} */ (e);
+    if (pool === detail) return;
+    pool = detail;
     if (held) owed = true;
     else if (d) draw();
   });
@@ -287,6 +309,7 @@ export function capacityPanel(page) {
   const read = poller(async () => {
     if (!page.isConnected) return false;
     try {
+      /** @type {BoxCapacity} */
       const next = await api('api/box-capacity');
       const same = d && !failed && next.readings.at(-1)?.[0] === d.readings.at(-1)?.[0] && next.readings.length === d.readings.length;
       failed = null;
@@ -295,13 +318,11 @@ export function capacityPanel(page) {
       if (held) owed = true;
       else draw();
     } catch (err) {
-      failed = err.message;
+      failed = /** @type {Error} */ (err).message;
       if (held) owed = true;
       else draw();
     }
   }, READ_MS);
   draw();
-  el.resume = () => read.now();
-  el.dragging = () => held;
-  return el;
+  return Object.assign(el, { resume: () => read.now(), dragging: () => held });
 }

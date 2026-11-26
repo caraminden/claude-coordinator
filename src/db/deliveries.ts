@@ -1,17 +1,39 @@
 // The one outbox's table (ADR 0021, #1385): every saved "send this later" row. src/outbox.ts is the only writer.
 import type { Store } from '../db.ts';
+import type { AlertBatch } from '../alert-wakes.ts';
+import type { Armed } from '../ci-armed.ts';
+import type { Relay } from '../wake.ts';
 import { inScope, scoped } from '../read-scope.ts';
 
 export type DeliveryState = 'waiting' | 'held' | 'sending' | 'sent' | 'dropped' | 'failed';
-export type Delivery = {
+
+/** Each outbox kind's two JSON columns: `when_arg` (what it waits on) and `payload` (what it sends). Its module writes both. */
+type Shapes = {
+  /** src/wake.ts: wake the minion once `when_arg`'s commit (null: the server's next commit) is live. `text` and `light` are set when it is met. */
+  wake_when_live: { when_arg: string | null; payload: { reason: string; since: string | null; light?: boolean; text?: string } };
+  /** src/wake.ts: a note `ticket` sends once its commit `when_arg` ships or is live; `batch` groups the ones met together. */
+  relay: { when_arg: string; payload: { ticket: number; to: Relay['to']; text: string; batch?: number } };
+  /** src/wake.ts: a sealed minion's brief, held until minion `after`'s work is live or merged. `why` is set when it is met. */
+  chain: { when_arg: { after: number; base: string | null; since?: number }; payload: { message: string; from: string; reason: string; told?: true; why?: string } };
+  /** src/wake.ts: wake_at, due at `when_arg` (ms). */
+  wake_at: { when_arg: number; payload: { note: string; setBy: string } };
+  /** src/ci-health.ts: wake once the runners labelled `when_arg` are back. `text` is set when it is met. */
+  runners_back: { when_arg: string; payload: { reason: string; text?: string } };
+  /** src/ci-armed.ts: a card or Taskmaster message armed for CI on commit `when_arg`. */
+  ci_armed: { when_arg: string; payload: Armed };
+  /** src/alert-wakes.ts: one scheme's batch of alerts for its Taskmaster. */
+  alert: { when_arg: null; payload: AlertBatch };
+  /** server.ts: news from a test box job. */
+  box_job: { when_arg: number; payload: { text: string } };
+};
+export type DeliveryKind = keyof Shapes;
+
+type DeliveryBase = {
   id: number;
   project_id: number;
-  kind: string;
   to_kind: 'minion' | 'taskmaster';
   to_id: number;
   when_kind: string;
-  when_arg: any;
-  payload: any;
   set_by: string;
   state: DeliveryState;
   due: number | null;
@@ -26,13 +48,20 @@ export type Delivery = {
   created_at: number;
   updated_at: number;
 };
-export type NewDelivery = Pick<Delivery, 'project_id' | 'kind' | 'to_kind' | 'to_id' | 'when_kind' | 'set_by'> & Partial<Pick<Delivery, 'id' | 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'dedupe_key' | 'origin' | 'reason'>>;
-export type DeliveryPatch = Partial<Pick<Delivery, 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason' | 'event_id'>>;
+type AnyDelivery = { [P in DeliveryKind]: DeliveryBase & { kind: P } & Shapes[P] }[DeliveryKind];
+type AnyNewDelivery = {
+  [P in DeliveryKind]: Pick<DeliveryBase, 'project_id' | 'to_kind' | 'to_id' | 'when_kind' | 'set_by'> & Partial<Pick<DeliveryBase, 'id' | 'state' | 'due' | 'met_at' | 'dedupe_key' | 'origin' | 'reason'>> & { kind: P; when_arg?: Shapes[P]['when_arg']; payload?: Shapes[P]['payload'] };
+}[DeliveryKind];
+/** A row of kind K (any kind by default): its `kind` says which `when_arg` and `payload` it holds. */
+export type Delivery<K extends DeliveryKind = DeliveryKind> = Extract<AnyDelivery, { kind: K }>;
+export type NewDelivery<K extends DeliveryKind = DeliveryKind> = Extract<AnyNewDelivery, { kind: K }>;
+export type DeliveryPatch = Partial<Pick<DeliveryBase, 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason' | 'event_id'> & Pick<Delivery, 'when_arg' | 'payload'>>;
+export type DeliveryQuery = { kind?: DeliveryKind; to?: number; toKind?: string; states?: DeliveryState[]; dedupe?: string };
 
 // The states of a row not yet sent or dropped, which a read scope keeps.
 const LIVE: DeliveryState[] = ['waiting', 'held', 'sending'];
 /** A row as stored: both JSON columns still text. */
-type DeliveryRow = Omit<Delivery, 'when_arg' | 'payload'> & { when_arg: string; payload: string };
+type DeliveryRow = DeliveryBase & { kind: DeliveryKind; when_arg: string; payload: string };
 const row = (r: DeliveryRow): Delivery => ({ ...r, when_arg: JSON.parse(r.when_arg), payload: JSON.parse(r.payload) });
 const PATCHABLE = new Set(['when_arg', 'payload', 'state', 'due', 'met_at', 'attempts', 'last_error', 'reason', 'event_id']);
 
@@ -56,7 +85,7 @@ export const deliveryQueries = {
   },
 
   /** Rows in id order, narrowed by kind, target (a minion's id unless toKind says otherwise), states or dedupe key. */
-  listDeliveries(this: Store, q: { kind?: string; to?: number; toKind?: string; states?: DeliveryState[]; dedupe?: string } = {}): Delivery[] {
+  listDeliveries(this: Store, q: DeliveryQuery = {}): Delivery[] {
     // In a read scope (src/read-scope.ts) every row still to go is read once (or every row in the states asked, which the
     // prune keeps short), and each ask for some of them filters that: a scheme's list asked twice a minion (#1527).
     if (inScope(this.db) && q.dedupe == null && q.states?.length) {

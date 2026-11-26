@@ -70,6 +70,13 @@ quoted whole from your system prompt) plus:
 loaded): the Grunt can't resolve it itself. Name lenses instead of "by the diff" only to add one
 the triggers miss. Give it the code, not your view of it: no summary of what you think is fine.
 
+**A change that fixes named findings** (IDs your brief handed over from a review, a retro or a bug
+list, like `HP14`): add its proof list to the brief, headed `Proofs:`, one line for every ID the
+brief named, fixed or not: `<ID>: <test file>: <test name>`, or `<ID>: no test: <why>`, or
+`<ID>: not fixed: <why>`, and the path of the brief's file (a handoff) when it has one. The reviewer
+checks it (the lenses' "Fix proofs"), and the base check in
+`references/review-extras.md` shows which of those tests are red on main.
+
 **Open `references/review-extras.md` when one applies:**
 - **A feeder** (your base is `build/<n>`): reviewed on the build's tip, with two more brief lines.
 - **Codex second opinion (light and deep):** run `citadel-codex-review --check` on every light or deep review; open it when that prints `ready`.
@@ -170,6 +177,12 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   (`Base check: 2 red, 1 passes on base (refactor's safety net), 0 skipped`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
 - **Fresh eyes (features), a common line, High route included:** one line under the Risk line: `Fresh eyes: <n> found, <n> fixed` with each unfixed one in "Not fixed", and the ready note says it ran. A feature that skipped it says why in the line: `Fresh eyes: skipped, small (2 files, 90 lines)`.
+- **Proofs (a change that fixes named findings):** under the Risk line, `Proofs: <n> of <m> red on main`,
+  then the brief's list as the review left it, each test marked with its base-check result. A test the
+  base check didn't show red (`PASSES ON BASE`, `skipped`, or one main already has, which it never runs)
+  counts as `no test`, with its why, unless you ran it red on main yourself as `references/ship.md`'s
+  "A test proves it" does. The ready
+  note carries the count (`risk medium: tab fixes, proofs 9/13`).
 - **Verifier, when it ran:** `Verifier: <n> found, <n> fixed, <n> wrong` under the Risk line; each wrong one with its reason goes in "Not fixed".
 - **Done lines (features):** when your first reply showed done lines, tick each in the ready note (`done 5/5`) and name any not met, with why, in the report line. Bugs, chores and research have none.
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the

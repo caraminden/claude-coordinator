@@ -44,8 +44,8 @@ export class OutsideSpend {
     this.store = store;
   }
 
-  setCap(projectId: number, cap: number | null) {
-    if (cap !== null && (!Number.isFinite(cap) || cap <= 0 || cap > 1_000_000)) throw new HttpError(400, 'cap_usd is a number above 0, or null for none');
+  setCap(projectId: number, cap: unknown) {
+    if (cap !== null && (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 0 || cap > 1_000_000)) throw new HttpError(400, 'cap_usd is a number above 0, or null for none');
     this.store.setSetting(capKey(projectId), cap);
   }
 

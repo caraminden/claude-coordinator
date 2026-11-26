@@ -102,6 +102,7 @@ nothing? Write `No findings.` Never invent one to fill the list.
 | Error handling | a `try`/`catch`, `.catch`, error callback, `??` or `\|\|` default, `.ok()`, `unwrap_or`, an HTTP status or error message |
 | Comments | a comment, docstring or doc that describes code, added or edited |
 | Tests | logic changed (not only copy, styles or docs), or tests added or changed |
+| Fix proofs | the brief has a `Proofs:` list: the change fixes findings the minion's brief named |
 | New types | a new type, class, interface, record shape, table or JSON format |
 | Access and secrets | a file Project facts lists as auth or access control, or code that reads a secret or decides who may do what |
 | Smells | a new module, or over about 100 new lines of logic |
@@ -164,6 +165,20 @@ sleep, a copied harness. Read each one against the code it names: a new file tha
 file can't, or drives it through another seam, isn't a finding. Each that holds is a Should fix, never Must
 fix (it costs lines and minutes, it doesn't break the change), and names the file to put the case in or the
 helper to use, as the script's line does.
+
+#### Fix proofs
+
+Each line of the brief's `Proofs:` list claims a finding is proven, or says why it isn't. Check every
+line against the diff:
+
+- `<ID>: <test>`: the test is in the diff or on main, and it drives the behaviour the finding
+  names, so it would fail with the fix reverted. A test that reads the source text, or asserts on
+  something the fix didn't change, proves nothing: Should fix, naming the case it should drive.
+- `<ID>: no test` with no why, or a why that doesn't say what stops a test (a screenshot-proven UI
+  change, a race no test can time), and `<ID>: not fixed` with no why: Must fix. The why is what
+  makes an unproven fix a choice someone made rather than one nobody noticed.
+- An ID with no line that the minion's brief (the file the review brief names) or a commit message
+  names: Must fix.
 
 #### New types
 

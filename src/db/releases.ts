@@ -57,6 +57,12 @@ export const releaseQueries = {
     return rows.map((r) => ({ project_id: Number(r.project_id), created_at: Number(r.created_at), text: String(JSON.parse(r.data).text ?? '') }));
   },
 
+  /** A minion's newest ship note ("Shipped …" or "Merged into …"), for its risk label on a cabal board (#2090). */
+  lastShipNote(this: Store, ticketId: number): string | null {
+    const r = this.db.prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'note' AND (data LIKE '{"text":"Shipped %' OR data LIKE '{"text":"Merged %') ORDER BY id DESC LIMIT 1`).get(ticketId) as { data: string } | undefined;
+    return r ? String(JSON.parse(r.data).text ?? '') : null;
+  },
+
   /** Record a release of a scheme's target (src/releases.ts). */
   addRelease(this: Store, r: Omit<ReleaseRow, 'id'>): number {
     return Number(this.db.prepare('INSERT INTO releases (project_id, target, version, changes, started_at, live_at, outcome, stages) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(r.project_id, r.target, r.version, r.changes, r.started_at, r.live_at, r.outcome, r.stages).lastInsertRowid);

@@ -9,12 +9,22 @@ import { api, h, icon, tintTitleBar } from './base.js';
 import { canBack, canForward, goBack, goForward, replaceHash } from './navstack.js';
 import { FRAME } from './rail.js';
 
+/** @typedef {{ left: number; top: number; width: number; height: number }} Rect */
+/** @typedef {{ title: string; bar: Rect | null; controls: unknown; color: string | null; backdrop: string | null }} BarMsg What a frame's page last said of its bar. */
+
+/** @type {Map<string, HTMLIFrameElement>} */
 const frames = new Map();
+/** @type {HTMLDivElement | null} */
 let box = null;
+/** @type {HTMLDivElement | null} */
 let probe = null; // the title bar strip's area (style.css), to measure
+/** @type {HTMLSpanElement | null} */
 let nav = null; // Citadel's ‹ › ×, over the frame's end
+/** @type {HTMLDivElement | null} */
 let strip = null; // an app with no .cui-topbar: its icon and name in the title bar strip, beside ‹ › ×
+/** @type {HTMLDivElement | null} */
 let drag = null; // the frame's .cui-topbar as the window's drag regions (mirrorBar)
+/** @type {WeakMap<HTMLIFrameElement, BarMsg>} */
 const bars = new WeakMap(); // frame → its page's last bar message (rail.js reportBar): it may be on another origin
 
 /**
@@ -32,24 +42,32 @@ function fit() {
   document.documentElement.classList.toggle('frame-topbar', !!bar);
   const name = frame.dataset.app;
   const entry = railEntry(name);
-  strip.replaceChildren(h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }), h('b', {}, appTitle(frame)));
+  /** @type {HTMLElement} */ (strip).replaceChildren(h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }), h('b', {}, appTitle(frame)));
   // In the installed app the window controls take the bar's colour (under a modal's backdrop), or the strip's.
-  tintTitleBar(bar && got.color, got?.backdrop);
+  tintTitleBar(bar && /** @type {BarMsg} */ (got).color, /** @type {string | undefined} */ (got?.backdrop));
   mirrorBar(got, frame);
   if (!bar) return;
-  const area = probe.getBoundingClientRect();
-  const left = box.getBoundingClientRect().left;
-  const end = nav.getBoundingClientRect();
+  const area = /** @type {HTMLElement} */ (probe).getBoundingClientRect();
+  const left = /** @type {HTMLElement} */ (box).getBoundingClientRect().left;
+  const end = /** @type {HTMLElement} */ (nav).getBoundingClientRect();
   const vars = { 'strip-h': area.height, 'strip-start': Math.max(0, area.left - left), 'strip-end': innerWidth - end.left, 'strip-row': end.height, 'safe-top': area.top };
-  frame.contentWindow.postMessage({ protocol: FRAME, type: 'strip', vars }, '*');
+  /** @type {Window} */ (frame.contentWindow).postMessage({ protocol: FRAME, type: 'strip', vars }, '*');
 }
 
-const railEntry = (name) => document.querySelector(`.citadel-rail a[data-app="${CSS.escape(name)}"]`);
-/** A frame's app as people know it: its rail label, else its page's title, else its name. */
+/** @param {string | undefined} name */
+const railEntry = (name) => document.querySelector(`.citadel-rail a[data-app="${CSS.escape(/** @type {string} */ (name))}"]`);
+/**
+ * A frame's app as people know it: its rail label, else its page's title, else its name.
+ * @param {HTMLIFrameElement} frame
+ */
 const appTitle = (frame) => railEntry(frame.dataset.app)?.querySelector('.label')?.textContent || bars.get(frame)?.title || frame.dataset.app;
 
-/** A rectangle from a frame's message, or null if it isn't one. */
-const rect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(r[k])) ? r : null);
+/**
+ * A rectangle from a frame's message, or null if it isn't one.
+ * @param {Record<string, unknown> | null | undefined} r
+ * @returns {Rect | null}
+ */
+const rect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(r[k])) ? /** @type {Rect} */ (r) : null);
 /**
  * The installed app's window takes its drag regions from this page only, never from a frame (#667): the frame's
  * own app-region did nothing, so a click on its bar's buttons dragged the window, unless Citadel's page beneath
@@ -57,27 +75,37 @@ const rect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number
  * controls (base.css's list). Later regions win, so #frames, after Citadel's page, overrides the page's regions
  * beneath; the box sits before .frame-nav, so ‹ › × stay clickable. While a modal dialog is open over the bar
  * (#772) only the title bar strip above it drags, so the dialog's own head and ✕ take clicks.
+ * @param {BarMsg | undefined} got
+ * @param {HTMLIFrameElement} frame
  */
 function mirrorBar(got, frame) {
   const r = rect(got?.bar);
-  drag.hidden = !r;
-  if (!r) return drag.replaceChildren();
+  const dragEl = /** @type {HTMLDivElement} */ (drag);
+  dragEl.hidden = !r;
+  if (!r) return dragEl.replaceChildren();
+  const g = /** @type {BarMsg} */ (got);
   const fr = frame.getBoundingClientRect();
+  /**
+   * @param {HTMLElement} el
+   * @param {Rect} b
+   * @param {number} x
+   * @param {number} y
+   */
   const place = (el, b, x, y) => (Object.assign(el.style, { left: `${x + b.left}px`, top: `${y + b.top}px`, width: `${b.width}px`, height: `${b.height}px` }), el);
-  if (got.backdrop !== null) {
-    const area = probe.getBoundingClientRect();
+  if (g.backdrop !== null) {
+    const area = /** @type {HTMLElement} */ (probe).getBoundingClientRect();
     const left = Math.max(area.left, fr.left);
-    place(drag, { left, top: area.top, width: Math.max(0, area.right - left), height: area.height }, 0, 0);
-    return drag.replaceChildren();
+    place(dragEl, { left, top: area.top, width: Math.max(0, area.right - left), height: area.height }, 0, 0);
+    return dragEl.replaceChildren();
   }
-  place(drag, r, fr.left, fr.top);
-  const controls = Array.isArray(got.controls) ? got.controls.map(rect).filter(Boolean) : [];
-  drag.replaceChildren(...controls.map((c) => place(h('div'), c, -r.left, -r.top)));
+  place(dragEl, r, fr.left, fr.top);
+  const controls = Array.isArray(g.controls) ? /** @type {Rect[]} */ (g.controls.map(rect).filter(Boolean)) : [];
+  dragEl.replaceChildren(...controls.map((c) => place(h('div'), c, -r.left, -r.top)));
 }
 
 if (typeof window !== 'undefined') {
   addEventListener('resize', fit);
-  navigator.windowControlsOverlay?.addEventListener('geometrychange', fit);
+  /** @type {Navigator & { windowControlsOverlay?: EventTarget }} */ (navigator).windowControlsOverlay?.addEventListener('geometrychange', fit);
   document.addEventListener('visibilitychange', () => stale.size && catchUp());
   // A frame's page (rail.js): its bar, and Alt+` while it has the keys (appswitch.js). Only from Citadel's own frames.
   addEventListener('message', (e) => {
@@ -87,8 +115,8 @@ if (typeof window !== 'undefined') {
     if (d.type === 'bar') {
       bars.set(frame, { title: typeof d.title === 'string' ? d.title : '', bar: rect(d.bar), controls: d.controls, color: typeof d.color === 'string' ? d.color : null, backdrop: typeof d.backdrop === 'string' ? d.backdrop : null });
       if (!frame.hidden) fit();
-    } else if (d.type === 'held' && stale.has(frame.dataset.app)) frame.dataset.update = 'held';
-    else if (d.type === 'reloading' && stale.has(frame.dataset.app)) frame.dataset.update = 'reloading';
+    } else if (d.type === 'held' && stale.has(/** @type {string} */ (frame.dataset.app))) frame.dataset.update = 'held';
+    else if (d.type === 'reloading' && stale.has(/** @type {string} */ (frame.dataset.app))) frame.dataset.update = 'reloading';
     else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
     else if (d.type === 'blur') frameKey(null);
     else if (d.type === 'leave') leave();
@@ -97,7 +125,7 @@ if (typeof window !== 'undefined') {
 
 /** Citadel's last own view, where the rail's Citadel entry goes (rail.js; its stored copy before the rail is drawn). */
 function ownView() {
-  const back = document.querySelector('.citadel-rail a[data-app=""]');
+  const back = /** @type {HTMLAnchorElement | null} */ (document.querySelector('.citadel-rail a[data-app=""]'));
   if (back) return new URL(back.href).hash || '#/';
   const key = `citadel-last-view:${new URL('./', import.meta.url).pathname}`; // rail.js viewKey
   try {
@@ -120,6 +148,7 @@ function leave() {
  * (`away` unset) or comes back after `AWAY` ms or more out of sight; a shorter trip (a photo picker, a quick switch) keeps it.
  */
 export const AWAY = 30_000;
+/** @param {{ phoneApp: boolean; hash: string; away?: number }} at */
 export const opensOnCitadel = ({ phoneApp, hash, away }) => phoneApp && /^#\/apps\//.test(hash) && (away === undefined || away >= AWAY);
 
 if (typeof window !== 'undefined') {
@@ -158,13 +187,16 @@ export const ARTIFACT_ALLOW = ['fullscreen *', ...NO_CLIPBOARD].join('; ');
 export const FRAME_ALLOW = [...['microphone', 'camera', 'fullscreen'].map((f) => `${f} *`), ...NO_CLIPBOARD].join('; ');
 
 /** A contraption frame's `allow`: clipboard writes only for an app whose citadel-app.json asks for them (clipboardApps, below). */
+/** @param {boolean} clipboard */
 export const frameAllow = (clipboard) => (clipboard ? FRAME_ALLOW.replace("clipboard-write 'none'", 'clipboard-write *') : FRAME_ALLOW);
 
 // The apps whose citadel-app.json asks for clipboard writes, fetched once when the first frame opens. A frame made before the
 // answer starts with none, and one that now gets more reloads with them, since a loaded page keeps the ones it started with.
 // Only that once: a later deploy asking for the clipboard reaches its frame at the next reload, not under someone using it.
 // Fetched here, not taken from rail.js: rail.js is served to apps, so its exports and events are their contract.
+/** @type {Set<string>} */
 let clipboardApps = new Set();
+/** @param {string} name */
 const appClipboard = (name) => clipboardApps.has(name);
 let asked = false;
 function askClipboard() {
@@ -172,7 +204,7 @@ function askClipboard() {
   asked = true;
   api('api/contraptions/mine').then(
     (mine) => {
-      clipboardApps = new Set((mine ?? []).flatMap((c) => (c?.clipboard ? [c.name] : [])));
+      clipboardApps = new Set((mine ?? []).flatMap((/** @type {{ name: string; clipboard?: boolean } | null} */ c) => (c?.clipboard ? [c.name] : [])));
       for (const [name, frame] of frames) {
         const allow = frameAllow(appClipboard(name));
         if (frame.allow === allow) continue;
@@ -186,7 +218,11 @@ function askClipboard() {
   ); // no answer: the next frame asks again
 }
 
-/** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */
+/**
+ * Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there.
+ * @param {string} name
+ * @param {string | null} [src]
+ */
 export function showFrame(name, src) {
   askClipboard();
   if (!box) {
@@ -219,7 +255,7 @@ export function showFrame(name, src) {
       stale.delete(name);
       dismissed.delete(name);
       showOffer();
-      delete frame.dataset.update;
+      delete (/** @type {HTMLIFrameElement} */ (frame).dataset.update);
       fit();
     });
     box.append(frame);
@@ -250,7 +286,7 @@ export function dropFrames() {
   loadedAt.clear();
   stale.clear();
   dismissed.clear();
-  clearTimeout(askTimer);
+  clearTimeout(/** @type {number | undefined} */ (askTimer));
 }
 
 /**
@@ -260,6 +296,7 @@ export function dropFrames() {
  * its page (rail.js) is asked to reload itself where it is, and says `held` instead while it holds unsent text. A frame on
  * screen, or held, gets a one-click offer; leaving it or hiding the window asks it again. Pages without Citadel's rail.js
  * never answer, so they only get the offer.
+ * @param {string} name
  */
 export function appDeployed(name) {
   const frame = frames.get(name);
@@ -273,6 +310,7 @@ export function appDeployed(name) {
 /**
  * Deploys the stream didn't bring (it has no replay: a laptop asleep, a phone page frozen), from the rail's list
  * (GET api/contraptions/mine, each app's `deployed`): a frame loaded before its app's last deploy catches up as above.
+ * @param {unknown} mine
  */
 export function deploysSince(mine) {
   for (const app of Array.isArray(mine) ? mine : []) {
@@ -289,12 +327,15 @@ const loadedAt = new Map(); // when each app's frame last loaded its page (this 
 const stale = new Set(); // apps whose open frame runs an older version than the live one
 const dismissed = new Set(); // their offer put away with ✕: they still reload out of sight
 const ASK_EVERY = 5000; // a held frame is asked again: its text may have been sent since
+/** @type {ReturnType<typeof setTimeout> | null} */
 let askTimer = null;
+/** @type {HTMLDivElement | null} */
 let offer = null;
+/** @param {HTMLIFrameElement} frame */
 const onScreen = (frame) => !frame.hidden && framed() && !document.hidden;
 
 function catchUp() {
-  clearTimeout(askTimer);
+  clearTimeout(/** @type {number | undefined} */ (askTimer));
   askTimer = null;
   for (const name of stale) {
     const frame = frames.get(name);
@@ -318,8 +359,8 @@ function showOffer() {
   offer = h(
     'div',
     { class: 'cui-notice frame-update', 'data-tone': 'info', 'data-app': name, role: 'status' },
-    h('span', {}, `${appTitle(frame)} has a new version`),
-    h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => reloadFrame(frame) }, 'Reload'),
+    h('span', {}, `${appTitle(/** @type {HTMLIFrameElement} */ (frame))} has a new version`),
+    h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => reloadFrame(/** @type {HTMLIFrameElement} */ (frame)) }, 'Reload'),
     h(
       'button',
       {
@@ -338,9 +379,12 @@ function showOffer() {
   box.append(offer);
 }
 
-/** Reload: the offer goes at once and the page reloads where it is; one that can't (no rail.js) starts again at its address in Citadel. */
+/**
+ * Reload: the offer goes at once and the page reloads where it is; one that can't (no rail.js) starts again at its address in Citadel.
+ * @param {HTMLIFrameElement} frame
+ */
 function reloadFrame(frame) {
-  const name = frame.dataset.app;
+  const name = /** @type {string} */ (frame.dataset.app);
   dismissed.add(name);
   showOffer();
   frame.contentWindow?.postMessage({ protocol: FRAME, type: 'deployed', auto: false }, '*');
@@ -349,11 +393,12 @@ function reloadFrame(frame) {
   }, 1500);
 }
 
+/** @param {boolean} on */
 function setFramed(on) {
   document.documentElement.classList.toggle('framed', on);
   // Leaving a contraption gives the window controls back their plain colour.
   if (!on) tintTitleBar(null);
-  for (const el of document.querySelectorAll('body > .topbar, body > main')) el.inert = on;
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('body > .topbar, body > main'))) el.inert = on;
   if (stale.size) catchUp(); // a frame just left catches up out of sight; one just shown gets its offer
 }
 
@@ -365,12 +410,14 @@ const SHARE_TAKERS = ['mandate'];
  * Where a share goes (#/share?title=&text=&url=, from the manifest's share_target): the first of your
  * contraptions `mine` (GET api/contraptions/mine) that takes shares, at its address with each field
  * passed on as it came, as share_title, share_text and share_url; null when none of yours takes shares.
+ * @param {string} search
+ * @param {{ name: string }[] | null | undefined} mine
  */
 export function shareTarget(search, mine) {
   const name = SHARE_TAKERS.find((n) => mine?.some?.((c) => c.name === n));
   if (!name) return null;
   const got = new URLSearchParams(search);
   const params = new URLSearchParams();
-  for (const k of ['title', 'text', 'url']) if (got.has(k)) params.set(`share_${k}`, got.get(k));
+  for (const k of ['title', 'text', 'url']) if (got.has(k)) params.set(`share_${k}`, /** @type {string} */ (got.get(k)));
   return { name, src: `/apps/${name}/?${params}` };
 }

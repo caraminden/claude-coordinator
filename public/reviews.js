@@ -15,6 +15,28 @@ import { markdownElement } from './ui/markdown.js';
 import { toast } from './ui/status.js';
 import { loadingLine } from './ui/state.js';
 
+/** @import { View } from './types.js' */
+/** @import { Child } from './base.js' */
+/**
+ * @typedef {{ after: number, to: string }} OnFail
+ * @typedef {{ id: number, words: string, person: string, at: number, minion: string }} Verdict
+ * @typedef {{ kind: string, why: string, count: number, last: number, lesson?: unknown }} Lesson
+ * @typedef {{ minion: string, round: number, verdict: string, disagreed?: boolean, at: number }} Run
+ * @typedef {{ diff?: string[], lines?: number, types?: string[], creative?: string, in_app?: string, schedule?: string, ask?: boolean }} Triggers
+ * @typedef {{ guides?: { href: string, label?: string }[], paths?: string[], verdicts?: boolean, requester?: boolean }} EntryContext
+ * @typedef {{ slug: string, name: string, kind: string, stage: string, enabled: boolean, trial?: boolean, kit?: boolean, file?: string, agent?: { path: string, text: string }, what?: string, when: string, body: string, extends?: string, panel?: string | null, on_fail?: OnFail[] | null, gate?: string | null, gives_label?: boolean, runs?: Run[], rate: number | null, firsts?: number, passes?: number, stuck?: string | null, calibrated?: string | null, verdicts: Verdict[], lessons: Lesson[], context?: EntryContext, triggers?: Triggers, version: number, updated_by: string, updated_at: number, model?: string | null, effort?: string | null }} Entry
+ * @typedef {{ slug: string, name: string, on: boolean, when: string, applies: string }} Audit
+ * @typedef {{ slug: string, judges?: string }} Starter
+ * @typedef {{ coverage?: { changes: number, watched: number, gaps?: { folder: string, changes: number }[] }, skills?: { name: string, what?: string }[], closed: number, judged: number, last?: number | null, days: number }} Glance
+ * @typedef {{ version: number, note: string, by: string, at: number }} Version
+ * @typedef {Record<string, unknown> & { on_fail?: OnFail[] | null }} Settings
+ * @typedef {{ slug: string, name: string, why?: string, before: string, after: string, settings?: Settings, settings_before?: Settings, version: number, ask: string }} Proposal
+ * @typedef {{ text: string, busy: boolean, note: string, proposals: Proposal[], applied: string[], answered: string, input?: HTMLInputElement }} Ask
+ * @typedef {{ projectId: number, entries: Entry[] | null, starters: Starter[], audits: Audit[], glance: Glance | null, selected: string | null, mode: 'view' | 'edit' | 'history' | 'new', versions: Version[] | null, ask: Ask | null, lenses: boolean | null, newWhen: string, kept: Map<string, HTMLElement>, behind: boolean, loads: number, shown: number, error?: string | null }} State
+ * @typedef {{ id: number, name: string, last: number | null, critics: number, trial: number, teachers: number, repo: number, opened: boolean, preship: boolean, rate: number | null, closed: number, judged: number, coverage?: { changes: number, watched: number, gap?: { folder: string, changes: number } } | null }} EveryRow
+ * @typedef {[number | null, number | null]} Cursor
+ */
+
 const COLUMNS = [
   ['work', 'While working'],
   ['ship', 'Before ship'],
@@ -25,33 +47,41 @@ const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'];
 const pacific = pacificStamp;
 const TYPING = 'input:not([type=checkbox]), select, textarea';
 
-let pageEl = null;
-let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen, kept, behind, loads, shown }
+/** The page's element and state, unset until reviewsPage first draws (read only after that). @type {HTMLElement} */
+let pageEl;
+/** @type {State} */
+let state; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen, kept, behind, loads, shown }
 // The tab ('scheme' or 'all') and the Every scheme rows outlive a scheme switch: the table is the same on every scheme.
-const every = { tab: 'scheme', rows: null, error: null };
+const every = /** @type {{ tab: string, rows: EveryRow[] | null, error: string | null }} */ ({ tab: 'scheme', rows: null, error: null });
 
+/** @param {string | null} [slug] */
 const url = (slug = '') => `api/projects/${state.projectId}/reviews${slug ? `/${encodeURIComponent(slug)}` : ''}`;
-const entry = (slug) => state.entries.find((e) => e.slug === slug);
+/** @param {string} slug */
+const entry = (slug) => /** @type {Entry[]} */ (state.entries).find((e) => e.slug === slug);
 // An audit's key on the page: audits are schedules, not entries, so their slugs live apart.
+/** @param {string | null} key */
 const audit = (key) => (key?.startsWith('audit:') ? state.audits.find((a) => `audit:${a.slug}` === key) : undefined);
 
-/** Who gives the risk label (as labelGiver in src/review-set.ts): the pre-ship review, else an enabled, calibrated entry marked to. */
+/**
+ * Who gives the risk label (as labelGiver in src/review-set.ts): the pre-ship review, else an enabled, calibrated entry marked to.
+ * @returns {{ name: string, slug?: string } | null}
+ */
 function labelGiver() {
   const pre = entry('pre-ship-review');
   if (!pre?.kit || pre.enabled) return pre?.kit ? pre : { name: 'Pre-ship review' };
-  return state.entries.find((e) => e.enabled && !e.trial && e.gives_label) ?? null;
+  return /** @type {Entry[]} */ (state.entries).find((e) => e.enabled && !e.trial && e.gives_label) ?? null;
 }
 
 export function reviewsPage() {
-  const projectId = view.projectId;
-  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: null, newWhen: '', kept: new Map(), behind: false, loads: 0, shown: 0 };
+  const projectId = /** @type {View} */ (view).projectId;
+  if (state?.projectId !== projectId) state = /** @type {State} */ ({ projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: null, newWhen: '', kept: new Map(), behind: false, loads: 0, shown: 0 });
   pageEl = h('section', {
     class: 'reviews-main',
-    onkeydown: (e) => {
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
       if (e.key === 'Escape' && state.mode === 'view') closePage();
     },
     // Not at once: a redraw between a press and its click would swallow the click.
-    onfocusout: (e) => e.target.matches(TYPING) && setTimeout(catchUp, 500),
+    onfocusout: (/** @type {FocusEvent} */ e) => /** @type {Element} */ (e.target).matches(TYPING) && setTimeout(catchUp, 500),
   });
   draw();
   load();
@@ -60,7 +90,7 @@ export function reviewsPage() {
 }
 
 function closePage() {
-  location.hash = `#/p/${view.projectId}/settings`;
+  location.hash = `#/p/${/** @type {View} */ (view).projectId}/settings`;
 }
 
 async function load() {
@@ -75,12 +105,15 @@ async function load() {
     if (!state.selected && entries.length && matchMedia('(min-width: 801px)').matches) state.selected = entries[0].slug;
   } catch (err) {
     at.behind = true;
-    if (state === at && !state.entries) state.error = err.message;
+    if (state === at && !state.entries) state.error = /** @type {Error} */ (err).message;
   }
   draw();
 }
 
-/** The server said the set changed: reload it, once no form is open and no field has the focus. */
+/**
+ * The server said the set changed: reload it, once no form is open and no field has the focus.
+ * @param {number} projectId
+ */
 export function onReviewsChanged(projectId) {
   if (!pageEl?.isConnected || state?.projectId !== projectId) return;
   state.behind = true;
@@ -90,14 +123,18 @@ export function onReviewsChanged(projectId) {
 function catchUp() {
   if (!state?.behind || !pageEl?.isConnected) return;
   const at = document.activeElement;
-  const typing = pageEl.contains(at) && at.matches(TYPING);
+  const typing = pageEl.contains(at) && /** @type {Element} */ (at).matches(TYPING);
   if (state.mode === 'edit' || state.mode === 'new' || typing) return;
   load();
   if (every.tab === 'all') loadEvery();
   if (state.mode === 'history') loadVersions();
 }
 
-/** A part of the page that holds typing: a redraw keeps the same element while it has unsaved changes, a save under way or the focus. */
+/**
+ * A part of the page that holds typing: a redraw keeps the same element while it has unsaved changes, a save under way or the focus.
+ * @param {string} key
+ * @param {() => HTMLElement} make
+ */
 function keep(key, make) {
   const was = state.kept.get(key);
   if (was?.querySelector('[data-draft], [type=submit]:disabled') || was?.contains(document.activeElement)) return was;
@@ -106,9 +143,13 @@ function keep(key, make) {
   return el;
 }
 
-/** Marks the form's Save while a field differs from how the form opened: keep() keeps it, and a deploy's reload waits (core.js, unsentWork). */
+/**
+ * Marks the form's Save while a field differs from how the form opened: keep() keeps it, and a deploy's reload waits (core.js, unsentWork).
+ * @param {HTMLFormElement} form
+ * @param {HTMLButtonElement} save
+ */
 function markDraft(form, save) {
-  const now = () => JSON.stringify([...form.querySelectorAll('input, select, textarea')].map((f) => (f.type === 'checkbox' ? f.checked : f.value)));
+  const now = () => JSON.stringify([.../** @type {NodeListOf<HTMLInputElement>} */ (form.querySelectorAll('input, select, textarea'))].map((f) => (f.type === 'checkbox' ? f.checked : f.value)));
   const was = now();
   save.value = 'unsaved';
   form.addEventListener('input', () => save.toggleAttribute('data-draft', now() !== was));
@@ -118,19 +159,19 @@ function markDraft(form, save) {
 /** Redraws the page; what it keeps stays where it was: the focus, the cursor and a text's scroll. */
 function draw() {
   if (!pageEl) return;
-  const at = pageEl.contains(document.activeElement) ? document.activeElement : null;
-  const cursor = at && [at.selectionStart, at.selectionEnd];
-  const scrolls = [...pageEl.querySelectorAll('textarea')].map((t) => [t, t.scrollTop]);
+  const at = /** @type {HTMLInputElement | null} */ (pageEl.contains(document.activeElement) ? document.activeElement : null);
+  const cursor = /** @type {Cursor | null} */ (at && [at.selectionStart, at.selectionEnd]);
+  const scrolls = [...pageEl.querySelectorAll('textarea')].map((t) => /** @type {[HTMLTextAreaElement, number]} */ ([t, t.scrollTop]));
   drawPage();
   if (at?.isConnected && document.activeElement !== at) {
     at.focus({ preventScroll: true });
-    if (cursor[0] != null) at.setSelectionRange(...cursor);
+    if (/** @type {Cursor} */ (cursor)[0] != null) at.setSelectionRange(.../** @type {Cursor} */ (cursor));
   }
   for (const [t, top] of scrolls) t.scrollTop = top;
 }
 
 function drawPage() {
-  const close = (cls, name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
+  const close = (/** @type {string} */ cls, /** @type {string} */ name) => h('button', { type: 'button', class: `close-view ${cls}`, 'aria-label': 'Close', title: 'Close', onclick: closePage }, icon(name));
   const head = h(
     'div',
     { class: 'ticket-head rv-head' },
@@ -138,9 +179,9 @@ function drawPage() {
       'div',
       { class: 'row' },
       close('narrow-only', 'back'),
-      h('h2', {}, h('span', { class: 'rv-title-long' }, 'Reviewers and critics'), h('span', { class: 'rv-title-short' }, 'Reviewers'), h('span', { class: 'muted rv-scheme' }, ` · ${view.project?.name ?? ''}`)),
+      h('h2', {}, h('span', { class: 'rv-title-long' }, 'Reviewers and critics'), h('span', { class: 'rv-title-short' }, 'Reviewers'), h('span', { class: 'muted rv-scheme' }, ` · ${/** @type {View} */ (view).project?.name ?? ''}`)),
       h('span', { class: 'spacer' }),
-      h('a', { class: 'muted small rv-skills-link', href: `#/p/${view.projectId}/skills` }, 'Skills'),
+      h('a', { class: 'muted small rv-skills-link', href: `#/p/${/** @type {View} */ (view).projectId}/skills` }, 'Skills'),
       every.tab === 'scheme' ? h('button', { type: 'button', class: 'cui-btn rv-new', onclick: () => select(null, 'new') }, '+ New') : null,
       close('wide-only', 'close'),
     ),
@@ -169,6 +210,7 @@ function offScreen() {
   return h('div', { hidden: true }, ...parts);
 }
 
+/** @param {string} k */
 function setTab(k) {
   every.tab = k;
   draw();
@@ -180,14 +222,17 @@ async function loadEvery() {
     every.rows = (await api('api/reviews/schemes')).schemes;
     every.error = null;
   } catch (err) {
-    every.error = err.message;
+    every.error = /** @type {Error} */ (err).message;
   }
   if (every.tab === 'all' && pageEl?.isConnected) draw();
 }
 
 // What the headline's phrases light up on hover (#1094): the cards each phrase counts.
+/** @param {Entry} e */
 const isOwn = (e) => e.enabled && !e.kit && !e.file && e.kind !== 'teacher' && e.kind !== 'audit';
+/** @param {Entry} e */
 const isNever = (e) => e.enabled && !e.kit && !e.runs?.length;
+/** @param {number} n @param {string} one @param {string} [many] */
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
@@ -195,15 +240,15 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  * cards it counts while it's hovered or focused; the unwatched share points at the ghost cards.
  */
 function headline() {
-  const name = view.project?.name ?? 'This scheme';
-  const own = state.entries.filter(isOwn);
-  const files = state.entries.filter((e) => e.enabled && e.file && e.kind !== 'teacher');
+  const name = /** @type {View} */ (view).project?.name ?? 'This scheme';
+  const own = /** @type {Entry[]} */ (state.entries).filter(isOwn);
+  const files = /** @type {Entry[]} */ (state.entries).filter((e) => e.enabled && e.file && e.kind !== 'teacher');
   const pre = entry('pre-ship-review');
-  const trial = state.entries.filter((e) => e.enabled && e.trial && !e.kit);
-  const never = state.entries.filter(isNever);
+  const trial = /** @type {Entry[]} */ (state.entries).filter((e) => e.enabled && e.trial && !e.kit);
+  const never = /** @type {Entry[]} */ (state.entries).filter(isNever);
   const g = state.glance;
   const cov = g?.coverage;
-  const hl = (key, tone, text) =>
+  const hl = (/** @type {string} */ key, /** @type {string} */ tone, /** @type {Child} */ text) =>
     h(
       'button',
       {
@@ -258,7 +303,7 @@ function ghostCards() {
       'div',
       { class: 'rv-ghost is-gap' },
       h('div', {}, 'Nothing watches ', h('code', {}, `${x.folder}/**`)),
-      h('div', { class: 'muted' }, `${plural(x.changes, 'change')} in ${state.glance.days} days`),
+      h('div', { class: 'muted' }, `${plural(x.changes, 'change')} in ${/** @type {Glance} */ (state.glance).days} days`),
       h(
         'button',
         {
@@ -277,13 +322,13 @@ function ghostCards() {
 
 /** The scheme's own repo files (#1094): its reviewing agent files as cards, and its review skills read-only, with the Skills page a click away. */
 function repoGroup() {
-  const files = state.entries.filter((e) => e.file && e.kind !== 'teacher');
+  const files = /** @type {Entry[]} */ (state.entries).filter((e) => e.file && e.kind !== 'teacher');
   const skills = state.glance?.skills ?? [];
   if (!files.length && !skills.length) return '';
   return h(
     'section',
     { class: 'rv-repo is-repo', 'aria-label': "From this scheme's repo" },
-    h('div', { class: 'rv-repo-head' }, h('h3', {}, "From this scheme's repo"), h('a', { class: 'small', href: `#/p/${view.projectId}/skills` }, 'See them on Skills')),
+    h('div', { class: 'rv-repo-head' }, h('h3', {}, "From this scheme's repo"), h('a', { class: 'small', href: `#/p/${/** @type {View} */ (view).projectId}/skills` }, 'See them on Skills')),
     h(
       'div',
       { class: 'rv-repo-items' },
@@ -310,28 +355,28 @@ function everyTable() {
   if (!every.rows) return loadingLine('Loading…');
   if (!every.rows.length) return h('p', { class: 'muted' }, "You aren't a member of any scheme yet.");
   const rows = [...every.rows].sort((a, b) => (b.last ?? 0) - (a.last ?? 0) || a.name.localeCompare(b.name));
-  const open = (r) => {
+  const open = (/** @type {EveryRow} */ r) => {
     every.tab = 'scheme';
     if (r.id === state.projectId) draw();
     else location.hash = `#/p/${r.id}/reviews`;
   };
-  const judges = (r) => {
-    const parts = [
+  const judges = (/** @type {EveryRow} */ r) => {
+    const parts = /** @type {[number, string, string][]} */ ([
       [r.critics, 'ok', 'critic'],
       [r.trial, 'warn', 'on trial'],
       [r.teachers, 'violet', 'teacher'],
       [r.repo, 'info', 'repo agent'],
-    ]
+    ])
       .filter(([v]) => v)
       .map(([v, tone, word]) => toneChip(tone, word === 'on trial' ? `${v} on trial` : plural(v, word)));
     return parts.length ? h('span', { class: 'rv-mx-judges' }, ...parts) : none();
   };
-  const watched = (r) => {
+  const watched = (/** @type {EveryRow} */ r) => {
     if (!r.coverage?.changes) return none(r.coverage ? 'no changes' : 'no repo');
     const f = r.coverage.watched / r.coverage.changes;
     return h('span', { 'data-hue': f >= 0.7 ? 'done' : f >= 0.4 ? 'waiting' : 'danger' }, meter(f, `${Math.round(100 * f)}%`));
   };
-  const cells = (r) => [
+  const cells = (/** @type {EveryRow} */ r) => [
     ['Scheme', h('span', { class: 'rv-mx-name' }, schemeTag(r.name), r.opened ? null : toneChip('neutral', 'never opened'), r.preship ? null : toneChip('danger', 'pre-ship off'))],
     ['Judges', judges(r)],
     ['Last run', r.last ? h('span', { class: 'rv-mx-when' }, ago(r.last)) : toneChip('warn', 'never')],
@@ -357,7 +402,7 @@ function everyTable() {
             {
               tabindex: 0,
               onclick: () => open(r),
-              onkeydown: (ev) => {
+              onkeydown: (/** @type {KeyboardEvent} */ ev) => {
                 if (ev.key === 'Enter') open(r);
               },
             },
@@ -369,6 +414,10 @@ function everyTable() {
   );
 }
 
+/**
+ * @param {string | null} slug
+ * @param {State['mode']} [mode]
+ */
 function select(slug, mode = 'view') {
   // Unsaved hand-offs outlive their own entry's History; an Edit or New form starts again.
   for (const key of state.kept.keys()) if (slug !== state.selected || !key.startsWith('fail:')) state.kept.delete(key);
@@ -383,8 +432,8 @@ function select(slug, mode = 'view') {
 }
 
 function board() {
-  const cols = COLUMNS.filter(([stage]) => stage !== 'ask' || state.entries.some((e) => e.stage === 'ask' && !e.file && e.kind !== 'teacher'));
-  if (!state.entries.length && !state.audits.length) {
+  const cols = COLUMNS.filter(([stage]) => stage !== 'ask' || /** @type {Entry[]} */ (state.entries).some((e) => e.stage === 'ask' && !e.file && e.kind !== 'teacher'));
+  if (!(/** @type {Entry[]} */ (state.entries).length) && !state.audits.length) {
     return h(
       'div',
       { class: 'rv-board rv-empty' },
@@ -399,8 +448,8 @@ function board() {
     ...cols.map(([stage, label]) => {
       // A teacher runs only when a critic hands it work (#1089): it hangs under those critics, not in a column. The repo's own
       // agent files sit in their own group under the columns (#1094).
-      const list = columnUnits(state.entries.filter((e) => e.stage === stage && e.kind !== 'teacher' && !e.file));
-      if (stage === 'work') list.push(...state.entries.filter((t) => t.kind === 'teacher' && !handsTo(t).length).map(looseTeacher), ...ghostCards());
+      const list = columnUnits(/** @type {Entry[]} */ (state.entries).filter((e) => e.stage === stage && e.kind !== 'teacher' && !e.file));
+      if (stage === 'work') list.push(.../** @type {Entry[]} */ (state.entries).filter((t) => t.kind === 'teacher' && !handsTo(t).length).map(looseTeacher), ...ghostCards());
       if (stage === 'schedule') list.push(...state.audits.map(auditCard));
       return h('section', { class: `rv-col is-${stage}`, 'aria-label': label }, h('h3', {}, label), list.length ? list : h('p', { class: 'muted rv-none' }, 'None'));
     }),
@@ -411,8 +460,12 @@ function board() {
  * A column in run order: the lenses as one card, a panel as one box, and "↓ then" between two of the scheme's own that
  * run, as the turn's run order says (orderLine in src/review-set.ts). The kit's own keep their own flow.
  */
+/**
+ * @param {Entry[]} here
+ * @returns {HTMLElement[]}
+ */
 function columnUnits(here) {
-  const out = [];
+  const out = /** @type {{ node: HTMLElement, runs?: boolean }[]} */ ([]);
   const seen = new Set();
   for (const e of here) {
     const key = isLens(e) ? 'lens' : e.panel && !e.kit && !e.file ? `panel:${e.panel}` : null;
@@ -423,13 +476,17 @@ function columnUnits(here) {
     if (key === 'lens') out.push({ node: lensesCard(here.filter(isLens)) });
     else if (key) {
       const members = here.filter((x) => x.panel === e.panel && !x.kit && !x.file);
-      out.push({ node: panelBox(e.panel, members), runs: members.some((x) => x.enabled) });
+      out.push({ node: panelBox(/** @type {string} */ (e.panel), members), runs: members.some((x) => x.enabled) });
     } else out.push({ node: withTeachers(e), runs: !e.kit && !e.file && e.enabled });
   }
   return out.flatMap((u, i) => (i && u.runs && out[i - 1].runs ? [h('div', { class: 'rv-then', 'aria-hidden': 'true' }, '↓ then'), u.node] : [u.node]));
 }
 
-/** A panel (Q7): its judges look at the same work at once and its referee merges their verdicts into one. */
+/**
+ * A panel (Q7): its judges look at the same work at once and its referee merges their verdicts into one.
+ * @param {string} name
+ * @param {Entry[]} members
+ */
 function panelBox(name, members) {
   const judges = members.filter((x) => x.kind !== 'referee');
   const refs = members.filter((x) => x.kind === 'referee');
@@ -447,7 +504,10 @@ function panelBox(name, members) {
   );
 }
 
-/** Its last runs, oldest first: green pass, red fail, amber where a person disagreed, grey where it asked a person. */
+/**
+ * Its last runs, oldest first: green pass, red fail, amber where a person disagreed, grey where it asked a person.
+ * @param {Run[]} runs
+ */
 function dots(runs) {
   return h(
     'span',
@@ -456,6 +516,7 @@ function dots(runs) {
   );
 }
 
+/** @param {Entry} e */
 function card(e) {
   const sw = onSwitch(e);
   const marks = [isOwn(e) && 'is-own', e.enabled && e.trial && !e.kit && 'is-trial', isNever(e) && 'is-never', e.file && 'is-repo', e.slug === 'pre-ship-review' && 'is-preship']
@@ -470,7 +531,7 @@ function card(e) {
       tabindex: 0,
       'aria-pressed': String(e.slug === state.selected),
       onclick: () => select(e.slug),
-      onkeydown: (ev) => {
+      onkeydown: (/** @type {KeyboardEvent} */ ev) => {
         if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) {
           ev.preventDefault();
           select(e.slug);
@@ -484,24 +545,36 @@ function card(e) {
   );
 }
 
+/** @param {Entry} e */
 const isLens = (e) => e.kit && e.slug.startsWith('lens-');
 
-/** The teachers an entry hands its stubborn fails to, with after how many fails: its hand-offs, or a critic's default (professor after 2). */
+/**
+ * The teachers an entry hands its stubborn fails to, with after how many fails: its hand-offs, or a critic's default (professor after 2).
+ * @param {Entry} e
+ * @returns {{ after: number, t: Entry }[]}
+ */
 function teachersOf(e) {
   const steps = e.on_fail ?? (e.kind === 'critic' ? [{ after: 2, to: 'professor' }] : []);
-  return steps.map((st) => ({ after: st.after, t: entry(st.to) })).filter((x) => x.t?.kind === 'teacher');
+  return steps.map((st) => ({ after: st.after, t: /** @type {Entry} */ (entry(st.to)) })).filter((x) => x.t?.kind === 'teacher');
 }
-/** The entries that hand off to a teacher, with after how many fails. */
+/**
+ * The entries that hand off to a teacher, with after how many fails.
+ * @param {Entry} t
+ */
 const handsTo = (t) =>
-  state.entries.flatMap((e) =>
+  /** @type {Entry[]} */ (state.entries).flatMap((e) =>
     teachersOf(e)
       .filter((x) => x.t.slug === t.slug)
       .map((x) => ({ e, after: x.after })),
   );
 /** "fix held 3 of 4", or that it has none yet: a teacher's record is whether the critic passed the work after its fix. */
+/** @param {Entry} t */
 const heldText = (t) => (t.firsts ? `fix held ${t.passes} of ${t.firsts === 20 ? 'the last 20' : t.firsts}` : 'no fixes yet');
 
-/** A card with a strip under it per teacher it hands off to, so the chain reads top to bottom (take A, #1089). */
+/**
+ * A card with a strip under it per teacher it hands off to, so the chain reads top to bottom (take A, #1089).
+ * @param {Entry} e
+ */
 function withTeachers(e) {
   const ts = teachersOf(e);
   if (!ts.length) return card(e);
@@ -527,7 +600,10 @@ function withTeachers(e) {
   );
 }
 
-/** A teacher no critic here hands off to: at the foot of While working, quiet, still openable. */
+/**
+ * A teacher no critic here hands off to: at the foot of While working, quiet, still openable.
+ * @param {Entry} t
+ */
 function looseTeacher(t) {
   return h(
     'button',
@@ -537,7 +613,10 @@ function looseTeacher(t) {
   );
 }
 
-/** The pre-ship review's lenses as one row that opens to a switch a lens (#1094), so nine of them don't bury the column. */
+/**
+ * The pre-ship review's lenses as one row that opens to a switch a lens (#1094), so nine of them don't bury the column.
+ * @param {Entry[]} lenses
+ */
 function lensesCard(lenses) {
   const on = lenses.filter((e) => e.enabled).length;
   const open = state.lenses ?? lenses.some((e) => e.slug === state.selected);
@@ -570,6 +649,10 @@ function lensesCard(lenses) {
   );
 }
 
+/**
+ * @param {Entry} e
+ * @param {boolean} [onCard]
+ */
 function chips(e, onCard = false) {
   return h(
     'div',
@@ -592,7 +675,10 @@ function chips(e, onCard = false) {
   );
 }
 
-/** A standard audit (kit/schedules/): its switch is its schedule's pause, so the page and Schedules never disagree. */
+/**
+ * A standard audit (kit/schedules/): its switch is its schedule's pause, so the page and Schedules never disagree.
+ * @param {Audit} a
+ */
 function auditCard(a) {
   const key = `audit:${a.slug}`;
   return h(
@@ -603,7 +689,7 @@ function auditCard(a) {
       tabindex: 0,
       'aria-pressed': String(key === state.selected),
       onclick: () => select(key),
-      onkeydown: (ev) => {
+      onkeydown: (/** @type {KeyboardEvent} */ ev) => {
         if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) {
           ev.preventDefault();
           select(key);
@@ -616,8 +702,10 @@ function auditCard(a) {
   );
 }
 
+/** @param {Audit} a */
 const auditChips = (a) => h('div', { class: 'rv-chips' }, h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'audit'), h('span', { class: 'cui-chip', 'data-tone': 'info', title: "One of the kit's standard audits" }, 'kit'), a.on ? null : h('span', { class: 'cui-chip', 'data-tone': 'neutral' }, 'off'));
 
+/** @param {Audit} a */
 function auditSwitch(a) {
   return h('button', {
     type: 'button',
@@ -626,20 +714,24 @@ function auditSwitch(a) {
     role: 'switch',
     'aria-checked': String(a.on),
     'aria-label': `${a.name}: ${a.on ? 'on' : 'off'}`,
-    onclick: (ev) => {
+    onclick: (/** @type {Event} */ ev) => {
       ev.stopPropagation();
       setAudit(a.slug, !a.on);
     },
   });
 }
 
+/**
+ * @param {string} slug
+ * @param {boolean} on
+ */
 function setAudit(slug, on) {
   const s = state;
   const path = url(`audits/${slug}`);
   const redraw = () => {
     if (state === s && s.mode !== 'edit' && s.mode !== 'new') draw();
   };
-  const flip = (v) => {
+  const flip = (/** @type {boolean} */ v) => {
     const a = s.audits.find((x) => x.slug === slug);
     if (a) a.on = v;
     redraw();
@@ -660,7 +752,10 @@ function setAudit(slug, on) {
   );
 }
 
-/** The trigger in words: "Changes in public/**", "Monthly", "When a person asks". */
+/**
+ * The trigger in words: "Changes in public/**", "Monthly", "When a person asks".
+ * @param {Entry} e
+ */
 function whenLine(e) {
   const t = e.triggers ?? {};
   const parts = [];
@@ -673,7 +768,10 @@ function whenLine(e) {
   return parts.join('; ');
 }
 
-/** Its on/off switch: Minion rules' switch (settings.css .rules-switch). */
+/**
+ * Its on/off switch: Minion rules' switch (settings.css .rules-switch).
+ * @param {Entry} e
+ */
 function onSwitch(e) {
   return h('button', {
     type: 'button',
@@ -682,14 +780,18 @@ function onSwitch(e) {
     role: 'switch',
     'aria-checked': String(e.enabled),
     'aria-label': `${e.name}: ${e.enabled ? 'on' : 'off'}`,
-    onclick: (ev) => {
+    onclick: (/** @type {Event} */ ev) => {
       ev.stopPropagation();
       setSwitch(e.slug, { enabled: !e.enabled });
     },
   });
 }
 
-/** A switch saves at once and rolls back with a toast if the save fails (Cara 2026-11-08). */
+/**
+ * A switch saves at once and rolls back with a toast if the save fails (Cara 2026-11-08).
+ * @param {string} slug
+ * @param {Record<string, unknown>} patch
+ */
 function setSwitch(slug, patch) {
   // Bound to the scheme it started in: a Retry after moving to another scheme still saves this one's entry.
   const s = state;
@@ -699,30 +801,31 @@ function setSwitch(slug, patch) {
   const redraw = () => {
     if (!mine()) return;
     if (s.mode !== 'edit' && s.mode !== 'new') return draw();
-    const e = s.entries.find((x) => x.slug === slug);
+    const e = /** @type {Entry[]} */ (s.entries).find((x) => x.slug === slug);
     for (const b of pageEl.querySelectorAll(`.rules-switch[data-slug="${CSS.escape(slug)}"]`)) b.setAttribute('aria-checked', String(!!e?.enabled));
   };
+  /** @type {Record<string, unknown> | undefined} */
   let was;
   optimistic({
     key: `reviews:${s.projectId}:${slug}`,
     apply: () => {
-      const e = s.entries.find((x) => x.slug === slug);
+      const e = /** @type {Entry[]} */ (s.entries).find((x) => x.slug === slug);
       if (!e) return;
-      was = Object.fromEntries(Object.keys(patch).map((k) => [k, e[k]]));
+      was = Object.fromEntries(Object.keys(patch).map((k) => [k, /** @type {Record<string, unknown>} */ (e)[k]]));
       Object.assign(e, patch);
       redraw();
     },
     send: () => api(path, { method: 'PATCH', body: patch }),
     undo: () => {
-      const e = s.entries.find((x) => x.slug === slug);
+      const e = /** @type {Entry[]} */ (s.entries).find((x) => x.slug === slug);
       if (e && was) Object.assign(e, was);
       redraw();
     },
     label: patch.enabled !== undefined ? `turn ${patch.enabled ? 'on' : 'off'} ${entry(slug)?.name ?? slug}` : patch.trial !== undefined ? 'change its trial' : `change ${entry(slug)?.name ?? slug}`,
   }).then(
     (saved) => {
-      const i = s.entries.findIndex((x) => x.slug === slug);
-      if (i >= 0 && saved?.slug) s.entries[i] = saved;
+      const i = /** @type {Entry[]} */ (s.entries).findIndex((x) => x.slug === slug);
+      if (i >= 0 && saved?.slug) /** @type {Entry[]} */ (s.entries)[i] = saved;
       redraw();
     },
     () => {},
@@ -734,14 +837,14 @@ function detail() {
   const a = audit(state.selected);
   if (a) return auditDetail(a);
   const e = state.selected && entry(state.selected);
-  if (!e) return h('aside', { class: 'rv-detail rv-detail-empty' }, h('p', { class: 'muted' }, state.entries.length ? 'Pick one to see what it reviews.' : ''));
+  if (!e) return h('aside', { class: 'rv-detail rv-detail-empty' }, h('p', { class: 'muted' }, /** @type {Entry[]} */ (state.entries).length ? 'Pick one to see what it reviews.' : ''));
   if (state.mode === 'edit') {
     const form = keep(`edit:${e.slug}`, () => editForm(e));
-    form.querySelector('.rv-recorded').replaceWith(recorded(e));
+    /** @type {Element} */ (form.querySelector('.rv-recorded')).replaceWith(recorded(e));
     return h('aside', { class: 'rv-detail' }, form);
   }
   const sw = onSwitch(e);
-  const section = (title, ...body) => h('section', { class: 'rv-sec' }, h('h4', {}, title), ...body);
+  const section = (/** @type {string} */ title, /** @type {Child[]} */ ...body) => h('section', { class: 'rv-sec' }, h('h4', {}, title), ...body);
   const ctx = e.context ?? {};
   const guides = ctx.guides ?? [];
   const contextItems = [
@@ -816,7 +919,10 @@ function detail() {
   );
 }
 
-/** Who hands work to a teacher, and after how many fails; none says how to wire one. */
+/**
+ * Who hands work to a teacher, and after how many fails; none says how to wire one.
+ * @param {Entry} t
+ */
 function handOffs(t) {
   const from = handsTo(t);
   if (!from.length) return h('p', { class: 'muted' }, "No critic here hands off to it yet. A critic's hand-offs (Edit by hand on the critic) name it.");
@@ -827,7 +933,10 @@ function handOffs(t) {
   );
 }
 
-/** Its runs, the first-round pass rate, and a warning when it always passes or always fails (Q4). */
+/**
+ * Its runs, the first-round pass rate, and a warning when it always passes or always fails (Q4).
+ * @param {Entry} e
+ */
 function record(e) {
   if (e.kind === 'teacher') {
     if (!e.runs?.length) return [h('p', { class: 'muted' }, "No fixes recorded yet. After each fix it gives, the critic's next round shows here as a dot: green when the fix held, red when the work failed again.")];
@@ -846,7 +955,11 @@ function record(e) {
   ].filter(Boolean);
 }
 
-/** What people said when they disagreed with it (Q13): only a minion records one; Edit by hand can remove one. */
+/**
+ * What people said when they disagreed with it (Q13): only a minion records one; Edit by hand can remove one.
+ * @param {Entry} e
+ * @param {boolean} removable
+ */
 function verdictList(e, removable) {
   return h(
     'ul',
@@ -855,26 +968,33 @@ function verdictList(e, removable) {
   );
 }
 
+/**
+ * @param {Entry} e
+ * @param {Verdict} v
+ */
 async function removeVerdict(e, v) {
   const s = state;
   try {
     await api(`${url(e.slug)}/verdicts/${v.id}`, { method: 'DELETE' });
-    const x = s.entries.find((y) => y.slug === e.slug);
+    const x = /** @type {Entry[]} */ (s.entries).find((y) => y.slug === e.slug);
     if (x) x.verdicts = x.verdicts.filter((y) => y.id !== v.id);
     toast('Removed: its next runs no longer read it');
     if (state === s) draw();
   } catch (err) {
-    toast(`Couldn't remove it: ${err.message}`);
+    toast(`Couldn't remove it: ${/** @type {Error} */ (err).message}`);
   }
 }
 
-/** Order, panel and hand-offs (Q7): where it runs in its column, who it judges with, and where a fail goes. */
+/**
+ * Order, panel and hand-offs (Q7): where it runs in its column, who it judges with, and where a fail goes.
+ * @param {Entry} e
+ */
 function withOthers(e) {
-  const col = state.entries.filter((x) => x.stage === e.stage);
+  const col = /** @type {Entry[]} */ (state.entries).filter((x) => x.stage === e.stage);
   const i = col.findIndex((x) => x.slug === e.slug);
   const label = COLUMNS.find(([v]) => v === e.stage)?.[1] ?? e.stage;
-  const moveBtn = (dir, text, at) => h('button', { type: 'button', class: 'cui-btn cui-small', disabled: !at, 'aria-label': `Run ${dir === 'up' ? 'earlier' : 'later'}`, onclick: () => move(e, dir) }, text);
-  const names = [...new Set(state.entries.filter((x) => x.panel && !x.kit).map((x) => x.panel))];
+  const moveBtn = (/** @type {'up' | 'down'} */ dir, /** @type {string} */ text, /** @type {boolean} */ at) => h('button', { type: 'button', class: 'cui-btn cui-small', disabled: !at, 'aria-label': `Run ${dir === 'up' ? 'earlier' : 'later'}`, onclick: () => move(e, dir) }, text);
+  const names = [...new Set(/** @type {Entry[]} */ (state.entries).filter((x) => x.panel && !x.kit).map((x) => x.panel))];
   const panel = h('input', {
     class: 'cui-input',
     value: e.panel ?? '',
@@ -882,8 +1002,8 @@ function withOthers(e) {
     maxlength: 40,
     list: 'rv-panels',
     'aria-label': 'Panel',
-    onchange: (ev) => {
-      const v = ev.target.value.trim() || null;
+    onchange: (/** @type {Event} */ ev) => {
+      const v = /** @type {HTMLInputElement} */ (ev.target).value.trim() || null;
       if (v !== (e.panel ?? null)) setSwitch(e.slug, { panel: v });
     },
   });
@@ -905,18 +1025,22 @@ function withOthers(e) {
   ];
 }
 
+/**
+ * @param {Entry} e
+ * @param {'up' | 'down'} dir
+ */
 function move(e, dir) {
   const s = state;
   const path = url(e.slug);
-  const col = s.entries.filter((x) => x.stage === e.stage);
+  const col = /** @type {Entry[]} */ (s.entries).filter((x) => x.stage === e.stage);
   const i = col.findIndex((x) => x.slug === e.slug);
   const other = col[dir === 'up' ? i - 1 : i + 1];
   if (!other) return;
   const swap = () => {
-    const a = s.entries.indexOf(e),
-      b = s.entries.indexOf(other);
+    const a = /** @type {Entry[]} */ (s.entries).indexOf(e),
+      b = /** @type {Entry[]} */ (s.entries).indexOf(other);
     if (a < 0 || b < 0) return;
-    [s.entries[a], s.entries[b]] = [s.entries[b], s.entries[a]];
+    [/** @type {Entry[]} */ (s.entries)[a], /** @type {Entry[]} */ (s.entries)[b]] = [/** @type {Entry[]} */ (s.entries)[b], /** @type {Entry[]} */ (s.entries)[a]];
     if (state === s) draw();
   };
   optimistic({
@@ -931,11 +1055,14 @@ function move(e, dir) {
   );
 }
 
-/** Hand off on a fail: after n failed rounds the work goes to the professor, a person or another entry. */
+/**
+ * Hand off on a fail: after n failed rounds the work goes to the professor, a person or another entry.
+ * @param {Entry} e
+ */
 function onFailEditor(e) {
   const fallback = e.kind === 'critic' ? 'professor after 2 fails, person after 3' : null;
   const steps = (e.on_fail ?? []).map((x) => ({ ...x }));
-  const targets = [['professor', 'the professor'], ['person', 'a person'], ...state.entries.filter((x) => x.slug !== e.slug && !x.kit).map((x) => [x.slug, x.name])];
+  const targets = [['professor', 'the professor'], ['person', 'a person'], .../** @type {Entry[]} */ (state.entries).filter((x) => x.slug !== e.slug && !x.kit).map((x) => [x.slug, x.name])];
   const box = h('div', { class: 'rv-onfail' });
   const sendSteps = () => {
     state.kept.delete(`fail:${e.slug}`);
@@ -960,8 +1087,8 @@ function onFailEditor(e) {
             max: 10,
             value: st.after,
             'aria-label': 'Failed rounds',
-            oninput: (ev) => {
-              st.after = Number(ev.target.value);
+            oninput: (/** @type {Event} */ ev) => {
+              st.after = Number(/** @type {HTMLInputElement} */ (ev.target).value);
               changed();
             },
           }),
@@ -971,8 +1098,8 @@ function onFailEditor(e) {
             {
               class: 'cui-input',
               'aria-label': 'Hand it to',
-              onchange: (ev) => {
-                st.to = ev.target.value;
+              onchange: (/** @type {Event} */ ev) => {
+                st.to = /** @type {HTMLSelectElement} */ (ev.target).value;
                 changed();
               },
             },
@@ -1020,17 +1147,23 @@ function onFailEditor(e) {
   return h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Hand off on a fail'), h('span', { class: 'muted rv-hint' }, e.on_fail?.length ? 'Each step takes over from the one before.' : fallback ? `None set: as every critic, ${fallback}.` : 'None set: its fails go back to the author.'), box);
 }
 
-/** Beside the pre-ship review's switch, before anyone flips it (Q10): what off means for this scheme's ships. */
+/**
+ * Beside the pre-ship review's switch, before anyone flips it (Q10): what off means for this scheme's ships.
+ * @param {Entry} e
+ */
 function preShipNote(e) {
-  const giver = state.entries.find((x) => x.enabled && !x.trial && x.gives_label);
+  const giver = /** @type {Entry[]} */ (state.entries).find((x) => x.enabled && !x.trial && x.gives_label);
   const off = giver ? `the ${giver.name} gives the risk label instead.` : "no change gets a risk label, so every ship in this scheme waits for a person's go.";
   return h('p', { class: `rv-warn${e.enabled ? '' : ' is-off'}`, role: 'note' }, e.enabled ? `Turned off, ${off}` : `It's off: ${off}`);
 }
 
-/** Trial, Block or Advise, and the risk label: an entry on trial only advises until it's calibrated or marked good (Q12). */
+/**
+ * Trial, Block or Advise, and the risk label: an entry on trial only advises until it's calibrated or marked good (Q12).
+ * @param {Entry} e
+ */
 function judging(e) {
   const lock = e.trial ? "On trial: it only advises until it's calibrated or marked good" : undefined;
-  const gate = (v, label) =>
+  const gate = (/** @type {'block' | 'advise'} */ v, /** @type {string} */ label) =>
     h(
       'button',
       {
@@ -1054,11 +1187,19 @@ function judging(e) {
       h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => setSwitch(e.slug, { trial: !e.trial }) }, e.trial ? 'Mark it good' : 'Put on trial'),
     ),
     h('div', { class: 'rv-seg', role: 'group', 'aria-label': 'When it fails' }, gate('block', 'Block the ship'), gate('advise', 'Advise')),
-    h('label', { class: 'rv-check', title: lock }, h('input', { type: 'checkbox', checked: e.gives_label, disabled: e.trial, onchange: (ev) => setSwitch(e.slug, { gives_label: ev.target.checked }) }), h('span', {}, 'Gives the risk label when the pre-ship review is off')),
+    h(
+      'label',
+      { class: 'rv-check', title: lock },
+      h('input', { type: 'checkbox', checked: e.gives_label, disabled: e.trial, onchange: (/** @type {Event} */ ev) => setSwitch(e.slug, { gives_label: /** @type {HTMLInputElement} */ (ev.target).checked }) }),
+      h('span', {}, 'Gives the risk label when the pre-ship review is off'),
+    ),
   );
 }
 
-/** A standard audit's detail: its switch, when it runs and what it's for. */
+/**
+ * A standard audit's detail: its switch, when it runs and what it's for.
+ * @param {Audit} a
+ */
 function auditDetail(a) {
   return h(
     'aside',
@@ -1098,11 +1239,12 @@ async function loadVersions() {
     const { versions } = await api(`${url(slug)}/versions`);
     if (shown()) s.versions = versions;
   } catch (err) {
-    if (shown()) toast(`Couldn't load its history: ${err.message}`);
+    if (shown()) toast(`Couldn't load its history: ${/** @type {Error} */ (err).message}`);
   }
   if (shown()) draw();
 }
 
+/** @param {Entry} e */
 function history(e) {
   if (!state.versions) return loadingLine('Loading its history…');
   return h(
@@ -1120,6 +1262,10 @@ function history(e) {
   );
 }
 
+/**
+ * @param {Entry} e
+ * @param {number} version
+ */
 async function restore(e, version) {
   const s = state;
   try {
@@ -1130,17 +1276,28 @@ async function restore(e, version) {
     if (s.selected === e.slug && s.mode === 'history') await loadVersions();
     else draw();
   } catch (err) {
-    toast(`Couldn't restore: ${err.message}`);
+    toast(`Couldn't restore: ${/** @type {Error} */ (err).message}`);
   }
 }
 
-/** A saved entry into the set it was saved from, which may no longer be the one on screen. */
+/**
+ * A saved entry into the set it was saved from, which may no longer be the one on screen.
+ * @param {State} s
+ * @param {Entry} saved
+ */
 function put(s, saved) {
-  const i = s.entries.findIndex((x) => x.slug === saved.slug);
-  if (i >= 0) s.entries[i] = saved;
+  const i = /** @type {Entry[]} */ (s.entries).findIndex((x) => x.slug === saved.slug);
+  if (i >= 0) /** @type {Entry[]} */ (s.entries)[i] = saved;
 }
 
-/** Saves an open Edit form. An answer that comes after the form closed updates its own entry and leaves what is open now alone. */
+/**
+ * Saves an open Edit form. An answer that comes after the form closed updates its own entry and leaves what is open now alone.
+ * @param {Entry} e
+ * @param {HTMLFormElement} form
+ * @param {HTMLButtonElement} save
+ * @param {HTMLElement} err
+ * @param {Record<string, unknown>} fields
+ */
 async function saveEdit(e, form, save, err, fields) {
   const s = state;
   const key = `edit:${e.slug}`;
@@ -1162,17 +1319,25 @@ async function saveEdit(e, form, save, err, fields) {
     save.disabled = false;
     s.behind = true; // it may be refused as stale: Cancel reads the newest
     if (!open()) {
-      toast(`Couldn't save ${e.name}: ${x.message}`);
+      toast(`Couldn't save ${e.name}: ${/** @type {Error} */ (x).message}`);
       return catchUp();
     }
-    err.textContent = x.message;
+    err.textContent = /** @type {Error} */ (x).message;
     err.hidden = false;
   }
 }
 
+/**
+ * @param {string} label
+ * @param {Child} input
+ * @param {string} [hint]
+ */
 const field = (label, input, hint) => h('label', { class: 'rv-field' }, h('span', { class: 'rv-label' }, label), input, hint ? h('span', { class: 'muted rv-hint' }, hint) : null);
 
-/** Edit by hand: the fields and the body as the critic reads it. A save names the version it started from, so a save over someone else's is refused. */
+/**
+ * Edit by hand: the fields and the body as the critic reads it. A save names the version it started from, so a save over someone else's is refused.
+ * @param {Entry} e
+ */
 function editForm(e) {
   if (e.kit || e.file) return kitForm(e);
   const name = h('input', { class: 'cui-input', value: e.name, required: true });
@@ -1204,7 +1369,7 @@ function editForm(e) {
   const requester = h('input', { type: 'checkbox', checked: !!e.context?.requester });
   const err = h('p', { class: 'error', hidden: true });
   const save = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Save');
-  const submit = (ev) => {
+  const submit = (/** @type {Event} */ ev) => {
     ev.preventDefault();
     const context = { ...e.context, verdicts: verdicts.checked, requester: requester.checked };
     saveEdit(e, form, save, err, { context, name: name.value, kind: kind.value, when: when.value.trim() || 'ask', stage: stage.value, model: model.value.trim() || null, effort: effort.value || null, body: body.value, note: note.value });
@@ -1233,13 +1398,16 @@ function editForm(e) {
   return markDraft(form, save);
 }
 
-/** A kit entry's or an agent file's edit: only this scheme's additions, read with the kit's text or the file's (which stay where they are). */
+/**
+ * A kit entry's or an agent file's edit: only this scheme's additions, read with the kit's text or the file's (which stay where they are).
+ * @param {Entry} e
+ */
 function kitForm(e) {
   const body = h('textarea', { class: 'cui-input rv-bodytext', rows: 12, spellcheck: false }, e.body);
   const note = h('input', { class: 'cui-input', placeholder: 'Edited by hand' });
   const err = h('p', { class: 'error', hidden: true });
   const save = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Save');
-  const submit = (ev) => {
+  const submit = (/** @type {Event} */ ev) => {
     ev.preventDefault();
     saveEdit(e, form, save, err, { body: body.value, note: note.value });
   };
@@ -1257,7 +1425,10 @@ function kitForm(e) {
   return markDraft(form, save);
 }
 
-/** The Edit form's lists that change by themselves: a redraw puts them in again around what was typed. */
+/**
+ * The Edit form's lists that change by themselves: a redraw puts them in again around what was typed.
+ * @param {Entry} e
+ */
 function recorded(e) {
   return h('div', { class: 'rv-recorded' }, e.verdicts?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Recorded verdicts'), verdictList(e, true)) : null, e.lessons?.length ? h('div', { class: 'rv-field' }, h('span', { class: 'rv-label' }, 'Lessons'), ...lessonList(e, true)) : null);
 }
@@ -1265,6 +1436,8 @@ function recorded(e) {
 /**
  * The finding checker's lessons for the pre-ship review (#1158): kinds of finding it refuted here, which the reviewer
  * reads once a kind has three refutes. Only a minion adds one; Edit by hand removes one.
+ * @param {Entry} e
+ * @param {boolean} removable
  */
 function lessonList(e, removable) {
   const read = e.lessons.filter((l) => l.lesson);
@@ -1291,19 +1464,23 @@ function lessonList(e, removable) {
   ];
 }
 
+/**
+ * @param {Entry} e
+ * @param {Lesson} l
+ */
 async function removeLesson(e, l) {
   const s = state;
-  const x = s.entries.find((y) => y.slug === e.slug);
+  const x = /** @type {Entry[]} */ (s.entries).find((y) => y.slug === e.slug);
   const was = x?.lessons;
-  if (x) x.lessons = was.filter((y) => y.kind !== l.kind);
+  if (x) x.lessons = /** @type {Lesson[]} */ (was).filter((y) => y.kind !== l.kind);
   if (state === s) draw();
   try {
     await api(`${url(e.slug)}/lessons`, { method: 'DELETE', body: { kind: l.kind } });
     toast('Removed: its count starts again from nothing');
   } catch (err) {
-    if (x) x.lessons = was;
+    if (x) x.lessons = /** @type {Lesson[]} */ (was);
     if (state === s) draw();
-    toast(`Couldn't remove it: ${err.message}`);
+    toast(`Couldn't remove it: ${/** @type {Error} */ (err).message}`);
   }
 }
 
@@ -1319,8 +1496,8 @@ function describeBox() {
     value: ask.text,
     maxlength: 2000,
     'aria-label': 'Describe a change',
-    oninput: (ev) => {
-      ask.text = ev.target.value;
+    oninput: (/** @type {Event} */ ev) => {
+      ask.text = /** @type {HTMLInputElement} */ (ev.target).value;
       markAsk(ask);
     },
   });
@@ -1333,7 +1510,7 @@ function describeBox() {
       'form',
       {
         class: 'rv-ask-row',
-        onsubmit: (ev) => {
+        onsubmit: (/** @type {Event} */ ev) => {
           ev.preventDefault();
           describe(ask);
         },
@@ -1348,9 +1525,13 @@ function describeBox() {
   );
 }
 
-/** What is typed but not yet answered holds a deploy's reload. */
-const markAsk = (ask) => ask.input.toggleAttribute('data-draft', ask.text.trim() !== ask.answered);
+/**
+ * What is typed but not yet answered holds a deploy's reload.
+ * @param {Ask} ask
+ */
+const markAsk = (ask) => /** @type {HTMLInputElement} */ (ask.input).toggleAttribute('data-draft', ask.text.trim() !== ask.answered);
 
+/** @param {Ask} ask */
 async function describe(ask) {
   const text = ask.text.trim();
   if (!text || ask.busy) return;
@@ -1359,42 +1540,46 @@ async function describe(ask) {
   draw();
   try {
     const r = await api(url('describe'), { method: 'POST', body: { text } });
-    Object.assign(ask, { note: r.note || (r.proposals.length ? '' : 'No change proposed.'), proposals: r.proposals.map((p) => ({ ...p, ask: text })), answered: text });
+    Object.assign(ask, { note: r.note || (r.proposals.length ? '' : 'No change proposed.'), proposals: r.proposals.map((/** @type {Proposal} */ p) => ({ ...p, ask: text })), answered: text });
   } catch (err) {
-    ask.note = `Couldn't ask: ${err.message}`;
+    ask.note = `Couldn't ask: ${/** @type {Error} */ (err).message}`;
   }
   ask.busy = false;
   markAsk(ask);
   if (state === s) draw();
 }
 
+/**
+ * @param {Ask} ask
+ * @param {Proposal} p
+ */
 function proposal(ask, p) {
-  const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
+  const row = (/** @type {string} */ op, /** @type {string} */ text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
   // Settings (phase 3: gate, panel, hand-offs) diff as lines above the body's.
-  const sets = (o) =>
+  const sets = (/** @type {Settings | undefined} */ o) =>
     Object.entries(o ?? {})
-      .map(([k, v]) => `${k}: ${k === 'on_fail' ? (v?.length ? v.map((x) => `${x.to} after ${x.after}`).join(', ') : 'the default') : (v ?? 'none')}`)
+      .map(([k, v]) => `${k}: ${k === 'on_fail' ? (/** @type {OnFail[] | null | undefined} */ (v)?.length ? /** @type {OnFail[]} */ (v).map((x) => `${x.to} after ${x.after}`).join(', ') : 'the default') : (v ?? 'none')}`)
       .join('\n');
   const runs = collapseRuns(diffLines(`${sets(p.settings_before)}${p.settings ? '\n\n' : ''}${p.before}`, `${sets(p.settings)}${p.settings ? '\n\n' : ''}${p.after}`)).map((r) =>
-    r.gap ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text))) : row(r.op, r.text),
+    r.gap ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((/** @type {{ text: string }} */ o) => row(' ', o.text))) : row(r.op, r.text),
   );
   const drop = () => {
     ask.proposals = ask.proposals.filter((x) => x !== p);
     draw();
   };
-  const apply = async (ev) => {
-    const b = ev.currentTarget;
+  const apply = async (/** @type {Event} */ ev) => {
+    const b = /** @type {HTMLButtonElement} */ (ev.currentTarget);
     b.disabled = true;
     const s = state; // a scheme switch during the save leaves the new scheme's entries alone
     try {
       const saved = await api(url(p.slug), { method: 'PATCH', body: { body: p.after, ...p.settings, version: p.version, note: `Described: ${p.ask}`.slice(0, 200) } });
       const i = s.entries?.findIndex((x) => x.slug === p.slug) ?? -1;
-      if (i >= 0) s.entries[i] = saved;
+      if (i >= 0) /** @type {Entry[]} */ (s.entries)[i] = saved;
       ask.applied.push(`Applied. Version ${saved.version} of ${saved.name}; History can undo it.`);
       ask.proposals = ask.proposals.filter((x) => x !== p);
       if (state === s) draw();
     } catch (err) {
-      toast(`Couldn't apply it: ${err.message}`);
+      toast(`Couldn't apply it: ${/** @type {Error} */ (err).message}`);
       b.disabled = false;
     }
   };
@@ -1426,14 +1611,14 @@ function newForm() {
   const add = h('button', { type: 'submit', class: 'cui-btn cui-primary' }, 'Add on trial');
   const s = state;
   const open = () => state === s && s.mode === 'new' && s.kept.get('new') === form;
-  const submit = async (ev) => {
+  const submit = async (/** @type {Event} */ ev) => {
     ev.preventDefault();
     add.disabled = true;
     err.hidden = true;
     try {
       const body = { ...(from.value ? { extends: from.value } : {}), ...(slug.value.trim() ? { slug: slug.value.trim() } : {}), ...(when.value.trim() ? { when: when.value.trim() } : {}) };
       const made = await api(url(), { method: 'POST', body });
-      if (!s.entries.some((x) => x.slug === made.slug)) s.entries.push(made);
+      if (!(/** @type {Entry[]} */ (s.entries).some((x) => x.slug === made.slug))) /** @type {Entry[]} */ (s.entries).push(made);
       if (open()) {
         s.newWhen = '';
         select(made.slug, 'edit');
@@ -1441,8 +1626,8 @@ function newForm() {
       if (state === s) load();
     } catch (x) {
       add.disabled = false;
-      if (!open()) return toast(`Couldn't add it: ${x.message}`);
-      err.textContent = x.message;
+      if (!open()) return toast(`Couldn't add it: ${/** @type {Error} */ (x).message}`);
+      err.textContent = /** @type {Error} */ (x).message;
       err.hidden = false;
     }
   };

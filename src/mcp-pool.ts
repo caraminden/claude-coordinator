@@ -13,6 +13,7 @@ import { handle } from './mcp.ts';
 import { poolAlive } from './pool-client.mjs';
 import { beatWhileOpen, turnStore, type TurnContext } from './pool-context.ts';
 import { dropLinks, machineRequest } from './pool-machine.ts';
+import { POOLED_WINDOWS } from './machine-pick.ts';
 import { thrown } from './thrown.ts';
 import type { RpcRequest } from './mcp-types.ts';
 
@@ -121,7 +122,7 @@ const server = createServer(async (req, res) => {
       const why = register(token, b);
       return why ? send(res, 400, { error: why }) : send(res, 204);
     }
-    const machine = /^\/machine\/(\d+)\/(mcp|ws)$/.exec(url.pathname);
+    const machine = /^\/machine\/(\d+|windows)\/(mcp|ws)$/.exec(url.pathname);
     if (url.pathname !== '/mcp' && !machine) return send(res, 404, { error: 'not found' });
     // No server-to-client stream: Claude Code takes 405 as "none", and every answer rides its request's POST.
     if (req.method === 'GET') return send(res, 405);
@@ -132,7 +133,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/mcp') return await serve(req, res, turn, handle);
     const [, id, srv] = machine!;
     const name = url.searchParams.get('name') || `machine ${id}`;
-    return await serve(req, res, turn, (msg) => machineRequest(token, Number(id), srv as 'mcp' | 'ws', name, msg, join(dirname(dir), 'machine-tools'), url.searchParams.get('lent')));
+    return await serve(req, res, turn, (msg) => machineRequest(token, id === POOLED_WINDOWS ? id : Number(id), srv as 'mcp' | 'ws', name, msg, join(dirname(dir), 'machine-tools'), url.searchParams.get('lent')));
   } catch (err) {
     if (!res.headersSent) send(res, 500, { error: thrown(err).message });
     else res.end();

@@ -16,28 +16,41 @@ import { rowTarget } from './schemecounts.js';
 import { threadRow } from './sidebar.js';
 import { byUrgency, mentions } from './threadstate.js';
 
+/** @import { InboxItem, Ticket, View } from './types.js' */
+/** One scheme's line on Home: its counts and its last days' ships (src/routes/projects.ts /api/home). @typedef {{ id: number, name: string, waiting: number, working: number, shipped: number, daily: number[] }} HomeScheme */
+/** What's broken now (src/ci-health.ts BrokenRow). @typedef {{ scheme: string, schemeId: number, key: string, what: string, next?: string, since: number | null, ringing: boolean, ringsAt?: number, who: { kind: 'minion' | 'taskmaster' | 'person', label: string, href: string } }} BrokenRow */
+/** The /api/home answer, plus whose it is. @typedef {{ items: InboxItem[], tickets: Ticket[], seen: Record<number, number>, schemes: HomeScheme[], since?: number, days: string[], broken: BrokenRow[], me: string | null }} HomeData */
+
 const CACHE = 'cc-home'; // the last /api/home answer, for the next first paint
 
+/** @type {HomeData | null} */
 let data = null; // the last answer: { items, tickets, seen, schemes, since, days, broken, me }, only ever drawn for the person it was fetched for
 try {
-  data = JSON.parse(localStorage.getItem(CACHE));
+  data = JSON.parse(/** @type {string} */ (localStorage.getItem(CACHE)));
 } catch {}
 if (!Array.isArray(data?.days)) data = null; // an answer cached before the bars (#1217) can't draw them
 let failed = false; // the last fetch failed: the list says so, with a retry, rather than "Loading…" for good
 // This visit: each list's ids in the order shown, the ones there when it opened (the rest are "new"), and the rows as last seen.
+/** @type {{ rows: number[], first: Set<number> | null, last: Map<number, { t: Ticket, items: InboxItem[] }>, fresh: boolean, shown: number[] }} */
 const visit = { rows: [], first: null, last: new Map(), fresh: false, shown: [] };
+/** @type {number | null} */
 let next = null; // the chat whose card you just answered, to move on from once the list agrees
+/** @type {ReturnType<typeof setTimeout> | 0} */
 let timer = 0;
+/** @type {HTMLElement | null} */
 let panel = null;
+/** @type {HTMLElement | null} */
 let overview = null;
+/** @type {HTMLElement | null} */
 let strip = null; // "Broken now" (#1662), drawn above everything else on the page
 let brokenOpen = false; // its list is open (#/home/broken, the address the alarm on people's phones links to)
 // Schemes folded shut on Home, by id, kept in this browser (their rows stay in the list; only the drawing folds).
 const FOLDED = 'cc-home-folded';
 const folded = new Set();
 try {
-  for (const id of JSON.parse(localStorage.getItem(FOLDED)) ?? []) folded.add(Number(id));
+  for (const id of JSON.parse(/** @type {string} */ (localStorage.getItem(FOLDED))) ?? []) folded.add(Number(id));
 } catch {}
+/** @param {number} id */
 function toggleFolded(id) {
   folded[folded.has(id) ? 'delete' : 'add'](id);
   try {
@@ -47,9 +60,11 @@ function toggleFolded(id) {
 }
 
 /** `#/p/…` as Home's address for the same chat: `#/home/p/…` (core.js routes both). */
+/** @param {string} hash */
 export const homeHash = (hash) => (hash.startsWith('#/p/') ? `#/home${hash.slice(1)}` : hash);
 
 /** The shelf says whether it shows the Home line, for the next start. */
+/** @param {boolean} shown */
 export function rememberHomeLine(shown) {
   try {
     if (shown) localStorage.setItem(HOME_LINE, '1');
@@ -75,6 +90,7 @@ export function homePanel() {
  * activity bars, no minion's own row. The side panel's title already says Home, so this has no heading of its own
  * (Josh, 2026-11-20: "It shouldnt say home twice in the header"); on a phone it holds the list first.
  */
+/** @param {HTMLElement | null} [list] */
 export function homeOverview(list = null) {
   overview = h('div', { class: 'home-overview-body' });
   strip = h('div', { class: 'home-broken-slot' });
@@ -112,8 +128,10 @@ export async function refreshHome() {
 }
 
 /** A chat event from the stream: your own answer to a card in the chat open from Home moves you on once the list agrees. */
+/** @param {import('./types.js').ChatEvent} event */
 export function homeEvent(event) {
   if (!view?.home || event.ticket_id !== view.id) return;
+  /** @type {{ answer?: unknown, author?: string, by?: string, settled?: { by?: string } }} */
   let d = {};
   try {
     d = JSON.parse(event.data);
@@ -128,6 +146,10 @@ export function homeEvent(event) {
 // ---- drawing ----
 
 /** `ids` in the order this visit shows them: the ones already shown keep their place (gone ones keep theirs, so a returning row sits where it was), new ones join the bottom. */
+/**
+ * @param {number[]} shown
+ * @param {number[]} ids
+ */
 const stable = (shown, ids) => [...shown, ...ids.filter((id) => !shown.includes(id))];
 
 /** Forget an answer fetched for someone else (a sign-out and in on this browser doesn't reload the page). */
@@ -136,11 +158,13 @@ const own = () => {
 };
 
 /** Each waiting minion's items, by ticket id. */
+/** @returns {Map<number, InboxItem[]>} */
 function groups() {
+  /** @type {Map<number, InboxItem[]>} */
   const rows = new Map();
   for (const i of data?.items ?? []) {
     if (!rows.has(i.ticketId)) rows.set(i.ticketId, []);
-    rows.get(i.ticketId).push(i);
+    /** @type {InboxItem[]} */ (rows.get(i.ticketId)).push(i);
   }
   return rows;
 }
@@ -148,6 +172,10 @@ function groups() {
 const CARDS = new Set(['question', 'plan', 'approval']);
 
 /** A row's address: Home's own for its chat, at its oldest card, else the oldest thing it waits on you for. */
+/**
+ * @param {Ticket} t
+ * @param {InboxItem[] | undefined} items
+ */
 const rowHref = (t, items) => {
   // A card (question, plan, approval) wins over an older mention or reply offer: Josh, 2026-11-20, "clicking a question card
   // on the home screen should go to the card".
@@ -166,13 +194,14 @@ function drawPanel() {
   const tickets = new Map((data?.tickets ?? []).map((t) => [t.id, t]));
   // A scheme's rows read seen times and mentions from the open scheme; Home's come from every scheme (ticket ids are global).
   // Seen times only grow, so the newer of the two wins.
-  if (view) for (const [id, at] of Object.entries(data?.seen ?? {})) if (!(view.seen?.[id] >= at)) (view.seen ??= {})[id] = at;
+  // Object.entries gives string ids; the data is keyed by ticket number, so they are typed as numbers (indexing is the same at run time).
+  if (view) for (const [id, at] of /** @type {[number, number][]} */ (/** @type {unknown} */ (Object.entries(data?.seen ?? {})))) if (!((view.seen?.[id] ?? -Infinity) >= at)) (view.seen ??= {})[id] = at;
   for (const [id, m] of mentionMap(data?.items ?? [])) if (!mentions.has(id)) mentions.set(id, m);
   // The first answer of a visit sorts each scheme as its own list does: Taskmaster first, then by urgency.
-  const order = [...rows.keys()].filter((id) => tickets.has(id)).sort((a, b) => Number(isCoordinator(tickets.get(b))) - Number(isCoordinator(tickets.get(a))) || byUrgency(tickets.get(a), tickets.get(b), usage));
+  const order = [...rows.keys()].filter((id) => tickets.has(id)).sort((a, b) => Number(isCoordinator(/** @type {Ticket} */ (tickets.get(b)))) - Number(isCoordinator(/** @type {Ticket} */ (tickets.get(a)))) || byUrgency(/** @type {Ticket} */ (tickets.get(a)), /** @type {Ticket} */ (tickets.get(b)), usage));
   visit.rows = stable(visit.rows, order);
   visit.first ??= new Set(order);
-  for (const id of order) visit.last.set(id, { t: tickets.get(id), items: rows.get(id) });
+  for (const id of order) visit.last.set(id, { t: /** @type {Ticket} */ (tickets.get(id)), items: /** @type {InboxItem[]} */ (rows.get(id)) });
   const names = schemeOrder();
   for (const id of visit.rows) {
     const t = visit.last.get(id)?.t;
@@ -193,11 +222,11 @@ function drawPanel() {
         { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) },
         h('h3', {}, s.name, shut ? h('span', { class: 'home-folded-count' }, String(ids.length)) : '', h('span', { class: 'spacer' }), fold),
         ...(shut ? [] : ids).map((id) => {
-          const t = tickets.get(id),
+          const t = /** @type {Ticket} */ (tickets.get(id)),
             items = rows.get(id);
           // The row's card and spend badges open on Home too, not in the scheme.
           const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })), spend_alert: t.spend_alert && { ...t.spend_alert, href: homeHash(t.spend_alert.href) } }, rowHref(t, items));
-          if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
+          if (visit.fresh && !(/** @type {Set<number>} */ (visit.first).has(id))) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
           return row;
         }),
       );
@@ -216,8 +245,10 @@ function drawPanel() {
     },
     'Try again',
   );
-  panel.replaceChildren(
-    ...(sections.length ? sections : [failed && !data ? emptyCard("Couldn't load Home", h('span', {}, "What waits on you didn't load. ", retry), { mark: '!', hue: 'danger' }) : emptyCard('Nothing needs you', data ? 'Minions in any of your schemes that wait on you show here.' : 'Loading what waits on you…')]),
+  /** @type {HTMLElement} */ (panel).replaceChildren(
+    ...(sections.length
+      ? /** @type {HTMLElement[]} */ (sections)
+      : [failed && !data ? emptyCard("Couldn't load Home", h('span', {}, "What waits on you didn't load. ", retry), { mark: '!', hue: 'danger' }) : emptyCard('Nothing needs you', data ? 'Minions in any of your schemes that wait on you show here.' : 'Loading what waits on you…')]),
   );
 }
 
@@ -226,6 +257,7 @@ function drawOverview() {
   own();
   strip?.replaceChildren(brokenStrip(data?.broken ?? []));
   const schemes = data?.schemes ?? [];
+  /** @param {'waiting' | 'working' | 'shipped'} k */
   const sum = (k) => schemes.reduce((n, s) => n + s[k], 0);
   const days = data?.days ?? [];
   // One scale for every scheme's bars, so a tall bar means the same in each.
@@ -243,6 +275,7 @@ function drawOverview() {
  * need to be alerted when there is something actually wrong and then I need to be able to see what it is and that it is
  * being fixed"; she picked a strip on the front page that opens the list, red when something needs a person.
  */
+/** @param {BrokenRow[]} rows */
 function brokenStrip(rows) {
   if (!rows.length) return '';
   const needs = rows.filter((r) => r.who.kind === 'person').length;
@@ -264,6 +297,7 @@ function brokenStrip(rows) {
 }
 
 /** One broken thing: its scheme and what's wrong, what's being done, since when, and who's on it (that opens it). */
+/** @param {BrokenRow} r */
 function brokenRow(r) {
   const meta = [r.since ? `since ${when(r.since)}` : '', !r.ringing && r.ringsAt ? `rings ${when(r.ringsAt)} if still broken` : ''].filter(Boolean).join(' · ');
   const tone = { person: 'danger', taskmaster: 'warn', minion: 'info' }[r.who.kind];
@@ -277,8 +311,18 @@ function brokenRow(r) {
 }
 
 /** A scheme's line: its tag, what's going on in it as chips, and its last days' ships as bars; it opens the scheme. */
+/**
+ * @param {HomeScheme} s
+ * @param {string[]} days
+ * @param {number} top
+ */
 function schemeRow(s, days, top) {
   // Always the three counts, in fixed slots (dim at zero), so the line's height doesn't change when a count does.
+  /**
+   * @param {number} n
+   * @param {string} tone
+   * @param {string} text
+   */
   const slot = (n, tone, text) => {
     const c = toneChip(n ? tone : 'neutral', text);
     c.classList.add('home-count');
@@ -300,6 +344,7 @@ function schemeRow(s, days, top) {
 }
 
 /** A Pacific day key ("2026-11-18") as "Tue Nov 18". */
+/** @param {string | undefined} day */
 function dayLabel(day) {
   if (!day) return '';
   const [y, m, d] = day.split('-').map(Number);
@@ -307,6 +352,7 @@ function dayLabel(day) {
 }
 
 /** A time as people read it (Pacific, as the rest of Citadel shows it), e.g. "Tue 2:10 PM". */
+/** @param {number} at */
 function when(at) {
   return pacificWeekdayClock(at);
 }
@@ -318,6 +364,7 @@ function moveOn() {
   if (rows.has(next)) return; // it still asks something else: stay
   const at = visit.shown.indexOf(next);
   // A scheme folded shut on Home is skipped: its rows are still in `shown`, but nothing there opens by itself.
+  /** @param {number} id */
   const open = (id) => rows.has(id) && !folded.has(visit.last.get(id)?.t.project_id);
   const after = [...visit.shown.slice(at + 1), ...visit.shown.slice(0, Math.max(at, 0))].find(open);
   const from = next;

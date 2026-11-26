@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { type Project, Store } from '../src/db.ts';
+import { EffortRetros, QUIET_MS } from '../src/effort-retros.ts';
 import { agentToken, type Booted, bootServer, fakeClaude, jsonLines, PROMPT_AND_TOKEN, tempRoot, until } from './helpers.ts';
 
 const tmp = tempRoot('closed-as-');
@@ -111,4 +113,93 @@ test('the Flow tab’s read carries the word', async () => {
       ['why', 'replaced'],
     ],
   );
+});
+
+// #2080 (Josh, 2026-11-25, "Effort follows moved asks"): the retro of #2065's effort started while the minion that took two
+// of its asks was still in the ship line.
+test('an effort follows an ask that moves into another minion, and its retro waits for that minion', async () => {
+  const tm = (await srv.call(`/api/projects/${project.id}`)).data.coordinator.id as number;
+  const as = srv.as({ token: agentToken(srv.data, tm) });
+  const mk = async (effortName?: string) => {
+    const m = await minion();
+    await end(m.id);
+    if (effortName) assert.equal((await srv.call(`/api/tickets/${m.id}/properties`, { properties: { effortName } }, 'PUT')).status, 200);
+    return (await get(m.id)) as { id: number; number: number; properties: Record<string, string> };
+  };
+  const shut = async (id: number, body: object = {}) => {
+    const r = await as(`/api/tickets/${id}/status`, { status: 'closed', ...body });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    return r.data;
+  };
+  const setting = (key: string) => new Store(join(srv.data, 'coordinator.db')).getSetting(key);
+  /** The effort names whose retro a tick starts, once they have been quiet long enough. */
+  const retros = async () => {
+    const store = new Store(join(srv.data, 'coordinator.db'));
+    const started: string[] = [];
+    const tick = new EffortRetros({
+      store,
+      by: 'Citadel',
+      mode: 'act',
+      now: () => Date.now() + QUIET_MS + 3_600_000,
+      newMinion: async (p: Project, m: { title: string }) => {
+        started.push(m.title);
+        const x = store.createTicket({ project_id: p.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
+        return { id: x.id, number: x.number as number };
+      },
+      runner: { emit: () => {}, send: () => {} } as never,
+      note: () => {},
+    });
+    await tick.tick();
+    return started;
+  };
+
+  const [a, b, c] = [await mk('Push gaps'), await mk('Push gaps'), await mk('Push gaps')];
+  const plain = await mk();
+  const own = await mk('Desktop CI');
+  await shut(b.id);
+  const moved = await shut(a.id, { as: 'replaced', into: plain.number });
+  assert.equal(moved.joined, 'Push gaps');
+  assert.equal((await get(plain.id)).properties.effortName, 'Push gaps');
+  // One with an effort of its own keeps it, and the first effort still waits for it.
+  assert.equal((await shut(c.id, { as: 'replaced', into: own.number })).joined, undefined);
+  assert.equal((await get(own.id)).properties.effortName, 'Desktop CI');
+  await shut(plain.id);
+  assert.deepEqual(await retros(), [], 'the minion one of its asks moved into is still open');
+  // Its work moves on again: the wait follows every hop.
+  const last = await mk('Third');
+  await shut(own.id, { as: 'replaced', into: last.number });
+  assert.deepEqual(await retros(), [], 'two hops on is still open');
+  await shut(last.id);
+  assert.deepEqual(await retros(), ['Retro: Push gaps']);
+
+  // A minion's own close says where its work went too; a bad number or the wrong word closes nothing.
+  const d = await mk('Moves');
+  const e = await mk();
+  assert.equal((await as(`/api/tickets/${d.id}/status`, { status: 'closed', as: 'replaced', into: 99999 })).status, 400);
+  assert.equal((await as(`/api/tickets/${d.id}/status`, { status: 'closed', as: 'done', into: e.number })).status, 400);
+  assert.equal((await as(`/api/tickets/${d.id}/status`, { status: 'closed', as: 'replaced', into: d.number })).status, 400);
+  assert.notEqual((await get(d.id)).status, 'closed');
+  const f = await minion();
+  assert.equal((await srv.call(`/api/tickets/${f.id}/properties`, { properties: { effortName: 'Moves' } }, 'PUT')).status, 200);
+  const r = await close(f, { as: 'replaced', into: e.number });
+  assert.deepEqual([r.status, r.data.joined], [202, 'Moves'], JSON.stringify(r.data));
+  await end(f.id);
+  assert.equal((await get(e.id)).properties.effortName, 'Moves');
+
+  // A close that is called off forgets where the ask was going.
+  const h = await mk();
+  const g = await minion();
+  assert.equal((await srv.call(`/api/tickets/${g.id}/properties`, { properties: { effortName: 'Called off' } }, 'PUT')).status, 200);
+  assert.deepEqual((await close(g, { as: 'replaced', into: h.number })).data.joined, 'Called off');
+  assert.equal((await get(h.id)).properties.effortName, undefined, 'nothing moves until it closes');
+  assert.ok((await srv.call(`/api/tickets/${g.id}/stop`, {})).status < 300);
+  await until('it to stop', async () => (await get(g.id)).status !== 'running');
+  assert.equal(setting(`moved-into:${g.id}`), null);
+  assert.equal((await get(h.id)).properties.effortName, undefined);
+
+  // Saying a closed one again replaces where its ask went; without `into`, it went nowhere.
+  await shut(g.id, { as: 'replaced', into: h.number });
+  assert.equal((await get(h.id)).properties.effortName, 'Called off');
+  await shut(g.id, { as: 'dropped' });
+  assert.equal(setting(`moved-into:${g.id}`), null);
 });

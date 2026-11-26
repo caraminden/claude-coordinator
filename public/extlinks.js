@@ -3,6 +3,12 @@
 // is left to the browser. Citadel's own pages use mountLinkHandler directly; a framed contraption's rail.js does too,
 // with the lists Citadel's state message carries.
 
+/**
+ * @typedef {{ name: string, to: string }} AppLink
+ * @typedef {{ own?: string[], apps?: Record<string, string>, domain?: string | null, self?: string | null }} LinkCtx
+ * @typedef {{ kind: 'app', app: AppLink } | { kind: 'page' } | { kind: 'window' } | { kind: 'browser' }} LinkClass
+ */
+
 const NAME = /^\/apps\/([a-z0-9][a-z0-9-]{0,31})(?=\/|$)/;
 
 /**
@@ -10,8 +16,14 @@ const NAME = /^\/apps\/([a-z0-9][a-z0-9-]{0,31})(?=\/|$)/;
  * always `/apps/<name>/…` on Citadel's own host. A link counts by `/apps/<name>/…` on a host in `own` (Citadel's), or by
  * the app's own host in `apps` (host -> name, lower case), where `/` is the app's front page. Anything else (a path
  * outside the app, credentials, `_citadel`) is not an app link.
+ * @param {string} href
+ * @param {string | URL} base
+ * @param {string[]} [own]
+ * @param {Record<string, string>} [apps]
+ * @returns {AppLink | null}
  */
 export function appLink(href, base, own = [], apps = {}) {
+  /** @type {URL} */
   let url;
   try {
     url = new URL(href, base);
@@ -30,11 +42,20 @@ export function appLink(href, base, own = [], apps = {}) {
   return name ? { name, to: tail } : null;
 }
 
-/** The hash route that opens `{ name, to }` in the app view (core.js route). */
+/**
+ * The hash route that opens `{ name, to }` in the app view (core.js route).
+ * @param {AppLink} link
+ */
 export const appHash = ({ name, to }) => `#/apps/${name}?to=${encodeURIComponent(to)}`;
 
-/** The address the app view loads for `to` inside app `name`, or null unless it resolves to that app on `origin`. */
+/**
+ * The address the app view loads for `to` inside app `name`, or null unless it resolves to that app on `origin`.
+ * @param {string} name
+ * @param {string} to
+ * @param {string} origin
+ */
 export function appSrc(name, to, origin) {
+  /** @type {URL} */
   let url;
   try {
     url = new URL(to, origin);
@@ -54,8 +75,13 @@ export function appSrc(name, to, origin) {
  *   { kind: 'browser' }                 outside: the browser's default
  * Order: another app's link first (even same-origin: Citadel's host serves every app's /apps/<y>/), then same origin
  * stays with the page, then Citadel's own hosts and anything on the apps domain, then outside. Never edit `own` or `apps` to steer one case.
+ * @param {string} href
+ * @param {string | URL} base
+ * @param {LinkCtx} [ctx]
+ * @returns {LinkClass}
  */
 export function classifyLink(href, base, { own = [], apps = {}, domain = null, self = null } = {}) {
+  /** @type {URL} */
   let url;
   try {
     url = new URL(href, base);
@@ -76,14 +102,16 @@ export function classifyLink(href, base, { own = [], apps = {}, domain = null, s
  * maps each app's own host to its name, `domain()` the apps domain, `openWindow(address)` goes there in this window,
  * `openApp({ name, to }, address)` shows an app. A modifier key, a `download` link, or a click something already
  * handled is left to the browser.
+ * @param {{ own: () => string[], apps?: () => Record<string, string>, domain?: () => string | null, self?: () => string | null, openApp?: (link: AppLink, address: string) => unknown, openWindow?: (address: string) => unknown, base?: () => string }} opts
  */
 export function mountLinkHandler({ own, apps = () => ({}), domain = () => null, self = () => null, openApp, openWindow, base = () => location.href }) {
+  /** @param {MouseEvent} e */
   const handle = (e) => {
     if (e.defaultPrevented || (e.type === 'click' ? e.button !== 0 : e.button !== 1)) return;
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-    const a = e.target?.closest?.('a[href]');
+    const a = /** @type {HTMLAnchorElement | null | undefined} */ (/** @type {Element | null} */ (e.target)?.closest?.('a[href]'));
     if (!a || a.hasAttribute('download')) return;
-    const href = a.getAttribute('href');
+    const href = /** @type {string} */ (a.getAttribute('href'));
     const c = classifyLink(href, base(), { own: own(), apps: apps(), domain: domain(), self: self() });
     // A click or middle click on an app's link shows it in the app view: a new tab of Citadel's own address would be the browser's.
     if (c.kind === 'app' && openApp) {

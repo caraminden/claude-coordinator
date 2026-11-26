@@ -1,7 +1,7 @@
 // tools/land.sh itself: the rebase, its test run or CI gate, conflicts and refusals.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc, stopShip } from './land-fixture.ts';
@@ -388,14 +388,14 @@ const hubHas = (r: ReturnType<typeof setup>, ref: string) => git(join(r.dir, 'hu
 const waits = (c: ReturnType<typeof ci>, r: ReturnType<typeof setup>) => hubHas(r, 'land/ticket/1-x') && c.calls().split('head_sha=').length > 2;
 
 test('a ship stopped before it has read the id of the run it pushed cancels that run, listed a moment late (#1894)', async () => {
-  const s = await stopped({}, waits, true);
+  const s = await stopped({ LAND_CI_LATE: '20' }, waits, true);
   assert.deepEqual(cancels(s.calls), ['7']);
   assert.ok(!hubHas(s.r, 'land/ticket/1-x') && !hubHas(s.r, 'land-base/ticket/1-x'), 'the scratch branches go');
 });
 
 test("a stopped ship whose commit's red run from before is all GitHub lists yet waits for its own run, and cancels that (#1894)", async () => {
   // The old run is the answer to the gate's two asks and the stop's first two.
-  const s = await stopped((r) => ({ FAKE_OLD_RUN: `${git(r.wt, 'rev-parse', 'HEAD')} completed failure`, FAKE_LAG: '3', FAKE_UNLISTED: '', LAND_CI_LATE_POLL: '0.2' }), waits);
+  const s = await stopped((r) => ({ FAKE_OLD_RUN: `${git(r.wt, 'rev-parse', 'HEAD')} completed failure`, FAKE_LAG: '3', FAKE_UNLISTED: '', LAND_CI_LATE: '20', LAND_CI_LATE_POLL: '0.2' }), waits);
   assert.deepEqual(cancels(s.calls), ['7']);
 });
 
@@ -1706,12 +1706,14 @@ test("the smoke check runs the always-tests and the branch's changed test files,
   assert.match(landLog(r.shared), /· smoke · ticket\/1-x · tests failed \(exit 1\) · \d+s$/m);
 });
 
-test('the smoke check adds the route test only when the affected map picks it for what the branch changed (#1544)', () => {
+test('the smoke check adds the @pinned tests (the route test, list-reads, the boot check) only when the affected map picks them for what the branch changed (#1544, #2037)', () => {
   const route = 'access-matrix';
-  const run = (changed: string) => {
+  const run = (changed: string, edit = (m: string) => m) => {
     const r = smokeSetup();
-    for (const f of ['affected.ts', 'affected-map.txt']) copyFileSync(join(repo, 'tools', f), join(r.source, 'tools', f));
-    writeFileSync(join(r.source, 'test', `${route}.test.ts`), ''); // built, not quoted: a quoted test name reads as an import to test/pipeline-files.test.ts
+    copyFileSync(join(repo, 'tools', 'affected.ts'), join(r.source, 'tools', 'affected.ts'));
+    writeFileSync(join(r.source, 'tools', 'affected-map.txt'), edit(readFileSync(join(repo, 'tools', 'affected-map.txt'), 'utf8')));
+    // built, not quoted: a quoted test name reads as an import to test/pipeline-files.test.ts
+    for (const t of [route, 'list-reads', 'boot-check']) writeFileSync(join(r.source, 'test', `${t}.test.ts`), '');
     git(r.source, 'add', '-A');
     git(r.source, 'commit', '-qm', 'map');
     git(r.wt, 'rebase', '-q', 'main');
@@ -1722,6 +1724,22 @@ test('the smoke check adds the route test only when the affected map picks it fo
   };
   assert.match(run('src/http.ts'), new RegExp(`test/mine\\.test\\.ts test/${route}\\.test\\.ts$`));
   assert.doesNotMatch(run('notes/c.txt'), new RegExp(route));
+  // #2037: the map's other @pinned tests (list-reads, the boot check) join the same way, for the paths that pick them.
+  assert.match(run('src/runner.ts'), /test\/mine\.test\.ts test\/boot-check\.test\.ts test\/list-reads\.test\.ts$/);
+  // A map from before @pinned: the route test alone, as before.
+  assert.match(
+    run('src/http.ts', (m) => m.replace(/^@pinned .*\n/m, '')),
+    new RegExp(`test/${route}\\.test\\.ts$`),
+  );
+  assert.doesNotMatch(
+    run('src/runner.ts', (m) => m.replace(/^@pinned .*\n/m, '')),
+    /list-reads|boot-check/,
+  );
+  // A map that can't answer runs every @pinned test, never skips one.
+  assert.match(
+    run('notes/c.txt', (m) => `${m}a line that is no rule\n`),
+    new RegExp(`test/${route}\\.test\\.ts test/list-reads\\.test\\.ts test/boot-check\\.test\\.ts$`),
+  );
 });
 
 test("a clean smoke check lands as before, its time outside the timing line; tests past the limit don't decide; LAND_SMOKE=0 skips it (#1012)", () => {
@@ -1758,6 +1776,81 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
   const off = smokeSetup();
   assert.equal(off.smoke({ SMOKE_EXIT: '1', LAND_SMOKE: '0' }).status, 0);
   assert.deepEqual(off.ran(), []);
+});
+
+// #1983: eight ships on 2026-11-25 waited up to 70 minutes in line to hear they were over the size list. The real repo-wide
+// list and the real size test (its list of allowed giants emptied: the fixture has none of them), run by the real citadel-test.
+test('a branch over the file size limit is refused by the smoke check, before the line (#1983)', () => {
+  const r = setup();
+  const size = `test/${'size-budget'}.test.ts`; // built, not quoted: test/pipeline-files.test.ts reads quoted test names
+  for (const f of ['tools/citadel-test', 'tools/citadel-test-reporter.ts', 'tools/citadel-node', 'tools/citadel-node.cjs', 'tools/mem-room', 'test/leak-guard.ts', 'test/leak-file.ts', 'package.json', size]) cpSync(join(repo, f), join(r.source, f));
+  const real = readFileSync(join(repo, size), 'utf8');
+  const bare = real.replace(/(export const ALLOWED[^\n]* = \{)\n[^]*?\n\};/, '$1};');
+  assert.notEqual(bare, real);
+  writeFileSync(join(r.source, size), bare);
+  const listed = readFileSync(join(repo, 'tools/always-tests.txt'), 'utf8').split('\n');
+  writeFileSync(join(r.source, 'tools/always-tests.txt'), `${listed.filter((l) => l === size).join('\n')}\n`);
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'size check');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'tools/big.sh', ':\n'.repeat(1501));
+  const main = git(r.source, 'rev-parse', 'main');
+  const own = { CITADEL_TEST_EXTRA: '0', TMPDIR: r.dir };
+  const res = r.run(own);
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /^land: smoke: .*tools\/big\.sh: 1501 lines, limit 1500/m);
+  assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\), before the line/m);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  r.commit(r.wt, 'tools/big.sh', ':\n'.repeat(1500));
+  const ok = r.run(own);
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test('a commit that lost its #N: title is refused by the smoke check, before the line; a branch with no #N titles is not (#1983)', () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  git(r.wt, 'commit', '-q', '--amend', '-m', 'lost it');
+  git(r.wt, 'commit', '-q', '--allow-empty', '-m', '#1: kept');
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /^land: smoke: commit [0-9a-f]+ \("lost it"\) lost its #N: title/m);
+  assert.match(res.stderr, /^land: smoke: a commit title is wrong, before the line \(\d+ s\), so nothing landed and nobody waited on it\./m);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.match(landLog(shared), /· smoke · ticket\/1-x · a commit title is wrong · \d+s$/m);
+  // The check at the front stays, for what the line or the rebase changed.
+  const late = r.run({ LAND_SMOKE: '0' });
+  assert.equal(late.status, 1);
+  assert.match(late.stderr, /^land: rebasing [^]*lost its #N: title/m);
+  git(r.wt, 'reset', '-q', '--hard', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n'); // "b.txt: mine": no title of it starts "#N"
+  assert.equal(r.run().status, 0);
+});
+
+test('the smoke check does not blame a title the rebase leaves out: one main has cherry-picked, or one that came off main (#1983)', () => {
+  for (const kind of ['cherry-picked', 'taken back']) {
+    const r = setup();
+    r.commit(r.wt, 'x.txt', 'no number in this title');
+    const x = git(r.wt, 'rev-parse', 'HEAD');
+    if (kind === 'cherry-picked') {
+      r.commit(r.source, 'm.txt', 'main moved');
+      git(r.source, 'cherry-pick', x);
+    } else {
+      const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+      mkdirSync(state);
+      writeFileSync(join(state, 'taken-back'), `${x} ticket/9-other\n`);
+    }
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    git(r.wt, 'commit', '-q', '--amend', '-m', '#1: mine');
+    const res = r.run();
+    assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
+    assert.equal(git(r.source, 'log', '-1', '--format=%s'), '#1: mine');
+  }
 });
 
 test("the smoke check refuses a .ts file that doesn't parse, by the branch's tools/parse-check.ts (#1012)", () => {
@@ -1883,10 +1976,19 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
 test("--check reads main's .gitattributes, so both appending to a union file is no conflict", () => {
   const r = setup();
   r.commit(r.wt, 'log.md', 'base\nmine\n');
+  for (const d of [r.wt, r.source]) mkdirSync(join(d, 'docs'));
+  r.commit(r.wt, 'docs/notes.md', 'base\nmine\n');
   r.commit(r.source, '.gitattributes', 'log.md merge=union\n');
   r.commit(r.source, 'log.md', 'base\ntheirs\n');
-  const res = r.run({}, ['--check']);
-  assert.equal(res.status, 0, res.stderr);
+  r.commit(r.source, 'docs/.gitattributes', 'notes.md merge=union\n'); // a folder's own, as git reads it
+  r.commit(r.source, 'docs/notes.md', 'base\ntheirs\n');
+  // Conflict prep off: its rebase in a scratch checkout reads main's .gitattributes either way, so it would hide a wrong
+  // verdict from the merge-tree trial itself (git before 2.40 ignores attr.tree, #2071).
+  for (const prep of ['1', '0']) {
+    const res = r.run({ LAND_PREP: prep }, ['--check']);
+    assert.equal(res.status, 0, `LAND_PREP=${prep}: ${res.stderr}`);
+    assert.doesNotMatch(res.stderr, /conflicts with main/, `LAND_PREP=${prep}`);
+  }
 });
 
 // #1361 (Cara 2026-11-20, "Wait for a busy desktop"): while a runner is online, a ship waits LAND_CI_START_ONLINE for

@@ -3,9 +3,13 @@
 
 export const HOME_SCHEME = 2; // Citadel
 
-/** The id to open from `projects` ([{ id }]), given the last-opened id; null when there are none. */
+/**
+ * The id to open from `projects` ([{ id }]), given the last-opened id; null when there are none.
+ * @param {{ id: number }[]} projects
+ * @param {number | null | undefined} lastId
+ */
 export function startScheme(projects, lastId) {
-  const has = (id) => projects.some((p) => p.id === id);
+  const has = (/** @type {number | null | undefined} */ id) => projects.some((p) => p.id === id);
   if (has(lastId)) return lastId;
   if (has(HOME_SCHEME)) return HOME_SCHEME;
   return projects[0]?.id ?? null;
@@ -18,8 +22,10 @@ const got = new Map();
 const none = new Set(); // asked for, answered null: not asked again this visit
 let owed = new Set();
 
-const keyOf = (p) => `${p.id}.${p.icon}`;
-const keep = (k) => {
+/** @typedef {{ id: number, icon?: string | number | null }} IconScheme */
+
+const keyOf = (/** @type {IconScheme} */ p) => `${p.id}.${p.icon}`;
+const keep = (/** @type {string} */ k) => {
   try {
     return localStorage.getItem(KEEP + k);
   } catch {
@@ -28,7 +34,7 @@ const keep = (k) => {
 };
 
 /** The favicon's src for scheme `p` once the page has it; null when it has none or the batch hasn't answered yet (the imgs fill in then). */
-export function iconSrc(p) {
+export function iconSrc(/** @type {IconScheme} */ p) {
   if (p.icon == null) return null;
   const k = keyOf(p);
   const src = got.get(k) ?? keep(k);
@@ -72,7 +78,7 @@ async function fetchOwed() {
     } catch {
       /* full or blocked: it is asked for again next visit */
     }
-    for (const el of document.querySelectorAll(`[data-scheme-icon="${id}"]`)) {
+    for (const el of /** @type {NodeListOf<HTMLImageElement>} */ (document.querySelectorAll(`[data-scheme-icon="${id}"]`))) {
       el.src = src;
       el.hidden = false;
     }

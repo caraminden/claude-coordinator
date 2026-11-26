@@ -4,6 +4,8 @@
 // any member can turn one off for the scheme, after one confirm that says what it loses ("a scheme should be able to do
 // whatever it wants"). "New skill" starts a minion with a brief the person edits first; a kit skill only for the
 // Citadel scheme's members, and their Start is the go.
+/** @import { Child } from './base.js' */
+/** @import { View } from './types.js' */
 import { ago, api, h, icon, threadHref, view, me, pacificStamp } from './base.js';
 import { gloss } from './help-words.js';
 import { emptyCard, hueRow, meter, schemeHue, schemeTag, showFirst, statTiles, toneChip } from './look.js';
@@ -18,14 +20,29 @@ const TABS = [
   ['agents', 'Grunt types'],
 ];
 const PHASES = ['before any edit', 'after edits', 'after an error', 'before a ship'];
+/** @typedef {{ source: string, kind: string, name: string, slug: string, what?: string, trigger?: string }} SkillItem */
+/** @typedef {{ at: number }} LastRun */
+/** @typedef {{ runs: number, minions: number, shipped: number, last: LastRun[], with: Record<string, number>, types: Record<string, number>, phases: Record<string, number>, typeMinions: Record<string, number> }} Usage */
+/** @typedef {{ agents?: Record<string, Usage>, skills?: Record<string, Usage>, active?: Record<string, number> }} UsageSet */
+/** @typedef {{ error?: string, items: SkillItem[], off: string[], canKit?: boolean, kitScheme?: number, days?: number, warnings: Record<string, string>, usage?: UsageSet | null, since?: number, usageError?: string | null }} SkillsData */
+/** @typedef {{ project_id: number, number: number | null, title?: string, at: number }} MinionRef */
+/** @typedef {MinionRef & { type: string, runs: number, phases: Record<string, number> }} UsedMinion */
+/** @typedef {MinionRef & { opened: string[] }} MissedMinion */
+/** @typedef {MinionRef & { quote: string }} NamedMinion */
+/** @typedef {{ error?: string, used: UsedMinion[], types: { type: string, opened: number, active: number }[], misses?: { type: string, total: number, rows: MissedMinion[] }, named: { total: number, rows: NamedMinion[] } }} SkillDetail */
+/** @typedef {{ type: string, did: number, of: number }} Rate */
 let tab = 'kit';
 let scope = 'scheme';
+/** Null before the first draw: every reader checks, or runs after the page set it. */
+/** @type {SkillsData | null} */
 let data = null;
+/** @type {HTMLElement | null} */
 let pageEl = null;
 let token = 0;
 // Rows are ordered by their runs only when the counts were there at the first draw; counts that fill in later keep the order
 // the person is looking at (no reflow without input) until they switch tab or scope.
 let ranked = false;
+/** @type {Map<string, string>} */
 const placed = new Map(); // a row's group, fixed while `ranked` holds: a skill someone else switches off keeps its place until this person moves
 
 export function skillsPage() {
@@ -40,7 +57,8 @@ export function skillsPage() {
 /** The scheme's settings changed (someone switched a skill): redraw from view.project's skills_off. */
 export function onSkillsChanged() {
   if (!pageEl?.isConnected || !data) return;
-  data.off = (view.project?.skills_off ?? '').split(' ').filter(Boolean);
+  const v = /** @type {View} */ (view);
+  data.off = (v.project?.skills_off ?? '').split(' ').filter(Boolean);
   draw();
 }
 
@@ -49,25 +67,25 @@ async function load() {
   const mine = ++token;
   const q = scope === 'all' ? '?all=1' : '';
   try {
-    const got = await api(`api/projects/${view.projectId}/skills${q}`);
+    const got = await api(`api/projects/${/** @type {View} */ (view).projectId}/skills${q}`);
     if (mine !== token) return;
     data = got;
     ranked = !!got.usage;
     placed.clear();
   } catch (err) {
     if (mine !== token) return;
-    data = { error: err.message };
+    data = /** @type {SkillsData} */ ({ error: /** @type {Error} */ (err).message });
   }
   draw();
-  if (data.error || data.usage) return;
+  if (/** @type {SkillsData} */ (data).error || /** @type {SkillsData} */ (data).usage) return;
   try {
-    const got = await api(`api/projects/${view.projectId}/skills/usage${q}`);
+    const got = await api(`api/projects/${/** @type {View} */ (view).projectId}/skills/usage${q}`);
     if (mine !== token) return;
-    data.usage = got.usage;
-    data.since = got.since;
+    /** @type {SkillsData} */ (data).usage = got.usage;
+    /** @type {SkillsData} */ (data).since = got.since;
   } catch (err) {
     if (mine !== token) return;
-    data.usageError = err.message;
+    /** @type {SkillsData} */ (data).usageError = /** @type {Error} */ (err).message;
   }
   draw();
 }
@@ -77,12 +95,13 @@ function draw() {
   const head = h(
     'div',
     { class: 'ticket-head' },
-    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' }, 'What minions and Grunts know how to do, when each skill is meant to run, and how it ran here in the last two weeks.'),
   );
   if (!data) return pageEl.replaceChildren(head, loadingLine('Loading…'));
   if (data.error) return pageEl.replaceChildren(head, h('p', { class: 'error' }, data.error));
+  /** @type {Record<string, number>} */
   const counts = { kit: data.items.filter((i) => i.source === 'kit' && i.kind === 'skill').length, scheme: data.items.filter((i) => i.source === 'scheme').length, agents: data.items.filter((i) => i.source === 'kit' && i.kind === 'agent').length };
   const bar = h(
     'div',
@@ -98,7 +117,7 @@ function draw() {
             'aria-pressed': String(tab === k),
             onclick: () => {
               tab = k;
-              ranked = !!data.usage;
+              ranked = !!(/** @type {SkillsData} */ (data).usage);
               placed.clear();
               draw();
             },
@@ -124,8 +143,8 @@ function draw() {
                 onclick: () => {
                   if (scope === k) return;
                   scope = k;
-                  data.usage = null;
-                  data.usageError = null;
+                  /** @type {SkillsData} */ (data).usage = null;
+                  /** @type {SkillsData} */ (data).usageError = null;
                   load();
                 },
               },
@@ -137,17 +156,20 @@ function draw() {
     h('span', { class: 'spacer' }),
     h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: newSkill }, '+ New skill'),
   );
-  pageEl.replaceChildren(head, bar, ...list().filter(Boolean));
+  pageEl.replaceChildren(head, bar, .../** @type {Node[]} */ (list().filter(Boolean)));
 }
 
-const usageOf = (item) => (item.kind === 'agent' ? data.usage?.agents : data.usage?.skills)?.[item.name];
-const isOff = (item) => item.source === 'kit' && item.kind === 'skill' && data.off.includes(item.slug);
+/** @param {SkillItem} item */
+const usageOf = (item) => (item.kind === 'agent' ? /** @type {SkillsData} */ (data).usage?.agents : /** @type {SkillsData} */ (data).usage?.skills)?.[item.name];
+/** @param {SkillItem} item */
+const isOff = (item) => item.source === 'kit' && item.kind === 'skill' && /** @type {SkillsData} */ (data).off.includes(item.slug);
 
 function list() {
-  const items = data.items.filter((i) => (tab === 'agents' ? i.source === 'kit' && i.kind === 'agent' : tab === 'kit' ? i.source === 'kit' && i.kind === 'skill' : i.source === 'scheme'));
+  const items = /** @type {SkillsData} */ (data).items.filter((i) => (tab === 'agents' ? i.source === 'kit' && i.kind === 'agent' : tab === 'kit' ? i.source === 'kit' && i.kind === 'skill' : i.source === 'scheme'));
+  /** @param {SkillItem} a @param {SkillItem} b */
   const byRuns = (a, b) => (ranked ? (usageOf(b)?.runs ?? 0) - (usageOf(a)?.runs ?? 0) : 0) || a.name.localeCompare(b.name);
   if (tab === 'scheme' && !items.length) {
-    return [emptyCard(`${view.project?.name ?? 'This scheme'} has no skills or Grunt types of its own yet`, "They live in its repo's .claude/skills and .claude/agents. + New skill starts a minion that writes one.", { mark: '+', hue: 'accent' })];
+    return [emptyCard(`${/** @type {View} */ (view).project?.name ?? 'This scheme'} has no skills or Grunt types of its own yet`, "They live in its repo's .claude/skills and .claude/agents. + New skill starts a minion that writes one.", { mark: '+', hue: 'accent' })];
   }
   const intro =
     tab === 'kit'
@@ -155,7 +177,7 @@ function list() {
           'p',
           { class: 'muted small sk-intro' },
           'Every scheme gets these by default, and they are recommended. A scheme can turn any of them off; its minions stop seeing it from their next turn. What judges work (critics and reviewers) lives on ',
-          h('a', { href: `#/p/${view.projectId}/reviews` }, 'Reviewers and critics'),
+          h('a', { href: `#/p/${/** @type {View} */ (view).projectId}/reviews` }, 'Reviewers and critics'),
           '.',
         )
       : tab === 'agents'
@@ -165,14 +187,15 @@ function list() {
   // Grouped by health only when the counts were there at the first draw: counts that fill in later keep one list in the
   // order the person is looking at (no reflow without input) until they switch tab or scope.
   if (!ranked) return [intro, h('div', { class: 'settings-rows sk-rows' }, ...items.sort(byRuns).map((i) => row(i, max)))];
+  /** @param {SkillItem} i */
   const group = (i) => {
-    if (!placed.has(keyOf(i))) placed.set(keyOf(i), { Off: 'off', Busy: 'busy' }[health(i)[1]] ?? 'look');
+    if (!placed.has(keyOf(i))) placed.set(keyOf(i), { Off: 'off', Busy: 'busy' }[/** @type {[string, string]} */ (health(i))[1]] ?? 'look');
     return placed.get(keyOf(i));
   };
   const groups = [
     ['Needs a look', 'waiting', 'look'],
     ['Busy', 'done', 'busy'],
-    [`Off in ${view.project?.name ?? 'this scheme'}`, 'muted', 'off'],
+    [`Off in ${/** @type {View} */ (view).project?.name ?? 'this scheme'}`, 'muted', 'off'],
   ];
   return [
     intro,
@@ -183,28 +206,37 @@ function list() {
   ];
 }
 
+/** @param {number} n @param {number} of */
 const pct = (n, of) => (of ? Math.round((100 * n) / of) : 0);
+/** @param {Record<string, number> | undefined} counts @param {number} [n] */
 const top = (counts, n = 4) =>
   Object.entries(counts ?? {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, n);
+/** @param {string} name */
 const short = (name) => name.replace(/^citadel:/, '');
+/** @param {number} n */
 const k = (n) => (n >= 10000 ? `${Math.floor(n / 1000)}k` : n >= 1000 ? `${Math.floor(n / 100) / 10}k` : String(n)); // a count never wraps the line on a phone: 5.6k, 99k
+/** @type {Record<string, string>} */
 const HUE = { ok: 'done', warn: 'waiting', danger: 'danger', neutral: 'muted' };
+/** @type {Record<string, string>} */
 const PHASE_TONE = { 'before any edit': 'info', 'after edits': 'violet', 'after an error': 'danger', 'before a ship': 'ok' };
+/** @param {MinionRef} r */
 const minionLink = (r) => h('a', { href: threadHref({ kind: r.number == null ? 'coordinator' : 'ticket', project_id: r.project_id, number: r.number, id: 0 }) }, r.number == null ? 'Taskmaster' : `#${r.number}`, r.number == null ? null : h('span', { class: 'sk-title' }, ` ${r.title}`));
 
 /** The type it opened in most (by minions) out of that type's minions at work in the window: "12 of 300 feature minions". */
+/** @param {Usage | undefined} u @returns {Rate | null} */
 function rateOf(u) {
-  const active = data.usage?.active ?? {};
+  const active = /** @type {SkillsData} */ (data).usage?.active ?? {};
   const [type, did] = top(u?.typeMinions, 99).find(([t]) => active[t]) ?? [];
-  return type ? { type, did, of: active[type] } : null;
+  return type ? { type, did: /** @type {number} */ (did), of: active[type] } : null;
 }
 
 /** A row's health (Josh picked take B, "Health first", on #1082's choices page, 2026-11-19): [tone, word]. */
+/** @param {SkillItem} item @returns {[string, string] | null} */
 function health(item) {
   if (isOff(item)) return ['neutral', 'Off'];
-  if (!data.usage) return null;
+  if (!(/** @type {SkillsData} */ (data).usage)) return null;
   const u = usageOf(item);
   if (!u) return ['danger', 'Unused'];
   const r = rateOf(u);
@@ -218,9 +250,11 @@ const opened = new Map(); // the same key → the tab a person picked in it
 const openRows = new Set();
 const bodies = new Map(); // the same key → the body on screen, which a late answer fills (a redraw replaces it)
 const drafts = new Map(); // the same key → a Tune brief the person edited
+/** @param {SkillItem} item */
 const keyOf = (item) => `${scope}|${item.kind}|${item.name}`;
 
 /** One line per skill: its health, name and trigger, calls in the window on a bar, and the last call; it opens in place. */
+/** @param {SkillItem} item @param {number} max */
 function row(item, max) {
   const u = usageOf(item);
   const hl = health(item);
@@ -232,8 +266,8 @@ function row(item, max) {
       class: 'settings-row sk-row',
       'data-hue': hl ? HUE[hl[0]] : 'muted',
       open: openRows.has(key),
-      ontoggle: (e) => {
-        if (e.currentTarget.open) {
+      ontoggle: (/** @type {Event} */ e) => {
+        if (/** @type {HTMLDetailsElement} */ (e.currentTarget).open) {
           openRows.add(key);
           fill(item, body);
         } else openRows.delete(key);
@@ -244,8 +278,12 @@ function row(item, max) {
       {},
       h('span', { class: 'sk-health' }, hl ? toneChip(hl[0], hl[1]) : h('span', { class: 'sk-ghost', 'aria-label': 'Loading counts' })),
       h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title sk-name' }, short(item.name), item.source === 'scheme' ? h('i', { class: 'muted' }, ' · own') : null), h('span', { class: 'settings-row-sum' }, item.trigger || item.what)),
-      h('span', { class: 'sk-calls', 'data-hue': 'running', 'data-tip': `Calls in the last ${data.days} days` }, !data.usage ? (data.usageError ? h('span', { class: 'muted', title: data.usageError }, '?') : h('span', { class: 'sk-ghost' })) : meter(Math.sqrt(u?.runs ?? 0) / Math.sqrt(max), k(u?.runs ?? 0))),
-      h('span', { class: 'sk-last muted', title: u?.last[0] ? pacific(u.last[0].at) : '' }, !data.usage ? '' : u?.last[0] ? ago(u.last[0].at) : 'never'),
+      h(
+        'span',
+        { class: 'sk-calls', 'data-hue': 'running', 'data-tip': `Calls in the last ${/** @type {SkillsData} */ (data).days} days` },
+        !(/** @type {SkillsData} */ (data).usage) ? (/** @type {SkillsData} */ (data).usageError ? h('span', { class: 'muted', title: /** @type {SkillsData} */ (data).usageError }, '?') : h('span', { class: 'sk-ghost' })) : meter(Math.sqrt(u?.runs ?? 0) / Math.sqrt(max), k(u?.runs ?? 0)),
+      ),
+      h('span', { class: 'sk-last muted', title: u?.last[0] ? pacific(u.last[0].at) : '' }, !(/** @type {SkillsData} */ (data).usage) ? '' : u?.last[0] ? ago(u.last[0].at) : 'never'),
       h('span', { class: 'settings-row-chev' }, icon('forward')),
     ),
     body,
@@ -257,6 +295,7 @@ function row(item, max) {
 const pacific = pacificStamp;
 
 /** The opened row: what a session sees, three tabs (where it ran, why not more, tune), and the off switch. */
+/** @param {SkillItem} item @param {HTMLElement} body */
 function fill(item, body) {
   const key = keyOf(item);
   const u = usageOf(item);
@@ -267,7 +306,7 @@ function fill(item, body) {
   if (!d) {
     // A scheme's own skill counts only its own scheme: another scheme's skill of the same name is another skill.
     const q = new URLSearchParams({ name: item.name, kind: item.kind, ...(scope === 'all' && item.source === 'kit' ? { all: '1' } : {}) });
-    d = api(`api/projects/${view.projectId}/skills/detail?${q}`)
+    d = api(`api/projects/${/** @type {View} */ (view).projectId}/skills/detail?${q}`)
       .then(
         (got) => details.set(key, got),
         (err) => details.set(key, { error: err.message }),
@@ -284,11 +323,11 @@ function fill(item, body) {
   const tabs = h(
     'div',
     { class: 'rules-seg sk-itabs', role: 'group', 'aria-label': 'Show' },
-    [
+    /** @type {[string, string, number | null][]} */ ([
       ['where', 'Where it ran', u?.minions ?? 0],
       ['why', 'Why not more', r ? r.of - r.did : null],
       ['tune', 'Tune', null],
-    ].map(([t, l, n]) =>
+    ]).map(([t, l, n]) =>
       h(
         'button',
         {
@@ -336,25 +375,28 @@ function fill(item, body) {
       ? h(
           'label',
           { class: 'sk-switch' },
-          off ? `Off in ${view.project?.name ?? 'this scheme'}` : `On in ${view.project?.name ?? 'this scheme'}`,
+          off ? `Off in ${/** @type {View} */ (view).project?.name ?? 'this scheme'}` : `On in ${/** @type {View} */ (view).project?.name ?? 'this scheme'}`,
           h('button', { type: 'button', class: 'rules-switch', role: 'switch', 'aria-checked': String(!off), 'aria-label': `${item.name}: ${off ? 'off' : 'on'} in this scheme`, onclick: () => (off ? setOff(item, false) : confirmOff(item)) }),
         )
       : h('span', { class: 'muted small' }, item.source === 'scheme' ? "This scheme's own" : 'A kit Grunt type: no switch'),
   );
   body.replaceChildren(
-    ...[
-      // replaceChildren writes a null as "null"
-      item.what ? h('p', { class: 'look-prose' }, item.what) : null,
-      item.trigger ? h('p', { class: 'look-prose' }, h('b', {}, 'When it runs: '), item.trigger) : null,
-      tabs,
-      pane,
-      foot,
-    ].filter(Boolean),
+    .../** @type {Node[]} */ (
+      [
+        // replaceChildren writes a null as "null"
+        item.what ? h('p', { class: 'look-prose' }, item.what) : null,
+        item.trigger ? h('p', { class: 'look-prose' }, h('b', {}, 'When it runs: '), item.trigger) : null,
+        tabs,
+        pane,
+        foot,
+      ].filter(Boolean)
+    ),
   );
 }
 
+/** @param {SkillItem} item @param {Usage | undefined} u @param {Rate | null} r @param {SkillDetail} d */
 function where(item, u, r, d) {
-  if (!u) return h('div', { class: 'sk-pane' }, emptyCard(`Not opened ${scope === 'all' ? 'in any scheme' : 'here'} in ${data.days} days`, isOff(item) ? "It's off in this scheme, so minions can't see it." : 'No minion, Taskmaster or Grunt opened it.', { mark: '–', hue: 'waiting' }));
+  if (!u) return h('div', { class: 'sk-pane' }, emptyCard(`Not opened ${scope === 'all' ? 'in any scheme' : 'here'} in ${/** @type {SkillsData} */ (data).days} days`, isOff(item) ? "It's off in this scheme, so minions can't see it." : 'No minion, Taskmaster or Grunt opened it.', { mark: '–', hue: 'waiting' }));
   const withs = top(u.with)
     .map(([n, c]) => `${n === 'none' ? 'no skill first' : short(n)} ${c}`)
     .join(' · ');
@@ -370,6 +412,7 @@ function where(item, u, r, d) {
 }
 
 /** Josh's picks (#1082's grilling, 2026-11-19): the type's rate with the misses, and named but never opened. Only what happened. */
+/** @param {SkillItem} item @param {Usage | undefined} u @param {SkillDetail} d */
 function whyNot(item, u, d) {
   const what = item.kind === 'skill' ? 'opened it' : 'started one';
   const types = d.types.filter((t) => t.active).slice(0, 3);
@@ -398,23 +441,25 @@ function whyNot(item, u, d) {
       u
         ? emptyCard('No misses to show', item.source === 'kit' ? "Every minion of the type that uses it most did, and none was sent its name and didn't." : 'Every minion of the type that uses it most did.')
         : item.source === 'kit'
-          ? emptyCard('Nothing named it either', `No minion opened it or was sent a message naming ${item.name} in ${data.days} days.`, { mark: '0', hue: 'muted' })
-          : emptyCard('No minion opened it', `Not in ${data.days} days. Messages are checked only for kit names (citadel:…), so one that asked for it by its bare name doesn't show here.`, { mark: '0', hue: 'muted' }),
+          ? emptyCard('Nothing named it either', `No minion opened it or was sent a message naming ${item.name} in ${/** @type {SkillsData} */ (data).days} days.`, { mark: '0', hue: 'muted' })
+          : emptyCard('No minion opened it', `Not in ${/** @type {SkillsData} */ (data).days} days. Messages are checked only for kit names (citadel:…), so one that asked for it by its bare name doesn't show here.`, { mark: '0', hue: 'muted' }),
     );
   else parts.push(h('p', { class: 'look-prose' }, 'These say what happened, not what should have: a minion can be right not to use it.'));
   return h('div', { class: 'sk-pane' }, ...parts);
 }
 
 /** The quote with the skill's name marked. */
+/** @param {string} text @param {string} name */
 function quote(text, name) {
   const i = text.indexOf(name);
   return i < 0 ? [text] : [text.slice(0, i), h('mark', {}, name), text.slice(i + name.length)];
 }
 
 /** "Tune with a minion": a brief the person can edit, then Start. A kit skill or Grunt type goes to the Citadel scheme, for its members (canKit). */
+/** @param {SkillItem} item @param {Usage | undefined} u @param {Rate | null} r @param {SkillDetail} d */
 function tune(item, u, r, d) {
   const kit = item.source === 'kit';
-  if (kit && !data.canKit) return h('div', { class: 'sk-pane' }, emptyCard('Tuning a kit skill is for Citadel scheme members', 'A kit change reaches every scheme. Ask one of them, with what you see on this page.', { mark: 'i', hue: 'muted' }));
+  if (kit && !(/** @type {SkillsData} */ (data).canKit)) return h('div', { class: 'sk-pane' }, emptyCard('Tuning a kit skill is for Citadel scheme members', 'A kit change reaches every scheme. Ask one of them, with what you see on this page.', { mark: 'i', hue: 'muted' }));
   const text = h('textarea', { class: 'cui-input sk-brief', rows: 12, 'aria-label': 'Brief' });
   const fresh = tuneBrief(item, u, r, d);
   text.value = drafts.get(keyOf(item)) ?? fresh;
@@ -434,11 +479,11 @@ function tune(item, u, r, d) {
       onclick: async () => {
         start.disabled = true;
         try {
-          const t = await api(`api/projects/${kit ? data.kitScheme : view.projectId}/tickets`, { method: 'POST', body: { title: `Tune ${item.kind === 'agent' ? 'Grunt type' : 'skill'}: ${short(item.name)}`, message: text.value, properties: { type: 'chore' } } });
+          const t = await api(`api/projects/${kit ? /** @type {SkillsData} */ (data).kitScheme : /** @type {View} */ (view).projectId}/tickets`, { method: 'POST', body: { title: `Tune ${item.kind === 'agent' ? 'Grunt type' : 'skill'}: ${short(item.name)}`, message: text.value, properties: { type: 'chore' } } });
           drafts.delete(keyOf(item));
           location.hash = threadHref(t);
         } catch (e) {
-          err.textContent = e.message;
+          err.textContent = /** @type {Error} */ (e).message;
           err.hidden = false;
           start.disabled = false;
         }
@@ -456,22 +501,26 @@ function tune(item, u, r, d) {
   );
 }
 
+/** @param {SkillItem} item @param {Usage | undefined} u @param {Rate | null} r @param {SkillDetail | undefined} d */
 function tuneBrief(item, u, r, d) {
   const slug = item.slug;
   const file = item.source === 'kit' ? (item.kind === 'agent' ? `kit/agents/${slug}.md` : `kit/skills/${slug}/SKILL.md`) : item.kind === 'agent' ? `.claude/agents/${slug}.md` : `.claude/skills/${slug}/SKILL.md`;
-  const target = item.source === 'kit' ? data.kitScheme : view.projectId;
-  const where = scope === 'all' ? 'every scheme' : (view.project?.name ?? 'this scheme');
+  const target = item.source === 'kit' ? /** @type {SkillsData} */ (data).kitScheme : /** @type {View} */ (view).projectId;
+  const v = /** @type {View} */ (view);
+  const where = scope === 'all' ? 'every scheme' : (v.project?.name ?? 'this scheme');
+  /** @param {MinionRef} m */
   const ref = (m) => {
-    const scheme = m.project_id === target ? '' : `${(view.projects ?? []).find((p) => p.id === m.project_id)?.name ?? `scheme ${m.project_id}`} `;
+    const scheme = m.project_id === target ? '' : `${(v.projects ?? []).find((p) => p.id === m.project_id)?.name ?? `scheme ${m.project_id}`} `;
     return m.number == null ? `${scheme}Taskmaster` : `${scheme}#${m.number} (${m.title})`;
   };
+  /** @template {MinionRef} T @param {T[]} rows @param {number} n @param {(m: T) => string} [line] */
   const list = (rows, n, line) => rows.slice(0, n).map((m) => `- ${ref(m)}${line ? `: ${line(m)}` : ''}`);
   return [
     `Tune ${item.kind === 'agent' ? 'the Grunt type' : 'the skill'} \`${item.name}\` (${file}) so sessions use it when they should and not otherwise.`,
     '',
     `What its description says now: ${item.what}${item.trigger ? ` ${item.trigger}` : ''}`,
     '',
-    `How it ran in ${where}, last ${data.days} days (from the Skills page):`,
+    `How it ran in ${where}, last ${/** @type {SkillsData} */ (data).days} days (from the Skills page):`,
     u ? `- ${u.runs} calls in ${u.minions} minions; ${u.shipped} in minions that later shipped.` : '- Never opened.',
     ...(r ? [`- ${r.did} of ${r.of} ${r.type} minions opened it.`] : []),
     ...(d?.used?.length ? ['', 'Some that opened it:', ...list(d.used, 5)] : []),
@@ -484,16 +533,17 @@ function tuneBrief(item, u, r, d) {
   ].join('\n');
 }
 
+/** @param {SkillItem} item */
 function confirmOff(item) {
-  const warn = data.warnings[item.slug];
+  const warn = /** @type {SkillsData} */ (data).warnings[item.slug];
   const u = usageOf(item);
   const dlg = openDialog({
     title: `Turn off ${item.name}?`,
     className: 'sk-confirm',
     body: [
-      h('p', {}, `It's a Citadel default and recommended. Off, ${view.project?.name ?? 'this scheme'}'s minions won't see it from their next turn, and steps that name it are skipped.`),
+      h('p', {}, `It's a Citadel default and recommended. Off, ${/** @type {View} */ (view).project?.name ?? 'this scheme'}'s minions won't see it from their next turn, and steps that name it are skipped.`),
       warn ? h('p', { class: 'cui-notice', 'data-tone': 'warn' }, warn) : null,
-      u ? h('p', { class: 'muted small' }, `It ran ${u.runs} times here in the last ${data.days} days.`) : null,
+      u ? h('p', { class: 'muted small' }, `It ran ${u.runs} times here in the last ${/** @type {SkillsData} */ (data).days} days.`) : null,
       h(
         'div',
         { class: 'sk-actions' },
@@ -516,9 +566,10 @@ function confirmOff(item) {
 }
 
 /** Saves at once and rolls back with a toast if the save fails (Cara 2026-11-08). */
+/** @param {SkillItem} item @param {boolean} off */
 function setOff(item, off) {
-  const p = view.project;
-  const d = data; // a scheme switch swaps `data`: a late answer must not write this scheme's list into another's page
+  const p = /** @type {View} */ (view).project;
+  const d = /** @type {SkillsData} */ (data); // a scheme switch swaps `data`: a late answer must not write this scheme's list into another's page
   const was = d.off;
   const next = off ? [...new Set([...was, item.slug])].sort() : was.filter((s) => s !== item.slug);
   optimistic({
@@ -526,13 +577,13 @@ function setOff(item, off) {
     sets: `scheme-settings:${p.id}:skills_off`,
     apply: () => {
       if (data === d) d.off = next;
-      if (view.project?.id === p.id) view.project.skills_off = next.join(' ');
+      if (/** @type {View} */ (view).project?.id === p.id) /** @type {View} */ (view).project.skills_off = next.join(' ');
       if (data === d) draw();
     },
     send: () => api(`api/projects/${p.id}`, { method: 'PATCH', body: { skills_off: next } }),
     undo: () => {
       if (data === d) d.off = was;
-      if (view.project?.id === p.id) view.project.skills_off = was.join(' ');
+      if (/** @type {View} */ (view).project?.id === p.id) /** @type {View} */ (view).project.skills_off = was.join(' ');
       if (data === d) draw();
     },
     label: `turn ${item.name} ${off ? 'off' : 'on'}`,
@@ -541,6 +592,7 @@ function setOff(item, off) {
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,40}$/;
 
+/** @param {{ name: string, what: string, when: string, kit: boolean }} opts */
 function brief({ name, what, when, kit }) {
   const n = name || '<name>';
   const where = kit ? `the Citadel kit, as kit/skills/${n}/SKILL.md, so every scheme loads it as \`citadel:${n}\`` : `this scheme's repo, as .claude/skills/${n}/SKILL.md`;
@@ -562,7 +614,7 @@ function newSkill() {
   const name = h('input', { type: 'text', class: 'cui-input', placeholder: 'e.g. release-notes', spellcheck: 'false', autocomplete: 'off' });
   const what = h('textarea', { class: 'cui-input', rows: 2, placeholder: 'Writes the release notes from the shipped minions' });
   const when = h('textarea', { class: 'cui-input', rows: 2, placeholder: 'Before a release, or when someone asks for notes' });
-  const where = data.canKit
+  const where = /** @type {SkillsData} */ (data).canKit
     ? h(
         'div',
         { class: 'rules-seg', role: 'group', 'aria-label': 'Where it goes' },
@@ -577,7 +629,7 @@ function newSkill() {
               'data-k': k,
               'aria-pressed': String(k === 'scheme'),
               onclick: () => {
-                for (const b of where.children) b.setAttribute('aria-pressed', String(b.dataset.k === k));
+                for (const b of /** @type {HTMLCollectionOf<HTMLElement>} */ (/** @type {HTMLElement} */ (where).children)) b.setAttribute('aria-pressed', String(b.dataset.k === k));
                 sync();
               },
             },
@@ -612,12 +664,12 @@ function newSkill() {
         }
         start.disabled = true;
         try {
-          const scheme = kit() ? data.kitScheme : view.projectId;
+          const scheme = kit() ? /** @type {SkillsData} */ (data).kitScheme : /** @type {View} */ (view).projectId;
           const t = await api(`api/projects/${scheme}/tickets`, { method: 'POST', body: { title: `New ${kit() ? 'kit ' : ''}skill: ${slug}`, message: text.value, properties: { type: 'feature' } } });
           dlg.close();
           location.hash = threadHref(t);
         } catch (e) {
-          err.textContent = e.message;
+          err.textContent = /** @type {Error} */ (e).message;
           err.hidden = false;
           start.disabled = false;
         }
@@ -625,6 +677,7 @@ function newSkill() {
     },
     'Start the minion',
   );
+  /** @param {string} t @param {Child} el */
   const label = (t, el) => h('label', { class: 'sk-field' }, h('span', {}, t), el);
   const dlg = openDialog({
     title: 'New skill',

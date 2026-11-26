@@ -17,6 +17,10 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.
 3. **Done when**: under that heading, the end state a person can see or check (a page shows X, a
    test goes green, a file exists in a folder), not process steps. One to five lines.
+   A line that needs the live data (a timing, a count over real chats) or a pipeline-lane file names
+   how the minion meets it: `host_check` db (Citadel's database only), `copy_app_data` (a home app's),
+   the ship's live `probe`, or a place in the lane. A turn in a container can't open the live data
+   itself.
 4. **Already shipped on this**: what git (`git log main --grep`, the paths in play) and the minions
    list show today, with the date checked and the commits or minions found, or "nothing found
    (checked 2026-11-19)". A minion that starts on work already shipped repeats it. For anything
@@ -26,6 +30,8 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    data). "Nothing in particular" when true.
    Run `who-touches <the files it will edit>` (on every turn's PATH) and name each open minion
    already changing one of them, so the new one plans around it instead of meeting it as a conflict at the ship.
+   Minions sealed on the same leader can't show up in `who-touches` yet. When two will edit the same
+   files (README.md's Layout table, a design-system page), say which ships second and rebases.
 6. **Ruled out or tried**: decisions already made (quoted, dated), what was tried and failed and
    why, what is out of scope. Write "Nothing yet" when that's true, so the minion doesn't go looking.
    A change to how saved things are stored, read or applied (records, settings, saved files, a person's
@@ -72,6 +78,7 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
   `wake_when_live`). Neither chore is a reason for `stay_open`, or goes in a brief as an after-ship step.
 - An idea or research minion ends in one handoff per piece of work it proposes, then the card that
   asks which to start (past four handoffs, a choices page: the Citadel-wide card rule (Asking and picking)).
+  Give each handoff's option its `start` (ask_question): a plain pick then starts that minion with no turn.
 
 ## Idea minions and process-only changes
 

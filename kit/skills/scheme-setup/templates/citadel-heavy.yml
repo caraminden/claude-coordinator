@@ -12,9 +12,10 @@
 # we just ship less").
 #
 # To adopt it:
-#   1. Runners: the scheme's own on the desktop (`ci_runners add`, `os: linux` for Linux ones in WSL). Swap
-#      <runner-label> below for theirs (<scheme-slug>-ci-linux, or <scheme-slug>-ci on Windows). Only one heavy job
-#      per repo runs at a time, so with two runners one always stays free for the scheme's ship tests.
+#   1. Runners: the scheme's own, which a computer lending it CI registers by itself once a workflow asks for the
+#      label. Swap <runner-label> below for theirs (<scheme-slug>-ci-linux, or <scheme-slug>-ci on Windows). Only one
+#      heavy job per repo runs at a time; a second runner, so one always stays free for ship tests, is the odd case
+#      `ci_runners` add (count 2) is for.
 #   2. Toolchain: add the setup steps the scheme's own CI uses (setup-node, a Rust toolchain, setup-uv, mise-action...)
 #      where it says so below. Jobs that need perigee itself (data only it has, its Android emulator) stay there
 #      with `citadel-heavy --here`, and jobs that run Claude never come here, so leave those out.

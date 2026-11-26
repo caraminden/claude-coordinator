@@ -19,6 +19,9 @@ export const schemeQueries = {
 
   createProject(this: Store, name: string, repoUrl: string | null, ownerId: number | null = null): Project {
     const r = this.db.prepare('INSERT INTO projects (name, repo_url, owner_id, created_at) VALUES (?, ?, ?, ?)').run(name, repoUrl, ownerId, Date.now());
+    // Each CI PC whose owner sees the new scheme (its owner, an admin) is lent to it, as one is to every scheme they see when it connects.
+    const id = Number(r.lastInsertRowid);
+    for (const u of this.listUsers()) if (u.id === ownerId || this.canSee({ uid: u.id, admin: !!u.admin }, id)) this.lendCiToJoined(id, u.id);
     return this.getProject(Number(r.lastInsertRowid))!;
   },
 

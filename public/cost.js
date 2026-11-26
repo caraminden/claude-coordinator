@@ -3,14 +3,25 @@ import { account, api, costText, h, view, whenShown } from './base.js';
 import { toast } from './ui/status.js';
 import { renderSidebar } from './sidebar.js';
 
+/** @typedef {{ day: string; total: number; byProject: Record<number, number> }} CostDay src/costs.ts CostDay */
+/** @typedef {{ name: string; week: number; month: number }} SpendRow src/costs.ts SpendRow */
+/** @typedef {{ project_id: number; name: string; month_usd: number; cap_usd: number | null; services: { service: string; usd: number }[] }} SchemeBill src/outside-spend.ts SchemeBill */
+/** @typedef {{ n: number; label: string; limit: number | null; assumed: boolean }} WeekPart src/costs.ts WeekPart */
+/** @typedef {{ outside: SchemeBill[]; days: CostDay[]; week: { limit: number | null; parts: WeekPart[] }; split: { people: SpendRow[]; schemes: SpendRow[] } }} CostsAnswer GET /api/costs (src/routes/app.ts) */
+
+/** @type {CostDay[] | null} */
 let days = null;
 // Every payer's spend by person and by scheme, week and month (src/costs.ts spendSplit, #689).
+/** @type {{ people: SpendRow[]; schemes: SpendRow[] } | null} */
 let split = null;
 // What an even day's share of the weekly limit comes to at API prices (a seventh of src/costs.ts hostWeek's limit, every account together), or null.
+/** @type {number | null} */
 let budget = null;
 // Each Claude account's part of that limit (src/costs.ts hostWeek), for the chip's tooltip.
+/** @type {WeekPart[]} */
 let parts = [];
 // This month's spend on outside APIs and OpenRouter by scheme and service, with each scheme's cap (src/outside-spend.ts, #839).
+/** @type {SchemeBill[]} */
 let outside = [];
 
 /** The 7-day breakdown, on Settings → Usage for admins (it used to open from a "Day 38%" chip beside the weekly bar). */
@@ -24,6 +35,7 @@ export function costDetail() {
  * A turn ended: fetch the totals again, once for a burst of turns (at most every 10 s) and not while the tab is hidden,
  * where nobody reads them (#1528); the tab coming back fetches what it put off.
  */
+/** @type {ReturnType<typeof setTimeout> | null} */
 let costTimer = null;
 export function costSoon() {
   if (!account?.admin || costTimer) return;
@@ -41,14 +53,17 @@ export function costSoon() {
 export async function renderCost() {
   if (!account?.admin) return; // the server login's costs across Citadel, so only admins see them
   const before = budget;
+  /** @type {number | null} */
   let limit;
   try {
+    /** @type {CostsAnswer} */
+    const answer = await api('api/costs');
     ({
       days,
       week: { limit, parts },
       split,
       outside,
-    } = await api('api/costs'));
+    } = answer);
     budget = limit && limit / 7;
   } catch {
     return; // keep the last figures; the next turn tries again
@@ -56,13 +71,14 @@ export async function renderCost() {
   // Minion rows show their cost against the week, so they redraw when that estimate moves.
   if (budget !== before && view?.kind === 'project') renderSidebar();
   for (const el of document.querySelectorAll('.cost-detail')) {
-    el.hidden = false;
-    if (el.contains(document.activeElement) && document.activeElement.matches('.cap-input')) continue; // typing a cap: a redraw would take the focus and the text
+    /** @type {HTMLElement} */ (el).hidden = false;
+    if (el.contains(document.activeElement) && document.activeElement?.matches('.cap-input')) continue; // typing a cap: a redraw would take the focus and the text
     drawPop(el);
   }
 }
 
 /** A cost as a share of the weekly limit, "0.4%", or null until the week can be priced. */
+/** @param {number} usd */
 export function weekShare(usd) {
   if (!budget) return null;
   const pct = (usd / (budget * 7)) * 100;
@@ -71,6 +87,7 @@ export function weekShare(usd) {
 
 /** Who paid and where it went: every login's turns, not just the server login's, in dollars. */
 function splitTables() {
+  /** @param {string} head @param {SpendRow[]} rows */
   const table = (head, rows) =>
     h(
       'table',
@@ -82,7 +99,7 @@ function splitTables() {
         rows.map((r) => h('tr', {}, h('th', { scope: 'row' }, r.name), h('td', { class: 'num' }, r.week ? costText(r.week) : '–'), h('td', { class: 'num' }, costText(r.month)))),
       ),
     );
-  return h('div', { class: 'spend-split' }, h('h4', {}, 'Every login, by person and scheme'), table('Person', split.people), table('Scheme', split.schemes));
+  return h('div', { class: 'spend-split' }, h('h4', {}, 'Every login, by person and scheme'), table('Person', /** @type {NonNullable<typeof split>} */ (split).people), table('Scheme', /** @type {NonNullable<typeof split>} */ (split).schemes));
 }
 
 /** This month's bill for outside APIs, per scheme and service, with a cap field for the scheme you're in (#839). */
@@ -96,7 +113,7 @@ function outsideBill() {
       await api(`api/projects/${pid}/spend`, { method: 'PUT', body: { cap_usd: usd } });
       renderCost();
     } catch (err) {
-      toast(`Couldn't set the cap: ${err.message}`, { tone: 'warn' });
+      toast(`Couldn't set the cap: ${/** @type {Error} */ (err).message}`, { tone: 'warn' });
     }
   });
   return h(
@@ -126,16 +143,22 @@ function outsideBill() {
 }
 
 /** A cost as a share of an even day: "38%". */
-const pct = (usd) => `${Math.round((usd / budget) * 100)}%`;
+/** @param {number} usd */
+const pct = (usd) => `${Math.round((usd / /** @type {number} */ (budget)) * 100)}%`;
 
+/** @param {Element} chip */
 function drawPop(chip) {
   if (!days) return;
   const pid = view?.projectId;
+  /** @param {string} day @param {number} i */
   const label = (day, i) => (i === 0 ? 'Today' : i === 1 ? 'Yesterday' : new Date(`${day}T12:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }));
   // The share of an even day first, the dollars beside it; a day over its share in amber.
+  /** @param {number} usd @param {number} [n] */
   const cell = (usd, n = 1) => h('td', { class: `num${budget && usd > budget * n ? ' warn' : ''}` }, !usd ? '–' : budget ? [pct(usd / n), h('span', { class: 'usd' }, costText(usd / n))] : costText(usd));
-  const here = (d) => d.byProject[pid] ?? 0;
-  const sum = (f) => days.reduce((s, d) => s + f(d), 0);
+  /** @param {CostDay} d */
+  const here = (d) => d.byProject[/** @type {number} */ (pid)] ?? 0;
+  /** @param {(d: CostDay) => number} f */
+  const sum = (f) => /** @type {CostDay[]} */ (days).reduce((s, d) => s + f(d), 0);
   chip.replaceChildren(
     h('h4', {}, budget ? 'Each day against an even share of the week' : 'Cost at API prices, not a bill'),
     h(

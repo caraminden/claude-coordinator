@@ -26,7 +26,7 @@ writeFileSync(noList, '# no repo-wide files\n');
 
 function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_TEST_FILES: '0', CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_TEST_FILES: '0', CITADEL_MEM_ROOM_MB: '100000', ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));
@@ -130,10 +130,10 @@ test('no files runs --affected, the same as asking for it', async (t) => {
   assert.doesNotMatch(bare.out, /name the test files/);
 });
 
-// #1621: the guards that read every file are picked by no map, so they ride on every run.
+// #1621: the guards that read every file are picked by no map, so they ride on every run. The last six (#1983) reddened ships only after their place in line.
 test('the repo-wide list holds the guards that read every file', () => {
   const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n');
-  for (const t of ['sync-calls', 'judges', 'one-until', 'script-env', 'host-signals-guards', 'format-own']) assert.ok(always.includes(`test/${t}.test.ts`), `${t} runs on every citadel-test run`);
+  for (const t of ['sync-calls', 'judges', 'one-until', 'script-env', 'host-signals-guards', 'format-own', 'size-budget', 'ui-contract', 'one-home', 'config', 'raw-log-read', 'ship-core-parity']) assert.ok(always.includes(`test/${t}.test.ts`), `${t} runs on every citadel-test run`);
 });
 
 // #768: the repo-wide tests ride along, so their failures show before the land.

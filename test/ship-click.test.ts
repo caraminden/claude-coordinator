@@ -3,7 +3,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
+import { ARMED_NOTE, type Armed } from '../src/armed-handoff.ts';
 import { keptCards } from '../src/card-wait.ts';
+import { armedKey } from '../src/db-keys.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { queueKey } from '../src/minion-queue.ts';
 import { git, makeRepo } from './git.ts';
@@ -238,7 +240,7 @@ test('one let in beside the lane holder hands off unless they came to share a pi
   store.claims.release(projectId, 'pipeline-lane');
 });
 
-test("a waiting minion's hand-off is held for the lane and marks it ready; another change of its ships (#1985)", async () => {
+test("a waiting minion's hand-off is armed for the lane and marks it ready; another change of its ships (#1985, #2046)", async () => {
   const holder = await minion({ file: 'src/pipe/a.ts' });
   const waiting = await minion({ file: 'src/pipe/b.ts' });
   const plain = await minion({ file: 'src/plain.ts' });
@@ -246,8 +248,8 @@ test("a waiting minion's hand-off is held for the lane and marks it ready; anoth
   store.claims.setQueue(projectId, 'pipeline-lane', [waiting.id, plain.id], 'Cara');
   const handOff = (id: number) => srv.as({ token: agentToken(srv.data, id) })(`/api/tickets/${id}/land/handoff`, { ...HAND_OFF, go: 'Cara, 1:00 PM PST' });
   const r = await handOff(waiting.id);
-  assert.equal(r.status, 409);
-  assert.match(String(r.data.error), /holds the pipeline lane\. You are marked ready/);
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.match(String(r.data.armed), /^Armed, not started: src\/pipe\/b\.ts is a pipeline file/);
   const ready = () => store.claims.queue(projectId, 'pipeline-lane').map((q) => [q.ticket, q.ready]);
   assert.deepEqual(ready(), [
     [waiting.id, 1],
@@ -269,24 +271,46 @@ test("a waiting minion's hand-off is held for the lane and marks it ready; anoth
   store.claims.release(projectId, 'pipeline-lane');
 });
 
-test('a pipeline change ships from the click only for the lane holder', async () => {
-  const out = await minion({ file: 'src/pipe/deep/x.ts' });
-  await fellBack(out, await out.card(), /src\/pipe\/deep\/x\.ts is a pipeline file and you don't hold the pipeline lane/);
-  const other = await minion({ file: 'tools/pipeline-files.txt' });
-  store.claims.take(projectId, 'pipeline-lane', out.id, 'Cara');
-  await fellBack(other, await other.card(), /tools\/pipeline-files\.txt is a pipeline file/);
-
+test('a pipeline change ships from the click only for the lane holder; anyone else is armed for the lane with the go (#2046)', async () => {
+  const someone = store.createTicket({ project_id: projectId, title: 'Holder', permission_mode: 'default', created_by: 'Cara' });
+  store.claims.take(projectId, 'pipeline-lane', someone.id, 'Cara');
+  const armedBy = async (m: Minion, file: RegExp) => {
+    assert.equal((await m.press(await m.card())).status, 202);
+    assert.equal(m.state().note, ARMED_NOTE, 'waits for the lane, not landing');
+    assert.ok(store.claims.waiting(projectId, 'pipeline-lane').includes(m.id));
+    assert.match(store.getSetting<Armed>(armedKey(m.id))!.args.go as string, /^Cara, .*, by Ship It/, "the click's go waits with it");
+    const q = store.getSetting<{ msgs?: unknown[]; held: { text: string }[] }>(queueKey(m.id))!;
+    assert.match(q.held.at(-1)!.text, file);
+    assert.ok(!q.msgs?.length, 'no turn to hand off again');
+  };
+  await armedBy(await minion({ file: 'src/pipe/deep/x.ts' }), /src\/pipe\/deep\/x\.ts is a pipeline file and you don't hold the pipeline lane, so Citadel armed your hand-off/);
+  await armedBy(await minion({ file: 'tools/pipeline-files.txt' }), /tools\/pipeline-files\.txt is a pipeline file/);
   const dropped = await minion({ file: 'src/pipe/deep/x.ts' });
   git(dropped.cwd, 'rm', '-q', 'tools/pipeline-files.txt');
   git(dropped.cwd, 'commit', '-qm', 'no list');
-  await fellBack(dropped, await dropped.card(), /is a pipeline file/);
+  await armedBy(dropped, /is a pipeline file/);
 
   const holder = await minion({ file: 'src/pipe/deep/x.ts' });
+  store.claims.setQueue(projectId, 'pipeline-lane', [], 'Cara');
   store.claims.release(projectId, 'pipeline-lane');
   store.claims.take(projectId, 'pipeline-lane', holder.id, 'Cara');
   assert.equal((await holder.press(await holder.card())).status, 202);
   assert.equal(holder.state().state, 'outside');
   await until('it ships', () => holder.state().status === 'closed');
+});
+
+test("an armed Ship It ships with no turn once the lane passes to it: the press's own answer doesn't rule it out (#2046)", async () => {
+  store.claims.setQueue(projectId, 'pipeline-lane', [], 'Cara');
+  store.claims.release(projectId, 'pipeline-lane');
+  const someone = store.createTicket({ project_id: projectId, title: 'Holder', permission_mode: 'default', created_by: 'Cara' });
+  store.claims.take(projectId, 'pipeline-lane', someone.id, 'Cara');
+  const m = await minion({ file: 'src/pipe/deep/x.ts' });
+  assert.equal((await m.press(await m.card())).status, 202);
+  assert.equal(m.state().note, ARMED_NOTE);
+  await srv.call(`/api/tickets/${someone.id}/status`, { status: 'closed' });
+  await until('it ships, or is woken', () => m.state().status === 'closed' || m.texts().some((x) => x.includes("didn't ship by itself")));
+  assert.ok(m.texts().includes('The pipeline lane is yours, so Citadel started your armed hand-off with no turn.'), String(m.texts().at(-1)));
+  await until('it ships', () => m.state().status === 'closed');
 });
 
 test('a hand_off the ship would refuse is refused with the card, and so is one it has no place on', async () => {

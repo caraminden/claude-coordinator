@@ -6,7 +6,8 @@
 // taken, so a tab that froze or was offline sends it later or on its next load. It never throws and never holds up the page.
 (() => {
   // Tests turn the times down (test/slow-recorder-browser.test.ts sets this before the script runs); a page never does.
-  const knob = globalThis.citadelSlowKnobs ?? {};
+  /** @type {{ slow?: number, sendAfterLoad?: number }} */
+  const knob = /** @type {{ citadelSlowKnobs?: { slow?: number, sendAfterLoad?: number } }} */ (globalThis).citadelSlowKnobs ?? {};
   const SLOW = knob.slow ?? 2000,
     TICK = 250,
     KEY = 'cc-slow-moments',
@@ -21,10 +22,19 @@
       ' · ',
     ) + (matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches ? ' · installed app' : '');
 
+  /**
+   * @typedef {{ kind: string, what: string, start: number, end: number, server: number | null, page: string }} Moment
+   * @typedef {[number, number, number | null, string]} Request
+   */
+  /**
+   * @param {[number, number, ...unknown[]][]} list
+   * @param {number} now
+   */
   const trim = (list, now) => {
     while (list.length && list[0][1] < now - KEPT_MS) list.shift();
   };
   // The heartbeat: each time it runs late by over 100 ms, the tab was blocked for that long. Kept two minutes.
+  /** @type {[number, number][]} */
   const blocked = []; // [start, end] in performance.now() time
   let last = performance.now();
   setInterval(() => {
@@ -41,8 +51,10 @@
   });
 
   // Every request in the last two minutes, fast ones too: a page opening is often several of them.
+  /** @type {Request[]} */
   const requests = []; // [start, end, server ms or null, what]
   // The page's address over time, so a wait is put on the page it started on.
+  /** @type {[number, string][]} */
   const pages = [[-Infinity, location.hash || '#/']];
   addEventListener('hashchange', () => {
     pages.push([performance.now(), location.hash || '#/']);
@@ -51,20 +63,35 @@
       pages[0][0] = -Infinity;
     }
   });
-  const pageAt = (t) => pages.findLast(([at]) => at <= t)[1];
+  /** @param {number} t */
+  const pageAt = (t) => /** @type {[number, string]} */ (pages.findLast(([at]) => at <= t))[1];
 
+  /**
+   * @param {number} start
+   * @param {number} end
+   */
   const tabTime = (start, end) => blocked.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, end) - Math.max(a, start)), 0);
+  /** @param {string | null | undefined} h */
   const serverMs = (h) => {
     const m = /(?:^|,)\s*app;dur=([\d.]+)/.exec(h || '');
     return m ? Number(m[1]) : null;
   };
 
+  /** @type {Moment[]} */
   const note = []; // moments waiting for the heartbeat to catch up, so their tab time is whole
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let timer = null;
+  /**
+   * @param {string} kind
+   * @param {string} what
+   * @param {number} start
+   * @param {number} end
+   * @param {number | null} server
+   */
   function noteMoment(kind, what, start, end, server) {
     if (end - start <= SLOW) return;
     note.push({ kind, what, start, end, server, page: pageAt(start) });
-    clearTimeout(timer);
+    clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (timer));
     timer = setTimeout(settle, 1000); // after the heartbeat has measured the pause
   }
 
@@ -74,13 +101,17 @@
     try {
       const moments = note.splice(0);
       const opens = moments.filter((m) => m.kind === 'open');
+      /**
+       * @param {Moment} m
+       * @param {Moment} w
+       */
       const inside = (m, w) => w !== m && w.start <= m.start + TICK && w.end >= m.end - TICK;
       for (const o of opens) {
         const within = requests.filter(([a, b]) => a >= o.start - TICK && b <= o.end + TICK);
-        const slowest = within.reduce((s, r) => (!s || r[1] - r[0] > s[1] - s[0] ? r : s), null);
+        const slowest = within.reduce((/** @type {Request | null} */ s, r) => (!s || r[1] - r[0] > s[1] - s[0] ? r : s), null);
         if (slowest) {
           o.what = slowest[3];
-          o.server = within.reduce((s, r) => (r[2] == null ? s : Math.max(s ?? 0, r[2])), null);
+          o.server = within.reduce((/** @type {number | null} */ s, r) => (r[2] == null ? s : Math.max(s ?? 0, r[2])), null);
         }
       }
       const rows = moments
@@ -95,6 +126,7 @@
     } catch {}
     send();
   }
+  /** @returns {{ at: number, kind: string, what: string }[]} */
   const kept = () => {
     try {
       return JSON.parse(localStorage.getItem(KEY) || '[]');
@@ -125,8 +157,14 @@
       });
   }
 
-  globalThis.citadelSlow = {
-    /** One request from api(): `start` from performance.now() as it was sent, `res` its answer or null if it failed. */
+  /** @type {{ citadelSlow?: unknown }} */ (globalThis).citadelSlow = {
+    /**
+     * One request from api(): `start` from performance.now() as it was sent, `res` its answer or null if it failed.
+     * @param {string | undefined} method
+     * @param {unknown} path
+     * @param {number} start
+     * @param {Response | null} res
+     */
     request(method, path, start, res) {
       try {
         const end = performance.now(),
@@ -141,6 +179,7 @@
 
   // Opening a page inside Citadel (a scheme, a minion, the Status page): from route() dimming the page to drawing it.
   let loaded = false,
+    /** @type {number | null} */
     opening = null;
   const watch = () =>
     new MutationObserver(() => {
@@ -159,7 +198,7 @@
     setTimeout(() => {
       loaded = true;
       try {
-        const nav = performance.getEntriesByType('navigation')[0];
+        const nav = /** @type {PerformanceNavigationTiming | undefined} */ (performance.getEntriesByType('navigation')[0]);
         // Served from the service worker's copy (no bytes came over the network), its Server-Timing is an old visit's.
         const server = nav?.transferSize === 0 ? 0 : (nav?.serverTiming?.find((t) => t.name === 'app')?.duration ?? null);
         if (nav) noteMoment('load', '', 0, nav.loadEventStart, server);

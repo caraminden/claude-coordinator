@@ -1,8 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # What a worker machine's owner runs on it (Citadel, Build 7; install-worker.sh puts it here). As root:
 #   citadel-worker signin            sign in to Claude, through Claude Code's own sign-in
 #   citadel-worker signin-github     sign in to GitHub, through gh's own sign-in
 #   citadel-worker caps [--workers N] [--threads N] [--memory GB] [--disk GB]
+#   citadel-worker page-caps --threads N --memory GB   the worker's own ask, through sudo: its Machines page's threads and memory
 #   citadel-worker folder add <name> <path> [--write]   a folder minions marked for this PC may use, at /host/<name>
 #   citadel-worker folder remove <name>
 #   citadel-worker folders           the folders, and whether each is mounted
@@ -12,6 +13,8 @@ set -euo pipefail
 
 die() { echo "citadel-worker: $*" >&2; exit 1; }
 r=${CITADEL_TEST_ROOT:-}
+# Run through sudo (page-caps), nothing of the caller's environment counts, whatever that sudo keeps: not its PATH either.
+if [[ -n ${SUDO_USER:-} ]]; then r='' PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; fi
 etc=$r/etc/citadel-worker
 user=citadel-worker
 home=$r/home/$user
@@ -92,6 +95,11 @@ edit_folders() {
   as systemctl --user restart citadel-worker
 }
 
+# Everything that user runs, its containers included, is held to $1 threads and $2 GB of memory.
+hold_slice() {
+  systemctl set-property "user-$uid.slice" "CPUQuota=$(($1 * 100))%" "MemoryMax=${2}G" "MemoryHigh=$(($2 * 1024 * 9 / 10))M"
+}
+
 case ${1:-} in
   signin)
     echo 'Follow the sign-in below. When it says you are signed in, type /exit.'
@@ -126,10 +134,23 @@ case ${1:-} in
     ( umask 077; printf '%s\n' "$cfg" > "$etc/config.json" )
     chown "root:$user" "$etc/config.json"
     chmod 640 "$etc/config.json"
-    # Everything that user runs, its containers included, is held to these.
-    systemctl set-property "user-$uid.slice" "CPUQuota=$((threads * 100))%" "MemoryMax=${memory}G" "MemoryHigh=$((memory * 1024 * 9 / 10))M"
+    hold_slice "$threads" "$memory"
     if $restart; then as systemctl --user restart citadel-worker; fi
-    echo "Caps: $(num workers) minions at once, $threads threads, $memory GB of memory, $(num disk_gb) GB of disk." ;;
+    echo "Caps: $(num workers) minions at once, $threads threads, $memory GB of memory, $(num disk_gb) GB of disk."
+    echo "Where its Machines page sets one of these caps, the page's wins: change it there." ;;
+  page-caps)
+    # The worker's own ask (Build 7, #2085): the threads and memory its owner set on the Machines page, which may be above this
+    # PC's own. The one command sudo lets its user run (install-worker.sh's sudoers file), so it takes only this shape, each a
+    # whole number within what this PC has, and holds only that user's slice to them: config.json, the PC's own caps, stays
+    # as its owner left it, and the worker holds the page's workers and disk itself.
+    threads_here=$(getconf _NPROCESSORS_ONLN)
+    memory_here=$(awk '$1 == "MemTotal:" { print int($2 / 1024 / 1024) }' "$r/proc/meminfo")
+    [[ $threads_here =~ ^[0-9]+$ && $memory_here =~ ^[0-9]+$ ]] || die "Refused: can't tell this PC's threads and memory."
+    [[ $# == 5 && $2 == --threads && $4 == --memory ]] || die 'Refused: page-caps takes --threads <n> --memory <GB>, and nothing else.'
+    [[ $3 =~ ^[1-9][0-9]{0,4}$ && $3 -le $threads_here ]] || die "Refused: --threads takes a whole number from 1 to $threads_here on this PC."
+    [[ $5 =~ ^[1-9][0-9]{0,4}$ && $5 -ge 2 && $5 -le $memory_here ]] || die "Refused: --memory takes a whole number from 2 to $memory_here on this PC."
+    hold_slice "$3" "$5"
+    echo "This PC's minions now have $3 threads and $5 GB of memory." ;;
   folder)
     case ${2:-} in
       add)
@@ -164,7 +185,7 @@ case ${1:-} in
     systemctl disable --now citadel-worker-mounts || true
     sleep 2
     userdel -r "$user"
-    rm -rf "${etc:?}" "$r/etc/systemd/system/citadel-worker-mounts.service" "$r/usr/local/bin/citadel-worker" "$r/etc/systemd/system.control/user-$uid.slice.d"
+    rm -rf "${etc:?}" "$r/etc/sudoers.d/citadel-worker" "$r/etc/systemd/system/citadel-worker-mounts.service" "$r/usr/local/bin/citadel-worker" "$r/etc/systemd/system.control/user-$uid.slice.d"
     systemctl daemon-reload
     echo 'Removed. Switch Minion turns off on its row of the Machines page too.' ;;
   *)

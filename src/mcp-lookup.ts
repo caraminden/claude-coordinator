@@ -24,7 +24,7 @@ export const QUEUE_JOB = () => ({
   inputSchema: {
     type: 'object',
     properties: {
-      machine: { type: 'string', enum: C().JOB_MACHINES, description: 'The machine' },
+      machine: { type: 'string', enum: C().JOB_MACHINES, description: 'The machine; leave it out and Citadel picks one lent to this scheme (online, one that already allows this recipe, the shortest queue)' },
       kind: {
         type: 'object',
         description: 'The recipe; any change to it but its name needs a new go',
@@ -45,7 +45,7 @@ export const QUEUE_JOB = () => ({
       when: { type: 'string', enum: ['hours', 'now'], description: '"hours" (default) or "now", which needs a reason and always asks the owner' },
       reason: { type: 'string', maxLength: 200, description: 'Why, shown on the go card; required with "now"' },
     },
-    required: ['machine', 'kind'],
+    required: ['kind'],
   },
 });
 

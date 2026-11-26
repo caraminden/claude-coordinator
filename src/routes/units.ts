@@ -11,8 +11,8 @@ export const unitRoutes: Route[] = [
     path: '/api/units',
     who: ['person'],
     access: 'admin',
-    handler: ({ res }) => {
-      const rows = checkUnits(DEPLOY_DIR);
+    handler: async ({ res }) => {
+      const rows = await checkUnits(DEPLOY_DIR);
       json(res, 200, { rows, summary: summary(rows) });
     },
   },

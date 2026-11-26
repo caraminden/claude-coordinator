@@ -76,7 +76,7 @@ export const peopleQueries = {
   },
 
   addMember(this: Store, projectId: number, userId: number) {
-    this.db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id, added_at) VALUES (?, ?, ?)').run(projectId, userId, Date.now());
+    if (this.db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id, added_at) VALUES (?, ?, ?)').run(projectId, userId, Date.now()).changes) this.lendCiToJoined(projectId, userId);
   },
 
   removeMember(this: Store, projectId: number, userId: number) {

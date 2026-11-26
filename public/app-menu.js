@@ -5,15 +5,27 @@
 // Copy. In the desktop app it ends with Reload and Inspect. Text boxes and Shift+right-click keep the browser's own; on a phone a long press opens it as a
 // sheet on an app's own items and links only (#1670), and plain text keeps the phone's selection. Point and Inspect go up to Citadel's page (pick.js), which owns the chat box and the desktop app's
 // screenshot and DevTools. Served to apps beside rail.js, so it imports only the files beside it.
+/** @import { MenuItem, MenuSpec } from './ui/menu.js' */
 import { mountMenus } from './ui/menu.js';
 import { copyText } from './ui/markdown.js';
 import { toast } from './ui/status.js';
 import { PICKABLE, cropBox, cropPart, describePart } from './pick-crop.js';
 
+/** @typedef {MenuItem | '-' | null | undefined | false} MenuEntry */
+/** @typedef {{ selector: string; items: (el: Element, event: Event) => MenuEntry[]; kind?: string; name?: (el: Element) => string }} Added */
+/** @typedef {{ framed: boolean; title: () => string; desktop: () => boolean; post: (type: string, data: Record<string, unknown>) => void }} AppMenuContext */
+
+/** @type {Added[]} */
 const added = []; // { selector, items, kind, name }, in the order added
 
 /** The app's own items (rail.d.ts `menu`), also on `window.citadel.menu` for a page that doesn't import. */
 export const menu = {
+  /**
+   * @param {string} selector
+   * @param {(el: Element, event: Event) => MenuEntry[]} items
+   * @param {{ kind?: string; name?: (el: Element) => string }} [options]
+   * @returns {() => void}
+   */
   add(selector, items, { kind, name } = {}) {
     if (typeof selector !== 'string' || typeof items !== 'function') throw new TypeError('citadel.menu.add(selector, items): a CSS selector and a function returning the items');
     const entry = { selector, items, kind, name };
@@ -25,21 +37,32 @@ export const menu = {
   },
 };
 
+/**
+ * @param {unknown} t
+ * @param {number} [n]
+ */
 const shorten = (t, n = 60) => {
   const s = String(t ?? '')
     .replace(/\s+/g, ' ')
     .trim();
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 };
+/**
+ * @param {string} text
+ * @param {string} what
+ */
 const copy = (text, what) => copyText(text).then((ok) => toast(ok ? `${what} copied` : `Could not copy the ${what.toLowerCase()}`));
 
 /** The added entry whose match is nearest to `t` (a later one wins a tie), with the element it matched. */
+/** @param {Element} t */
 function ownMatch(t) {
+  /** @type {{ a: Added; el: HTMLElement } | null} */
   let best = null;
   for (const a of added) {
+    /** @type {HTMLElement | null} */
     let el = null;
     try {
-      el = t.closest(a.selector);
+      el = /** @type {HTMLElement | null} */ (t.closest(a.selector));
     } catch {} // a bad selector matches nothing
     if (el && (!best || best.el === el || best.el.contains(el))) best = { a, el };
   }
@@ -50,19 +73,30 @@ function ownMatch(t) {
  * The menu for `target` in an app, as ui/menu.js's spec; null leaves the browser's own. `ctx`: { framed, title(),
  * desktop(), post(type, data) }, from rail.js: whether Citadel frames the page, the app's name, whether that's the
  * desktop app, and a message up to Citadel's page.
+ * @param {Element} target
+ * @param {MouseEvent | null} e
+ * @param {AppMenuContext} ctx
+ * @returns {MenuSpec | null}
  */
 export function appMenuFor(target, e, ctx) {
   if (target.closest('.citadel-rail, .citadel-layer')) return null;
   const title = ctx.title();
   const desktop = ctx.desktop();
   const foot = desktop || matchMedia('(pointer: coarse)').matches ? undefined : "Shift+right-click: the browser's own menu";
+  /**
+   * @param {HTMLElement} el
+   * @param {string} [label]
+   * @returns {MenuEntry[]}
+   */
   const point = (el, label = 'Point at this') => (ctx.framed ? [{ label, icon: '📍', point: true, run: () => pointAt(el, ctx) }, { label: 'Point and draw…', icon: '✎', point: true, run: () => pointAt(el, ctx, true) }, '-'] : []);
   const [x, y] = e?.clientX || e?.clientY ? [e.clientX, e.clientY] : centre(target);
   const inspect = { label: 'Inspect', icon: '⌕', keys: 'Ctrl+Shift+I', run: () => ctx.post('inspect', { x, y }) };
   const reload = { label: `Reload ${title}`, icon: '↻', keys: 'Ctrl+R', run: () => location.reload() };
   // This menu cancels the desktop app's own, which offers Reload this app in every app (#1691), so each desktop menu keeps one.
+  /** @type {MenuEntry[]} */
   const tail = desktop ? ['-', reload, inspect] : [];
-  const hue = document.querySelector('meta[name=theme-color]:not([media])')?.content;
+  const hue = /** @type {HTMLMetaElement | null} */ (document.querySelector('meta[name=theme-color]:not([media])'))?.content;
+  /** @type {Pick<MenuSpec, 'hue' | 'tone'>} */
   const appTone = hue ? { hue } : { tone: 'violet' };
 
   const sel = getSelection();
@@ -72,11 +106,11 @@ export function appMenuFor(target, e, ctx) {
   }
   const own = ownMatch(target);
   if (own) {
-    const items = (own.a.items(own.el, e) ?? []).map((it) => (it && it !== '-' ? { ...it, from: title } : it));
+    const items = (own.a.items(own.el, /** @type {Event} */ (e)) ?? []).map((it) => (it && it !== '-' ? { ...it, from: title } : it));
     const text = own.el.innerText?.trim();
-    return { kind: own.a.kind ?? `${title} item`, ...appTone, name: shorten(own.a.name?.(own.el) ?? text, 50), foot, items: [...point(own.el), ...items, text && '-', text && { label: 'Copy text', icon: '⧉', run: () => copy(text, 'Text') }, ...tail] };
+    return { kind: own.a.kind ?? `${title} item`, ...appTone, name: shorten(own.a.name?.(own.el) ?? text, 50), foot, items: [...point(own.el), ...items, /** @type {MenuEntry} */ (text && '-'), /** @type {MenuEntry} */ (text && { label: 'Copy text', icon: '⧉', run: () => copy(text, 'Text') }), ...tail] };
   }
-  const link = target.closest('a[href]');
+  const link = /** @type {HTMLAnchorElement | null} */ (target.closest('a[href]'));
   if (link) {
     return {
       kind: 'Link',
@@ -94,12 +128,14 @@ export function appMenuFor(target, e, ctx) {
     };
   }
   const page = [{ label: `Copy link to ${title}`, icon: '🔗', run: () => copy(location.href, 'Link') }, reload];
+  /** @type {MenuEntry[]} */
   const end = desktop ? ['-', inspect] : [];
-  const part = target.closest(PICKABLE);
+  const part = /** @type {HTMLElement | null} */ (target.closest(PICKABLE));
   if (part && part !== document.body) return { kind: 'Part', tone: 'neutral', name: describePart(part, title, '').label.split(' · ')[0], foot, items: [...point(part), ...page, ...end] };
   return { kind: title, ...appTone, name: document.title && document.title !== title ? document.title : undefined, foot, items: [...point(document.body, 'Point at this page'), ...page, ...end] };
 }
 
+/** @param {Element} el */
 const centre = (el) => {
   const r = el.getBoundingClientRect();
   return [Math.max(0, r.left) + Math.min(r.width / 2, 24), Math.max(0, r.top) + Math.min(r.height / 2, 14)];
@@ -108,6 +144,9 @@ const centre = (el) => {
 /**
  * Point at `el` from inside Citadel's frame: its note, with this page's crop of it, or in the desktop app its place in
  * the frame, which Citadel's page screenshots (exact, where the copied crop can miss a picture or a canvas).
+ * @param {HTMLElement} el
+ * @param {AppMenuContext} ctx
+ * @param {boolean} [draw]
  */
 async function pointAt(el, ctx, draw = false) {
   const note = describePart(el, ctx.title(), `${location.pathname}${location.search}${location.hash}`);
@@ -118,6 +157,7 @@ async function pointAt(el, ctx, draw = false) {
 /**
  * A phone's long press (#1670) opens the sheet only on what an app added with menu.add() and on links, so plain text
  * keeps the phone's own selection; a selection in progress keeps it too.
+ * @param {Element} t
  */
 export function pressable(t) {
   const sel = getSelection();
@@ -125,14 +165,18 @@ export function pressable(t) {
   return !!(ownMatch(t) || t.closest('a[href]'));
 }
 
-/** Wire the page's right-click and a phone's long press to the app menu; rail.js calls it once on an app's page. */
+/**
+ * Wire the page's right-click and a phone's long press to the app menu; rail.js calls it once on an app's page.
+ * @param {AppMenuContext} ctx
+ */
 export function mountAppMenu(ctx) {
-  globalThis.citadel = Object.assign(globalThis.citadel ?? {}, { menu });
+  const g = /** @type {{ citadel?: object }} */ (globalThis);
+  g.citadel = Object.assign(g.citadel ?? {}, { menu });
   // iPhone's own link preview would cover the sheet. A constructed sheet, which a strict CSP allows (as rail.js does).
   const noCallout = new CSSStyleSheet();
   noCallout.replaceSync('a[href] { -webkit-touch-callout: none; }');
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, noCallout];
-  const off = mountMenus({ menuFor: (t, e) => appMenuFor(t, e, ctx), longPress: (t) => pressable(t) });
+  const off = mountMenus({ menuFor: (t, e) => appMenuFor(t, /** @type {MouseEvent | null} */ (e), ctx), longPress: (t) => pressable(t) });
   return () => {
     off();
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== noCallout);

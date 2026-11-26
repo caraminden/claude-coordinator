@@ -17,8 +17,10 @@ check, both on the scheme's own Linux runner. An app with a Windows desktop part
 3. Make `ci.yml`'s steps the repo's check commands (Project facts). Keep each step's failure loud: no `--if-present`,
    no `|| true`.
 4. Run `node tools/boot-check.ts` (with the app's folder, if `citadel-app.json` isn't at the root) and fix what it finds.
-5. Give the repo a runner: `ci_runners` `op: "add"`, `os: "linux"`. Jobs wait until one is there. The runner is a small Ubuntu with
-   Node and git: what a test needs beyond that (a browser, a `-dev` library) is a setup step, or Cara installs it once.
+5. Nobody adds a runner: once `ci.yml` asks for `<scheme-slug>-ci-linux`, a computer lending the scheme CI registers one by itself
+   within a few minutes (Citadel, #2064). If none lends it, the scheme's members get one card naming computers they could ask.
+   The runner is a small Ubuntu with Node and git, and any lent computer may run it: what a test needs beyond that (a toolchain,
+   a browser, a `-dev` library) is a setup step in the workflow (`setup-node` and the like), never a by-hand install.
 6. Ship. Then dispatch both workflows once by hand and read the runs: a nightly nobody has seen green proves nothing.
    *Done when* both are green on the default branch and the runner shows Idle.
 7. Rows for `tools/boot-check.ts` and `tools/ci-numbers.sh` go in the README Layout table when a layout test asks for them.

@@ -16,7 +16,7 @@ export const root = mkdtempSync(join(tmpdir(), 'scheme-land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // COORDINATOR_CONTAINER: the template refuses in a container turn (#577), and these tests run there too.
 // COORDINATOR_SHARED_DIR: a turn's real shared folder, where the timing line would go (the retro log); unset, it goes in .git.
-export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined }), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined }), LAND_CI_LATE: '0', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 
 // The timing lines in a log folder (#1320), every day's land.md: a run may cross midnight UTC.
 export const timingLines = (dir: string) =>
@@ -150,7 +150,7 @@ export function ciSetup(branches: number, { stack = '', batch = '', check = 'tru
     { mode: 0o755 },
   );
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_LATE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
+  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
   type L = ReturnType<typeof land>;

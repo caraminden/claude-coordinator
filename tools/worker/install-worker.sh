@@ -10,8 +10,9 @@
 #      on the PC shares, #542), then writes /etc/wsl.conf: systemd on, and no Windows drives or programs in here. If
 #      that changed anything it stops with status 10: restart the distro and run this again (install-worker.ps1 does);
 #   2. installs podman, git, curl and Node from the distro's archive;
-#   3. makes the user citadel-worker (no sudo, no password), which runs everything, held to the caps;
-#   4. keeps the token and caps in /etc/citadel-worker, which minions can't reach;
+#   3. makes the user citadel-worker (no password, and sudo only for step 4's one command), which runs everything, held to the caps;
+#   4. keeps the token and caps in /etc/citadel-worker, which minions can't reach, and lets the worker set its threads and memory to
+#      the Machines page's through sudo, for that one command (citadel-worker page-caps) and nothing else;
 #   5. starts the worker as that user's service, at every boot, and waits until it reaches Citadel.
 # Signing in to Claude and GitHub is the owner's, after: `citadel-worker signin` and `citadel-worker signin-github`.
 set -euo pipefail
@@ -70,11 +71,11 @@ unset CC_MACHINE_TOKEN
 
 # 2. What it needs.
 missing=()
-for c in podman newuidmap git curl node findmnt; do command -v $c >/dev/null || missing+=("$c"); done
+for c in podman newuidmap git curl node findmnt sudo visudo; do command -v $c >/dev/null || missing+=("$c"); done
 if [[ ${#missing[@]} -gt 0 ]]; then
   command -v apt-get >/dev/null || die "Install these with your package manager, then run this again: ${missing[*]} (Node 18 or newer, and podman set up for rootless use)."
   apt-get update -q
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends podman uidmap slirp4netns passt fuse-overlayfs catatonit netavark aardvark-dns dbus-user-session git curl ca-certificates nodejs util-linux
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends podman uidmap slirp4netns passt fuse-overlayfs catatonit netavark aardvark-dns dbus-user-session git curl ca-certificates nodejs util-linux sudo
 fi
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' || die "Node $(node -v) is too old: the worker needs 18 or newer."
 
@@ -130,6 +131,23 @@ install -m 755 "$got" "$r/usr/local/bin/citadel-worker"
 chown "root:$user" "$etc/machine-token"
 chmod 640 "$etc/machine-token"
 "$r/usr/local/bin/citadel-worker" caps --no-restart ${caps[@]+"${caps[@]}"}
+# The one root command the worker may run (#2085): its threads and memory from the Machines page, which citadel-worker page-caps checks. Its
+# own PATH and nothing of the caller's environment: else sudo could keep that user's PATH, and its own bash or node run as root.
+sudoers=$r/etc/sudoers.d/citadel-worker
+mkdir -p "$r/etc/sudoers.d"
+cat > "$sudoers.new" <<'SUDO'
+# Citadel minion worker (tools/worker/install-worker.sh): it may set its own threads and memory to its Machines page's, and nothing else.
+Defaults:citadel-worker env_reset, secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+citadel-worker ALL=(root) NOPASSWD: /usr/local/bin/citadel-worker page-caps *
+SUDO
+chmod 440 "$sudoers.new"
+if visudo -cqf "$sudoers.new"; then
+  mv -f "$sudoers.new" "$sudoers"
+  grep -Eqs '^[@#]includedir /etc/sudoers\.d' "$r/etc/sudoers" || echo "Note: /etc/sudoers doesn't read /etc/sudoers.d here, so the Machines page can't raise this PC's threads and memory: citadel-worker caps does."
+else
+  rm -f "$sudoers.new"
+  echo "Note: this PC's sudo refused the worker's rule, so the Machines page can't raise this PC's threads and memory: citadel-worker caps does."
+fi
 # When this install ran: with one token on two PCs, Citadel goes with the newest.
 date +%s%3N > "$etc/installed"
 chmod 644 "$etc/installed"

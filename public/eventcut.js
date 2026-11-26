@@ -4,6 +4,9 @@
 // (core.js keepOpenChat) both send events through here; stored events stay whole.
 import { TASK_TOOLS, workKind } from './progress.js';
 
+/** @import { ChatAction, ChatEvent, ToolBlock } from './types.js' */
+/** @typedef {{ type?: string, text?: unknown, content?: unknown, id: string, input?: Record<string, unknown>, name: string, work?: string, cut?: unknown }} RawBlock */
+
 /** A Grunt's tool result: nothing reads it unopened but a failure's first line (progress-ui.js actionEl). */
 export const GRUNT_RESULT_HEAD = 200;
 /** The minion's own: "Created #15 …" and a TaskCreate's "#3" are at the start (chattext.js ticketActionRef, progress.js). */
@@ -15,11 +18,14 @@ export const TEXT_HEAD = 300;
 /** Smaller events are sent as stored: nothing in them is worth parsing to cut. */
 const SMALL = 2000;
 
+/** @param {unknown} content */
 const textOf = (content) => (typeof content === 'string' ? content : Array.isArray(content) ? content.map((c) => (typeof c?.text === 'string' ? c.text : c?.type === 'image' ? '[image]' : '')).join('\n') : '');
 
 /** One stored event row ({ id, ticket_id, kind, data, created_at }) as a page sends it: the same row, or a copy with big fields cut. */
+/** @param {ChatEvent} row */
 export function cutEvent(row) {
   if (row.kind !== 'claude' || typeof row.data !== 'string' || row.data.length <= SMALL) return row;
+  /** @type {{ type?: string, parent_tool_use_id?: unknown, message?: { content?: unknown } }} */ // JSON 'null' leaves no content, so it returns below
   let data;
   try {
     data = JSON.parse(row.data);
@@ -29,7 +35,7 @@ export function cutEvent(row) {
   const content = data?.message?.content;
   if (!Array.isArray(content)) return row;
   let changed = false;
-  for (const block of content) {
+  for (const block of /** @type {RawBlock[]} */ (content)) {
     if (!block || typeof block !== 'object') continue;
     if (data.type === 'user' && block.type === 'tool_result') {
       const text = textOf(block.content);
@@ -43,9 +49,9 @@ export function cutEvent(row) {
     } else if (data.type === 'assistant' && block.type === 'tool_use' && block.input && typeof block.input === 'object' && !TASK_TOOLS.has(block.name)) {
       for (const [key, value] of Object.entries(block.input)) {
         if (typeof value !== 'string' || value.length <= INPUT_HEAD) continue;
-        block.work ??= workKind(block); // the whole call's kind, read before its words go (#1923)
+        block.work ??= workKind(/** @type {ToolBlock} */ (block)); // the whole call's kind, read before its words go (#1923)
         block.input[key] = value.slice(0, INPUT_HEAD);
-        (block.cut ??= {})[key] = value.length;
+        /** @type {Record<string, number>} */ ((block.cut ??= {}))[key] = value.length;
         changed = true;
       }
     }
@@ -54,4 +60,5 @@ export function cutEvent(row) {
 }
 
 /** Whether an action ({ block, result } from thread.js) was cut on the way, so opening it fetches the rest. */
+/** @param {Pick<ChatAction, 'block' | 'result'>} action */
 export const actionCut = (action) => !!(action.block?.cut || action.result?.cut);

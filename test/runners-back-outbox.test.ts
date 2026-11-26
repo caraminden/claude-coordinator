@@ -11,6 +11,7 @@ import type { Runner } from '../src/ci-view.ts';
 import { Outbox, type OutboxRunner } from '../src/outbox.ts';
 import { testPins } from './helpers.ts';
 import { fake } from './typed.ts';
+import { deliveriesOf } from '../src/outbox.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'rb-outbox-'));
@@ -107,7 +108,7 @@ test('saved waits move into the table at boot in one go, none dropped, and the k
   const w = world();
   await w.outbox.boot();
   assert.deepEqual(
-    store.listDeliveries({ kind: 'runners_back' }).map((r) => [r.to_id, r.payload.reason, r.when_kind]),
+    deliveriesOf(store, 'runners_back').map((r) => [r.to_id, r.payload.reason, r.when_kind]),
     [
       [a, 'one.', 'runners'],
       [b, 'two.', 'runners'],

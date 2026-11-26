@@ -18,6 +18,7 @@
 # loudly: the full suite after it has its own hang limit. A file not started in time is named, as skipped. Map rules
 # whose glob holds `**` are left out: they map a whole folder to guard tests that read the repo, which race on nothing.
 # BURN_IN_NICE: a prefix for each copy (the flake proof's `nice -n 19`).
+# BURN_IN_INNER: set off CI to 4 / copies, the in-file concurrency a test file that reads it should use (#2073).
 set -uo pipefail
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 copies=${BURN_IN_COPIES:-10}
@@ -116,6 +117,22 @@ if [ "${1:-}" != --ship ]; then
   if [ -z "${RUNNER_TEMP:-}${CI:-}${GITHUB_ACTIONS:-}${BURN_IN_QUEUED:-}" ]; then
     [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: copies must be a whole number, not $n"; exit 1; }
     [ "$n" -le 4 ] || { echo "burn-in: $n copies at once is CI's; here it runs 4, queued for a heavy slot (re-run CI for $n)"; n=4; }
+    # The file's own concurrency multiplies its copies (#2073: 4 copies of boot-check's 8-way describe ran 32 boot checks
+    # in one slot and stalled the server on Nov 25), so copies x in-file concurrency stays within the slot's 4 CPUs.
+    # A file that reads BURN_IN_INNER gets 4 / copies; a fixed number runs fewer copies; a bare true is refused.
+    if grep -q "process\.env\.BURN_IN_INNER" "$file"; then
+      export BURN_IN_INNER=$((4 / n))
+    else
+      inner=$(grep -oE 'concurrency:[[:space:]]*(true|[0-9]+)' "$file" | awk '{ v = $NF; if (v == "true") t = 1; else if (v + 0 > m) m = v + 0 } END { print t ? "true" : m + 0 }')
+      if [ "$inner" = true ] || [ "$inner" -gt 4 ]; then
+        echo "burn-in: $file asks concurrency: $inner, more than the heavy slot's 4 at once; have it read BURN_IN_INNER (as test/boot-check.test.ts does) so the burn-in can cap it, or burn it in on CI"
+        exit 1
+      fi
+      if [ "$inner" -gt 1 ] && [ $((n * inner)) -gt 4 ]; then
+        echo "burn-in: $file runs concurrency $inner inside each copy, so here it runs $((4 / inner)) copies, not $n"
+        n=$((4 / inner))
+      fi
+    fi
     BURN_IN_QUEUED=1 BURN_IN_NICE=${BURN_IN_NICE:-nice -n 19} CITADEL_HEAVY_JUDGE=0 CITADEL_HEAVY_WHAT="burn-in $file x$n" \
       exec "$tools/citadel-heavy" --here bash "$tools/burn-in.sh" "$file" "$n"
   fi

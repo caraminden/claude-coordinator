@@ -158,7 +158,7 @@ export class RoleSetups {
     const run: Run = { id: randomBytes(6).toString('hex'), role, kind, at: now, by: person.name, done: null, ok: null, why: null, admin: null, worker_install: workerInstall, steps: [], report: null, shot: null };
     const a: Active = { run, machineId: machine.id, phase, heard: now };
     this.active.set(machine.id, a);
-    if (workerInstall && role === 'ci') run.steps.push({ text: 'Run the install command below on that PC, as administrator', state: 'running' }, { text: "The runner agent connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
+    if (workerInstall && role === 'ci') run.steps.push({ text: 'Run the install commands below on that PC', state: 'running' }, { text: "The runner agent connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
     else if (workerInstall) run.steps.push({ text: 'Run the install command below on that PC, as its owner', state: 'running' }, { text: "The worker connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
     this.save(machine.id, run);
     if (phase === 'agent') {

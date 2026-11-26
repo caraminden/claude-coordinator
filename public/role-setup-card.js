@@ -46,9 +46,14 @@ function runnerInstall(m, redraw) {
   return h(
     'div',
     { class: 'role-setup-admin' },
-    linux ? null : [h('p', { class: 'small' }, 'For Windows jobs: on that PC, open PowerShell as administrator (Run as administrator) and paste this.'), block('powershell-admin', machineSetupRunnerAgent(url, token))],
-    linux ? null : [h('p', { class: 'small' }, 'For Linux jobs too: its runners run in a WSL distro of their own. Make it once, in a normal PowerShell (the CI runner guide\'s "Linux runners in WSL" has the rest):'), block('powershell', 'wsl --install Ubuntu-24.04 --name citadel-ci')],
-    h('p', { class: 'small' }, linux ? 'On that PC, in a root shell (sudo -i), paste this.' : 'Then open a root shell in it (wsl -d citadel-ci -u root) and paste this.'),
+    linux ? null : [h('p', { class: 'small' }, '1. Windows jobs: on that PC, open PowerShell as administrator and paste this.'), block('powershell-admin', machineSetupRunnerAgent(url, token))],
+    linux
+      ? null
+      : [
+          h('p', { class: 'small' }, '2. Linux jobs too (optional): their runners run in a WSL distro of their own. In a normal PowerShell, make it once and open a root shell in it (the CI runner guide\'s "Linux runners in WSL" has more):'),
+          block('powershell', 'wsl --install Ubuntu-24.04 --name citadel-ci\nwsl -d citadel-ci -u root'),
+        ],
+    h('p', { class: 'small' }, linux ? 'On that PC, in a root shell (sudo -i), paste this.' : '3. In that root shell, paste this.'),
     block(linux ? 'bash' : 'wsl', machineSetupRunnerAgentLinux(url, token)),
   );
 }

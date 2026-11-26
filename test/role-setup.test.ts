@@ -255,7 +255,7 @@ test('CI runners: Set up shows the install command and waits for the runner agen
   const delve = t.store.createProject('Delve', 'https://github.com/caraminden/delve.git', t.josh.id);
   const run = t.setups.start(t.machine(), 'ci', 'setup', t.josh);
   assert.equal(run.worker_install, true, 'the card shows the runner agent install');
-  assert.match(run.steps[0].text, /as administrator/);
+  assert.match(run.steps[0].text, /install commands below/);
   assert.deepEqual(t.sent, [], 'nothing goes to the machine agent');
   t.tick(5000);
   assert.equal(t.run('ci')!.done, null);
@@ -272,7 +272,7 @@ test('CI runners: Set up shows the install command and waits for the runner agen
   assert.equal(kept.worker_install, false);
   assert.deepEqual(
     kept.steps.map((x) => `${x.state} ${x.text}`),
-    ['ok Run the install command below on that PC, as administrator', 'ok The runner agent connected to Citadel', 'ok Linux runner agent connected, from JOSH-PC', 'ok The Linux runner agent answers a job', 'ok Delve: JOSH-PC idle, JOSH-PC-2 busy'],
+    ['ok Run the install commands below on that PC', 'ok The runner agent connected to Citadel', 'ok Linux runner agent connected, from JOSH-PC', 'ok The Linux runner agent answers a job', 'ok Delve: JOSH-PC idle, JOSH-PC-2 busy'],
     "another PC's runner, offline, isn't this PC's",
   );
   assert.equal(kept.ok, true);

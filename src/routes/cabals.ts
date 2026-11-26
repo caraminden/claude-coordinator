@@ -191,6 +191,9 @@ export const cabalRoutes: Route[] = [
         }
         const row = store.cabalRow(Number(body.row));
         if (!row || row.lead_id !== ticket.id) throw new HttpError(404, `No row ${String(body.row).slice(0, 20)} on your board`);
+        // A member the lead started stays on its row while open: the row is what makes it the lead's own, and it counts in the width.
+        const member = row.approved_at != null && row.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;
+        if (member && member.status !== 'closed' && (body.remove === true || (fields.ticket_id !== undefined && fields.ticket_id !== row.ticket_id))) throw new HttpError(409, `#${member.number} is open: its row stays on the board until it is dismissed`);
         if (body.remove === true) store.deleteCabalRow(row.id);
         else {
           // A change to what the forming card showed takes back its go: a changed row needs a new card.

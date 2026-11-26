@@ -156,8 +156,11 @@ test("cabal_member unseals, stops and reseals only the lead's own members; a mem
   assert.equal((await as(b.id, `/api/tickets/${b.id}/cabal/start`, { row: 'C' })).status, 403);
 
   assert.equal((await member('unseal', b.number)).status, 409, "B isn't sealed");
+  assert.equal((await board(lead.id, { action: 'row', row: rowOf('B').id, remove: true })).status, 409, "an open member's row stays: it is what makes B the lead's own");
+  assert.equal((await board(lead.id, { action: 'row', row: rowOf('B').id, minion: null })).status, 409);
   assert.equal((await member('reseal', b.number)).status, 200);
   await until('B sealed', () => minion('Do b')!.state === 'parked');
+  assert.equal((await member('reseal', b.number)).status, 409, 'sealed already');
   const u = await member('unseal', b.number);
   assert.equal(u.status, 200, JSON.stringify(u.data));
   await until('B unsealed', () => minion('Do b')!.state !== 'parked');

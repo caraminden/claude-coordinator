@@ -176,7 +176,8 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   const project = store.getProject(lead.project_id)!;
   const nm = name(app, lead);
   const by = `${overseerOf({ name: nm })} #${lead.number}`;
-  const handoff = join(projectSharedDir(app.dataDir, project.id), r.handoff);
+  // Checked again at the start: a next-up row may start long after its card, and its handoff may be gone by then.
+  const handoff = join(projectSharedDir(app.dataDir, project.id), await handoffPath(app, project.id, r.handoff));
   const after = chainOf(app, lead, r);
   const type = store.props.forTarget('minion', lead.id).type;
   const message = [extra, `Your brief is the handoff ${handoff}: read it first and work from it.`, `You are a member of ${nm}'s cabal, row ${rowName(r)}. Its lead is ${overseerOf({ name: nm })}, #${lead.number}: read your cabal_board at each wake, set your note there at milestones, and send your asks there.`]
@@ -191,6 +192,7 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
     parent: lead.number,
     cabal: lead.number,
     pick_reason: `on ${nm}'s approved roster (row ${rowName(r)})`,
+    not_duplicate: true, // people approved this row's handoff on its card, even one an earlier minion started from
     ...(r.cost != null ? { expected_cost: r.cost } : {}),
     // A build's members wait for a merge into its branch: nothing in a build is live before the build is.
     ...(after != null ? { start_after: after, start_when: lead.build != null ? 'merged' : 'live' } : {}),
@@ -269,6 +271,7 @@ export async function memberAction(app: App, lead: Ticket, action: unknown, mini
     return `${stopped ? `Stopped #${t.number}'s turn` : `#${t.number} had no turn running`}; its queued messages are dropped.${ship ? ` ${ship}` : ''}`;
   }
   if (action === 'reseal') {
+    if (runner.parked(t)) throw new HttpError(409, `#${t.number} is sealed already`);
     store.updateTicket(t.id, { state: 'parked' }, { kind: 'agent', name: author });
     runner.emit(t.id, 'note', { text: `${author}, its cabal's lead, sealed it: messages to it wait until it is unsealed.` });
     runner.broadcastTicket(t.id);

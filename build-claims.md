@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md server.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts
+shared: src/turn-launch.ts src/machines.ts src/routes/machines.ts public/machine-agent.mjs src/db.ts src/db/machines.ts src/mcp.ts tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts README.md server.ts test/judges.test.ts test/db-areas.test.ts src/runner.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -12,7 +12,7 @@ shared: src/turn-launch.ts public/machine-agent.mjs src/db.ts src/db/machines.ts
 #2006: (merged in)
 #2070: (merged in)
 #2044: (merged in)
-#2052: src/machine-roles.ts test/machine-roles.test.ts src/machine-pools.ts test/machine-pools.test.ts src/machine-lend.ts test/machine-relay.test.ts src/machines.ts src/routes/machines.ts
+#2052: (merged in)
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
 
@@ -37,3 +37,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - T8 (#2070) merged in on 2026-11-25; src/runner.ts is shared again. Its other files are unclaimed (so #2070's, or their first feeder's): a later piece that changes a line in one asks #1935.
 - The Remove-a-machine screen (#2044) merged in on 2026-11-25; its files are unclaimed (so #2044's): a later piece that changes a line in one asks #1935.
 - Lent to M1 (#2052) for its merge (2026-11-25, after Josh's go): src/machines.ts (#1962's storedLend lines, #2006's lendsWorker) and src/routes/machines.ts (#2011's DELETE line); shared again after it.
+- M1 (#2052) merged in on 2026-11-25 (Josh's go); src/machines.ts and src/routes/machines.ts are shared again. Its files (src/machine-roles.ts, src/machine-pools.ts, src/machine-lend.ts and their tests) are unclaimed again (each counts as the first feeder that merged it in): M2-M6 (#2053-#2057) that change a line in one ask #1935 to put it on their line.

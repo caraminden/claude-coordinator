@@ -1122,7 +1122,7 @@ export class WorkspaceHost {
     }
     if (job.room) {
       return {
-        text: `${job.name} in ${job.workspace} is waiting for room on this computer (job ${job.id}), ${secondsSince(job.room.since)} s so far: Citadel holds off new minion turns here until its size is free, and starts it anyway after 30 minutes. Nothing has started yet. Call job with id "${job.id}" to wait for it; stop_job leaves.`,
+        text: `${job.name} in ${job.workspace} is waiting for room on this computer (job ${job.id}), ${secondsSince(job.room.since)} s so far: Citadel is holding it until this computer has room for it beside the minion turns running here (no new turn starts here meanwhile), and after 30 minutes of waiting it starts anyway, at lower priority. Nothing has started yet. It keeps waiting without you: call job with id "${job.id}" to wait for it (each call waits up to ${WAIT_MAX} s), or stop_job with id "${job.id}" to give up on it.`,
       };
     }
     if (job.line) {

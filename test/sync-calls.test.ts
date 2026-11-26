@@ -1,14 +1,25 @@
 // The server has one thread: a blocking file or process call in server.ts or src/ holds every request, every
-// stream and every timer until it returns (#1463; the Nov 20 and 21 stall reports found readdir, stat and process
-// starts in the stall stacks). This ratchet counts the blocking calls (`readFileSync(`, `execFileSync(`, any
-// `*Sync(`) in each file. A file may go down; one that goes up, or a new file with any, fails here.
+// stream and every timer until it returns (#1463; the stall reports of Nov 20 to 25 found readdir, stat, exists and
+// process starts in the stall stacks, each time on a new path). This check reads every file server.ts imports,
+// finds each blocking call (`readFileSync(`, `execFileSync(`, any `*Sync(`) and the function it sits in, and fails
+// on one that test/sync-calls.json doesn't class (#2111):
 //
-// Lower a file's number in test/sync-calls.json when you remove some (`UPDATE_SYNC_CALLS=1` rewrites the whole
-// file from the code). Raise one only for code that never runs on the server's thread once it listens: boot before
-// listen, a CLI under tools/, a worker thread or a child process, and say why in the commit.
+//   boot  runs only before the server listens (module load, a constructor, startup recovery), or never on the
+//         server's thread at all (a worker, a child process).
+//   proc  no disk in it: reads of /proc, /sys and cgroup files (kernel memory, kept on the thread on purpose,
+//         #1980), crypto and zlib.
+//   rare  disk or a process, on an action a person or minion takes now and then (a new scheme, a build, a preview).
+//   owed  disk or a process on a path that runs often once the server listens: a timer, a poller, a turn's start or
+//         end, a common request. Each names its handoff or reason. This is the list of what is left to move.
+//
+// A new call is written the async way (node:fs/promises, promisify(execFile), the readers in src/off-thread-*.ts
+// and src/heavy-folder.ts); test/off-thread-fs.test.ts traps a path to prove it. Only `boot` and `proc` take new
+// entries: the totals of `rare` and `owed` below only go down. A file server.ts never imports (a tool, a worker's
+// own file) isn't read at all. `UPDATE_SYNC_CALLS=1` rewrites the counts from the code, keeps each class, drops
+// functions that have no call left, and adds new ones as "unclassed" for you to class.
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { test } from 'node:test';
 
 const repo = join(import.meta.dirname, '..');
@@ -16,7 +27,6 @@ const allowFile = join(import.meta.dirname, 'sync-calls.json');
 
 /** A blocking call: any lower-case name ending Sync, called. `new DatabaseSync(` and other classes start upper-case. */
 const CALL = /\b[a-z]\w*Sync\(/g;
-const PROCESS = /^(spawnSync|execFileSync|execSync)\($/;
 
 /**
  * The file with its comments blanked: a scan that knows strings, template literals and regex literals, so a `/*` or
@@ -71,48 +81,150 @@ export function syncCalls(text: string): string[] {
   return code(text).match(CALL) ?? [];
 }
 
+/** The most `rare` and `owed` calls there may be. Lower them when you move calls off the thread; never raise them. */
+const RARE_MOST = 0;
+const OWED_MOST = 0;
+
+type Class = 'boot' | 'proc' | 'rare' | 'owed';
+/** file → function → [class, calls, why (owed: the handoff or reason; others: what triggers it)]. */
+type Allow = Record<string, Record<string, [Class | 'unclassed', number, string?]>>;
+
+const IMPORT = /\b(?:import|export)\s+(?!type\b)[^;'"]*?from\s+['"](\.[^'"]+)['"]|\bimport\(\s*['"](\.[^'"]+)['"]\s*\)|\bimport\s+['"](\.[^'"]+)['"]/g;
+
+/** server.ts and every file it imports, directly or through another (type-only imports left out). */
 function sources(): string[] {
-  const out = [join(repo, 'server.ts')];
-  const walk = (dir: string) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      if (e.isDirectory()) walk(join(dir, e.name));
-      else if (e.name.endsWith('.ts')) out.push(join(dir, e.name));
+  const seen = new Set<string>();
+  const queue = [join(repo, 'server.ts')];
+  while (queue.length) {
+    const f = queue.pop()!;
+    if (seen.has(f) || !existsSync(f)) continue;
+    seen.add(f);
+    for (const m of code(readFileSync(f, 'utf8')).matchAll(IMPORT)) queue.push(resolve(dirname(f), m[1] ?? m[2] ?? m[3]));
+  }
+  return [...seen].filter((f) => f === join(repo, 'server.ts') || f.startsWith(join(repo, 'src') + sep)).sort();
+}
+
+const TOP = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+(\w+)|(?:const|let|var)\s+(\w+)|(?:abstract\s+)?class\s+(\w+))/;
+const MEMBER = /^  (?:(?:public|private|protected|static|async|override|readonly|get|set)\s+)*(#?\w+)\s*[(<=:;]/;
+
+/**
+ * A file's blocking calls by the function each sits in: `name` for a top-level function or const, `Class.member`
+ * inside a class, `(module)` at the top level. It goes by the formatter's layout (a top-level declaration starts its
+ * line, a class member is indented once), which is enough to name where a call lives.
+ */
+export function callsByFunction(text: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  let top = '(module)',
+    cls = '',
+    member = '';
+  for (const line of code(text).split('\n')) {
+    const t = TOP.exec(line);
+    if (t) {
+      cls = t[3] ?? '';
+      top = t[1] ?? t[2] ?? t[3];
+      member = '';
+    } else if (/^\S/.test(line) && !/^[)}\]]/.test(line)) {
+      top = '(module)';
+      cls = '';
+    } else if (cls) {
+      const m = MEMBER.exec(line);
+      if (m) member = m[1];
     }
-  };
-  walk(join(repo, 'src'));
+    const n = line.match(CALL)?.length ?? 0;
+    if (n) {
+      const who = cls ? `${cls}.${member || '(fields)'}` : top;
+      out[who] = (out[who] ?? 0) + n;
+    }
+  }
   return out;
 }
 
-test('no new blocking file or process call in server.ts or src/ (#1463)', () => {
-  const counts: Record<string, number> = {};
-  const kinds: Record<string, string[]> = {};
+/** One function to a line, so a diff shows exactly which call was classed or moved. */
+function format(allow: Allow): string {
+  const files = Object.keys(allow)
+    .sort()
+    .map((f) => {
+      const fns = Object.entries(allow[f]).map(([fn, row]) => `  ${JSON.stringify(fn)}: ${JSON.stringify(row)}`);
+      return ` ${JSON.stringify(f)}: {\n${fns.join(',\n')}\n }`;
+    });
+  return `{\n${files.join(',\n')}\n}\n`;
+}
+
+test("every blocking call the server's thread can reach is classed, and the ones on busy paths only go down (#1463, #2111)", () => {
+  const allowed: Allow = JSON.parse(readFileSync(allowFile, 'utf8'));
+  const found: Record<string, Record<string, number>> = {};
   for (const f of sources()) {
-    const calls = syncCalls(readFileSync(f, 'utf8'));
-    if (!calls.length) continue;
-    const rel = relative(repo, f);
-    counts[rel] = calls.length;
-    kinds[rel] = calls;
+    const calls = callsByFunction(readFileSync(f, 'utf8'));
+    if (Object.keys(calls).length) found[relative(repo, f)] = calls;
   }
   if (process.env.UPDATE_SYNC_CALLS) {
-    const sorted = Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
-    writeFileSync(allowFile, `${JSON.stringify(sorted, null, 1)}\n`);
+    const next: Allow = {};
+    for (const [file, fns] of Object.entries(found)) {
+      next[file] = {};
+      for (const [fn, n] of Object.entries(fns)) {
+        const was = allowed[file]?.[fn];
+        next[file][fn] = was ? ([was[0], n, ...(was[2] ? [was[2]] : [])] as Allow[string][string]) : ['unclassed', n];
+      }
+    }
+    writeFileSync(allowFile, format(next));
     return;
   }
-  const allowed: Record<string, number> = JSON.parse(readFileSync(allowFile, 'utf8'));
   const over: string[] = [];
-  for (const [file, n] of Object.entries(counts)) {
-    const may = allowed[file] ?? 0;
-    if (n <= may) continue;
-    const procs = kinds[file].filter((c) => PROCESS.test(c)).length;
-    const what = [...new Set(kinds[file])].map((c) => c.slice(0, -1)).join(', ');
-    over.push(`${file}: ${n} blocking calls, ${may} allowed (${what})${procs ? `; ${procs} start a process` : ''}`);
-  }
+  for (const [file, fns] of Object.entries(found))
+    for (const [fn, n] of Object.entries(fns)) {
+      const may = allowed[file]?.[fn];
+      if (!may || may[0] === 'unclassed') over.push(`${file}: ${fn} makes ${n} blocking call${n > 1 ? 's' : ''} and has no class`);
+      else if (n > may[1]) over.push(`${file}: ${fn} makes ${n} blocking calls, ${may[1]} allowed (${may[0]})`);
+    }
   assert.deepEqual(
     over,
     [],
-    `${over.join('\n')}\n\nThe server has one thread, and a blocking call holds all of it. Use the async way: ` +
+    `${over.join('\n')}\n\nThe server has one thread, and a blocking call holds all of it while the disk is busy. Use the async way: ` +
       'node:fs/promises (readFile, stat, readdir, rm, writeFile, mkdir) for files, and execFile through promisify(execFile) or spawn for processes. ' +
-      "Only code that never runs on the server's thread once it listens (boot before listen, a worker, a child process) may raise its number in test/sync-calls.json, with the why in the commit.",
+      "Only a call that never touches the disk on the server's thread once it listens may be added to test/sync-calls.json: class `boot` " +
+      '(before listen, a worker, a child process) or `proc` (/proc, /sys, crypto, zlib), with what triggers it.',
+  );
+  const rows = Object.entries(allowed).flatMap(([file, fns]) => Object.entries(fns).map(([fn, row]) => ({ file, fn, row })));
+  const classes: Class[] = ['boot', 'proc', 'rare', 'owed'];
+  assert.deepEqual(
+    rows.filter((r) => !classes.includes(r.row[0] as Class)).map((r) => `${r.file}: ${r.fn}`),
+    [],
+    'each entry has a class: boot, proc, rare or owed',
+  );
+  assert.deepEqual(
+    rows.filter((r) => r.row[0] !== 'boot' && r.row[0] !== 'proc' && !r.row[2]).map((r) => `${r.file}: ${r.fn}`),
+    [],
+    'a rare or owed entry says what triggers it, and an owed one names its handoff',
+  );
+  const total = (c: Class) => rows.filter((r) => r.row[0] === c).reduce((a, r) => a + r.row[1], 0);
+  assert.ok(total('rare') <= RARE_MOST, `${total('rare')} rare calls, at most ${RARE_MOST}: a new blocking call on a path that runs after listen is written the async way, not added as rare`);
+  assert.ok(total('owed') <= OWED_MOST, `${total('owed')} owed calls, at most ${OWED_MOST}: this list only goes down`);
+});
+
+test('a call is named by the function it sits in', () => {
+  assert.deepEqual(
+    callsByFunction(
+      [
+        "const KEY = readFileSync('k');",
+        'export async function load(dir: string) {',
+        '  return readdirSync(dir).map((f) => statSync(f));',
+        '}',
+        'export class Waits {',
+        '  private dir = mkdtempSync(root);',
+        '  constructor() {',
+        '    mkdirSync(this.dir);',
+        '  }',
+        '  private async poll(): Promise<void> {',
+        '    for (const f of files) if (existsSync(f)) rmSync(f);',
+        '  }',
+        '}',
+        "writeFileSync('x', '');",
+        'export const tail = (p: string) => {',
+        '  return readFileSync(p);',
+        '};',
+      ].join('\n'),
+    ),
+    { KEY: 1, load: 2, 'Waits.dir': 1, 'Waits.constructor': 1, 'Waits.poll': 2, '(module)': 1, tail: 1 },
   );
 });
 

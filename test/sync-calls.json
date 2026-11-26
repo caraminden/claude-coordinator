@@ -1,110 +1,507 @@
 {
- "server.ts": 7,
- "src/apk-build.ts": 19,
- "src/apk-release.ts": 3,
- "src/app-services.ts": 10,
- "src/app-snapshots.ts": 4,
- "src/approvals.ts": 1,
- "src/artifact-data.ts": 2,
- "src/artifact-scan.ts": 1,
- "src/backup-freshness.ts": 5,
- "src/brief-lint.ts": 4,
- "src/build-cache.ts": 5,
- "src/build-output.ts": 1,
- "src/catalogue.ts": 2,
- "src/checkpoint.ts": 5,
- "src/claude-link.ts": 18,
- "src/codex-link.ts": 1,
- "src/codex-lock.ts": 13,
- "src/codex-review.ts": 29,
- "src/codex-turn.ts": 31,
- "src/codex.ts": 3,
- "src/container-relief.ts": 4,
- "src/contraption-agent-cap.ts": 5,
- "src/contraption-asks.ts": 6,
- "src/contraption-errors.ts": 3,
- "src/contraption-media.ts": 19,
- "src/contraption-turns.ts": 36,
- "src/contraptions.ts": 7,
- "src/credentials.ts": 1,
- "src/db-nocow.ts": 32,
- "src/db-warmer.ts": 4,
- "src/decisions-load.ts": 5,
- "src/dismissed-cleanup.ts": 4,
- "src/emulator-lease.ts": 4,
- "src/events-db.ts": 1,
- "src/exec.ts": 3,
- "src/fast-mode.ts": 4,
- "src/fcm.ts": 2,
- "src/flake-fixes.ts": 4,
- "src/front.ts": 2,
- "src/github-link.ts": 1,
- "src/handoff-tidy.ts": 8,
- "src/history.ts": 1,
- "src/hook-run.ts": 1,
- "src/host-job.ts": 21,
- "src/host-load.ts": 3,
- "src/host-signals.ts": 2,
- "src/host-tool-ship.ts": 1,
- "src/host-tools.ts": 3,
- "src/ideas.ts": 6,
- "src/keepalive.ts": 8,
- "src/kit-sync.ts": 7,
- "src/land-news.ts": 4,
- "src/land.ts": 18,
- "src/link-check.ts": 11,
- "src/long-jobs.ts": 10,
- "src/loop-lag.ts": 4,
- "src/make-app.ts": 4,
- "src/mcp-minions.ts": 1,
- "src/mcp-pool.ts": 10,
- "src/memory-curator.ts": 6,
- "src/memory-files.ts": 20,
- "src/openrouter.ts": 7,
- "src/pin-spares.ts": 5,
- "src/png-matte.ts": 2,
- "src/pool-machine.ts": 5,
- "src/pre-tool-hook.ts": 3,
- "src/previews.ts": 14,
- "src/prompts.ts": 1,
- "src/push.ts": 7,
- "src/quiet.ts": 4,
- "src/reader.ts": 1,
- "src/reaper.ts": 1,
- "src/release-key.ts": 2,
- "src/release-readers.ts": 1,
- "src/release-targets.ts": 1,
- "src/replay-keep.ts": 11,
- "src/replay.ts": 17,
- "src/review-describe.ts": 1,
- "src/review-set.ts": 16,
- "src/routes/contraptions.ts": 3,
- "src/routes/projects.ts": 1,
- "src/routes/reviews.ts": 1,
- "src/routes/tickets.ts": 2,
- "src/rule-overlap.ts": 4,
- "src/runner.ts": 78,
- "src/schedules.ts": 2,
- "src/scheme-refs.ts": 1,
- "src/sd-watchdog.ts": 5,
- "src/sessions.ts": 29,
- "src/shell.ts": 1,
- "src/ship-stop.ts": 5,
- "src/side-ask.ts": 6,
- "src/side-guard.ts": 1,
- "src/skills.ts": 3,
- "src/slash-commands.ts": 2,
- "src/standing-checks.ts": 5,
- "src/supervisor-client.ts": 12,
- "src/taskmaster-files.ts": 8,
- "src/tripwire-git.ts": 5,
- "src/tripwire.ts": 17,
- "src/turn-launch.ts": 46,
- "src/turn-tmp.ts": 6,
- "src/ultrareview.ts": 10,
- "src/waits.ts": 5,
- "src/wake.ts": 1,
- "src/watchdog.ts": 1,
- "src/workspace.ts": 14,
- "src/worktree-sweep.ts": 4
+ "server.ts": {
+  "checkoutHead": ["unclassed",1],
+  "(module)": ["unclassed",1],
+  "deployState": ["unclassed",1],
+  "rollback": ["unclassed",1],
+  "incidents": ["unclassed",3]
+ },
+ "src/apk-build.ts": {
+  "capacitorApp": ["unclassed",4],
+  "ApkBuilds.keyless": ["unclassed",1],
+  "ApkBuilds.makeKey": ["unclassed",1],
+  "ApkBuilds.check": ["unclassed",13]
+ },
+ "src/apk-release.ts": {
+  "apksigner": ["unclassed",2],
+  "install": ["unclassed",1]
+ },
+ "src/app-services.ts": {
+  "manifestOn": ["unclassed",1],
+  "AppServices.installNow": ["unclassed",1],
+  "AppServices.deployNow": ["unclassed",8]
+ },
+ "src/app-snapshots.ts": {
+  "newId": ["unclassed",2],
+  "takeSnapshot": ["unclassed",1],
+  "restoreSnapshot": ["unclassed",1]
+ },
+ "src/approvals.ts": {
+  "pluginDirArgs": ["unclassed",1]
+ },
+ "src/artifact-data.ts": {
+  "bridgeSource": ["unclassed",2]
+ },
+ "src/artifact-scan.ts": {
+  "ArtifactScanner.scan": ["unclassed",1]
+ },
+ "src/brief-lint.ts": {
+  "namedFiles": ["unclassed",4]
+ },
+ "src/build-cache.ts": {
+  "ensureGradleInit": ["unclassed",4],
+  "trimCache": ["unclassed",1]
+ },
+ "src/build-output.ts": {
+  "findBuildOutput": ["unclassed",1]
+ },
+ "src/catalogue.ts": {
+  "itemsIn": ["unclassed",2]
+ },
+ "src/checkpoint.ts": {
+  "walFrames": ["unclassed",2],
+  "(module)": ["unclassed",3]
+ },
+ "src/claude-link.ts": {
+  "androidEnv": ["unclassed",2],
+  "resolveClaude": ["unclassed",3],
+  "ClaudeLink.spec": ["unclassed",3],
+  "ClaudeLink.start": ["unclassed",5],
+  "ClaudeLink.hostFolder": ["unclassed",4],
+  "ClaudeLink.unlinkOne": ["unclassed",1]
+ },
+ "src/codex-link.ts": {
+  "CodexLink.status": ["unclassed",1]
+ },
+ "src/codex-lock.ts": {
+  "startTime": ["unclassed",1],
+  "tokenLife": ["unclassed",1],
+  "codexLock": ["unclassed",11]
+ },
+ "src/codex-review.ts": {
+  "hooked": ["unclassed",1],
+  "notReady": ["unclassed",2],
+  "images": ["unclassed",2],
+  "outPath": ["unclassed",5],
+  "reviewNow": ["unclassed",1],
+  "imageConfig": ["unclassed",2],
+  "turnConfig": ["unclassed",1],
+  "runnerConfig": ["unclassed",2],
+  "copyPinned": ["unclassed",3],
+  "inContainer": ["unclassed",9],
+  "(module)": ["unclassed",1]
+ },
+ "src/codex.ts": {
+  "saveGenerated": ["unclassed",3]
+ },
+ "src/container-relief.ts": {
+  "text": ["unclassed",1],
+  "processes": ["unclassed",1],
+  "ContainerRelief.tick": ["unclassed",2]
+ },
+ "src/contraption-asks.ts": {
+  "saveAskFiles": ["unclassed",1],
+  "noteInbox": ["unclassed",5]
+ },
+ "src/contraption-errors.ts": {
+  "ErrorDigest.write": ["unclassed",3]
+ },
+ "src/contraption-media.ts": {
+  "mediaFile": ["unclassed",1],
+  "listMedia": ["unclassed",2],
+  "sweepMedia": ["unclassed",3],
+  "readPng": ["unclassed",4],
+  "codexImage": ["unclassed",6],
+  "runMediaTool": ["unclassed",3]
+ },
+ "src/contraption-turns.ts": {
+  "AGENT_CAP": ["unclassed",1],
+  "MACHINE_MCP": ["unclassed",1],
+  "CODEX_FILES": ["unclassed",1],
+  "ContraptionTurns.constructor": ["unclassed",1],
+  "ContraptionTurns.dropCodex": ["unclassed",1],
+  "ContraptionTurns.dropBlind": ["unclassed",3],
+  "ContraptionTurns.dropTranscript": ["unclassed",2],
+  "ContraptionTurns.run": ["unclassed",3],
+  "ContraptionTurns.turn": ["unclassed",22],
+  "ContraptionTurns.stop": ["unclassed",1]
+ },
+ "src/contraptions.ts": {
+  "writeSecret": ["unclassed",4],
+  "Contraptions.newKeys": ["unclassed",3]
+ },
+ "src/credentials.ts": {
+  "sealKey": ["unclassed",1]
+ },
+ "src/db-nocow.ts": {
+  "hostOps": ["unclassed",6],
+  "fsyncPath": ["unclassed",3],
+  "move": ["unclassed",19],
+  "dropTmp": ["unclassed",2],
+  "walNoCow": ["unclassed",2]
+ },
+ "src/db-warmer.ts": {
+  "readThrough": ["unclassed",1],
+  "(module)": ["unclassed",3]
+ },
+ "src/dismissed-cleanup.ts": {
+  "DismissedCleanup.clearBuild": ["unclassed",1],
+  "DismissedCleanup.sweepWorktrees": ["unclassed",3]
+ },
+ "src/emulator-lease.ts": {
+  "readEmulatorLease": ["unclassed",1],
+  "releaseEmulatorLease": ["unclassed",3]
+ },
+ "src/events-db.ts": {
+  "attachEventsIfThere": ["unclassed",1]
+ },
+ "src/exec.ts": {
+  "runLogged": ["unclassed",3]
+ },
+ "src/fast-mode.ts": {
+  "FastMode.start": ["unclassed",3]
+ },
+ "src/fcm.ts": {
+  "Fcm.account": ["unclassed",2]
+ },
+ "src/front.ts": {
+  "listenThroughFront": ["unclassed",2]
+ },
+ "src/github-link.ts": {
+  "noLogin": ["unclassed",1]
+ },
+ "src/handoff-tidy.ts": {
+  "whyKeep": ["unclassed",1],
+  "moveFile": ["unclassed",4],
+  "tidyForClosed": ["unclassed",2],
+  "reconcileMoved": ["unclassed",1]
+ },
+ "src/history.ts": {
+  "PLAN_RULES": ["unclassed",1]
+ },
+ "src/hook-run.ts": {
+  "(module)": ["unclassed",1]
+ },
+ "src/host-job.ts": {
+  "heardLost": ["unclassed",1],
+  "moveAside": ["unclassed",1],
+  "HostJobs.start": ["unclassed",7],
+  "HostJobs.child": ["unclassed",2],
+  "HostJobs.state": ["unclassed",1],
+  "HostJobs.alive": ["unclassed",3],
+  "lost": ["unclassed",1],
+  "readCode": ["unclassed",1],
+  "tail": ["unclassed",4]
+ },
+ "src/host-load.ts": {
+  "slotCount": ["unclassed",1],
+  "readPressure": ["unclassed",1],
+  "hostLoad": ["unclassed",1]
+ },
+ "src/host-signals.ts": {
+  "hostTextSync": ["unclassed",1],
+  "runnable": ["unclassed",1]
+ },
+ "src/host-tool-ship.ts": {
+  "approveHostTool": ["unclassed",1]
+ },
+ "src/host-tools.ts": {
+  "readManifest": ["unclassed",2],
+  "miseBin": ["unclassed",1]
+ },
+ "src/ideas.ts": {
+  "handoffFiles": ["unclassed",2],
+  "Ideas.fromHandoff": ["unclassed",2],
+  "Ideas.readPage": ["unclassed",2]
+ },
+ "src/keepalive.ts": {
+  "treeHash": ["unclassed",3],
+  "claudeStamp": ["unclassed",4]
+ },
+ "src/kit-sync.ts": {
+  "git": ["unclassed",1],
+  "merge3": ["unclassed",4],
+  "KitSync.poll": ["unclassed",1],
+  "KitSync.branch": ["unclassed",1]
+ },
+ "src/land-news.ts": {
+  "readTail": ["unclassed",4]
+ },
+ "src/land.ts": {
+  "landArgs": ["unclassed",3],
+  "Landings.start": ["unclassed",1],
+  "Landings.handOff": ["unclassed",2],
+  "Landings.hasHandoff": ["unclassed",1],
+  "Landings.settled": ["unclassed",1],
+  "Landings.talked": ["unclassed",1],
+  "Landings.wasTalked": ["unclassed",1],
+  "Landings.prepNew": ["unclassed",3],
+  "Landings.markStopped": ["unclassed",1],
+  "Landings.stopped": ["unclassed",1],
+  "Landings.landPid": ["unclassed",3]
+ },
+ "src/link-check.ts": {
+  "pageText": ["unclassed",4],
+  "cardlessChoices": ["unclassed",1],
+  "postedCard": ["unclassed",1],
+  "closeSelfOk": ["unclassed",1],
+  "readMarker": ["unclassed",1],
+  "check": ["unclassed",2],
+  "(module)": ["unclassed",1]
+ },
+ "src/long-jobs.ts": {
+  "readLongJobs": ["unclassed",2]
+ },
+ "src/loop-lag.ts": {
+  "ioStalledUs": ["unclassed",1],
+  "cgroupOf": ["unclassed",1],
+  "pressureUs": ["unclassed",1],
+  "read": ["unclassed",1]
+ },
+ "src/make-app.ts": {
+  "schemeRunner": ["unclassed",3],
+  "makeApp": ["unclassed",1]
+ },
+ "src/memory-curator.ts": {
+  "writeIndex": ["unclassed",1],
+  "readIndex": ["unclassed",1],
+  "readNote": ["unclassed",1],
+  "restoreSaved": ["unclassed",3]
+ },
+ "src/memory-files.ts": {
+  "plain": ["unclassed",1],
+  "readFolder": ["unclassed",5],
+  "writeAtomic": ["unclassed",6],
+  "saveNote": ["unclassed",1],
+  "indexNote": ["unclassed",4],
+  "deleteNote": ["unclassed",2]
+ },
+ "src/openrouter.ts": {
+  "outPath": ["unclassed",4],
+  "target": ["unclassed",1],
+  "writeOutput": ["unclassed",2]
+ },
+ "src/pin-spares.ts": {
+  "pinSparesAt": ["unclassed",3]
+ },
+ "src/png-matte.ts": {
+  "decode": ["unclassed",1],
+  "encodePng": ["unclassed",1]
+ },
+ "src/pool-client.mjs": {
+  "poolAlive": ["unclassed",1],
+  "readPool": ["unclassed",1],
+  "ensurePool": ["unclassed",6]
+ },
+ "src/pre-tool-hook.ts": {
+  "readSent": ["unclassed",1],
+  "saveSent": ["unclassed",1],
+  "runHook": ["unclassed",1]
+ },
+ "src/previews.ts": {
+  "git": ["unclassed",1],
+  "Previews.constructor": ["unclassed",1],
+  "Previews.start": ["unclassed",1],
+  "Previews.halt": ["unclassed",1],
+  "Previews.sweep": ["unclassed",2],
+  "Previews.dropBuild": ["unclassed",2],
+  "Previews.spawnPreview": ["unclassed",3],
+  "Previews.proxyBuild": ["unclassed",3]
+ },
+ "src/prompts.ts": {
+  "promptMessage": ["unclassed",1]
+ },
+ "src/push.ts": {
+  "loadVapidKeys": ["unclassed",4],
+  "encryptPayload": ["unclassed",3]
+ },
+ "src/quiet.ts": {
+  "procs": ["unclassed",2],
+  "uptimeTicks": ["unclassed",1],
+  "cmdline": ["unclassed",1]
+ },
+ "src/reaper.ts": {
+  "Reaper.constructor": ["unclassed",1]
+ },
+ "src/release-key.ts": {
+  "hasKey": ["unclassed",1],
+  "makeReleaseKey": ["unclassed",1]
+ },
+ "src/release-readers.ts": {
+  "LandsInFlight.attach": ["unclassed",1]
+ },
+ "src/release-targets.ts": {
+  "TargetFinder.facts": ["unclassed",1]
+ },
+ "src/replay-keep.ts": {
+  "turnsIn": ["unclassed",1],
+  "keepTurn": ["unclassed",2],
+  "prune": ["unclassed",4],
+  "dropMatching": ["unclassed",3],
+  "keptDirs": ["unclassed",1]
+ },
+ "src/review-describe.ts": {
+  "runOneShot": ["unclassed",1]
+ },
+ "src/review-set.ts": {
+  "readAgentFiles": ["unclassed",2],
+  "loadStarters": ["unclassed",3],
+  "put": ["unclassed",1],
+  "renderSet": ["unclassed",2],
+  "repoRubrics": ["unclassed",5],
+  "kitLine": ["unclassed",2]
+ },
+ "src/routes/contraptions.ts": {
+  "contraptionRoutes": ["unclassed",3]
+ },
+ "src/routes/projects.ts": {
+  "ideaRow": ["unclassed",1]
+ },
+ "src/routes/reviews.ts": {
+  "kitAgent": ["unclassed",1]
+ },
+ "src/routes/tickets.ts": {
+  "ticketRoutes": ["unclassed",1]
+ },
+ "src/rule-overlap.ts": {
+  "mdFiles": ["unclassed",2],
+  "readIn": ["unclassed",2]
+ },
+ "src/runner.ts": {
+  "wrapperAlive": ["unclassed",5],
+  "argInProc": ["unclassed",2],
+  "wrapperInProc": ["unclassed",2],
+  "unsentSteers": ["unclassed",1],
+  "Runner.waitStray": ["unclassed",1],
+  "Runner.noteStrays": ["unclassed",3],
+  "Runner.recover": ["unclassed",7],
+  "Runner.reattach": ["unclassed",1],
+  "Runner.keepSupervisor": ["unclassed",1],
+  "Runner.rescue": ["unclassed",4],
+  "Runner.gone": ["unclassed",1],
+  "Runner.send": ["unclassed",3],
+  "Runner.checkTurn": ["unclassed",2],
+  "Runner.endLive": ["unclassed",2],
+  "Runner.signal": ["unclassed",1],
+  "Runner.spawnWrapper": ["unclassed",1],
+  "Runner.poll": ["unclassed",4],
+  "Runner.dirChanged": ["unclassed",1],
+  "Runner.readStream": ["unclassed",3],
+  "Runner.wrapUp": ["unclassed",1],
+  "Runner.steerSystem": ["unclassed",2],
+  "Runner.keepCodexLog": ["unclassed",1],
+  "Runner.writeRefs": ["unclassed",2],
+  "Runner.writeSchemeRefs": ["unclassed",1]
+ },
+ "src/schedules.ts": {
+  "loadTemplates": ["unclassed",2]
+ },
+ "src/scheme-refs.ts": {
+  "readRefs": ["unclassed",1]
+ },
+ "src/sd-watchdog.ts": {
+  "markExit": ["unclassed",1],
+  "takeMark": ["unclassed",2],
+  "markStop": ["unclassed",1],
+  "readStop": ["unclassed",1]
+ },
+ "src/sessions.ts": {
+  "mergeMemory": ["unclassed",14],
+  "saveSession": ["unclassed",2],
+  "writeBack": ["unclassed",6],
+  "(module)": ["unclassed",2],
+  "lastEffort": ["unclassed",4]
+ },
+ "src/shell.ts": {
+  "shellOff": ["unclassed",1]
+ },
+ "src/ship-stop.ts": {
+  "descendants": ["unclassed",2],
+  "stopInLine": ["unclassed",1],
+  "kitMoved": ["unclassed",2]
+ },
+ "src/side-ask.ts": {
+  "SideAsks.recover": ["unclassed",1],
+  "SideAsks.poll": ["unclassed",1],
+  "SideAsks.read": ["unclassed",1],
+  "SideAsks.finish": ["unclassed",2],
+  "SideAsks.dropFork": ["unclassed",1]
+ },
+ "src/side-guard.ts": {
+  "(module)": ["unclassed",1]
+ },
+ "src/skills.ts": {
+  "read": ["unclassed",1],
+  "itemsIn": ["unclassed",1]
+ },
+ "src/slash-commands.ts": {
+  "fileDescription": ["unclassed",2]
+ },
+ "src/standing-checks.ts": {
+  "CHECKS": ["unclassed",1],
+  "isDir": ["unclassed",1],
+  "isFile": ["unclassed",1],
+  "mtime": ["unclassed",1],
+  "readText": ["unclassed",1]
+ },
+ "src/supervisor-client.ts": {
+  "supervisorAlive": ["unclassed",1],
+  "readSupervisor": ["unclassed",1],
+  "ensureSupervisor": ["unclassed",7],
+  "pruneOld": ["unclassed",3]
+ },
+ "src/taskmaster-files.ts": {
+  "relayFile": ["unclassed",8]
+ },
+ "src/tripwire-git.ts": {
+  "git": ["unclassed",1],
+  "midMerge": ["unclassed",1],
+  "gitHabitReason": ["unclassed",1],
+  "inTheWay": ["unclassed",1],
+  "writeSaves": ["unclassed",1]
+ },
+ "src/tripwire.ts": {
+  "hasDeployScript": ["unclassed",1],
+  "envBelow": ["unclassed",6],
+  "globRoot": ["unclassed",5],
+  "realPath": ["unclassed",2],
+  "segmentReason": ["unclassed",2],
+  "(module)": ["unclassed",1]
+ },
+ "src/turn-launch.ts": {
+  "pinTurnFiles": ["unclassed",39],
+  "coordinatorAccess": ["unclassed",1]
+ },
+ "src/turn-run.mjs": {
+  "put": ["unclassed",2],
+  "takeSpec": ["unclassed",3],
+  "claimSpec": ["unclassed",1],
+  "prepare": ["unclassed",4],
+  "feeder": ["unclassed",6]
+ },
+ "src/turn-tmp.ts": {
+  "makeTmpDir": ["unclassed",3],
+  "clearTmpDir": ["unclassed",1],
+  "sweepTmpDirs": ["unclassed",1],
+  "dropTurnDir": ["unclassed",1]
+ },
+ "src/ultrareview.ts": {
+  "UltraReviews.ghRun": ["unclassed",1],
+  "UltraReviews.openPr": ["unclassed",1],
+  "UltraReviews.cleanUp": ["unclassed",1],
+  "UltraReviews.run": ["unclassed",1],
+  "UltraReviews.viaPr": ["unclassed",2],
+  "UltraReviews.finish": ["unclassed",2],
+  "writeFindings": ["unclassed",2]
+ },
+ "src/waits.ts": {
+  "read": ["unclassed",1],
+  "stat": ["unclassed",1],
+  "files": ["unclassed",1],
+  "writeOrder": ["unclassed",2]
+ },
+ "src/wake.ts": {
+  "runsRepo": ["unclassed",1]
+ },
+ "src/workspace.ts": {
+  "surveyReports": ["unclassed",1],
+  "buildBranch": ["unclassed",1],
+  "landsBuilds": ["unclassed",1],
+  "recoverTicketDir": ["unclassed",8],
+  "restoreTicketDir": ["unclassed",3]
+ },
+ "src/worktree-sweep.ts": {
+  "removeWorktree": ["unclassed",3],
+  "restoreSaved": ["unclassed",1]
+ }
 }

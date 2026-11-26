@@ -7,7 +7,7 @@
 // the same signals across minions.
 import type { Store, Ticket } from './db.ts';
 import { nextStep, tierLabel } from '../public/model-table.js';
-import { refusalKind } from './land.ts';
+import { classifyLandFailure, NO_CODE } from './land.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 
 /** Thresholds, from the handoff (starting values: the two-week read says whether they hold). */
@@ -16,6 +16,15 @@ export const CHURN_ROUNDS = 4;
 export const SHIP_FAILS = 2;
 /** Refusals the minion couldn't help, so they say nothing about its model and don't count (#2047, Josh, 2026-11-25). */
 const NOT_THE_MODELS = new Set(['conflict', 'passed-alone', 'boot-copy', 'cut-off', 'ci', 'no-answer']);
+
+/**
+ * A failed ship's kind: classifyLandFailure's, or `no-answer` for exit 75 (CI gave no verdict), or `cut-off` for a run that
+ * ended with no exit code, whatever it printed first (as the ship trail reads it).
+ */
+export function refusalKind(output: string, code: number | null = null): string | null {
+  if (code === 75) return 'no-answer';
+  return output.trimEnd().endsWith(NO_CODE.trim()) ? 'cut-off' : (classifyLandFailure(output)?.kind ?? null);
+}
 
 // A tool name only counts as the command a segment runs (at the start, or after ;, &, |, a bracket or a newline), past any
 // VAR=value, cd, timeout or wrapper (citadel-heavy, npx), and as a whole word: `cat $TMPDIR/citadel-test.log` and

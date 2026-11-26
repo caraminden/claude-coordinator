@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { emptyState, failingTests, observe, shipFailed, StallWatch, stallKey, SUGGESTIONS_KEY, type StallState } from '../src/stall-signals.ts';
+import { emptyState, failingTests, observe, shipFailed, StallWatch, stallKey, SUGGESTIONS_KEY, refusalKind, type StallState } from '../src/stall-signals.ts';
 import { NO_CODE } from '../src/land.ts';
 import { nextStep, TIERS } from '../public/model-table.js';
 import { editedFiles, testCommand } from '../src/stall-signals.ts';
@@ -142,6 +142,15 @@ test("refusals that are not the model's fault never count: conflict, passed alon
   assert.deepEqual(shipFailed(s, 'own-test'), []);
   assert.deepEqual(shipFailed(s, 'conflict'), [], 'one real failure and a conflict are not two');
   assert.match(shipFailed(s, 'own-test')[0].evidence[0], /kinds: own-test, own-test/);
+});
+
+// How server.ts reads a handed-off run before counting it.
+test('a handed-off run that gave no exit code or no CI verdict is read as one that does not count', () => {
+  const red = 'land: smoke: ✖ test/a.test.ts › b';
+  assert.equal(refusalKind(red, 1), 'own-test');
+  assert.equal(refusalKind(`${red}${NO_CODE}`, 1), 'cut-off', 'a red printed before the cut still counts as cut off');
+  assert.equal(refusalKind(red, 75), 'no-answer');
+  assert.equal(refusalKind('something else', 1), null);
 });
 
 test('a count saved before these kinds stopped counting does not fire on one real failure', () => {

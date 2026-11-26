@@ -164,7 +164,7 @@ import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
 import { ShipLane } from './src/ship-lane.ts';
-import { StallWatch } from './src/stall-signals.ts';
+import { StallWatch, refusalKind } from './src/stall-signals.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
@@ -1849,8 +1849,8 @@ const landHandoffs = new LandHandoffs({
   },
   failed: (id, kind) => {
     runner.places.refused(id, true);
-    stallWatch.shipFailed(id, kind);
     const run = landings.get(id);
+    stallWatch.shipFailed(id, run ? refusalKind(run.output, run.code) : kind);
     if (run) recordFailure(store, id, run.output, run.code);
   },
   landed: (id, commit) => {

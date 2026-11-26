@@ -141,3 +141,13 @@ test("the format template's way onto main replays a branch cut before the reform
     s.done();
   }
 });
+
+test('a Rust repo is set up with unsafe denied by default, and a note on every use', () => {
+  const lints = readFileSync(join(templates, 'rust-lints.toml'), 'utf8');
+  assert.match(lints, /^\[workspace\.lints\.rust\]\nunsafe_code = "deny"/m);
+  assert.match(lints, /^\[workspace\.lints\.clippy\]\nundocumented_unsafe_blocks = "deny"/m);
+  const skill = readFileSync(join(templates, '../SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+  for (const part of ['templates/rust-lints.toml', '`workspace = true`', '#![allow(unsafe_code)]', '// SAFETY:', 'cargo clippy']) {
+    assert.ok(skill.includes(part), part);
+  }
+});

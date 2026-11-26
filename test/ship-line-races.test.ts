@@ -493,35 +493,38 @@ for (const half of [false, true])
     else assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H));
   });
 
-test("a server killed after a hand-off's folder is in place, before land.sh starts: the minion is told it ended", { timeout: 120_000 }, async () => {
-  const s = handoff();
-  s.script('echo ran >>ran\n');
-  const script = join(s.data, '..', 'server.ts');
-  writeFileSync(
-    script,
-    `import fs from 'node:fs';
+for (const when of ['before', 'after'])
+  test(`a server killed just ${when} a hand-off's folder is renamed into place, land.sh not started: the minion is told it ended`, { timeout: 120_000 }, async () => {
+    const s = handoff();
+    s.script('echo ran >>ran\n');
+    const script = join(s.data, '..', 'server.ts');
+    writeFileSync(
+      script,
+      `import fs from 'node:fs';
      import { syncBuiltinESMExports } from 'node:module';
      const real = fs.renameSync;
      fs.renameSync = (from, to) => {
+       const note = String(from).endsWith('.new') && !String(to).includes('.old-');
+       if (note && ${when === 'before'}) process.kill(process.pid, 'SIGKILL');
        real(from, to);
-       if (String(from).endsWith('.new')) process.kill(process.pid, 'SIGKILL');
+       if (note) process.kill(process.pid, 'SIGKILL');
      };
      syncBuiltinESMExports();
      const { Landings } = await import(${JSON.stringify(resolve('src/land.ts'))});
      new Landings(${JSON.stringify(s.data)}).handOff(1, ${JSON.stringify(s.cwd)}, { PATH: process.env.PATH }, [], ${JSON.stringify(H)});`,
-  );
-  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', timeout: 60_000 });
-  assert.equal(r.signal, 'SIGKILL', r.stderr);
-  // Past the start's grace, as the next server sees it a minute on.
-  writeFileSync(join(s.data, 'run', 'landings', '1', 'started'), '0');
-  const next = s.server();
-  assert.deepEqual(await next.landings.pending(), [1]);
-  await next.handoffs.poll();
-  assert.deepEqual(await next.landings.pending(), [], 'reported');
-  assert.ok(
-    s.did.some((d) => d.startsWith('message: ')),
-    `the minion hears: ${s.did.join(', ') || 'nothing'}`,
-  );
-  assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H), 'and can hand off again');
-  await until('land.sh ends', () => next.landings.get(1)!.code !== null);
-});
+    );
+    const r = spawnSync(process.execPath, [script], { encoding: 'utf8', timeout: 60_000 });
+    assert.equal(r.signal, 'SIGKILL', r.stderr);
+    // Past the start's grace, as the next server sees it a minute on.
+    writeFileSync(join(s.data, 'run', 'landings', when === 'before' ? '1.new' : '1', 'started'), '0');
+    const next = s.server();
+    assert.deepEqual(await next.landings.pending(), [1]);
+    await next.handoffs.poll();
+    assert.deepEqual(await next.landings.pending(), [], 'reported');
+    assert.ok(
+      s.did.some((d) => d.startsWith('message: ')),
+      `the minion hears: ${s.did.join(', ') || 'nothing'}`,
+    );
+    assert.ok(next.landings.handOff(1, s.cwd, s.env, [], H), 'and can hand off again');
+    await until('land.sh ends', () => next.landings.get(1)!.code !== null);
+  });

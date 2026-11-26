@@ -1584,7 +1584,7 @@ test("a last run's folder a restart left mid-delete is no hand-off, and the dail
   mkdirSync(join(dir, '6.old-1700000000000'), { recursive: true });
   writeFileSync(join(dir, '6.old-1700000000000', 'handoff.json'), '{}');
   mkdirSync(join(dir, '9.new')); // a start a kill cut off before its folder was renamed in (#2133)
-  writeFileSync(join(dir, '9.new', 'handoff.json'), '{}');
+  writeFileSync(join(dir, '9.new', 'handoff.json'), '{'); // half written: a whole one is taken in at the scan
   mkdirSync(join(dir, '6'));
   writeFileSync(join(dir, '6', 'handoff.json'), '{}');
   const l = new Landings(data);

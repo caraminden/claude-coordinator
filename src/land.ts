@@ -167,7 +167,21 @@ export class Landings {
 
   private async scan() {
     try {
-      const names = (await readdir(this.root)).filter((n) => /^\d+$/.test(n));
+      const all = await readdir(this.root);
+      const names = all.filter((n) => /^\d+$/.test(n));
+      // Killed between HostJobs.start's two renames, a hand-off (a re-queue above all, which no turn waits on) is only
+      // in the folder built aside: with its note whole, take it in, so it is reported as a ship that ended.
+      for (const next of all.filter((n) => /^\d+\.new$/.test(n))) {
+        const n = next.slice(0, -'.new'.length);
+        if (names.includes(n)) continue;
+        try {
+          JSON.parse(await readFile(join(this.root, next, HANDOFF), 'utf8'));
+          await rename(join(this.root, next), join(this.root, n));
+          names.push(n);
+        } catch {
+          // No whole note (nothing was handed off), or a new start has the folder: prune's.
+        }
+      }
       for (let i = 0; i < names.length; i += 16) {
         const found = await Promise.all(
           names.slice(i, i + 16).map((n) =>

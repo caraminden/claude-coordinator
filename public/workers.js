@@ -8,7 +8,7 @@ import { tooCold, waitsLine } from './threadstate.js';
 import { optimistic } from './ui/optimistic.js';
 import { lineMoved, openLine, quickLane } from './worker-line.js';
 
-/** @import { WorkerLimit, WorkersTile } from './types.js' */
+/** @import { WorkerLimit, WorkersTile } from './types/workers.js' */
 
 const READ_MS = 3_000;
 const SIZES = Array.from({ length: 50 }, (_, i) => i + 1);

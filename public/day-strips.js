@@ -6,7 +6,7 @@ import { shortDuration } from './chattext.js';
 import { emptyCard } from './look.js';
 import { mountTips } from './ui/tip.js';
 
-/** @import { Strip, StripPartName } from './types.js' */
+/** @import { Strip, StripPartName } from './types/workers.js' */
 /** @typedef {Record<StripPartName, number>} Totals */
 /** The parts, in src/day-strips.ts's order, with the words people read. */
 /** @type {[StripPartName, string][]} */

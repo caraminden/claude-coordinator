@@ -8,7 +8,8 @@ import { usage } from './core.js';
 import { rowState, spokenCell } from './threadstate.js';
 import { emptyCard, schemeTag, statTiles, toneChip } from './look.js';
 import { loadingLine } from './ui/state.js';
-/** @import { Chain, ChainNode, EdgeKind, Ticket, View } from './types.js' */
+/** @import { Chain, ChainNode, EdgeKind } from './types/list.js' */
+/** @import { Ticket, View } from './types.js' */
 /** The screen on show: these run on a scheme's page, where `view` is set. */
 const cur = () => /** @type {View} */ (view);
 /** @typedef {{ at: number, chains: Chain[] | null, error?: string | null, loading?: Promise<void> | null, after: (() => void)[] }} ChainRead */

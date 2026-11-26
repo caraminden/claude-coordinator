@@ -4,7 +4,7 @@
 import { api, h, pacificStamp, poller, svg } from './base.js';
 import { emptyCard, statTiles, toneChip } from './look.js';
 
-/** @import { BoxCapacity, BoxRow } from './types.js' */
+/** @import { BoxCapacity, BoxRow } from './types/workers.js' */
 
 const READ_MS = 60_000;
 const plural = (/** @type {number} */ n, /** @type {string} */ word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;

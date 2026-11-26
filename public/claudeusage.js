@@ -1,9 +1,7 @@
 // Claude usage windows across accounts, pure so tests can load it. One rule for the bar and the tooltip's lines:
 // a window past its reset counts as 0% used (the server's windowNow in src/account-pick.ts does the same).
 
-/** @import { UsageWindow } from './types.js' */
-/** The parts of a window the page reads (src/account-pick.ts MeterWindow). @typedef {Pick<UsageWindow, 'utilization' | 'resetsAt'>} MeterWindow */
-/** @typedef {{ n?: number; label: string; same?: string | null; usage?: { weekly?: MeterWindow | null; session?: MeterWindow | null } | null }} UsageAccount a row of the account list */
+/** @import { MeterWindow, UsageAccount } from './types/usage.js' */
 
 /** @param {MeterWindow | null | undefined} w @param {number} now */
 const live = (w, now) => w && (!w.resetsAt || w.resetsAt > now);

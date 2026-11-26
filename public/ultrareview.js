@@ -1,7 +1,8 @@
 // Ultra review (#432): a person runs `claude ultrareview` on their own Claude login, on this minion's
 // branch or on an area of the scheme's repo, and the findings land in this chat. It spends a free run or
 // usage credits, so the dialog says so and the server only takes it from a person who confirmed.
-/** @import { Ticket, UltraBatchRow, UltraCheck, UltraRefused, UltraStarted } from './types.js' */
+/** @import { Ticket } from './types.js' */
+/** @import { UltraBatchRow, UltraCheck, UltraRefused, UltraStarted } from './types/ultra.js' */
 import { api, h } from './base.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';

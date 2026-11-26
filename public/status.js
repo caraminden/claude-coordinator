@@ -15,7 +15,7 @@ import { workersPanel } from './workers.js';
 import { capacityPanel } from './box-capacity.js';
 import { dayStripsPanel } from './day-strips.js';
 /** @import { Child } from './base.js' */
-/** @import { StatusApp, StatusChecks, StatusCitadel, StatusCpuRow, StatusData, StatusEaseNow, StatusEaseWaiting, StatusEaseHeld, StatusJob, StatusLook, StatusShipLine, StatusShipTarget, StatusSlowMoment, StatusStorm, StatusTone, StatusVerdict, StatusAnswer } from './types.js' */
+/** @import { StatusApp, StatusChecks, StatusCitadel, StatusCpuRow, StatusData, StatusEaseNow, StatusEaseWaiting, StatusEaseHeld, StatusJob, StatusLook, StatusShipLine, StatusShipTarget, StatusSlowMoment, StatusStorm, StatusTone, StatusVerdict, StatusAnswer } from './types/status.js' */
 /** @typedef {{ target: string, looks: Record<string, StatusLook>, verdict: StatusVerdict, ask: boolean }} Investigating */
 
 const REFRESH_MS = 30_000;

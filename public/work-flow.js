@@ -6,7 +6,7 @@ import { COLS, dayBefore, layout, money, nodesOf, ribbon, rows, value } from './
 import { emptyCard, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
 
-/** @import { FlowMinion, FlowView } from './types.js' */
+/** @import { FlowMinion, FlowView } from './types/workers.js' */
 /** @import { FlowCol, FlowUnit, FlowNode, FlowLink } from './flowmath.js' */
 /** @typedef {FlowView & { asked: number, key: string, error?: undefined }} FlowOk */
 /** A read that failed: ours names its range, ci.js's own does not. @typedef {{ error: string | true, key?: string, asked?: undefined, minions?: undefined, unread?: undefined, repo?: undefined }} FlowFail */

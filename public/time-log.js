@@ -1,5 +1,5 @@
 // The ribbon's arithmetic (#1991): the stretches of a time log (src/time-log.ts) as tiles that fit, and a log grown to now. No DOM.
-/** @import { TimeKind, TimeLog, TimeRow, TimeSeg } from './types.js' */
+/** @import { TimeKind, TimeLog, TimeRow, TimeSeg } from './types/time-log.js' */
 
 /**
  * A log `ms` after it was cut: its last stretch is still going on, unless the minion is dismissed.

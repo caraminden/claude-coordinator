@@ -2,7 +2,8 @@
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
 import { account, ago, openView, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
-/** @import { CardLink, ListedTicket as Row, MemoryHit, RowState, SchemeListed, Ticket, View, WaitRow } from './types.js' */
+/** @import { CardLink, SchemeListed, Ticket, View } from './types.js' */
+/** @import { ListedTicket as Row, MemoryHit, RowState, WaitRow } from './types/list.js' */
 /** @import { Tips } from './ui/tip.js' */
 import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';

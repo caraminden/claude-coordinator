@@ -1,6 +1,6 @@
 // The CI desktop cards on the CI page's Overview, behind its CI desktop load toggle (#534, moved there from Machines by #968, onto Overview by #1019): each PC that hosts CI runners, as src/ci-load.ts sees it: a
 // verdict, what it is doing now, the last 24 hours, and each pool of runners with its queue (public/ci.js reads them).
-/** @import { PcView, PcBrief } from './types.js' */
+/** @import { PcView, PcBrief } from './types/ci.js' */
 import { ago, h } from './base.js';
 
 const GB = 1024 ** 3;

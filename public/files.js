@@ -8,7 +8,8 @@ import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { startUpload } from './ui/upload.js';
 
-/** @import { ArtifactFile, SharedFile, View } from './types.js' */
+/** @import { ArtifactFile, SharedFile } from './types/files.js' */
+/** @import { View } from './types.js' */
 /** @import { UploadResult } from './ui/upload.js' */
 /** @typedef {{ file: File, path: string, at: number, progress: number, failed?: boolean }} PendingUpload */
 /** @typedef {{ files: File[], folder: string }} Staged */

@@ -1,4 +1,4 @@
-/** @import { Account, ChatEvent, ClaudeUsage, CodexState, CodexUsage, CodexWindow, EventsPage, Ticket } from './types.js' */ /** @import { PrRepo, PrTarget } from './threadrefs.js' */ /** @typedef {HTMLFormElement & Record<'login' | 'password', HTMLInputElement>} LoginForm */ // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
+/** @import { Account, ChatEvent, EventsPage, Ticket } from './types.js' */ /** @import { ClaudeUsage, CodexState, CodexUsage, CodexWindow, MeterWindow, PlanUsage } from './types/usage.js' */ /** @import { PrRepo, PrTarget } from './threadrefs.js' */ /** @typedef {HTMLFormElement & Record<'login' | 'password', HTMLInputElement>} LoginForm */ // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
 import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
@@ -670,7 +670,7 @@ export function renderUsage(next = usage) {
   usage = next;
   syncUsageLinks();
   const accounts = usage?.accounts && usage.accounts.length > 1 ? usage.accounts : null;
-  /** @type {{ utilization: number, resetsAt: number | null, status?: string | null } | null | undefined} */
+  /** @type {(MeterWindow & { status?: string | null }) | null | undefined} */
   const week = accounts ? combineWindows(accounts, 'weekly') : usage?.weekly;
   const session = accounts ? combineWindows(accounts, 'session') : usage?.session;
   for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.usage:not(.codex)'))) {
@@ -684,7 +684,7 @@ export function renderUsage(next = usage) {
     const out = accounts ? accounts.every((a) => high(a.usage)) : week.status && week.status !== 'allowed';
     el.dataset.level = out || pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
     const when = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-    const sess = (/** @type {{ utilization: number, resetsAt: number | null }} */ w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
+    const sess = (/** @type {MeterWindow} */ w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
     el.title = [
       accounts ? `Weekly usage combined across ${accounts.length} Claude accounts: ${pct}%${week.resetsAt ? `, next reset ${when(week.resetsAt)}` : ''}` : `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
       session ? `5-hour window${accounts ? ' (combined)' : ''}: ${sess(session)}` : null,
@@ -735,9 +735,9 @@ export function codexWindowsBlock() {
 }
 
 const when = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-const live = (/** @type {{ resetsAt: number | null } | null | undefined} */ w) => w && (!w.resetsAt || w.resetsAt > Date.now());
+const live = (/** @type {MeterWindow | null | undefined} */ w) => w && (!w.resetsAt || w.resetsAt > Date.now());
 /** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
-const high = (/** @type {import('./types.js').PlanUsage | null | undefined} */ u) => [u?.session, u?.weekly].some((w) => live(w) && w && (w.status === 'rejected' || w.utilization >= 0.9));
+const high = (/** @type {PlanUsage | null | undefined} */ u) => [u?.session, u?.weekly].some((w) => live(w) && w && (w.status === 'rejected' || w.utilization >= 0.9));
 // With several Claude accounts (#779), only once every one of them is high: turns move to the next by themselves.
 const claudeHigh = () => (usage?.accounts && usage.accounts.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage));
 

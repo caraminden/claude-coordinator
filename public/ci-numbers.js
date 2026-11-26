@@ -1,7 +1,7 @@
 // The CI page's Numbers tab (#1369, Cara 2026-11-20: "Keep CI numbers per commit and flag a step up"; on #1369's card,
 // "New tab on the CI page"): a row per series a scheme's CI sends (kit/skills/ci-store/ci-numbers.sh), with its chart
 // over its runs. Each point links its commit; a step up that held (src/ci-numbers.ts) is marked where it started.
-/** @import { CiNumbersView, CiNumberSeries, CiNumberStepRow, CiNumbersRules, ReadFailed } from './types.js' */
+/** @import { CiNumbersView, CiNumberSeries, CiNumberStepRow, CiNumbersRules, ReadFailed } from './types/ci.js' */
 /** @typedef {CiNumberSeries['points'][number]} Point */
 import { api, h, pacificDate, pacificStamp } from './base.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';

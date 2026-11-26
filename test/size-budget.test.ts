@@ -18,7 +18,6 @@ export const LIMIT = 1500;
 export const ALLOWED: Record<string, [number, string]> = {
   'public/reviews.js': [1662, 'the Reviewers and critics page (+162: JSDoc types replacing implicit any, #2023)'],
   'public/settings.js': [1609, "a scheme's settings pages (+109: JSDoc types replacing implicit any, #2023)"],
-  'public/types.d.ts': [1828, '(+16: the cabal card the list draws, #2092) the shared type home the six front-end typing rounds add to at once (#2010; round 6, #2026, added InboxItem); split by area once they finish (#2022) (+217: types replacing any, #2087)'],
   'public/core.js': [1523, '(+1: cabal cards arrive like build headers, #2092) over the line once the Biome reformat (#1792) broke its long lines; a split is queued (+5: types replacing any, #2022; +3 for the cabal page, #2090)'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [

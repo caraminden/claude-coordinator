@@ -3,7 +3,10 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-/** @import { CiRead, CiScheme, CiProblem, CiRun, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, ListedTicket, PcView, HostLoad, View, ReadFailed, Scheme, StatusData, TestHealth, CiNumbersView } from './types.js' */
+/** @import { CiRead, CiScheme, CiProblem, CiRun, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, ReadFailed, TestHealth, CiNumbersView } from './types/ci.js' */
+/** @import { ListedTicket } from './types/list.js' */
+/** @import { View, Scheme } from './types.js' */
+/** @import { StatusData } from './types/status.js' */
 /** @import { Child } from './base.js' */
 import { ago, api, h, icon, keepView, view, pacificStamp, poller } from './base.js';
 import { hostLoadBlock } from './ci-host.js';

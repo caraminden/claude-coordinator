@@ -5,6 +5,6 @@
   // the server into this check and counts its errors twice (declare the type in public/, as progress.js's FinishedStep).
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["esnext", "dom", "dom.iterable"], "types": [], "checkJs": true, "moduleDetection": "force" },
-  "include": ["public/**/*.js"],
+  "include": ["public/**/*.js", "public/types/*.d.ts"],
   "exclude": ["public/sw.js"]
 }

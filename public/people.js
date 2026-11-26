@@ -11,6 +11,7 @@ import { loadingLine } from './ui/state.js';
 
 /** @import { Child } from './base.js' */
 /** @import { View } from './types.js' */
+/** @import { ClaudeUsage, MeterWindow, PlanUsage } from './types/usage.js' */
 /** @typedef {{ slug: string, state?: string, error?: string, failed?: boolean, login?: string }} MemberGithub */
 /** @typedef {{ id: number, name: string, login: string, owner: boolean, github?: MemberGithub | null }} Member */
 /** @typedef {{ id: number, name: string, login: string }} Who */
@@ -438,20 +439,18 @@ function replayCard() {
   );
 }
 
-/** @typedef {{ utilization: number, resetsAt?: number }} Meter */
-/** @typedef {{ session?: Meter, weekly?: Meter, account?: number, accounts?: { n: number, usage?: Usage | null, same?: string }[] }} Usage */
 /** @typedef {{ n: number, email?: string, expired?: boolean, ready?: boolean, limitedUntil: number, plan?: string }} ClaudeAccount */
-/** @typedef {{ error?: string, accounts?: ClaudeAccount[], host?: boolean, state?: string, linking: number, url?: string, pinned?: number, inUse?: number, usage?: Usage }} ClaudeState */
+/** @typedef {{ error?: string, accounts?: ClaudeAccount[], host?: boolean, state?: string, linking: number, url?: string, pinned?: number, inUse?: number, usage?: ClaudeUsage }} ClaudeState */
 
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
-const weekText = (/** @type {Meter | null | undefined} */ w) => (w ? `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}` : null);
+const weekText = (/** @type {MeterWindow | null | undefined} */ w) => (w ? `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}` : null);
 
 /** A window's use as of its account's last turn: "41%". */
-const pctText = (/** @type {Meter} */ w) => `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%`;
+const pctText = (/** @type {MeterWindow} */ w) => `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%`;
 const clock = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 
 /** One account's meters: "5 hours 41% · week 62%, resets Thu 9:00 AM", or nothing before its first turn. */
-const meterText = (/** @type {Usage | null | undefined} */ u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.weekly && `week ${weekText(u.weekly)}`].filter(Boolean).join(' · ');
+const meterText = (/** @type {PlanUsage | null | undefined} */ u) => [u?.session && `5 hours ${pctText(u.session)}`, u?.weekly && `week ${weekText(u.weekly)}`].filter(Boolean).join(' · ');
 
 /**
  * Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. Up to three
@@ -627,7 +626,7 @@ function claudeCard() {
   return card;
 }
 
-/** @typedef {{ error?: string, state?: string, override?: import('./types.js').CodexState | null, url?: string, code?: string }} CodexState */
+/** @typedef {{ error?: string, state?: string, override?: import('./types/usage.js').CodexState | null, url?: string, code?: string }} CodexState */
 
 /** Your own Codex (#330): a second-opinion reviewer on your ChatGPT plan, signed in inside your Claude container. */
 function codexCard() {

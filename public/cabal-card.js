@@ -3,7 +3,7 @@
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
 import { h } from './base.js';
 import { money } from './cabal.js';
-/** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types.js' */
+/** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
 
 /** The cards open on this page, by lead id: they stay open across redraws. */
 export const openCabals = /** @type {Set<number>} */ (new Set());

@@ -2,7 +2,7 @@
 // Replays a ticket's stored events to rebuild Claude's task list (TaskCreate/TaskUpdate, or
 // TodoWrite) and to sort every other tool call under the step that was in progress when it ran.
 
-/** @import { ChatAction, ChatBlock, ClaudeEvent, PlanStep, ProgressTask, ResultBlock, ToolBlock, ToolInput } from './types.js' */
+/** @import { ChatAction, ChatBlock, ClaudeEvent, PlanStep, ProgressTask, ResultBlock, ToolBlock, ToolInput } from './types/chat.js' */
 /** @typedef {ReturnType<typeof createProgress> & { doneCount?: number }} Prog */
 /** @typedef {Pick<ChatAction, 'block' | 'result' | 'startedAt' | 'doneAt'>} Act */
 /** @typedef {{ kind: string, text: string, object?: string }} Described */

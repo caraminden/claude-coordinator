@@ -3,7 +3,8 @@
 // redraw of the progress line, so a click, a scroll or focus in it isn't lost to the next event. Explain (#1994): Haiku's
 // reading of each step and wait, kept for everyone (src/time-log-explain.ts), shown in the rows in place of the outcomes.
 /** @import { ProgressUi } from './progress-ui.js' */
-/** @import { Ticket, TimeExplainLine, TimeKind, TimeLog, TimeRow, TimeSeg } from './types.js' */
+/** @import { Ticket } from './types.js' */
+/** @import { TimeExplainLine, TimeKind, TimeLog, TimeRow, TimeSeg } from './types/time-log.js' */
 /** @typedef {{ log: TimeLog | null, at: number, sig: string, busy: boolean, failed: string, explaining: boolean, explainFailed: string }} Entry */
 /** @typedef {{ id: number, ui: ProgressUi, top: HTMLElement, list: HTMLElement, el: HTMLElement, drawn: string }} Panel */
 import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, pacificDate, pacificIso, pacificStamp, openView, view } from './base.js';

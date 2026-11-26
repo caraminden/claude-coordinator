@@ -4,7 +4,8 @@
 // (core.js keepOpenChat) both send events through here; stored events stay whole.
 import { TASK_TOOLS, workKind } from './progress.js';
 
-/** @import { ChatAction, ChatEvent, ToolBlock } from './types.js' */
+/** @import { ChatAction, ToolBlock } from './types/chat.js' */
+/** @import { ChatEvent } from './types.js' */
 /** @typedef {{ type?: string, text?: unknown, content?: unknown, id: string, input?: Record<string, unknown>, name: string, work?: string, cut?: unknown }} RawBlock */
 
 /** A Grunt's tool result: nothing reads it unopened but a failure's first line (progress-ui.js actionEl). */

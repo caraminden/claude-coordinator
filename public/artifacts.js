@@ -15,7 +15,8 @@ import { renderFiles } from './files.js';
 import { ARTIFACT_ALLOW, ARTIFACT_SANDBOX } from './frames.js';
 import { loadingLine } from './ui/state.js';
 
-/** @import { ArtifactFile, SharedFile, View } from './types.js' */
+/** @import { ArtifactFile, SharedFile } from './types/files.js' */
+/** @import { View } from './types.js' */
 /** @import { ThreadRef } from './base.js' */
 /** @import { BridgeOpen, BridgeDraw } from './bridge-host.js' */
 /** @import { Lightbox, LightboxItem } from './ui/media.js' */

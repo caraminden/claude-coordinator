@@ -1,7 +1,8 @@
 // The progress readout under a chat's head: the step line, its meter and the plan's steps. The pure half is progress.js.
 import { api, dismissedWhen, h, isCoordinator, openView, statusLabel, view } from './base.js';
 
-/** @import { ChatAction, ProgressTask, Ticket } from './types.js' */
+/** @import { ChatAction, ProgressTask } from './types/chat.js' */
+/** @import { Ticket } from './types.js' */
 /** A chat readout's own state, kept per chat. @typedef {{ open: boolean, openSteps: Set<string>, cmdsOpen: Set<string>, actsOpen: Set<string>, looseOpen?: boolean, tlSel?: string | null, tlSeg?: number | null, tlAll?: boolean, tlPlain?: boolean }} ProgressUi */
 import { threadRefs, usage } from './core.js';
 import { jobOf, rowState, workingBy } from './threadstate.js';

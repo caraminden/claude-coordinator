@@ -1,8 +1,10 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
-/** @import { CardLink, ListedTicket as Row, PlanUsage as Usage, RowState, TicketState, Wait, WorkerWait } from './types.js' */
+/** @import { CardLink, TicketState, Wait, WorkerWait } from './types.js' */
+/** @import { ListedTicket as Row, RowState } from './types/list.js' */
+/** @import { PlanUsage as Usage } from './types/usage.js' */
 /** @typedef {NonNullable<Row['activity']>} Activity */
-/** @import { UsageWindow } from './types.js' */
+/** @import { UsageWindow } from './types/usage.js' */
 import { isCoordinator, me, STATES, view, pacificClock, pacificWeekdayClock } from './base.js';
 import { waitFam, waitShows, waitWords } from './wait.js';
 

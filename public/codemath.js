@@ -2,7 +2,7 @@
 
 /** Lines at which a file is big enough to be worth splitting. */
 export const BIG = 900;
-/** @import { CodeFile } from './types.js' */
+/** @import { CodeFile } from './types/code-map.js' */
 /** The fields of a CodeFile these sums read. @typedef {Pick<CodeFile, 'path' | 'lines' | 'changed' | 'bugs'> & Partial<Pick<CodeFile, 'who'>>} Counted */
 /** Minions that make a file busy (Josh's picked mock: 900 lines, 40 minions), and the fewest in a scheme with less going on. */
 const BUSY = 40;

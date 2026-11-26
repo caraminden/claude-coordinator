@@ -9,7 +9,7 @@ import { emptyCard, meter, showFirst, toneChip } from './look.js';
 import { openDialog } from './ui/dialog.js';
 import { toast } from './ui/status.js';
 
-/** @import { CodeCountsAnswer, CodeFile } from './types.js' */
+/** @import { CodeCountsAnswer, CodeFile } from './types/code-map.js' */
 /** @typedef {Record<string, { number: number; title: string }[]>} Splitting */
 /** @typedef {{ f: CodeFile; x: number; y: number; r: number; el: SVGElement | null }} Dot */
 /** @typedef {Partial<CodeCountsAnswer> & { error?: unknown }} CodeRead the read, or what ci.js keeps when it failed */

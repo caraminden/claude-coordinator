@@ -9,6 +9,7 @@ import { WORKER_LIMITS } from './machine-setup.js';
 import { removing } from './machine-remove.js';
 import { heldCaps, workerSection, workerState } from './machine-worker-row.js';
 import { setupPart } from './role-setup-card.js';
+import { lastRun } from './role-setup.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 
@@ -85,7 +86,10 @@ function standing(m, r) {
   }
   if (r.role === 'screen') return m.screen ? { text: `✓ screen ${m.screen.holder ? 'busy' : 'free'}`, tone: 'ok' } : { text: 'not set up yet', tone: 'info' };
   if (r.role === 'ci') return m.runners ? (m.online ? { text: '✓ runner host connected', tone: 'ok' } : { text: 'offline', tone: 'neutral' }) : { text: 'not set up yet', tone: 'info' };
-  return hasGpu(m) ? { text: '✓ GPU jobs ready', tone: 'ok' } : { text: 'not set up yet', tone: 'info' };
+  if (hasGpu(m)) return { text: '✓ GPU jobs ready', tone: 'ok' };
+  // After a Set up that failed, the header says so too, not "not set up yet" over the section's red chip.
+  const run = lastRun(r);
+  return run?.done && !run.ok ? { text: 'set up failed', tone: 'danger' } : { text: 'not set up yet', tone: 'info' };
 }
 
 /** The schemes a role is lent to, as chips that switch: every scheme the viewer sees, and any already on its list. */

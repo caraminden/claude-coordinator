@@ -41,7 +41,8 @@ function press(m, r, kind, redraw) {
 }
 
 function chip(run) {
-  if (!run) return toneChip('neutral', 'Not set up here yet');
+  // Before any run the role's own header chip says where it stands; this part adds only its button and what it does.
+  if (!run) return null;
   if (!run.done) return toneChip('info', run.kind === 'test' ? 'Testing…' : 'Setting up…');
   return run.ok ? toneChip('ok', run.kind === 'test' ? '✓ Test passed' : '✓ Set up') : toneChip('danger', run.kind === 'test' ? 'Test failed' : 'Set up failed');
 }
@@ -93,7 +94,9 @@ export function setupPart(m, r, redraw) {
         )
       : null,
     run?.ok && run.report ? h('p', { class: 'small' }, run.report) : null,
-    run?.shot && r.role === 'screen' ? h('a', { href: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, target: '_blank', rel: 'noopener', class: 'role-setup-shot' }, h('img', { src: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, alt: `The screenshot ${m.name}'s test took`, loading: 'lazy' })) : null,
+    run?.shot && r.role === 'screen'
+      ? h('a', { href: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, target: '_blank', rel: 'noopener', class: 'role-setup-shot', title: 'Open the screenshot full size' }, h('img', { src: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, alt: `The screenshot ${m.name}'s test took`, loading: 'lazy' }))
+      : null,
     run?.done ? h('p', { class: 'muted small', title: pacificStamp(run.done) }, `${run.kind === 'test' ? 'Tested' : 'Set up'} by ${run.by} ${ago(run.done)}.`) : null,
   );
 }

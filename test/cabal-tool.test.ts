@@ -1,0 +1,102 @@
+// cabal_board end to end (#2090): through the real MCP server and the routes behind it. A member's note and asks, the
+// lead's answers, rows, log and red line, and the delivery rule: a non-blocking ask is held mail to the lead, a blocking one
+// wakes it (the server's claude is a fake that ends at once).
+import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { after, before, test } from 'node:test';
+import { Auth } from '../src/auth.ts';
+import { Store } from '../src/db.ts';
+import { bootServer, type Booted, fakeClaude, PASSWORD, SECRET, stopTurns, tempRoot } from './helpers.ts';
+import { agentEnv, mcpOnce } from './mcp-agent.ts';
+
+const tmp = tempRoot('cabal-tool-');
+const root = tmp.dir;
+const data = join(root, 'data');
+mkdirSync(data, { recursive: true });
+after(async () => {
+  if (srv) await srv.stop();
+  await stopTurns(root);
+  await tmp.teardown();
+});
+
+const store = new Store(join(data, 'coordinator.db'));
+const A = store.createProject('A', null);
+const minion = (title: string) => store.createTicket({ project_id: A.id, kind: 'ticket', title, permission_mode: 'default', created_by: 'Josh' });
+const LEAD = minion('Docs lead');
+const M1 = minion('Sweep one');
+const M2 = minion('Sweep two');
+const OUTSIDER = minion('Not in it');
+store.joinCabal(M1.id, LEAD.id, A.id, M1.title);
+store.joinCabal(M2.id, LEAD.id, A.id, M2.title);
+
+const tokens = new Auth(PASSWORD, SECRET);
+let srv: Booted;
+before(async () => {
+  srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude(root) } });
+});
+
+async function tool(from: number, args: object, cabal = true) {
+  const env = agentEnv(srv.base, tokens.agentToken(from), { id: from, project_id: A.id }, 'thread', cabal ? { COORDINATOR_CABAL: '1' } : {});
+  const result = await mcpOnce(env, 'tools/call', { name: 'cabal_board', arguments: args }, tmp.track);
+  return { text: String(result.content[0].text), error: !!result.isError };
+}
+const userMessages = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => String(JSON.parse(e.data).text ?? ''));
+
+test('only a turn flagged as in a cabal is offered cabal_board', async () => {
+  // TMPDIR: tools/list keeps the list it served there (src/tool-hold.ts); the server's temp root is cleared with it.
+  const env = agentEnv(srv.base, tokens.agentToken(OUTSIDER.id), { id: OUTSIDER.id, project_id: A.id }, 'thread', { TMPDIR: root });
+  const list = await mcpOnce(env, 'tools/list', {}, tmp.track);
+  assert.ok(!list.tools.some((t: { name: string }) => t.name === 'cabal_board'));
+  const r = await tool(OUTSIDER.id, {});
+  assert.match(r.text, /not on a cabal board/);
+});
+
+test('a member sets its note and files; a non-blocking ask is held mail to the lead', async () => {
+  assert.match((await tool(M1.id, { action: 'note', note: 'built, in review', files: ['test/helpers.ts'] })).text, /Saved/);
+  const r = await tool(M1.id, { action: 'ask', text: 'Which helper do you want?' });
+  assert.match(r.text, /^Ask \d+ is on the board\. #\d+ reads it as held mail/, r.text);
+  const read = await tool(M2.id, {});
+  assert.match(read.text, /built, in review/);
+  assert.match(read.text, /ask \d+ from Sweep one #\d+ .*Which helper/);
+  assert.doesNotMatch(read.text, /BLOCKING/);
+});
+
+test("the lead edits rows, logs and sets the red line; a member can't", async () => {
+  assert.match((await tool(LEAD.id, { action: 'row', label: 'Fix', title: 'Fixer', role: 'fixer' })).text, /Row \d+ saved/);
+  assert.match((await tool(LEAD.id, { action: 'log', text: 'Josh, 21:20: "Lend it for one merge"' })).text, /Saved/);
+  assert.match((await tool(LEAD.id, { action: 'red', text: 'Full run red on test/x.test.ts' })).text, /Saved/);
+  const denied = await tool(M1.id, { action: 'log', text: 'mine' });
+  assert.ok(denied.error);
+  assert.match(denied.text, /Only the cabal's lead/);
+  const read = (await tool(LEAD.id, {})).text;
+  assert.match(read, /^RED \(.*\): Full run red/m);
+  assert.match(read, /Fix roster Fixer \[fixer\] \| not started/);
+  assert.match(read, /Lend it for one merge/);
+});
+
+test("the lead's answer comes back the way it was asked: held mail for a plain ask, a wake for a blocking one", async () => {
+  const plain = store.cabalAsks(LEAD.id).find((a) => !a.blocking)!;
+  assert.match((await tool(LEAD.id, { action: 'answer', ask: plain.id, text: 'test/helpers.ts' })).text, /reads it as held mail/);
+  assert.match((await tool(LEAD.id, { action: 'answer', ask: plain.id, text: 'again' })).text, /already answered/);
+  // A blocking ask written straight to the board (asking it through the tool would wake the lead, and end this token).
+  const blocked = store.addCabalAsk(LEAD.id, M1.id, 'I need src/b.ts to go on', true);
+  assert.match((await tool(LEAD.id, { action: 'answer', ask: blocked, text: 'Take it' })).text, /#\d+ is woken for it now/);
+  assert.ok(
+    userMessages(M1.id).some((t) => t.includes('Take it')),
+    "in the asker's chat as a message, not held",
+  );
+});
+
+test('a blocking ask wakes the lead', async () => {
+  const r = await tool(M2.id, { action: 'ask', text: 'I need src/a.ts to go on', blocking: true });
+  assert.match(r.text, /is woken for it now/, r.text);
+  assert.ok(
+    userMessages(LEAD.id).some((t) => t.includes('I need src/a.ts')),
+    "in the lead's chat as a message, not held",
+  );
+});

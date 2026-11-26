@@ -8,29 +8,43 @@ import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { failedLine, loadingLine } from './ui/state.js';
 
-/** What the page holds for a row between redraws, by machine id: its token and address, the picked OS, caps being typed, open blocks. */
-const kept = new Map();
-const keptFor = (id) => kept.get(id) ?? kept.set(id, { link: null, asking: false, error: null, os: null, caps: null, open: new Set(), folder: { name: '', path: '', write: false } }).get(id);
+/** @import { MachineCheckLine, MachineRow, MachineWorker, MachineWorkerCaps } from './types.js' */
+/** @typedef {() => void} Redraw */
+/** @typedef {{ link: { agent_url: string, token: string } | null, asking: boolean, error: string | null, os: string | null, caps: MachineWorkerCaps | null, capsOver?: string, open: Set<string>, folder: { name: string, path: string, write: boolean } }} Kept what the page holds for one row */
 
-/** Its token was replaced: the command is made again with the new one. */
+/** What the page holds for a row between redraws, by machine id: its token and address, the picked OS, caps being typed, open blocks. @type {Map<number, Kept>} */
+const kept = new Map();
+/** @param {number} id @returns {Kept} */
+const keptFor = (id) => /** @type {Kept} */ (kept.get(id) ?? kept.set(id, { link: null, asking: false, error: null, os: null, caps: null, open: new Set(), folder: { name: '', path: '', write: false } }).get(id));
+
+/** Its token was replaced: the command is made again with the new one. @param {number} id */
 export function forgetWorkerLink(id) {
   const k = kept.get(id);
   if (k) k.link = k.error = null;
 }
 
-const windows = (m) => (m.worker.host ? m.worker.wsl : (keptFor(m.id).os ?? (/^linux/i.test(navigator.userAgentData?.platform ?? navigator.platform) && !/android/i.test(navigator.userAgent) ? 'linux' : 'windows')) === 'windows');
+/** @param {MachineRow} m */
+const windows = (m) =>
+  /** @type {MachineWorker} */ (m.worker).host
+    ? /** @type {MachineWorker} */ (m.worker).wsl
+    : (keptFor(m.id).os ?? (/^linux/i.test(/** @type {{ userAgentData?: { platform?: string } }} */ (navigator).userAgentData?.platform ?? navigator.platform) && !/android/i.test(navigator.userAgent) ? 'linux' : 'windows')) === 'windows';
+/** @param {MachineRow} m */
 const mine = (m) => m.owner_id !== null && m.owner_id === account?.id;
 
-/** How a worker stands, in a word or two and a line: the most pressing thing first. */
+/**
+ * How a worker stands, in a word or two and a line: the most pressing thing first.
+ * @param {MachineRow} m
+ * @returns {{ tone: 'neutral' | 'info' | 'warn' | 'danger' | 'ok', word: string, why: string }}
+ */
 export function workerState(m) {
-  const w = m.worker;
+  const w = /** @type {MachineWorker} */ (m.worker);
   if (!w.on) return { tone: 'neutral', word: 'Off', why: w.here ? 'It is set up and connected, and takes no turns while this is off.' : mine(m) ? 'Let your own minions run on this PC.' : 'Its owner can let their own minions run on it.' };
   if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: 'Nothing runs there until that PC is set up: its row follows it from then on.' };
   if (!w.here) return { tone: 'warn', word: 'Away', why: `Last heard from ${w.seen ? ago(w.seen) : 'some time ago'}. ${w.wsl ? 'Signing out of Windows stops it: sign in there, and it comes back by itself.' : 'Turn that PC on; if it is on, "sudo citadel-worker status" there says why.'}` };
   if (w.twice) return { tone: 'warn', word: 'Two workers', why: "This PC's Citadel agent has a worker block in its config too, and is refused: take that block out. Its minion turns run in citadel-worker." };
   if (w.image?.state === 'failed') return { tone: 'danger', word: 'Image failed', why: `${w.image.text} It tries again in 10 minutes.` };
   if (w.image?.state === 'building') return { tone: 'info', word: 'Building its image', why: w.image.text };
-  if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${w.caps?.disk_gb} GB, so no new turn starts there.` };
+  if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${heldCaps(m)?.disk_gb} GB, so no new turn starts there.` };
   if (!w.image) return { tone: 'info', word: 'Connecting', why: 'It is connected and is checking its image.' };
   if (w.claude_wanted) return { tone: 'warn', word: 'Wrong Claude version', why: `Its Claude is ${w.claude} and this server's is ${w.claude_wanted}. ${w.image.state === 'own' ? "Its image is its owner's own: update it there." : 'It updates itself.'}` };
   if (w.signed_in === false || (w.accounts?.length && !w.accounts.some((a) => a.there === 'in'))) return { tone: 'warn', word: 'Needs a Claude sign-in', why: 'No turn starts there until its owner signs in with one of their linked Claude accounts.' };
@@ -42,16 +56,17 @@ export function workerState(m) {
 }
 
 /** The worker is all that computer runs: no agent of Citadel's was ever connected from it. */
+/** @param {MachineRow} m */
 const only = (m) => !m.online && !m.last_seen_at && m.worker?.on;
 
-/** A worker-only row's state word and hue while its worker isn't ready; null leaves the row's own. */
+/** A worker-only row's state word and hue while its worker isn't ready; null leaves the row's own. @param {MachineRow} m */
 export function workerWord(m) {
   if (!only(m) || m.status !== 'ready') return null;
   const { tone } = workerState(m);
-  return { info: ['Setting up', 'running'], warn: ['Needs a fix', 'waiting'], danger: ['Needs a fix', 'danger'] }[tone] ?? null;
+  return /** @type {Record<string, string[]>} */ ({ info: ['Setting up', 'running'], warn: ['Needs a fix', 'waiting'], danger: ['Needs a fix', 'danger'] })[tone] ?? null;
 }
 
-/** A row's reason with its Minion turns in it; they stand for it where the worker is all that computer runs. */
+/** A row's reason with its Minion turns in it; they stand for it where the worker is all that computer runs. @param {MachineRow} m */
 export function workerReason(m) {
   if (!m.worker?.on) return m.reason;
   const { word } = workerState(m);
@@ -59,10 +74,14 @@ export function workerReason(m) {
   return only(m) || word === m.reason || m.reason === 'Runs minion turns' ? turns : `${m.reason} · ${turns}`;
 }
 
-/** A change to the row's worker, shown at once, with its request behind. */
+/** A change to the row's worker, shown at once, with its request behind. @param {MachineRow} m @param {Partial<MachineWorker>} fields @param {() => Promise<unknown>} send @param {string} label @param {Redraw} redraw */
 function change(m, fields, send, label, redraw) {
-  const now = () => (view.machines?.find((x) => x.id === m.id) ?? m).worker;
-  const was = Object.fromEntries(Object.keys(fields).map((k) => [k, now()[k]]));
+  const now = () => {
+    const row = /** @type {MachineRow[] | undefined} */ (view?.machines)?.find((x) => x.id === m.id) ?? m;
+    return /** @type {MachineWorker} */ (row.worker);
+  };
+  const was = Object.fromEntries(Object.keys(fields).map((k) => [k, /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (now()))[k]]));
+  /** @param {Partial<MachineWorker>} vals */
   const set = (vals) => {
     Object.assign(now(), vals);
     redraw();
@@ -70,8 +89,9 @@ function change(m, fields, send, label, redraw) {
   optimistic({ key: `machine-worker:${m.id}`, apply: () => set(fields), send, undo: () => set(was), label });
 }
 
+/** @param {MachineRow} m @param {Redraw} redraw */
 function workerSwitch(m, redraw) {
-  const { on } = m.worker;
+  const { on } = /** @type {MachineWorker} */ (m.worker);
   const shared = m.owner_id === null;
   const why = on ? null : shared ? 'Shared machines run no minions' : mine(m) ? null : 'Only its owner can switch this on';
   const flip = () => change(m, { on: !on }, () => api(`api/machines/${m.id}`, { method: 'PATCH', body: { worker: !on } }), `switch Minion turns ${on ? 'off' : 'on'} for ${m.name}`, redraw);
@@ -88,31 +108,42 @@ function workerSwitch(m, redraw) {
   });
 }
 
+/** @param {string} tag @param {string} command */
 const shell = (tag, command) => markdownElement(`\`\`\`${tag}\n${command}\n\`\`\``);
 
-/** A block that opens and closes, and stays as it was over a redraw. */
+/**
+ * A block that opens and closes, and stays as it was over a redraw.
+ * @param {Kept} k
+ * @param {string} id
+ * @param {string} title
+ * @param {...(Node | string | null)} inside
+ */
 function folded(k, id, title, ...inside) {
   const el = h('details', { class: 'worker-fold', open: k.open.has(id) }, h('summary', {}, title), ...inside);
   el.addEventListener('toggle', () => k.open[el.open ? 'add' : 'delete'](id));
   return el;
 }
 
-/** The caps being typed, until that PC's own change under them; else its own, or the starting ones. */
-const capsFor = (m, k) => (k.caps && k.capsOver === JSON.stringify(m.worker.caps) ? k.caps : (m.worker.caps ?? WORKER_CAPS));
+/** The caps being typed, until that PC's own change under them; else its own, or the starting ones. @param {MachineRow} m @param {Kept} k @returns {MachineWorkerCaps} */
+const capsFor = (m, k) => {
+  const own = /** @type {MachineWorker} */ (m.worker).caps;
+  return k.caps && k.capsOver === JSON.stringify(own) ? k.caps : (own ?? WORKER_CAPS);
+};
 
-/** Four numbers its owner sets; the command below follows them as they are typed. */
+/** Four numbers its owner sets; the command below follows them as they are typed. @param {MachineRow} m @param {Kept} k @param {() => void} follow */
 function capsInputs(m, k, follow) {
   const set = capsFor(m, k);
+  /** @param {keyof MachineWorkerCaps} key @param {string} label @param {string} unit */
   const field = (key, label, unit) => {
     const [min, max] = WORKER_LIMITS[key];
-    const input = h('input', { type: 'text', inputmode: 'numeric', id: `worker-cap-${m.id}-${key}`, value: String(set[key]), maxlength: String(max).length, title: `${min} to ${max}${unit ? ` ${unit}` : ''}`, 'aria-label': `${label}${unit ? ` (${unit})` : ''}` });
+    const input = /** @type {HTMLInputElement} */ (h('input', { type: 'text', inputmode: 'numeric', id: `worker-cap-${m.id}-${key}`, value: String(set[key]), maxlength: String(max).length, title: `${min} to ${max}${unit ? ` ${unit}` : ''}`, 'aria-label': `${label}${unit ? ` (${unit})` : ''}` }));
     input.oninput = () => {
       const n = /^[1-9]\d*$/.test(input.value.trim()) && Number(input.value) >= min && Number(input.value) <= max ? Number(input.value) : null;
       input.setAttribute('aria-invalid', String(n === null));
       // Half-typed, or out of bounds: the command keeps the last number that was neither.
       if (n === null) return;
       k.caps = { ...capsFor(m, k), [key]: n };
-      k.capsOver = JSON.stringify(m.worker.caps);
+      k.capsOver = JSON.stringify(/** @type {MachineWorker} */ (m.worker).caps);
       follow();
     };
     return h('label', { class: 'worker-cap' }, h('span', {}, label), h('span', { class: 'worker-cap-box' }, input, unit ? h('i', {}, unit) : null));
@@ -120,7 +151,7 @@ function capsInputs(m, k, follow) {
   return h('div', { class: 'worker-caps' }, field('workers', 'Minions at once', ''), field('threads', 'CPU threads', ''), field('memory_gb', 'Memory', 'GB'), field('disk_gb', 'Disk', 'GB'));
 }
 
-/** The install command with this PC's own values. Its token is asked for once, when the block is first seen. */
+/** The install command with this PC's own values. Its token is asked for once, when the block is first seen. @param {MachineRow} m @param {Kept} k @param {Redraw} redraw */
 function installBlock(m, k, redraw) {
   if (!m.token_showable) return h('p', { class: 'cui-notice', 'data-tone': 'info' }, 'This machine was linked before Citadel kept tokens, so the command can\'t be filled in. Press "New token" below once; then it shows here. Whatever is connected with the old token has to be installed again.');
   if (k.error) return failedLine(`Couldn't get this machine's token: ${k.error}`, { retry: () => ((k.error = null), redraw()) });
@@ -130,7 +161,7 @@ function installBlock(m, k, redraw) {
       api(`api/machines/${m.id}/token`)
         .then(
           (got) => (k.link = got),
-          (err) => (k.error = err.message),
+          (/** @type {Error} */ err) => (k.error = err.message),
         )
         .finally(() => {
           k.asking = false;
@@ -143,14 +174,15 @@ function installBlock(m, k, redraw) {
   const box = h('div', { class: 'worker-command' });
   const draw = () => {
     const caps = capsFor(m, k);
-    box.replaceChildren(shell(win ? 'powershell' : 'bash', (win ? machineSetupWorkerWindows : machineSetupWorkerLinux)(k.link.agent_url, k.link.token, caps)));
+    box.replaceChildren(shell(win ? 'powershell' : 'bash', (win ? machineSetupWorkerWindows : machineSetupWorkerLinux)(/** @type {NonNullable<Kept['link']>} */ (k.link).agent_url, /** @type {NonNullable<Kept['link']>} */ (k.link).token, caps)));
   };
   draw();
+  /** @param {string} os @param {string} label */
   const tab = (os, label) => h('button', { type: 'button', class: `chip${(os === 'windows') === win ? ' on' : ''}`, 'aria-pressed': String((os === 'windows') === win), onclick: () => ((k.os = os), redraw()) }, label);
   return h(
     'div',
     { class: 'worker-install' },
-    m.worker.host ? null : h('div', { class: 'row worker-os', role: 'group', 'aria-label': 'That PC runs' }, tab('windows', 'Windows'), tab('linux', 'Linux')),
+    /** @type {MachineWorker} */ (m.worker).host ? null : h('div', { class: 'row worker-os', role: 'group', 'aria-label': 'That PC runs' }, tab('windows', 'Windows'), tab('linux', 'Linux')),
     capsInputs(m, k, draw),
     h('p', { class: 'small' }, win ? 'On that PC, open PowerShell as yourself (not as administrator) and run:' : 'On that PC, open a terminal and run (it asks for your password):'),
     box,
@@ -165,22 +197,24 @@ function installBlock(m, k, redraw) {
   );
 }
 
-/** Changing caps on a worker that is set up: the numbers, and the command that makes them so there. */
+/** Changing caps on a worker that is set up: the numbers, and the command that makes them so there. @param {MachineRow} m @param {Kept} k */
 function capsBlock(m, k) {
   const box = h('div', { class: 'worker-command' });
   const draw = () => {
     const caps = capsFor(m, k);
-    const same = Object.keys(WORKER_CAPS).every((key) => caps[key] === m.worker.caps?.[key]);
-    box.replaceChildren(same ? h('p', { class: 'muted small' }, 'These are its caps now. Change a number to get the command that sets it there.') : shell(m.worker.wsl ? 'powershell' : 'bash', workerCapsCommand(m.worker.wsl, caps)));
+    const same = Object.keys(WORKER_CAPS).every((key) => caps[/** @type {keyof MachineWorkerCaps} */ (key)] === /** @type {MachineWorker} */ (m.worker).caps?.[/** @type {keyof MachineWorkerCaps} */ (key)]);
+    box.replaceChildren(same ? h('p', { class: 'muted small' }, 'These are its caps now. Change a number to get the command that sets it there.') : shell(/** @type {MachineWorker} */ (m.worker).wsl ? 'powershell' : 'bash', workerCapsCommand(/** @type {MachineWorker} */ (m.worker).wsl, caps)));
   };
   draw();
   return h('div', {}, capsInputs(m, k, draw), box);
 }
 
+/** @param {MachineRow} m @param {Kept} k */
 function signIns(m, k) {
-  const w = m.worker;
+  const w = /** @type {MachineWorker} */ (m.worker);
   const win = w.wsl;
   const tag = win ? 'powershell' : 'bash';
+  /** @param {string} name @param {boolean | null} is @param {string} [word] */
   const chip = (name, is, word) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${word ?? (is ? 'signed in' : is === false ? 'not signed in' : 'checking')}`);
   const claudeNote = 'Claude Code opens its own sign-in. Type /exit once it says you are in.';
   // Linked accounts (#2061): each signs in there into its own folder, and a turn runs only on one signed in there. One account
@@ -189,8 +223,10 @@ function signIns(m, k) {
   const several = (w.accounts?.length ?? 0) > 1 || one?.there === 'other';
   const scheme = location.hash.match(/^#\/p\/(\d+)/)?.[1];
   const yours = () => (scheme ? h('a', { href: `#/p/${scheme}/account` }, 'Settings → Your account') : 'Settings → Your account');
+  /** @typedef {[string, boolean | null, string, (string | Node)[], string?]} SignStep */
+  /** @type {SignStep[]} */
   const claude = several
-    ? w.accounts.map((a) => [
+    ? (w.accounts ?? []).map((a) => [
         `Claude account ${a.n}`,
         a.there === 'in',
         `signin ${a.n}`,
@@ -198,7 +234,9 @@ function signIns(m, k) {
         a.there === 'other' ? 'other organization' : undefined,
       ])
     : [['Claude', one ? one.there === 'in' : w.signed_in, 'signin', [claudeNote]]];
+  /** @type {SignStep[]} */
   const steps = [...claude, ['GitHub', w.github, 'signin-github', ['So turns can push and open pull requests as you.']]];
+  /** @param {SignStep} step */
   const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', ...note), shell(tag, workerCommand(win, verb)));
   const todo = steps.filter(([, is]) => is === false);
   const done = steps.filter(([, is]) => is !== false);
@@ -214,11 +252,15 @@ function signIns(m, k) {
   );
 }
 
+/** @type {Record<string, string>} */
 const MARK = { waiting: '○', running: '', ok: '✓', fail: '✕' };
+/** @type {Record<string, string>} */
 const STATE_WORD = { waiting: 'not run yet', running: 'running', ok: 'passed', fail: 'failed' };
 
+/** @param {MachineRow} m @param {Redraw} redraw */
 function selfTest(m, redraw) {
-  const w = m.worker;
+  const w = /** @type {MachineWorker} */ (m.worker);
+  /** @type {MachineCheckLine[]} */
   const blank = Object.entries(WORKER_CHECKS).map(([key, name]) => ({ key, name, state: 'waiting', text: '' }));
   const test = w.test;
   const running = !!test && !test.done;
@@ -257,13 +299,13 @@ function selfTest(m, redraw) {
 
 // ---------- What marked minions reach on that PC (Build 7 T8, src/host-reach.ts) ----------
 
-/** One argument for that PC's shell, quoted. */
+/** One argument for that PC's shell, quoted. @param {boolean} win @param {string} text */
 const quoted = (win, text) => (win ? `'${text.replaceAll("'", "''")}'` : `'${text.replaceAll("'", "'\\''")}'`);
 const FOLDER_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
-/** The folders its owner lets marked minions use, from the worker's own config there, and the command that changes them. */
+/** The folders its owner lets marked minions use, from the worker's own config there, and the command that changes them. @param {MachineRow} m @param {Kept} k */
 function hostFolders(m, k) {
-  const w = m.worker;
+  const w = /** @type {MachineWorker} */ (m.worker);
   const win = w.wsl;
   const tag = win ? 'powershell' : 'bash';
   const list = w.folders ?? [];
@@ -274,8 +316,9 @@ function hostFolders(m, k) {
     const path = ask.path.trim();
     box.replaceChildren(FOLDER_NAME.test(name) && path ? shell(tag, workerCommand(win, `folder add ${name} ${quoted(win, path)}${ask.write ? ' --write' : ''}`)) : h('p', { class: 'muted small' }, "Type a short name (a-z, 0-9, - and _) and the folder's full path to get the command that adds it."));
   };
+  /** @param {'name' | 'path'} key @param {string} label @param {string} place */
   const field = (key, label, place) => {
-    const input = h('input', { type: 'text', value: ask[key], placeholder: place, 'aria-label': label, spellcheck: 'false', autocomplete: 'off' });
+    const input = /** @type {HTMLInputElement} */ (h('input', { type: 'text', value: ask[key], placeholder: place, 'aria-label': label, spellcheck: 'false', autocomplete: 'off' }));
     input.oninput = () => {
       ask[key] = input.value;
       if (key === 'name') input.setAttribute('aria-invalid', String(!!input.value.trim() && !FOLDER_NAME.test(input.value.trim())));
@@ -283,7 +326,7 @@ function hostFolders(m, k) {
     };
     return h('label', { class: 'worker-cap' }, h('span', {}, label), input);
   };
-  const write = h('input', { type: 'checkbox', checked: ask.write });
+  const write = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: ask.write }));
   write.onchange = () => {
     ask.write = write.checked;
     draw();
@@ -328,7 +371,7 @@ const PROGRAMS_EXAMPLE = `"programs": {
   }
 }`;
 
-/** The programs its owner lets marked minions start (run_on_host), from that PC's agent config, and how to change them. */
+/** The programs its owner lets marked minions start (run_on_host), from that PC's agent config, and how to change them. @param {MachineRow} m @param {Kept} k */
 function hostPrograms(m, k) {
   const list = m.programs;
   return h(
@@ -360,18 +403,19 @@ function hostPrograms(m, k) {
   );
 }
 
-/** Its caps as the worker holds them: that PC's own, lowered by any its owner set on the Machines page (Build 7 M3). */
+/** Its caps as the worker holds them: as it says while here (#2085), else those its owner set on the Machines page, and that PC's own where the page leaves one blank (Build 7 M3). @param {MachineRow} m @returns {Record<keyof MachineWorkerCaps, number | null> | null} */
 export function heldCaps(m) {
-  const own = m.worker?.caps ?? null;
-  const page = m.roles?.find((r) => r.role === 'turns')?.caps ?? {};
+  if (m.worker?.held) return m.worker.held;
+  const own = /** @type {Record<string, number> | null} */ (m.worker?.caps ?? null);
+  const page = /** @type {Record<string, number | undefined>} */ (m.roles?.find((r) => r.role === 'turns')?.caps ?? {});
   const keys = ['workers', 'threads', 'memory_gb', 'disk_gb'];
   if (!own && !keys.some((k) => page[k] != null)) return null;
-  return Object.fromEntries(keys.map((k) => [k, Math.min(own?.[k] ?? Infinity, page[k] ?? Infinity)]).map(([k, v]) => [k, v === Infinity ? null : v]));
+  return /** @type {Record<keyof MachineWorkerCaps, number | null>} */ (Object.fromEntries(keys.map((k) => [k, page[k] ?? own?.[k] ?? null])));
 }
 
-/** The Minion turns part of an opened row; inside its role card (`bare`), without its own switch and border. */
+/** The Minion turns part of an opened row; inside its role card (`bare`), without its own switch and border. @param {MachineRow} m @param {Redraw} redraw @param {{ bare?: boolean }} [opts] */
 export function workerSection(m, redraw, { bare = false } = {}) {
-  const w = m.worker;
+  const w = /** @type {MachineWorker} */ (m.worker);
   const k = keptFor(m.id);
   const st = workerState(m);
   const head = h(
@@ -401,13 +445,13 @@ export function workerSection(m, redraw, { bare = false } = {}) {
     w.host ? hostFolders(m, k) : null,
     w.host && w.wsl ? hostPrograms(m, k) : null,
     w.host ? selfTest(m, redraw) : null,
-    owner && w.host ? folded(k, 'caps', bare ? "Change that PC's own caps (the most the page can give it)" : 'Change its caps', capsBlock(m, k)) : null,
+    owner && w.host ? folded(k, 'caps', bare ? "Change that PC's own caps (used where the page leaves one blank)" : 'Change its caps', capsBlock(m, k)) : null,
     // Closed until asked for: its command shows the token, and fetches it only then.
     owner && w.host ? again(m, k, redraw) : null,
   );
 }
 
-/** The install command again, for an update or a new token, once the block is opened. */
+/** The install command again, for an update or a new token, once the block is opened. @param {MachineRow} m @param {Kept} k @param {Redraw} redraw */
 function again(m, k, redraw) {
   const el = folded(k, 'again', 'Show the install command again', k.open.has('again') ? installBlock(m, k, redraw) : null);
   el.addEventListener('toggle', () => el.open && el.childElementCount === 1 && redraw());

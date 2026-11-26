@@ -8,6 +8,7 @@ import { toolsForTurn } from './tool-hold.ts';
 import type { ToolDef, RpcRequest } from './mcp-types.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { C, call, NOT_HERE } from './mcp-call.ts';
+import { CABAL_BOARD, runCabalTool } from './mcp-cabal.ts';
 import { APP_TOOLS, CONTRAPTION_TOOLS, PUBLISH_RELEASE, PUBLISH_DESKTOP, MAKE_RELEASE_KEY, DEPLOY_CONTRAPTION, COPY_APP_DATA, MANDATE_ITEM, CONTRAPTION_READ, CONTRAPTION_TURNS, runAppsTool } from './mcp-apps.ts';
 import { WAKE_AT, PREP_ULTRA_REVIEWS, HOST_CHECK, CI_RUNNERS, CI_FILES, SHIP_RISK, WAKE_WHEN_LIVE, ORDER_SHIP_LINE, MARK_URGENT, SHIP_LESSONS, RELAY_WHEN_LIVE, MINION_WAKE_WHEN_LIVE, WAKE_WHEN_RUNNERS_BACK, REPORT_SPEND, LOG_LEARNED, HAND_OFF_LAND, LAND, START_PREVIEW, runShipTool } from './mcp-ship.ts';
 import { ASK_QUESTION, SETTLE_QUESTION, PROPOSE_PLAN, PROPOSE_MACHINE_LEND, PROPOSE_HOST_TOOL, PROPOSE_MACHINE_NOTES, PROPOSE_MEMORY, APPLY_MEMORY, STRIKE_TEXT, MARK_IMAGE, APPROVE, runCardsTool } from './mcp-cards.ts';
@@ -146,6 +147,7 @@ const THREAD_TOOLS = () => [
   MESSAGE_COORDINATOR,
   MESSAGE_MINION(),
   READ_MINION,
+  ...(C().CABAL ? [CABAL_BOARD] : []),
   RELAY_WHEN_LIVE,
   MINION_WAKE_WHEN_LIVE,
   WAKE_WHEN_RUNNERS_BACK,
@@ -160,7 +162,7 @@ const THREAD_TOOLS = () => [
 ];
 
 /** Each family's handlers; a family answers NOT_HERE for another family's tool. */
-const FAMILIES = [runAppsTool, runShipTool, runCardsTool, runSchemeTool, runMinionsTool, runLookupTool];
+const FAMILIES = [runAppsTool, runShipTool, runCardsTool, runSchemeTool, runMinionsTool, runLookupTool, runCabalTool];
 
 async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
   // Each role may only call its own tools.

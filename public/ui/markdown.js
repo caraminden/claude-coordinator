@@ -15,12 +15,21 @@
 // browser; markdownDoc in Citadel's core.js hangs Citadel's links, file cards and #N refs on its hooks.
 // Raw HTML is escaped, all but <br>.
 
-const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/** @param {string} s */
+const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => /** @type {Record<string, string>} */ ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 import { marksOverlay, parseMarks } from './marks.js';
 
-const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
+/** @import { MarkdownOptions } from './markdown.js' */
+/** @typedef {(match: string, ...groups: string[]) => string} Replacer A string.replace callback: the match, then its groups. */
+/** @typedef {{ lines: string[], content: number }} ListItem A list item: its lines and the column its text starts at. */
 
-/** Info string → [tone, header label] for a fence that names where its commands run (#898); other tags draw plain. */
+/** @param {string} s */
+const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, /** @type {Replacer} */ ((_, e) => /** @type {Record<string, string>} */ ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]));
+
+/**
+ * Info string → [tone, header label] for a fence that names where its commands run (#898); other tags draw plain.
+ * @type {Record<string, [string, string[]]>}
+ */
 const SHELL_KINDS = {
   admin: ['PowerShell · Admin · Windows · Run as administrator', ['powershell-admin', 'pwsh-admin', 'ps1-admin', 'admin-powershell']],
   powershell: ['PowerShell · Windows', ['powershell', 'pwsh', 'ps1']],
@@ -40,11 +49,19 @@ const ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*)|$)/;
 const LINK = /\[((?:[^[\]]|\[[^\]]*\])*)\]\(\s*(?:&lt;)?((?:[^\s()]|\([^\s()]*\))*?)(?:&gt;)?(?:\s+&quot;(.*?)&quot;)?\s*\)/g;
 const DELIM = /^\s*\|?(?:\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/;
 
-const indentOf = (l) => /^ */.exec(l)[0].length;
+/** @param {string} l */
+const indentOf = (l) => /** @type {RegExpExecArray} */ (/^ */.exec(l))[0].length;
+/**
+ * @param {string[]} lines
+ * @param {number} i
+ */
 const isTableStart = (lines, i) => /^\s*\|/.test(lines[i]) || (lines[i].includes('|') && lines[i + 1]?.includes('|') && DELIM.test(lines[i + 1]));
 /**
  * Whether lines[i] cuts into a paragraph above it. In a document only a bullet or a list counting
  * from 1 does, so a wrapped "450. About…" stays text; in chat (`breaks`) every line is as typed.
+ * @param {string[]} lines
+ * @param {number} i
+ * @param {boolean} breaks
  */
 const startsBlock = (lines, i, breaks) => {
   const l = lines[i];
@@ -53,6 +70,7 @@ const startsBlock = (lines, i, breaks) => {
 };
 
 /** A table cell's code spans show an escaped pipe as the pipe (GFM); outside one, inline() drops the backslash. */
+/** @param {string} cell */
 const unpipe = (cell) => cell.replace(/(?<!\\)(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g, (code) => code.replaceAll('\\|', '|'));
 
 /** A code span (not across a blank line) or an HTML comment, for stripComments. */
@@ -62,10 +80,14 @@ const CODE_OR_COMMENT = /(?<!\\)(`+)(?!`)(?:(?!\n[ \t>]*\n)[\s\S])*?[^`]\1(?!`)|
  * `src` without its HTML comments, except where they are code: inside a fenced block (tracked by
  * character and length, as blocks() does) or a code span. A comment reaches across a fence only when it
  * opens a line (GitHub's HTML block); one opened mid-paragraph never does.
+ * @param {string} src
  */
 function stripComments(src) {
+  /** @type {string[]} */
   const out = [];
+  /** @type {string[]} */
   let run = [];
+  /** @type {RegExp | null} */
   let close = null;
   let comment = false; // in a comment that opened a line: it runs to its -->, past fences, as an HTML block does
   const flush = () => {
@@ -103,7 +125,10 @@ function stripComments(src) {
   return out.join('\n');
 }
 
-/** GitHub's id for a heading: lower case, punctuation dropped, spaces to hyphens. */
+/**
+ * GitHub's id for a heading: lower case, punctuation dropped, spaces to hyphens.
+ * @type {typeof import('./markdown.js').slug}
+ */
 export function slug(html) {
   return unescapeHtml(html.replace(/<[^>]*>/g, ''))
     .toLowerCase()
@@ -113,6 +138,10 @@ export function slug(html) {
 }
 
 /** The default link: http(s) and mailto open a new tab, never `_top` (that would take Citadel's whole window); anything else is inert. */
+/**
+ * @param {string} href
+ * @param {string} html
+ */
 const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href) ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${html}</a>` : `<span class="cui-link" title="${escapeHtml(href)}">${html}</span>`);
 
 /**
@@ -133,6 +162,8 @@ const BARE = new RegExp(`(?<![A-Za-z0-9/])(https?:\\/\\/${URL_TAIL}+)` + `|(?<![
  * A bare link's end without the marks that end the sentence around it, and in markdown (`md`) the
  * emphasis around it too ("x/**." keeps "x/", as GitHub does); a ")" or "]" stays when it closes one
  * inside it, and "&amp;" stays whole.
+ * @param {string} s
+ * @param {boolean} md
  */
 function trimBare(s, md) {
   let end = s.length;
@@ -146,30 +177,41 @@ function trimBare(s, md) {
   }
 }
 
-/** Escaped text with its bare URLs, DOIs and web addresses as `link(href, html)`; in markdown, `held` holds each link's HTML out (see inline()). */
+/**
+ * Escaped text with its bare URLs, DOIs and web addresses as `link(href, html)`; in markdown, `held` holds each link's HTML out (see inline()).
+ * @param {string} s
+ * @param {(href: string, html: string) => string} link
+ * @param {((html: string) => string) | null} [held]
+ */
 function linkBare(s, link, held = null) {
-  return s.replace(BARE, (m, url, doiPrefix, doi, web, tld) => {
-    // "ASP.NET", "Foo.IO": a web address's ending is written in lower case.
-    // "org.apache.commons.io" is a package name, read backwards from its domain.
-    if (web && (tld !== tld.toLowerCase() || PACKAGE_ROOT.test(web.split('.')[0]))) return m;
-    const kept = trimBare(m, !!held);
-    // What's left must still point somewhere: not "https://" or "10.1234/" alone.
-    if (url ? /^https?:\/\/$/i.test(kept) : doi && !/\/[^/]/.test(kept)) return m;
-    const href = url
-      ? unescapeHtml(kept)
-      : web
-        ? `https://${unescapeHtml(kept)}`
-        : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0))
-            .split('/')
-            .map(encodeURIComponent)
-            .join('/')}`;
-    return (held ?? String)(link(href, kept)) + m.slice(kept.length);
-  });
+  return s.replace(
+    BARE,
+    /** @type {(m: string, url: string | undefined, doiPrefix: string | undefined, doi: string | undefined, web: string | undefined, tld: string) => string} */ (
+      (m, url, doiPrefix, doi, web, tld) => {
+        // "ASP.NET", "Foo.IO": a web address's ending is written in lower case.
+        // "org.apache.commons.io" is a package name, read backwards from its domain.
+        if (web && (tld !== tld.toLowerCase() || PACKAGE_ROOT.test(web.split('.')[0]))) return m;
+        const kept = trimBare(m, !!held);
+        // What's left must still point somewhere: not "https://" or "10.1234/" alone.
+        if (url ? /^https?:\/\/$/i.test(kept) : doi && !/\/[^/]/.test(kept)) return m;
+        const href = url
+          ? unescapeHtml(kept)
+          : web
+            ? `https://${unescapeHtml(kept)}`
+            : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0))
+                .split('/')
+                .map(encodeURIComponent)
+                .join('/')}`;
+        return (held ?? String)(link(href, kept)) + m.slice(kept.length);
+      }
+    ),
+  );
 }
 
 /**
  * Plain text (a record's field, a note) as HTML: everything escaped, its bare http(s) URLs, DOIs and
  * web addresses linked, opening a new tab. DOIs go to https://doi.org/, a web address to https://.
+ * @type {typeof import('./markdown.js').linkify}
  */
 export function linkify(text) {
   return linkBare(escapeHtml(String(text ?? '')), defaultLink);
@@ -178,9 +220,10 @@ export function linkify(text) {
 /**
  * HTML you made (already escaped) with the bare URLs and DOIs in its text linked as linkify's. Tags,
  * links (<a>…</a>) and code (<code>, <pre>) are left as they are.
+ * @type {typeof import('./markdown.js').linkifyHtml}
  */
 export function linkifyHtml(html) {
-  return String(html ?? '').replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => (tag ? all : linkBare(text, defaultLink)));
+  return String(html ?? '').replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, /** @type {(all: string, tag: string | undefined, _name: string | undefined, text: string) => string} */ ((all, tag, _name, text) => (tag ? all : linkBare(text, defaultLink))));
 }
 
 /**
@@ -189,18 +232,21 @@ export function linkifyHtml(html) {
  * without its words. Hold those back or close them, so the text never flashes pipes or asterisks that
  * a moment later become a table or bold. Nothing changes inside an open code fence.
  * Table rule from Theory of Crafting's app/web/markdown.ts; the rest is Mandate's mend (src/markdown.ts).
+ * @param {string} src
  */
 function mendStreaming(src) {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   // Whether the text ends inside a fence, tracked by its character and length as blocks() closes it.
+  /** @type {RegExp | null} */
   let close = null;
   for (const l of lines) {
+    /** @type {RegExpExecArray | null} */
     const m = close ? null : FENCE.exec(l);
     if (close?.test(l)) close = null;
     else if (m) close = new RegExp(`^ {0,3}${m[1][0]}{${m[1].length},}\\s*$`);
   }
   if (close) return lines.join('\n');
-  let line = lines.pop();
+  let line = /** @type {string} */ (lines.pop());
   // A partial link shows just its label until its address closes.
   line = line.replace(/!\[[^\]]*(\]\([^)\s]*)?$/, ''); // a half image waits whole: its alt text alone would flash
   line = line.replace(/\[([^\]]*)\]\([^)\s]*$/, '$1').replace(/\[([^\]]*)$/, '$1');
@@ -235,13 +281,18 @@ function mendStreaming(src) {
  * An image whose title holds marks (#960): the hook's picture with the marks drawn over its first <img>, and a
  * "Marks" toggle (and with `draw`, a "Draw on it" button) under it. Any other title, or a hook that draws no
  * <img>, is the hook's own HTML.
+ * @param {NonNullable<MarkdownOptions['image']>} image
+ * @param {string} href
+ * @param {string} alt
+ * @param {string | null} title
+ * @param {boolean} draw
  */
 function markedImage(image, href, alt, title, draw) {
   const parsed = parseMarks(title);
   const html = image(href, alt, parsed ? null : title);
   if (!parsed || !/<img\b/i.test(html)) return html;
   const pic = html.replace(/<img\b[^>]*>/i, (img) => `<span class="cui-marked-pic">${img}${marksOverlay(parsed)}</span>`);
-  return `<span class="cui-marked" data-marks="${escapeHtml(title)}">${pic}<span class="cui-marks-bar">` + `<label class="cui-marks-toggle"><input type="checkbox" checked> Marks</label>` + `${draw ? '<button type="button" class="cui-marks-draw">✎ Draw on it</button>' : ''}</span></span>`;
+  return `<span class="cui-marked" data-marks="${escapeHtml(/** @type {string} */ (title))}">${pic}<span class="cui-marks-bar">` + `<label class="cui-marks-toggle"><input type="checkbox" checked> Marks</label>` + `${draw ? '<button type="button" class="cui-marks-draw">✎ Draw on it</button>' : ''}</span></span>`;
 }
 
 /**
@@ -258,13 +309,16 @@ function markedImage(image, href, alt, title, draw) {
  * - `image(href, alt, title)`: an image's HTML (default: its alt text). A title of marks (ui/marks.js: "marks 1280x900: box …")
  *   is drawn over the image's <img>, with a toggle under it, and the hook gets no title;
  * - `text(html)`: runs over the inline HTML outside code and links, e.g. to link #N.
+ * @type {typeof import('./markdown.js').renderMarkdown}
  */
-export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s, breaks = false, streaming = false, headingBase = 3, drawMarks = false } = {}) {
+export function renderMarkdown(src, { link = defaultLink, image, text = /** @type {(html: string) => string} */ ((s) => s), breaks = false, streaming = false, headingBase = 3, drawMarks = false } = {}) {
   image ??= (_href, alt) => `<span class="cui-alt">[image: ${alt}]</span>`;
   if (streaming) src = mendStreaming(src);
   const base = Math.min(Math.max(Math.trunc(headingBase) || 1, 1), 6) - 1;
+  /** @type {Map<string, number>} */
   const slugs = new Map();
 
+  /** @param {string} s */
   const emphasis = (s) =>
     s
       .replace(/\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -275,37 +329,43 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
       // Only between spaces or brackets, so snake_case_names and <date>_<branch> stay as they are.
       .replace(/(^|[\s([{]|&quot;|&#39;)_(?=[^_\s])(.+?)(?<=[^_\s])_(?=$|[\s.,;:!?)\]}]|&quot;|&#39;)/g, '$1<em>$2</em>');
 
+  /** @param {string} t */
   const inline = (t) => {
     // Code, escapes, links and URLs are held out as \0n\0 so emphasis can't reach into them; n is
     // written in private-use digits, not ASCII ones, so a `text` hook that rewrites numbers leaves it be.
+    /** @type {string[]} */
     const held = [];
+    /** @param {string} html */
     const hold = (html) => `\u0000${String(held.push(html) - 1).replace(/\d/g, (d) => String.fromCharCode(0xe000 + Number(d)))}\u0000`;
     const MARK = /\u0000([\uE000-\uE009]+)\u0000/g;
+    /** @param {string} n */
     const at = (n) => held[Number([...n].map((c) => c.charCodeAt(0) - 0xe000).join(''))] ?? '';
     // An image's alt is an attribute, so what was held in it comes back as text.
-    const plain = (html) => html.replace(MARK, (_, n) => at(n).replace(/<[^>]*>/g, ''));
+    /** @param {string} html */
+    const plain = (html) => html.replace(MARK, /** @type {Replacer} */ ((_, n) => at(n).replace(/<[^>]*>/g, '')));
     let s = escapeHtml(t)
       // An escaped backtick can't open a code span (the escape pass below keeps it); inside one a backslash is as typed.
-      .replace(/(?<!\\)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`))
+      .replace(/(?<!\\)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, /** @type {Replacer} */ ((_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`)))
       // shortcut: only the escapes Markdown needs, not all punctuation, so Windows paths like
       // "C:\Users\x\..." and "\\server" read as typed; widen it if someone needs "\." or "\\".
-      .replace(/\\(&lt;|&gt;|[*_`|[\]~#])/g, (_, c) => hold(c))
+      .replace(/\\(&lt;|&gt;|[*_`|[\]~#])/g, /** @type {Replacer} */ ((_, c) => hold(c)))
       .replace(/&lt;br\s*\/?&gt;/gi, () => hold('<br>'))
       // Images first, so a linked image ("[![alt](a.png)](https://x)") keeps its picture.
-      .replace(new RegExp(`!${LINK.source}`, 'g'), (_, alt, href, title) => hold(markedImage(image, unescapeHtml(href), plain(alt), title == null ? null : unescapeHtml(title), drawMarks)))
-      .replace(LINK, (_, label, href) => hold(link(unescapeHtml(href), emphasis(label))))
+      .replace(new RegExp(`!${LINK.source}`, 'g'), /** @type {Replacer} */ ((_, alt, href, title) => hold(markedImage(/** @type {NonNullable<MarkdownOptions['image']>} */ (image), unescapeHtml(href), plain(alt), title == null ? null : unescapeHtml(title), drawMarks))))
+      .replace(LINK, /** @type {Replacer} */ ((_, label, href) => hold(link(unescapeHtml(href), emphasis(label)))))
       // "<https://x>", then bare URLs and DOIs, go through `link` too. Their trailing marks stay
       // outside: "**https://x/**." is bold, then a full stop.
-      .replace(/&lt;(https?:\/\/(?:(?!&lt;|&gt;)[^\s<>\u0000])+)&gt;/gi, (_, url) => hold(link(unescapeHtml(url), url)));
+      .replace(/&lt;(https?:\/\/(?:(?!&lt;|&gt;)[^\s<>\u0000])+)&gt;/gi, /** @type {Replacer} */ ((_, url) => hold(link(unescapeHtml(url), url))));
     s = text(emphasis(linkBare(s, link, hold)));
     // A held piece can hold others, so at most one pass per piece; what a hook broke is dropped.
-    for (let pass = 0; pass <= held.length && s.includes('\u0000'); pass++) s = s.replace(MARK, (_, n) => at(n));
+    for (let pass = 0; pass <= held.length && s.includes('\u0000'); pass++) s = s.replace(MARK, /** @type {Replacer} */ ((_, n) => at(n)));
     return s.replace(/\u0000[\uE000-\uE009]*/g, '');
   };
 
   /**
    * A paragraph's lines: a line ending in "\" or two spaces breaks. With `breaks` every line does,
    * and each is its own run of emphasis, so a stray "*" can't italicise the next line.
+   * @param {string[]} para
    */
   const paragraph = (para) =>
     breaks
@@ -320,7 +380,9 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
             .join(''),
         ).replace(/\n/g, '<br>');
 
+  /** @param {string[]} rows */
   const table = (rows) => {
+    /** @param {string} r */
     const cells = (r) =>
       r
         .trim()
@@ -329,6 +391,10 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
         .map((c) => unpipe(c.trim()));
     const hasHead = rows.length > 1 && DELIM.test(rows[1]) && rows[1].includes('-');
     const align = hasHead ? cells(rows[1]).map((c) => (/^:-+:$/.test(c) ? ' class="cui-al-c"' : /-:$/.test(c) ? ' class="cui-al-r"' : '')) : [];
+    /**
+     * @param {string} r
+     * @param {string} tag
+     */
     const row = (r, tag) => {
       let cs = cells(r);
       if (hasHead) cs = align.map((_, n) => cs[n] ?? '');
@@ -339,22 +405,30 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     return `<div class="cui-table"><table>${head}<tbody>${body}</tbody></table></div>`;
   };
 
-  /** The list starting at lines[i]: its HTML and the line after it. */
+  /**
+   * The list starting at lines[i]: its HTML and the line after it.
+   * @param {string[]} lines
+   * @param {number} i
+   * @returns {{ html: string, next: number }}
+   */
   const list = (lines, i) => {
-    const first = ITEM.exec(lines[i]);
+    const first = /** @type {RegExpExecArray} */ (ITEM.exec(lines[i]));
     const indent = first[1].length;
     const ordered = /\d/.test(first[2]);
+    /** @param {string} l */
     const sibling = (l) => {
       const m = ITEM.exec(l);
       return !!m && m[1].length <= indent && /\d/.test(m[2]) === ordered;
     };
+    /** @type {ListItem[]} */
     const items = [];
     let loose = false;
-    let item = null;
+    /** @type {ListItem | null} */
+    let item = null; // set by the first line, a sibling, before any other branch reads it
     for (; i < lines.length; i++) {
       const l = lines[i];
       if (sibling(l)) {
-        const m = ITEM.exec(l);
+        const m = /** @type {RegExpExecArray} */ (ITEM.exec(l));
         item = { lines: [m[3] ?? ''], content: m[1].length + m[2].length + 1 };
         items.push(item);
       } else if (!l.trim()) {
@@ -364,14 +438,14 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
         if (sibling(lines[k])) loose = true;
         else if (indentOf(lines[k]) > indent) {
           // A second paragraph in the item makes the list loose; a nested list after a gap doesn't.
-          if (!ITEM.test(lines[k].slice(Math.min(item.content, indentOf(lines[k]))))) loose = true;
-          item.lines.push(...lines.slice(i, k).map(() => ''));
+          if (!ITEM.test(lines[k].slice(Math.min(/** @type {ListItem} */ (item).content, indentOf(lines[k]))))) loose = true;
+          /** @type {ListItem} */ (item).lines.push(...lines.slice(i, k).map(() => ''));
         } else break;
         i = k - 1;
       } else if (indentOf(l) > indent) {
-        item.lines.push(l.slice(Math.min(item.content, indentOf(l))));
+        /** @type {ListItem} */ (item).lines.push(l.slice(Math.min(/** @type {ListItem} */ (item).content, indentOf(l))));
       } else if (lines[i - 1].trim() && !startsBlock(lines, i, breaks) && !ITEM.test(l)) {
-        item.lines.push(l.trim()); // a lazy wrap carries on the item's last line
+        /** @type {ListItem} */ (item).lines.push(l.trim()); // a lazy wrap carries on the item's last line
       } else break;
     }
     const tag = ordered ? 'ol' : 'ul';
@@ -385,16 +459,24 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     return { html: `<${tag}${start}>${lis.join('')}</${tag}>`, next: i };
   };
 
-  /** HTML for `lines`; `tight` drops the <p> around paragraphs, as in a list without gaps. */
+  /**
+   * HTML for `lines`; `tight` drops the <p> around paragraphs, as in a list without gaps.
+   * @param {string[]} lines
+   * @param {boolean} [tight]
+   * @returns {string}
+   */
   const blocks = (lines, tight = false) => {
+    /** @type {string[]} */
     const out = [];
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
+      /** @type {RegExpExecArray | null} */
       let m;
       if (!line.trim()) {
         i++;
       } else if ((m = FENCE.exec(line))) {
+        /** @type {string[]} */
         const code = [];
         const close = new RegExp(`^ {0,3}${m[1][0] === '`' ? '`' : '~'}{${m[1].length},}\\s*$`);
         for (i++; i < lines.length && !close.test(lines[i]); i++) code.push(lines[i]);
@@ -419,6 +501,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
         for (i++; i < lines.length && lines[i].includes('|') && (/^\s*\|/.test(lines[i]) || rows.length === 1 || !startsBlock(lines, i, breaks)); i++) rows.push(lines[i]);
         out.push(table(rows));
       } else if (QUOTE.test(line)) {
+        /** @type {string[]} */
         const quoted = [];
         for (; i < lines.length && (QUOTE.test(lines[i]) || (lines[i].trim() && quoted.at(-1)?.trim() && !startsBlock(lines, i, breaks))); i++) {
           quoted.push(lines[i].replace(/^ {0,3}> ?/, ''));
@@ -429,6 +512,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
         out.push(l.html);
         i = l.next;
       } else {
+        /** @type {string[]} */
         const para = [];
         for (; i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines, i, breaks)); i++) para.push(lines[i]);
         out.push(tight ? paragraph(para) : `<p>${paragraph(para)}</p>`);
@@ -454,10 +538,13 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
  * A reply squeezed into a line or two, for a preview or a button (Mandate's ReplyLine): no links
  * (their labels stay), a list item is a "• " line, every other block is its text on a line of its
  * own, joined with <br>. Bold, italics and code stay. HTML, escaped like renderMarkdown's.
+ * @type {typeof import('./markdown.js').markdownLine}
  */
 export function markdownLine(src, { streaming = false } = {}) {
   if (streaming) src = mendStreaming(src);
+  /** @type {MarkdownOptions} */
   const plain = { link: (_href, html) => html, image: (_href, alt) => alt, breaks: true };
+  /** @type {string[]} */
   const out = [];
   for (const raw of stripComments(src.replace(/\r\n?/g, '\n')).split('\n')) {
     if (!raw.trim() || FENCE.test(raw) || HR.test(raw) || (raw.includes('|') && DELIM.test(raw) && raw.includes('-'))) continue;
@@ -521,7 +608,7 @@ const CSS = `
 }
 :where(.cui-md .cui-marks-toggle > input) { margin: 0; accent-color: #e5383b; }
 :where(.cui-md :is(.cui-marks-toggle, .cui-marks-draw):hover) { border-color: var(--citadel-accent); }
-:where(.cui-md pre.cui-shell) { position: relative; padding-top: 0; border-left: 4px solid var(--cui-shell); }
+:where(.cui-md pre.cui-shell) { position: relative; isolation: isolate; padding-top: 0; border-left: 4px solid var(--cui-shell); }
 :where(.cui-md pre.cui-shell)::before {
   content: attr(data-label); display: block; margin: 0 -0.6rem 0.5rem -0.6rem; padding: 0.45rem 4.4rem 0.45rem 0.6rem;
   font: 600 var(--citadel-size-small) var(--citadel-font); line-height: 1.3; color: var(--cui-shell);
@@ -565,6 +652,7 @@ function adoptStyles() {
  * Put `text` on the clipboard; whether it worked. navigator.clipboard needs a secure context (not
  * Citadel's plain-http tailnet address), so without it a hidden textarea is copied the old way. The
  * textarea goes beside `near` (default the body), so it can be selected inside a modal dialog too.
+ * @type {typeof import('./markdown.js').copyText}
  */
 export async function copyText(text, near = document.body) {
   try {
@@ -575,7 +663,7 @@ export async function copyText(text, near = document.body) {
   ta.className = 'cui-copy-text';
   ta.value = text;
   ta.readOnly = true;
-  const back = document.activeElement;
+  const back = /** @type {HTMLElement | null} */ (document.activeElement);
   near.append(ta);
   ta.select();
   ta.setSelectionRange(0, text.length);
@@ -590,15 +678,25 @@ export async function copyText(text, near = document.body) {
 
 /** A fenced block's Copy button: its label is CSS, so the block's text and a selection over it stay the code's. */
 const copyButton = () => label(Object.assign(document.createElement('button'), { type: 'button', className: 'cui-copy' }), 'Copy code');
+/**
+ * @param {HTMLElement} b
+ * @param {string} text
+ */
 const label = (b, text) => (b.setAttribute('aria-label', text), b);
+/** @type {WeakMap<HTMLElement, ReturnType<typeof setTimeout>>} */
 const copied = new WeakMap();
-/** What Copy puts on the clipboard: a shell block (#898's tags) ends in exactly one newline so a paste runs without another Enter; other blocks copy as written. */
+/**
+ * What Copy puts on the clipboard: a shell block (#898's tags) ends in exactly one newline so a paste runs without another Enter; other blocks copy as written.
+ * @type {typeof import('./markdown.js').copyPayload}
+ */
 export const copyPayload = (text, shell) => (shell ? text.replace(/\n+$/, '') + '\n' : text);
+/** @param {Event} e */
 async function onCopy(e) {
-  const b = e.target.closest?.('.cui-copy');
-  const code = b?.parentElement.querySelector(':scope > code');
+  const b = /** @type {HTMLElement} */ (/** @type {Element} */ (e.target).closest?.('.cui-copy'));
+  const code = b?.parentElement?.querySelector(':scope > code');
   if (!code) return;
-  const ok = await copyText(copyPayload(code.textContent, b.parentElement.classList.contains('cui-shell')), b.parentElement);
+  const box = /** @type {HTMLElement} */ (b.parentElement);
+  const ok = await copyText(copyPayload(/** @type {string} */ (code.textContent), box.classList.contains('cui-shell')), box);
   b.dataset.copied = ok ? 'yes' : 'no';
   label(b, ok ? 'Copied' : "Couldn't copy");
   clearTimeout(copied.get(b));
@@ -612,7 +710,10 @@ async function onCopy(e) {
 }
 const hooked = new WeakSet();
 
-/** A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted. */
+/**
+ * A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted.
+ * @type {typeof import('./markdown.js').markdownElement}
+ */
 export function markdownElement(src, opts) {
   const el = document.createElement('div');
   updateMarkdown(el, src, opts);
@@ -622,6 +723,7 @@ export function markdownElement(src, opts) {
 /**
  * Draw `src` into `el` (made a .cui-md), as a reply streams in. Only what changed is replaced: the
  * blocks that render the same are kept, so a selection or a text search in them survives.
+ * @type {typeof import('./markdown.js').updateMarkdown}
  */
 export function updateMarkdown(el, src, opts) {
   adoptStyles();

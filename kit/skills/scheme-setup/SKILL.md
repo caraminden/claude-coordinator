@@ -88,7 +88,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    `test/`, set its source folders and file extensions, and list each file already over the line limit at its current size with a
    one-line reason, so files can shrink but not grow (Citadel's is `test/size-budget.test.ts`). The template skips the files the kit syncs in (`KIT_SYNCED`: land.sh, guard.sh, pre-push, ponytail.md): never list them in ALLOWED.
    A repo with TypeScript also gets the type check: copy `templates/typecheck.ts` to `tools/typecheck.ts`, set its
-   config block (baseline path, tsconfigs; none counts `any` only), add `typescript` as a devDependency, run
+   config block (baseline path, tsconfigs, none counting `any` only; and `SCRIPTS`, the front-end `.js` a tsconfig checks with `checkJs`, whose JSDoc `any` and `@ts-` comments then count too), add `typescript` as a devDependency, run
    `node tools/typecheck.ts --init`, and make `node tools/typecheck.ts` (exit 1 when a file gains a type error, an
    explicit `any` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
    `--update` after lowering counts (Cara, 2026-11-24: "don't cheat and use 'any'"; Citadel's is `test/typecheck.test.ts`).
@@ -147,12 +147,12 @@ check or its failure is in your done note.
 ### 4. Install the push guard
 
 Read `references/push-guard.md` and do it as written: copy `guard.sh`, `pre-push` and `settings.json` from `templates/`, prove the
-guard, then point every workflow job at the scheme's shared runner (`<scheme-slug>-ci`) and call `ci_runners` with `op: "add"`.
-A repo with no workflows, when the plan gives it CI, gets `templates/starter-ci/` instead, on a Linux runner of its own (`os: "linux"`).
+guard, then point every workflow job at the scheme's shared runner (`<scheme-slug>-ci`). Nobody adds the runner: a computer
+lending the scheme CI registers it by itself once a workflow asks for the label. A repo with no workflows, when the plan
+gives it CI, gets `templates/starter-ci/` instead, on its Linux runner (`<scheme-slug>-ci-linux`).
 
 *Done when* `git config core.hooksPath` prints `.githooks`, `tools/guard.sh --self-test` ends `0 failed`, a push to main through
-`.githooks/pre-push` exits 1, no job's `runs-on` is a bare hosted runner and, if the repo has workflows, `ci_runners` came back
-done with the runner Idle (or its failure is in your done note).
+`.githooks/pre-push` exits 1, and no job's `runs-on` is a bare hosted runner.
 
 ### 5. Adapt each skill the plan pulls in
 

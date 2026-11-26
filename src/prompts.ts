@@ -9,6 +9,7 @@ import { imageSize } from './image-size.ts';
 import { AGENT_NAME } from './auth.ts';
 import { onboardingOpen, type Machine, type PersonalLayer, type Project, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
+import { POOLED_WINDOWS } from './machine-pick.ts';
 import { lines } from './approvals.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -41,6 +42,10 @@ Do nothing else this turn, and reply in one line.`;
 /** What a minion's handoff turn is asked (its composer's /fresh, #937): a minion has no fresh_session, so its reply is the handoff. */
 export const minionHandoffPrompt = (why: string) =>
   `${APP_NAME} is starting you a fresh Claude session (${why}): your next turn begins from a short handoff instead of this whole conversation. People's chat history stays as it is; only your context resets. Before that, commit any work in progress. Then reply with your handoff and nothing else: your whole reply is what your next session starts from. Put in what you were asked and by whom, the decisions made (quoting who made them and when), the branch and what is committed, cards waiting on people, what you are sealed on, and what is left to do. Facts, not history. Do nothing else this turn.`;
+
+/** A cabal lead's shift change (#2093): its board holds the roster, notes, asks and log, so the handoff carries only the rest. */
+export const leadHandoffPrompt = (why: string) =>
+  `${APP_NAME} is starting you a fresh Claude session (${why}), a shift change: your next turn begins from your handoff and your cabal's board instead of this whole conversation. People's chat history stays as it is; only your context resets. Before that, commit any work in progress, and put on the board with cabal_board what belongs there and isn't yet (decisions with who made them and when as log lines, row notes, the red run). Then reply with your handoff and nothing else: your whole reply is what your next session starts from. The board comes with it, so don't repeat the roster, members' states, asks, claims, spend or the log. Put in only what the board doesn't hold: cards waiting on people, what you are sealed on, the branch and any half-done merge or fix, what you promised people, and what you do next. Facts, not history. Do nothing else this turn.`;
 
 /** Where a fresh session's first turn starts (#406). */
 export const freshStartText = (handoff: string) => `This is a fresh Claude session: ${APP_NAME} reset your context (people's chat history is unchanged). Your memory loads as usual. Your previous session's handoff:\n\n${handoff}`;
@@ -339,7 +344,7 @@ export function promptParts(
         'Read files by range; never `cat` several whole files in one call, and read only the part of a parked long output you need.',
         `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and the Citadel-wide Closing rule says you are done, end the minion in that same turn: ${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}.`,
         "Tell or ask another minion of this scheme with `message_minion` (mcp__thread); `list_tickets` and `read_minion` find who owns what. The Taskmaster (`message_coordinator`) is for what only it can do: starting, closing or reopening minions, a decision, another scheme. Wake a minion sealed on you: `message_minion` `unpark: true`. Sealed on one: note its #N. Give each a `need`; don't report shipping (it is shown).",
-        'Handoffs (written with `citadel:briefing`) go to the Taskmaster by path (message_coordinator, `need: fyi`) and on one multi-select `ask_question` card, one option per handoff. A proposal always ends in a card.',
+        'Handoffs (written with `citadel:briefing`) go to the Taskmaster by path (message_coordinator, `need: fyi`) and on one multi-select `ask_question` card, one option (with `start`) per handoff. A proposal always ends in a card.',
         // Moved where their job meets them (#1574, #1277's ablation): strike → strike_text, wake_when_live and relay_when_live → their own descriptions, model tiers → citadel:subagents and citadel:briefing (test/model-table.test.ts), Settings edits → edit_instructions, done lines → set_properties' reply on type feature and citadel:self-review.
         'Stuck, or a fix that did not hold (citadel:diagnosing-bugs)? On Sonnet, ask the Taskmaster for the next model or effort step (`message_coordinator`, need: ask) rather than carrying on at the same tier.',
         "Wherever the instructions say to run tools/land.sh (but not a build minion's --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, shows you as landing meanwhile, posts the shipped line and dismisses or seals you on a clean land, and wakes you with its output if it fails.",
@@ -424,7 +429,7 @@ function approvalNote(project: Project): string[] {
 }
 
 /** A connected machine and the servers this turn gets from it; without servers, the MCP server it lends. `lent` names that MCP server, where its agent says. */
-export type TurnMachine = Machine & { servers?: MachineServer[]; lent?: string | null };
+export type TurnMachine = Machine & { servers?: MachineServer[]; lent?: string | null /** Its Windows screen role is lent: the pooled mcp__windows__ tools may use it (Build 7 M5). */; screen?: true };
 
 /** The MCP servers a turn gets from a machine: its own under its name, its workspace tools as <name>-ws. */
 export function machineServers(m: TurnMachine): { name: string; server: MachineServer }[] {
@@ -433,26 +438,25 @@ export function machineServers(m: TurnMachine): { name: string; server: MachineS
 
 /** Machines whose owners let jobs run on them (#857): queue_job's one line. */
 function jobsLine(names: string[]): string {
-  return `GPU jobs: ${names.join(', ')} run container jobs (an image pinned by digest) with queue_job; its owner gives each new recipe a go on a card in your chat, and jobs run in its job hours unless you ask for now with a reason. You are woken when one ends; results land in the shared folder's jobs/<id>/. job_status reads it, stop_job stops it.`;
+  return `GPU jobs: ${names.join(', ')} run container jobs (an image pinned by digest) with queue_job (leave machine out and Citadel picks one); its owner gives each new recipe a go on a card in your chat, and jobs run in its job hours unless you ask for now with a reason. You are woken when one ends; results land in the shared folder's jobs/<id>/. job_status reads it, stop_job stops it.`;
 }
 
 /** Which people's computers lend this turn their MCP tools. */
 function machineTools(machines: TurnMachine[]): string[] {
   if (!machines.length) return [];
-  const names = machines
-    .map(
-      (m) =>
-        `${m.name} (${machineServers(m)
-          .map((s) => `mcp__${s.name}`)
-          .join(', ')})`,
-    )
-    .join(', ');
-  const ws = machines.some((m) => m.servers?.includes('ws'));
+  const names = machines.map((m) => `${m.name} (${[...machineServers(m).map((s) => `mcp__${s.name}`), ...(m.screen ? [`through mcp__${POOLED_WINDOWS}`] : [])].join(', ')})`).join(', ');
+  const screen = machines.some((m) => m.screen);
+  const ws = screen || machines.some((m) => m.servers?.includes('ws'));
   return [
     `Connected machines: ${names}. Their MCP tools run on people's own computers, not on this server: files and builds there are separate from your working directory, so sync code there (for example with git) before building, and expect a tool to fail if that computer goes offline mid-turn.`,
     ...(ws
       ? [
-          `A machine's workspace tools (mcp__<name>${WS_SUFFIX}) check out a pushed branch in a folder its owner chose and run only the tasks the owner listed there: call its workspaces tool first. Minions share each workspace, one job at a time, so check what is checked out before you switch it and say what you left it on. fetch_file copies a file from there into your files folder on this server.`,
+          `A machine's workspace tools (mcp__<name>${WS_SUFFIX}${screen ? `, and mcp__${POOLED_WINDOWS}` : ''}) check out a pushed branch in a folder its owner chose and run only the tasks the owner listed there: call its workspaces tool first. Minions share each workspace, one job at a time, so check what is checked out before you switch it and say what you left it on. fetch_file copies a file from there into your files folder on this server.`,
+        ]
+      : []),
+    ...(screen
+      ? [
+          `For Windows, use mcp__${POOLED_WINDOWS} first: the same workspace tools on any Windows machine lent to this scheme. Citadel picks one and keeps you on it while it stays online, so your checkout stays warm; if it goes away, the next call moves to another and says so, and you check out again there. Use a machine's own mcp__<name>${WS_SUFFIX} only when the work needs that one PC.`,
         ]
       : []),
     ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`),

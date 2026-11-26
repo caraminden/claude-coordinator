@@ -62,16 +62,19 @@ export function handOffResult(args: Record<string, unknown>, contraptions: strin
 /** The host's read-only checks (#621), for a turn in a container: it has no live database or systemd user bus of its own. */
 export const HOST_CHECK = {
   name: 'host_check',
-  description: `The host's read-only checks, since this turn runs in a container that can't reach them itself: wherever instructions or habits say \`sqlite3 -readonly …/coordinator.db\`, \`journalctl --user\`, \`systemctl --user status\` or \`list-units\`, call this instead. what: "db" runs one SQL statement on ${APP_NAME}'s live database, read-only, with login secrets shown as [hidden] (at most 1,000 rows; it holds every scheme's chat, so only a turn a ${APP_NAME} admin or ${APP_NAME} scheme member asked for may run it); "journal" prints a user unit's journal (unit, lines, since, grep); "status" is \`systemctl --user status <unit>\`; "units" lists user units (unit as a pattern). A turn's chat, tool calls and output are in the events table (ticket_id is the minion's internal id, which read_ticket shows). The live checkout (the code ${APP_NAME} runs) is mounted read-only at its own path, so read it with Read, grep and git as usual.`,
+  description: `The host's read-only checks, since this turn runs in a container that can't reach them itself: wherever instructions or habits say \`sqlite3 -readonly …/coordinator.db\`, \`journalctl --user\`, \`systemctl --user status\` or \`list-units\`, call this instead. what: "db" runs one SQL statement on ${APP_NAME}'s live database, read-only, with login secrets shown as [hidden] (at most 1,000 rows; it holds every scheme's chat, so only a turn a ${APP_NAME} admin or ${APP_NAME} scheme member asked for may run it); "journal" prints a user unit's journal (unit, lines, since, grep); "status" is \`systemctl --user status <unit>\`; "units" lists user units (unit as a pattern); "judge_replay" runs your worktree's \`node tools/judge-replay.ts <judge> --record\` on the host over the live database (read-only; judge, days, scheme; the same people as db), writes the record into your worktree's test/judge-replays.json and returns its report: use it whenever judge-replay needs the live database, such as after changing a judge's pinned code, then read the hits and commit the file. A slow judge's replay can take up to 15 minutes: wait for it. A turn's chat, tool calls and output are in the events table (ticket_id is the minion's internal id, which read_ticket shows). The live checkout (the code ${APP_NAME} runs) is mounted read-only at its own path, so read it with Read, grep and git as usual.`,
   inputSchema: {
     type: 'object',
     properties: {
-      what: { type: 'string', enum: ['db', 'journal', 'status', 'units'], description: 'Which check' },
+      what: { type: 'string', enum: ['db', 'journal', 'status', 'units', 'judge_replay'], description: 'Which check' },
       sql: { type: 'string', maxLength: 20000, description: 'For db: one SQL statement, e.g. "SELECT id, number, title FROM tickets WHERE project_id = 3 ORDER BY id DESC LIMIT 5"' },
       unit: { type: 'string', maxLength: 120, description: 'For journal and status: a user unit, like claude-coordinator.service (journal without one reads every user unit); for units, a pattern like "citadel-*"' },
       lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'For journal: how many of the last lines (default 100)' },
       since: { type: 'string', maxLength: 40, description: 'For journal: a time journalctl reads, like "1 hour ago" or "2026-11-12 18:00"' },
       grep: { type: 'string', maxLength: 200, description: 'For journal: only lines matching this pattern (journalctl -g)' },
+      judge: { type: 'string', maxLength: 41, description: 'For judge_replay: the judge id, like any-nudge (node tools/judge-replay.ts --list names them)' },
+      days: { type: 'integer', minimum: 1, maximum: 60, description: 'For judge_replay: how many days back to replay (default 3)' },
+      scheme: { type: 'integer', minimum: 1, description: 'For judge_replay: only this scheme id' },
     },
     required: ['what'],
   },
@@ -81,7 +84,7 @@ export const HOST_CHECK = {
 export const CI_RUNNERS = {
   name: 'ci_runners',
   description:
-    "Add, list or remove this scheme's self-hosted GitHub Actions runners on a CI PC (more than one can host CI; list shows each), through the CI runner agent there (tools/ci-runner/README.md). `host` names the PC (its machine name from list_machines, or its hostname): add goes there and waits for that PC's own runners to show Idle (left out, it takes the first free PC); list and remove with no host reach every PC. add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo (with os linux, Linux runners labelled <scheme-slug>-ci-linux, in WSL on the same PC, for jobs Windows can't run), skipping ones already there, then waits until GitHub shows them Idle (with a `role`, or on a second PC: until the new ones are online, busy or not). `role` sets what the new runners are for (Citadel puts its labels on them through GitHub; runners already there are left as they are): land (the label alone, which ships take), side (also <label>-side, for long or background jobs), long (also <label>-long), check (only <label>-check). Left out: side on a PC with no land runner for the scheme while another PC has one, else the PC's own order. remove takes this scheme's runners off the PC and GitHub; list shows every runner service on the PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
+    "For odd cases only: a scheme's runner registers by itself on a PC lending it CI once its workflows ask, and comes off when the scheme is unticked there, so never call add just to give a scheme CI. Add, list or remove this scheme's self-hosted GitHub Actions runners on a CI PC (more than one can host CI; list shows each), through the CI runner agent there (tools/ci-runner/README.md). `host` names the PC (its machine name from list_machines, or its hostname): add goes there and waits for that PC's own runners to show Idle (left out, it takes the first free PC); list and remove with no host reach every PC. add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo (with os linux, Linux runners labelled <scheme-slug>-ci-linux, in WSL on the same PC, for jobs Windows can't run), skipping ones already there, then waits until GitHub shows them Idle (with a `role`, or on a second PC: until the new ones are online, busy or not). `role` sets what the new runners are for (Citadel puts its labels on them through GitHub; runners already there are left as they are): land (the label alone, which ships take), side (also <label>-side, for long or background jobs), long (also <label>-long), check (only <label>-check). Left out: side on a PC with no land runner for the scheme while another PC has one, else the PC's own order. remove takes this scheme's runners off the PC and GitHub; list shows every runner service on the PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -203,7 +206,7 @@ export const RELAY_WHEN_LIVE = {
 
 export const MINION_WAKE_WHEN_LIVE = {
   name: 'wake_when_live',
-  description: `Waiting on another minion's change to be deployed? Call this with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. ${WAKE_DESCRIPTION.replace('the minion', 'this minion')}`,
+  description: `Waiting on another minion's change to be deployed? Call this with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. If all that's left then is to ship, hand off now with hand_off_land's \`when: {"live": ...}\` instead. ${WAKE_DESCRIPTION.replace('the minion', 'this minion')}`,
   inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
 };
 
@@ -246,14 +249,15 @@ export const HAND_OFF_LAND = () => ({
     type: 'object',
     properties: {
       summary: { type: 'string', maxLength: 300, description: 'What ships, in one line' },
-      learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or docs missed or fought you; "nothing" is fine. Never holds the ship' },
-      risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out (no review gives one), it ships as high and needs go" },
+      learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or docs missed or fought you; "nothing" is fine' },
+      risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out, it ships as high and needs go" },
       risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus what you chose not to fix' },
       go: { type: 'string', maxLength: 200, description: 'At or above your go threshold, or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
       fix_proof: { type: 'object', description: "A proven bug fix's proof, instead of go: {test, red_on, red_output, review} (self-review)" },
       stay_open: { type: 'boolean', description: 'Only for more pieces of your brief. Not to delete handoffs (they move on close) or tell a minion (relay_when_live, first)' },
       waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing"); woken once live, do them' },
       probe: { type: 'object', description: 'Live check, for 600+ line ships (self-review)' },
+      when: { description: '"proof" or {"live":"#N"|sha}: ships then' },
       ...LAND_PROPS,
       ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
     },
@@ -343,16 +347,19 @@ export async function runShipTool(name: string, args: Record<string, unknown>): 
     }
     case 'host_check': {
       const body: Record<string, unknown> = {};
-      for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep'] as const) if (args[k] !== undefined) body[k] = args[k];
-      return (await call<{ output: string }>('POST', '/api/host-check', body)).output;
+      for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep', 'judge', 'days', 'scheme'] as const) if (args[k] !== undefined) body[k] = args[k];
+      const { output } = await call<{ output?: string }>('POST', '/api/host-check', body);
+      // A slow answer's 200 goes out before the check ends (slowJson), so a restart mid-way leaves a body with no output.
+      if (output === undefined) throw new Error('The check was cut off before it answered (a restart of the server does that): run it again');
+      return output;
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe', 'when'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       if (args.outage === true) body.outage = true;
-      await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
-      return handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
+      const r = await call<{ armed?: string }>('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
+      return r?.armed ?? handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).

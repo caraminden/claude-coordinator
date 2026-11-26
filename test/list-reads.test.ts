@@ -40,8 +40,8 @@ function seed(n: number): string {
       const mail = store.addEvent(t.id, 'user_message', { text: 'held for later', author: 'Josh' });
       store.setSetting(queueKey(t.id), { held: [{ author: 'Josh', text: 'held for later', images: [], id: mail.id }] });
       store.setSetting(`loop:${t.id}`, { sent: [now], held: [{ to: t.id, author: 'Josh', text: 'again', at: now }] });
-      store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: { after: leader.id, base: null }, payload: { message: 'go on', from: 'Josh' }, set_by: 'Josh' });
-      store.addDelivery({ project_id: p.id, kind: 'relay', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: { commit: null }, payload: { text: 'once live' }, set_by: 'Josh' });
+      store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: { after: leader.id, base: null }, payload: { message: 'go on', from: 'Josh', reason: "leader's work is live" }, set_by: 'Josh' });
+      store.addDelivery({ project_id: p.id, kind: 'relay', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: 'f'.repeat(40), payload: { ticket: leader.id, to: { minion: t.id, number: t.number ?? 0 }, text: 'once live' }, set_by: 'Josh' });
     }
   }
   store.db.close();

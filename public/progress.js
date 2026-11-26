@@ -2,47 +2,65 @@
 // Replays a ticket's stored events to rebuild Claude's task list (TaskCreate/TaskUpdate, or
 // TodoWrite) and to sort every other tool call under the step that was in progress when it ran.
 
+/** @import { ChatAction, ChatBlock, ClaudeEvent, PlanStep, ProgressTask, ResultBlock, ToolBlock, ToolInput } from './types.js' */
+/** @typedef {ReturnType<typeof createProgress> & { doneCount?: number }} Prog */
+/** @typedef {Pick<ChatAction, 'block' | 'result' | 'startedAt' | 'doneAt'>} Act */
+/** @typedef {{ kind: string, text: string, object?: string }} Described */
+
 /** Tools that manage the task list itself; they are progress, not work, so they are never shown as actions. */
+/** @type {Set<string | undefined>} */
 export const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'TodoWrite', 'mcp__thread__plan']);
 /** A minion's always-loaded plan tool (#1275, src/mcp.ts PLAN), read like TaskCreate and TaskUpdate. */
+/** @type {Set<string | undefined>} */
 const PLAN_TOOLS = new Set(['mcp__thread__plan']);
 /** Housekeeping tools (loading other tools' schemas) that are not shown as actions either. */
+/** @type {Set<string | undefined>} */
 const HIDDEN_TOOLS = new Set(['ToolSearch']);
 
 /** Whether a tool call is real work to show, rather than plan bookkeeping or housekeeping. */
+/** @param {string | undefined} name */
 export const isWorkTool = (name) => !TASK_TOOLS.has(name) && !HIDDEN_TOOLS.has(name);
+
+/**
+ * A finished step as applyEvent collects it (#571). Declared here, not in src/, so the page's type check (tsconfig.public.json)
+ * never reads the server; src/db-rows.ts passes it on.
+ * @typedef {{ id: string, subject: string, estimate: number | null, startedAt: number, finishedAt: number, work: number, model: string | null }} FinishedStep
+ */
 
 export function createProgress() {
   return {
     // work: a step's milliseconds underway inside running turns; workFrom: when the running turn's share began (null between turns).
-    tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions, estimate, startedAt, work, workFrom, kind, own, seen, stage }
-    pendingCreates: new Map(), // tool_use_id -> TaskCreate input, until its result tells us the task id
+    tasks: /** @type {ProgressTask[]} */ ([]), // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions, estimate, startedAt, work, workFrom, kind, own, seen, stage }
+    pendingCreates: /** @type {Map<unknown, unknown>} */ (new Map()), // tool_use_id -> TaskCreate input, until its result tells us the task id
     turnActions: 0,
     turnFailed: false, // the last turn ended in an error event (no init since)
     turnOk: false, // the last turn sent a successful result, so a later error (a deploy report) isn't its failure
-    lastAction: null,
+    lastAction: /** @type {string | null} */ (null),
     planMoved: true, // the task list changed since the last turn ended; until it does, a step left underway isn't this turn's
-    model: null, // the running or last turn's model, from its init
-    lastAt: null, // the newest event's time, where a turn that ended with no result stopped counting
-    at: null, // the tagged step (#1923) the server last saw worked on, by id: its stage is the one underway
+    model: /** @type {string | null} */ (null), // the running or last turn's model, from its init
+    lastAt: /** @type {number | null} */ (null), // the newest event's time, where a turn that ended with no result stopped counting
+    at: /** @type {string | null} */ (null), // the tagged step (#1923) the server last saw worked on, by id: its stage is the one underway
     asked: false, // a card went out this turn, so it isn't answered yet
     planned: false, // this turn made a plan call
     prep: false, // the review skill is open and no reviewer has started
-    side: null, // the untagged step the minion said it is on, until the server next sees another stage worked on
+    side: /** @type {string | null} */ (null), // the untagged step the minion said it is on, until the server next sees another stage worked on
     closing: false, // close_self was called this turn, and nothing since says it stays open
-    finished: /** @type {import('../src/db-rows.ts').FinishedStep[] | null} */ (null), // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
+    finished: /** @type {FinishedStep[] | null} */ (null), // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
   };
 }
 
 /** Where a tagged plan is (#1923), for a page that starts in the middle of one (history.ts). */
+/** @param {Pick<Prog, 'at' | 'asked' | 'planned' | 'prep' | 'side' | 'closing'>} p */
 export const planPlace = ({ at, asked, planned, prep, side, closing }) => ({ at, asked, planned, prep, side, closing });
 
+/** @param {unknown} path */
 const basename = (path) =>
   String(path ?? '')
     .split('/')
     .filter(Boolean)
     .pop() || String(path ?? '');
 
+/** @param {unknown} text @param {number} [max] */
 function clip(text, max = 90) {
   const line = String(text ?? '')
     .trim()
@@ -51,16 +69,19 @@ function clip(text, max = 90) {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+/** @param {string} text */
 const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** @param {string | undefined} url */
 function hostname(url) {
   try {
-    return new URL(url).hostname;
+    return new URL(/** @type {string} */ (url)).hostname;
   } catch {
     return clip(url, 60);
   }
 }
 
+/** @type {Record<string, string>} */
 const GIT_WORDS = {
   status: 'Checked what changed',
   diff: 'Looked at code changes',
@@ -93,11 +114,13 @@ const TEST_RE = /^(npm|pnpm|yarn|bun) (run )?test|^(pytest|jest|vitest|go test|c
 const WRITE_RE = /(?:^|[^2&>])>>?\s*([\w./~-]+\.\w+)/;
 
 /** git with its options before the subcommand (-C <dir>, -c <name=value>, quoted or not) left out. */
+/** @param {string} command */
 function bareGit(command) {
   return command.replace(/\bgit((?: -[Cc] (?:"[^"]*"|'[^']*'|\S+)| --(?:git-dir|work-tree)[= ](?:"[^"]*"|'[^']*'|\S+))+)(?= )/g, 'git');
 }
 
 /** A raw shell command in words, for when Claude gave it no description. Null if nothing fits. */
+/** @param {string} cmd @returns {string | null} */
 function describeOne(cmd) {
   const c = cmd.trim().replace(/^((sudo|timeout \S+|env|time|nice|setsid|\w+=\S*)\s+)+/, '');
   const [prog, ...rest] = c.split(/\s+/);
@@ -110,7 +133,7 @@ function describeOne(cmd) {
       .split(/\s+/)
       .slice(1)
       .find((a) => !a.startsWith('-'));
-    return GIT_WORDS[sub] ?? `Ran git ${sub ?? ''}`.trim();
+    return GIT_WORDS[String(sub)] ?? `Ran git ${sub ?? ''}`.trim();
   }
   if (prog === 'gh') return `Used GitHub (${args.slice(0, 2).join(' ')})`;
   if (/^(npm|pnpm|yarn|bun)$/.test(prog)) return /^(i|install|add|ci)$/.test(args[0]) ? 'Installed dependencies' : `Ran ${prog} ${args.slice(0, 2).join(' ')}`.trim();
@@ -133,7 +156,10 @@ function describeOne(cmd) {
   if (/^(mkdir|touch)$/.test(prog)) return 'Created files';
   if (/^(cp|mv|ln|rsync)$/.test(prog)) return 'Copied or moved files';
   if (/^(rm|rmdir)$/.test(prog)) return 'Deleted files';
-  if (/^(curl|wget|http)$/.test(prog)) return `Made a web request${rest.find((a) => /^https?:/.test(a.replace(/^['"]/, ''))) ? ` to ${hostname(rest.find((a) => /^https?:/.test(a.replace(/^['"]/, ''))).replace(/^['"]|['"]$/g, ''))}` : ''}`;
+  if (/^(curl|wget|http)$/.test(prog)) {
+    const url = rest.find((a) => /^https?:/.test(a.replace(/^['"]/, '')));
+    return `Made a web request${url ? ` to ${hostname(url.replace(/^['"]|['"]$/g, ''))}` : ''}`;
+  }
   if (/^(kill|pkill|killall)$/.test(prog)) return 'Stopped a process';
   if (/^(ps|pgrep|top|htop)$/.test(prog)) return 'Checked running processes';
   if (/^(ss|netstat|lsof)$/.test(prog)) return 'Checked open ports';
@@ -148,14 +174,16 @@ function describeOne(cmd) {
 }
 
 /** "git log …; git diff …" -> "Looked at commit history, looked at code changes". */
+/** @param {unknown} command */
 function describeCommand(command) {
+  /** @type {string[]} */
   const parts = [];
   // Only the first program of each pipeline matters ("git log | head" is still "looked at history").
   for (const seg of String(command ?? '').split(/\n|&&|\|\||;/)) {
     const words = describeOne(seg.split('|')[0]);
     // "Looked at a.ts" then "Looked at b.ts" -> "Looked at a.ts and b.ts".
     const verb = words?.match(/^(Looked at|Edited|Wrote|Ran) (\S+\.\w+)$/);
-    const prev = verb && parts.findIndex((t) => t.startsWith(`${verb[1]} `) && /\.\w+$/.test(t));
+    const prev = verb ? parts.findIndex((t) => t.startsWith(`${verb[1]} `) && /\.\w+$/.test(t)) : -1;
     if (verb && prev >= 0) parts[prev] = `${parts[prev].replace(' and ', ', ')} and ${verb[2]}`;
     else if (words && !parts.includes(words)) parts.push(words);
     if (/<<\s*'?(\w+)/.test(seg)) break; // a heredoc body follows; it is not more commands
@@ -175,6 +203,7 @@ function describeCommand(command) {
  * What kind of work a shell command is, as a phase of the job: looking around, changing things,
  * checking they work, or saving them to git. Uses the command itself, then Claude's description.
  */
+/** @param {unknown} command @param {string} [description] */
 function commandPhase(command, description = '') {
   // git's options before the subcommand don't change which subcommand it is.
   const c = bareGit(String(command ?? ''));
@@ -190,6 +219,7 @@ function commandPhase(command, description = '') {
   return 'other';
 }
 
+/** @type {Record<string, string>} */
 const TOOL_PHASE = {
   Read: 'explore',
   Grep: 'explore',
@@ -207,6 +237,7 @@ const TOOL_PHASE = {
 };
 
 /** Which phase of the work a tool call belongs to (see PHASES). */
+/** @param {ToolBlock} block */
 export function actionPhase(block) {
   const i = block.input || {};
   if (block.name === 'Bash') return commandPhase(i.command, i.description);
@@ -215,6 +246,7 @@ export function actionPhase(block) {
 }
 
 /** The kinds a plan's step can be tagged with (#1923), and how the stage reads while underway. */
+/** @type {Record<string, string>} */
 export const STEP_KINDS = { read: 'Reading', build: 'Building', test: 'Testing', review: 'Reviewing', ask: 'Asking', ship: 'Shipping' };
 
 const SCRATCH_RE = /TMPDIR|\/tmp\//;
@@ -228,15 +260,21 @@ const SIDE_RE = /^"?[^\s"]*(?:side-check\.sh|citadel-codex-review)\b/;
 const WRAPPER_RE = /^(?:(?:sudo|time|nice(?: -n ?\S+)?|setsid|xvfb-run(?: -a)?|env|timeout(?: -\S+)* \S+|mise exec --|\w+=(?:"[^"]*"|\S*))\s+)+/;
 
 /** What a shell command shows of the work (#1923): files written outside scratch folders, a test run, a ship, or ''. */
+/** @param {unknown} command */
 function commandKind(command) {
   const all = String(command ?? '');
   // A heredoc's body is a script or a document: it can write files, but its words run no tests.
+  /** @type {string[]} */
   const bodies = [];
-  const shell = all.replace(/(<<-?\s*\\?['"]?(\w+)['"]?[^\n]*\n)([\s\S]*?)(?:\n\s*\2(?=\s|$)|$)/g, (_, head, tag, body) => {
-    bodies.push(body);
-    return head;
-  });
+  const shell = all.replace(
+    /(<<-?\s*\\?['"]?(\w+)['"]?[^\n]*\n)([\s\S]*?)(?:\n\s*\2(?=\s|$)|$)/g,
+    /** @param {string} _ @param {string} head @param {string} tag @param {string} body */ (_, head, tag, body) => {
+      bodies.push(body);
+      return head;
+    },
+  );
   // A script that names a scratch folder counts only by a write whose own path is spelled out.
+  /** @param {string} text */
   const writes = (text) => (text.match(/open\([^)\n]*\)\.write\(|\.write_text\(|write_text\(|writeFile(?:Sync)?\([^,\n]*|\.write\(/g) ?? []).some((w) => !SCRATCH_RE.test(w) && (!SCRATCH_RE.test(text) || /^(?:open|writeFile(?:Sync)?)\(['"]/.test(w)));
   let built = bodies.some(writes);
   let tested = false;
@@ -267,6 +305,7 @@ const REVIEWER_RE = /(?:^|[:-])(?:reviewer|critic|fresh-eyes|finding-checker)$/;
  * The kind of step a tool call shows being worked on (#1923), or '' when it says nothing: reading, git and talk happen
  * during every step. `grunt` when a Grunt made the call: only its file edits count, as a reviewer runs tests of its own.
  */
+/** @param {ToolBlock} block @param {boolean} [grunt] */
 export function workKind(block, grunt = false) {
   const i = block.input || {};
   // A page's cut-down copy of a long command carries the kind its whole text had (eventcut.js).
@@ -280,12 +319,13 @@ export function workKind(block, grunt = false) {
   const short = tool.replace(/^mcp__.*?__/, '');
   if (short === 'hand_off_land' || tool === 'mcp__thread__land' || tool === 'mcp__thread__publish_desktop') return 'ship';
   if (tool === 'mcp__thread__propose_plan') return 'ask';
-  if (tool === 'mcp__thread__ask_question') return i.notice ? '' : ['ship', 'merge', 'land'].includes(i.kind) ? 'shipcard' : 'ask';
+  if (tool === 'mcp__thread__ask_question') return i.notice ? '' : /** @type {(string | undefined)[]} */ (['ship', 'merge', 'land']).includes(i.kind) ? 'shipcard' : 'ask';
   if (/^mcp__.*-ws__run_task$/.test(tool)) return 'test';
   return '';
 }
 
 /** How each phase reads once done and while underway; `files` is filled in for changes. */
+/** @type {Record<string, { done: string | ((f?: string) => string), now: string | ((f?: string) => string) }>} */
 const PHASES = {
   explore: { done: 'Looked through the code', now: 'Looking through the code' },
   change: { done: (f) => (f ? `Changed ${f}` : 'Made changes'), now: (f) => (f ? `Changing ${f}` : 'Making changes') },
@@ -298,11 +338,14 @@ const PHASES = {
 };
 
 /** What a tool call says about the work underway, at the level of its phase: "Changing app.js", "Trying it out". */
+/** @param {ChatBlock} block */
 export function activityLabel(block) {
-  const phase = actionPhase(block);
-  return phaseText(phase, phase === 'change' ? describeAction(block).object : '', false);
+  const call = /** @type {ToolBlock} */ (block);
+  const phase = actionPhase(call);
+  return phaseText(phase, phase === 'change' ? describeAction(call).object : '', false);
 }
 
+/** @param {string} phase @param {string | undefined} files @param {boolean} done */
 function phaseText(phase, files, done) {
   const t = PHASES[phase][done ? 'done' : 'now'];
   return typeof t === 'function' ? t(files) : t;
@@ -313,7 +356,9 @@ function phaseText(phase, files, done) {
  * "Changed app.js, style.css" → "Tried it out". Back-to-back calls of the same kind merge, so a
  * long session reads as a few conceptual chunks. The last phase is worded as ongoing when `running`.
  */
+/** @param {Act[]} actions @param {boolean} [running] */
 export function workPhases(actions, running = false) {
+  /** @type {{ phase: string, count: number, failed: number, files: string[], actions: Act[] }[]} */
   const phases = [];
   for (const a of actions) {
     const phase = actionPhase(a.block);
@@ -335,6 +380,7 @@ export function workPhases(actions, running = false) {
  * A tool call in plain words: `text` is a short sentence ("Edited runner.ts"), `kind` groups it for
  * a step's roll-up, and `object` is the file it touched, if any.
  */
+/** @param {ToolBlock} block @returns {Described} */
 export function describeAction(block) {
   const i = block.input || {};
   const name = block.name;
@@ -379,22 +425,27 @@ export function describeAction(block) {
 }
 
 /** One-line description of a tool call, e.g. "Edited runner.ts". */
+/** @param {ToolBlock} block */
 export function actionLabel(block) {
   return describeAction(block).text;
 }
 
+/** @param {string[]} names */
 function listNames(names) {
   const shown = names.slice(0, 3).join(', ');
   return names.length > 3 ? `${shown} and ${names.length - 3} more` : shown;
 }
 
+/** @param {number} n @param {string} one @param {string} [many] */
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * Roll a step's tool calls up into one line, e.g. "Edited runner.ts, app.js · ran 3 commands (1 failed) · read 4 files".
  * `actions` are { block, result } with result null while still running.
  */
+/** @param {Act[]} actions */
 export function summarizeActions(actions) {
+  /** @type {Record<string, Described[]>} */
   const by = {};
   let failed = 0;
   for (const a of actions) {
@@ -403,7 +454,8 @@ export function summarizeActions(actions) {
     if (a.result?.is_error) failed++;
   }
   const parts = [];
-  const files = (list) => [...new Set(list.map((d) => d.object).filter(Boolean))];
+  /** @param {Described[]} list */
+  const files = (list) => [...new Set(list.flatMap((d) => (d.object ? [d.object] : [])))];
   if (by.edit) parts.push(`changed ${listNames(files(by.edit))}`);
   if (by.run) parts.push(`ran ${plural(by.run.length, 'command')}`);
   if (by.read) parts.push(`read ${plural(files(by.read).length, 'file')}`);
@@ -416,6 +468,7 @@ export function summarizeActions(actions) {
   return capitalize(parts.join(' · ')) + (failed ? ` (${failed} failed)` : '');
 }
 
+/** @param {ChatBlock} block */
 function resultText(block) {
   const c = block.content;
   if (typeof c === 'string') return c;
@@ -424,8 +477,10 @@ function resultText(block) {
 }
 
 /** The states that say a minion's work is over (set_thread_status). */
+/** @type {Set<string | null | undefined>} */
 const NOTHING_LEFT = new Set(['complete', 'pending-deploy']);
 
+/** @param {Prog} p */
 function allDone(p) {
   return p.tasks.every((t) => t.status === 'completed');
 }
@@ -433,15 +488,18 @@ function allDone(p) {
 /**
  * Apply one stored event. Returns the tool calls in it that count as work, each tagged with the id
  * of the step it belongs to (null when no step was in progress). `at` (the event's time) dates a step's start.
- * @param {number | null} [at]
+ * @param {Prog} p @param {string} kind @param {ClaudeEvent | null | undefined} data @param {number | null} [at]
  */
 export function applyEvent(p, kind, data, at = null) {
+  /** @type {{ block: ToolBlock, taskId: string | null }[]} */
   const actions = [];
   // A turn that died says so, rather than the "Done" of a plan an earlier turn finished.
   if (kind === 'error' && !p.turnOk) p.turnFailed = true;
   if (kind !== 'claude' || !data) return actions;
   // A Grunt's own task list isn't the minion's plan (#571).
-  if (data.parent_tool_use_id && data.message?.content?.some?.((b) => b.type === 'tool_use' && TASK_TOOLS.has(b.name))) return actions;
+  const raw = data.message?.content;
+  const content = Array.isArray(raw) ? raw : [];
+  if (data.parent_tool_use_id && content.some((b) => b.type === 'tool_use' && TASK_TOOLS.has(b.name))) return actions;
   const lastAt = p.lastAt;
   if (at != null) p.lastAt = at;
   // A turn that finished well wasn't failed by an error on the way (its MCP server not connecting).
@@ -474,7 +532,7 @@ export function applyEvent(p, kind, data, at = null) {
       if (t.status === 'in_progress' && at != null && (!t.kind || t.id === stepLead(p))) t.workFrom = at;
     }
   } else if (data.type === 'assistant') {
-    for (const block of data.message?.content ?? []) {
+    for (const block of content) {
       if (block.type === 'text' && block.text?.trim()) {
         // What Claude said while a step was underway is the best plain summary of that step; a
         // Grunt's report (a subagent's words) is not.
@@ -483,49 +541,51 @@ export function applyEvent(p, kind, data, at = null) {
         continue;
       }
       if (block.type !== 'tool_use') continue;
-      const input = block.input || {};
-      if (block.name === 'TaskCreate' || block.name === 'TaskUpdate' || block.name === 'TodoWrite' || PLAN_TOOLS.has(block.name)) p.planMoved = true;
-      if (block.name === 'TaskCreate') {
-        p.pendingCreates.set(block.id, input);
-      } else if (block.name === 'TaskUpdate') {
+      const call = /** @type {ToolBlock} */ (block);
+      const input = call.input || {};
+      if (call.name === 'TaskCreate' || call.name === 'TaskUpdate' || call.name === 'TodoWrite' || PLAN_TOOLS.has(call.name)) p.planMoved = true;
+      if (call.name === 'TaskCreate') {
+        p.pendingCreates.set(call.id, input);
+      } else if (call.name === 'TaskUpdate') {
         updateTask(
           p,
           p.tasks.findIndex((t) => t.id === String(input.taskId)),
           input,
           at,
         );
-      } else if (PLAN_TOOLS.has(block.name)) {
-        applyPlan(p, block.id, input, at);
-      } else if (block.name === 'TodoWrite' && Array.isArray(input.todos)) {
+      } else if (PLAN_TOOLS.has(call.name)) {
+        applyPlan(p, call.id, input, at);
+      } else if (call.name === 'TodoWrite' && Array.isArray(input.todos)) {
         // A step the plan still has keeps its id, matched by its words; a new step gets a new one (from this
         // call's id), so an earlier plan's actions and open steps don't land under it.
         const old = [...p.tasks];
         p.tasks = input.todos.map((t, n) => {
           const i = old.findIndex((o) => o.subject === t.content);
           const was = i < 0 ? null : old.splice(i, 1)[0];
-          const id = was?.id ?? `todo-${block.id}-${n}`;
+          const id = was?.id ?? `todo-${call.id}-${n}`;
           const startedAt = t.status !== 'in_progress' ? undefined : was?.status === 'in_progress' ? was.startedAt : at;
           return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0, startedAt, work: was?.work ?? 0, workFrom: t.status === 'in_progress' ? (was?.workFrom ?? at) : null };
         });
-      } else if (isWorkTool(block.name)) {
-        const work = workKind(block, !!data.parent_tool_use_id);
+      } else if (isWorkTool(call.name)) {
+        const work = workKind(call, !!data.parent_tool_use_id);
         if (work) sawWork(p, work, at);
         const task = stepInfo(p, true).current;
         if (task) task.actions++;
         p.turnActions++;
-        p.lastAction = activityLabel(block);
-        actions.push({ block, taskId: task?.id ?? null });
+        p.lastAction = activityLabel(call);
+        actions.push({ block: call, taskId: task?.id ?? null });
       }
     }
     // The state its reply ends on (runner.ts stripStatus), or the call that sets one: nothing is left to do.
-    const calls = (name) => data.message?.content?.find?.((b) => b.type === 'tool_use' && b.name === name);
+    /** @param {string} name */
+    const calls = (name) => /** @type {ToolBlock | undefined} */ (content.find((b) => b.type === 'tool_use' && b.name === name));
     if (!data.parent_tool_use_id && calls('mcp__thread__close_self')) p.closing = true;
     if (data.turn_state && !NOTHING_LEFT.has(data.turn_state)) p.closing = false; // another state cancels the close
     if (!data.parent_tool_use_id && (NOTHING_LEFT.has(data.turn_state) || NOTHING_LEFT.has(calls('mcp__thread__set_thread_status')?.input?.state))) finishPlan(p, at);
   } else if (data.type === 'user') {
-    for (const block of data.message?.content ?? []) {
+    for (const block of content) {
       if (block.type !== 'tool_result' || !p.pendingCreates.has(block.tool_use_id)) continue;
-      const input = p.pendingCreates.get(block.tool_use_id);
+      const input = /** @type {ToolInput} */ (p.pendingCreates.get(block.tool_use_id));
       p.pendingCreates.delete(block.tool_use_id);
       const id = resultText(block).match(/#(\d+)/)?.[1];
       if (block.is_error || !id) continue;
@@ -537,7 +597,7 @@ export function applyEvent(p, kind, data, at = null) {
   return actions;
 }
 
-/** One TaskUpdate (or a plan step put in its shape) on the step at `idx` (none when -1). */
+/** One TaskUpdate (or a plan step put in its shape) on the step at `idx` (none when -1). @param {Prog} p @param {number} idx @param {ToolInput} input @param {number | null | undefined} at */
 function updateTask(p, idx, input, at) {
   if (idx < 0) return;
   const task = p.tasks[idx];
@@ -556,9 +616,11 @@ function updateTask(p, idx, input, at) {
   if (typeof input.metadata?.outcome === 'string') task.outcome = input.metadata.outcome;
 }
 
+/** @type {Record<string, string>} */
 const PLAN_STATUS = { todo: 'pending', doing: 'in_progress', done: 'completed', dropped: 'deleted' };
 
 /** Why a plan call (#1275) is refused, or '' when it is fine. The tool and the readout share it, so a refused call never moves the readout. */
+/** @param {{ steps?: unknown } | null | undefined} input */
 export function planError(input) {
   const steps = input?.steps;
   if (!Array.isArray(steps) || !steps.length) return 'steps is required: a list of { n, … }, one per step to add or change.';
@@ -574,20 +636,23 @@ export function planError(input) {
 }
 
 /** A plan call (#1275): each step by its number n, added when new, else changed as a TaskUpdate would. */
+/** @param {Prog} p @param {string} callId @param {ToolInput} input @param {number | null | undefined} at */
 function applyPlan(p, callId, input, at) {
   if (planError(input)) return;
+  const steps = input.steps ?? [];
   // Naming step 1 with a title once the plan is finished starts a new one, its ids new; a late step 4 just adds.
   // A tagged plan's last step may never be ticked (its ship ends the turn), so a later turn's new step 1, with others, starts one too.
   const first = p.tasks.find((t) => (t.n ?? Number(t.id)) === 1);
   // More than half the others restated under their own titles are the same plan, its first step retitled.
-  const others = input.steps.filter((o) => o.step && o.n !== 1);
+  const others = steps.filter((o) => o.step && o.n !== 1);
   const same = others.filter((o) => p.tasks.some((t) => (t.n ?? Number(t.id)) === o.n && t.subject === o.step)).length;
+  /** @param {PlanStep} s */
   const fresh = (s) => s.n === 1 && s.step && (allDone(p) || (p.at && !p.planned && first && s.step !== first.subject && others.length && same * 2 <= others.length));
-  if (p.tasks.length && input.steps.some(fresh)) p.tasks = [];
+  if (p.tasks.length && steps.some(fresh)) p.tasks = [];
   if (!p.tasks.some((t) => t.id === p.at)) p.at = null;
   p.planned = true;
-  for (const s of input.steps) {
-    const update = { status: PLAN_STATUS[s.status], subject: s.step, activeForm: s.doing, description: s.why, metadata: { estimate: s.minutes, outcome: s.outcome } };
+  for (const s of steps) {
+    const update = { status: s.status == null ? undefined : PLAN_STATUS[s.status], subject: s.step, activeForm: s.doing, description: s.why, metadata: { estimate: s.minutes, outcome: s.outcome } };
     // A step TaskCreate made (id "3") is step 3 too, so a minion that started its plan before #1275 carries it on.
     let idx = p.tasks.findIndex((t) => (t.n ?? Number(t.id)) === s.n);
     if (idx < 0) {
@@ -618,6 +683,7 @@ function applyPlan(p, callId, input, at) {
 }
 
 /** The kinds whose order can't be read from the calls: work goes round them until a card or a ship. */
+/** @type {Set<string | undefined>} */
 const ROUND = new Set(['read', 'build', 'test', 'review']);
 
 /**
@@ -625,8 +691,10 @@ const ROUND = new Set(['read', 'build', 'test', 'review']);
  * stage, and a kind that comes back (build, test, build) takes in what's between, since an edit can't say which. Cards
  * and ships start a new round, so a build before a card and one after it stay apart. [[step, …], …] in plan order.
  */
+/** @param {Prog} p */
 function stagesOf(p) {
   const tagged = p.tasks.filter((t) => t.kind);
+  /** @type {ProgressTask[][]} */
   const out = [];
   let round = 0; // where this round starts in `out`
   for (const t of tagged) {
@@ -635,7 +703,7 @@ function stagesOf(p) {
       if (same >= 0) out.splice(same, out.length - same, [...out.slice(same).flat(), t]);
       else out.push([t]);
     } else {
-      if (out.at(-1)?.[0].kind === t.kind) out.at(-1).push(t);
+      if (out.at(-1)?.[0].kind === t.kind) out[out.length - 1].push(t);
       else out.push([t]);
       round = out.length;
     }
@@ -644,21 +712,27 @@ function stagesOf(p) {
 }
 
 /** The minion is on a step with no kind, which only it can tick. */
+/** @param {Prog} p */
 const onSide = (p) => p.tasks.some((t) => t.id === p.side && t.status === 'in_progress');
 
+/** @param {Prog} p @param {ProgressTask[][]} [stages] */
 const stageAt = (p, stages = stagesOf(p)) => stages.findIndex((st) => st.some((t) => t.id === p.at));
 
 /**
  * Move the plan by what a tool call shows (#1923). It only ever ticks what it saw worked on: a step passed over with no
  * sign of work stays open, and an unsure call moves nothing, since a wrong tick is worse than a late one.
  */
+/** @param {Prog} p @param {string} work @param {number | null | undefined} at */
 function sawWork(p, work, at) {
   const stages = stagesOf(p);
   const cur = stageAt(p, stages);
   if (cur < 0) return;
   // A step the minion marked done itself is never gone back to.
+  /** @param {number} i @param {string} kind */
   const has = (i, kind) => stages[i].some((t) => t.kind === kind && t.own !== 'done');
+  /** @param {string} kind @param {number} from @param {number} to */
   const find = (kind, from, to) => stages.findIndex((st, i) => i >= from && i < to && has(i, kind));
+  /** @param {string} kind */
   const any = (kind) => stages.some((st) => st.some((t) => t.kind === kind));
   let kind = work;
   if (work === 'shipcard') kind = find('ask', cur, stages.length) >= 0 || !any('ship') ? 'ask' : 'ship';
@@ -674,6 +748,7 @@ function sawWork(p, work, at) {
   let to = -1;
   const ahead = find(kind, cur + 1, stages.length);
   // The round (between cards and ships) the current stage is in.
+  /** @param {number} i */
   const breaks = (i) => !ROUND.has(stages[i][0].kind);
   let start = cur;
   while (start > 0 && !breaks(start - 1)) start--;
@@ -689,7 +764,7 @@ function sawWork(p, work, at) {
     if (has(cur, 'review') && !(p.prep && kind === 'build'))
       to = -1; // fixing and re-testing what the review found is still the review
     else if (kind === 'build' && find(kind, start, cur) >= 0) to = find(kind, start, cur);
-    else if (kind === 'build' || !stages.slice(cur + 1, ahead).some((st) => st.some((t) => ['build', 'review'].includes(t.kind) && !t.seen))) {
+    else if (kind === 'build' || !stages.slice(cur + 1, ahead).some((st) => st.some((t) => /** @type {(string | undefined)[]} */ (['build', 'review']).includes(t.kind) && !t.seen))) {
       // Past the round is past a card not posted yet: noted, not moved to.
       if (ahead >= 0 && ahead < end) to = ahead;
       else if (ahead >= 0 && kind === 'build') for (const t of stages[ahead]) t.seen = true;
@@ -714,6 +789,7 @@ function sawWork(p, work, at) {
   goTo(p, stages, to, at);
 }
 
+/** @param {Prog} p @param {ProgressTask[][]} stages @param {number} to @param {number | null | undefined} at */
 function goTo(p, stages, to, at) {
   p.at = stages[to][0].id;
   for (const t of stages[to]) if (t.own !== 'todo') t.seen = true;
@@ -721,6 +797,7 @@ function goTo(p, stages, to, at) {
 }
 
 /** Set the tagged steps' statuses from where the plan is (#1923); a step the minion marked done itself stays done. */
+/** @param {Prog} p @param {ProgressTask[][]} stages @param {number | null | undefined} at */
 function arrange(p, stages, at) {
   const cur = stageAt(p, stages);
   if (cur < 0) return;
@@ -730,12 +807,13 @@ function arrange(p, stages, at) {
   if (testing && cur > 0 && stages[cur - 1].some((t) => t.kind === 'build')) from = cur - 1;
   // Nor does the review skill opened ahead of its reviewer.
   if (p.prep && stages[cur].some((t) => t.kind === 'review')) while (from > 0 && stages[from - 1].some((t) => t.kind === 'build' || t.kind === 'test')) from--;
+  /** @param {number} i */
   const held = (i) => i >= from && i < cur;
   for (const [i, st] of stages.entries()) {
     const open = st.filter((t) => t.own !== 'done' && t.own !== 'todo');
     for (const t of st) if (t.own === 'todo') setStatus(p, t, 'pending', at);
     if (!open.length) continue;
-    const lead = leadOf(st);
+    const lead = /** @type {ProgressTask} */ (leadOf(st));
     if (i < cur && !held(i) && lead.seen) {
       for (const t of open) settle(t, at);
       // A shared stage's time, split by the guesses: the steps' own can't be told apart.
@@ -758,6 +836,7 @@ function arrange(p, stages, at) {
 }
 
 /** A step's status, with the times that go with it (#571). One that is back underway keeps its start and the work before. */
+/** @param {Prog} p @param {ProgressTask} task @param {string} status @param {number | null | undefined} at */
 function setStatus(p, task, status, at) {
   if (status === 'in_progress' && task.status !== 'in_progress') {
     const back = task.kind && task.startedAt != null;
@@ -773,12 +852,14 @@ function setStatus(p, task, status, at) {
 }
 
 /** The minion says nothing is left (state complete, close_self): the stage underway, and what it held open, are done. */
+/** @param {Prog} p @param {number | null | undefined} at */
 function finishPlan(p, at) {
   if (!p.at) return;
   for (const t of p.tasks) if (t.kind && t.status === 'in_progress') setStatus(p, t, 'completed', at);
 }
 
 /** Close a step's running share of working time at `at` (#571). */
+/** @param {ProgressTask} task @param {number | null | undefined} at */
 function settle(task, at) {
   if (task.workFrom == null) return;
   if (at != null) task.work = (task.work ?? 0) + Math.max(0, at - task.workFrom);
@@ -786,6 +867,7 @@ function settle(task, at) {
 }
 
 /** A step's guessed minutes (metadata.estimate, #551), from Claude's own tool input: a sane number or nothing. */
+/** @param {ToolInput} input */
 function estimateOf(input) {
   const n = Number(input.metadata?.estimate);
   return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : undefined;
@@ -796,22 +878,28 @@ function estimateOf(input) {
  * finished, then the one underway, then the rest in plan order, so a step added late and done early can't sit
  * green after an unfinished one.
  */
+/** @param {Prog} p */
 export function planTrack(p) {
+  /** @type {Record<string, number>} */
   const rank = { completed: 0, in_progress: 1 };
+  /** @param {ProgressTask} t @returns {'c' | 'i' | 'h' | 'p'} */
   const state = (t) => (t.status === 'completed' ? 'c' : t.status !== 'in_progress' ? 'p' : heldStep(p, t) ? 'h' : 'i');
-  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => [t.estimate ?? null, state(t)]);
+  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => /** @type {[number | null, 'c' | 'i' | 'h' | 'p']} */ ([t.estimate ?? null, state(t)]));
 }
 
 /** A stage's step it is timed and shown under: the one the minion said it is on, else its first still open (#1923). */
+/** @param {ProgressTask[]} st */
 const leadOf = (st) => st.find((t) => t.own === 'doing') ?? st.find((t) => t.own !== 'done' && t.own !== 'todo');
 
 /** The lead of the stage underway. */
+/** @param {Prog} p */
 function stepLead(p) {
   const stages = stagesOf(p);
   return leadOf(stages[stageAt(p, stages)] ?? [])?.id ?? null;
 }
 
 /** A step that is built and now being tested (#1923): not ticked yet, as a failed test brings the bar back to it. */
+/** @param {Prog} p @param {ProgressTask} t */
 export const heldStep = (p, t) => t.status === 'in_progress' && !!t.kind && t.stage !== stepLead(p);
 
 /**
@@ -821,11 +909,12 @@ export const heldStep = (p, t) => t.status === 'in_progress' && !!t.kind && t.st
  * scaled by it. The step's time is its working time: `since` is moved on past the gaps between turns.
  * Null when the step underway has no guess or start. Also the whole plan's start and guessed seconds (#630).
  */
+/** @param {Prog} p @param {boolean} running @param {number} [now] @param {number} [ratio] */
 export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   const { current } = stepInfo(p, running);
   const shared = sharedSteps(p, current);
   const guess = shared.length > 1 ? shared.reduce((sum, t) => sum + (t.estimate ?? 0), 0) : current?.estimate;
-  if (!guess || !current.startedAt) return null;
+  if (!guess || !current?.startedAt) return null;
   const scale = ratio > 0 ? ratio : 1;
   // Whole seconds, so a scaled guess doesn't round up a minute on float noise (20 × 0.3 = 6.000000000000001).
   const usual = Math.round(guess * 60 * scale);
@@ -843,6 +932,7 @@ export function planEstimate(p, running, now = Date.now(), ratio = 1) {
  * Counts for the readout: which step is underway out of how many. While a turn runs, a step an earlier
  * turn left underway (a card it waited on) isn't this turn's until the plan moves (#518).
  */
+/** @param {Prog} p @param {boolean} [running] */
 export function stepInfo(p, running = false) {
   const total = p.tasks.length;
   const done = p.tasks.filter((t) => t.status === 'completed').length;
@@ -855,13 +945,15 @@ export function stepInfo(p, running = false) {
 }
 
 /** The steps of the stage underway: more than one when the server can't tell them apart (#1923). */
+/** @param {Prog} p @param {ProgressTask | null} current @returns {ProgressTask[]} */
 const sharedSteps = (p, current) => (current ? p.tasks.filter((t) => t === current || (t.kind && current.kind && t.status === 'in_progress' && t.stage === current.stage && current.own !== 'doing')) : []);
 
 /** What the stage underway is called: its step's own words, or the kinds of a shared stage ("Building, 2 steps", #1923). */
+/** @param {Prog} p @param {ProgressTask | null} current @param {string} words */
 function stageWords(p, current, words) {
   const shared = sharedSteps(p, current);
   if (shared.length < 2) return words;
-  const kinds = [...new Set(shared.map((t) => STEP_KINDS[t.kind]))].map((k, i) => (i ? k.toLowerCase() : k));
+  const kinds = [...new Set(shared.map((t) => STEP_KINDS[String(t.kind)]))].map((k, i) => (i ? k.toLowerCase() : k));
   return `${kinds.length > 1 ? `${kinds.slice(0, -1).join(', ')} and ${kinds.at(-1)}` : kinds[0]}, ${shared.length} steps`;
 }
 
@@ -870,6 +962,7 @@ function stageWords(p, current, words) {
  * the list's badge and the readout's meter show, so no two views read differently (#72, #518).
  * `worked` keeps a line after a turn of only words, since it opens the minion's time log (#1991).
  */
+/** @param {Prog} p @param {boolean} running @param {boolean} [worked] */
 export function progressLine(p, running, worked = false) {
   const { total, done, current } = stepInfo(p, running);
   // A finished plan from an earlier turn says nothing about a turn that is running now.
@@ -888,8 +981,9 @@ export function progressLine(p, running, worked = false) {
  * A progressLine without its count, for a row whose badge already shows steps done. Also strips the
  * older "Running tests… 3/7" form, which stored last_activity may still hold.
  */
+/** @param {string} line */
 export function withoutCount(line) {
-  return line.replace(/^(?:Step|(Paused at) step) \d+ of \d+: /, (_, paused) => (paused ? 'Paused at: ' : '')).replace(/(?: · | )\d+(?:\/| of )\d+(?: steps| done)?$/, '');
+  return line.replace(/^(?:Step|(Paused at) step) \d+ of \d+: /, /** @param {string} _ @param {string} paused */ (_, paused) => (paused ? 'Paused at: ' : '')).replace(/(?: · | )\d+(?:\/| of )\d+(?: steps| done)?$/, '');
 }
 
 /** How long the readout keeps a finished call's label before saying "Thinking…", so the line doesn't blink between two calls (#543). */
@@ -900,12 +994,14 @@ export const THINKING_AFTER = 5000;
  * last one for a few seconds after it finished, then "Thinking…". `actions` are the turn's
  * { block, result, startedAt, doneAt } in order.
  */
+/** @param {Act[]} actions @param {number} now */
 export function nowDoing(actions, now) {
   const last = actions.findLast((a) => !a.result) ?? actions.at(-1);
-  return last && (!last.result || !(now - last.doneAt >= THINKING_AFTER)) ? actionLabel(last.block) : 'Thinking…';
+  return last && (!last.result || !(now - (last.doneAt ?? NaN) >= THINKING_AFTER)) ? actionLabel(last.block) : 'Thinking…';
 }
 
 /** How long the readout's running call has run, once it is a minute or more ("5 min", #1923). */
+/** @param {Act[]} actions @param {number} now */
 export function runningFor(actions, now) {
   const last = actions.findLast((a) => !a.result);
   const min = last ? Math.floor((now - last.startedAt) / 60_000) : 0;
@@ -916,6 +1012,7 @@ export function runningFor(actions, now) {
  * The step side of a running turn's readout line ("Fixing the double alert"), beside the running call,
  * so it leaves out the last action progressLine adds: "Planning" before a step starts, else "Working".
  */
+/** @param {Prog} p @param {boolean} running */
 export function stepName(p, running) {
   const { total, done, current } = stepInfo(p, running);
   return current ? stageWords(p, current, current.activeForm || current.subject).replace(/…$/, '') : total && !done ? 'Planning' : 'Working';

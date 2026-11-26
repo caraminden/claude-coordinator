@@ -59,7 +59,37 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     sharedDir: (id) => projectSharedDir(dataDir, id),
     start: async (p, brief) => {
       const id = -1 - started.length;
-      started.push({ id, project_id: p.id, title: brief.title, status: 'new', kind: 'minion', created_at: now } as Ticket);
+      started.push({
+        id,
+        project_id: p.id,
+        title: brief.title,
+        status: 'new',
+        kind: 'ticket',
+        created_at: now,
+        updated_at: now,
+        number: null,
+        state: null,
+        note: null,
+        replies: null,
+        build: null,
+        parent: null,
+        session_id: null,
+        cwd: '',
+        branch: null,
+        permission_mode: '',
+        model: null,
+        effort: null,
+        last_model: null,
+        last_effort: null,
+        picked_because: null,
+        workflow: 0,
+        plugin_dirs: '',
+        last_activity: null,
+        closed_at: null,
+        person_id: null,
+        coordinator_of: null,
+        created_by: '',
+      });
       if (!warm) hits.push({ at: now, key: `start:${flakeKey(brief.title)}`, text: brief.title });
       return { id };
     },

@@ -7,11 +7,18 @@
 //   pages were written for (the sandbox makes the real localStorage throw).
 // It talks only to the viewer that framed it, or the Citadel tab whose Open button opened it
 // (public/bridge-host.js); opened any other way, saved values still show but nothing new is kept or sent.
+/** @typedef {{ key: string, value: unknown }} Entry */
+/** What the viewer answers with: a hello (who is looking), a read (entries) or a send (who it went to); each caller reads only its own part. @typedef {{ person?: string, file?: string, owner?: string | null, draw?: boolean, entries: Entry[], to: string }} Answer */
+/** The globals this page script adds for the page. @typedef {Window & typeof globalThis & { claude?: unknown, storage?: unknown, citadel?: unknown }} PageWindow */
+/** @typedef {{ resolve: (value: Answer) => void, reject: (reason: unknown) => void, acked: boolean, onAck?: (known?: Answer) => void, timer?: ReturnType<typeof setTimeout> }} Pending */
+/** @type {(cfg: { entries: Entry[], page: string }) => void} */
+// biome-ignore format: the server slices this file from the start of the function below (src/artifact-data.ts), and the formatter would move it
 (function (cfg) {
   'use strict';
   const TAG = 'citadel-bridge-1';
   const NO_VIEWER = "This tab isn't connected to Citadel: open the page from Citadel (its viewer or its Open button)";
   const host = window.parent !== window ? window.parent : window.opener;
+  /** @param {unknown} v */
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
   const data = new Map(cfg.entries.map((e) => [e.key, e.value]));
 
@@ -19,14 +26,22 @@
   // reloaded is never taken for one of this page's. The viewer also says at once that it has a request (`ack`): past the
   // limit one it has is asked after (`alive`) rather than given up on, so Citadel being slow never reads as a
   // viewer that is gone, and nothing is sent beside a copy still on its way (#1862).
+  /** @type {Map<number, Pending>} */
   const pending = new Map();
   let seq = Math.floor(Math.random() * 1e9);
   let heard = false; // the viewer has spoken to this page
+  /**
+   * @param {string} op @param {Record<string, unknown>} [extra] @param {number} [ms]
+   * @param {{ onAck?: (known?: Answer) => void, onLate?: () => void }} [hooks]
+   * @returns {Promise<Answer>}
+   */
   function request(op, extra, ms = 15000, { onAck, onLate } = {}) {
-    return new Promise((resolve, reject) => {
+    return new Promise((/** @type {(value: Answer) => void} */ resolve, reject) => {
       if (!host) return reject(new Error(NO_VIEWER));
       const id = ++seq;
+      /** @param {Record<string, unknown>} m */
       const post = (m) => host.postMessage({ bridge: TAG, id, page: cfg.page, ...m }, '*');
+      /** @type {Pending} */
       const p = { resolve, reject, acked: false, onAck };
       const late = () => {
         if (p.acked) {
@@ -61,15 +76,21 @@
   // Who is looking and who made the page, once the viewer answers; false when there is no viewer. A viewer that
   // can't reach Citadel (it is down or restarting) says who all the same, so the page opens on what it was served
   // with and takes picks; its writes wait for `joined`, the hello that lands, tried as often as a write is (#1862).
+  /** @type {{ person?: string, file?: string, owner?: string | null, draw: boolean } | null} */
   let info = null;
   let joining = false; // the viewer is there, Citadel isn't yet
+  /** @type {(value: boolean) => void} */
   let opened;
+  /** @type {Promise<boolean>} */
   const early = new Promise((r) => (opened = r));
+  /** @param {Answer} r */
   const open = (r) => {
     info = { person: r.person, file: r.file, owner: r.owner, draw: !!r.draw };
     opened(true);
   };
+  /** @returns {Promise<Answer>} */
   async function hello() {
+    /** @type {Answer | null} */
     let known = null;
     const meanwhile = () => {
       joining = true;
@@ -81,7 +102,7 @@
       try {
         return await request('hello', {}, 5000, { onAck: (k) => (known = k ?? known), onLate: meanwhile });
       } catch (err) {
-        if (!err.retry) {
+        if (!(/** @type {{ retry?: boolean }} */ (err).retry)) {
           if (!--tries) throw err;
           continue;
         }
@@ -109,10 +130,13 @@
   const ready = Promise.race([early, joined]);
 
   // Watchers of keys (`key`) or of every key under a prefix (`prefix`), told after any change.
+  /** @type {Set<{ key: string, fn: () => void, prefix: boolean }>} */
   const watchers = new Set();
+  /** @param {string[]} keys */
   function notify(keys) {
     for (const w of watchers) if (keys.some((k) => (w.prefix ? k.startsWith(w.key) : k === w.key))) w.fn();
   }
+  /** @param {string} key @param {() => void} fn @param {boolean} [prefix] */
   function watch(key, fn, prefix = false) {
     const w = { key, fn, prefix };
     watchers.add(w);
@@ -122,15 +146,20 @@
 
   // Writes: applied here at once, sent to the viewer at most every 100 ms with each key's latest value,
   // so a slider moving fast stays under the viewer's 20 writes a second and its last value always lands.
+  /** @type {Map<string, unknown>} */
   let queue = new Map();
+  /** @type {Promise<void> | null} */
   let flushing = null;
   // The last flush's requests: the next waits for them, so a later value never reaches the server first.
   let sending = Promise.resolve();
   // Flushed but not yet answered: a refresh meanwhile keeps them on top, as it does the queue.
+  /** @type {Map<string, unknown>} */
   const inFlight = new Map();
   // Refused for good, with what the page shows and why (#1940): on top of refreshes too, and not saved until its key lands.
+  /** @type {Map<string, { value: unknown, why: string }>} */
   const refused = new Map();
   const refusedWhy = () => [...refused.values()].at(-1)?.why;
+  /** @param {string} key @param {unknown} value */
   function write(key, value) {
     // null (NaN and the like clone to it) is the wire's delete, so it deletes here too.
     const v = value === undefined ? undefined : (clone(value) ?? undefined);
@@ -174,6 +203,7 @@
   // A write Citadel couldn't take because it was down or restarting (the viewer says `retry`) is sent again,
   // 1 s, 2 s, 4 s … 15 s apart, until it lands (#821): it stays on top of refreshes meanwhile, as in flight.
   let retrying = false;
+  /** @param {Entry[]} entries */
   async function keep(entries) {
     for (let gap = 1000; ; gap = Math.min(gap * 2, 15000)) {
       try {
@@ -181,7 +211,7 @@
         retrying = false;
         return;
       } catch (err) {
-        if (!err.retry) {
+        if (!(/** @type {{ retry?: boolean }} */ (err).retry)) {
           retrying = false;
           throw err;
         }
@@ -194,6 +224,7 @@
 
   // Whether what the page shows is saved (#821): 'saved', 'saving' (on its way), 'retrying' (Citadel is
   // down or restarting; it is sent again until it lands) or 'failed' (refused, #1940). Watchers hear each change, and why it failed.
+  /** @type {Set<(state: string, why?: string) => void>} */
   const saveWatchers = new Set();
   let saveState = 'saved';
   const nowSaving = () => {
@@ -207,17 +238,19 @@
     for (const fn of saveWatchers) fn(s, s === 'failed' ? refusedWhy() : undefined);
   }
   let warned = false;
+  /** @param {Error} err */
   const warn = (err) => {
     if (!warned) console.warn(`Citadel: ${err.message}`);
     warned = true;
   };
 
   // The store as the server has it now (another person's or an agent's write); writes not yet sent or answered stay on top.
+  /** @param {Entry[]} entries */
   function replace(entries) {
     const next = new Map(entries.map((e) => [e.key, e.value]));
     // One the server has after all (its answer was lost) is saved.
     for (const [k, { value }] of refused) if (JSON.stringify(next.get(k) ?? null) === JSON.stringify(value)) refused.delete(k);
-    for (const [k, v] of [...[...refused].map(([k, { value }]) => [k, value]), ...inFlight, ...queue]) {
+    for (const [k, v] of [...[...refused].map(([k, { value }]) => /** @type {[string, unknown]} */ ([k, value])), ...inFlight, ...queue]) {
       if (v === null) next.delete(k);
       else next.set(k, v);
     }
@@ -259,21 +292,26 @@
   addEventListener('keydown', typing, true);
 
   // localStorage kept in the page's store (`localStorage/<key>`); sessionStorage only for this page's life.
+  /** @param {string} prefix */
   function storageShim(prefix) {
+    /** @type {Map<string, string>} */
     const mem = new Map();
     const keys = () => (prefix ? [...data.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)) : [...mem.keys()]);
+    /** @param {string} k */
     const get = (k) => {
       const v = prefix ? data.get(prefix + k) : mem.get(String(k));
       return v === undefined ? null : String(v);
     };
+    /** @param {string} k @param {unknown} v */
     const set = (k, v) => (prefix ? write(prefix + k, String(v)).catch(warn) : mem.set(String(k), String(v)));
+    /** @param {string} k */
     const del = (k) => (prefix ? write(prefix + k, undefined).catch(warn) : mem.delete(String(k)));
     const api = {
-      getItem: (k) => get(k),
-      setItem: (k, v) => void set(k, v),
-      removeItem: (k) => void del(k),
+      getItem: (/** @type {string} */ k) => get(k),
+      setItem: (/** @type {string} */ k, /** @type {unknown} */ v) => void set(k, v),
+      removeItem: (/** @type {string} */ k) => void del(k),
       clear: () => keys().forEach(del),
-      key: (i) => keys()[i] ?? null,
+      key: (/** @type {number} */ i) => keys()[i] ?? null,
       get length() {
         return keys().length;
       },
@@ -282,16 +320,16 @@
     return new Proxy(api, {
       get: (t, p) => (typeof p === 'symbol' || p in t ? Reflect.get(t, p) : (get(p) ?? undefined)),
       set: (t, p, v) => (typeof p === 'symbol' || p in t ? Reflect.set(t, p, v) : (set(p, v), true)),
-      deleteProperty: (t, p) => (del(p), true),
-      has: (t, p) => p in t || get(p) !== null,
+      deleteProperty: (t, p) => (del(/** @type {string} */ (p)), true),
+      has: (t, p) => p in t || get(/** @type {string} */ (p)) !== null,
       ownKeys: () => keys(),
-      getOwnPropertyDescriptor: (t, p) => (get(p) === null ? undefined : { value: get(p), enumerable: true, configurable: true, writable: true }),
+      getOwnPropertyDescriptor: (t, p) => (get(/** @type {string} */ (p)) === null ? undefined : { value: get(/** @type {string} */ (p)), enumerable: true, configurable: true, writable: true }),
     });
   }
-  for (const [name, prefix] of [
+  for (const [name, prefix] of /** @type {['localStorage' | 'sessionStorage', string][]} */ ([
     ['localStorage', 'localStorage/'],
     ['sessionStorage', ''],
-  ]) {
+  ])) {
     try {
       void window[name];
     } catch {
@@ -304,74 +342,78 @@
     Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => b.toString(36).padStart(2, '0'))
       .join('')
       .slice(0, 20);
+  /** @param {string} key @param {string} id */
   const docSnap = (key, id) => {
     const v = data.get(key);
     return { id, exists: v !== undefined, data: () => clone(v) };
   };
+  /** @param {string} name */
   function collection(name) {
     const pre = `db/${name}/`;
     const query = () => {
       const docs = [...data.keys()].filter((k) => k.startsWith(pre)).map((k) => docSnap(k, k.slice(pre.length)));
-      return { docs, size: docs.length, empty: !docs.length, forEach: (f) => docs.forEach(f) };
+      return { docs, size: docs.length, empty: !docs.length, forEach: (/** @type {(doc: (typeof docs)[number]) => void} */ f) => docs.forEach(f) };
     };
+    /** @param {string | number} [id] */
     const doc = (id = randomId()) => {
       const key = pre + id;
       return {
         id: String(id),
         get: async () => docSnap(key, String(id)),
-        set: async (v, opts) => void (await write(key, opts?.merge ? { ...data.get(key), ...v } : v)),
-        update: async (patch) => void (await write(key, { ...data.get(key), ...patch })),
+        /** @param {unknown} v @param {{ merge?: boolean }} [opts] */
+        set: async (v, opts) => void (await write(key, opts?.merge ? { .../** @type {Record<string, unknown>} */ (data.get(key)), .../** @type {Record<string, unknown>} */ (v) } : v)),
+        update: async (/** @type {Record<string, unknown>} */ patch) => void (await write(key, { .../** @type {Record<string, unknown>} */ (data.get(key)), ...patch })),
         delete: async () => void (await write(key, undefined)),
-        onSnapshot: (fn) => watch(key, () => fn(docSnap(key, String(id)))),
+        onSnapshot: (/** @type {(snap: ReturnType<typeof docSnap>) => void} */ fn) => watch(key, () => fn(docSnap(key, String(id)))),
       };
     };
     return {
       id: String(name),
       doc,
-      add: async (v) => {
+      add: async (/** @type {unknown} */ v) => {
         const d = doc();
         await d.set(v);
         return d;
       },
       get: async () => query(),
-      onSnapshot: (fn) => watch(pre, () => fn(query()), true),
+      onSnapshot: (/** @type {(snap: ReturnType<typeof query>) => void} */ fn) => watch(pre, () => fn(query()), true),
     };
   }
   const db = { collection };
-  if (window.claude === undefined) {
-    window.claude = {
+  if (/** @type {PageWindow} */ (window).claude === undefined) {
+    /** @type {PageWindow} */ (window).claude = {
       // Only the database: a page reading the scheme's files or calling tools is past what a page should do.
-      use: async (what) => (what === 'db' && (await ready) ? db : null),
+      use: async (/** @type {string} */ what) => (what === 'db' && (await ready) ? db : null),
       complete: () => Promise.reject(new Error('window.claude.complete is not available in Citadel')),
     };
   }
 
   // claude.ai's persistent storage: `storage/<key>`. Everything here is shared, so `shared` is always true.
   const ST = 'storage/';
-  if (window.storage === undefined) {
-    window.storage = {
-      get: async (key) => (data.has(ST + key) ? { key, value: clone(data.get(ST + key)), shared: true } : null),
-      set: async (key, value) => (await write(ST + key, value), { key, value, shared: true }),
-      delete: async (key) => (await write(ST + key, undefined), { key, deleted: true, shared: true }),
+  if (/** @type {PageWindow} */ (window).storage === undefined) {
+    /** @type {PageWindow} */ (window).storage = {
+      get: async (/** @type {string} */ key) => (data.has(ST + key) ? { key, value: clone(data.get(ST + key)), shared: true } : null),
+      set: async (/** @type {string} */ key, /** @type {unknown} */ value) => (await write(ST + key, value), { key, value, shared: true }),
+      delete: async (/** @type {string} */ key) => (await write(ST + key, undefined), { key, deleted: true, shared: true }),
       list: async (prefix = '') => ({ keys: [...data.keys()].filter((k) => k.startsWith(ST + prefix)).map((k) => k.slice(ST.length)), prefix, shared: true }),
     };
   }
 
-  window.citadel = {
+  /** @type {PageWindow} */ (window).citadel = {
     /** Resolves true once the viewer answers, false when the page is open on its own. */
     ready,
     info: async () => ((await ready) ? { ...info } : null),
     storage: {
-      get: async (key) => clone(data.get(key)) ?? null,
-      set: (key, value) => write(String(key), value),
-      delete: (key) => write(String(key), undefined),
+      get: async (/** @type {string} */ key) => clone(data.get(key)) ?? null,
+      set: (/** @type {unknown} */ key, /** @type {unknown} */ value) => write(String(key), value),
+      delete: (/** @type {unknown} */ key) => write(String(key), undefined),
       list: async (prefix = '') => [...data.keys()].filter((k) => k.startsWith(prefix)),
-      watch: (fn) => watch('', () => fn(), true),
+      watch: (/** @type {() => void} */ fn) => watch('', () => fn(), true),
     },
     /** 'saved', 'saving', 'retrying' (Citadel is down or restarting, and it is sent again until it lands) or 'failed' (refused, and not sent again). */
     saveState: () => saveState,
     /** Call `fn(state, why)` now and on each change of saveState (`why`: a 'failed' one's reason); returns the unwatch. */
-    watchSaves: (fn) => {
+    watchSaves: (/** @type {(state: string, why?: string) => void} */ fn) => {
       saveWatchers.add(fn);
       fn(saveState, saveState === 'failed' ? refusedWhy() : undefined);
       return () => saveWatchers.delete(fn);
@@ -382,7 +424,7 @@
      * In Citadel's viewer a sent page closes, showing the chat; `keepOpen: true` leaves it open (a page that sends
      * several times on purpose).
      */
-    send: async (text, { images, keepOpen, items } = {}) => {
+    send: async (/** @type {unknown} */ text, /** @type {{ images?: unknown[], keepOpen?: boolean, items?: unknown[] }} */ { images, keepOpen, items } = {}) => {
       // A click in a tab never reaches the viewer, so the page checks it here too: a page never sends by itself.
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (!(await ready)) throw new Error(NO_VIEWER);
@@ -398,7 +440,7 @@
       // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.
       setTimeout(() => {
         const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);
-        for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.nodeValue.trim().startsWith('In the comment box')) n.nodeValue = `Sent to ${r.to}.`;
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/** @type {string} */ (n.nodeValue).trim().startsWith('In the comment box')) n.nodeValue = `Sent to ${r.to}.`;
       });
       return r;
     },
@@ -407,7 +449,7 @@
      * null when closed unchanged, { marked: false } when every mark was taken off, or { marked: true, mediaType,
      * data } (base64), ready for send's images. Only in Citadel's viewer: info().draw says whether it can.
      */
-    draw: async (src) => {
+    draw: async (/** @type {unknown} */ src) => {
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.draw works only from a click or key press');
       if (!(await ready)) throw new Error(NO_VIEWER);
       // Drawing takes as long as it takes: an hour before the page gives up on an answer.
@@ -417,11 +459,11 @@
 
   // A link to another site would load inside this frame, where Citadel can't show it: open it in a tab.
   addEventListener('click', (e) => {
-    const a = e.target?.closest?.('a[href]');
+    const a = /** @type {Element | null} */ (e.target)?.closest?.('a[href]');
     if (!a || e.defaultPrevented || e.button !== 0 || !['', '_self', '_top', '_parent'].includes(a.getAttribute('target') ?? '')) return;
     let url;
     try {
-      url = new URL(a.getAttribute('href'), document.baseURI);
+      url = new URL(/** @type {string} */ (a.getAttribute('href')), document.baseURI);
     } catch {
       return;
     }

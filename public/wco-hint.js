@@ -3,17 +3,29 @@
 // goes for good when it's closed or the title bar is hidden.
 import { h } from './base.js';
 
+/**
+ * navigator.windowControlsOverlay and navigator.userAgentData, which Chromium has and the DOM types don't.
+ * @typedef {{ visible: boolean, addEventListener: (type: string, listener: () => void) => void }} Overlay
+ * @typedef {Navigator & { windowControlsOverlay?: Overlay, userAgentData?: { mobile: boolean } }} ChromiumNavigator
+ */
+
 const KEY = 'cc-wco-hint';
 
 // A phone or tablet's installed app is standalone too and Chrome there may expose the overlay, but it has no title bar
 // to hide. userAgentData.mobile is the platform's own answer (Chromium, the only engine with the overlay, has it);
 // (pointer: fine) is the fallback, since a touch-first device's main pointer is coarse.
-const isDesktop = () => (navigator.userAgentData ? navigator.userAgentData.mobile === false : matchMedia('(pointer: fine)').matches);
+const isDesktop = () => (/** @type {ChromiumNavigator} */ (navigator).userAgentData ? /** @type {{ mobile: boolean }} */ (/** @type {ChromiumNavigator} */ (navigator).userAgentData).mobile === false : matchMedia('(pointer: fine)').matches);
 
 // wco: navigator.windowControlsOverlay. installed: a query for the app window, which an install from the address bar
 // turns on without a reload, hence the change listener.
-export function wcoHint(wco = navigator.windowControlsOverlay, installed = matchMedia('(display-mode: standalone)'), desktop = isDesktop) {
+/**
+ * @param {Overlay | undefined} [wco]
+ * @param {{ matches: boolean, addEventListener: (type: string, listener: () => void) => void }} [installed]
+ * @param {() => boolean} [desktop]
+ */
+export function wcoHint(wco = /** @type {ChromiumNavigator} */ (navigator).windowControlsOverlay, installed = matchMedia('(display-mode: standalone)'), desktop = isDesktop) {
   if (!wco) return;
+  /** @type {HTMLElement | null} */
   let note = null;
   const done = () => {
     note?.remove();

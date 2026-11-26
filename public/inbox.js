@@ -7,25 +7,40 @@ import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 
+/** @import { ChatEvent, InboxItem, ListedTicket, SchemeListed, Ticket, View } from './types.js' */
+/** @import { MinionLike, SeenHere } from './schemecounts.js' */
+/** What a row of the strip names its minion by: a whole minion, or the little the page knows of one. @typedef {Pick<Ticket, 'id' | 'project_id' | 'number' | 'kind' | 'title'>} RowTicket */
+
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
+/** @type {{ projectId: number | null, items: InboxItem[], timer: ReturnType<typeof setTimeout> | 0, countsTimer: ReturnType<typeof setTimeout> | 0 }} */
 const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
 // Items a person answered here whose answer the server's list hasn't dropped yet: left out of every count at the click (#1409).
+/** @type {Map<string, InboxItem>} */
 const answered = new Map(); // item key -> item
 // Each scheme's items as last fetched, so a scheme you switch to draws its strip (or none) in its first paint instead of popping it in after.
+/** @type {Map<number, InboxItem[]>} */
 const inboxSeen = new Map();
 
 // Another Taskmaster session of a split scheme (#919) included: the Overlord's cards count for everyone (#1400).
+/** @param {number} id */
 const ticketOf = (id) => itemTicket(view, id);
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
 // A mention (#1149) goes once you've opened its chat since it came.
-const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 })) || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
+/** @param {InboxItem} item */
+const faded = (item) => (item.kind === 'replies' && isSeen(/** @type {Pick<Ticket, 'id' | 'updated_at'>} */ (ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 }))) || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
 
-/** The newest mention of you in each minion's chat, as its row shows it (#1149). */
+/**
+ * The newest mention of you in each minion's chat, as its row shows it (#1149).
+ * @param {InboxItem[]} items
+ */
 export function mentionMap(items) {
+  /** @type {Map<number, { by: string, at: number }>} */
   const out = new Map();
-  for (const i of items) if (i.kind === 'mention' && !(out.get(i.ticketId)?.at > i.at)) out.set(i.ticketId, { by: i.card.by, at: i.at });
+  // A mention's card always names who wrote it (src/inbox.ts).
+  for (const i of items) if (i.kind === 'mention' && !((out.get(i.ticketId)?.at ?? -Infinity) > i.at)) out.set(i.ticketId, { by: /** @type {string} */ (/** @type {NonNullable<InboxItem['card']>} */ (i.card).by), at: i.at });
   return out;
 }
+/** @param {Map<number, { at: number }>} map */
 const mentionKeys = (map) =>
   [...map]
     .map(([id, m]) => `${id}:${m.at}`)
@@ -36,6 +51,8 @@ const mentionKeys = (map) =>
  * A card was answered here (#1409): the strip, the pill, the app badge and the minion's row chip drop it now, not
  * when the server's list arrives. Returns the undo for a refused answer. shortcut: a minion update already in flight
  * from before the answer can put the row's chip back for a moment; the server's list settles it.
+ * @param {number} ticketId
+ * @param {number | string | ((item: InboxItem) => boolean)} which
  */
 export function answerNow(ticketId, which) {
   const hit = answeredItems(inbox.items, ticketId, which);
@@ -53,12 +70,15 @@ export function answerNow(ticketId, which) {
   };
 }
 
-/** A minion update from the stream, before the page keeps it: what its person answered here and the server hasn't dropped yet stays off its row. */
+/**
+ * A minion update from the stream, before the page keeps it: what its person answered here and the server hasn't dropped yet stays off its row.
+ * @param {MinionLike | undefined} ticket
+ */
 export function holdAnswered(ticket) {
   const mine = [...answered.values()].filter((i) => i.ticketId === ticket?.id);
   if (!mine.length) return;
-  if (ticket.open_cards) ticket.open_cards = withoutCards(ticket.open_cards, mine);
-  if (mine.some((i) => i.kind === 'replies')) ticket.replies = [];
+  if (/** @type {MinionLike} */ (ticket).open_cards) /** @type {MinionLike} */ (ticket).open_cards = withoutCards(/** @type {NonNullable<MinionLike['open_cards']>} */ (/** @type {MinionLike} */ (ticket).open_cards), mine);
+  if (mine.some((i) => i.kind === 'replies')) /** @type {MinionLike} */ (ticket).replies = [];
 }
 
 /** Fetch the scheme's items again, then redraw the strip. */
@@ -77,7 +97,11 @@ export async function refreshInbox() {
 let fetchSeq = 0;
 let drawnSeq = 0;
 
-/** Draw a scheme's items as fetched: by refreshInbox, or by the scheme's open, which fetched them just now (project.js). */
+/**
+ * Draw a scheme's items as fetched: by refreshInbox, or by the scheme's open, which fetched them just now (project.js).
+ * @param {number} projectId
+ * @param {InboxItem[] | null} items
+ */
 export function takeItems(projectId, items) {
   if (!items || view?.kind !== 'project' || view.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
@@ -91,10 +115,15 @@ export function takeItems(projectId, items) {
 /**
  * Whether a scheme's first paint waits for its items (#1533): a scheme seen before draws its last, and a shut strip is one line
  * whatever the items are, so it holds its place while they come. Only an opened strip, whose rows push the list down, waits.
+ * @param {number} projectId
  */
 export const stripWaits = (projectId) => !inboxSeen.has(projectId) && stripOpen();
 
-/** A scheme's items, kept for its next first paint; null when the fetch failed. */
+/**
+ * A scheme's items, kept for its next first paint; null when the fetch failed.
+ * @param {number} projectId
+ * @returns {Promise<InboxItem[] | null>}
+ */
 export async function fetchInbox(projectId) {
   const { items } = await api(`api/projects/${projectId}/inbox`).catch(() => ({ items: null }));
   if (items) inboxSeen.set(projectId, items);
@@ -149,6 +178,7 @@ export const countsIfOwed = () => countsOwed && countsSoon();
 const others = otherSchemes(countsSoon);
 
 /** A chat event from the stream: refetch when it opens or settles a card, in this scheme or another. */
+/** @param {ChatEvent} event */
 export function inboxEvent(event) {
   if (view?.kind !== 'project') return;
   // Lazily, like the sidebar: home.js pulls in the app shell (core, sidebar), which a node test can't load.
@@ -159,30 +189,40 @@ export function inboxEvent(event) {
   } else if (cardEvent(event)) refreshSoon();
 }
 
-/** One of this scheme's minions changed: refetch when that can move the count; a turn starting or ending only redraws the spinner. */
+/**
+ * One of this scheme's minions changed: refetch when that can move the count; a turn starting or ending only redraws the spinner.
+ * @param {Ticket | undefined} before
+ * @param {Ticket} after
+ */
 export function inboxTicket(before, after) {
   if (countMoved(before, after)) refreshSoon();
   else if (turnMoved(before, after)) {
     renderInbox();
-    if (view.home) import('./home.js').then((m) => m.refreshHomeSoon()); // Home's Working now
+    if (/** @type {View} */ (view).home) import('./home.js').then((m) => m.refreshHomeSoon()); // Home's Working now
   }
 }
 
 /** The counts came afresh with the page (or after the stream dropped): news the watcher missed meanwhile mustn't hide the next change. */
 export const forgetOtherSchemes = () => others.forget();
 
-/** Another scheme's minion changed (#188). */
+/**
+ * Another scheme's minion changed (#188).
+ * @param {Ticket} ticket
+ */
 export function inboxOtherTicket(ticket) {
   if (view?.kind === 'project') others.ticket(ticket);
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
+/** @type {Record<string, string>} */
 const ASKS = { approval: '✋ Approve', question: '❓ Question', notice: '🔔 Notice', doc: '🗳️ Picks', secret: '🔑 Secret', plan: '📋 Plan', replies: '💬 Reply', mention: '@ Mention', quiet: '💤 Quiet', loop: '⏸ Loop guard' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
+/** @type {HTMLElement | null} */
 let strip = null;
 // The opened list of rows, kept across redraws.
+/** @type {HTMLElement | null} */
 let list = null;
 
 /** The strip for the minions panel (showProject puts it above the Taskmaster's row). */
@@ -192,6 +232,7 @@ export function inboxStrip() {
 }
 
 /** A scheme's pill for the scheme lists: the spinner while a turn runs, then the Needs-you count (schemePill says what shows); hidden when neither. */
+/** @param {Pick<SchemeListed, 'id' | 'inbox' | 'running' | 'working' | 'shipping'> & { fresh?: boolean }} p */
 export function schemeCount(p) {
   // No words on the pill (Cara, 2026-11-17): its reason is the popover, hover or a long press, as a tap opens the scheme (#906).
   pillTips ??= mountTips(document.body, { selector: '.scheme-count[data-tip]', acts: '.scheme-count' });
@@ -212,21 +253,29 @@ export function schemeCount(p) {
   );
 }
 
+/** @type {ReturnType<typeof mountTips> | null} */
 let pillTips = null;
 
+/** @type {{ on: boolean | null }} */
 const badge = { on: null };
 /** The installed app's icon badge follows the purple pills (#980). */
 export const updateBadge = () => syncBadge(wantsBadge(view?.projects, view?.projectId, seenHere), badge);
 
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
+/** @type {Map<number, string>} */
 const seenSent = new Map();
 // The open scheme's waiting items you've seen (seenInScheme), the chat you were on at the last redraw, and whether anything's new.
 // pill: the open scheme's count and spinner as its strip has them, which every draw of its pill uses (openPill, #1400).
+/** @type {SeenHere & { chatId: number | null, keys: Set<string> }} */
 const seenHere = { projectId: null, chatId: null, keys: new Set(), fresh: false, pill: null };
 
 /** Record the items you've seen waiting in the scheme you're in on the server when they change (#539), behind the page. */
+/**
+ * @param {number} projectId
+ * @param {string[]} keys
+ */
 function markItemsSeen(projectId, keys) {
-  const p = view.projects?.find((q) => q.id === projectId);
+  const p = /** @type {View} */ (view).projects?.find((q) => q.id === projectId);
   if (p) p.fresh = seenHere.fresh;
   const sig = [...keys].sort().join('\n');
   if (!p || seenSent.get(projectId) === sig) return;
@@ -240,6 +289,7 @@ function markItemsSeen(projectId, keys) {
 /**
  * Another tab or device of yours saw what waits in a scheme (#539): fetch the counts again so the server says
  * whether anything is still new, since the other tab may have seen less than this one shows.
+ * @param {number} projectId
  */
 export function onSeenItems(projectId) {
   if (projectId === view?.projectId) return;
@@ -267,7 +317,7 @@ export function renderInbox() {
   const count = minionCount(waiting);
   const shown = minionCount(all);
   // A scheme you hid (#226) keeps its strip but no pill.
-  const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
+  const hidden = view.projects?.find((p) => p.id === /** @type {View} */ (view).projectId)?.hidden;
   // Every Taskmaster session's turn spins it, as the server's pill does: a split scheme's Overlord too (#919).
   const running = !hidden && [view.coordinator, ...view.tickets.values(), ...(view.taskmasters ?? []).map((tm) => itemTicket(view, tm.id))].some(isWorking);
   const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
@@ -291,10 +341,11 @@ export function renderInbox() {
   const open = stripOpen();
   // A minion's items share its row, in the order of its most urgent one. A card addressed to you is a row like the rest,
   // linking to it in its chat (Cara, 2026-11-14: "It should just link to the chat that has the card like it used to").
+  /** @type {Map<number, InboxItem[]>} */
   const rows = new Map();
   for (const i of items) {
     if (!rows.has(i.ticketId)) rows.set(i.ticketId, []);
-    rows.get(i.ticketId).push(i);
+    /** @type {InboxItem[]} */ (rows.get(i.ticketId)).push(i);
   }
   const toggle = h(
     'button',
@@ -343,24 +394,27 @@ function holdStrip() {
 /**
  * A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited.
  */
+/** @type {ReturnType<typeof mountTips> | null} */
 let inboxTips = null;
+/** @param {InboxItem[]} items */
 export function inboxRow(items) {
   const { from } = items[0];
   // A minion the page hasn't heard of yet still gets a row, by its id, until its first update names it.
-  const t = ticketOf(items[0].ticketId) ?? (from ? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title } : { id: items[0].ticketId, project_id: view.projectId, number: null, kind: 'ticket', title: '' });
+  const t = /** @type {RowTicket} */ (ticketOf(items[0].ticketId)) ?? (from ? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title } : { id: items[0].ticketId, project_id: /** @type {View} */ (view).projectId, number: null, kind: 'ticket', title: '' });
+  /** @type {Map<string, { n: number, why: string, at: number }>} */
   const asks = new Map();
   for (const i of items) {
-    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : (ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind);
+    const ask = i.kind === 'spend' ? `💸 Over $${/** @type {NonNullable<InboxItem['card']>} */ (i.card).stage}` : (ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind);
     // The chip's popover says why it's here (#906): the newest of its kind.
     const was = asks.get(ask);
-    asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, t), at: Math.max(was?.at ?? 0, i.at) });
+    asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, /** @type {ListedTicket} */ (t)), at: Math.max(was?.at ?? 0, i.at) });
   }
   // A tap on a chip opens its why, not the minion (tip.js tapOpens).
   inboxTips ??= mountTips(document.body, { selector: '.inbox-row .chip[data-tip]', tapOpens: true });
   const seen = items.every(faded);
   const target = rowTarget(items);
   // Another person's Taskmaster (#919) shows only in Everyone: its card addressed to you opens there (#1400).
-  const everyone = view.taskmasters?.some((x) => x.id === t.id && x.person_id != null && x.id !== view.coordinator?.id);
+  const everyone = /** @type {View} */ (view).taskmasters?.some((x) => x.id === t.id && x.person_id != null && x.id !== /** @type {View} */ (view).coordinator?.id);
   const open = everyone
     ? () => {
         try {
@@ -370,7 +424,7 @@ export function inboxRow(items) {
     : null;
   return h(
     'a',
-    { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t), onclick: open },
+    { class: `inbox-row${seen ? ' seen' : ''}${/** @type {View} */ (view).id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t), onclick: open },
     h('span', { class: 'name' }, from ? `${from.scheme} ` : '', isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h(
       'span',

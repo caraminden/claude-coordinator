@@ -897,6 +897,7 @@ export class Runner {
       cardLinks: (t) => this.cardLinks(t),
       ciHold: (id) => this.ciHold?.(id),
       probeHold: (id) => this.probeHold?.(id),
+      armed: (id, claim, fallback) => this.armed?.(id, claim, fallback) ?? false,
     });
     this.promptHolds = new Holds(store);
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
@@ -1396,6 +1397,7 @@ export class Runner {
   /** The list's line for a minion whose own CI run is held off the desktop (CiHold.noteFor); set by server.ts. */
   heldLine?: (ticketId: number) => string | null;
 
+  armed?: (ticketId: number, claim: string, fallback: (why: string) => void) => boolean; // a claim passed: ship its armed hand-off (#2046, fireArmed); set in server.ts
   /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
   probeHold?: (ticketId: number) => boolean;
 
@@ -2537,7 +2539,7 @@ export class Runner {
               // and forget its size, or the idle check would ask again each minute.
               this.store.deleteSetting(freshKey(ticketId));
               this.store.deleteSetting(contextKey(ticketId));
-              this.emit(ticketId, 'note', { text: mark.stopped ? `The handoff turn was stopped, so the fresh start is off: the ${roleWord(ticket)} keeps its session.` : 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
+              this.emit(ticketId, 'note', { text: mark.stopped ? `The handoff turn was stopped, so the fresh start is off: the ${roleWord(ticket)} keeps its session.` : `The fresh start could not run a turn, so the ${roleWord(ticket)} keeps its session.` });
               return rest();
             });
         }),
@@ -3043,7 +3045,7 @@ export class Runner {
           : promptMessage([
               ...(context ? [{ author: 'System', text: context, images: [] }] : []),
               ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
-              ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []),
+              ...(handoff ? [{ author: 'System', text: freshStartText(await this.fresh.opening(ticket, handoff)), images: [] }] : []),
               ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
               ...handBack,
               ...cancelledLine,
@@ -3115,8 +3117,8 @@ export class Runner {
       if (!resumed) this.statuses.delete(ticket.id);
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });
       // A turn that only carries on a cut-off one wakes nobody: a seal set during that one stays (#1958), as it would at its end.
-      // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
-      else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'parked' && carriesOn) && !(ticket.state === 'outside' && this.serverWork(ticket.id, true)))
+      // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends. A lead's shift change (#2093) keeps its state.
+      else if (ticket.state && ticket.state !== 'pending-deploy' && !(step && this.store.getCabal(ticket.id)) && !(ticket.state === 'parked' && carriesOn) && !(ticket.state === 'outside' && this.serverWork(ticket.id, true)))
         this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
@@ -3124,7 +3126,7 @@ export class Runner {
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
       else if (ticket.kind === 'coordinator' && ticket.note) this.store.updateTicket(ticket.id, { note: null });
       // One-tap replies answer the turn that offered them; a new turn makes them stale.
-      if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
+      if (ticket.replies && !(step && this.store.getCabal(ticket.id))) this.store.updateTicket(ticket.id, { replies: null });
     }
     const turn: TurnState = {
       ...(Object.keys(retries).length ? { retries } : {}),
@@ -3415,6 +3417,8 @@ export class Runner {
         media: !!this.mediaFor?.(person),
         // A Codex turn has image_gen itself; a host turn reaches Codex only through the person's Codex container.
         codexImages: !codex && ticket.kind !== 'coordinator' && !this.codexWhy(person) && (!place.host || !!reviewAt),
+        // A minion on a cabal board or leading one (#2090) is offered cabal_board; no other turn pays for its text.
+        cabal: ticket.kind !== 'coordinator' && this.store.inCabal(ticket.id),
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         jobMachines,
@@ -4098,7 +4102,7 @@ export class Runner {
     if (ev.type === 'result') {
       const status = this.statuses.get(ticketId);
       this.statuses.delete(ticketId);
-      if (status && !ev.is_error) this.onStatusTrailer(ticketId, status);
+      if (status && !ev.is_error && !(this.store.getCabal(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId))?.fresh)) this.onStatusTrailer(ticketId, status);
       if (status) this.saveTurn(ticketId, { status: undefined });
     }
     // Likewise the model: remembered from turns that ran without one chosen.

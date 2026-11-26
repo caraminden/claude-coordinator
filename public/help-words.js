@@ -15,7 +15,10 @@ export const WORDS = {
   contraption: { word: 'Contraption', def: 'A contraption is a small app that runs inside Citadel, with its own page and often its own agent.' },
 };
 
-/** A label that names a Citadel word. No tip, no underline (Josh, 2026-11-20: "not worth the annoyance"); the help page keeps the definitions. */
+/** A label that names a Citadel word. No tip, no underline (Josh, 2026-11-20: "not worth the annoyance"); the help page keeps the definitions.
+ * @param {string} _key
+ * @param {import('./base.js').Child} children
+ */
 export function gloss(_key, children) {
   return h('span', {}, children);
 }

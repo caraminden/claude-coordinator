@@ -1,31 +1,75 @@
 // A role's Set up and Test on its card (Build 7 M4, src/role-setup.ts): the buttons, each step's line as it runs, the
 // one administrator command a step needs, and the green tick with its report. The run comes back in the role's
 // setup.run on the machines broadcast; a press shows at once, with its request behind (ui/optimistic.js).
-import { account, ago, api, h, pacificStamp, view } from './base.js';
+/** @import { MachineRole, MachineRow, SetupRun } from './types.js' */
+import { account, ago, api, h, openView, pacificStamp } from './base.js';
 import { toneChip } from './look.js';
+import { machineSetupRunnerAgent, machineSetupRunnerAgentLinux } from './machine-setup.js';
 import { adminCommand, lastRun, SETUP_ROLES } from './role-setup.js';
 import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
+/** @type {Record<SetupRun['steps'][number]['state'], string>} */
 const MARK = { waiting: '○', running: '', ok: '✓', fail: '✕' };
+/** @type {Record<SetupRun['steps'][number]['state'], string>} */
 const STATE_WORD = { waiting: 'not run yet', running: 'running', ok: 'passed', fail: 'failed' };
+/** @param {string | null} tag @param {string} command */
 const shell = (tag, command) => markdownElement(`\`\`\`${tag}\n${command}\n\`\`\``);
-/** What Set up does there, in one line, before it is pressed. */
+/** What Set up does there, in one line, before it is pressed. @type {Record<string, string>} */
 const ABOUT = {
   tools: 'Checks each MCP server and folder ticked here answers, and lists their tools.',
   screen: 'Turns screenshots on in its machine-agent.json, then takes a screenshot and opens and closes Notepad.',
   turns: 'Installs the worker (a WSL distro of its own on Windows), then runs its self-test.',
   gpu: 'Checks the GPU, podman and NVIDIA’s container toolkit, turns GPU jobs on, then runs nvidia-smi in a container.',
+  ci: 'Shows the command that installs the CI runner agent (as administrator; on Windows, the Linux one in WSL too), waits for it to join this row, then tests it. Each scheme ticked here gets its runner here by itself when its CI first needs one.',
 };
 
-/** Who presses it: its owner, or an admin on a shared machine (the server's rule). */
+/** The row's token and address for the runner agent's install, by machine id: asked once a Set up shows it. @type {Map<number, { token?: string, url?: string, failed?: string }>} */
+const installs = new Map();
+
+/** CI's Set up: the runner agent's install lines with this row's token (one per OS this PC runs CI for), until it connects. @param {MachineRow} m @param {() => void} redraw */
+function runnerInstall(m, redraw) {
+  const got = installs.get(m.id);
+  if (!got) {
+    installs.set(m.id, {});
+    api(`api/machines/${m.id}/token`)
+      .then((/** @type {{ token: string, agent_url: string }} */ r) => installs.set(m.id, { token: r.token, url: r.agent_url }))
+      .catch((/** @type {Error} */ err) => installs.set(m.id, { failed: err.message }))
+      .finally(redraw);
+  }
+  if (got?.failed) return h('p', { class: 'cui-notice', 'data-tone': 'danger' }, `Couldn't get the install command: ${got.failed} `, h('button', { type: 'button', class: 'secondary small', onclick: () => (installs.delete(m.id), redraw()) }, 'Try again'));
+  if (!got?.token || !got.url) return h('p', { class: 'muted small' }, 'Getting the install command…');
+  const { token, url } = got;
+  /** @param {string} tag @param {string} line */
+  const block = (tag, line) => markdownElement(`\`\`\`${tag}\n${line}\n\`\`\``);
+  const linux = m.report?.os === 'linux';
+  return h(
+    'div',
+    { class: 'role-setup-admin' },
+    linux ? null : [h('p', { class: 'small' }, '1. Windows jobs: on that PC, open PowerShell as administrator and paste this.'), block('powershell-admin', machineSetupRunnerAgent(url, token))],
+    linux
+      ? null
+      : [
+          h('p', { class: 'small' }, '2. Linux jobs too (optional): their runners run in a WSL distro of their own. In a normal PowerShell, make it once and open a root shell in it (the CI runner guide\'s "Linux runners in WSL" has more):'),
+          block('powershell', 'wsl --install Ubuntu-24.04 --name citadel-ci\nwsl -d citadel-ci -u root'),
+        ],
+    h('p', { class: 'small' }, linux ? 'On that PC, in a root shell (sudo -i), paste this.' : '3. In that root shell, paste this.'),
+    block(linux ? 'bash' : 'wsl', machineSetupRunnerAgentLinux(url, token)),
+  );
+}
+
+/** Who presses it: its owner, or an admin on a shared machine (the server's rule). @param {MachineRow} m */
 const presses = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
-const current = (m) => view.machines?.find((x) => x.id === m.id) ?? m;
+/** @param {MachineRow} m @returns {MachineRow} */
+const current = (m) => /** @type {MachineRow[] | undefined} */ (openView().machines)?.find((x) => x.id === m.id) ?? m;
+/** @param {MachineRow} m @param {string} role */
 const runOf = (m, role) => lastRun(current(m).roles?.find((r) => r.role === role));
 
+/** @param {MachineRow} m @param {MachineRole} r @param {'setup' | 'test'} kind @param {() => void} redraw */
 function press(m, r, kind, redraw) {
   const role = current(m).roles?.find((x) => x.role === r.role);
   const was = role?.setup ?? null;
+  /** @param {MachineRole['setup']} setup */
   const set = (setup) => {
     const now = current(m).roles?.find((x) => x.role === r.role);
     if (now) now.setup = setup;
@@ -33,13 +77,14 @@ function press(m, r, kind, redraw) {
   };
   optimistic({
     key: `role-setup:${m.id}`,
-    apply: () => set({ ...(was ?? {}), run: { id: '', role: r.role, kind, at: Date.now(), by: account?.name ?? '', done: null, ok: null, why: null, admin: null, worker_install: false, steps: [{ text: 'Starting…', state: 'running' }], report: null, shot: null } }),
+    apply: () => set({ ...(was ?? {}), run: { id: '', role: /** @type {SetupRun['role']} */ (r.role), kind, at: Date.now(), by: account?.name ?? '', done: null, ok: null, why: null, admin: null, worker_install: false, steps: [{ text: 'Starting…', state: 'running' }], report: null, shot: null } }),
     send: () => api(`api/machines/${m.id}/roles/${r.role}/setup`, { method: 'POST', body: { kind } }),
     undo: () => set(was),
     label: `${kind === 'test' ? 'test' : 'set up'} ${r.name} on ${m.name}`,
   });
 }
 
+/** @param {SetupRun | null} run */
 function chip(run) {
   // Before any run the role's own header chip says where it stands; this part adds only its button and what it does.
   if (!run) return null;
@@ -48,6 +93,7 @@ function chip(run) {
 }
 
 /** The administrator command a step needs, built from fixed words only (role-setup.js), with where it runs. */
+/** @param {SetupRun} run */
 function adminPart(run) {
   const a = adminCommand(run.admin);
   if (!a) return null;
@@ -60,7 +106,11 @@ function adminPart(run) {
   );
 }
 
-/** Set up and Test on a role's card, and its last run; null for a role this release doesn't set up (CI's is #2064's). */
+/** Set up and Test on a role's card, and its last run; null for a role this release doesn't set up.
+ * @param {MachineRow} m
+ * @param {MachineRole} r
+ * @param {() => void} redraw
+ */
 export function setupPart(m, r, redraw) {
   if (!SETUP_ROLES.includes(r.role)) return null;
   const run = runOf(m, r.role) ?? lastRun(r);
@@ -68,8 +118,10 @@ export function setupPart(m, r, redraw) {
   const going = !!run && !run.done;
   const turnsHere = r.role === 'turns' && !!m.worker?.host;
   // Minion turns' own self-test (T5's) is on the card already once its worker is there: Set up is for a PC without one.
-  const offline = r.role !== 'turns' && !m.online;
+  // CI's runner agent is a program of its own: its Set up installs it with the PC's agent off or absent.
+  const offline = r.role !== 'turns' && r.role !== 'ci' && !m.online;
   const why = going ? 'Running now' : offline ? `${m.name} is offline` : null;
+  /** @param {'setup' | 'test'} kind @param {boolean} primary */
   const button = (kind, primary) =>
     h(
       'button',
@@ -93,6 +145,7 @@ export function setupPart(m, r, redraw) {
           run.steps.map((s) => h('li', { 'data-state': s.state }, h('span', { class: 'worker-check-mark', role: 'img', 'aria-label': STATE_WORD[s.state] }, s.state === 'running' ? h('span', { class: 'cui-spin' }) : MARK[s.state]), h('span', { class: 'worker-check-name' }, s.text))),
         )
       : null,
+    r.role === 'ci' && can && run && !run.done && run.worker_install ? runnerInstall(m, redraw) : null,
     run?.ok && run.report ? h('p', { class: 'small' }, run.report) : null,
     run?.shot && r.role === 'screen'
       ? h('a', { href: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, target: '_blank', rel: 'noopener', class: 'role-setup-shot', title: 'Open the screenshot full size' }, h('img', { src: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, alt: `The screenshot ${m.name}'s test took`, loading: 'lazy' }))

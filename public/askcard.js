@@ -6,6 +6,7 @@
  * The header line: kind, contraption, person and the item it's about, if any.
  * `ask` is `{ kind: 'bug'|'feature', contraption, person, member, item?, summary }`.
  */
+/** @param {{ kind: string, contraption: string, person: string, member?: boolean, item?: string, summary?: string }} ask */
 export function askHeader(ask) {
   return [ask.kind === 'bug' ? 'Bug report' : 'Feature ask', ask.contraption, ask.member ? ask.person : `${ask.person}, not a member`, ask.item ? `about “${ask.item}”` : ''].filter(Boolean).join(' · ');
 }

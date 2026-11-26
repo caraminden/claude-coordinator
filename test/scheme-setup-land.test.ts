@@ -758,8 +758,12 @@ test('a land-queue/.seq that holds no number is named, and the next ticket still
 test("--check reads main's .gitattributes, so both appending to a union file is no conflict", () => {
   const r = setup();
   r.commit(r.wt, 'log.md', 'base\nmine\n');
+  for (const d of [r.wt, r.main]) mkdirSync(join(d, 'docs'));
+  r.commit(r.wt, 'docs/notes.md', 'base\nmine\n');
   r.commit(r.main, '.gitattributes', 'log.md merge=union\n');
   r.commit(r.main, 'log.md', 'base\ntheirs\n');
+  r.commit(r.main, 'docs/.gitattributes', 'notes.md merge=union\n'); // a folder's own, as git reads it
+  r.commit(r.main, 'docs/notes.md', 'base\ntheirs\n');
   const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh'), '--check'], { cwd: r.wt, encoding: 'utf8', env });
   assert.equal(res.status, 0, res.stderr);
 });
@@ -789,7 +793,30 @@ test('a commit that lost its "#N:" title beside one that has it is refused by na
   const res = r.run();
   assert.equal(res.status, 1);
   assert.match(res.stderr, /lost its #N: title/);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'before the line (#1983)');
+  assert.match(res.stderr, /^land: smoke: a commit title is wrong, before the line \(\d+ s\), so nothing landed and nobody waited on it\./m, 'the wording landResult (src/land.ts) reads');
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
+  const late = r.run({ LAND_SMOKE: '0' }); // and at the front, for what the rebase did
+  assert.equal(late.status, 1);
+  assert.match(late.stderr, /^land: rebasing [^]*lost its #N: title/m);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+});
+
+test('the smoke check does not blame a title the rebase leaves out: one main has cherry-picked, or one land_under names (#1983)', () => {
+  for (const kind of ['cherry-picked', 'land_under']) {
+    const r = setup('true', {}, 'land_under() { [ ! -e "$UNDER" ] || cat "$UNDER"; }\n');
+    const under = join(r.dir, 'under');
+    commitAs(r, 'x.txt', 'no number in this title');
+    const x = git(r.wt, 'rev-parse', 'HEAD');
+    if (kind === 'cherry-picked') {
+      r.commit(r.main, 'm.txt', 'main moved');
+      git(r.main, 'cherry-pick', x);
+    } else writeFileSync(under, `${x}\n`);
+    commitAs(r, 'b.txt', '#1: mine');
+    const res = r.run({ UNDER: under });
+    assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
+    assert.equal(git(r.main, 'log', '-1', '--format=%s'), '#1: mine');
+  }
 });
 
 // #1626: in a scheme whose titles end in "(#N)", none starts "#N", so only an empty subject is a lost title.

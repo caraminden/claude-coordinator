@@ -44,7 +44,7 @@
 #    doesn't refuse; a file's id stands for every test in it. A check that timed out, or a CI workflow still running,
 #    is never waived. With no SMOKE_CMD (or LAND_SMOKE=0) fast mode is off: a land with no check at all takes the gate.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
-#    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
+#    main would conflict (git merge-tree), commit titles, then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
 #    CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the line too. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
 # 1. Rebases the branch onto the local main. A conflict stops here, unless MERGES has a rule for the file (ship-time
@@ -447,6 +447,13 @@ merge_driver() {
 if [ "${1:-}" = --merge ]; then
   [ $# = 6 ] || exit 2
   shift
+  # trial()'s merge-tree runs in a scratch folder (attrs_of): its files made whole, the hook runs from the repo's top and
+  # finds the repo as it does in the rebase.
+  if [ -n "${LAND_TOP:-}" ]; then
+    for p in 2 3 4; do [[ ${!p} == /* ]] || set -- "${@:1:p-1}" "$PWD/${!p}" "${@:p+1}"; done
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+    cd "$LAND_TOP" || exit 1
+  fi
   if merge_driver "$@"; then exit 0; else exit 1; fi
 fi
 # land_git <side> <git args>: git with the driver on (side as above). The worktree's own land.sh and land.local.sh
@@ -1202,12 +1209,29 @@ prep_say() {
   base=${under:-$(git merge-base "$1" "$pre")}
   say "prep: $branch will conflict with $Q_PREDNAME once $Q_PREDNAME ships; conflicted files: ${files:-none named}; record the fix against $1 from $base to $pre"
 }
+# <onto>: a scratch folder holding <onto>'s .gitattributes files (nested ones too), printed, for trial()'s merge-tree to
+# run in. git reads attributes from the worktree it runs in, then its index, and git before 2.40 ignores attr.tree, which
+# read the branch's there (#2071): so trial() runs it in this folder with an empty index, and every git reads <onto>'s
+# as the rebase onto it will. Removed after the trial.
+attrs_of() {
+  local d m o p
+  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") && d=$(cd "$d" && pwd -P) || return 1
+  # A symlink's text isn't read as attributes, so only plain files are copied.
+  while IFS=$'\t' read -r -d '' m p; do
+    read -r m _ o <<<"$m"
+    case $m:/$p in 1006??:*/.gitattributes) ;; *) continue ;; esac
+    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$o" >"$d/$p" || { rm -rf "$d"; return 1; }
+  done < <(git ls-tree -r -z "$1")
+  echo "$d"
+}
 # trial <onto> <commit>: git merge-tree's trial of that commit's rebase onto <onto> (from $under, with land_under). 1 on a
 # conflict, its files (comma-separated) in $mt_files; a git that can't tell (exit 2 and up) counts as clean.
 trial() {
-  local out rc=0
+  local out rc=0 at gd
   mt_files=''
-  out=$(land_git ours -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" "$2" 2>/dev/null) || rc=$?
+  gd=$(git rev-parse --absolute-git-dir) && at=$(attrs_of "$1") || return 0
+  out=$(top=$(git rev-parse --show-toplevel) && cd "$at" && LAND_TOP=$top GIT_INDEX_FILE=$at/.index land_git ours --git-dir="$gd" --work-tree="$at" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" "$2" 2>/dev/null) || rc=$?
+  rm -rf "$at"
   [ "$rc" = 1 ] || return 0
   mt_files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
   return 1
@@ -1269,6 +1293,8 @@ here=$(git rev-parse --show-toplevel)
 cd "$here"
 gitdir=$(git rev-parse --absolute-git-dir)
 branch=$(git branch --show-current)
+# A --full run's checks: the $BRANCH commit the build took in, to compare with in place of a newer last release (#2067).
+if [ "$mode" = full ]; then LAND_BUILD_BASE=$(git merge-base HEAD "refs/heads/$BRANCH") && export LAND_BUILD_BASE; fi
 [ -z "$verify" ] || branch=verify LAND_KNOWN_RED='' LAND_FAST='' # its scratch branch is land/verify; it judges, so nothing is known red
 if [ "$CONFLICT_PREP" = 1 ] && [ "$mode" = land ] && [ -z "$verify" ]; then
   rr=(-c rerere.enabled=true -c rerere.autoupdate=true -c rebase.updateRefs=false)
@@ -2597,6 +2623,11 @@ smoke() {
   local t0=$SECONDS out rc=0 passed=1
   say "smoke: checking $branch before it queues"
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+  # Commit titles, again on the rebased commit: here without the same patches on main, and land_under's (#1983); one the rebase would empty is named.
+  if [ "$mode" = land ] && ! out=$(titles "nothing landed" --cherry-pick --right-only "refs/heads/$BRANCH...$pre" ${under:+"^$under"} 2>&1); then
+    sed 's/^land: /land: smoke: /' <<<"$out. If $BRANCH already has that commit's change, git rebase $BRANCH drops it" >&2
+    refuse "smoke: a commit title is wrong, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+  fi
   early_plan
   # A SMOKE_CMD that is the early check's own command runs once, on the rebase.
   if [ -n "$SMOKE_CMD" ] && [ "$SMOKE_CMD" != "$early_cmd" ]; then

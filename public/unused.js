@@ -4,14 +4,18 @@ import { api, h, icon, view } from './base.js';
 import { settingsTabs, settingsTitle } from './settings.js';
 import { loadingLine } from './ui/state.js';
 
+/** One row of api/admin/usage (src/usage-ledger.ts unusedList). @typedef {{ kind: string, name: string, first: string, last: string, n: number, days: number, idle: boolean, never: boolean }} UsageItem */
+
+/** @type {Record<string, string>} */
 const KIND = { page: 'Page', route: 'Route group', tool: 'MCP tool', schedule: 'Schedule', setting: 'Setting changed', skill: 'Skill', grunt: 'Grunt type' };
 
+/** @param {string} t */
 const nw = (t) => t.replace(/-/g, '\u2011').replace(/ /g, '\u00a0'); // no break inside a date or a kind: the table's cells wrap whatever their style says
 
 export function unusedPage() {
   const slot = h('div', { class: 'where-slot loading' }, loadingLine('Loading…'));
   api('api/admin/usage')
-    .then(({ since, items }) => {
+    .then((/** @type {{ since: string | null, items: UsageItem[] }} */ { since, items }) => {
       slot.classList.remove('loading');
       const idle = items.filter((i) => i.idle).length;
       slot.replaceChildren(
@@ -50,7 +54,7 @@ export function unusedPage() {
     h(
       'div',
       { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {NonNullable<typeof view>} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'What nobody has used in 30 days, from the usage ledger: the first things to question.'),
     ),

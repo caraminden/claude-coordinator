@@ -1,9 +1,14 @@
 // Orders → Decisions (#1064): every dated, quoted decision, parsed live from where it is written (src/decisions.ts).
 // Read-only: each row links to its source, where editing stays. A reversed decision links to the one that replaced it,
 // and lists the copies still saying the old one, with a button that starts a minion to clean them up.
+/** @import { Child } from './base.js' */
 import { api, h, icon, view, pacificDate } from './base.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { toast } from './ui/status.js';
+
+/** @import { View } from './types.js' */
+/** @typedef {{ kind: string, label: string, file?: string | null, line?: number | null, href?: string | null }} Place */
+/** @typedef {{ id: string | number, rule: string, quote?: string, who: string, date: string | number, text: string, scope: string, places: Place[], reversed?: { by?: string | number, byText: string, href?: string, stale: Place[] } | null, reverses: (string | number)[] }} Decision */
 
 const SCOPES = [
   ['scheme', 'This scheme'],
@@ -11,29 +16,38 @@ const SCOPES = [
   ['all', 'All'],
 ];
 const day = pacificDate;
+/** @param {string} href */
 const external = (href) => /^https?:/.test(href);
 let scope = 'scheme';
 const openRows = new Set();
 const SCHEME_KINDS = ['scheme', 'repo', 'adr', 'memory', 'ideas'];
 /** In the picked tab: its own scope, or a copy written there (as inScope in src/decisions.ts). */
+/** @param {Decision} d */
 const shows = (d) => scope === 'all' || d.scope === scope || d.places.some((p) => (SCHEME_KINDS.includes(p.kind) ? 'scheme' : 'citadel') === scope);
 
 /** Where a decision is written, as a link to the place (a line on GitHub, an instructions or memory page). */
+/** @param {Place} p */
 function placeLink(p) {
   const text = `${p.label}${p.file && p.file !== p.label ? ` · ${p.file}` : ''}${p.line && p.kind !== 'citadel' && p.kind !== 'scheme' ? `:${p.line}` : ''}`;
   return p.href ? h('a', { href: p.href, ...(external(p.href) ? { target: '_blank', rel: 'noopener' } : {}) }, text) : h('span', {}, text);
 }
+/** @param {Decision} d */
 const sourceName = (d) => [...new Set(d.places.map((p) => (p.kind === 'adr' ? p.file?.split('/').pop()?.replace(/\.md$/, '') : p.kind === 'memory' ? 'Memory' : p.kind === 'kit' ? 'The kit' : p.label)))].join(' · ');
 
 /** The message that starts a chore minion to clean up a reversed decision's old copies. */
+/**
+ * @param {Decision} d
+ * @param {Decision | null | undefined} by
+ */
 export function cleanupBrief(d, by) {
-  const now = by ? `${by.rule}${by.quote ? `: "${by.quote}"` : ''} (${by.who}, ${by.date})` : d.reversed.byText;
-  const where = d.reversed.stale.map((p) => `- ${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}${p.href ? ` (${p.href})` : ''}`).join('\n');
+  const now = by ? `${by.rule}${by.quote ? `: "${by.quote}"` : ''} (${by.who}, ${by.date})` : /** @type {NonNullable<Decision['reversed']>} */ (d.reversed).byText;
+  const where = /** @type {NonNullable<Decision['reversed']>} */ (d.reversed).stale.map((p) => `- ${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}${p.href ? ` (${p.href})` : ''}`).join('\n');
   return `A newer decision reversed an older one, but the older one is still written in this scheme. Bring these copies in line with the newer decision, quoting it with its date, or remove the old text where it no longer applies. Change only what the reversal touches.\n\nOld: ${d.rule}${d.quote ? `: "${d.quote}"` : ''} (${d.who}, ${d.date})\nNow: ${now}\n\nStill written in:\n${where}\n\nThe Decisions page (Orders → Decisions) shows both; it re-reads the sources, so the copies leave its list once fixed.`;
 }
 
 export function decisionsPage() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
+  /** @type {{ decisions: Decision[], counts: { label: string, count: number, files: number }[] } | null} */
   let data = null;
   const meta = h('p', { class: 'meta' }, 'Reading the sources…');
   const counts = h('p', { class: 'muted small decision-counts' });
@@ -52,7 +66,7 @@ export function decisionsPage() {
           'aria-pressed': String(key === scope),
           onclick: () => {
             scope = key;
-            for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.scope === key));
+            for (const b of pick.children) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.scope === key));
             filter();
           },
         },
@@ -60,27 +74,31 @@ export function decisionsPage() {
       ),
     ),
   );
+  /** @type {{ row: HTMLDetailsElement, d: Decision }[]} */
   const rows = [];
 
+  /** @param {Decision} d @param {Map<string | number, Decision>} byId */
   const row = (d, byId) => {
     const by = d.reversed?.by ? byId.get(d.reversed.by) : null;
-    const jump = (id) => (ev) => {
+    /** @param {string | number} id */
+    const jump = (id) => (/** @type {Event} */ ev) => {
       ev.preventDefault();
       const target = rows.find((r) => r.d.id === id);
       if (!target) return;
       if (!shows(target.d)) {
-        pick.querySelector('[data-scope="all"]').click();
+        /** @type {HTMLButtonElement} */ (pick.querySelector('[data-scope="all"]')).click();
       }
       search.value = '';
       filter();
-      const el = rows.find((r) => r.d.id === id).row;
+      const el = /** @type {{ row: HTMLDetailsElement }} */ (rows.find((r) => r.d.id === id)).row;
       el.open = true;
       el.scrollIntoView({ block: 'center' });
     };
+    /** @type {Child[]} */
     const body = [d.quote ? h('blockquote', { class: 'decision-quote' }, `“${d.quote}”`) : '', h('p', { class: 'decision-text' }, d.text), d.places.length ? h('p', { class: 'small decision-places' }, 'Written in: ', ...d.places.flatMap((pl, i) => [i ? ', ' : '', placeLink(pl)])) : ''];
     if (d.reversed) {
       const stale = d.reversed.stale;
-      const clean = stale.length ? h('button', { type: 'button', class: 'secondary', onclick: () => cleanUp(d, by, clean) }, 'Clean up the old copies') : '';
+      const clean = stale.length ? h('button', { type: 'button', class: 'secondary', onclick: () => cleanUp(d, by, /** @type {HTMLButtonElement} */ (clean)) }, 'Clean up the old copies') : '';
       body.push(
         h(
           'div',
@@ -105,9 +123,9 @@ export function decisionsPage() {
           { class: 'small' },
           'Reverses: ',
           ...d.reverses
-            .map((id) => byId.get(id))
+            .map((id) => /** @type {Decision} */ (byId.get(id)))
             .filter(Boolean)
-            .flatMap((o, i) => [i ? ', ' : '', h('a', { href: '#', onclick: jump(o.id) }, `${o.rule} (${o.who}, ${day(o.date)})`)]),
+            .flatMap((/** @type {Decision} */ o, i) => [i ? ', ' : '', h('a', { href: '#', onclick: jump(o.id) }, `${o.rule} (${o.who}, ${day(o.date)})`)]),
         ),
       );
     }
@@ -120,6 +138,7 @@ export function decisionsPage() {
   };
 
   /** Start a chore minion with the copies to fix; the button shows it at once and a failure puts it back with a retry. */
+  /** @param {Decision} d @param {Decision | null | undefined} by @param {HTMLButtonElement} btn */
   const cleanUp = (d, by, btn) => {
     const was = btn.textContent;
     btn.disabled = true;
@@ -129,7 +148,7 @@ export function decisionsPage() {
       (err) => {
         btn.disabled = false;
         btn.textContent = was;
-        toast(`Couldn't start the cleanup minion: ${err.message}`, { action: { label: 'Retry', run: () => cleanUp(d, by, btn) } });
+        toast(`Couldn't start the cleanup minion: ${/** @type {Error} */ (err).message}`, { action: { label: 'Retry', run: () => cleanUp(d, by, btn) } });
       },
     );
   };
@@ -168,14 +187,14 @@ export function decisionsPage() {
       render();
     },
     (err) => {
-      meta.textContent = `Couldn't read the decisions: ${err.message}`;
+      meta.textContent = `Couldn't read the decisions: ${/** @type {Error} */ (err).message}`;
     },
   );
 
   return h(
     'section',
     { class: 'artifacts-main people-main decisions-main' },
-    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
     h('div', { class: 'row decision-tools' }, search, pick, h('a', { href: `#/p/${p.id}/ideas`, class: 'small' }, 'Ideas ledger')),
     counts,
     list,

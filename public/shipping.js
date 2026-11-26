@@ -2,40 +2,61 @@
 // label a person's go is needed, and what waits for a try. The server (routes, prompts, hand_off_land) and the Minion
 // rules page both read this file, so the gate is decided in one place.
 
+/** @typedef {[string, string][]} Options [value, what people read] pairs */
+
 /** [value, what people read] for each setting, in the order the page shows them. */
+/** @type {Options} */
 export const SHIP_PATHS = [
   ['citadel', 'Citadel ships it'],
   ['pr-auto', 'Pull request, auto-merge when green'],
   ['pr-minion', 'Pull request, the minion merges when green'],
   ['pr-person', 'Pull request, a person merges'],
 ];
+/** @type {Options} */
 export const GO_FROM = [
   ['never', 'Never needed'],
   ['high', 'High-risk changes'],
   ['medium', 'Medium and high-risk changes'],
   ['all', 'Every change'],
 ];
+/** @type {Options} */
 export const TRY_FIRST = [
   ['never', 'Ships when green'],
   ['ui', 'UI changes wait for a try'],
   ['features', 'Every feature waits for a try'],
 ];
+/** @param {Options} opts */
 export const values = (opts) => opts.map(([v]) => v);
+/**
+ * @template {string | null | undefined} V
+ * @param {Options} opts
+ * @param {V} v
+ * @returns {string | V}
+ */
 export const label = (opts, v) => opts.find(([k]) => k === v)?.[1] ?? v;
 
 /** The approval rules that make a merge wait for a person's Approve ("Merge a pull request" under Approvals). */
 export const MERGE_RULES = ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'];
 
+/** @type {Record<string, number>} */
 const RANK = { low: 0, medium: 1, high: 2 };
+/** @type {Record<string, number>} */
 const FROM = { all: 0, medium: 1, high: 2, never: 3 };
-/** Whether a change with this risk label waits for a person's go before it ships. */
-export const needsGo = (goFrom, risk) => RANK[risk] >= FROM[goFrom || 'high'];
+/**
+ * Whether a change with this risk label waits for a person's go before it ships.
+ * @param {string | null | undefined} goFrom
+ * @param {string | null | undefined} risk an unknown or missing label reads as undefined, which waits for nothing, as before
+ */
+export const needsGo = (goFrom, risk) => RANK[/** @type {string} */ (risk)] >= FROM[goFrom || 'high'];
 
 /**
  * The one gate (N2): a person merges every change on pr-person, so its go is from every change; on a pull-request path
  * (pr-auto, pr-minion, pr-person) the merge approval is on exactly when every change needs a go, and a go by label otherwise comes on a card. On
  * Citadel's own path nothing merges a PR, so the merge approval is left as people set it. Returns the settings with
  * go_from and approval_rules made to agree; a rule list that already agrees comes back unchanged, order and all.
+ * @template {{ ship_path?: string | null, go_from?: string | null, approval_rules?: string | null }} S
+ * @param {S} settings
+ * @returns {{ go_from: S['go_from'] | 'all', approval_rules: S['approval_rules'] | string }}
  */
 export function shippingGate({ ship_path, go_from, approval_rules }) {
   const goFrom = ship_path === 'pr-person' ? 'all' : go_from;

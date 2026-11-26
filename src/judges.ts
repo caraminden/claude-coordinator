@@ -87,6 +87,7 @@ export const JUDGES: Judge[] = [
           'MAIN_WAIT_MS',
           'MAIN_SETTLE_MS',
           'OTHERS_CAP_MS',
+          'OWN_CAP_MS',
           'SLOT_HOLD_MS',
           'SLOT_WAIT_MS',
           'REPORT_MS',
@@ -301,8 +302,8 @@ export const JUDGES: Judge[] = [
     name: 'Effort retros (#1751)',
     mode: 'act', // Cara, 2026-11-24: "Start for real now"
     replay: true,
-    acts: "starts a citadel:retro minion in a scheme when every minion of a named effort (3+) or an unnamed start_after chain (4+) has closed for 6 hours, unless a major build's retro covers it",
-    pins: [{ path: 'src/effort-retros.ts', symbols: ['NAMED_FLOOR', 'CHAIN_FLOOR', 'QUIET_MS', 'AUTO', 'effortsDue', 'EffortRetros.tick'] }],
+    acts: "starts a citadel:retro minion in a scheme when every minion of a named effort (3+) or an unnamed start_after chain (4+) has closed for 6 hours (and every minion their asks moved into), unless a major build's retro covers it",
+    pins: [{ path: 'src/effort-retros.ts', symbols: ['NAMED_FLOOR', 'CHAIN_FLOOR', 'QUIET_MS', 'AUTO', 'effortsDue', 'moveEffort', 'movedTo', 'EffortRetros.tick'] }],
     callers: ['src/effort-retros.ts'],
   },
   {
@@ -335,6 +336,14 @@ export const JUDGES: Judge[] = [
       { path: 'src/app-shots.ts', symbols: ['AppShots.read'] },
     ],
     callers: ['src/app-shots.ts', 'tools/app-shots/app-shots.ts', 'tools/app-shots/inner.ts'],
+  },
+  {
+    id: 'main-rollbacks',
+    name: 'Main went back (#2077)',
+    mode: 'act', // the brief's Done when (Josh's pick on #2068's retro card, 2026-11-25); replayed over the real resets first
+    replay: true,
+    acts: "tells each open minion whose branch still holds commits a reset took off its scheme's main, with the rebase that takes them out (held for a sealed one)",
+    pins: [{ path: 'src/main-rollback.ts', symbols: ['REFLOG_DEPTH', 'reflog', 'MainRollbacks.scheme', 'MainRollbacks.tellHolders', 'rollbackText'] }],
   },
 ];
 

@@ -3,10 +3,13 @@
 // the command the owner runs as administrator is made here, from these words only, so a machine's token can't put a
 // command of its own in front of its owner. No DOM: src/role-setup.ts imports it too.
 
-/** The roles whose Set up and Test this release runs (CI's are #2064's, after one row per PC). */
-export const SETUP_ROLES = ['tools', 'screen', 'turns', 'gpu'];
+/** @import { SetupAdmin, SetupRun } from './types.js' */
+
+/** The roles whose Set up and Test this release runs. */
+export const SETUP_ROLES = ['tools', 'screen', 'turns', 'gpu', 'ci'];
 
 /** What a step needs done as administrator, by key: the words people read and, per package manager, the command. */
+/** @type {Record<string, { what: string, os: 'windows' | 'linux' }>} */
 export const ADMIN_NEEDS = {
   wsl: { what: 'WSL 2', os: 'windows' },
   podman: { what: 'podman', os: 'linux' },
@@ -15,6 +18,7 @@ export const ADMIN_NEEDS = {
 };
 export const PACKAGE_MANAGERS = ['apt', 'dnf'];
 
+/** @type {Record<string, Record<string, string>>} */
 const LINUX = {
   podman: { apt: 'sudo apt-get install -y podman', dnf: 'sudo dnf install -y podman' },
   'nvidia-toolkit': {
@@ -30,12 +34,18 @@ const LINUX = {
   cdi: { apt: 'sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml', dnf: 'sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml' },
 };
 
-/** An agent's report of what it lacks, kept only when it is that: known needs of one OS, and a known package manager. */
+/**
+ * An agent's report of what it lacks, kept only when it is that: known needs of one OS, and a known package manager.
+ * @param {unknown} v
+ * @returns {SetupAdmin | null}
+ */
 export function cleanAdmin(v) {
   if (!v || typeof v !== 'object') return null;
-  const needs = Array.isArray(v.needs) ? [...new Set(v.needs.filter((n) => typeof n === 'string' && Object.hasOwn(ADMIN_NEEDS, n)))] : [];
+  const given = /** @type {{ needs?: unknown, pm?: unknown }} */ (v);
+  /** @type {string[]} */
+  const needs = Array.isArray(given.needs) ? [...new Set(given.needs.filter((/** @type {unknown} */ n) => typeof n === 'string' && Object.hasOwn(ADMIN_NEEDS, n)))] : [];
   if (!needs.length || new Set(needs.map((n) => ADMIN_NEEDS[n].os)).size > 1) return null;
-  const pm = PACKAGE_MANAGERS.includes(v.pm) ? v.pm : null;
+  const pm = typeof given.pm === 'string' && PACKAGE_MANAGERS.includes(given.pm) ? given.pm : null;
   // The toolkit comes before the list it makes, and podman before both.
   const order = Object.keys(ADMIN_NEEDS);
   return { needs: needs.sort((a, b) => order.indexOf(a) - order.indexOf(b)), pm };
@@ -44,6 +54,8 @@ export function cleanAdmin(v) {
 /**
  * The one command for what a PC lacks, with where it runs ('powershell-admin' or 'bash'), and what follows it; null
  * when a need has no command for that PC (a package manager other than apt and dnf), which `manual` then says.
+ * @param {unknown} admin
+ * @returns {{ tag: 'powershell-admin' | 'bash' | null, command: string | null, what: string, after: string } | null}
  */
 export function adminCommand(admin) {
   const a = cleanAdmin(admin);
@@ -52,8 +64,13 @@ export function adminCommand(admin) {
   const what = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
   if (a.needs[0] === 'wsl') return { tag: 'powershell-admin', command: 'wsl --install --no-distribution', what, after: 'Then restart the PC and press Set up again.' };
   if (!a.pm) return { tag: null, command: null, what, after: `This PC has neither apt nor dnf: install ${what} its own way, then press Set up again.` };
-  return { tag: 'bash', command: a.needs.map((n) => LINUX[n][a.pm]).join(' && \\\n'), what, after: 'Then press Set up again.' };
+  const pm = a.pm;
+  return { tag: 'bash', command: a.needs.map((n) => LINUX[n][pm]).join(' && \\\n'), what, after: 'Then press Set up again.' };
 }
 
-/** A role's last run as its card reads it from the row (machine_roles.setup.run), or null. */
-export const lastRun = (r) => (r?.setup && typeof r.setup.run === 'object' ? r.setup.run : null);
+/**
+ * A role's last run as its card reads it from the row (machine_roles.setup.run), or null.
+ * @param {{ setup?: Record<string, unknown> | null } | null | undefined} r
+ * @returns {SetupRun | null}
+ */
+export const lastRun = (r) => (r?.setup && typeof r.setup.run === 'object' ? /** @type {SetupRun | null} */ (r.setup.run) : null);

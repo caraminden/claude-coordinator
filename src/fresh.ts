@@ -1,9 +1,13 @@
-// Fresh starts (#406, #423): asking for one, the handoff it waits for, what ends it, the idle sweep.
+// Fresh starts (#406, #423): asking for one, the handoff it waits for, what ends it, the idle sweep. A Taskmaster's, and a
+// cabal lead's shift change (#2093), start by themselves.
 // Moved out of runner.ts (#1840): it takes what it needs from the Runner as `FreshDeps`.
+import { boardText, readBoard } from './cabal-board.ts';
 import type { EventRow, Store, Ticket } from './db.ts';
+import type { TicketFields } from './db-rows.ts';
 import type { Lanes } from './lanes.ts';
 import { handoffSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
-import { COMPACT_COMMAND, handoffPrompt, minionHandoffPrompt } from './prompts.ts';
+import { sleepKey } from './needs.ts';
+import { COMPACT_COMMAND, handoffPrompt, leadHandoffPrompt, minionHandoffPrompt } from './prompts.ts';
 import type { KillResume, LimitResume, NetResume } from './resumes.ts';
 import { contextKey, freshKey, handoffKey } from './turn-keys.ts';
 import type { QueuedMessage } from './turn-messages.ts';
@@ -34,6 +38,8 @@ export const FRESH_CONTEXT_TOKENS = 150_000;
 /** Past this much context (tokens), an idle Taskmaster starts fresh (#406): its next cold wake would re-read all of it at full price. Cara 2026-11-15: 60k, not 150k. */
 export const FRESH_IDLE_CONTEXT_TOKENS = 60_000;
 const HANDOFF_MAX = 20_000;
+/** A minion that leads a cabal: it has a board of its own (#2090). */
+export const leadsCabal = (store: Store, t: Ticket) => t.kind !== 'coordinator' && !!store.getCabal(t.id);
 
 /** What a fresh start needs from the Runner. */
 export interface FreshDeps {
@@ -45,7 +51,7 @@ export interface FreshDeps {
   limitWait: (ticketId: number) => LimitResume | null;
   netWait: (ticketId: number) => NetResume | null;
   killWait: (ticketId: number) => KillResume | null;
-  parked: (t: Ticket) => boolean;
+  parked: (t: TicketFields) => boolean;
   next: (ticketId: number) => void;
   lanes: Lanes;
   closing: ReadonlyMap<number, string | null>;
@@ -101,8 +107,10 @@ export class Fresh {
     // A message queued for a fresh start Citadel asked for by itself goes first, before its handoff or
     // its /compact fallback; the step follows that turn (#423).
     if (f.auto && this.d.queued(ticketId)) return null;
-    const minion = this.d.store.getTicket(ticketId)?.kind !== 'coordinator';
-    return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: (minion ? minionHandoffPrompt : handoffPrompt)(f.why), images: [], fresh: 'handoff' };
+    if (f.compact) return { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' };
+    const t = this.d.store.getTicket(ticketId);
+    const prompt = t?.kind === 'coordinator' ? handoffPrompt : t && leadsCabal(this.d.store, t) ? leadHandoffPrompt : minionHandoffPrompt;
+    return { author: 'System', text: prompt(f.why), images: [], fresh: 'handoff' };
   }
 
   /**
@@ -127,7 +135,7 @@ export class Fresh {
       this.d.store.deleteSetting(contextKey(ticketId));
       this.d.store.updateTicket(ticketId, { session_id: null });
       if (sheeted) this.d.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the new session starts from a facts sheet the server built from the database.` });
-      this.d.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
+      this.d.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why, ...(ticket && leadsCabal(this.d.store, ticket) ? { shift: true } : {}) });
     } else if (turn?.fresh === 'handoff' && stopped) {
       this.d.store.deleteSetting(freshKey(ticketId));
       this.d.emit(ticketId, 'note', { text: `The handoff turn was stopped, so the fresh start is off: the ${who} keeps its session.` });
@@ -142,8 +150,21 @@ export class Fresh {
     }
   }
 
+  /** What a fresh session opens with: its handoff, and a cabal lead's board as it is now. */
+  async opening(ticket: Ticket, handoff: string): Promise<string> {
+    if (!leadsCabal(this.d.store, ticket)) return handoff;
+    // The turn goes on without it: the lead can read the board itself.
+    const board = await readBoard(this.d.store, ticket.id, { parked: (t) => this.d.parked(t) }).catch((err) => void console.error(`Minion ${ticket.id}: its board could not be read:`, err));
+    return `${handoff}\n\n${board ? `Your cabal's board now (cabal_board):\n${boardText(board, ticket.number)}` : "Your cabal's board could not be read: read it with cabal_board."}`;
+  }
+
+  /** Whether Citadel starts this chat fresh by itself: a Taskmaster, or a cabal's lead that isn't sealed, asleep or waiting only to go live. */
+  private startsItself(t: Ticket) {
+    return t.kind === 'coordinator' || (leadsCabal(this.d.store, t) && t.state !== 'pending-deploy' && !this.d.parked(t) && !this.d.store.getSetting(sleepKey(t.id)));
+  }
+
   /**
-   * Taskmasters idle FRESH_IDLE_MS with more than FRESH_IDLE_CONTEXT_TOKENS of context start fresh (#406),
+   * Taskmasters and cabal leads idle FRESH_IDLE_MS with more than FRESH_IDLE_CONTEXT_TOKENS of context start fresh (#406),
    * while their prompt cache is still warm. One that missed that window (a restart) still does: its
    * next wake would re-read the whole context anyway. Run every minute.
    */
@@ -151,7 +172,7 @@ export class Fresh {
     if (this.d.noTurns()) return;
     for (const p of this.d.store.listProjects()) {
       for (const t of this.d.store.listTickets(p.id)) {
-        if (t.kind !== 'coordinator' || !t.session_id || t.status !== 'idle' || this.d.isRunning(t.id) || this.d.queued(t.id) || this.d.lanes.busy(t.id) || this.d.limitWait(t.id) || this.d.netWait(t.id) || this.d.killWait(t.id)) continue;
+        if (!t.session_id || t.status !== 'idle' || this.d.isRunning(t.id) || this.d.queued(t.id) || this.d.lanes.busy(t.id) || this.d.limitWait(t.id) || this.d.netWait(t.id) || this.d.killWait(t.id) || !this.startsItself(t)) continue;
         const size = this.d.store.getSetting<number>(contextKey(t.id));
         const ended = this.d.store.lastTurnEnd(t.id);
         if (!size || size <= FRESH_IDLE_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
@@ -161,7 +182,7 @@ export class Fresh {
   }
 
   /**
-   * A Taskmaster whose turn ended past FRESH_CONTEXT_TOKENS starts fresh at once (#423), not only once idle.
+   * A Taskmaster or cabal lead whose turn ended past FRESH_CONTEXT_TOKENS starts fresh at once (#423), not only once idle.
    * Not while messages wait (the last of their turns hands off) or on a usage-limit or network wait, and
    * never after a fresh-start step's own turn: one that leaves it big waits for the next real turn.
    */
@@ -169,7 +190,7 @@ export class Fresh {
     if (turn.fresh || this.d.queued(ticketId) || this.d.limitWait(ticketId) || this.d.netWait(ticketId) || this.d.killWait(ticketId)) return;
     const t = this.d.store.getTicket(ticketId);
     const size = this.d.store.getSetting<number>(contextKey(ticketId));
-    if (t?.kind !== 'coordinator' || !t.session_id || !size || size <= FRESH_CONTEXT_TOKENS) return;
+    if (!t?.session_id || !size || size <= FRESH_CONTEXT_TOKENS || !this.startsItself(t)) return;
     this.requestFresh(ticketId, `${Math.round(size / 1000)}k tokens of context at the end of a turn`, true);
   }
 }

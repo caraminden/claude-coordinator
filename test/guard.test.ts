@@ -16,8 +16,8 @@ test('the template --self-test passes with LIVE_APPS set by env and written into
     const copy = join(dir, 'guard.sh');
     writeFileSync(copy, readFileSync(tpl, 'utf8').replace(/^LIVE_APPS=\(\)$/m, 'LIVE_APPS=(x)'));
     for (const [path, env] of [
-      [tpl, { ...process.env, GUARD_LIVE_APPS: 'x' }],
-      [copy, process.env],
+      [tpl, { ...process.env, GUARD_LIVE_APPS: 'x', GUARD_SELF_TEST_NESTED: '1' }],
+      [copy, { ...process.env, GUARD_SELF_TEST_NESTED: '1' }],
     ] as const) {
       const r = spawnSync('bash', [path, '--self-test'], { encoding: 'utf8', env });
       assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -29,23 +29,18 @@ test('the template --self-test passes with LIVE_APPS set by env and written into
 });
 
 for (const file of ['tools/guard.sh', 'kit/skills/scheme-setup/templates/guard.sh']) {
-  test(`${file} --self-test passes`, () => {
-    const r = spawnSync('bash', [join(root, file), '--self-test'], { encoding: 'utf8' });
-    assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stdout, /self-test: \d+ passed, 0 failed/);
-  });
-
-  // A git hook (pre-push running the checks) exports GIT_DIR and friends; the self-test's scratch
-  // repos must not land in the repo being pushed (Peek Auras: core.bare=true, HEAD moved).
-  test(`${file} --self-test under a git hook's GIT_DIR leaves that repo alone`, () => {
+  // One run of each copy answers three things: it passes, it passes with a git hook's GIT_DIR exported, and that
+  // GIT_DIR's repo is left alone. The self-test's scratch repos must not land in the repo being pushed (Peek Auras:
+  // core.bare=true, HEAD moved). The run is not NESTED, so it also runs its own nested check of the same.
+  test(`${file} --self-test passes, also under a git hook's GIT_DIR, and leaves that repo alone`, () => {
     const real = mkdtempSync(join(tmpdir(), 'guard-real-'));
     try {
       execFileSync('git', ['init', '-q', '-b', 'mine', real]);
       const before = { config: readFileSync(join(real, '.git', 'config'), 'utf8'), head: readFileSync(join(real, '.git', 'HEAD'), 'utf8') };
-      // NESTED skips the self-test's own copy of this check, which would only run it a third time.
-      const env = { ...process.env, GIT_DIR: join(real, '.git'), GIT_WORK_TREE: real, GIT_INDEX_FILE: join(real, '.git', 'index'), GUARD_SELF_TEST_NESTED: '1' };
+      const env = { ...process.env, GIT_DIR: join(real, '.git'), GIT_WORK_TREE: real, GIT_INDEX_FILE: join(real, '.git', 'index') };
       const r = spawnSync('bash', [join(root, file), '--self-test'], { encoding: 'utf8', env });
       assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /self-test: \d+ passed, 0 failed/);
       assert.equal(readFileSync(join(real, '.git', 'HEAD'), 'utf8'), before.head);
       assert.equal(readFileSync(join(real, '.git', 'config'), 'utf8'), before.config);
     } finally {

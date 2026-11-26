@@ -1,7 +1,7 @@
 // A scheme's review set (src/review-set.ts, Build 4): the page's reads and saves, and the MCP tool's.
 // Everyone in the scheme reads it; people and the Taskmaster change anything. A minion saves only an entry's body,
 // for the critic loop's learning step (citadel:critique step 9): the switches stay a person's call (Q10, Q12).
-import { HttpError, json, readJson, type App, type Route } from '../http.ts';
+import { HttpError, isInt, json, readJson, type App, type Route } from '../http.ts';
 import { BUILT_INS, calibratedText, isAgentFile, isKit, loadStarters, readAgentFiles, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type AgentFile, type EntryFields, type ReviewEntry, type Lesson, type ReviewSet, type Verdict } from '../review-set.ts';
 import { describeCron, loadTemplates, templateFields, templateVars } from '../schedules.ts';
 import { describePrompt, readProposals, runDescribe } from '../review-describe.ts';
@@ -406,7 +406,7 @@ export const reviewRoutes: Route[] = [
     refuse: 'Only people and Taskmasters restore a version',
     async handler({ req, res, app, session, project, params }) {
       const { version } = await readJson(req);
-      if (!Number.isInteger(version)) throw new HttpError(400, 'Name the version to restore');
+      if (!isInt(version)) throw new HttpError(400, 'Name the version to restore');
       const e = run(() => app.store.reviews.restore(project.id, decodeURIComponent(params.slug), version, session.name));
       broadcast(app, project);
       return json(res, 200, viewOne(app, project, e));

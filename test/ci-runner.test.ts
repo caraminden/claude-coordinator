@@ -287,3 +287,18 @@ test("a named runner carrying another of the scheme's labels than the one expect
   );
   assert.equal(w.notes.length, 0);
 });
+
+test('#2064: a PC whose CI no longer lends to the scheme takes only its own runners off, the ones named for its hosts', async () => {
+  const w = world();
+  w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'), runner(8, 'OTHER-PC', 'peek-auras-ci'));
+  const pc = w.machine('josh-pc', w.josh.id);
+  w.store.writeMachineRoles(pc.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: [], setup: { runner_agent: true } } : r)));
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'OTHER-PC', 'peek-auras-ci'), { status: 403, message: /isn't on josh-pc/ });
+  w.tokens.hostsOf = () => ['DESK'];
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'OTHER-PC', 'peek-auras-ci'), { status: 403 });
+  assert.equal((await w.tokens.unregister(pc, 'Peek Auras', 'DESK', 'peek-auras-ci')).removed, true);
+  assert.deepEqual(
+    w.gh.runners.map((r) => r.name),
+    ['OTHER-PC'],
+  );
+});

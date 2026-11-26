@@ -17,14 +17,16 @@ after(async () => {
  */
 async function fakeApp(answers: (number | 'open')[]) {
   const posts: { session: string; message: { method?: string; id?: number } }[] = [];
-  const state = { stream: null as ServerResponse | null, session: '', gets: 0 };
+  // `picked`: the pooled Windows tools' pick headers for each session that opens (Build 7 M5).
+  const state = { stream: null as ServerResponse | null, session: '', gets: 0, picked: [] as [string, string | null][] };
   const srv = createServer((req, res) => {
     if (req.method === 'GET' && req.url!.startsWith('/api/machines/5/session?')) {
       state.gets++;
       const answer = answers.shift() ?? 503;
       if (answer !== 'open') return res.writeHead(answer).end('That machine is offline');
       state.session = String(state.gets).padStart(24, '0');
-      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const [machine, from] = state.picked.shift() ?? [];
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', ...(machine ? { 'x-citadel-machine': machine } : {}), ...(from ? { 'x-citadel-moved-from': from } : {}) });
       res.write(`data: ${JSON.stringify({ session: state.session })}\n\n`);
       state.stream = res;
       return;
@@ -79,6 +81,30 @@ test('after the app restarts, the proxy waits out "machine offline" answers unti
   assert.equal(app.posts[1].message.method, 'initialize', 'the handshake is replayed to the new session');
   p.send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   await until('tools/list posted to the new session', () => app.posts.some((x) => x.message.id === 2 && x.session === app.state.session));
+});
+
+test('the pooled Windows tools say which PC their first call ran on, and that they moved when the app picked another (Build 7 M5)', async () => {
+  const app = await fakeApp(['open', 'open']);
+  app.state.picked.push(['win-a', null], ['win-b', 'win-a']);
+  const p = startProxy(app.base);
+  p.send(init);
+  await until('initialize posted', () => app.posts.length === 1);
+  app.reply({ jsonrpc: '2.0', id: 1, result: {} });
+  const call = async (id: number) => {
+    p.send({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'run_task', arguments: {} } });
+    await until('the call posted', () => app.posts.some((x) => x.message.id === id && x.session === app.state.session));
+    app.reply({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'ran' }] } });
+    const r = (await until('the call answered', () => p.out.find((o) => o.id === id))) as unknown as { result: { content: { text: string }[] } };
+    return r.result.content.map((c) => c.text);
+  };
+  assert.deepEqual(await call(2), ['box is on win-a.', 'ran']);
+  assert.deepEqual(await call(3), ['ran'], 'said once per session');
+  // win-a goes away: the stream ends, the proxy opens a new session, and the app picked win-b.
+  app.state.stream!.end();
+  await until('a new session', () => app.state.gets === 2);
+  const moved = await call(4);
+  assert.match(moved[0]!, /^box moved to win-b: win-a went away\. Its checkout is not this one's/);
+  assert.equal(moved[1], 'ran');
 });
 
 test('a first connect that the app answers 503 still fails at once', async () => {

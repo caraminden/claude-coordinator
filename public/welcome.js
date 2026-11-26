@@ -6,10 +6,21 @@ import { account, api, h, me, view } from './base.js';
 import { WORDS } from './help-words.js';
 import { toast } from './ui/status.js';
 
+/** @import { Account, Ticket } from './types.js' */
+/** @typedef {NonNullable<Account['welcome']>} Welcome */
+/** @typedef {HTMLDivElement & { answer: (picked: string | null) => void }} PracticeCard */
+
 const HIDDEN = 'cc-welcome-hidden'; // a person who folded it to its top line keeps it folded on this device
 
-/** The steps (src/welcome.ts's STEPS), each with where "show me" goes; null where there is nowhere yet (no scheme). */
+/**
+ * The steps (src/welcome.ts's STEPS), each with where "show me" goes; null where there is nowhere yet (no scheme).
+ * @param {number | null} pid
+ */
 function steps(pid) {
+  /**
+   * @param {string} page
+   * @param {string} part
+   */
   const at = (page, part) => (pid == null ? null : `#/p/${pid}${page}?show=${part}`);
   return [
     { key: 'password', title: 'Set your password', sub: 'Done when you took your invite.', href: at('/account', 'password') },
@@ -23,11 +34,14 @@ function steps(pid) {
 /** The practice card's answers; the server takes only these (src/welcome.ts CARD_OPTIONS). */
 const OPTIONS = ['Ask my Taskmaster for something small', 'Read along with a minion', 'Just look around for now'];
 
+/** @type {{ el: HTMLElement, draw: (w: Welcome) => void } | null} */
 let live = null; // { el, draw } of the panel on screen, so a later look ticks it in place
 
 /**
  * The panel for `account.welcome`, or nothing when it's gone. `pid` is the scheme whose pages the steps link into
  * (null on the no-scheme page); `schemes` are the names of the schemes you're in, for the words.
+ * @param {number | null} pid
+ * @param {string[]} schemes
  */
 export function welcomePanel(pid, schemes) {
   const w = account?.welcome;
@@ -48,7 +62,7 @@ export function welcomePanel(pid, schemes) {
     return { s, row, text };
   });
   const practice = practiceCard();
-  const cardRow = rows.find((r) => r.s.key === 'card').row;
+  const cardRow = /** @type {NonNullable<(typeof rows)[number]>} */ (rows.find((r) => r.s.key === 'card')).row;
   cardRow.setAttribute('aria-expanded', 'false');
   cardRow.addEventListener('click', () => {
     const open = practice.hidden;
@@ -68,9 +82,10 @@ export function welcomePanel(pid, schemes) {
   const body = h('div', { class: 'welcome-body' }, h('div', { class: 'welcome-steps' }, ...rows.map((r) => r.row), practice), words);
   const el = h('section', { class: 'welcome', 'aria-label': 'Welcome to Citadel' }, h('div', { class: 'welcome-head' }, ring, h('div', { class: 'welcome-title' }, h('h3', {}, `Welcome, ${me}`), sub), fold, close), body);
 
+  /** @param {Welcome} w */
   const draw = (w) => {
     const n = list.filter((s) => w.steps[s.key]).length;
-    ring.firstChild.textContent = `${n}/5`;
+    /** @type {ChildNode} */ (ring.firstChild).textContent = `${n}/5`;
     ring.style.setProperty('--p', String(n * 20));
     ring.setAttribute('aria-label', `${n} of 5 done`);
     sub.textContent = w.done ? "You're set. This panel goes away now." : "Five small things and you're running. About 4 minutes.";
@@ -78,6 +93,7 @@ export function welcomePanel(pid, schemes) {
     for (const r of rows) r.row.classList.toggle('ticked', !!w.steps[r.s.key]);
     practice.answer(w.card);
   };
+  /** @param {boolean} f */
   const setFolded = (f) => {
     folded = f;
     body.hidden = f;
@@ -90,8 +106,9 @@ export function welcomePanel(pid, schemes) {
   fold.addEventListener('click', () => setFolded(!folded));
   close.addEventListener('click', () => {
     // Gone at once; the server hears behind it, and a failure brings it back with a retry.
-    const before = account.welcome;
-    account.welcome = null;
+    const acct = /** @type {Account} */ (account);
+    const before = acct.welcome;
+    acct.welcome = null;
     el.hidden = true;
     wrote++;
     api('api/welcome', { method: 'POST', body: { dismiss: true } }).then(
@@ -101,7 +118,7 @@ export function welcomePanel(pid, schemes) {
       },
       () => {
         el.hidden = false; // still mounted, so it really is back
-        account.welcome = before;
+        acct.welcome = before;
         toast("Couldn't hide the welcome. It's back for now.", { tone: 'danger' });
       },
     );
@@ -114,22 +131,23 @@ export function welcomePanel(pid, schemes) {
   /** The practice card: the three answers as buttons, your pick shown on its button. */
   function practiceCard() {
     const buttons = OPTIONS.map((o) => h('button', { type: 'button', class: 'small secondary', 'data-option': o }, o));
-    const card = h('div', { class: 'welcome-card', hidden: true }, h('p', {}, h('b', {}, 'Practice card. '), 'What would you like to do first? Nothing ships, whichever you pick.'), h('div', { class: 'welcome-options' }, ...buttons));
-    card.answer = (picked) => {
+    const card = /** @type {PracticeCard} */ (h('div', { class: 'welcome-card', hidden: true }, h('p', {}, h('b', {}, 'Practice card. '), 'What would you like to do first? Nothing ships, whichever you pick.'), h('div', { class: 'welcome-options' }, ...buttons)));
+    card.answer = (/** @type {string | null} */ picked) => {
       for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.option === picked));
     };
     for (const b of buttons)
       b.addEventListener('click', () => {
-        const o = b.dataset.option;
-        if (!account.welcome || account.welcome.card) return; // answered, or finished: it's a practice card, not a setting
-        const before = account.welcome;
+        const o = /** @type {string} */ (b.dataset.option);
+        const acct = /** @type {Account} */ (account);
+        if (!acct.welcome || acct.welcome.card) return; // answered, or finished: it's a practice card, not a setting
+        const before = acct.welcome;
         wrote++;
-        account.welcome = { ...before, card: o, steps: { ...before.steps, card: true } };
-        draw(account.welcome);
+        acct.welcome = { ...before, card: o, steps: { ...before.steps, card: true } };
+        draw(acct.welcome);
         api('api/welcome', { method: 'POST', body: { card: o } })
           .then((r) => welcomeLooked(r.welcome))
           .catch(() => {
-            account.welcome = before;
+            acct.welcome = before;
             draw(before);
             toast("Couldn't send your answer. Pick it again.", { tone: 'danger' });
           });
@@ -139,9 +157,10 @@ export function welcomePanel(pid, schemes) {
 }
 
 /** Take a fresh look from the server and tick the panel in place; once it says done, the next mount shows nothing. */
+/** @param {Welcome | null} w */
 function welcomeLooked(w) {
   if (!account) return;
-  account.welcome = w?.done ? null : w;
+  /** @type {Account} */ (account).welcome = w?.done ? null : w;
   if (!live?.el.isConnected) return;
   if (w) live.draw(w);
   else {
@@ -150,6 +169,7 @@ function welcomeLooked(w) {
   } // finished or dismissed elsewhere (another tab, your phone)
 }
 
+/** @type {Promise<unknown> | null} */
 let asking = null;
 let wrote = 0; // counts the hides and picks sent: a read that began before one is older than it and is dropped
 /** Ask the server again (on mount, on focus, after you write): a step done elsewhere ticks here. */
@@ -163,9 +183,11 @@ export function refreshWelcome() {
 }
 
 /** The welcome for the chat open now: only over your Taskmaster's chat, in a scheme you're in. */
+/** @param {Ticket | null | undefined} ticket */
 export function chatWelcome(ticket) {
   if (ticket?.kind !== 'coordinator' || !account?.welcome) return null;
-  const schemes = (view.projects ?? []).filter((p) => p.member !== false && !p.hidden).map((p) => p.name);
+  const open = /** @type {NonNullable<typeof view>} */ (view);
+  const schemes = (open.projects ?? []).filter((p) => p.member !== false && !p.hidden).map((p) => p.name);
   const el = welcomePanel(ticket.project_id, schemes);
   if (el) queueMicrotask(refreshWelcome);
   return el;

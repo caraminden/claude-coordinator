@@ -1,4 +1,7 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs (the Machines page is settings-machines.js).
+/** @import { Child } from './base.js' */
+/** @import { PluginDir, Workflow } from './minion-rules.js' */
+/** @import { View, Scheme } from './types.js' */
 import { account, ago, api, h, icon, me, schemeIcon, view } from './base.js';
 import { onSkillsChanged } from './skills.js';
 import { openHash } from './core.js';
@@ -20,19 +23,25 @@ import { GO_FROM, SHIP_PATHS, TRY_FIRST, label as optionLabel } from './shipping
 // The desktop app (#1186) has no Web Push: its device is `desktop:<id>`, the id kept under DESKTOP_PUSH, and its pings
 // come down the live stream while it runs (core.js shows them).
 export const DESKTOP_PUSH = 'citadel-desktop-push';
-const desktop = !!window.citadelDesktop;
+const desktop = !!(/** @type {{ citadelDesktop?: unknown }} */ (window).citadelDesktop);
 const pushSupported = desktop ? 'Notification' in window : 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
+/** @typedef {{ endpoint: string, unsubscribe: () => Promise<unknown> }} PushSub */
+
+/** @returns {Promise<PushSub | null>} */
 async function pushSubscription() {
   if (desktop) {
     const id = localStorage.getItem(DESKTOP_PUSH);
-    return id && { endpoint: `desktop:${id}`, unsubscribe: async () => localStorage.removeItem(DESKTOP_PUSH) };
+    return /** @type {PushSub | null} */ (id && { endpoint: `desktop:${id}`, unsubscribe: async () => localStorage.removeItem(DESKTOP_PUSH) });
   }
   const reg = await navigator.serviceWorker.ready;
   return reg.pushManager.getSubscription();
 }
 
-/** The browser's VAPID key as pushManager.subscribe wants it. */
+/**
+ * The browser's VAPID key as pushManager.subscribe wants it.
+ * @param {string} b64
+ */
 function keyBytes(b64) {
   const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
@@ -79,11 +88,12 @@ export async function pushOff() {
 }
 
 /** Subscribe this device again with what pushOff found set; off if any of it can't be, so a muted scheme never pings. */
+/** @param {{ onlyPinned?: boolean, muted: number[], everything: number[] }} was */
 export async function pushBackOn(was) {
   await pushOn();
   try {
-    const { endpoint } = await pushSubscription();
-    const set = (body) => api('api/push/subscription', { method: 'PATCH', body: { endpoint, ...body } });
+    const { endpoint } = /** @type {PushSub} */ (await pushSubscription());
+    const set = (/** @type {object} */ body) => api('api/push/subscription', { method: 'PATCH', body: { endpoint, ...body } });
     if (was.onlyPinned) await set({ onlyPinned: true });
     for (const projectId of was.muted) await set({ projectId, muted: true });
     for (const projectId of was.everything) await set({ projectId, everything: true });
@@ -94,6 +104,8 @@ export async function pushBackOn(was) {
 }
 
 // What this browser last said of its push state, drawn at once on the next scheme so the box keeps its height while it asks again.
+/** @typedef {{ subscribed: boolean, muted: number[], onlyPinned?: boolean, everything?: number[] }} PushState */
+/** @type {PushState} */
 let pushState = { subscribed: false, muted: [] };
 
 /**
@@ -101,14 +113,14 @@ let pushState = { subscribed: false, muted: [] };
  * pinned-only (this device) and, for the open scheme, a mute and "Everything" (this device). Same calls as before.
  */
 export function notificationsPage() {
-  const project = view.project;
+  const project = /** @type {View} */ (view).project;
   const on = h('input', { type: 'checkbox' });
   const mute = h('input', { type: 'checkbox' });
   const pinned = h('input', { type: 'checkbox' });
   const all = h('input', { type: 'checkbox' });
   const hint = h('span', { class: 'hint', hidden: true });
-  const toggle = (box, text, title) => h('label', { class: 'toggle', title }, box, text);
-  const row = (ic, hue, title, summary, ...body) => settingsRow({ icon: ic, hue, title, summary, open: true }, ...body)[0];
+  const toggle = (/** @type {HTMLElement} */ box, /** @type {string} */ text, /** @type {string} */ title) => h('label', { class: 'toggle', title }, box, text);
+  const row = (/** @type {string} */ ic, /** @type {string} */ hue, /** @type {string} */ title, /** @type {string} */ summary, /** @type {Child[]} */ ...body) => settingsRow({ icon: ic, hue, title, summary, open: true }, ...body)[0];
   const onRow = row(
     'bell',
     'accent',
@@ -139,6 +151,10 @@ export function notificationsPage() {
   const muteRow = row('belloff', 'danger', `Mute ${project.name}`, `This device · scheme ${project.name}`, toggle(mute, `Mute ${project.name} here`, 'Stop notifications from this scheme on this device'), settingsHelp(`Stop notifications from ${project.name} on this device. Other schemes keep notifying.`));
   // The scheme's heading goes with its rows, so a device that isn't subscribed shows no empty heading.
   const schemeBlock = h('div', { class: 'settings-block' }, ...settingsSection(`${project.name} on this device`, allRow, muteRow));
+  /**
+   * @param {PushState} state
+   * @param {string} [err]
+   */
   const show = (state, err) => {
     pushState = state;
     on.checked = state.subscribed;
@@ -151,18 +167,19 @@ export function notificationsPage() {
     hint.textContent = err ?? (denied && !state.subscribed ? 'Blocked for this site in the browser settings' : '');
     hint.hidden = !hint.textContent;
   };
-  const busy = async (fn) => {
+  const busy = async (/** @type {() => Promise<PushState>} */ fn) => {
     on.disabled = mute.disabled = pinned.disabled = all.disabled = true;
     try {
       show(await fn());
     } catch (ex) {
-      await refresh(ex.message);
+      await refresh(/** @type {Error} */ (ex).message);
     } finally {
       mute.disabled = pinned.disabled = all.disabled = false;
       if (Notification.permission !== 'denied') on.disabled = false;
     }
   };
   /** Show where this browser stands (and `err`, if a change just failed). */
+  /** @param {string=} err */
   async function refresh(err) {
     const sub = await pushSubscription().catch(() => null);
     const state = sub && (await api('api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null));
@@ -179,19 +196,19 @@ export function notificationsPage() {
   );
   mute.addEventListener('change', () =>
     busy(async () => {
-      const sub = await pushSubscription();
+      const sub = /** @type {PushSub} */ (await pushSubscription());
       return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
     }),
   );
   all.addEventListener('change', () =>
     busy(async () => {
-      const sub = await pushSubscription();
+      const sub = /** @type {PushSub} */ (await pushSubscription());
       return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, everything: all.checked } });
     }),
   );
   pinned.addEventListener('change', () =>
     busy(async () => {
-      const sub = await pushSubscription();
+      const sub = /** @type {PushSub} */ (await pushSubscription());
       return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, onlyPinned: pinned.checked } });
     }),
   );
@@ -203,7 +220,7 @@ export function notificationsPage() {
     h(
       'div',
       { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Notifications are set per browser or app, so each device has its own. Scheme settings say which scheme they are for.'),
     ),
@@ -225,12 +242,12 @@ if (pushSupported && !desktop) {
 // focus-existing), and lands here: show a thread or view it names; a bare /c/ leaves you where you were.
 // A share from the Share sheet (/c/share?…, #375) goes to its route, which reloads an open frame there;
 // encoded as the server's redirect does (src/http.ts ownPath), so a fresh launch's own share isn't taken twice.
-const shareHash = (url) => {
+const shareHash = (/** @type {URL} */ url) => {
   const q = new URLSearchParams(url.search).toString();
   return `#/share${q ? `?${q}` : ''}`;
 };
 if ('launchQueue' in window) {
-  window.launchQueue.setConsumer(({ targetURL }) => {
+  /** @type {Window & { launchQueue: { setConsumer: (fn: (p: { targetURL?: string }) => void) => void } }} */ (window).launchQueue.setConsumer(({ targetURL }) => {
     const url = targetURL && new URL(targetURL);
     const hash = url && (url.pathname.endsWith('/c/share') ? shareHash(url) : url.hash);
     if (hash) openHash(hash);
@@ -240,12 +257,16 @@ if ('launchQueue' in window) {
 // ---------- project instructions ----------
 
 const MAX_INSTRUCTIONS = 32000;
-const count = (n) => n.toLocaleString('en');
+const count = (/** @type {number} */ n) => n.toLocaleString('en');
 
 /**
  * Read-only aids under an instructions editor: a size meter against the cap and an outline of its ## sections
  * (each with its character count, a click jumps there). Every turn reads the whole text, so size is cost.
  * Call update() whenever the text may have changed.
+ */
+/**
+ * @param {HTMLTextAreaElement} textarea
+ * @param {number} cap
  */
 function instructionAids(textarea, cap) {
   const gauge = h('div', { class: 'aids-meter', role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': cap, 'aria-label': 'Size against the limit' });
@@ -256,7 +277,7 @@ function instructionAids(textarea, cap) {
     const n = text.trim().length;
     // Size is cost: ok under 80% of the cap, warn near it, danger over it (the meter and the chip share the hue).
     const [tone, hue, word] = n > cap ? ['danger', 'danger', 'Over the limit'] : n > cap * 0.8 ? ['warn', 'waiting', 'Near the limit'] : ['ok', 'done', 'Fits'];
-    gauge.setAttribute('aria-valuenow', n);
+    gauge.setAttribute('aria-valuenow', String(n));
     gauge.dataset.hue = hue;
     gauge.replaceChildren(toneChip(tone, word), meter(n / cap, `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%)`), h('span', { class: 'muted small' }, 'Every turn reads all of it.'));
     const marks = [...text.matchAll(/^##[ \t]+(.+)$/gm)];
@@ -279,28 +300,31 @@ function instructionAids(textarea, cap) {
   return { el: box, update };
 }
 
+/** @typedef {{ name: string, size: number, paths: string[], upstream?: string, pin?: string }} RepoRule */
+
 /** A read-only card: how this scheme's repo is set up, read from its files when the page opens. */
 function repoSetupCard() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const body = h('div', { class: 'repo-setup' }, h('p', { class: 'muted small' }, 'Reading the repo…'));
   // `code` and **bold** spans as elements; a value past 240 characters shows its start, the rest behind a toggle.
-  const inline = (t) =>
+  const inline = (/** @type {string} */ t) =>
     t
       .split(/(`[^`]+`|\*\*[^*]+\*\*)/)
       .filter(Boolean)
-      .map((x) => (x[0] === '`' ? h('code', {}, x.slice(1, -1)) : x.startsWith('**') ? h('strong', {}, x.slice(2, -2)) : x));
-  const long = (t) => (t.length <= 240 ? inline(t) : h('details', {}, h('summary', {}, ...inline(t.slice(0, 240).replace(/[`*]+[^`*]*$/, '')), '…'), h('div', {}, ...inline(t))));
-  const kv = (rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
+      .map((/** @type {string} */ x) => (x[0] === '`' ? h('code', {}, x.slice(1, -1)) : x.startsWith('**') ? h('strong', {}, x.slice(2, -2)) : x));
+  const long = (/** @type {string} */ t) => (t.length <= 240 ? inline(t) : h('details', {}, h('summary', {}, ...inline(t.slice(0, 240).replace(/[`*]+[^`*]*$/, '')), '…'), h('div', {}, ...inline(t))));
+  const kv = (/** @type {[string, string][]} */ rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
   api(`api/projects/${p.id}/repo-setup`).then(
     (r) => {
+      /** @type {HTMLElement[]} */
       const parts = [statTiles([r.facts ? r.facts.length : 0, 'project facts', r.facts ? 'done' : 'waiting'], [r.rules.length, 'rules', 'running'], [r.skills.length, 'own skills', 'teal'])];
       if (!r.facts) parts.push(h('p', {}, toneChip('warn', 'No Project facts'), " The kit's skills fall back to defaults. ", 'Use the Tune up button above to have the Taskmaster write them.'));
-      else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
+      else parts.push(kv(r.facts.map((/** @type {{ label: string, value: string }} */ f) => [f.label, f.value])));
       parts.push(
         h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
-        r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}` + (x.upstream ? ` · copied from ${x.upstream}${x.pin ? ` at ${x.pin}` : ''}` : '')])) : h('p', { class: 'muted small' }, 'None.'),
+        r.rules.length ? kv(r.rules.map((/** @type {RepoRule} */ x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}` + (x.upstream ? ` · copied from ${x.upstream}${x.pin ? ` at ${x.pin}` : ''}` : '')])) : h('p', { class: 'muted small' }, 'None.'),
       );
-      parts.push(h('h4', {}, `Its own skills (.claude/skills/, ${r.skills.length})`), r.skills.length ? kv(r.skills.map((x) => [x.name, x.description])) : h('p', { class: 'muted small' }, 'None.'));
+      parts.push(h('h4', {}, `Its own skills (.claude/skills/, ${r.skills.length})`), r.skills.length ? kv(r.skills.map((/** @type {{ name: string, description: string }} */ x) => [x.name, x.description])) : h('p', { class: 'muted small' }, 'None.'));
       body.replaceChildren(...parts);
     },
     (err) => body.replaceChildren(h('p', { class: 'error' }, `Could not read the repo: ${err.message}`)),
@@ -308,13 +332,14 @@ function repoSetupCard() {
   return h('div', { class: 'settings-card settings-anchor', id: 'repo-setup' }, h('h3', { class: 'settings-label' }, "How this scheme's repo is set up"), h('div', { class: 'muted small' }, 'Read from CLAUDE.md and .claude/ in the repo each time you open this; change it by editing the repo or with a tune-up.'), body);
 }
 
+/** @param {Scheme} project */
 export function onProjectUpdate(project) {
   for (const el of document.querySelectorAll(`[data-project-name="${project.id}"]`)) el.textContent = project.name;
   for (const el of document.querySelectorAll(`[data-taskmaster-name="${project.id}"]`)) el.textContent = `${project.name} Taskmaster`;
   if (view?.kind !== 'project') return;
-  view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
-  if (view.projectId !== project.id) return;
-  view.project = project;
+  /** @type {View} */ (view).projects = /** @type {View} */ (view).projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
+  if (/** @type {View} */ (view).projectId !== project.id) return;
+  /** @type {View} */ (view).project = project;
   for (const el of document.querySelectorAll('[data-rules-row]')) el.dispatchEvent(new Event('settings-refresh'));
   document.getElementById('land-mode')?.dispatchEvent(new Event('settings-refresh'));
   for (const el of document.querySelectorAll('[data-rules-review]')) el.dispatchEvent(new Event('settings-refresh'));
@@ -328,8 +353,12 @@ export function onProjectUpdate(project) {
 }
 
 /** Someone else saved: show their text unless this tab has edits of its own, and bring the counter and buttons in step (sync). */
+/**
+ * @param {string} id
+ * @param {string} text
+ */
 function theirText(id, text) {
-  const el = document.getElementById(id);
+  const el = /** @type {HTMLTextAreaElement | null} */ (document.getElementById(id));
   if (!el) return;
   if (!el.hasAttribute('data-draft')) el.value = text;
   el.dispatchEvent(new Event('settings-refresh'));
@@ -342,8 +371,9 @@ const ONBOARDING_STEPS = { interview: [2, 'interview'], planned: [3, 'plan'], 's
  * "Setting up · interview (2 of 4) · Skip" on the Taskmaster's chat head while the scheme is being
  * set up (#172); an empty placeholder once it's done or skipped, so a live update can swap it in.
  */
+/** @param {Scheme} project */
 export function onboardingStrip(project) {
-  const step = ONBOARDING_STEPS[project.onboarding];
+  const step = ONBOARDING_STEPS[/** @type {keyof typeof ONBOARDING_STEPS} */ (project.onboarding)];
   if (!step) return h('span', { id: 'onboarding-strip', hidden: true });
   const skip = h('button', { type: 'button', class: 'link', title: 'Stop the guided setup; the Taskmaster carries on as usual' }, 'Skip');
   skip.onclick = () => {
@@ -360,7 +390,7 @@ export function onboardingStrip(project) {
 export function renderGithubStrip() {
   const el = document.getElementById('github-strip');
   if (!el) return;
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   el.hidden = !p.github_error;
   if (!p.github_error) return el.replaceChildren();
   const retry = h('button', { type: 'button', class: 'secondary small' }, 'Retry');
@@ -371,7 +401,7 @@ export function renderGithubStrip() {
       onProjectUpdate(await api(`api/projects/${p.id}/github`, { method: 'POST' }));
     } catch (err) {
       // The server saved the new error and broadcast it; show it now in case the stream is slow.
-      onProjectUpdate({ ...view.project, github_error: err.message.replace(/^GitHub repo not created: /, '') });
+      onProjectUpdate({ .../** @type {View} */ (view).project, github_error: /** @type {Error} */ (err).message.replace(/^GitHub repo not created: /, '') });
     }
   };
   el.replaceChildren(h('span', { class: 'error' }, `GitHub repo not created: ${p.github_error}`), retry);
@@ -384,37 +414,39 @@ export function renderGithubStrip() {
  * It sits in the panel's <summary>, so its own clicks and keys must not collapse the panel or close
  * the phone drawer.
  */
+/** @param {Scheme} project */
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
   // Settings sits beside the scheme it belongs to (Josh, 2026-11-13); made once so a rename keeps its count.
   const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: "Members, your account, machines and usage; the scheme's instructions and rules are in Orders, beside Minions" }, 'Settings');
   const show = () => {
     wrap.replaceChildren(
-      schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
-      h('button', { type: 'button', class: 'label', 'data-project-name': project.id, title: 'Rename scheme (its repo stays as it is)', onclick: edit }, view.project.name),
+      schemeIcon(/** @type {View} */ (view).projects?.find((p) => p.id === project.id) ?? project),
+      h('button', { type: 'button', class: 'label', 'data-project-name': project.id, title: 'Rename scheme (its repo stays as it is)', onclick: edit }, /** @type {View} */ (view).project.name),
       h('span', { class: 'divider', 'aria-hidden': 'true' }),
       settings,
     );
   };
   // Every label showing the name changes now; the server's broadcast confirms it, and a refusal puts the old name back.
-  const rename = (name) => onProjectUpdate({ ...(view.projectId === project.id ? view.project : project), name });
+  const rename = (/** @type {string} */ name) => onProjectUpdate({ ...(project.id === /** @type {View} */ (view).projectId ? /** @type {View} */ (view).project : project), name });
   const edit = () => {
     const panel = wrap.closest('details');
     if (panel && !panel.open) {
       panel.open = true;
       return;
     }
-    const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Scheme name' });
+    const input = h('input', { class: 'rename-input', value: /** @type {View} */ (view).project.name, maxlength: '80', 'aria-label': 'Scheme name' });
     const save = () => {
       const name = input.value.trim(); // as the server stores it
-      const was = view.project.name;
+      const was = /** @type {View} */ (view).project.name;
       show();
       if (!name || name === was) return;
+      const current = () => /** @type {View} */ (view).projects?.find((p) => p.id === project.id)?.name ?? /** @type {View} */ (view).project?.name;
       optimistic({
         key: `scheme-name:${project.id}`,
         apply: () => rename(name),
         send: () => api(`api/projects/${project.id}`, { method: 'PATCH', body: { name } }),
-        undo: () => (view.projects?.find((p) => p.id === project.id)?.name ?? view.project?.name) === name && rename(was), // unless a later rename changed it again
+        undo: () => current() === name && rename(was), // unless a later rename changed it again
         label: `rename the scheme to ${name}`,
       });
     };
@@ -437,17 +469,18 @@ export function projectTitle(project) {
     wrap.replaceChildren(
       input,
       // mousedown kept from blurring the field, so the tap reaches save instead of cancelling.
-      h('button', { type: 'button', class: 'rename', 'aria-label': 'Save name', onmousedown: (e) => e.preventDefault(), onclick: save }, '✓'),
+      h('button', { type: 'button', class: 'rename', 'aria-label': 'Save name', onmousedown: (/** @type {Event} */ e) => e.preventDefault(), onclick: save }, '✓'),
     );
     input.focus();
     input.select();
   };
   wrap.addEventListener('click', (e) => {
     // Clicks inside the title edit it; they don't collapse the panel or close the drawer.
-    if (e.target.closest('button, input')) {
+    const target = /** @type {Element} */ (e.target);
+    if (target.closest('button, input')) {
       e.preventDefault();
       e.stopPropagation();
-    } else if (e.target.closest('a')) e.stopPropagation(); // Settings goes there without toggling the panel
+    } else if (target.closest('a')) e.stopPropagation(); // Settings goes there without toggling the panel
   });
   show();
   return wrap;
@@ -465,11 +498,11 @@ export { ORDERS_GROUPS, SETTINGS_GROUPS };
 /** True for a page that lives in Orders, not Settings. */
 export { isOrdersPage };
 const settingsGroups = () => SETTINGS_GROUPS.filter(([, , , admin]) => !admin || account?.admin);
-const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
+const propsCount = (/** @type {string} */ kind) => (kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '');
 
 export function settingsTabs() {
   // An Orders page keeps the (hidden) menu so it shares the settings pages' layout; its menu is the panel's Orders tab.
-  if (isOrdersPage(view.main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
+  if (isOrdersPage(/** @type {View} */ (view).main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
   const nav = h(
     'nav',
     { class: 'settings-tabs', 'aria-label': 'Settings' },
@@ -479,7 +512,13 @@ export function settingsTabs() {
         { class: 'settings-group', 'data-hue': hue },
         h('span', { class: 'settings-group-label' }, label === 'Scheme' ? gloss('scheme', label) : label),
         items.map(({ kind, label: text, icon: ic }) =>
-          h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, icon(ic), h('span', { class: 'label' }, kind === 'contraptions' ? gloss('contraption', text) : text), propsCount(kind)),
+          h(
+            'a',
+            { class: /** @type {View} */ (view).main === kind ? 'active' : '', href: `#/p/${/** @type {View} */ (view).projectId}/${kind}`, 'aria-current': /** @type {View} */ (view).main === kind ? 'page' : null },
+            icon(ic),
+            h('span', { class: 'label' }, kind === 'contraptions' ? gloss('contraption', text) : text),
+            propsCount(kind),
+          ),
         ),
       ),
     ),
@@ -501,15 +540,15 @@ export function ordersMenu() {
           h(
             'a',
             {
-              class: view.main === kind ? 'active' : '',
-              href: `#/p/${view.projectId}/${kind}`,
+              class: /** @type {View} */ (view).main === kind ? 'active' : '',
+              href: `#/p/${/** @type {View} */ (view).projectId}/${kind}`,
               title: sum,
-              'aria-current': view.main === kind ? 'page' : null,
+              'aria-current': /** @type {View} */ (view).main === kind ? 'page' : null,
               // Back from the schedules list to this menu changes no route, so Schedules again only shows the list (#1083).
               onclick:
                 kind === 'schedules'
-                  ? (e) => {
-                      if (view.main === 'schedules') e.currentTarget.closest('.sidebar')?.classList.add('show-schedules');
+                  ? (/** @type {Event} */ e) => {
+                      if (/** @type {View} */ (view).main === 'schedules') /** @type {Element} */ (e.currentTarget).closest('.sidebar')?.classList.add('show-schedules');
                     }
                   : null,
             },
@@ -525,11 +564,11 @@ export function ordersMenu() {
 
 /** A settings or Orders page's title: its area beside the desktop menu; on a phone a back link to the list and the page's name. */
 export function settingsTitle() {
-  const orders = isOrdersPage(view.main);
-  const page = (orders ? ORDERS_GROUPS : SETTINGS_GROUPS).flatMap(([, , items]) => items).find((r) => r.kind === view.main);
+  const orders = isOrdersPage(/** @type {View} */ (view).main);
+  const page = (orders ? ORDERS_GROUPS : SETTINGS_GROUPS).flatMap(([, , items]) => items).find((r) => r.kind === /** @type {View} */ (view).main);
   const area = orders ? 'Orders' : 'Settings';
   return [
-    h('a', { class: 'settings-back', href: `#/p/${view.projectId}/${orders ? 'orders' : 'settings'}`, title: orders ? 'All of Orders' : 'All settings' }, icon('back'), area),
+    h('a', { class: 'settings-back', href: `#/p/${/** @type {View} */ (view).projectId}/${orders ? 'orders' : 'settings'}`, title: orders ? 'All of Orders' : 'All settings' }, icon('back'), area),
     // An Orders page has no menu beside it, so its own name heads it on a desktop too.
     h('h2', {}, h('span', { class: 'settings-title-wide' }, orders ? (page?.label ?? area) : area), h('span', { class: 'settings-title-narrow' }, page?.label ?? area)),
   ];
@@ -541,7 +580,7 @@ export function settingsHome(orders = false) {
   return h(
     'section',
     { class: 'artifacts-main settings-home' },
-    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, title), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, title), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
     h(
       'nav',
       { 'aria-label': title },
@@ -553,7 +592,7 @@ export function settingsHome(orders = false) {
           items.map(({ kind, label: text, icon: ic, blurb: sum }) =>
             h(
               'a',
-              { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
+              { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${/** @type {View} */ (view).projectId}/${kind}` },
               h('span', { class: 'settings-tile' }, icon(ic)),
               h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
               h('span', { class: 'settings-row-chev' }, icon('forward')),
@@ -567,7 +606,7 @@ export function settingsHome(orders = false) {
 
 /** "Tune up" (#175): the Taskmaster runs setup again as a diff on what the scheme has, then the chat opens on it. */
 export function tuneUpButton() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const open = p.onboarding !== 'done' && p.onboarding !== 'skipped';
   const b = h('button', { type: 'button', class: 'secondary tune-up', disabled: open, title: open ? "Setup is under way: see the Taskmaster's chat" : 'The Taskmaster asks what changed and posts a plan of edits for you to approve' }, 'Tune up');
   b.onclick = async () => {
@@ -578,7 +617,7 @@ export function tuneUpButton() {
       location.hash = `#/p/${p.id}`;
     } catch (err) {
       b.disabled = false;
-      alert(err.message);
+      alert(/** @type {Error} */ (err).message);
     }
   };
   return b;
@@ -588,6 +627,7 @@ export function tuneUpButton() {
  * Fast mode (#1017): Off or Fast. A low or medium land goes live on the smoke check alone and the full suite runs on
  * main behind it; the server refuses it while the scheme's land.sh is older than the kit's, and the toast says so.
  */
+/** @param {Scheme} p */
 function fastModeRow(p) {
   // Citadel itself stays off (Cara, 2026-11-18, "Later"; Josh, 2026-11-19: lock it with a note). The server still accepts
   // the setting. If #1017's Nov 26 decision turns it on for Citadel, change this line to `const locked = false;` (or delete it).
@@ -603,7 +643,7 @@ function fastModeRow(p) {
     ),
   );
   const shown = () => {
-    on.checked = !locked && view.project?.land_mode === 'fast';
+    on.checked = !locked && /** @type {View} */ (view).project?.land_mode === 'fast';
     sum.textContent = on.checked ? 'On' : 'Off';
   };
   on.addEventListener('settings-refresh', shown);
@@ -621,15 +661,24 @@ function fastModeRow(p) {
  * so they read as drafts again. The server's own copy replaces ours once it answers, unless a later save is pending.
  * `draft`: the typed text being saved (typedDraft's `begin()`).
  */
+/**
+ * @param {Scheme} p
+ * @param {Record<string, unknown>} mine
+ * @param {Record<string, unknown>} body
+ * @param {string} label
+ * @param {(saved: boolean, err?: unknown) => void} shown
+ * @param {ReturnType<typeof typedDraft>['begin'] extends () => infer D ? D : never} [draft]
+ */
 function saveProject(p, mine, body, label, shown, draft) {
+  /** @type {Record<string, unknown>} */
   let was;
-  const ours = () => view.project?.id === p.id && Object.entries(mine).every(([k, v]) => view.project[k] === v);
+  const ours = () => /** @type {View} */ (view).project?.id === p.id && Object.entries(mine).every(([k, v]) => /** @type {View} */ (view).project[/** @type {keyof Scheme} */ (k)] === v);
   const result = optimistic({
     key: `scheme-settings:${p.id}`,
     sets: `scheme-settings:${p.id}:${Object.keys(mine).sort()}`,
     apply: () => {
-      was = Object.fromEntries(Object.keys(mine).map((k) => [k, view.project?.[k]]));
-      if (view.project?.id === p.id) Object.assign(view.project, mine);
+      was = Object.fromEntries(Object.keys(mine).map((k) => [k, /** @type {View} */ (view).project?.[/** @type {keyof Scheme} */ (k)]]));
+      if (/** @type {View} */ (view).project?.id === p.id) Object.assign(/** @type {View} */ (view).project, mine);
       renderSidebar();
       draft?.sent();
       shown(true);
@@ -637,16 +686,16 @@ function saveProject(p, mine, body, label, shown, draft) {
     send: () => api(`api/projects/${p.id}`, { method: 'PATCH', body }).finally(draft?.answered),
     undo: (err) => {
       // Otherwise someone's update, or a later save, changed them again: theirs stays, and the page still says it wasn't saved.
-      if (ours()) Object.assign(view.project, was);
+      if (ours()) Object.assign(/** @type {View} */ (view).project, was);
       renderSidebar();
       draft?.refused();
       shown(false, err);
       // The stream has no replay: a tab that missed their update fetches it, so Discard loads theirs as the refusal says.
       // An update that arrived meanwhile may be newer than the answer: it stays.
-      const seen = view.project;
-      if (err?.status === 409 && body.was)
+      const seen = /** @type {View} */ (view).project;
+      if (/** @type {{ status?: number } | null} */ (err)?.status === 409 && body.was)
         api(`api/projects/${p.id}?tickets=open`).then(
-          ({ project }) => view.project === seen && onProjectUpdate(project),
+          ({ project }) => /** @type {View} */ (view).project === seen && onProjectUpdate(project),
           () => {},
         );
     },
@@ -662,6 +711,11 @@ function saveProject(p, mine, body, label, shown, draft) {
 /**
  * A text field other people can save too (#1859). Keeps the stored text its draft began from, for the save to name as
  * `was`, and the field's data-draft mark, which stands while a save is out: a refusal then finds the text still in the box.
+ */
+/**
+ * @param {HTMLInputElement | HTMLTextAreaElement} el
+ * @param {() => string} saved
+ * @param {() => boolean} [dirty]
  */
 function typedDraft(el, saved, dirty = () => el.value.trim() !== saved().trim()) {
   let base = saved();
@@ -695,9 +749,11 @@ function typedDraft(el, saved, dirty = () => el.value.trim() !== saved().trim())
 }
 
 /**
- * A row that opens (#995, Cara picked "Side menu, rows that open"): an icon tile in its own hue, a title, a one-line
- * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
- * line, which its page keeps up to date.
+ * A row that opens (#995, Cara picked "Side menu, rows that open"): an icon tile in its own hue, a title, a one-line summary
+ * and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary line, which its page keeps up to date.
+ * @param {{ icon?: string, hue?: string | null, title: Child, summary?: Child, open?: boolean, key?: string | null, part?: string | null }} row
+ * @param {...Child} body
+ * @returns {[HTMLDetailsElement, HTMLSpanElement]}
  */
 export function settingsRow({ icon: ic, hue, title, summary = '', open = false, key, part }, ...body) {
   const sum = h('span', { class: 'settings-row-sum' }, summary);
@@ -705,23 +761,24 @@ export function settingsRow({ icon: ic, hue, title, summary = '', open = false, 
   // `part`: its name for "show me where" links (#1122, src/show-parts.ts).
   const row = h(
     'details',
-    { class: 'settings-row', 'data-hue': hue, 'data-part': part ?? null, open: key && openRows.has(key) ? openRows.get(key) : open, ontoggle: key ? (e) => openRows.set(key, e.currentTarget.open) : null },
+    { class: 'settings-row', 'data-hue': hue, 'data-part': part ?? null, open: key && openRows.has(key) ? openRows.get(key) : open, ontoggle: key ? (/** @type {Event} */ e) => openRows.set(key, /** @type {HTMLDetailsElement} */ (e.currentTarget).open) : null },
     h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)), h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum), h('span', { class: 'settings-row-chev' }, icon('forward'))),
     h('div', { class: 'settings-row-body' }, ...body),
   );
   return [row, sum];
 }
 
+/** @type {Map<string, boolean>} */
 const openRows = new Map(); // a keyed row's open state, by key
 
 /** A group of rows under an uppercase heading. */
-export const settingsSection = (title, ...rows) => [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...rows)];
+export const settingsSection = (/** @type {Child} */ title, /** @type {Child[]} */ ...rows) => [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...rows)];
 
 /**
  * A strip of in-page links at the top of a long page (Cara picked "Jump links on long pages"). Plain `#id` links would
  * hit the hash router, so each scrolls its target (an element with that id, which carries .settings-anchor) into view.
  */
-export function settingsJump(...links) {
+export function settingsJump(/** @type {[string, string][]} */ ...links) {
   return h(
     'nav',
     { class: 'settings-jump', 'aria-label': 'On this page' },
@@ -729,8 +786,8 @@ export function settingsJump(...links) {
       h(
         'a',
         {
-          href: `#/p/${view.projectId}/${view.main}`,
-          onclick: (e) => {
+          href: `#/p/${/** @type {View} */ (view).projectId}/${/** @type {View} */ (view).main}`,
+          onclick: (/** @type {Event} */ e) => {
             e.preventDefault();
             document.getElementById(id)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
           },
@@ -742,7 +799,7 @@ export function settingsJump(...links) {
 }
 
 /** Help text cut to its first sentence, the rest behind More (Cara picked "Shorter help text"). */
-export function settingsHelp(first, ...rest) {
+export function settingsHelp(/** @type {Child} */ first, /** @type {Child[]} */ ...rest) {
   if (!rest.length) return h('p', { class: 'muted small settings-help' }, first);
   const more = h('span', { class: 'settings-more', hidden: true }, ' ', ...rest);
   const btn = h(
@@ -763,16 +820,28 @@ export function settingsHelp(first, ...rest) {
 }
 
 /** Reads what the pickers list (plugin folders, the property registry, CI's workflows, the schedule count), then redraws them. */
+/**
+ * @template T
+ * @typedef {{ status: string, value?: T }} Settled
+ */
+/** @typedef {{ key: string, value_kind: string, status: string, values: { value: string, status: string }[] }} RegistryKey */
+
+/**
+ * @param {ReturnType<typeof pickers>} rules
+ * @param {HTMLElement[]} elsewhere
+ */
 function loadRulesData(rules, elsewhere) {
-  const id = view.projectId;
-  Promise.allSettled([api(`api/projects/${id}/plugins`), api(`api/projects/${id}/properties`), api('api/ci'), api(`api/projects/${id}/schedules`)]).then(([pl, pr, ci, sc]) => {
-    rules.data.failed = { plugins: pl.status === 'rejected', ci: ci.status === 'rejected' };
-    if (pl.value) rules.data.found = pl.value.plugins;
-    if (pr.value) rules.data.registry = pr.value.keys.filter((k) => k.value_kind === 'enum' && k.status === 'active').map((k) => ({ key: k.key, values: k.values.filter((v) => v.status !== 'proposed' && v.status !== 'archived').map((v) => v.value) }));
-    if (ci.value) rules.data.workflows = ci.value.schemes.find((s) => s.id === id)?.view.workflows ?? [];
-    if (sc.value && elsewhere[0]?.isConnected) elsewhere[0].replaceWith(...elsewhereRows(sc.value.schedules.filter((x) => !x.paused).length).slice(0, 1));
-    rules.refreshAll();
-  });
+  const id = /** @type {View} */ (view).projectId;
+  Promise.allSettled([api(`api/projects/${id}/plugins`), api(`api/projects/${id}/properties`), api('api/ci'), api(`api/projects/${id}/schedules`)]).then(
+    (/** @type {[Settled<{ plugins: PluginDir[] }>, Settled<{ keys: RegistryKey[] }>, Settled<{ schemes: { id: number, view: { workflows: Workflow[] } }[] }>, Settled<{ schedules: { paused?: boolean }[] }>]} */ [pl, pr, ci, sc]) => {
+      rules.data.failed = { plugins: pl.status === 'rejected', ci: ci.status === 'rejected' };
+      if (pl.value) rules.data.found = pl.value.plugins;
+      if (pr.value) rules.data.registry = pr.value.keys.filter((k) => k.value_kind === 'enum' && k.status === 'active').map((k) => ({ key: k.key, values: k.values.filter((v) => v.status !== 'proposed' && v.status !== 'archived').map((v) => v.value) }));
+      if (ci.value) rules.data.workflows = ci.value.schemes.find((s) => s.id === id)?.view.workflows ?? [];
+      if (sc.value && elsewhere[0]?.isConnected) elsewhere[0].replaceWith(...elsewhereRows(sc.value.schedules.filter((x) => !x.paused).length).slice(0, 1));
+      rules.refreshAll();
+    },
+  );
 }
 
 /**
@@ -781,19 +850,19 @@ function loadRulesData(rules, elsewhere) {
  * The flag is the scheme's, so one click clears it for every member.
  */
 function rulesReviewBanner() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const box = h('section', { class: 'rules-review', 'data-rules-review': '', 'aria-label': 'Check the rules after setup' });
   const ok = h('button', { type: 'button' }, 'Looks right');
   const list = h('div', { class: 'hue-rows' });
   const summary = h('div', { class: 'row' });
-  const lines = (s) =>
+  const lines = (/** @type {string | null | undefined} */ s) =>
     (s ?? '')
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean).length;
   const draw = () => {
-    box.hidden = !view.project.rules_review;
-    const q = view.project;
+    box.hidden = !(/** @type {View} */ (view).project.rules_review);
+    const q = /** @type {View} */ (view).project;
     // [what, value, whether it is still the starting value]
     const rows = [
       ['How changes ship', optionLabel(SHIP_PATHS, q.ship_path), q.ship_path === 'citadel'],
@@ -822,7 +891,7 @@ function rulesReviewBanner() {
 
 /** Main panel: Minion rules, each setting a row of pickers (public/minion-rules.js) with typed entry as the fallback. */
 export function approvalsEditor() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const rules = pickers({ settingsRow, settingsHelp, saveProject, typedDraft });
   const elsewhere = elsewhereRows(null);
   const section = h(
@@ -853,15 +922,23 @@ export function approvalsEditor() {
 function renderInstructionsHead() {
   const el = document.getElementById('instructions-head');
   if (!el) return;
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   el.replaceChildren(
     h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
-    h('div', { class: 'meta' }, 'The Taskmaster and every minion get these in their system prompt, from their next turn.', p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''),
+    h('div', { class: 'meta' }, 'The Taskmaster and every minion get these in their system prompt, from their next turn.', p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(/** @type {number} */ (p.instructions_updated_at))}.` : ''),
   );
 }
 
+/** @typedef {{ op: string, text: string }} DiffLine */
+/** @typedef {{ by: string, at: number, before?: string, diff: DiffLine[] }} Save */
+
 /** The last few saves of some instructions, each with what it removed and added, and how to reload them. */
+/**
+ * @param {string} url
+ * @param {(text: string) => void} [restore]
+ * @returns {[HTMLDivElement, () => Promise<void>]}
+ */
 function recentChanges(url, restore) {
   const history = h('div', { class: 'instructions-history' });
   const load = async () => {
@@ -869,19 +946,19 @@ function recentChanges(url, restore) {
       const { history: saves } = await api(url);
       history.replaceChildren(
         ...(saves.length ? [h('h3', { class: 'settings-label' }, 'Recent changes')] : []),
-        ...saves.map((s) =>
+        ...saves.map((/** @type {Save} */ s) =>
           h(
             'details',
             {},
-            h('summary', {}, `${s.by}, ${ago(s.at)} `, h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
-            h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))),
+            h('summary', {}, `${s.by}, ${ago(s.at)} `, h('span', { class: 'muted small' }, `+${s.diff.filter((/** @type {DiffLine} */ d) => d.op === '+').length} −${s.diff.filter((/** @type {DiffLine} */ d) => d.op === '-').length} lines`)),
+            h('pre', { class: 'instructions-diff' }, ...s.diff.map((/** @type {DiffLine} */ d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))),
             // Fills the field with the text from before this save; nothing is saved until Save.
-            ...(restore && s.before !== undefined ? [h('button', { type: 'button', class: 'secondary', onclick: () => restore(s.before) }, 'Put the text from before this change in the field')] : []),
+            ...(restore && s.before !== undefined ? [h('button', { type: 'button', class: 'secondary', onclick: () => restore(/** @type {string} */ (s.before)) }, 'Put the text from before this change in the field')] : []),
           ),
         ),
       );
     } catch (err) {
-      history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${err.message}`));
+      history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${/** @type {Error} */ (err).message}`));
     }
   };
   return [history, load];
@@ -894,8 +971,10 @@ const MAX_PERSONAL = 4000;
  * minions assigned to you, never in the Taskmaster's prompt. Each scope keeps its own draft while you switch.
  */
 export function myInstructionsEditor() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
+  /** @type {Record<string, string>} */
   let saved = { everywhere: '', scheme: '' };
+  /** @type {Record<string, string>} */
   const drafts = {};
   let scope = 'everywhere';
   const textarea = h('textarea', {
@@ -934,6 +1013,7 @@ export function myInstructionsEditor() {
     status.textContent = '';
     sync();
   });
+  /** @type {Record<string, ReturnType<typeof recentChanges>>} */
   const histories = { everywhere: recentChanges(`api/projects/${p.id}/my-instructions/history?scope=everywhere`), scheme: recentChanges(`api/projects/${p.id}/my-instructions/history?scope=scheme`) };
   const historySlot = h('div');
   const scopes = [
@@ -941,7 +1021,7 @@ export function myInstructionsEditor() {
     ['scheme', `${p.name} only`],
   ];
   const switcher = h('div', { class: 'row my-scope', role: 'group', 'aria-label': 'Applies to' });
-  const showScope = (next) => {
+  const showScope = (/** @type {string} */ next) => {
     scope = next;
     switcher.replaceChildren(...scopes.map(([key, label]) => h('button', { type: 'button', class: `chip${key === scope ? ' on' : ''}`, 'aria-pressed': String(key === scope), onclick: () => showScope(key) }, label)));
     textarea.value = drafts[scope] ?? saved[scope];
@@ -955,7 +1035,7 @@ export function myInstructionsEditor() {
     const at = scope;
     const was = saved[at];
     const text = textarea.value;
-    const show = (t, said) => {
+    const show = (/** @type {string} */ t, /** @type {string} */ said) => {
       saved = { ...saved, [at]: t };
       if (scope === at) status.textContent = said;
       sync();
@@ -989,7 +1069,7 @@ export function myInstructionsEditor() {
     status.textContent = '';
     sync();
   };
-  const layer = (name, who, cls) => h('li', { class: cls }, h('strong', {}, name), h('span', { class: 'muted small' }, who));
+  const layer = (/** @type {string} */ name, /** @type {string} */ who, /** @type {string} */ cls) => h('li', { class: cls }, h('strong', {}, name), h('span', { class: 'muted small' }, who));
   const section = h(
     'section',
     { class: 'artifacts-main instructions-main my-instructions' },
@@ -1038,7 +1118,7 @@ export function myInstructionsEditor() {
       // Open on this scheme's text when only it is set.
       showScope(!r.everywhere.text && r.scheme.text ? 'scheme' : 'everywhere');
     } catch (err) {
-      status.textContent = `Could not load them: ${err.message}`;
+      status.textContent = `Could not load them: ${/** @type {Error} */ (err).message}`;
     }
   })();
   showScope('everywhere');
@@ -1053,8 +1133,18 @@ export function myInstructionsEditor() {
  * whether each really repeats (#1211; Josh, 2026-11-20: "List now, verdicts fill in"); Save anyway works throughout.
  * Leaving while it checks saves, saying so: there is no list left to press Save anyway in, and the text would be lost (#1859).
  */
+/** @typedef {{ label: string, line?: number, href?: string, excerpt: string, why: string }} Overlap */
+
+/**
+ * @param {string} scope
+ * @param {string} text
+ * @param {HTMLElement} box
+ * @param {HTMLElement} status
+ * @returns {Promise<boolean>}
+ */
 async function checkRepeats(scope, text, box, status) {
-  const projectId = view.projectId;
+  const projectId = /** @type {View} */ (view).projectId;
+  /** @type {Overlap[]} */
   let found;
   try {
     ({ found } = await api(`api/projects/${projectId}/instructions/overlaps`, { method: 'POST', body: { scope, text } }));
@@ -1068,11 +1158,11 @@ async function checkRepeats(scope, text, box, status) {
   }
   status.textContent = '';
   return new Promise((done) => {
-    const close = (go) => () => {
+    const close = (/** @type {boolean} */ go) => () => {
       box.hidden = true;
       done(go);
     };
-    const where = (o) => {
+    const where = (/** @type {Overlap} */ o) => {
       const name = `${o.label}${o.line ? `, line ${o.line}` : ''}`;
       return o.href ? h('a', { href: o.href, ...(/^https?:/.test(o.href) ? { target: '_blank', rel: 'noopener' } : {}) }, name) : h('strong', {}, name);
     };
@@ -1091,23 +1181,34 @@ async function checkRepeats(scope, text, box, status) {
   });
 }
 
+/** @type {Record<string, string>} */
 const VERDICT = { repeats: 'really repeats it', conflicts: 'conflicts with it', fine: 'only shares wording' };
 
 /** Sonnet's verdicts into the open repeats list; a later check or a closed list drops them. */
+/**
+ * @param {number} projectId
+ * @param {string} scope
+ * @param {string} text
+ * @param {HTMLElement} box
+ * @param {HTMLElement[]} marks
+ * @param {HTMLElement} note
+ * @param {string} places
+ */
 async function fillVerdicts(projectId, scope, text, box, marks, note, places) {
   const run = (box.dataset.run = String(Number(box.dataset.run ?? 0) + 1));
+  /** @type {{ verdicts?: ({ verdict: string, why?: string } | null)[], places?: string[], failed?: string, unlinked?: string }} */
   let r;
   try {
     r = await api(`api/projects/${projectId}/instructions/overlaps/verdicts`, { method: 'POST', body: { scope, text } });
   } catch (err) {
-    r = { failed: err.message };
+    r = { failed: /** @type {Error} */ (err).message };
   }
   if (box.dataset.run !== run || box.hidden) return;
   // The server matched again; verdicts for a different list (the text changed under it) would land on the wrong rows.
   if (r.verdicts && (r.places ?? []).join('\n') !== places) r = { failed: 'the saved text changed while it ran; save again to check' };
   if (r.verdicts) {
     marks.forEach((m, i) => {
-      const v = r.verdicts[i];
+      const v = /** @type {NonNullable<typeof r.verdicts>} */ (r.verdicts)[i];
       m.className = `repeat-verdict${v && v.verdict !== 'fine' ? ' strong' : ' muted'}`;
       m.textContent = v ? `Sonnet: ${VERDICT[v.verdict]}${v.why ? `. ${v.why}` : '.'}` : 'Sonnet: no verdict.';
     });
@@ -1120,8 +1221,11 @@ async function fillVerdicts(projectId, scope, text, box, marks, note, places) {
 }
 
 /** The Citadel-wide instructions as last loaded or broadcast, for the tab below. */
+/** @typedef {{ text: string, by?: string | null, at: number }} AppInstructions */
+/** @type {AppInstructions | null} */
 let appInstructions = null;
 
+/** @param {AppInstructions} instructions */
 export function onAppInstructionsUpdate(instructions) {
   appInstructions = instructions;
   theirText('app-instructions-text', instructions.text);
@@ -1133,14 +1237,14 @@ function renderAppInstructionsHead() {
   if (!el) return;
   const a = appInstructions;
   el.replaceChildren(
-    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' }, "Every scheme's minions and Taskmaster get these, before their scheme's own.", a?.by ? ` Last changed by ${a.by} ${ago(a.at)}.` : ''),
   );
 }
 
 /** A refused save's status: the server's words when someone saved first. */
-const notSaved = (err) => (err?.status === 409 ? `Not saved: ${err.message}.` : 'Not saved.');
+const notSaved = (/** @type {unknown} */ err) => (/** @type {{ status?: number, message?: string } | null} */ (err)?.status === 409 ? `Not saved: ${/** @type {Error} */ (err).message}.` : 'Not saved.');
 
 /** Main panel: edit the instructions every scheme shares. */
 export function appInstructionsEditor() {
@@ -1190,10 +1294,11 @@ export function appInstructionsEditor() {
   };
   // Saved at once; a refusal puts the last saved text back as the saved one, and the field keeps what was typed as a draft.
   const saveNow = () => {
-    let was;
+    /** @type {AppInstructions | null} */
+    let was = null;
     const mine = { ...appInstructions, text: textarea.value, by: me, at: Date.now() };
     const sending = draft.begin();
-    const show = (a, said) => {
+    const show = (/** @type {AppInstructions} */ a, /** @type {string | null} */ said) => {
       appInstructions = a;
       status.textContent = said;
       renderAppInstructionsHead();
@@ -1209,10 +1314,10 @@ export function appInstructionsEditor() {
       send: () => api('api/app/instructions', { method: 'PUT', body: { text: mine.text, was: sending.from } }).finally(sending.answered),
       undo: (err) => {
         sending.refused();
-        show(appInstructions === mine ? was : appInstructions, notSaved(err)); // someone's update, or a later save, stays
+        show(/** @type {AppInstructions} */ (appInstructions === mine ? was : appInstructions), notSaved(err)); // someone's update, or a later save, stays
         loadHistory();
         const seen = appInstructions;
-        if (err?.status === 409)
+        if (/** @type {{ status?: number } | null} */ (err)?.status === 409)
           api('api/app/instructions').then(
             (a) => appInstructions === seen && onAppInstructionsUpdate(a),
             () => {},
@@ -1250,7 +1355,7 @@ export function appInstructionsEditor() {
   (async () => {
     try {
       appInstructions = await api('api/app/instructions');
-      textarea.value = appInstructions.text;
+      textarea.value = /** @type {AppInstructions} */ (appInstructions).text;
       textarea.disabled = false;
       status.textContent = '';
       renderAppInstructionsHead();
@@ -1259,7 +1364,7 @@ export function appInstructionsEditor() {
         textarea.setSelectionRange(0, 0);
       }
     } catch (err) {
-      status.textContent = `Could not load them: ${err.message}`;
+      status.textContent = `Could not load them: ${/** @type {Error} */ (err).message}`;
     }
     sync();
   })();
@@ -1274,11 +1379,12 @@ function githubOwnerField() {
   const input = h('input', { id: 'github-owner', spellcheck: 'false', autocomplete: 'off', disabled: true });
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button', class: 'secondary' }, 'Save');
-  const show = (s) => {
+  const show = (/** @type {{ github_owner?: string, github_owner_default?: string }} */ s) => {
     input.value = saved = s.github_owner ?? '';
     input.placeholder = s.github_owner_default ?? 'caraminden';
     input.disabled = false;
   };
+  /** @type {string | null} */
   let saved = null; // the owner as last saved, so a refusal can say the field no longer matches it
   save.onclick = () => {
     const was = saved;
@@ -1316,7 +1422,7 @@ function githubOwnerField() {
 
 /** Main panel: edit the project's instructions, or import them from Claude Code. */
 export function instructionsEditor() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const textarea = h('textarea', {
     id: 'instructions-text',
     'data-part': 'scheme-instructions',
@@ -1330,7 +1436,7 @@ export function instructionsEditor() {
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button' }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
-  const now = () => (view.project?.id === p.id ? view.project : p); // a save can outlast the page
+  const now = () => (/** @type {View} */ (view).project?.id === p.id ? /** @type {View} */ (view).project : p); // a save can outlast the page
   const draft = typedDraft(textarea, () => now().instructions ?? '');
   const sync = () => {
     const dirty = draft.sync();
@@ -1356,7 +1462,7 @@ export function instructionsEditor() {
     if (!go) return;
     const instructions = textarea.value;
     const sending = draft.begin();
-    const shown = (saved, err) => {
+    const shown = (/** @type {boolean} */ saved, /** @type {unknown} */ err) => {
       status.textContent = saved ? `Saved. Minions pick this up on their next turn. ${instructionCost(instructions)}` : notSaved(err);
       renderInstructionsHead();
       sync();
@@ -1374,7 +1480,7 @@ export function instructionsEditor() {
   };
 
   /** Put imported text at the end of what's there (or in place of it), then let people review and save. */
-  const insert = (parts, replace) => {
+  const insert = (/** @type {string[]} */ parts, /** @type {boolean} */ replace) => {
     const add = parts
       .map((x) => x.trim())
       .filter(Boolean)
@@ -1389,7 +1495,7 @@ export function instructionsEditor() {
 
   const fileInput = h('input', { type: 'file', accept: '.md,.markdown,.txt,text/markdown,text/plain', multiple: true, hidden: true });
   fileInput.onchange = async () => {
-    const files = [...fileInput.files];
+    const files = [.../** @type {FileList} */ (fileInput.files)];
     fileInput.value = '';
     insert(await Promise.all(files.map((f) => f.text())), false);
   };
@@ -1443,19 +1549,25 @@ export function instructionsEditor() {
 }
 
 /** The import picker: this app's Claude Code instruction and memory files, to tick and add. */
+/**
+ * @param {HTMLElement} el
+ * @param {(parts: string[], replace: boolean) => void} insert
+ */
 async function loadInstructionSources(el, insert) {
   el.replaceChildren(h('p', { class: 'muted small' }, 'Looking for Claude Code instructions and memory…'));
+  /** @type {{ id: string, group: string, content: string, label: string, path: string, truncated?: boolean, note?: string }[]} */
   let sources;
   try {
-    ({ sources } = await api(`api/projects/${view.projectId}/instructions/sources`));
+    ({ sources } = await api(`api/projects/${/** @type {View} */ (view).projectId}/instructions/sources`));
   } catch (err) {
-    el.replaceChildren(h('p', { class: 'error' }, `Could not list Claude Code files: ${err.message}`));
+    el.replaceChildren(h('p', { class: 'error' }, `Could not list Claude Code files: ${/** @type {Error} */ (err).message}`));
     return;
   }
   if (!sources.length) {
     el.replaceChildren(h('p', { class: 'muted small' }, 'No Claude Code instructions or memory files found for this login. Import a file or paste instead.'));
     return;
   }
+  /** @type {Set<string>} */
   const picked = new Set();
   const add = h('button', { type: 'button', disabled: true }, 'Add to instructions');
   const replace = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Replace instructions');

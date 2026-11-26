@@ -5,6 +5,13 @@
 //
 // Standalone like every file in public/ui/: no imports, no inline styles, cui-* classes.
 
+/**
+ * @template {keyof HTMLElementTagNameMap} K
+ * @param {K} tag
+ * @param {string | null} [cls]
+ * @param {string | null} [text]
+ * @returns {HTMLElementTagNameMap[K]}
+ */
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -12,7 +19,10 @@ const el = (tag, cls, text) => {
   return e;
 };
 
-/** A loading line: a spinner and `text` in div.cui-loading, role="status". */
+/**
+ * A loading line: a spinner and `text` in div.cui-loading, role="status".
+ * @type {typeof import('./state.js').loadingLine}
+ */
 export function loadingLine(text = 'Loading…') {
   const box = el('div', 'cui-loading');
   box.setAttribute('role', 'status');
@@ -22,7 +32,10 @@ export function loadingLine(text = 'Loading…') {
   return box;
 }
 
-/** A failure line: `text` and, when `retry` is given, a Retry button (label overridable) that calls it. */
+/**
+ * A failure line: `text` and, when `retry` is given, a Retry button (label overridable) that calls it.
+ * @type {typeof import('./state.js').failedLine}
+ */
 export function failedLine(text, { retry, label = 'Retry' } = {}) {
   const box = el('div', 'cui-failed');
   box.setAttribute('role', 'alert');
@@ -36,7 +49,10 @@ export function failedLine(text, { retry, label = 'Retry' } = {}) {
   return box;
 }
 
-/** An empty state: a mark, a title and what would fill it. `tone` is a chip tone (default ok: empty is good). */
+/**
+ * An empty state: a mark, a title and what would fill it. `tone` is a chip tone (default ok: empty is good).
+ * @type {typeof import('./state.js').emptyState}
+ */
 export function emptyState(title, line, { mark = '✓', tone = 'ok' } = {}) {
   const box = el('div', 'cui-empty');
   box.dataset.tone = tone;
@@ -53,6 +69,7 @@ export function emptyState(title, line, { mark = '✓', tone = 'ok' } = {}) {
  * A row of tabs (div.cui-tabs, role="tablist"). `items` is [key, label | Node] pairs; `onSelect(key)` runs on every click
  * (the picked tab's too) and on an arrow key (then with { keyboard: true } as a second argument, so a page that redraws the row can focus the new one). Returns { element, set(key), current }. `set` changes the picked tab without
  * calling onSelect. The picked tab is the one with aria-selected="true", so a page that sets it itself stays in step.
+ * @type {typeof import('./state.js').tabs}
  */
 export function tabs({ items, current, onSelect, label, className = '' }) {
   const box = el('div', `cui-tabs ${className}`.trim());
@@ -71,6 +88,7 @@ export function tabs({ items, current, onSelect, label, className = '' }) {
     return b;
   });
   const now = () => buttons.find((b) => b.getAttribute('aria-selected') === 'true')?.dataset.key;
+  /** @param {string | undefined} key */
   function show(key) {
     for (const b of buttons) {
       const on = b.dataset.key === key;
@@ -82,10 +100,12 @@ export function tabs({ items, current, onSelect, label, className = '' }) {
     const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
     if (!d) return;
     const i = buttons.findIndex((b) => b.dataset.key === now());
-    const next = buttons[(i + d + buttons.length) % buttons.length];
-    show(next.dataset.key);
+    const j = (i + d + buttons.length) % buttons.length;
+    const next = buttons[j];
+    const key = items[j][0]; // what the button's data-key holds
+    show(key);
     next.focus();
-    onSelect?.(next.dataset.key, { keyboard: true });
+    onSelect?.(key, { keyboard: true });
     e.preventDefault();
   });
   box.append(...buttons);

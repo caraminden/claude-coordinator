@@ -1,8 +1,9 @@
 # Citadel's starter CI (the kit's scheme-setup/templates/starter-ci/README.md, #1782): install, typecheck, build, tests.
 # Copy to .github/workflows/ci.yml. Swap <scheme-slug>, and make the steps this repo's own check.
 #
-# It runs on the scheme's own Linux runner only (`ci_runners` add, `os: linux`), never on GitHub's: those cost Actions
-# minutes, so there is no switch to them here.
+# It runs on the scheme's own Linux runner only, never on GitHub's: those cost Actions minutes, so there is no switch to
+# them here. Nobody adds the runner: a computer lending the scheme CI registers one once this file asks for its label.
+# Any lent computer may run it, so the steps install every toolchain they use (setup-node and the like).
 name: ci
 
 # After a ship: the commit main now holds. Not on pull requests: they'd run the same check twice, on a stale commit
@@ -35,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24 # what package.json's engines asks for
-      # Other toolchains go here: astral-sh/setup-uv, jdx/mise-action, dtolnay/rust-toolchain.
+      # Other toolchains go here (astral-sh/setup-uv, jdx/mise-action, dtolnay/rust-toolchain): the runner has only Node and git.
 
       # A repo with one check command (tools/check.sh, `npm run check`) runs that in place of Typecheck and Tests, so CI
       # and a ship agree. Delete a step the repo has no script for; don't hide it with --if-present, which passes when

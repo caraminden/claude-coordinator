@@ -8,7 +8,7 @@
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, hostname } from 'node:os';
+import { cpus, homedir, hostname, totalmem } from 'node:os';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,8 @@ const IMAGE = 'localhost/citadel-worker';
 const NO_IMAGE = `${IMAGE}:none`;
 /** Exit status the service takes as "don't start me again" (RestartPreventExitStatus): a newer install has this machine's token. */
 const REPLACED = 64;
+/** The root helper's one command this user may run through sudo (install-worker.sh's sudoers file): the page's caps, raised. */
+const PAGE_CAPS = ['-n', '/usr/local/bin/citadel-worker', 'page-caps'];
 /** Where the self-test's folders show inside its container. */
 const TEST_ROOT = '/citadel-self-test';
 /** Where `citadel-worker folder add` mounts each of the owner's host folders in this distro, as root (T8). */
@@ -128,8 +130,15 @@ export class WorkerAgent {
     this.installed = o.installed ?? 0;
     /** Another program spoke for this machine a moment ago: it ends its turns first. */
     this.wait = true;
-    /** The caps its owner set on the Machines page (Build 7 M3), from each sync's reply: it holds the lower of these and config.json's. */
+    /** The caps its owner set on the Machines page (Build 7 M3), from each sync's reply: it holds these where set, else config.json's (want). */
     this.page = {};
+    /** What this PC has: the page's threads and memory are held to it. */
+    this.here = { threads: cpus().length, memory_gb: Math.floor(totalmem() / 1024 ** 3) };
+    /** The threads and memory the root helper last set this PC's slice to (#2085); null: config.json's, as install and caps set it. */
+    this.slice = null;
+    /** The last threads and memory it asked the root helper for, so a refused ask is made once until they change. */
+    this.asked = '';
+    this.raising = false;
     // WSL2 says so in its kernel's name; the app then shows PowerShell commands.
     this.wsl = /microsoft/i.test(safeRead('/proc/sys/kernel/osrelease'));
     // No image yet: its claude is unknown, so the app places nothing here until it is.
@@ -196,12 +205,39 @@ export class WorkerAgent {
     return body;
   }
 
-  /** The caps it holds now: config.json's, lowered by any the owner set on the Machines page. */
-  held() {
+  /** What its owner wants: the Machines page's caps where set, else config.json's (the PC's own); threads and memory within what this PC has. */
+  want() {
     const c = this.cfg.caps;
     /** @param {'workers' | 'threads' | 'memory_gb' | 'disk_gb'} k */
-    const low = (k) => Math.min(c[k], this.page[k] ?? Infinity);
-    return { workers: low('workers'), threads: low('threads'), memory_gb: low('memory_gb'), disk_gb: low('disk_gb') };
+    const pick = (k) => this.page[k] ?? c[k];
+    return { workers: pick('workers'), threads: Math.min(pick('threads'), this.here.threads), memory_gb: Math.min(pick('memory_gb'), this.here.memory_gb), disk_gb: pick('disk_gb') };
+  }
+
+  /** The caps it holds now: what its owner wants, threads and memory as far as this PC's slice was set. */
+  held() {
+    const w = this.want();
+    const slice = this.slice ?? this.cfg.caps;
+    return { ...w, threads: Math.min(w.threads, slice.threads), memory_gb: Math.min(w.memory_gb, slice.memory_gb) };
+  }
+
+  /**
+   * Set this PC's slice to the threads and memory its owner wants, through the root helper (citadel-worker page-caps), at
+   * its first sync and whenever they change: config.json stays the PC's own, and the worker holds workers and disk itself.
+   */
+  async raise() {
+    const w = this.want();
+    const ask = `${w.threads} ${w.memory_gb}`;
+    if (ask === this.asked || this.raising) return;
+    this.asked = ask;
+    this.raising = true;
+    const got = await this.exec('sudo', [...PAGE_CAPS, '--threads', String(w.threads), '--memory', String(w.memory_gb)]).finally(() => (this.raising = false));
+    if (!got.code) {
+      this.slice = { threads: w.threads, memory_gb: w.memory_gb };
+      this.log(lastLine(got.out));
+    } else if (w.threads > (this.slice ?? this.cfg.caps).threads || w.memory_gb > (this.slice ?? this.cfg.caps).memory_gb)
+      // Only a raise needs it: a PC set up before the helper holds lower ones on its containers (fit).
+      this.log(`Could not raise this PC's threads and memory to the Machines page's (${lastLine(got.err || got.out)}). A PC set up before this could run its install command again, or citadel-worker caps sets them here.`);
+    this.fit();
   }
 
   full() {
@@ -211,9 +247,10 @@ export class WorkerAgent {
   /** The owner's most workers, or none while there is no image, it has only just taken this machine over or the disk cap is reached: turns that run go on. */
   fit() {
     this.worker.cfg.max = this.wait || this.full() || !(this.image?.state === 'own' || this.image?.state === 'ready') ? 0 : this.held().workers;
-    // Threads and memory below what the PC's own slice holds go on its containers too (machine-worker.mjs containerArgs).
+    // Threads and memory below what the PC's slice holds go on its containers too (machine-worker.mjs containerArgs).
     const held = this.held();
-    this.worker.cfg.limits = held.threads < this.cfg.caps.threads || held.memory_gb < this.cfg.caps.memory_gb ? { threads: held.threads, memory_gb: held.memory_gb } : null;
+    const slice = this.slice ?? this.cfg.caps;
+    this.worker.cfg.limits = held.threads < slice.threads || held.memory_gb < slice.memory_gb ? { threads: held.threads, memory_gb: held.memory_gb } : null;
   }
 
   /** Tell the app how this worker stands, and do what it answers. */
@@ -222,7 +259,7 @@ export class WorkerAgent {
     const mounted = mountedFolders();
     this.worker.cfg.host = hostMounts(this.cfg.folders, mounted);
     const folders = this.cfg.folders.map((f) => ({ ...f, ready: mounted.has(f.name) }));
-    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test, folders, folder_problems: this.cfg.problems };
+    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, held: this.held(), image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test, folders, folder_problems: this.cfg.problems };
     const reply = await this.json('/api/machines/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     this.said = null;
     if (!this.code && !reply.replaced) this.log(`Connected to ${this.appUrl} as ${hostname()}`);
@@ -240,6 +277,7 @@ export class WorkerAgent {
     this.wait = reply.wait === true;
     this.page = pageCaps(reply.caps);
     this.fit();
+    void this.raise();
     // Newer code at the app: the service starts this again, on it. Turns run on in the container, but a restart can wait for them.
     this.code ??= reply.agent;
     if (reply.agent !== this.code && !this.worker.turns.size && !this.building && !this.testing) {

@@ -11,6 +11,11 @@
 // Standalone apart from rail.js, and brings its own styles, since contraptions load it from outside Citadel's pages.
 import { hasRail, leaveEdge, openRail } from './rail.js';
 
+/** @import { DrawerSide, Drawers } from './drawers.js' */
+/** @typedef {'left' | 'right'} Side */
+/** @typedef {{ el: HTMLElement; side: Side; wasOpen: boolean; returnFocus: HTMLElement | null; inerted: HTMLElement[]; progress: number; width?: number; back?: boolean }} Drawer The drawer pulled out now. */
+/** @typedef {{ id: number; x0: number; y0: number; side?: Side | 'rail'; dir: 1 | -1; mode: 'wait' | 'drag'; from: 0 | 1; target: EventTarget | null; samples: [number, number][] }} Touch The touch being tracked. */
+
 export const NARROW = '(max-width: 800px)'; // the mobile layout's breakpoint in style.css
 export const EDGE = 44; // px from the screen edge a swipe has to start in: a thumb's width, not a sliver
 const SLOP = 10; // px of movement before deciding whether a touch is a swipe
@@ -21,6 +26,10 @@ const COMMIT = 1 / 3; // how far along a slow drag has to get to finish the move
 /**
  * Decide what a touch that has moved (dx, dy) is: 'wait' while it is too short to tell, 'swipe'
  * when it is mostly horizontal in direction `dir` (+1 rightward, -1 leftward), else 'ignore'.
+ * @param {number} dx
+ * @param {number} dy
+ * @param {1 | -1} dir
+ * @returns {'wait' | 'swipe' | 'ignore'}
  */
 export function classify(dx, dy, dir) {
   if (Math.hypot(dx, dy) < SLOP) return 'wait';
@@ -31,6 +40,9 @@ export function classify(dx, dy, dir) {
  * Whether a released drawer should end open: a fast enough flick decides, otherwise whether the drag
  * got a third of the way from where it started (`from`: 0 pulling it out, 1 pushing it back).
  * `progress` is 0 (closed) to 1 (open); `velocity` is px/ms in the opening direction.
+ * @param {number} progress
+ * @param {number} velocity
+ * @param {0 | 1} [from]
  */
 export function settleOpen(progress, velocity, from = 0) {
   if (velocity > FLING) return true;
@@ -38,7 +50,12 @@ export function settleOpen(progress, velocity, from = 0) {
   return from === 0 ? progress >= COMMIT : progress > 1 - COMMIT;
 }
 
-/** Which drawer a touch at `x` on a screen `width` wide would pull out, if any. */
+/**
+ * Which drawer a touch at `x` on a screen `width` wide would pull out, if any.
+ * @param {number} x
+ * @param {number} width
+ * @returns {Side | null}
+ */
 export function edgeSide(x, width) {
   if (x <= EDGE) return 'left';
   if (x >= width - EDGE) return 'right';
@@ -48,9 +65,12 @@ export function edgeSide(x, width) {
 /**
  * Whether something under the finger scrolls sideways and still has room to go in the drag's
  * direction; then the drag scrolls it (a wide code block or table) rather than pulling a drawer.
+ * @param {EventTarget | null} target
+ * @param {number} dir
+ * @param {Element} stop
  */
 function scrollsSideways(target, dir, stop) {
-  for (let el = target; el && el !== stop && el.nodeType === 1; el = el.parentElement) {
+  for (let el = /** @type {HTMLElement | null} */ (target); el && el !== stop && el.nodeType === 1; el = el.parentElement) {
     if (el.scrollWidth <= el.clientWidth + 1) continue;
     const ox = getComputedStyle(el).overflowX;
     if (ox !== 'auto' && ox !== 'scroll') continue;
@@ -68,6 +88,8 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), texta
  * that redraw it. `main` (an element, a list, or a function returning either) goes inert behind an
  * open drawer, and the first of it is held still while a drawer comes and goes.
  * Returns `open(side)`, `close()` and `destroy()`.
+ * @param {{ left?: DrawerSide; right?: DrawerSide; main?: Element | Iterable<Element | null> | (() => Element | Iterable<Element | null> | null) }} [opts]
+ * @returns {Drawers}
  */
 export function initDrawers({ left, right, main } = {}) {
   const sides = { left, right };
@@ -85,47 +107,62 @@ export function initDrawers({ left, right, main } = {}) {
   backdrop.hidden = true;
   document.body.append(backdrop);
 
+  /** @type {Drawer | null} */
   let drawer = null; // { el, side, wasOpen, returnFocus, inerted, width, progress }
+  /** @type {Touch | null} */
   let touch = null; // the touch being tracked: { id, x0, y0, side, dir, mode, from, samples }
 
+  /**
+   * @param {Side} side
+   * @returns {HTMLElement | null}
+   */
   const panelFor = (side) => {
     const el = sides[side]?.el;
     return (typeof el === 'function' ? el() : el) ?? null;
   };
+  /** @returns {HTMLElement[]} */
   const mains = () => {
     const m = typeof main === 'function' ? main() : main;
-    return !m ? [] : m instanceof Element ? [m] : [...m].filter(Boolean);
+    return /** @type {HTMLElement[]} */ (!m ? [] : m instanceof Element ? [m] : [...m].filter(Boolean));
   };
 
-  /** Run `change` to the page's layout without what's behind the drawer moving. */
+  /**
+   * Run `change` to the page's layout without what's behind the drawer moving.
+   * @param {() => void} change
+   */
   function keepPlace(change) {
     const anchor = mains()[0];
     const y = anchor?.getBoundingClientRect().top;
     change();
-    if (anchor?.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - y);
+    if (anchor?.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - /** @type {number} */ (y));
   }
 
+  /** @param {number} p */
   function setProgress(p) {
-    drawer.progress = Math.min(1, Math.max(0, p));
-    const off = (1 - drawer.progress) * 100;
-    drawer.el.style.transform = `translateX(${drawer.side === 'left' ? -off : off}%)`;
-    backdrop.style.opacity = String(drawer.progress);
+    const d = /** @type {Drawer} */ (drawer);
+    d.progress = Math.min(1, Math.max(0, p));
+    const off = (1 - d.progress) * 100;
+    d.el.style.transform = `translateX(${d.side === 'left' ? -off : off}%)`;
+    backdrop.style.opacity = String(d.progress);
   }
 
-  /** Lift an element out of the page into a drawer, fully closed, ready to be pulled or slid out. */
+  /**
+   * Lift an element out of the page into a drawer, fully closed, ready to be pulled or slid out.
+   * @param {Side} side
+   */
   function mount(side) {
     const el = panelFor(side);
     if (!el) return false;
     // A <details> panel (Citadel's) shows its contents in the drawer and goes back collapsed or not as it was.
     const details = el instanceof HTMLDetailsElement;
-    drawer = { el, side, wasOpen: details && el.open, returnFocus: document.activeElement, inerted: [], progress: 0 };
+    drawer = { el, side, wasOpen: details && el.open, returnFocus: /** @type {HTMLElement | null} */ (document.activeElement), inerted: [], progress: 0 }; // width follows below
     keepPlace(() => {
       el.classList.add('citadel-drawer', `citadel-drawer-${side}`);
       if (details) el.open = true;
     });
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
-    el.setAttribute('aria-label', sides[side].label);
+    el.setAttribute('aria-label', /** @type {DrawerSide} */ (sides[side]).label);
     el.tabIndex = -1;
     backdrop.hidden = false;
     setProgress(0);
@@ -135,7 +172,11 @@ export function initDrawers({ left, right, main } = {}) {
     return true;
   }
 
-  /** Slide the drawer to open or shut; once shut it goes back into the page. */
+  /**
+   * Slide the drawer to open or shut; once shut it goes back into the page.
+   * @param {boolean} open
+   * @param {{ instant?: boolean }} [opts]
+   */
   function settle(open, { instant = false } = {}) {
     if (!drawer) return;
     const d = drawer;
@@ -171,6 +212,7 @@ export function initDrawers({ left, right, main } = {}) {
     setTimeout(end, 400); // in case the transition never runs
   }
 
+  /** @param {Drawer} d */
   function unmount(d) {
     // A second close while the first still slides (a link, then its hashchange) ends in here twice.
     if (d.back) return;
@@ -193,22 +235,34 @@ export function initDrawers({ left, right, main } = {}) {
     }
     if (el.contains(document.activeElement) || document.activeElement === document.body) {
       if (d.returnFocus?.isConnected && d.returnFocus !== document.body) d.returnFocus.focus({ preventScroll: true });
-      else document.activeElement?.blur?.();
+      else {
+        /** @type {HTMLElement | null} */ (document.activeElement)?.blur?.();
+      }
     }
     announce('citadel-drawer-close', d.side, el);
   }
 
+  /** @param {{ instant?: boolean }} [opts] */
   const close = (opts) => drawer && settle(false, opts);
   // On document, which outlives a drawer element a new view replaced: citadel-drawer-open as the element
   // is pulled out (before it slides in, so a page can move its composer into it), citadel-drawer-close once
   // it is back in the page. Always in pairs. Names stay literal at each call: the contract test reads them.
+  /**
+   * @param {string} name
+   * @param {Side} side
+   * @param {HTMLElement} el
+   */
   const announce = (name, side, el) => document.dispatchEvent(new CustomEvent(name, { detail: { side, el } }));
 
-  /** Slide a drawer out by itself (a handle, or the page's own button); the switcher for a left edge with only the rail. */
-  function open(side, returnFocus = document.activeElement) {
+  /**
+   * Slide a drawer out by itself (a handle, or the page's own button); the switcher for a left edge with only the rail.
+   * @param {Side} side
+   * @param {HTMLElement | null} [returnFocus]
+   */
+  function open(side, returnFocus = /** @type {HTMLElement | null} */ (document.activeElement)) {
     if (side === 'left' && !drawer && narrow.matches && !panelFor(side) && hasRail()) return openRail();
     if (drawer || !narrow.matches || !mount(side)) return;
-    drawer.returnFocus = returnFocus;
+    /** @type {Drawer} */ (/** @type {unknown} */ (drawer)).returnFocus = returnFocus; // mount() has set it, which the narrowing above can't see
     // Let the closed position paint first so the drawer slides in.
     requestAnimationFrame(() => requestAnimationFrame(() => settle(true)));
   }
@@ -227,10 +281,11 @@ export function initDrawers({ left, right, main } = {}) {
       const t = e.touches[0];
       if (drawer) {
         // A drag across an open drawer or its backdrop, toward its edge, pushes it back.
-        if (!drawer.el.contains(e.target) && e.target !== backdrop) return;
+        if (!drawer.el.contains(/** @type {Node} */ (e.target)) && e.target !== backdrop) return;
         touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, dir: drawer.side === 'left' ? -1 : 1, mode: 'wait', from: 1, target: e.target, samples: [] };
         return;
       }
+      /** @type {Side | 'rail' | null} */
       let side = edgeSide(t.clientX, window.innerWidth);
       if (side === 'left' && !panelFor(side) && hasRail()) side = 'rail';
       if (!side || (side !== 'rail' && !panelFor(side))) {
@@ -246,7 +301,7 @@ export function initDrawers({ left, right, main } = {}) {
     'touchmove',
     (e) => {
       if (!touch) return;
-      const t = [...e.changedTouches].find((c) => c.identifier === touch.id);
+      const t = [...e.changedTouches].find((c) => c.identifier === /** @type {Touch} */ (touch).id);
       if (!t) return;
       const dx = t.clientX - touch.x0;
       const dy = t.clientY - touch.y0;
@@ -255,7 +310,7 @@ export function initDrawers({ left, right, main } = {}) {
         if (kind === 'wait') return;
         // Past the left drawer, or from an edge with none: the app switcher, which slides out by itself.
         const pastLeft = kind === 'ignore' && drawer?.side === 'left' && hasRail() && classify(dx, dy, 1) === 'swipe';
-        if (pastLeft && !scrollsSideways(touch.target, 1, drawer.el)) {
+        if (pastLeft && !scrollsSideways(touch.target, 1, /** @type {Drawer} */ (drawer).el)) {
           touch = null;
           openRail();
           return;
@@ -269,31 +324,33 @@ export function initDrawers({ left, right, main } = {}) {
           openRail();
           return;
         }
-        if (!drawer && !mount(touch.side)) {
+        if (!drawer && !mount(/** @type {Side} */ (touch.side))) {
           touch = null;
           return;
         }
         touch.mode = 'drag';
         touch.x0 = t.clientX; // follow from here, so the drawer doesn't jump by the slop
-        drawer.el.classList.remove('citadel-drawer-settling');
+        /** @type {Drawer} */ (drawer).el.classList.remove('citadel-drawer-settling');
         backdrop.classList.remove('citadel-drawer-settling');
       }
       if (e.cancelable) e.preventDefault(); // the swipe is ours: no scrolling or history swipe
-      const moved = (t.clientX - touch.x0) * (drawer.side === 'left' ? 1 : -1);
-      setProgress(touch.from + moved / drawer.width);
+      const d = /** @type {Drawer} */ (drawer);
+      const moved = (t.clientX - touch.x0) * (d.side === 'left' ? 1 : -1);
+      setProgress(touch.from + moved / /** @type {number} */ (d.width));
       touch.samples.push([e.timeStamp, t.clientX]);
       if (touch.samples.length > 5) touch.samples.shift();
     },
     { passive: false, signal },
   );
 
+  /** @param {TouchEvent} e */
   const release = (e) => {
     if (!touch) return;
     const tr = touch;
     if (![...e.changedTouches].some((c) => c.identifier === tr.id)) return;
     touch = null;
     if (tr.mode !== 'drag' || !drawer) return;
-    const [first, last] = [tr.samples[0], tr.samples.at(-1)];
+    const [first, last] = /** @type {[number, number][]} */ ([tr.samples[0], tr.samples.at(-1)]); // either may be missing: checked below
     const dt = last && first ? last[0] - first[0] : 0;
     // A finger that stopped before letting go isn't flicking.
     const held = last ? e.timeStamp - last[0] > 100 : true;
@@ -306,14 +363,14 @@ export function initDrawers({ left, right, main } = {}) {
   // ---- other ways to close ----
 
   // Edge handles: the same drawers with a tap, where the browser's back/forward swipe wins the edge.
-  const handles = Object.keys(sides)
+  const handles = /** @type {Side[]} */ (Object.keys(sides))
     .filter((side) => sides[side])
     .map((side) => {
       const handle = document.createElement('button');
       handle.type = 'button';
       handle.className = `citadel-drawer-handle ${side}`;
-      handle.setAttribute('aria-label', `Open ${sides[side].label.toLowerCase()}`);
-      handle.title = sides[side].label;
+      handle.setAttribute('aria-label', `Open ${/** @type {DrawerSide} */ (sides[side]).label.toLowerCase()}`);
+      handle.title = /** @type {DrawerSide} */ (sides[side]).label;
       handle.addEventListener('click', () => open(side, handle));
       document.body.append(handle);
       return handle;
@@ -331,9 +388,9 @@ export function initDrawers({ left, right, main } = {}) {
       }
       if (e.key !== 'Tab') return;
       // Keep Tab inside the open drawer.
-      const items = [...drawer.el.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
+      const items = /** @type {HTMLElement[]} */ ([...drawer.el.querySelectorAll(FOCUSABLE)]).filter((x) => x.offsetParent !== null || x === document.activeElement);
       if (!items.length) return;
-      const [first, last] = [items[0], items.at(-1)];
+      const [first, last] = /** @type {HTMLElement[]} */ ([items[0], items.at(-1)]); // items is not empty
       if (e.shiftKey && (document.activeElement === first || document.activeElement === drawer.el)) {
         e.preventDefault();
         last.focus();
@@ -347,18 +404,19 @@ export function initDrawers({ left, right, main } = {}) {
   document.addEventListener(
     'click',
     (e) => {
-      if (!drawer || !drawer.el.contains(e.target)) return;
+      const target = /** @type {Element} */ (e.target);
+      if (!drawer || !drawer.el.contains(target)) return;
       // A <details> panel's own bar collapses it in the page; in a drawer it closes the drawer. A button or
       // field or link in the bar (the project's rename ✎, its Settings link) does its own thing instead; a link
       // then puts the drawer away below.
-      const summary = e.target.closest('summary');
-      if (summary?.parentElement === drawer.el && !e.target.closest('button, input, a[href]')) {
+      const summary = target.closest('summary');
+      if (summary?.parentElement === drawer.el && !target.closest('button, input, a[href]')) {
         e.preventDefault();
         close();
         return;
       }
       // Following a link (a thread, project or artifact, or a contraption's own view) puts the drawer away.
-      const a = e.target.closest('a[href]');
+      const a = target.closest('a[href]');
       if (a && !e.defaultPrevented) {
         drawer.wasOpen = false;
         close();
@@ -411,6 +469,7 @@ export function initDrawers({ left, right, main } = {}) {
 // A constructed sheet, since Citadel's Content-Security-Policy (and maybe a contraption's) refuses inline <style>.
 // Placement and width win over the page's own rules (!important), so its desktop sizes don't leak in; the look
 // (background, padding, border) is the page's, and the width is --citadel-drawer-width on the element.
+/** @type {CSSStyleSheet | null} */
 let sheet = null;
 function addStyles() {
   if (sheet) return;

@@ -40,7 +40,7 @@ export type CheckLine = { key: CheckKey; name: string; state: 'waiting' | 'runni
 export type SelfTest = { id: string; at: number; done: number | null; ok: boolean; why: string | null; lines: CheckLine[] };
 export type WorkerCaps = { workers: number; threads: number; memory_gb: number; disk_gb: number };
 type ImageState = { state: 'ready' | 'building' | 'failed' | 'own'; text: string };
-type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean; folders: HostFolder[]; folder_problems: string[] };
+type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; held: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean; folders: HostFolder[]; folder_problems: string[] };
 /** Kept over a restart: how the worker was last set up (its newest install, by when that ran) and what its tests said. */
 type Kept = { installed?: number; host: string; wsl: boolean; caps: WorkerCaps | null; seen: number; test: SelfTest | null; passed: number | null };
 /** A machine's worker as its row shows it. */
@@ -52,6 +52,8 @@ export type WorkerView = {
   host: string | null;
   wsl: boolean;
   caps: WorkerCaps | null;
+  /** What it holds now, while here: the page's caps where set, else its own, threads and memory as far as that PC's slice took them (#2085). */
+  held: WorkerCaps | null;
   image: ImageState | null;
   claude: string | null;
   /** This server's claude when the worker's differs: no turn starts there until they match. */
@@ -172,7 +174,7 @@ export class WorkerJoin {
     const facts = this.facts.get(machineId);
     const kept = this.kept(machineId);
     if (!kept) return null;
-    if (facts?.full) return `it is at its disk cap (${facts.disk_gb} of ${facts.caps?.disk_gb} GB)`;
+    if (facts?.full) return `it is at its disk cap (${facts.disk_gb} of ${(facts.held ?? facts.caps)?.disk_gb} GB)`;
     if (facts?.image?.state === 'failed') return 'its image could not be built';
     if (facts?.image?.state === 'building') return 'its image is being built';
     if (kept.test && !kept.test.ok) return 'its self-test failed';
@@ -195,6 +197,7 @@ export class WorkerJoin {
       host: facts?.host || kept?.host || null,
       wsl: facts?.wsl ?? kept?.wsl ?? false,
       caps: facts?.caps ?? kept?.caps ?? null,
+      held: facts?.held ?? null,
       image: facts?.image ?? null,
       claude: here ? (info?.claude ?? null) : null,
       claude_wanted: here && home && info?.claude && !sameClaude(home, info.claude) ? home : null,
@@ -247,6 +250,7 @@ export class WorkerJoin {
       host: text(body.host, 80),
       wsl: body.wsl === true,
       caps: cleanCaps(body.caps),
+      held: cleanCaps(body.held),
       image: cleanImage(body.image),
       github: yes(body.github),
       disk_gb: count(body.disk_gb, 100_000),
@@ -266,7 +270,7 @@ export class WorkerJoin {
     return { ...(await this.wanted()), on: this.d.lends(machine), test: test ? test.id : null, ships: this.d.ships(machine.id), wait: now - facts.since < HERE_MS, caps: this.pageCaps(machine.id) };
   }
 
-  /** The caps its owner set on the Machines page for Minion turns (Build 7 M3); the worker holds the lower of these and its own. */
+  /** The caps its owner set on the Machines page for Minion turns (Build 7 M3); the worker holds these where set, raising that PC's threads and memory to them through its root helper (#2085). */
   pageCaps(machineId: number) {
     const { ticks: _, runners: __, ...caps } = (this.d.store.machineRoles?.(machineId) ?? []).find((r) => r.role === 'turns')?.caps ?? {};
     return caps;

@@ -2,7 +2,11 @@
 // waiting and lost time over its steps. src/time-log.ts cuts it; time-log.js fits it. The panel's element outlives a
 // redraw of the progress line, so a click, a scroll or focus in it isn't lost to the next event. Explain (#1994): Haiku's
 // reading of each step and wait, kept for everyone (src/time-log-explain.ts), shown in the rows in place of the outcomes.
-import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, pacificDate, pacificIso, pacificStamp, view } from './base.js';
+/** @import { ProgressUi } from './progress-ui.js' */
+/** @import { Ticket, TimeExplainLine, TimeKind, TimeLog, TimeRow, TimeSeg } from './types.js' */
+/** @typedef {{ log: TimeLog | null, at: number, sig: string, busy: boolean, failed: string, explaining: boolean, explainFailed: string }} Entry */
+/** @typedef {{ id: number, ui: ProgressUi, top: HTMLElement, list: HTMLElement, el: HTMLElement, drawn: string }} Panel */
+import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, pacificDate, pacificIso, pacificStamp, openView, view } from './base.js';
 import { firstSentence, shortDuration } from './chattext.js';
 import { grow, rowKey, tiles } from './time-log.js';
 import { heldStep } from './progress.js';
@@ -14,22 +18,25 @@ const FRESH_MS = 10_000;
 const IDLE_MS = 60_000;
 /** Rows past this start behind a button, the newest showing. */
 const ROWS = 30;
+/** @type {Record<string, string>} */
 const ICON = { completed: '✓', in_progress: '◐', pending: '○' };
+/** @type {Record<TimeKind, string>} */
 const KIND = { work: 'working', wait: 'waiting', lost: 'lost', gone: 'finished' };
 
 /** The last log read per chat, so reopening shows it at once: {log, at, sig, busy, failed, explaining, explainFailed}. */
+/** @type {Map<number, Entry>} */
 const logs = new Map();
-const entryOf = (id) => {
+const entryOf = (/** @type {number} */ id) => {
   if (!logs.has(id)) logs.set(id, { log: null, at: 0, sig: '', busy: false, failed: '', explaining: false, explainFailed: '' });
-  if (logs.size > 30) logs.delete(logs.keys().next().value);
-  return logs.get(id);
+  if (logs.size > 30) logs.delete(/** @type {number} */ (logs.keys().next().value));
+  return /** @type {Entry} */ (logs.get(id));
 };
 /** What a change of means the log was cut too early. */
 const signature = () => {
-  const t = view.ticket;
-  return [t.status, t.state, t.closed_at, t.wait?.stage, !!t.worker_wait, ...view.progress.tasks.map((s) => `${s.id}${s.status}${s.subject}`)].join('|');
+  const t = /** @type {Ticket} */ (openView().ticket);
+  return [t.status, t.state, t.closed_at, t.wait?.stage, !!t.worker_wait, ...openView().progress.tasks.map((s) => `${s.id}${s.status}${s.subject}`)].join('|');
 };
-const isRunning = () => view.ticket.status === 'running' && !view.ticket.worker_wait;
+const isRunning = () => /** @type {Ticket} */ (openView().ticket).status === 'running' && !(/** @type {Ticket} */ (openView().ticket).worker_wait);
 
 /** Read a minion's log unless the one held is fresh. Hovering or focusing the line reads it, so the click has it. */
 export async function readLog(force = false) {
@@ -46,32 +53,37 @@ export async function readLog(force = false) {
     Object.assign(e, { log, sig, failed: '' });
   } catch (err) {
     // A kept chat opens before the network is asked (`replay`, base.js): not a failure, and asked again on the next redraw.
-    e.failed = err.message === 'Catching up' ? '' : err.message;
+    const { message } = /** @type {Error} */ (err);
+    e.failed = message === 'Catching up' ? '' : message;
   }
   Object.assign(e, { busy: false, at: Date.now() });
   if (panel?.id === id && panel.el.isConnected) draw();
 }
 
+/** @type {Panel | null} */
 let panel = null;
+/** The panel, once the chat has asked for one. */
+const shownPanel = () => /** @type {Panel} */ (panel);
+/** @type {ReturnType<typeof mountTips> | null} */
 let tips = null;
 let clock = 0;
 
 /** The panel for the chat in view, kept while that chat is. */
 export function timeLogPanel() {
-  const id = view.ticket.id;
-  if (panel?.id !== id || panel.ui !== view.ui) {
+  const id = /** @type {Ticket} */ (openView().ticket).id;
+  if (panel?.id !== id || panel.ui !== openView().ui) {
     const top = h('div', { class: 'tl-top' });
     const list = h('div', { class: 'tl-rows' });
-    panel = { id, ui: view.ui, top, list, el: h('div', { class: 'time-log' }, top, list), drawn: '' };
+    panel = { id, ui: openView().ui, top, list, el: h('div', { class: 'time-log' }, top, list), drawn: '' };
   }
   tips ??= mountTips(document.body, { selector: '.tl-tile[data-tip], .tl-guess[data-tip], .tl-by[data-tip]' });
   clearInterval(clock);
   clock = setInterval(() => {
-    if (!panel.el.isConnected) return clearInterval(clock);
+    if (!shownPanel().el.isConnected) return clearInterval(clock);
     readLog();
     draw();
   }, FRESH_MS);
-  return panel.el;
+  return shownPanel().el;
 }
 
 /** Draw the panel again, once it is on the page (the ribbon fits its width). */
@@ -80,32 +92,34 @@ export function drawTimeLog() {
   draw();
 }
 
-const swatch = (kind, guess = false) => h('i', { class: `tl-k ${kind}${guess ? ' guess' : ''}`, 'aria-hidden': 'true' });
-const bit = (kind, ms, word = '') => h('span', { class: 'tl-bit' }, swatch(kind), shortDuration(ms), word);
-const probably = (r) => r.guess && r.sub !== 'unknown' && h('span', { class: 'tl-guess', tabindex: 0, 'data-tip': 'Worked out from what is recorded around it, not recorded itself' }, 'probably');
+const swatch = (/** @type {TimeKind} */ kind, guess = false) => h('i', { class: `tl-k ${kind}${guess ? ' guess' : ''}`, 'aria-hidden': 'true' });
+const bit = (/** @type {TimeKind} */ kind, /** @type {number} */ ms, word = '') => h('span', { class: 'tl-bit' }, swatch(kind), shortDuration(ms), word);
+const probably = (/** @type {TimeRow} */ r) => r.guess && r.sub !== 'unknown' && h('span', { class: 'tl-guess', tabindex: 0, 'data-tip': 'Worked out from what is recorded around it, not recorded itself' }, 'probably');
 
 /** The rows before a log has arrived: the plan the page already holds, with no times. */
-const planRows = () => view.progress.tasks.map((t) => ({ type: 'step', title: t.subject, kind: 'work', status: t.status, outcome: t.outcome, start: null, end: null, work: 0, wait: 0, lost: 0 }));
+/** @returns {TimeRow[]} */
+const planRows = () => openView().progress.tasks.map((t) => ({ type: 'step', title: t.subject, kind: 'work', status: t.status, outcome: t.outcome, start: null, end: null, work: 0, wait: 0, lost: 0 }));
 
 /** A step's one line: what came of it, or where it is. */
-function stepLine(r) {
-  const t = view.progress.tasks.find((x) => x.subject === r.title);
+function stepLine(/** @type {TimeRow} */ r) {
+  const t = openView().progress.tasks.find((x) => x.subject === r.title);
   if (r.outcome) return r.outcome;
   if (r.status === 'completed') return (t?.note && firstSentence(t.note)) || t?.description || '';
   if (r.status === 'pending') return t?.description || 'Not started yet';
-  if (t && heldStep(view.progress, t)) return 'Done so far, kept open in case a test sends it back';
+  if (t && heldStep(openView().progress, t)) return 'Done so far, kept open in case a test sends it back';
   return isRunning() ? t?.description || '' : 'Paused here when the turn ended';
 }
 
-function rowEl(r, isLast, log) {
+function rowEl(/** @type {TimeRow} */ r, /** @type {boolean} */ isLast, /** @type {TimeLog | null} */ log) {
   const key = rowKey(r);
-  const on = key && panel.ui.tlSel === key;
+  const on = key && shownPanel().ui.tlSel === key;
   const going = isLast && !log?.closed && r.type !== 'step';
   const ms = r.work + r.wait + r.lost;
-  const icon = r.type === 'step' ? (ICON[r.status] ?? (r.more ? '·' : '○')) : r.type === 'line' ? '·' : '‖';
-  const read = key && explained(log)?.parts[key];
+  const icon = r.type === 'step' ? (ICON[/** @type {string} */ (r.status)] ?? (r.more ? '·' : '○')) : r.type === 'line' ? '·' : '‖';
+  const read = (key && explained(log)?.parts[key]) || undefined;
   const line = !read?.length && r.type === 'step' && !r.more && stepLine(r);
-  const when = r.start && `${at(r.start, log)} to ${going || (r.status === 'in_progress' && isRunning()) ? 'now' : at(r.end, log)}`;
+  // A row with a time came with a log.
+  const when = r.start && `${at(r.start, log)} to ${going || (r.status === 'in_progress' && isRunning()) ? 'now' : at(/** @type {number} */ (r.end), log)}`;
   const head = [
     h('span', { class: 'icon', 'aria-hidden': 'true' }, icon),
     h('span', { class: 'subject' }, r.type === 'line' ? firstSentence(r.title, 200) : r.title, ' ', r.continued ? h('span', { class: 'tl-guess' }, 'continued ') : '', probably(r) || ''),
@@ -122,16 +136,16 @@ function rowEl(r, isLast, log) {
     'div',
     { class: `tl-row tl-${r.type}${r.status ? ` ${r.status}` : ''}${r.kind === 'lost' ? ' lost' : ''}${r.guess ? ' guess' : ''}${r.status === 'in_progress' && !isRunning() ? ' paused' : ''}${on ? ' on' : ''}`, 'data-row': key },
     key ? h('button', { class: 'tl-head', 'aria-pressed': String(!!on), title: `${when}. ${on ? 'Show the whole ribbon' : 'Show on the ribbon'}`, 'data-focus': key, onclick: () => pick(on ? null : key) }, head) : h('div', { class: 'tl-head' }, head),
-    r.event ? h('a', { class: 'tl-jump', href: jumpHref(view.ticket, r.event), title: 'Show in the chat', 'aria-label': 'Show in the chat', 'data-focus': `jump ${key}` }, 'Chat ↗') : '',
+    r.event ? h('a', { class: 'tl-jump', href: jumpHref(/** @type {Ticket} */ (openView().ticket), r.event), title: 'Show in the chat', 'aria-label': 'Show in the chat', 'data-focus': `jump ${key}` }, 'Chat ↗') : '',
     read?.length ? readingOf(read) : line ? h('p', { class: 'tl-note' }, explained(log) ? h('span', { class: 'tl-own', title: read ? 'Haiku found nothing in the chat to add here' : 'Haiku had nothing to read here yet' }, 'Its own words: ') : '', line) : '',
   );
 }
 
 /** The log's reading when it is shown: there is one and it isn't hidden. */
-const explained = (log) => (log?.explain?.presses.length && !panel.ui.tlPlain ? log.explain : null);
+const explained = (/** @type {TimeLog | null} */ log) => (log?.explain?.presses.length && !shownPanel().ui.tlPlain ? log.explain : null);
 
 /** A part's lines, each with numbered squares that open the chat at the events it rests on. */
-const readingOf = (lines) =>
+const readingOf = (/** @type {TimeExplainLine[]} */ lines) =>
   h(
     'ul',
     { class: 'tl-read' },
@@ -147,7 +161,7 @@ const readingOf = (lines) =>
           { class: 'tl-evs' },
           /\S+$/.exec(l.text)?.[0] ?? '',
           '\u00a0',
-          l.ev.map((ev, i) => h('a', { class: 'tl-ev', href: jumpHref(view.ticket, ev), title: 'Show in the chat', 'aria-label': `Show in the chat: what line ${i + 1} rests on` }, String(i + 1))),
+          l.ev.map((ev, i) => h('a', { class: 'tl-ev', href: jumpHref(/** @type {Ticket} */ (openView().ticket), ev), title: 'Show in the chat', 'aria-label': `Show in the chat: what line ${i + 1} rests on` }, String(i + 1))),
         ),
       ),
     ),
@@ -155,42 +169,43 @@ const readingOf = (lines) =>
 
 /** Explain: a press runs Haiku on the presser's own login; the reply is the log with its reading, for everyone. */
 async function explain() {
-  const id = panel.id;
+  const id = shownPanel().id;
   const e = entryOf(id);
   if (e.explaining) return;
   Object.assign(e, { explaining: true, explainFailed: '' });
-  panel.ui.tlPlain = false;
+  shownPanel().ui.tlPlain = false;
   draw();
   try {
     const log = await api(`api/tickets/${id}/time-log/explain`, { method: 'POST', body: {} });
-    Object.assign(e, { log, at: Date.now(), sig: view.ticket?.id === id ? signature() : '' });
+    Object.assign(e, { log, at: Date.now(), sig: openView().ticket?.id === id ? signature() : '' });
   } catch (err) {
-    e.explainFailed = err.message;
+    e.explainFailed = /** @type {Error} */ (err).message;
   }
   e.explaining = false;
   if (panel?.id === id && panel.el.isConnected) draw();
 }
 
-const cents = (usd) => (usd == null ? '' : ` · ${usd * 100 < 0.1 ? '<0.1' : (usd * 100).toFixed(usd * 100 < 1 ? 2 : 1)}¢`);
-const stamp = (ms) => (pacificIso(ms) === pacificIso(Date.now()) ? pacificClock : pacificStamp)(ms);
+const cents = (/** @type {number | null} */ usd) => (usd == null ? '' : ` · ${usd * 100 < 0.1 ? '<0.1' : (usd * 100).toFixed(usd * 100 < 1 ? 2 : 1)}¢`);
+const stamp = (/** @type {number} */ ms) => (pacificIso(ms) === pacificIso(Date.now()) ? pacificClock : pacificStamp)(ms);
 
 /** Explain's line under the ribbon: its button, or whose reading it is and whether something came since. */
-function explainBar(e, log) {
+function explainBar(/** @type {Entry} */ e, /** @type {TimeLog} */ log) {
+  const { ui } = shownPanel();
   const x = log.explain;
   if (!x || !log.rows.some((r) => r.start)) return '';
   const writing = e.explaining || x.writing;
   const failed = !writing && e.explainFailed && failedLine(`Explain didn't work: ${e.explainFailed}. The steps below are the minion's own.`, { retry: explain });
   const last = x.presses.at(-1);
   const fresh = x.fresh.length;
-  const btn = (label) => h('button', { class: 'small tl-explain-btn', 'data-focus': 'explain', disabled: !!writing, onclick: explain }, label);
+  const btn = (/** @type {string} */ label) => h('button', { class: 'small tl-explain-btn', 'data-focus': 'explain', disabled: !!writing, onclick: explain }, label);
   const bits = [];
   if (writing) bits.push(h('span', { class: 'tl-writing', role: 'status' }, `Haiku is writing what happened in each ${last ? 'new part' : 'step'}…`, x.writing && !e.explaining ? ` (asked by ${x.writing.by})` : ''));
   else if (!last && !failed) bits.push(btn('Explain'), h('span', { class: 'muted' }, 'Haiku writes what happened in each step'));
   if (last) {
     const all = x.presses.map((p) => `${p.by}, ${stamp(p.at)}${cents(p.cost)}`).join('\n');
     bits.push(
-      h('span', { class: 'tl-by', tabindex: 0, 'data-tip': `Haiku read the chat's record of each part. It can miss things: each line's squares show what it rests on.\n${all}` }, h('b', {}, panel.ui.tlPlain ? "Haiku's reading (hidden)" : "Haiku's reading"), ` · ${last.by}, ${stamp(last.at)}${cents(last.cost)}`),
-      h('button', { class: 'small secondary', 'data-focus': 'plain', 'aria-pressed': String(!!panel.ui.tlPlain), onclick: () => ((panel.ui.tlPlain = !panel.ui.tlPlain), draw()) }, panel.ui.tlPlain ? 'Show Explain' : 'Hide Explain'),
+      h('span', { class: 'tl-by', tabindex: 0, 'data-tip': `Haiku read the chat's record of each part. It can miss things: each line's squares show what it rests on.\n${all}` }, h('b', {}, ui.tlPlain ? "Haiku's reading (hidden)" : "Haiku's reading"), ` · ${last.by}, ${stamp(last.at)}${cents(last.cost)}`),
+      h('button', { class: 'small secondary', 'data-focus': 'plain', 'aria-pressed': String(!!ui.tlPlain), onclick: () => ((ui.tlPlain = !ui.tlPlain), draw()) }, ui.tlPlain ? 'Show Explain' : 'Hide Explain'),
     );
     if (fresh && !writing) bits.push(h('div', { class: 'cui-notice tl-stale', 'data-tone': 'warn', role: 'status' }, h('span', {}, `Out of date: new in the chat since ${stamp(last.at)}`), failed ? '' : btn(`Explain the new part${fresh > 1 ? 's' : ''}`)));
   }
@@ -198,28 +213,29 @@ function explainBar(e, log) {
 }
 
 /** A time in the log: its day too when that isn't the day the log starts on. */
-const at = (ms, log) => `${pacificIso(ms) === pacificIso(log.start) ? '' : `${pacificDate(ms)}, `}${pacificClockBare(ms)}`;
+const at = (/** @type {number} */ ms, /** @type {TimeLog | null} */ log) => `${pacificIso(ms) === pacificIso(/** @type {TimeLog} */ (log).start) ? '' : `${pacificDate(ms)}, `}${pacificClockBare(ms)}`;
 
 /** Pick a row (or none): its stretches light up. From a tile, `seg` is the stretch, and the row scrolls into sight. */
-function pick(key, seg = null) {
-  Object.assign(panel.ui, { tlSel: key, tlSeg: seg?.start ?? null });
+function pick(/** @type {string | null} */ key, /** @type {TimeSeg | null} */ seg = null) {
+  Object.assign(shownPanel().ui, { tlSel: key, tlSeg: seg?.start ?? null });
   draw();
-  if (seg && key) panel.list.querySelector('.tl-row.on')?.scrollIntoView({ block: 'nearest' });
+  if (seg && key) shownPanel().list.querySelector('.tl-row.on')?.scrollIntoView({ block: 'nearest' });
 }
 
-const partsOf = (t) =>
+/** @typedef {ReturnType<typeof tiles>[number]} Tile */
+const partsOf = (/** @type {Tile} */ t) =>
   Object.entries(t.ms)
     .filter(([, ms]) => ms >= 1000)
     .sort((a, b) => b[1] - a[1])
-    .map(([k, ms]) => `${KIND[k]} ${shortDuration(ms)}`)
+    .map(([k, ms]) => `${KIND[/** @type {TimeKind} */ (k)]} ${shortDuration(ms)}`)
     .join(', ');
-const said = (t, log) => t.main.title ?? log.rows[t.main.row]?.title ?? '';
+const said = (/** @type {Tile} */ t, /** @type {TimeLog} */ log) => t.main.title ?? log.rows[/** @type {number} */ (t.main.row)]?.title ?? '';
 
-function ribbon(log) {
-  const width = panel.el.clientWidth || 340;
+function ribbon(/** @type {TimeLog} */ log) {
+  const width = shownPanel().el.clientWidth || 340;
   const fit = tiles(log.segs, Math.floor(width / 5));
-  const key = (t) => rowKey(log.rows[t.main.row]);
-  const sel = panel.ui.tlSel;
+  const key = (/** @type {Tile} */ t) => rowKey(log.rows[/** @type {number} */ (t.main.row)]);
+  const { tlSel: sel, tlSeg } = shownPanel().ui;
   // A long gap shows its length where it is squeezed.
   return h(
     'div',
@@ -229,7 +245,7 @@ function ribbon(log) {
       const el = h(
         'button',
         {
-          class: `tl-tile ${t.kind}${t.guess ? ' guess' : ''}${t.squeezed ? ' squeezed' : ''}${sel && !log.segs.some((s) => s.start >= t.start && s.end <= t.end && rowKey(log.rows[s.row]) === sel) ? ' dim' : ''}${panel.ui.tlSeg != null && panel.ui.tlSeg >= t.start && panel.ui.tlSeg < t.end ? ' sel' : ''}`,
+          class: `tl-tile ${t.kind}${t.guess ? ' guess' : ''}${t.squeezed ? ' squeezed' : ''}${sel && !log.segs.some((s) => s.start >= t.start && s.end <= t.end && rowKey(log.rows[/** @type {number} */ (s.row)]) === sel) ? ' dim' : ''}${tlSeg != null && tlSeg >= t.start && tlSeg < t.end ? ' sel' : ''}`,
           // A stretch with a row is reached by it.
           tabindex: key(t) ? -1 : 0,
           'data-tip': words,
@@ -245,28 +261,29 @@ function ribbon(log) {
 }
 
 /** The stretch a tap picked, in words: a phone has no hover. */
-function picked(log) {
-  if (panel.ui.tlSeg == null) return '';
-  const s = log.segs.find((x) => x.start <= panel.ui.tlSeg && x.end > panel.ui.tlSeg);
+function picked(/** @type {TimeLog} */ log) {
+  const { tlSeg } = shownPanel().ui;
+  if (tlSeg == null) return '';
+  const s = log.segs.find((x) => x.start <= tlSeg && x.end > tlSeg);
   if (!s) return '';
-  const title = s.title ?? log.rows[s.row]?.title ?? '';
+  const title = s.title ?? log.rows[/** @type {number} */ (s.row)]?.title ?? '';
   return h(
     'p',
     { class: 'tl-picked' },
     swatch(s.kind, s.guess),
     h('b', {}, `${at(s.start, log)} to ${s === log.segs.at(-1) && !log.closed ? 'now' : at(s.end, log)}`),
     ` ${KIND[s.kind]} ${shortDuration(s.end - s.start)}${title ? ` · ${firstSentence(title, 120)}` : ''} `,
-    s.event && s.row === undefined ? h('a', { class: 'tl-jump', href: jumpHref(view.ticket, s.event) }, 'Chat ↗') : '',
+    s.event && s.row === undefined ? h('a', { class: 'tl-jump', href: jumpHref(/** @type {Ticket} */ (openView().ticket), s.event) }, 'Chat ↗') : '',
     h('button', { class: 'tl-clear', 'aria-label': 'Show the whole ribbon', onclick: () => pick(null) }, '×'),
   );
 }
 
-function topOf(e, log) {
+function topOf(/** @type {Entry} */ e, /** @type {TimeLog | null | 0 | undefined} */ log) {
   const retry = e.failed && failedLine(`Couldn't read the time log: ${e.failed}`, { retry: () => readLog(true) });
   if (!log) return [h('div', { class: 'tl-total' }, h('b', {}, 'Where the time went'), e.failed ? '' : h('span', { class: 'muted' }, 'reading…')), h('div', { class: `tl-ribbon none${e.failed ? '' : ' busy'}` }), retry || ''];
   const { work, wait, lost, guess } = log.totals;
   if (!log.segs.length) return [h('div', { class: 'tl-total' }, 'Nothing recorded yet'), retry || ''];
-  const last = log.segs.at(-1);
+  const last = /** @type {TimeSeg} */ (log.segs.at(-1));
   return [
     h(
       'div',
@@ -287,20 +304,20 @@ function topOf(e, log) {
 
 function draw() {
   if (heldWhilePressed(draw)) return;
-  const e = entryOf(panel.id);
+  const e = entryOf(shownPanel().id);
   const log = e.log && grow(e.log, Date.now() - e.at);
   const rows = log?.rows.length ? log.rows : planRows();
-  const { ui, list, top } = panel;
+  const { ui, list, top, el } = shownPanel();
   // A pick made on a row behind the button opens the rest.
   const cut = ui.tlAll || rows.length <= ROWS + 5 || rows.slice(0, -ROWS).some((r) => rowKey(r) && rowKey(r) === ui.tlSel) ? 0 : rows.length - ROWS;
   // Nothing changed but a second's growth: leave what the pointer is on alone.
-  const drawn = JSON.stringify([rows, e.failed, !!log, log?.explain, e.explaining, e.explainFailed, ui.tlPlain, ui.tlSel, ui.tlSeg, cut, isRunning(), panel.el.clientWidth, log && Math.round(log.end / FRESH_MS), view.progress.tasks.map((t) => [t.status, t.description, t.note])], (k, v) =>
+  const drawn = JSON.stringify([rows, e.failed, !!log, log?.explain, e.explaining, e.explainFailed, ui.tlPlain, ui.tlSel, ui.tlSeg, cut, isRunning(), el.clientWidth, log && Math.round(log.end / FRESH_MS), openView().progress.tasks.map((t) => [t.status, t.description, t.note])], (k, v) =>
     ['work', 'wait', 'lost', 'end'].includes(k) ? Math.round(v / FRESH_MS) : v,
   );
-  if (drawn === panel.drawn) return;
-  panel.drawn = drawn;
-  const focus = panel.el.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
-  const scroller = panel.el.parentElement;
+  if (drawn === shownPanel().drawn) return;
+  shownPanel().drawn = drawn;
+  const focus = el.contains(document.activeElement) ? /** @type {HTMLElement} */ (document.activeElement).dataset.focus : null;
+  const scroller = el.parentElement;
   const scroll = scroller?.scrollTop;
   top.replaceChildren(...topOf(e, log).filter(Boolean));
   const lastTimed = rows.findLastIndex((r) => r.start);
@@ -323,6 +340,7 @@ function draw() {
     ...rows.slice(cut).map((r, i) => rowEl(r, i + cut === lastTimed, log)),
     ...(!rows.length && log ? [h('p', { class: 'muted empty' }, 'Nothing has run yet.')] : []),
   );
-  if (scroller) scroller.scrollTop = scroll;
-  if (focus) panel.el.querySelector(`[data-focus="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
+  if (scroller) scroller.scrollTop = /** @type {number} */ (scroll);
+  const again = focus ? /** @type {HTMLElement | null} */ (el.querySelector(`[data-focus="${CSS.escape(focus)}"]`)) : null;
+  again?.focus({ preventScroll: true });
 }

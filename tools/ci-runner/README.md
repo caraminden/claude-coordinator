@@ -6,30 +6,32 @@ anyway (Josh, 2026-11-05: "We need to make the default for all schemes to use ca
 A personal account's runner serves one repo only, so each scheme's repo gets its own runner instance
 on each PC that runs its CI (Delve's `delve-ci` shape).
 
-This page is for **the PC's owner**: the person who adds a PC as a CI runner host. Any member can (#1933). The
-worked example throughout is Cara's Windows desktop (DESKTOP-G248IJ8), the first one; its names, sizes and dated
-notes are that PC's, not settings yours must copy.
+This page is for **the PC's owner**: the person who lends a PC to CI. Any member can (#1933). The worked example
+throughout is Cara's Windows desktop (DESKTOP-G248IJ8), the first one; its names, sizes and dated notes are that PC's,
+not settings yours must copy.
 
 ## Add your PC
 
-1. On Citadel's Machines page, press **Add a CI runner host** and name it. The machine is yours; nobody else's
-   schemes can use it until you say so.
-2. Run the install line it shows on the PC itself:
+One PC is one row on Citadel's Machines page, and CI is one of its roles (Build 7). Nobody asks for "a runner for
+scheme X" (Josh, 2026-11-25: "there should be one connection that multiple schemes can use"; #2064):
 
-   | Your PC | Tab | Section below |
-   |---|---|---|
-   | Windows, for Windows jobs | **Windows** | [Install the runner agent](#install-the-runner-agent-the-pcs-owner-once) |
-   | Windows, for Linux jobs | **Linux in WSL** | [Linux runners in WSL](#linux-runners-in-wsl-510) |
-   | Linux | **Linux** | [Linux runners on plain Linux](#linux-runners-on-plain-linux-1933) |
+1. On the PC's row, switch **CI runners** on and press **Set up**. It shows the one install line for the runner
+   agent, with the row's own token, to run as administrator on the PC: the Windows agent for Windows jobs, and on a
+   Windows PC the Linux one too, in a WSL distro of its own ([Linux runners in WSL](#linux-runners-in-wsl-510);
+   [plain Linux](#linux-runners-on-plain-linux-1933)). Set up waits for the agent to connect, then tests it.
+2. Pick schemes under **Runs CI for**. Every scheme you're in is ticked once the agent connects, and a scheme you join
+   or make later is ticked too; untick one you don't want. A scheme's runners can go on it only when you own it, you
+   are in that scheme and you lent it.
+3. That's all. When a ticked scheme's workflow asks for its label (`<scheme-slug>-ci`, `<scheme-slug>-ci-linux`), or a
+   job waits for one, Citadel registers one runner for it on each connected PC lending it CI (`src/ci-auto.ts`, every 2
+   minutes, one PC at a time: the owner's order on the Machines page, then the most room), so its jobs spread over them.
+   Unticking a scheme takes its runners off that PC. Idle runners cost a service each and nothing else; Citadel posts
+   nothing when one goes on or off, only when it fails. Only when no PC lends a scheme CI while its jobs wait
+   do its members get one card naming PCs they could ask. Set the [caps](#your-own-caps) if 75% of the PC is too much.
 
-   A Windows PC that runs both kinds of job is two hosts, one per agent.
-3. Open the host's line and pick schemes under **Runs CI for**. A scheme's runners can go on it only when you own
-   it, you are in that scheme and you lent it. Un-lending stops new runners; ask `ci_runners remove` from the scheme
-   first to take its old ones off.
-   An admin's new host is shared, with no owner: any admin lends it, and it runs CI for no scheme until one does.
-4. Someone in the scheme asks for runners (`ci_runners`, below). On a scheme's second PC, the first runner is a
-   **side** runner by default; say a [role](#runner-roles-1934) to get another. Set the [caps](#your-own-caps) first if 75% of the
-   PC is too much.
+`ci_runners` (below) stays for odd cases: a second runner, a [role](#runner-roles-1934), a list. A **CI runner host**
+row (**Add a CI runner host** on the Machines page, before Build 7) still works, and Citadel never takes its runners
+off by itself. An admin's new host is shared, with no owner, and runs CI for no scheme until an admin ticks one.
 
 CI jobs run code from the repos you lend to, as accounts of their own without administrator rights. Don't lend a PC
 to a scheme whose members you wouldn't let run programs on it.
@@ -49,7 +51,8 @@ Registration tokens (and the Linux scripts' removal tokens) last about an hour a
 
 Citadel installs them itself (#328; Josh, 2026-11-05: "Citadel installs it itself"). The **CI runner
 agent** (`public/runner-agent.mjs`) runs on the PC as SYSTEM (as root on Linux), from a scheduled task, and dials
-out to Citadel like a machine agent. It does three things, and only when a member of the scheme asks:
+out to Citadel like a machine agent. It does three things, when Citadel needs a scheme's runner (above) or a member
+of the scheme asks:
 
 | Ask | What runs on a Windows PC |
 |---|---|
@@ -62,11 +65,10 @@ Linux PC) instead, which runs `add-runner.sh`, `list-runners.sh` or `remove-runn
 [Linux runners in WSL](#linux-runners-in-wsl-510) and
 [on plain Linux](#linux-runners-on-plain-linux-1933). With more than one PC, `host` names the one an `add` goes to.
 
-People and Taskmasters ask with the `ci_runners` tool (a minion's or the Taskmaster's), or
-`POST /api/projects/<id>/ci-runners` with `{"op": "add", "count": 2}`. Citadel checks the asker is in the
-scheme. An `add` or `remove` posts one note in the scheme Taskmaster's chat when it ends, with the
-agent's output (and any tokens its scripts fetched) collapsed under it; a `list` posts none. Scheme setup calls
-`ci_runners add` when it gives a scheme CI (the `citadel:scheme-setup` skill).
+Citadel asks by itself for a scheme's first runner (above). People and Taskmasters ask, for odd cases, with the
+`ci_runners` tool (a minion's or the Taskmaster's), or `POST /api/projects/<id>/ci-runners` with
+`{"op": "add", "count": 2}`. Citadel checks the asker is in the scheme. An `add` or `remove` posts one note in the scheme Taskmaster's chat when it ends, with the
+agent's output (and any tokens its scripts fetched) collapsed under it; a `list` posts none.
 
 What keeps the agent narrow:
 - **Only its own scripts.** It runs the scripts installed next to it, with a scheme id and a
@@ -131,7 +133,8 @@ role's labels on the runners the add makes, through GitHub's API with the scheme
 
 ## Install the runner agent (the PC's owner, once)
 
-1. On Citadel's Machines page, press **Add a CI runner host** under the list and name it (Cara's is
+1. On a PC's own row, CI's **Set up** shows this step's whole line with the row's token: run it and skip the rest. On a
+   CI runner host (before Build 7): on Citadel's Machines page, press **Add a CI runner host** under the list and name it (Cara's is
    `cara-desktop-runners`). Copy its token (`ccm_…`) and the address its setup lines connect to.
 2. Easiest: the page shows the whole line, address and token filled in, right after you add the host (or make a new token for it). Copy that and skip to the end of this step. By hand: open PowerShell **as administrator** and paste this. Put that address in
    `$u` and the token in place of `ccm_…`:
@@ -217,7 +220,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$d\add-runner.ps1" -Scheme 
 ```
 
 - `-Session` adds the session runner and nothing else: no service runners, and it takes no
-  `-Count`. Build runners come from `ci_runners add` as before.
+  `-Count`. Build runners register by themselves ([Add your PC](#add-your-pc)).
 - `-Visible` runs its jobs on the person's own desktop. **Screen tests need it**: a hidden desktop
   refuses screen reads (`BitBlt`: "Access is denied") and capture. The session must also stay
   unlocked; a locked PC refuses them too. Without `-Visible`, windows open on a hidden desktop that
@@ -306,7 +309,8 @@ there and tell the minion**: the PC is never restarted for this.
    ```
 
    (`networkingMode=mirrored`, step 3's fallback, also has no relay; `localhostForwarding` only applies to NAT.)
-2. **Its host on Citadel.** On Citadel's Machines page, press **Add a CI runner host** and name it
+2. **Its host on Citadel.** On a PC's own row, CI's **Set up** shows step 3's line with the row's token (no host to add).
+   On a CI runner host (before Build 7): on Citadel's Machines page, press **Add a CI runner host** and name it
    (Cara's is `cara-desktop-linux`). Leave the install line open on the **Linux in WSL** tab and press **Copy**. Give the host
    the schemes that should get Linux runners (Theory of Crafting) under its line, as for the Windows host.
 3. **The Linux agent.** In PowerShell, open a root shell in the distro, then paste the line:
@@ -346,8 +350,9 @@ there and tell the minion**: the PC is never restarted for this.
    holds (`/run/citadel-win-ports`); each suite reads it before and after (`win-ports.sh`) and goes red on a rise still
    there a write later, step 1's leak come back. A PC set up before it shipped runs this line once more to get it; until
    then the suite says there is no count and checks nothing.
-5. **The runners.** A minion or Taskmaster of the scheme asks `ci_runners` with `op: add`, `os: linux` and a count.
-   Then the scheme's own system packages go in by hand (`wsl -d citadel-ci -u root`, then `apt-get install …`).
+5. **The runners.** They register by themselves once a lent scheme's workflow asks for `<scheme-slug>-ci-linux`
+   ([Add your PC](#add-your-pc)). What a job needs beyond Node and git is a setup step in its workflow, so any lent PC
+   runs it.
 
 To update the Linux agent and its scripts later, run step 3's line again (the token is the host's; make a new one on
 the Machines page if it's lost). To stop everything: `Disable-ScheduledTask -TaskName 'Citadel WSL runners'`, then
@@ -604,7 +609,7 @@ would cancel the land waiting there), niced.
 testing, or main's full run waits or runs, and starts each again, from its beginning, once the line has been empty for
 5 minutes (1 at night, 23:00 to 06:00 Pacific; longer each time the same run is stopped again). Main's full run waits for
 a gap in the ships, 4 hours at most, then goes once the ship running ends, and the next ships wait for it: Citadel's label stays only on the side runner till main's run is over, an hour at most (Josh, 2026-11-25, picked "Wait for a gap, max 4 h", then "After 4 h, ships wait": beside a ship it hit its 10-minute limit and gave no verdict); while it waits, ships' own checks and early runs still go. A ship's `land/**` run is never touched, and another scheme's heavy jobs are
-held 4 hours at most.
+held 4 hours at most. Citadel's own heavy jobs and hand-started suites are held 2 hours at most for ships (Josh, 2026-11-25, picked "2 hours"): past that they run beside them, one Citadel job at a time, and main's run stops one only once main itself can go (so while one runs, ships' own checks and early runs are skipped).
 **One flake proof beside ships** (Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card; it narrows both his earlier
 picks, for flake proofs only): one proof starts and runs on whatever the ship line does, and the next, the longest held first, starts when it ends.
 A ship, its own check and the early next train never wait for one; main's run stops one once it may start, as before; heavy jobs and suites never run beside one: each waits for the one that runs, and goes before the next if it may start.
@@ -612,8 +617,8 @@ No proof starts while a ship's red tests run again alone (`rerun failed files al
 **One Citadel job at a time** (#1906; Josh, 2026-11-24: "Citadel never runs two heavy jobs at once"): the runs of Citadel's
 own repo go one by one, in the order ship, main's full run, a ship's own check (`check/**`, a light check) or the early next
 train (`early/**`), then heavy jobs and suites started by hand, then flake proofs. A job is let in when it asks; one told to wait is
-stopped and started again by itself. A ship's run stops whatever runs but a flake proof, main's included, until main's has
-waited 4 hours for ships: then it runs beside them (#1902's cap, the one time two of them run at once but for a proof and the caps below). An own check or early run starts only
+stopped and started again by itself. A ship's run stops whatever runs but a flake proof and a job past its 2 hours, main's included, until main's has
+waited 4 hours for ships: then it runs beside them (#1902's cap, two of them then run at once, as with a proof and the caps below). An own check or early run starts only
 on an idle desktop (`ci_busy` in `deploy-queue.sh` before the push, the ask after): its ship goes on without it, and the stopped run
 comes back only while its branch is there. A job that has run 4 hours keeps no other
 waiting, and none waits behind lower ones past 24 hours (a proof waits its turn; main's run waits for ships 4 hours). Other

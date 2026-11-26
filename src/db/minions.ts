@@ -323,6 +323,7 @@ export const minionQueries = {
     this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM wait_records WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM time_log_explains WHERE ticket_id = ?').run(id);
+    this.deleteCabalOf(id);
     this.memory.deleteTicket(id);
     this.minionIndex.deleteTicket(id);
     this.claims.releaseHeldBy(id);

@@ -2,9 +2,14 @@
 // in the background, with its token. What it lends is ticked on the page afterwards, from what the agent finds
 // there; machine-agent.json beside it stays its owner's, and the app never stores it.
 
+/** @import { MachineWorkerCaps } from './types.js' */
+
 /**
  * For macOS and Linux: the agent installs itself as a launchd agent or a systemd user unit
  * (machine-agent.mjs --install), from its own folder, logging there. Any shell: fish too.
+ * @param {string} url
+ * @param {string} name
+ * @param {string} token
  */
 export function machineSetupPosix(url, name, token) {
   return ['mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&', `curl -fsSLO ${url}/machine-agent.mjs &&`, `node machine-agent.mjs ${url} ${token} --config machine-agent.json --install ${name}`].join('\n');
@@ -13,19 +18,26 @@ export function machineSetupPosix(url, name, token) {
 /**
  * Connect a computer (Build 7 M2): the same, with a join code in place of the name and token. The agent swaps the code
  * for its token, names its service after the machine the app made for it, and installs as above.
+ * @param {string} url
+ * @param {string} code
  */
 export function machineJoinPosix(url, code) {
   return ['mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&', `curl -fsSLO ${url}/machine-agent.mjs &&`, `node machine-agent.mjs ${url} --join ${code} --config machine-agent.json --install`].join('\n');
 }
 
-/** Where a background agent logs, as the page shows it. */
+/** Where a background agent logs, as the page shows it. * @param {string} os
+ * @param {string} name
+ */
 export function agentLog(os, name) {
   return os === 'windows' ? `%USERPROFILE%\\coordinator-agent\\machine-agent-${name}.log` : `~/coordinator-agent/machine-agent-${name}.log`;
 }
 
+/** @param {string} s */
 const psq = (s) => `'${s.replace(/'/g, "''")}'`;
+/** @param {string} name */
 const taskName = (name) => `Coordinator agent (${name})`;
 // This machine's agent by its log file, which no other agent on the computer has.
+/** @param {string} name */
 const killAgent = (name) => `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -like "*machine-agent-${name}.log*" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
 
 /**
@@ -33,17 +45,23 @@ const killAgent = (name) => `Get-CimInstance Win32_Process -Filter "Name='node.e
  * own session, so it can reach an open Godot editor), started again within 5 minutes if it ever stops,
  * with no window to close (#309). No reboot needed.
  * One script block, so a missing Node or failed download stops it before a broken task is registered.
+ * @param {string} url
+ * @param {string} name
+ * @param {string} token
  */
 export function machineSetupWindows(url, name, token) {
   return windowsScript(url, name, token, psq, []);
 }
 
 // A double-quoted PowerShell string in which only $name and $token expand: the join command's, which learns both as it runs.
+/** @param {string} s */
 const psJoined = (s) => `"${s.replace(/[`"]/g, '`$&').replace(/\$(?!name\b|token\b)/g, '`$')}"`;
 
 /**
  * Connect a computer on Windows (Build 7 M2): the agent swaps the join code for the machine's name and token first,
  * then the same task as machineSetupWindows is registered with them. A used or old code stops it before any task.
+ * @param {string} url
+ * @param {string} code
  */
 export function machineJoinWindows(url, code) {
   return windowsScript(url, '$name', '$token', psJoined, [
@@ -53,7 +71,12 @@ export function machineJoinWindows(url, code) {
   ]);
 }
 
-/** The Windows script: `name` and `token` are literal, or $name and $token that `join` sets as it runs; `say` quotes the lines it prints. */
+/** The Windows script: `name` and `token` are literal, or $name and $token that `join` sets as it runs; `say` quotes the lines it prints. * @param {string} url
+ * @param {string} name
+ * @param {string} token
+ * @param {(s: string) => string} say
+ * @param {string[]} join
+ */
 function windowsScript(url, name, token, say, join) {
   const task = taskName(name);
   // Disabled as well as stopped, or the 5-minute trigger starts it again; its node goes too, in case
@@ -98,13 +121,17 @@ function windowsScript(url, name, token, say, join) {
   ].join('\n');
 }
 
-/** The CI runner agent's one-time install line (tools/ci-runner/README.md), for an admin PowerShell on a PC that hosts CI, with this app's machines address and the token filled in. */
+/** The CI runner agent's one-time install line (tools/ci-runner/README.md), for an admin PowerShell on a PC that hosts CI, with this app's machines address and the token filled in. * @param {string} url
+ * @param {string} token
+ */
 export function machineSetupRunnerAgent(url, token) {
   const u = url.replace(/\/$/, '');
   return `$u = '${u}'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-runner-agent.ps1" -CitadelUrl $u -MachineToken '${token}'`;
 }
 
-/** The Linux runner agent's install line (#510, tools/ci-runner/README.md), for a root shell: in the WSL distro on a Windows PC, or on a Linux PC. */
+/** The Linux runner agent's install line (#510, tools/ci-runner/README.md), for a root shell: in the WSL distro on a Windows PC, or on a Linux PC. * @param {string} url
+ * @param {string} token
+ */
 export function machineSetupRunnerAgentLinux(url, token) {
   const u = url.replace(/\/$/, '');
   // A fresh file of root's own: a fixed /tmp name left by another user (an earlier try outside root) can't be
@@ -128,20 +155,30 @@ export const WORKER_CHECKS = {
 export const WORKER_CAPS = { workers: 6, threads: 8, memory_gb: 24, disk_gb: 60 };
 export const WORKER_LIMITS = { workers: [1, 64], threads: [1, 1024], memory_gb: [2, 4096], disk_gb: [20, 99999] };
 
-/** The line that makes a Windows PC a minion worker (tools/worker/install-worker.ps1), for its owner's normal PowerShell. */
+/** The line that makes a Windows PC a minion worker (tools/worker/install-worker.ps1), for its owner's normal PowerShell. * @param {string} url
+ * @param {string} token
+ * @param {MachineWorkerCaps} caps
+ */
 export function machineSetupWorkerWindows(url, token, caps) {
   const u = url.replace(/\/$/, '');
   return `$u = '${u}'; $env:CC_MACHINE_TOKEN = '${token}'; iwr "$u/worker-setup/install-worker.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-worker.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-worker.ps1" -Url $u -Workers ${caps.workers} -Threads ${caps.threads} -MemoryGB ${caps.memory_gb} -DiskGB ${caps.disk_gb}; $env:CC_MACHINE_TOKEN = $null`;
 }
 
-/** The same for a Linux PC (tools/worker/install-worker.sh), in a bash terminal. */
+/** The same for a Linux PC (tools/worker/install-worker.sh), in a bash terminal. * @param {string} url
+ * @param {string} token
+ * @param {MachineWorkerCaps} caps
+ */
 export function machineSetupWorkerLinux(url, token, caps) {
   const u = url.replace(/\/$/, '');
   return `u='${u}'; f=$(mktemp) && curl -fsSL "$u/worker-setup/install-worker.sh" -o "$f" && sudo CC_MACHINE_TOKEN='${token}' bash "$f" "$u" ${capFlags(caps)}`;
 }
 
+/** @param {MachineWorkerCaps} caps */
 const capFlags = (caps) => `--workers ${caps.workers} --threads ${caps.threads} --memory ${caps.memory_gb} --disk ${caps.disk_gb}`;
 
-/** A `citadel-worker` command on the worker's own PC: its sign-ins and its caps. */
+/** A `citadel-worker` command on the worker's own PC: its sign-ins and its caps. * @param {boolean | null | undefined} wsl
+ * @param {string} rest
+ */
 export const workerCommand = (wsl, rest) => (wsl ? `wsl -d citadel-workers -u root --exec /usr/local/bin/citadel-worker ${rest}` : `sudo citadel-worker ${rest}`);
+/** @param {boolean | null | undefined} wsl @param {MachineWorkerCaps} caps */
 export const workerCapsCommand = (wsl, caps) => workerCommand(wsl, `caps ${capFlags(caps)}`);

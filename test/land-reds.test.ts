@@ -105,3 +105,9 @@ test("a run's own verdict beats a later round's, a cut-off line names the run it
   const c = Object.fromEntries(landReds(runs, lines, SINCE).reds.map((r) => [r.id, `${r.cause}${r.rider ? ' rider' : ''}`]));
   assert.deepEqual(c, { 50: 'change', 52: 'change rider', 60: 'flaky', 61: 'change', 70: 'flaky', 71: 'change' });
 });
+
+test("a ship that adds the case a burn-in failed is that red's change, not a race (#2019)", () => {
+  const lines = day([`- 01:10:00Z · burn-in red · ticket/50-a · test/a.test.ts: failed in 1 of 10 copies at once · ${U}50`, `- 01:11:00Z · ship train suspects · ticket/50-a · #51 (test/a.test.ts) · adds the failing case: #51 · ${U}50`].join('\n'));
+  const [red] = landReds([run(50, 'ticket/50-a', '01:00', '01:10')], lines, SINCE).reds;
+  assert.deepEqual([red.cause, red.why], ['change', '#51 adds the failing test case']);
+});

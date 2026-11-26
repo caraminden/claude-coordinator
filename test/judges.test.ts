@@ -23,13 +23,15 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
 // Two ships that change an entry merge by rule (count, MERGES in tools/land.local.sh, #1917).
 // biome-ignore format: one line per entry is what the merge rule reads
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
-  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 47 },
+  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 48 },
+  'src/armed-handoff.ts': { why: "tells the lane's keeper, as held mail, that a minion joined the pipeline lane's queue, and wakes one taken out of it (#2046); wakes one whose armed ship a red proof, a dismissed leader or a guard ruled out, with why (#2089): set rules on the run's head and conclusion, and holds as mail any other finished run while armed, since a turn would rule the ship out; no judgement; the armed ship itself goes through Ship It's guards", calls: 7 },
   'src/apk-deploy.ts': { why: 'wiring moved out of server.ts (#1838): tells the Taskmaster who published an Android build; judges nothing', calls: 1 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/running-turn.ts': { why: 'sends a running turn the signal the runner asks for (a stop, or what is left of a killed turn); judges nothing (#1937)', calls: 2 },
   'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits (and asks whether that test is alive); judges nothing", calls: 3 },
   'kit/skills/scheme-setup/templates/starter-ci/boot-check.ts': { why: 'stops the app it started itself, in a CI job; judges nothing', calls: 1 },
   'src/worktree-deps.ts': { why: 'stops its own npm install past its time limit; judges nothing', calls: 1 },
+  'src/card-starts.ts': { why: "a person's pick on a card decides what starts (#2050); it only tells the Taskmaster what did", calls: 1 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
   'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674)", calls: 11 },
   'src/routes/projects.ts': { why: "tells the Taskmaster a person started a minion; a new scheme's kickoff, a tune-up and a brief a person sent", calls: 4 },
@@ -91,7 +93,11 @@ test('every pinned symbol is found, and every judge with a replay matches its la
     if (j.replay !== true) continue;
     const rec = records[j.id];
     assert.ok(rec, `${j.id} has a replay but none is recorded: run node tools/judge-replay.ts ${j.id} --record`);
-    assert.equal(rec.hash, judgeHash(j, ROOT), `${j.name}'s code changed since its last replay (${rec.at}; pinned code: ${j.pins.map((p) => p.path).join(' ')}). Run node tools/judge-replay.ts ${j.id}, read what it would do now beside what it did, then add --record and commit test/judge-replays.json`);
+    assert.equal(
+      rec.hash,
+      judgeHash(j, ROOT),
+      `${j.name}'s code changed since its last replay (${rec.at}; pinned code: ${j.pins.map((p) => p.path).join(' ')}). Run node tools/judge-replay.ts ${j.id}, read what it would do now beside what it did, then add --record and commit test/judge-replays.json (in a container turn, the host_check tool with what: "judge_replay" does both on the host)`,
+    );
   }
 });
 
@@ -212,7 +218,7 @@ test('a replay store reads the real database, keeps its own writes, and shows mi
       store.listTickets(p.id).map((x) => [x.id, x.status]),
       [
         [-1, 'new'],
-        [early.id, 'working'],
+        [early.id, 'running'],
       ],
       'at 200: the early one still open, the late one not made',
     );

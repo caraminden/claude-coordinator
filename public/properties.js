@@ -9,13 +9,20 @@ import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
 import { loadingLine } from './ui/state.js';
 
+/** @import { Ticket, View } from './types.js' */
+/** @import { Picks, PropKey, PropRegValue, PropValue } from './propfilter.js' */
+/** @typedef {PropRegValue & { aliases: string[], reviewed?: boolean, created_by?: string, description?: string }} RegValue */
+/** @typedef {Omit<PropKey, 'values'> & { values: RegValue[], scope: string, label?: string, description?: string, multi?: boolean, created_by?: string }} RegKey */
+/** @typedef {{ keys: RegKey[], globalOwner?: number }} Registry */
+/** @typedef {{ id?: number, name: string, picks: Record<string, PropValue[]> }} SavedView */
+
 // ---------- properties (the scheme's property registry) ----------
 
 /** A property as people read it: always with its key, since one word can be a value of two keys. */
-const propertyValue = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
+const propertyValue = (/** @type {PropValue | PropValue[]} */ v) => (Array.isArray(v) ? v.join(', ') : String(v));
 
 /** The "tag N" chip in a minion's header; it opens to the minion's properties. */
-export function propertyChip(t) {
+export function propertyChip(/** @type {Ticket} */ t) {
   const count = Object.keys(t.properties ?? {}).length;
   const body = h('div', {});
   const chip = h(
@@ -38,12 +45,12 @@ export function propertyChip(t) {
 }
 
 /** Who the minion is assigned to: type a name or pick one people already go by; empty unassigns it. */
-function assignPicker(t) {
-  let current = t.properties?.assigned ?? '';
-  const userKeys = propFilter.keys.filter((k) => k.value_kind === 'user').map((k) => k.key);
+function assignPicker(/** @type {Ticket} */ t) {
+  let current = /** @type {string} */ (t.properties?.assigned ?? '');
+  const userKeys = /** @type {RegKey[]} */ (propFilter.keys).filter((k) => k.value_kind === 'user').map((k) => k.key);
   // One spelling per person, the one already in use before the signed-in name, as the server matches them.
   const byLower = new Map();
-  for (const n of [...[...view.tickets.values()].flatMap((m) => userKeys.flatMap((k) => m.properties?.[k] ?? [])), me]) if (n && !byLower.has(n.toLowerCase())) byLower.set(n.toLowerCase(), n);
+  for (const n of /** @type {string[]} */ ([...[.../** @type {View} */ (view).tickets.values()].flatMap((m) => userKeys.flatMap((k) => m.properties?.[k] ?? [])), me])) if (n && !byLower.has(n.toLowerCase())) byLower.set(n.toLowerCase(), n);
   const names = [...byLower.values()].sort();
   const list = h(
     'datalist',
@@ -57,7 +64,7 @@ function assignPicker(t) {
     const was = current;
     if (name === was) return;
     // Shown as saved at once; the minions list and this header redraw from the broadcast that follows, and a refusal puts the old name back.
-    const show = (n, text) => {
+    const show = (/** @type {string} */ n, /** @type {string} */ text) => {
       current = input.value = n;
       note.textContent = text;
     };
@@ -69,7 +76,7 @@ function assignPicker(t) {
       label: name ? `assign it to ${name}` : 'unassign it',
     });
   });
-  input.addEventListener('keydown', (e) => {
+  input.addEventListener('keydown', (/** @type {KeyboardEvent} */ e) => {
     if (e.key === 'Enter') input.blur();
   });
   // Handover (#690): typing a name hands it to them; this makes it yours in one tap.
@@ -82,9 +89,9 @@ function assignPicker(t) {
         type: 'button',
         class: 'small',
         onclick: () =>
-          takeOver(t, (done) => {
-            current = input.value = done ? me : (t.properties?.assigned ?? '');
-            take.hidden = done;
+          takeOver(t, (/** @type {boolean} */ done) => {
+            current = input.value = /** @type {string} */ (done ? me : (t.properties?.assigned ?? ''));
+            /** @type {HTMLButtonElement} */ (take).hidden = done;
             note.textContent = done ? 'Saved' : '';
           }),
       },
@@ -94,7 +101,7 @@ function assignPicker(t) {
 }
 
 /** A property's values, each a button that adds it to the minions list's filter when the filter offers it. */
-function filterLinks(t, key, value) {
+function filterLinks(/** @type {Ticket} */ t, /** @type {string} */ key, /** @type {PropValue | PropValue[]} */ value) {
   const offered = propFilter.projectId === t.project_id && filterChoices(propFilter.keys ?? [], [t]).find((c) => c.key === key)?.values;
   if (!offered) return h('span', { class: 'pv' }, propertyValue(value));
   return [value].flat().map((v) =>
@@ -105,8 +112,8 @@ function filterLinks(t, key, value) {
             type: 'button',
             class: 'pv pv-pick',
             title: `Filter the minions list by ${key}: ${v}`,
-            onclick: (e) => {
-              e.currentTarget.closest('details').open = false;
+            onclick: (/** @type {Event} */ e) => {
+              /** @type {HTMLDetailsElement} */ (/** @type {HTMLElement} */ (e.currentTarget).closest('details')).open = false;
               pick(key, v, true);
             },
           },
@@ -117,11 +124,11 @@ function filterLinks(t, key, value) {
 }
 
 /** Close a <details> popover on a click elsewhere. */
-export function closeOnClickAway(chip) {
+export function closeOnClickAway(/** @type {HTMLDetailsElement} */ chip) {
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
-    const away = (e) => {
-      if (chip.contains(e.target)) return;
+    const away = (/** @type {Event} */ e) => {
+      if (chip.contains(/** @type {Node} */ (e.target))) return;
       chip.open = false;
       document.removeEventListener('click', away);
     };
@@ -134,23 +141,24 @@ export function closeOnClickAway(chip) {
 
 // The scheme's keys, the values ticked per key, which parts of the panel are open, and the scheme's
 // saved views (null until loaded), kept across minion switches like the search.
-export const propFilter = { projectId: null, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null };
+export const propFilter = /** @type {{ projectId: number | null, keys: RegKey[] | null, picks: Picks, open: boolean, openKeys: Map<string, boolean>, views: SavedView[] | null }} */ ({ projectId: null, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null });
 
 /**
  * Under the minions search: a Filters button that opens a panel with a collapsible checklist per
  * key, and the ticked values as chips that untick on a click.
  */
 // Each scheme's keys and saved views as last fetched: a scheme you switch to draws its Filters button in the first paint.
+/** @type {Map<number, { keys: RegKey[], views: SavedView[] | null }>} */
 const filterSeen = new Map();
 
 // The registry is asked for by the filter and the Settings count in the same load: one read serves both, until a few
 // seconds after it's answered (counted from the answer, so a slow open doesn't ask twice, #1528).
-const registry = sharedRead((projectId) => api(`api/projects/${projectId}/properties`));
+const registry = sharedRead((/** @type {number} */ projectId) => api(`api/projects/${projectId}/properties`));
 const readRegistry = registry.read;
 const forgetRegistry = registry.forget;
 
 /** Fetch a scheme's filter data before it is shown (project.js waits on it the first time); a scheme seen before shows its last and refreshes behind. */
-export function preparePropFilter(projectId) {
+export function preparePropFilter(/** @type {number} */ projectId) {
   const load = Promise.all([readRegistry(projectId), api(`api/projects/${projectId}/views`).catch(() => null)])
     .then(([reg, views]) => {
       const had = filterSeen.get(projectId);
@@ -167,7 +175,7 @@ export function preparePropFilter(projectId) {
 export async function renderPropFilter() {
   const el = document.getElementById('prop-filter');
   if (!el) return;
-  const projectId = view.projectId;
+  const projectId = /** @type {View} */ (view).projectId;
   if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null, ...filterSeen.get(projectId) });
   if (!propFilter.keys || !propFilter.views) {
     const [reg, views] = await Promise.all([
@@ -182,11 +190,11 @@ export async function renderPropFilter() {
   renderSavedViews();
   if (!el.isConnected) return;
   // Every list change redraws this, so put keyboard focus back where it was.
-  const focused = el.contains(document.activeElement) ? document.activeElement.dataset.pf : null;
+  const focused = el.contains(document.activeElement) ? /** @type {HTMLElement} */ (document.activeElement).dataset.pf : null;
   const { picks } = propFilter;
-  const tickets = [...view.tickets.values()];
+  const tickets = [.../** @type {View} */ (view).tickets.values()];
   const open = tickets.filter((t) => t.status !== 'closed');
-  const choices = filterChoices(propFilter.keys, tickets);
+  const choices = filterChoices(/** @type {RegKey[]} */ (propFilter.keys), tickets);
   if (!choices.length && !picks.size) return el.replaceChildren();
   const ticked = [...picks.values()].reduce((n, set) => n + set.size, 0);
   el.replaceChildren(
@@ -227,11 +235,11 @@ export async function renderPropFilter() {
         )
       : '',
   );
-  if (focused) el.querySelector(`[data-pf="${CSS.escape(focused)}"]`)?.focus();
+  if (focused) /** @type {HTMLElement | null} */ (el.querySelector(`[data-pf="${CSS.escape(focused)}"]`))?.focus();
 }
 
 /** Tick or untick one value, then redraw the list (which redraws the filter). */
-function pick(key, v, on) {
+function pick(/** @type {string} */ key, /** @type {PropValue} */ v, /** @type {boolean} */ on) {
   const set = propFilter.picks.get(key) ?? new Set();
   if (on) set.add(v);
   else set.delete(v);
@@ -241,7 +249,7 @@ function pick(key, v, on) {
 }
 
 /** A key's collapsible checklist; each value shows how many open minions it would let through, given the other keys' picks. */
-function filterSection({ key, values }, counts) {
+function filterSection(/** @type {{ key: string, values: PropValue[] }} */ { key, values }, /** @type {Map<PropValue, number>} */ counts) {
   const picked = propFilter.picks.get(key) ?? new Set();
   const sec = h(
     'details',
@@ -249,7 +257,7 @@ function filterSection({ key, values }, counts) {
     h('summary', { 'data-pf': `key:${key}` }, key, picked.size ? h('span', { class: 'pf-n' }, String(picked.size)) : ''),
     values.map((v) => {
       const n = counts.get(v) ?? 0;
-      return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, h('input', { type: 'checkbox', checked: picked.has(v), 'data-pf': `value:${key}:${v}`, onchange: (e) => pick(key, v, e.target.checked) }), String(v), h('span', { class: 'pf-n' }, String(n)));
+      return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, h('input', { type: 'checkbox', checked: picked.has(v), 'data-pf': `value:${key}:${v}`, onchange: (/** @type {Event} */ e) => pick(key, v, /** @type {HTMLInputElement} */ (e.target).checked) }), String(v), h('span', { class: 'pf-n' }, String(n)));
     }),
   );
   sec.addEventListener('toggle', () => propFilter.openKeys.set(key, sec.open));
@@ -261,12 +269,12 @@ function renderSavedViews() {
   const el = document.getElementById('saved-views');
   const { picks, keys, views } = propFilter;
   if (!el || !views) return;
-  const apply = (next) => {
+  const apply = (/** @type {Picks} */ next) => {
     propFilter.picks = next;
     renderSidebar();
   };
   const chips = views.map((v) => {
-    const vp = viewPicks(v.picks, keys);
+    const vp = viewPicks(v.picks, /** @type {RegKey[]} */ (keys));
     const on = picks.size > 0 && samePicks(picks, vp);
     return h(
       'span',
@@ -275,24 +283,31 @@ function renderSavedViews() {
       on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '🗑') : '',
     );
   });
-  const unsaved = picks.size > 0 && !views.some((v) => samePicks(picks, viewPicks(v.picks, keys)));
+  const unsaved = picks.size > 0 && !views.some((v) => samePicks(picks, viewPicks(v.picks, /** @type {RegKey[]} */ (keys))));
   el.replaceChildren(...chips, unsaved ? h('button', { type: 'button', class: 'secondary small sv-save', onclick: saveView }, '＋ Save view') : '');
 }
 
 // Saving and deleting show in the chips at once; the server's list replaces ours once it answers, unless a
 // later save or delete changed ours since, and a refusal puts that one view back as it was.
+/**
+ * @param {(views: SavedView[]) => SavedView[]} next
+ * @param {(projectId: number) => Promise<SavedView[]> | SavedView[] | null} send
+ * @param {(views: SavedView[]) => SavedView[]} undo
+ * @param {string} label
+ */
 function changeViews(next, send, undo, label) {
-  const projectId = propFilter.projectId;
+  const projectId = /** @type {number} */ (propFilter.projectId);
+  /** @type {SavedView[]} */
   let mine;
-  const show = (views) => {
+  const show = (/** @type {SavedView[]} */ views) => {
     if (propFilter.projectId !== projectId) return;
     propFilter.views = mine = views;
     renderSavedViews();
   };
   optimistic({
     key: `views:${projectId}`,
-    apply: () => show(next(propFilter.views)),
-    send: () => send(projectId),
+    apply: () => show(next(/** @type {SavedView[]} */ (propFilter.views))),
+    send: () => /** @type {Promise<SavedView[]>} */ (send(projectId)),
     undo: () => propFilter.projectId === projectId && propFilter.views && show(undo(propFilter.views)),
     label,
   }).then(
@@ -304,9 +319,11 @@ function changeViews(next, send, undo, label) {
 function saveView() {
   const name = prompt('Name this view (only you see it):')?.trim();
   if (!name) return;
-  if (propFilter.views.some((v) => v.name === name) && !confirm(`Replace the view "${name}" with what's ticked now?`)) return;
+  if (/** @type {SavedView[]} */ (propFilter.views).some((v) => v.name === name) && !confirm(`Replace the view "${name}" with what's ticked now?`)) return;
   const picks = Object.fromEntries([...propFilter.picks].map(([k, set]) => [k, [...set]]));
+  /** @type {SavedView} */
   const mine = { name, picks };
+  /** @type {SavedView | undefined} */
   let replaced;
   changeViews(
     (views) => {
@@ -315,16 +332,16 @@ function saveView() {
     },
     async (projectId) => {
       const views = await api(`api/projects/${projectId}/views`, { method: 'POST', body: { name, picks } });
-      mine.id = views.find((v) => v.name === name)?.id; // a delete queued behind this one needs it
+      mine.id = views.find((/** @type {SavedView} */ v) => v.name === name)?.id; // a delete queued behind this one needs it
       return views;
     },
     // Unless a later save or delete replaced it.
-    (views) => (views.includes(mine) ? (replaced ? views.map((v) => (v === mine ? replaced : v)) : views.filter((v) => v !== mine)) : views),
+    (views) => (views.includes(mine) ? (replaced ? views.map((v) => (v === mine ? /** @type {SavedView} */ (replaced) : v)) : views.filter((v) => v !== mine)) : views),
     `save the view "${name}"`,
   );
 }
 
-function deleteView(v) {
+function deleteView(/** @type {SavedView} */ v) {
   if (!confirm(`Delete the view "${v.name}"? What's ticked stays ticked.`)) return;
   let at = -1;
   changeViews(
@@ -341,7 +358,7 @@ function deleteView(v) {
 }
 
 /** This person saved or deleted a view in this scheme, maybe in another tab. */
-export function onViewsChanged(projectId, name) {
+export function onViewsChanged(/** @type {number} */ projectId, /** @type {string} */ name) {
   if (name !== me || view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
   if (!propFilter.views) return renderPropFilter(); // not loaded yet: it loads them
   // The chips stay as they are until the list comes, and a save or delete clicked meanwhile keeps its own.
@@ -357,29 +374,29 @@ export function onViewsChanged(projectId, name) {
 }
 
 /** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */
-const keyEditable = (reg, k) => k.scope === 'scheme' || reg.globalOwner === view.projectId;
+const keyEditable = (/** @type {Registry} */ reg, /** @type {RegKey} */ k) => k.scope === 'scheme' || reg.globalOwner === /** @type {View} */ (view).projectId;
 
 /** What waits on a person: proposed keys and values, and values a Taskmaster added. */
-function toReview(reg) {
+function toReview(/** @type {Registry} */ reg) {
   return reg.keys.filter((k) => keyEditable(reg, k)).flatMap((k) => [...(k.status === 'proposed' ? [k.key] : []), ...k.values.filter((v) => v.status === 'proposed' || (v.status === 'active' && !v.reviewed)).map((v) => `${k.key}: ${v.value}`)]);
 }
 
 async function loadProperties() {
-  const projectId = view.projectId;
+  const projectId = /** @type {View} */ (view).projectId;
   const reg = await readRegistry(projectId);
   return view?.projectId === projectId ? reg : null;
 }
 
 /** The panel's Orders tab and the Orders menu's Properties row: how many property proposals wait for a person's review. */
 export async function renderSettingsCount() {
-  const counts = () => [...document.querySelectorAll('.panel-tabs .props-count, .orders-pane .props-count, .settings-home .props-count')];
+  const counts = () => [.../** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.panel-tabs .props-count, .orders-pane .props-count, .settings-home .props-count'))];
   if (!counts().length) return;
   const reg = await loadProperties().catch(() => null);
   if (!reg) return;
   const waiting = toReview(reg).length;
   // Looked up again after the fetch: a route change meanwhile may have drawn new ones.
   for (const el of counts()) {
-    el.textContent = waiting || '';
+    el.textContent = String(waiting || '');
     el.title = waiting ? `${waiting} properties to review` : '';
     el.hidden = !waiting;
   }
@@ -387,7 +404,7 @@ export async function renderSettingsCount() {
 
 const openProps = new Set(); // keys (and the new-key row) left open, across redraws
 
-export function onPropertiesChanged(projectId) {
+export function onPropertiesChanged(/** @type {number | null} */ projectId) {
   if (view?.kind !== 'project' || (projectId !== null && projectId !== view.projectId)) return;
   forgetRegistry();
   renderSettingsCount();
@@ -398,7 +415,7 @@ export function onPropertiesChanged(projectId) {
 
 /** Main panel: the registry as this scheme sees it, with proposals to settle and forms to add to it. */
 export function propertiesPage() {
-  const p = view.project;
+  const p = /** @type {View} */ (view).project;
   const section = h(
     'section',
     { class: 'artifacts-main props-main' },
@@ -420,48 +437,51 @@ async function renderPropertiesPage() {
   const body = document.getElementById('props-body');
   if (!body) return;
   const mine = ++renderSeq;
+  /** @type {Registry | null} */
   let reg;
   try {
     reg = await loadProperties();
     if (mine !== renderSeq) return;
   } catch (err) {
-    if (mine === renderSeq) body.replaceChildren(h('p', { class: 'muted' }, err.message));
+    if (mine === renderSeq) body.replaceChildren(h('p', { class: 'muted' }, /** @type {Error} */ (err).message));
     return;
   }
   if (!reg || !body.isConnected) return;
   // A form being filled in keeps its node through the redraw (anyone's registry change redraws), so what's typed stays.
   const focused = document.activeElement;
-  const typing = (form) => [...form.elements].some((e) => e.type === 'text' && (e === focused || e.value.trim()));
+  const typing = (/** @type {HTMLFormElement} */ form) => [...form.elements].some((e) => /** @type {HTMLInputElement} */ (e).type === 'text' && (e === focused || /** @type {HTMLInputElement} */ (e).value.trim()));
+  /** @type {(name: string, build: () => HTMLFormElement) => HTMLFormElement} */
   const keep = (name, build) => {
-    const old = body.querySelector(`form[data-form="${CSS.escape(name)}"]`);
+    const old = /** @type {HTMLFormElement | null} */ (body.querySelector(`form[data-form="${CSS.escape(name)}"]`));
     return old && typing(old) ? old : build();
   };
   const NEW = '\0new-key';
   // One status line for every render, so a kept form's errors still show.
   const status = body.querySelector(':scope > p.props-status') ?? h('p', { class: 'muted small props-status', role: 'status' });
+  /** @type {(path: string, payload: unknown, done?: () => void) => Promise<string[] | null>} */
   const run = async (path, payload, done) => {
     status.textContent = '';
     try {
-      const r = await api(`api/projects/${view.projectId}/properties/${path}`, { method: 'POST', body: payload });
+      const r = await api(`api/projects/${/** @type {View} */ (view).projectId}/properties/${path}`, { method: 'POST', body: payload });
       if (r.warnings?.length) return r.warnings;
       done?.();
       forgetRegistry();
       renderPropertiesPage();
       renderSettingsCount();
     } catch (err) {
-      status.textContent = err.message;
+      status.textContent = /** @type {Error} */ (err).message;
     }
     return null;
   };
-  const review = (k, v, action, extra = {}) => run('review', { key: k.key, value: v?.value, action, ...extra });
-  const btn = (label, title, onclick) => h('button', { type: 'button', class: 'secondary small', title, onclick }, label);
+  const review = (/** @type {RegKey} */ k, /** @type {RegValue | null} */ v, /** @type {string} */ action, extra = {}) => run('review', { key: k.key, value: v?.value, action, ...extra });
+  const btn = (/** @type {string} */ label, /** @type {string} */ title, /** @type {() => unknown} */ onclick) => h('button', { type: 'button', class: 'secondary small', title, onclick }, label);
 
-  const keyBlock = (k) => {
-    const edit = keyEditable(reg, k);
+  const keyBlock = (/** @type {RegKey} */ k) => {
+    const edit = keyEditable(/** @type {Registry} */ (reg), k);
     const kind = k.value_kind === 'integer' ? 'a whole number' : k.value_kind === 'user' ? "a person's login name" : k.value_kind === 'text' ? 'free text' : k.multi ? 'one or more values' : 'one value';
     const values = k.values.filter((v) => v.status !== 'archived');
     const archived = k.values.filter((v) => v.status === 'archived');
-    const valueChip = (v) => {
+    const valueChip = (/** @type {RegValue} */ v) => {
       const flag = v.status === 'proposed' ? 'proposed' : !v.reviewed ? 'new' : '';
       const actions = !edit
         ? []
@@ -495,7 +515,7 @@ async function renderPropertiesPage() {
       const value = h('input', { type: 'text', placeholder: 'new value', 'aria-label': `New ${k.key} value`, autocomplete: 'off' });
       const aliases = h('input', { type: 'text', placeholder: 'aliases, comma-separated', 'aria-label': 'Aliases', autocomplete: 'off' });
       const warn = h('div', { class: 'pv-warn' });
-      const add = async (force) => {
+      const add = async (/** @type {boolean} */ force) => {
         const payload = {
           key: k.key,
           force,
@@ -517,7 +537,7 @@ async function renderPropertiesPage() {
         {
           class: 'row pv-add',
           'data-form': `values:${k.key}`,
-          onsubmit: (e) => {
+          onsubmit: (/** @type {Event} */ e) => {
             e.preventDefault();
             if (value.value.trim()) add(false);
           },
@@ -573,7 +593,7 @@ async function renderPropertiesPage() {
     const multi = h('input', { type: 'checkbox' });
     const global = h('input', { type: 'checkbox' });
     const warn = h('div', { class: 'pv-warn' });
-    const add = async (force) => {
+    const add = async (/** @type {boolean} */ force) => {
       const warnings = await run('keys', { key: key.value.trim(), label: label.value, description: description.value, value_kind: kind.value, multi: multi.checked, global: global.checked, force }, () => form.reset());
       warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
     };
@@ -582,12 +602,12 @@ async function renderPropertiesPage() {
       {
         class: 'prop-new-key',
         'data-form': 'new-key',
-        onsubmit: (e) => {
+        onsubmit: (/** @type {Event} */ e) => {
           e.preventDefault();
           if (key.value.trim()) add(false);
         },
       },
-      h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'), reg.globalOwner === view.projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
+      h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'), /** @type {Registry} */ (reg).globalOwner === /** @type {View} */ (view).projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
       h('div', { class: 'row pv-add' }, description, h('button', { type: 'submit', class: 'small' }, 'Add key')),
       warn,
     );
@@ -600,20 +620,20 @@ async function renderPropertiesPage() {
     return row;
   };
 
-  const live = (k) => k.status !== 'archived';
-  const global = reg.keys.filter((k) => k.scope === 'global' && live(k));
-  const own = reg.keys.filter((k) => k.scope === 'scheme' && live(k));
+  const live = (/** @type {RegKey} */ k) => k.status !== 'archived';
+  const global = /** @type {Registry} */ (reg).keys.filter((k) => k.scope === 'global' && live(k));
+  const own = /** @type {Registry} */ (reg).keys.filter((k) => k.scope === 'scheme' && live(k));
   body.replaceChildren(
     ...[
       status,
       h('h3', { class: 'settings-section' }, 'All schemes'),
-      reg.globalOwner === view.projectId ? '' : settingsHelp('These belong to the whole app; change them from the Citadel scheme.'),
+      /** @type {Registry} */ (reg).globalOwner === /** @type {View} */ (view).projectId ? '' : settingsHelp('These belong to the whole app; change them from the Citadel scheme.'),
       h('div', { class: 'settings-rows' }, ...global.map(keyBlock)),
-      h('h3', { class: 'settings-section' }, view.project.name),
+      h('h3', { class: 'settings-section' }, /** @type {View} */ (view).project.name),
       h('div', { class: 'settings-rows' }, ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small settings-empty' }, 'No keys of its own yet.')])),
       h('h3', { class: 'settings-section' }, 'Add'),
       h('div', { class: 'settings-rows' }, newKeyRow()),
     ].filter(Boolean),
   );
-  if (focused?.isConnected && !body.contains(document.activeElement) && body.contains(focused)) focused.focus({ preventScroll: true });
+  if (focused?.isConnected && !body.contains(document.activeElement) && body.contains(focused)) /** @type {HTMLElement} */ (focused).focus({ preventScroll: true });
 }

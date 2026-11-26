@@ -782,7 +782,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     // The one invariant (#1378): every message sent is in a turn that started, in the minion's queue record, or in an outbox row still to send
     // (armed, or a chain's brief waiting on its leader's work).
     const carried = [...started.flat(), ...queue, ...mail, ...(q.taken ?? []), ...(q.steered ?? []).map((s) => s.msg)].map((m) => m.text);
-    carried.push(...rows.filter((d) => armed || onEvent(d)).map((d) => String(d.payload.note ?? d.payload.message)));
+    carried.push(...rows.filter((d) => armed || onEvent(d)).map((d) => String(('note' in d.payload ? d.payload.note : undefined) ?? ('message' in d.payload ? d.payload.message : undefined))));
     for (const text of rec.held(cut.n)) if (!carried.some((c) => c.includes(text))) problems.push(`lost "${text}": no turn, queue record or outbox row has it`);
     if (!started.length && !waiting) {
       const owed = rec.owed(cut.n);

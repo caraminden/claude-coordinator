@@ -307,12 +307,8 @@ function renderMachineList() {
 
 /** No machines yet (Build 7 M3): what would fill the page, and the button that starts it. */
 function emptyMachines() {
-  return h(
-    'div',
-    { class: 'machine-empty' },
-    emptyCard("You haven't connected a computer", 'Connect one and Citadel offers the roles it can do: tools and folders, CI runners, minion turns, GPU jobs.', { mark: '+', hue: 'accent' }),
-    h('button', { type: 'button', onclick: () => connectComputer() }, 'Connect a computer'),
-  );
+  // Connect a computer (Build 7 M2) is the bar's button above, and its panel opens by itself on an empty page.
+  return h('div', { class: 'machine-empty' }, emptyCard("You haven't connected a computer", 'Connect one with Connect a computer above, and Citadel offers the roles it can do: tools and folders, CI runners, minion turns, GPU jobs.', { mark: '+', hue: 'accent' }));
 }
 
 /** Make a new token for a machine and show its install line. */

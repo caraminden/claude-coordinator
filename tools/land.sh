@@ -2495,10 +2495,10 @@ train_failing() {
 # The ships held off the train on a guess, now that the train without them has a verdict. <files>: every file it was
 # red on (train_failing). Nobody is refused here (#2098; Josh, 2026-11-26, "Have we not analyzed the guessing at all?"):
 # a held ship was not red alone, so the train passing without it is no proof (6 of the first 10 refused that way were
-# innocent, 3 on flaky tests). One with a test among <files> goes back in line (the guess was wrong). One whose tests
-# are all known flakes (train_flaky) goes back in line too: their pass without it says nothing. The rest go back in line
-# to ship alone (`alone`, train_verdict), so their own CI run is the proof, and a guess can't pull them off train after
-# train. No files: it was green. A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
+# innocent, 3 on flaky tests). One with a test among <files> goes back in line (the guess was wrong). The rest go back
+# in line to ship alone (`alone`, train_verdict), so their own CI run is the proof, and a guess can't pull them off train
+# after train (a flaky test that CI's machine fails with one of them would, lap after lap); known flakes (train_flaky)
+# only change the words. No files: it was green. A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
 train_settle() {
   local i f t red=" $* " again n=("${held_n[@]}") br=("${held_br[@]}") w=("${held_was[@]}") fs=("${held_files[@]}") run=("${held_run[@]}") kind=("${held_kind[@]}") how=("${held_how[@]}") log=("${held_log[@]}")
   held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()
@@ -2513,9 +2513,9 @@ train_settle() {
     elif [ $# -gt 0 ] && [ -n "$burn_red" ] && [ "${kind[$i]}" != burn ]; then
       train_hold "${n[$i]}" "${br[$i]}" "${w[$i]}" "${fs[$i]}" "${run[$i]}" "${kind[$i]}" "${how[$i]}" "${log[$i]}"
     elif train_flaky "${fs[$i]}" "${br[$i]}"; then
-      say "$t goes back in line: ${fs[$i]//,/, } flaked on other ships, so the train passing without it proves nothing"
-      retro_log "ship train verdict · $label · $t back in line on a guess: ${fs[$i]//,/, } known flakes, so the pass without it proves nothing · ${fs[$i]} · ${run[$i]}"
-      rm -f "$train_dir/${n[$i]}"
+      say "$t goes back in line to ship alone: ${fs[$i]//,/, } flaked on other ships, so the train passing without it proves nothing, and its own CI run decides"
+      retro_log "ship train verdict · $label · $t back in line to ship alone on a guess: known flakes, so the pass without it proves nothing · ${fs[$i]} · ${run[$i]}"
+      train_tell "${n[$i]}" "alone $branch ${fs[$i]} ${how[$i]}"
     else
       say "$t goes back in line to ship alone: it was pulled on a guess, and the train without it passed ${fs[$i]//,/, }, but no ship pulled for it failed it alone, so its own CI run decides"
       retro_log "ship train verdict · $label · $t back in line to ship alone on a guess: the train without it passed, and nothing proves it · ${fs[$i]} · ${run[$i]}"
@@ -2718,7 +2718,7 @@ train_suspects() {
       elif [ "${how[$m]}" = unrun ]; then line+="${line:+, }$t (${next[$m]}; not run alone: waits for the next train)" rest+="${rest:+, }$t"
       else line+="${line:+, }$t (${next[$m]}; passed alone: waits for the next train)" rest+="${rest:+, }$t"; fi
     done
-    say "suspects: $line: CI is red on the ship train ($ci_url) in those tests, so they leave the train at once.${new_line:+ $new_line adds the test case that failed, so that is the cause: back to its minion with the failure.}${sure_line:+ Run alone on main here, the tests failed with $sure_line and passed without, so that is the cause: back to its minion with the failure.}${held_line:+ $held_line: not red alone here, so the files are only a guess: refused only if the train passes those tests without.}${rest:+ $rest: not red alone here, and another ship was: the next train.} The train runs again with the ships that are left, and none from the line takes their places"
+    say "suspects: $line: CI is red on the ship train ($ci_url) in those tests, so they leave the train at once.${new_line:+ $new_line adds the test case that failed, so that is the cause: back to its minion with the failure.}${sure_line:+ Run alone on main here, the tests failed with $sure_line and passed without, so that is the cause: back to its minion with the failure.}${held_line:+ $held_line: not red alone here, so the files are only a guess: they go back in line once the train has a verdict without them, to ship alone unless it is red on those tests again.}${rest:+ $rest: not red alone here, and another ship was: the next train.} The train runs again with the ships that are left, and none from the line takes their places"
     retro_log "ship train suspects · $label · $(sed 's/; [^)]*)/)/g' <<<"$line")${new_line:+ · adds the failing case: $new_line}${sure_line:+ · failed alone here: $sure_line}${held_line:+ · pulled on a guess, not red alone here: $held_line}${rest:+ · not red alone here while another ship was: $rest} · $ci_url"
     [ -z "$sure_line$new_line" ] || split_over
     keep=()

@@ -168,12 +168,12 @@ test('suspects: the ships pulled off the train replace the bisect line, naming e
   const after = (line: string) => landNews([...front, ...red.slice(0, -1), sus, line].join('\n'), name).at(-1);
   assert.deepEqual(after('land: #1351 goes back in line: the train was red again on test/b.test.ts without it, so the guess was wrong'), { tone: 'warn', text: '#1351 is back in line: the train was red again on b without it, so the guess was wrong' });
   assert.deepEqual(after('land: #1351 is refused: it was pulled on a guess, no ship pulled for test/b.test.ts failed it alone, and the train without it passed it'), { tone: 'bad', text: '#1351 is sent back: the train without it passed b, and no pulled ship failed it alone' });
-  // Since #2098 a guess refuses nobody: the ship goes back in line, to ship alone unless its tests are known flakes.
+  // Since #2098 a guess refuses nobody: the ship goes back in line to ship alone, and known flakes change only the words.
   assert.deepEqual(after('land: #1351 goes back in line to ship alone: it was pulled on a guess, and the train without it passed test/b.test.ts, but no ship pulled for it failed it alone, so its own CI run decides'), {
     tone: 'warn',
     text: '#1351 is back in line to ship alone: the train without it passed b, but nothing proved it the cause',
   });
-  assert.deepEqual(after('land: #1351 goes back in line: test/b.test.ts flaked on other ships, so the train passing without it proves nothing'), { tone: 'warn', text: '#1351 is back in line: b flaked on other ships, so the pass without it proves nothing' });
+  assert.deepEqual(after('land: #1351 goes back in line to ship alone: test/b.test.ts flaked on other ships, so the train passing without it proves nothing, and its own CI run decides'), { tone: 'warn', text: '#1351 is back in line to ship alone: b flaked on other ships, so the pass without it proves nothing' });
   assert.match(after('land: ticket/1311-front steps aside: the next ship in line runs the train with what is left of it')!.text, /steps aside: the next ship in line runs the train with what is left$/);
   // a suspects line that gave up leaves the bisect line alone
   const none = [...front, ...red, 'land: suspects: no ship on the train touched test/x.test.ts or what it imports, so the bisect looks for the ship'];

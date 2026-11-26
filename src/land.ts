@@ -528,7 +528,7 @@ const PHASES: [RegExp, string][] = [
   // A rider waits outside the line for its train's verdict (#1166); "back in line" puts it in line again.
   [/^land: riding in \S+'s ship train/, 'riding'],
   [/^land: pulled off \S+'s ship train/, 'pulled off its train'], // until the train without it has a verdict (#1918)
-  [/^land: back in line on its own/, 'in line'],
+  [/^land: back in line (on its own|to ship alone)/, 'in line'],
 ];
 
 export function landPhase(output: string): string {

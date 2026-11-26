@@ -114,8 +114,8 @@ export function landNews(output: string, name: (branch: string) => string): News
       news.push({ tone: 'warn', text: `${m[1]} is back in line: the train was red again on ${list(m[2].split(', ').map(short))} without it, so the guess was wrong` });
     } else if ((m = s.match(/^(\S+) goes back in line to ship alone: it was pulled on a guess, and the train without it passed (.+?), but /))) {
       news.push({ tone: 'warn', text: `${m[1]} is back in line to ship alone: the train without it passed ${list(m[2].split(', ').map(short))}, but nothing proved it the cause` });
-    } else if ((m = s.match(/^(\S+) goes back in line: (.+?) flaked on other ships, so the train passing without it proves nothing/))) {
-      news.push({ tone: 'warn', text: `${m[1]} is back in line: ${list(m[2].split(', ').map(short))} flaked on other ships, so the pass without it proves nothing` });
+    } else if ((m = s.match(/^(\S+) goes back in line to ship alone: (.+?) flaked on other ships, so the train passing without it proves nothing/))) {
+      news.push({ tone: 'warn', text: `${m[1]} is back in line to ship alone: ${list(m[2].split(', ').map(short))} flaked on other ships, so the pass without it proves nothing` });
     } else if ((m = s.match(/^(\S+) is refused: it was pulled on a guess, no ship pulled for (.+?) failed it alone, and the train without it passed it/))) {
       news.push({ tone: 'bad', text: `${m[1]} is sent back: the train without it passed ${list(m[2].split(', ').map(short))}, and no pulled ship failed it alone` });
     } else if ((m = s.match(/^(\S+) steps aside: /))) {

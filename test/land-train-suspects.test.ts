@@ -302,7 +302,7 @@ test('a ship pulled on a guess, not red alone, whose train passes without it, go
   clean(l);
 });
 
-test('a guess on a test that flaked on other ships: the train passing without it proves nothing, so the ship goes back in line and rides the next train', async () => {
+test('a guess on a test that flaked on other ships: the pass without it proves nothing, the words say so, and it ships alone so no flaky red pulls it lap after lap', async () => {
   const l = await line(
     ships(8, { 3: guess('real', 3) }),
     (d) => ({ ...once(d), LAND_TRAIN_MAX: '3' }),
@@ -313,11 +313,9 @@ test('a guess on a test that flaked on other ships: the train passing without it
   );
   const done = await l.go();
   back(done);
-  assert.match(done[1].stderr, /#3 goes back in line: test\/real\.test\.ts flaked on other ships, so the train passing without it proves nothing/);
-  assert.match(done[2].stderr, /back in line on its own/);
-  assert.doesNotMatch(done[2].stderr, /to ship alone/);
-  assert.match(done[2].stderr, /ship train: ticket\/3-x takes the \d ships waiting behind it/, 'it fronts the next train');
-  assert.match(verdicts(l).join('\n'), /ship train verdict · ticket\/2-x · #3 back in line on a guess: test\/real\.test\.ts known flakes, so the pass without it proves nothing ·/);
+  assert.match(done[1].stderr, /#3 goes back in line to ship alone: test\/real\.test\.ts flaked on other ships, so the train passing without it proves nothing, and its own CI run decides/);
+  guessed(done[2], 'test/real.test.ts', 'shipped');
+  assert.match(verdicts(l).join('\n'), /ship train verdict · ticket\/2-x · #3 back in line to ship alone on a guess: known flakes, so the pass without it proves nothing · test\/real\.test\.ts ·/);
   assert.doesNotMatch(retro(l), /refused on a guess/);
   clean(l);
 });

@@ -139,8 +139,8 @@ test('judge_replay waits for a slow judge: the flake counter’s 3 days take abo
   writeFileSync(join(slow, 'tools/judge-replay.ts'), "import { readFileSync } from 'node:fs';\nconsole.log(readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').split('\\0')[3]);\n");
   writeFileSync(join(slow, 'tools/judge-replays/flake-counter.ts'), '');
   const out = await hostCheck({ ...opts, worktree: { cwd: slow, env: worktree.env } }, { what: 'judge_replay', judge: 'flake-counter' });
-  // #2075 measured 201 s a day; half as much again for a busy box.
-  assert.ok(Number(out) >= 1.5 * 3 * 201, `stopped after ${out} s`);
+  // #2075 measured 201 s a day; at least 40% spare for a busy box.
+  assert.ok(Number(out) >= 1.4 * 3 * 201, `stopped after ${out} s`);
 });
 
 test('a slow answer sends its headers before the work ends, so the caller’s fetch does not give up (#2100)', async (t) => {

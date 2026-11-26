@@ -21,7 +21,7 @@ export interface BuildSummary {
 const git = gitOut;
 
 /** Every build branch in the repo: local build/<n>, else origin's, keyed by n. */
-async function buildRefs(repoDir: string): Promise<Map<number, string>> {
+export async function buildRefs(repoDir: string): Promise<Map<number, string>> {
   const out = await git(['for-each-ref', '--format=%(refname)', 'refs/heads/build/', 'refs/remotes/origin/build/'], repoDir);
   const refs = new Map<number, string>();
   for (const ref of (out ?? '').split('\n')) {
@@ -31,6 +31,11 @@ async function buildRefs(repoDir: string): Promise<Map<number, string>> {
     if (!refs.has(n) || m[1] === 'heads') refs.set(n, ref);
   }
   return refs;
+}
+
+/** Whether a minion's work is in `ref` (a git fact): its branch exists, has commits of its own, and `ref` has its tip. */
+export async function mergedInto(repoDir: string, t: { branch: string | null; created_at: number }, ref: string): Promise<boolean> {
+  return !!t.branch && (await git(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`], repoDir)) !== null && !(await emptyBranch(repoDir, t.branch, t.created_at)) && (await git(['merge-base', '--is-ancestor', `refs/heads/${t.branch}`, ref], repoDir)) !== null;
 }
 
 /** The builds with a branch in a scheme, sorted by number; [] without a repo or a build branch. */
@@ -49,8 +54,7 @@ export async function buildSummaries(store: Store, projectId: number): Promise<B
     let open = 0;
     for (const t of tickets) {
       if (t.build !== n || t.id === owner) continue;
-      const folded = !!t.branch && (await git(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`], repoDir)) !== null && !(await emptyBranch(repoDir, t.branch, t.created_at)) && (await git(['merge-base', '--is-ancestor', `refs/heads/${t.branch}`, ref], repoDir)) !== null;
-      if (folded) merged++;
+      if (await mergedInto(repoDir, t, ref)) merged++;
       else if (t.status !== 'closed') open++;
     }
     const behind = Number(await git(['rev-list', '--count', `${ref}..${main}`], repoDir)) || 0;

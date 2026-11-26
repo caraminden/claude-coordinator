@@ -98,6 +98,14 @@ the last one in line waited for every run ahead of it.
   front or more than one ship), the output says "no ship could be pinned on …, so they stay on the train", and only a
   red again on that file brings the bisect. With no confirmed cause, such a file sends the train to the bisect as
   before. The cap stays 7.
+- **A burn-in red on a case one ship adds needs no proof** (#2019; Josh, 2026-11-25, "Yes, find and fix", after
+  nothing shipped from 1:58 PM PST). A burn-in race passes when run once, so the run alone on main could only guess,
+  and the bisect ignored which test failed. Now `burn_new` reads the failing case names from the log: a case main and
+  the ships before one don't have is that ship's. The suspects refuse it at once; a bisect step jumps to it. A case
+  that was already there, or that a ship only edited, is still a guess: that day's 2:13 PM red was a case on main
+  since #1563, and "the file's editor did it" would have named the wrong ship.
+  A case whose file a later ship on the train also changes stays a guess too. Accepted: a new case that only fails
+  because of another ship's source change still refuses the ship that adds it.
 - **Red on main too refuses nobody** (#1430, before #1403's run alone on the train; Cara, 2026-11-21, picked on #1427's card after main's own clock test
   refused #1356, #1378, #1414 and #1366 between 00:00 and 01:30 PST). Before the suspects or the bisect, or a red
   ship alone's refusal, each real failure (at most 6 files) runs alone on main's tip here, niced. One that fails there

@@ -110,11 +110,19 @@ jobs:
           set +e
           echo '=== citadel-heavy: the command starts ==='
           # Niced, so the scheme's ship tests on the same PC get the CPU first.
-          if command -v nice >/dev/null; then nice -n 19 bash -c "$COMMAND"; else bash -c "$COMMAND"; fi
+          # A window in the machine's log, so a ship's suite beside it keeps no suite time (#2082); an older snapshot has no script.
+          window=
+          [ ! -x tools/ci-window.sh ] || window=tools/ci-window.sh
+          if command -v nice >/dev/null; then $window nice -n 19 bash -c "$COMMAND"; else $window bash -c "$COMMAND"; fi
           rc=$?
           # A newline first: output with none at its end would hide the marker mid-line (heavy-ci.ts drops this line again).
           printf '\n=== citadel-heavy: the command exited %s ===\n' "$rc"
           exit $rc
+      # A cancel leaves a window open (tools/ci-window.sh --close).
+      - name: close this job's window
+        if: always()
+        continue-on-error: true
+        run: if [ -x tools/ci-window.sh ]; then tools/ci-window.sh --close; fi
       # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
       - name: clear what this job left running
         if: always()

@@ -5,7 +5,9 @@
 //   node tools/judge-replay.ts --list
 // --record writes the replay to test/judge-replays.json with the judge's hash, which test/judges.test.ts checks: run it
 // after changing a judge's pinned code, and read the hits first. Exit 0, or 2 on a bad argument.
-import { readFileSync, writeFileSync } from 'node:fs';
+// A turn in a person's container can't see the live database: there the host_check tool's what: "judge_replay" runs this
+// on the host, with --record, in the minion's worktree (#2074).
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { JUDGES, judge, type ReplayRecord } from '../src/judges.ts';
 import { judgeHash } from './judge-replays/pins.ts';
@@ -60,7 +62,11 @@ async function main(argv: string[]) {
   if (!(days > 0)) return (console.error('--days takes a number of days.'), 2);
   const mod = (await import(`./judge-replays/${id}.ts`)) as { replay(ctx: ReplayCtx): Promise<ReplayResult> };
   const t0 = Date.now();
-  const r = await mod.replay({ db, days, scheme: scheme ? Number(scheme) : null, now: Date.now(), repo: ROOT });
+  const r = await mod.replay({ db, days, scheme: scheme ? Number(scheme) : null, now: Date.now(), repo: ROOT }).catch((err) => {
+    // Some replays read only git or gh, so a missing database is named only when one fails.
+    if (!existsSync(db)) console.error(`No database at ${db}.${process.env.COORDINATOR_CONTAINER ? ` This turn runs in a container: call the host_check tool with what: "judge_replay" and judge: "${id}" instead.` : ''}`);
+    throw err;
+  });
   const { both, replayOnly, realOnly } = pair(r);
   const line = (a: Act) => `  ${pacific(a.at)}  ${a.key}  ${a.text.slice(0, 220)}`;
   console.log(`${j.name}, the last ${days} day${days === 1 ? '' : 's'}: read ${r.inputs} in ${((Date.now() - t0) / 1000).toFixed(1)} s.`);

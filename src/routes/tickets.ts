@@ -19,6 +19,7 @@ import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { moveEffort } from '../effort-retros.ts';
 import { unsealedBy } from '../held-mail.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
@@ -27,7 +28,9 @@ import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs } from '../land.ts';
-import { checkHandoff, laneHold, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { checkHandoff, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
+import { laneHandoff, triggerHandoff } from '../armed-handoff.ts';
+import { cleanStart, startPicked, type CardStart } from '../card-starts.ts';
 import { reviewRefusal } from '../review-gate.ts';
 import { criticRefusal } from '../critic-gate.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
@@ -41,7 +44,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, overLimit, type BatchRow, 
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, isRecord, json, type JsonBody, oneOf, ownWrites, readJson, replyList, slowJson, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { deciding, postPlan } from '../plan-cards.ts';
@@ -55,6 +58,7 @@ import type { ContentBlock } from '../claude-events.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 import { stopMinionShip } from '../ship-stop.ts';
+import { cabalLead, putOnCabal } from './cabals.ts';
 
 /** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
 /**
@@ -86,6 +90,12 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
     if (body.start_after !== null) throw new HttpError(400, 'start_after can only be set to null here: it takes a minion off its chain (a chain is made by create_ticket)');
     if (ticket.kind === 'coordinator' || caller === id) throw new HttpError(400, `A minion can't take itself, or the ${AGENT_NAME}, off a chain`);
     if (!takeOffChain(ticket, name, { store, runner, waiters: app.waiters }, body.note === undefined)) throw new HttpError(409, `#${ticket.number} isn't sealed waiting on another minion's work`);
+  }
+  // A cabal's board (#2090): the Taskmaster or a person puts a minion on one, never the minion itself.
+  // Checked here, done after the other fields: a refused field leaves it where it was.
+  if (body.cabal !== undefined) {
+    if (caller === id) throw new HttpError(400, "A minion can't put itself on a cabal or take itself off one: ask the Taskmaster");
+    if (body.cabal !== null) cabalLead(store, ticket.project_id, body.cabal, id);
   }
   // The view's replies are a list; compare the stored JSON.
   const stored = store.getTicket(id)!;
@@ -124,6 +134,7 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
       app.notify(id, { kind: 'state', state: fields.state, note: 'note' in fields ? (fields.note ?? null) : stored.note }, caller ? null : name);
     }
   }
+  if (body.cabal !== undefined) putOnCabal(app, ticket, body.cabal, name);
   if (unparks) {
     unparkTicket(app, stored, name, caller ? APP_NAME : name).catch((err) => {
       runner.emit(id, 'note', { text: `Unparking failed: ${err.message}` });
@@ -189,6 +200,8 @@ interface CardOption {
   description?: string;
   image?: string;
   recommended?: true;
+  /** A pick starts this minion with no turn (#2050, src/card-starts.ts). */
+  start?: CardStart;
 }
 /** A question card's question as stored. */
 interface CardQuestion {
@@ -203,6 +216,7 @@ interface RawOption {
   description?: unknown;
   image?: unknown;
   recommended?: unknown;
+  start?: unknown;
 }
 interface RawQuestion {
   question?: unknown;
@@ -212,8 +226,9 @@ interface RawQuestion {
 }
 
 /** A secret card's ask (#838): the name it saves under, whose it is (the answerer's own unless "scheme"), and why. */
-function secretAsk(raw: Record<string, unknown> | null | undefined): SecretAsk {
-  if (!raw || typeof raw !== 'object') throw new HttpError(400, 'secret must be an object with a name');
+function secretAsk(v: unknown): SecretAsk {
+  if (!v || typeof v !== 'object') throw new HttpError(400, 'secret must be an object with a name');
+  const raw: { scope?: unknown; name?: unknown; why?: unknown } = v;
   const scope = oneOf(raw.scope ?? 'person', ['person', 'scheme'], 'secret.scope') as SecretScope;
   return { name: secretName(raw.name), scope, ...(raw.why ? { why: str(raw.why, 'secret.why', 300) } : {}) };
 }
@@ -255,6 +270,7 @@ async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknow
         ...(description ? { description: str(description, `${n} option ${j + 1} description`, 300) } : {}),
         ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
         ...(o?.recommended === true || o?.recommended === 'true' || says || described ? { recommended: true } : {}),
+        ...(o?.start != null ? { start: o.start as CardStart } : {}),
       };
     });
     if (new Set(options.map((o) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
@@ -277,6 +293,8 @@ async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknow
   });
   for (const [i, q] of questions.entries()) {
     for (const [j, o] of q.options.entries()) {
+      // Checked here, not in the map above: it reads the file system (#2050).
+      if (o.start) o.start = await cleanStart(app, ticket.project_id, o.start, `Question ${i + 1} option ${j + 1}`);
       const problem = o.image && (await optionImageProblem(o.image, ticket.cwd, ticketRoots(app, ticket)));
       if (problem) throw new HttpError(400, `Question ${i + 1} option ${j + 1} image ${problem}`);
     }
@@ -291,6 +309,15 @@ async function choicesDoc(app: App, ticket: Ticket | TicketView, raw: unknown): 
   const html = await readFile(found.file, 'utf8');
   if (!choicesPage(html)) throw new HttpError(400, 'doc must be a mock kit page with pick bars (it loads mockkit.js and calls mock.picks or mock.boards): its Send dock is what answers the card (citadel:docs-and-mocks skill)');
   return { path: found.abs, title: pageTitle(html, found.abs) };
+}
+
+/** The minion a close's `into` names, where the closing one's ask moved; refused before anything closes. */
+function movedInto(app: App, ticket: Ticket | TicketView, body: Record<string, unknown>): Ticket | null {
+  if (body.into == null) return null;
+  if (body.as !== 'replaced') throw new HttpError(400, 'into goes with as: replaced');
+  const into = app.store.getTicketByNumber(ticket.project_id, Number(body.into));
+  if (!into || into.id === ticket.id || into.kind === 'coordinator') throw new HttpError(400, `into: no other minion #${body.into} here`);
+  return into;
 }
 
 /** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
@@ -686,7 +713,7 @@ export const ticketRoutes: Route[] = [
       const { store } = app;
       // `left`: they've left it (navigated away, hid the tab). That records nothing new: a finished minion
       // they had open at its latest update closes (#811).
-      const body = await readJson(req).catch(() => ({}));
+      const body = await readJson(req).catch((): JsonBody => ({}));
       if (body?.left === true) return json(res, 200, { seen_at: store.seenAt(session.name, id), closed: app.runner.closeIfSeen(id, session.name) });
       clearMentions(store, session.name, id);
       return json(res, 200, { seen_at: await store.markSeen(session.name, id) });
@@ -890,7 +917,8 @@ export const ticketRoutes: Route[] = [
       const { runner } = app;
       // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
       const body = await readJson(req);
-      const found = typeof body.path === 'string' && (await resolveTicketFile(app, ticket, body.path));
+      if (typeof body.path !== 'string') throw new HttpError(404, 'That file is no longer there');
+      const found = await resolveTicketFile(app, ticket, body.path);
       if (!found) throw new HttpError(404, 'That file is no longer there');
       const quote = typeof body.quote === 'string' ? body.quote.slice(0, 2000) : '';
       // Named as the ticket would write it: relative to its working directory, else in full.
@@ -924,6 +952,8 @@ export const ticketRoutes: Route[] = [
       // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
       const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
       const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
+      // A start (#2050) is a minion's plain card: a Taskmaster starts its own with create_ticket, and a ship card's pick is a go.
+      if (questions.some((q) => q.options.some((o) => o.start)) && (kind || ticket.kind === 'coordinator' || body.for_everyone === true)) throw new HttpError(400, "start goes on a minion's own question card, not a ship card or a Taskmaster's (a Taskmaster starts minions with create_ticket)");
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
       const card: Card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // A card that repeats one open or just answered is refused once; not_duplicate posts it. Both are counted (settings
@@ -1197,18 +1227,24 @@ export const ticketRoutes: Route[] = [
           // Ship It on a card with its hand-off prepared ships now, with no turn (#1930); else the minion gets the answer, with why.
           const mine = `My answers to your question card:\n\n${text}`;
           const images = await saveImages(app, ticket, body.images);
-          const why = await shipOnClick(
-            app,
-            store.getTicket(id)!,
-            { event: card.id, data },
-            {
-              by: session.name,
-              uid: session.uid ?? null,
-              picked: answers.flatMap((a) => a.selected),
-              added: images.length + files.length > 0 || answers.some((a) => a.other),
-              record: (held) => runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: held }),
-            },
-          );
+          // A pick of an option carrying a start (#2050) starts that minion with no turn; held mail for the owner when that was all.
+          const starts = (questions as CardQuestion[]).some((q) => q.options.some((o) => o.start)) ? await startPicked(app, store.getTicket(id)!, questions, answers, session, images.length + files.length > 0 || answers.some((a) => a.other)) : null;
+          if (starts?.held) runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: `${mine}\n\n${starts.text}` });
+          else if (starts) deliverAnswer(app, id, session.name, `${mine}\n\n${starts.text}`, answer, images, files);
+          const why = starts
+            ? null
+            : await shipOnClick(
+                app,
+                store.getTicket(id)!,
+                { event: card.id, data },
+                {
+                  by: session.name,
+                  uid: session.uid ?? null,
+                  picked: answers.flatMap((a) => a.selected),
+                  added: images.length + files.length > 0 || answers.some((a) => a.other),
+                  record: (held) => runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: held }),
+                },
+              );
           if (why !== null) deliverAnswer(app, id, session.name, `${mine}${why ? `\n\n(${APP_NAME} didn't ship it by itself: ${why}.)` : ''}`, answer, images, files);
         }
       } finally {
@@ -1414,17 +1450,25 @@ export const ticketRoutes: Route[] = [
       // Why it closed, in one word (#1989; Josh, 2026-11-25, "Save one word"): an agent says it, a person's one click doesn't.
       const as = body.status === 'closed' && body.as != null ? { closedAs: body.as } : null;
       if (as) store.props.check(ticket.project_id, as);
+      const into = movedInto(app, ticket, body);
       // Already as asked: a second dismissal, or a reopen of a minion that isn't dismissed, changes nothing.
       if ((body.status === 'closed') === (ticket.status === 'closed')) {
         if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
+        // A word said again about a closed minion replaces where its ask went.
+        const joined = as && ticket.status === 'closed' ? moveEffort(store, ticket, into) : null;
         if (as) runner.broadcastTicket(id);
-        return json(res, 200, ticketView(app, id));
+        if (joined) runner.broadcastTicket(into!.id);
+        return json(res, 200, { ...ticketView(app, id), ...(joined ? { joined } : {}) });
       }
+      let joined: string | null = null;
       if (body.status === 'closed') {
+        // Before the close, which hands the effort over.
+        joined = moveEffort(store, ticket, into);
         const closed = runner.close(id, `${session.name} dismissed this minion.`);
         if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
         if (as) runner.broadcastTicket(id);
         await closed;
+        if (joined) runner.broadcastTicket(into!.id);
       } else {
         store.updateTicket(id, { status: body.status });
         await ownWrites(); // the broadcast, the worktree check and the reply read it back (#1244)
@@ -1435,7 +1479,7 @@ export const ticketRoutes: Route[] = [
         void app.outbox?.poke({ type: 'reopened', ticket: id }); // its held deliveries (wake_at, ADR 0021) go now
       }
       await ownWrites();
-      return json(res, 200, ticketView(app, id));
+      return json(res, 200, { ...ticketView(app, id), ...(joined ? { joined } : {}) });
     },
   },
   {
@@ -1569,10 +1613,18 @@ export const ticketRoutes: Route[] = [
     async handler({ req, res, app, caller }) {
       const body = await readJson(req);
       // The database holds every scheme's chat, so only a turn whose person sees every scheme reads it (db.ts canSee).
-      const refused = body?.what === 'db' ? adminAskRefusal(app.store, caller!.id) : null;
+      // A judge replay reads it too (#2074), and runs in the caller's worktree with the environment a land gets.
+      const reads = body?.what === 'db' || body?.what === 'judge_replay';
+      const refused = reads ? adminAskRefusal(app.store, caller!.id) : null;
       if (refused) throw new HttpError(403, refused);
       const { systemctl, journalctl } = app.services.opts;
-      return json(res, 200, { output: await hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl }, body) });
+      const own = body?.what === 'judge_replay' && caller!.kind === 'ticket' && caller!.cwd ? caller! : null;
+      const worktree = own ? { cwd: own.cwd!, env: app.runner.hostEnv(own, bearer(req)) } : null;
+      // A slow judge's replay outlasts the MCP server's fetch unless the answer beats (#2100).
+      return slowJson(
+        res,
+        hostCheck({ db: join(app.dataDir, 'coordinator.db'), systemctl, journalctl, worktree }, body).then((output) => ({ output })),
+      );
     },
   },
   {
@@ -1619,7 +1671,7 @@ export const ticketRoutes: Route[] = [
       if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree makes media');
       const tool = oneOf(body.tool, MEDIA_TOOLS, 'tool') as MediaTool | null;
       if (!tool) throw new HttpError(400, `tool must be one of: ${MEDIA_TOOLS.join(', ')}`);
-      const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+      const args = isRecord(body.args) ? body.args : {};
       // provider "azure" (#842): any minion of the scheme spends the scheme's own key, with no per-person cap (the scheme's outside-spend cap only warns): raw SSML to Azure Speech on the scheme's own key, booked to the scheme as outside spend (#839), not OpenRouter.
       if (tool === 'generate_speech' && args.provider === 'azure') {
         return json(
@@ -1675,9 +1727,10 @@ export const ticketRoutes: Route[] = [
       const body = (await readJson(req)) ?? {};
       const mine = app.store.getTicket(ticket.id)!;
       const ready = await checkHandoff(app, mine, body, bearer(req));
-      // A fix for shipping that is broken right now jumps the lane.
-      const held = body.into === undefined && body.outage !== true && body.fix !== true && (await laneHold(app, mine));
-      if (held) throw new HttpError(409, `Not handed off: ${held}`);
+      // `when` arms it on its flake proof or on something going live (#2089); a pipeline change waits for the pipeline lane,
+      // armed (#2046): the server ships it when the lane is its own, or it may ship beside the holder.
+      const armed = (await triggerHandoff(app, mine, body)) ?? (await laneHandoff(app, mine, body));
+      if (armed) return json(res, 202, { ok: true, armed });
       if (!startHandoff(app, mine, ready, { kind: 'minion' })) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },
@@ -1872,9 +1925,11 @@ export const ticketRoutes: Route[] = [
       const cleared = app.store.getTicket(id)!.state === 'ready';
       // Checked before the close, written after it: a refused one leaves no word.
       if (body.as != null) app.store.props.check(ticket.project_id, { closedAs: body.as });
+      const into = movedInto(app, ticket, body);
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
       if (body.as != null) app.store.props.set('minion', id, ticket.project_id, { closedAs: body.as }, session.name);
-      return json(res, 202, { ...ticketView(app, id), cleared });
+      const joined = moveEffort(app.store, ticket, into);
+      return json(res, 202, { ...ticketView(app, id), cleared, ...(joined ? { joined } : {}) });
     },
   },
 ];

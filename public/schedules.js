@@ -1,6 +1,7 @@
 // The scheme's scheduled minions (src/schedules.ts), under Orders → Schedules (#1083, Josh picked "List in the panel,
 // page on the right"): the panel lists them, standard audits then the scheme's own, each split by category, and a
 // row opens its page in the main pane at #/p/N/schedules/ID. The page leads with what it does, then its status.
+/** @import { View } from './types.js' */
 import { ago, api, h, icon, view } from './base.js';
 import { modelName } from './composer.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
@@ -9,14 +10,32 @@ import { optimistic } from './ui/optimistic.js';
 import { briefSkills, briefSummary, groupSchedules, nextSchedule, soon, when } from './schedule-text.js';
 import { loadingLine } from './ui/state.js';
 
+/** @import { Child } from './base.js' */
+/** @import { ScheduleRow } from './schedule-text.js' */
+/** @typedef {{ at: number, skip?: boolean, status?: string, state?: string, number?: number | null, note?: string, cost?: number }} ScheduleRun */
+/** @typedef {{ name: string, template?: boolean | string, rows: { name: string, template?: unknown }[], state: string, slug: string }} Audit */
+/**
+ * A schedule as src/schedules.ts lists it: the fields this page reads.
+ * @typedef {ScheduleRow & { name: string, project_id: number, when: string, cron: string, brief: string, type: string, once?: boolean | number, notes?: string, model?: string | null, effort?: string | null, last_error?: string | null, last_run_at?: number | null, last_status?: string, last_state?: string, last_number?: number | null, last_cost?: number, last_skip?: string, skips14?: number, runs?: ScheduleRun[], trigger_count?: number | null, trigger_kind?: string | null, trigger_so_far?: number, trigger_gap_hours?: number | null, min_minions?: number | null, gate_scope?: string }} Schedule
+ */
+/** @typedef {{ projectId: number, schedules: Schedule[], audits: Audit[], error?: string }} PageData */
+
 // A chip's tone as the hue of its row's tile and bar (Citadel's look, #1068).
+/** @type {Record<string, string>} */
 const HUE = { ok: 'done', warn: 'waiting', danger: 'danger', info: 'running', neutral: 'held' };
 
+/** @param {number} n */
 const money = (n) => `$${n.toFixed(n < 10 ? 2 : 0)}`;
 
-const href = (id) => `#/p/${view.projectId}/schedules${id ? `/${id}` : ''}`;
+/** @param {number | null} id */
+const href = (id) => `#/p/${/** @type {View} */ (view).projectId}/schedules${id ? `/${id}` : ''}`;
 
 /** A run's outcome chip: what the minion found (its state), "running" while it works, "error" if it broke. */
+/**
+ * @param {string | undefined} status
+ * @param {string | undefined} state
+ * @returns {[string, string, string]}
+ */
 function outcome(status, state) {
   if (status === 'running') return ['info', 'running', 'Its last run is working now'];
   if (status === 'error' || state === 'error') return ['danger', 'error', 'Its last run ended in an error'];
@@ -25,16 +44,22 @@ function outcome(status, state) {
 }
 
 /** A schedule's one status: paused, failed to start, its last run's outcome, or new. */
+/**
+ * @param {Schedule} s
+ * @returns {[string, string, string]}
+ */
 function status(s) {
   return s.paused ? ['warn', 'Paused', 'It starts nothing until resumed'] : s.last_error ? ['danger', 'Failed', "Its last run didn't start"] : s.last_run_at ? outcome(s.last_status, s.last_state) : ['neutral', 'New', 'It has not run yet'];
 }
 
+/** @param {string} tone @param {string} word @param {string} [tip] */
 function chip(tone, word, tip) {
   const c = toneChip(tone, word);
   if (tip) c.title = tip;
   return c;
 }
 
+/** @param {Schedule} s @param {ScheduleRun} r */
 function runLine(s, r) {
   if (r.skip) return hueRow({ hue: 'held', lead: '–', meta: ago(r.at) }, h('span', { class: 'muted' }, 'skipped by the gate'));
   const [tone, word] = outcome(r.status, r.state);
@@ -42,9 +67,11 @@ function runLine(s, r) {
 }
 
 /** Each kit template against this scheme's rows: flags a missing one and two for one, and shows a deliberate omission as such. */
+/** @param {Audit[]} audits */
 function auditsCheck(audits) {
   const bad = audits.filter((a) => a.state !== 'ok');
   if (!bad.length) return '';
+  /** @param {Audit} a */
   const line = (a) => {
     const ids = a.rows.map((r) => `"${r.name}"${r.template ? '' : ' (hand-made)'}`).join(' and ');
     if (a.state === 'left-out') return hueRow({ hue: 'held', lead: '–' }, h('span', { class: 'muted' }, `${a.name}: left out on purpose`));
@@ -58,13 +85,13 @@ function auditsCheck(audits) {
           {
             type: 'button',
             class: 'secondary small',
-            onclick: async (e) => {
-              e.currentTarget.disabled = true;
+            onclick: async (/** @type {Event} */ e) => {
+              /** @type {HTMLButtonElement} */ (e.currentTarget).disabled = true;
               try {
-                await api(`api/projects/${view.projectId}/schedules`, { method: 'POST', body: { template: a.slug } });
+                await api(`api/projects/${/** @type {View} */ (view).projectId}/schedules`, { method: 'POST', body: { template: a.slug } });
               } catch (ex) {
-                e.currentTarget.disabled = false;
-                alert(ex.message);
+                /** @type {HTMLButtonElement} */ (e.currentTarget).disabled = false;
+                alert(/** @type {Error} */ (ex).message);
               }
             },
           },
@@ -79,6 +106,7 @@ function auditsCheck(audits) {
 }
 
 /** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
+/** @param {Schedule} s */
 function runsAs(s) {
   const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
   return set.length ? h('span', { title: 'What each run starts with' }, set.join(', ')) : '';
@@ -87,6 +115,7 @@ function runsAs(s) {
 // ---------- the list, in the panel ----------
 
 /** A compact row: name and status chip, then when it runs and when next. */
+/** @param {Schedule} s */
 function listRow(s) {
   const [tone, word, tip] = status(s);
   return h(
@@ -97,6 +126,7 @@ function listRow(s) {
   );
 }
 
+/** @param {Schedule[]} schedules */
 function scheduleList(schedules) {
   if (!schedules.length) return emptyCard('Nothing scheduled yet', 'A schedule starts a minion on a timer; ask the Taskmaster to add one.', { mark: '◷', hue: 'muted' });
   return h(
@@ -120,10 +150,10 @@ function drawPane() {
     'a',
     {
       class: 'schedules-back',
-      href: `#/p/${view.projectId}/orders`,
-      onclick: (e) => {
+      href: `#/p/${/** @type {View} */ (view).projectId}/orders`,
+      onclick: (/** @type {Event} */ e) => {
         e.preventDefault();
-        e.currentTarget.closest('.sidebar')?.classList.remove('show-schedules');
+        /** @type {HTMLElement} */ (e.currentTarget).closest('.sidebar')?.classList.remove('show-schedules');
       },
     },
     icon('back'),
@@ -138,6 +168,7 @@ function drawPane() {
 // ---------- the page, in the main pane ----------
 
 /** Its page: what it does, its status, its runs, then rows that open on the instructions, skills, model and gate. */
+/** @param {Schedule} s */
 function schedulePage(s) {
   const [tone, word, tip] = status(s);
   const hue = s.paused ? 'held' : HUE[tone];
@@ -192,7 +223,7 @@ function schedulePage(s) {
           ? h(
               'div',
               { class: 'schedule-skills' },
-              skills.map((k) => h('a', { class: 'cui-chip', 'data-tone': 'violet', href: `#/p/${view.projectId}/skills` }, k)),
+              skills.map((k) => h('a', { class: 'cui-chip', 'data-tone': 'violet', href: `#/p/${/** @type {View} */ (view).projectId}/skills` }, k)),
             )
           : h('p', { class: 'look-prose' }, 'Its brief names no skill; the run uses whatever its minion picks.'),
       )[0],
@@ -221,6 +252,7 @@ function schedulePage(s) {
 }
 
 /** Every schedule at once: what runs on a timer, the next one, and what is paused; then where to pick one. */
+/** @param {Schedule[]} schedules */
 function overview(schedules) {
   const live = schedules.filter((s) => !s.paused);
   const next = nextSchedule(live);
@@ -229,11 +261,12 @@ function overview(schedules) {
     statTiles([String(live.length), 'on a timer', 'running'], [next ? soon(next.next_run_at) : '–', next ? `next · ${next.name}` : 'nothing due', 'teal'], [String(schedules.length - live.length), 'paused or done', 'held'], failed ? [String(failed), "didn't start", 'danger'] : null),
     h('div', { class: 'schedules-pick' }, emptyCard('Pick a schedule', 'Its page shows what it does, the skills it uses, its runs, and its pause and delete.', { mark: '◷', hue: 'muted' })),
     // A phone has no panel beside it: the list sits here, and a tap opens the page full screen.
-    h('div', { class: 'schedules-narrow-list' }, auditsCheck(data.audits), scheduleList(schedules)),
+    h('div', { class: 'schedules-narrow-list' }, auditsCheck(/** @type {PageData} */ (data).audits), scheduleList(schedules)),
   ];
 }
 
 let waitingOnBlur = false;
+/** @type {number | null | undefined} */
 let drawnFor; // the schedule the page shows now: a redraw for the same one waits for a field being edited
 function drawPage() {
   if (!pageEl?.isConnected) return;
@@ -252,7 +285,7 @@ function drawPage() {
   const head = h(
     'div',
     { class: 'ticket-head' },
-    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${/** @type {View} */ (view).projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     current ? h('a', { class: 'schedules-up', href: href(null) }, icon('back'), 'All schedules') : '',
   );
@@ -262,9 +295,13 @@ function drawPage() {
 
 // ---------- state, saving and redraws ----------
 
+/** @type {PageData | null} */
 let data = null; // { projectId, schedules, audits } or { error }
+/** @type {number | null} */
 let current = null; // the schedule whose page is open
+/** @type {HTMLElement | null} */
 let paneEl = null;
+/** @type {HTMLElement | null} */
 let pageEl = null;
 let token = 0;
 
@@ -273,18 +310,20 @@ function draw() {
   drawPage();
 }
 
+/** @param {number} projectId */
 async function load(projectId) {
   const mine = ++token;
   try {
     const [{ schedules }, { audits }] = await Promise.all([api(`api/projects/${projectId}/schedules`), api(`api/projects/${projectId}/schedule-audits`)]);
     if (mine === token) data = { projectId, schedules, audits };
   } catch (ex) {
-    if (mine === token) data = { projectId, error: ex.message };
+    if (mine === token) data = /** @type {PageData} */ ({ projectId, error: /** @type {Error} */ (ex).message });
   }
   if (mine === token) draw();
 }
 
 /** The panel's schedules list (Orders → Schedules); drawn from what was fetched last, then fresh. */
+/** @param {number} projectId @param {number | null | undefined} [id] */
 export function schedulesPane(projectId, id) {
   current = id ?? null;
   if (data?.projectId !== projectId) data = null;
@@ -294,6 +333,7 @@ export function schedulesPane(projectId, id) {
 }
 
 /** The main pane's Schedules page: the open schedule's page, or the overview with none picked. Fetches behind. */
+/** @param {number} projectId @param {number | null | undefined} [id] */
 export function schedulesPage(projectId, id) {
   current = id ?? null;
   if (data?.projectId !== projectId) data = null;
@@ -304,6 +344,7 @@ export function schedulesPage(projectId, id) {
 }
 
 /** Another schedule of the scheme on screen: swap the page and the list's highlight in place, no reload. False if not on it. */
+/** @param {number} projectId @param {number | null | undefined} [id] */
 export function openSchedule(projectId, id) {
   if (!pageEl?.isConnected || !paneEl?.isConnected || data?.projectId !== projectId) return false;
   current = id ?? null;
@@ -314,6 +355,7 @@ export function openSchedule(projectId, id) {
 }
 
 /** Someone added, changed or ran a schedule: refetch if its scheme's Schedules page is open. */
+/** @param {number} projectId */
 export function onSchedulesChanged(projectId) {
   if ((pageEl?.isConnected || paneEl?.isConnected) && view?.projectId === projectId) load(projectId);
 }
@@ -322,8 +364,14 @@ export function onSchedulesChanged(projectId) {
  * The activity gate and one-off (#745): "Skip unless N minions since the last run" (blank always runs), whose minions
  * it counts once N is set, and Run once. Each change shows at once and saves behind.
  */
+/** @param {Schedule} s */
 function gateFields(s) {
-  const scope = h('select', { class: 'small', 'aria-label': 'Whose minions count', onchange: (e) => save(s, { gate_scope: e.target.value }) }, h('option', { value: 'scheme', selected: s.gate_scope !== 'all' }, 'in this scheme'), h('option', { value: 'all', selected: s.gate_scope === 'all' }, 'in all schemes'));
+  const scope = h(
+    'select',
+    { class: 'small', 'aria-label': 'Whose minions count', onchange: (/** @type {Event} */ e) => save(s, { gate_scope: /** @type {HTMLSelectElement} */ (e.target).value }) },
+    h('option', { value: 'scheme', selected: s.gate_scope !== 'all' }, 'in this scheme'),
+    h('option', { value: 'all', selected: s.gate_scope === 'all' }, 'in all schemes'),
+  );
   const n = h('input', {
     type: 'number',
     min: 1,
@@ -333,9 +381,10 @@ function gateFields(s) {
     placeholder: 'any',
     value: s.min_minions ?? '',
     'aria-label': 'Minions needed',
-    onchange: (e) => {
-      const v = e.target.value.trim();
-      if (v !== '' && !(Number.isInteger(Number(v)) && Number(v) >= 1)) return e.target.reportValidity();
+    onchange: (/** @type {Event} */ e) => {
+      const t = /** @type {HTMLInputElement} */ (e.target);
+      const v = t.value.trim();
+      if (v !== '' && !(Number.isInteger(Number(v)) && Number(v) >= 1)) return t.reportValidity();
       save(s, { min_minions: v === '' ? null : Number(v) });
     },
   });
@@ -344,11 +393,12 @@ function gateFields(s) {
     { class: 'schedule-gate small' },
     h('label', { title: 'Each due slot checks first: with fewer minions made since its last real run, it skips at no cost' }, 'Skip unless ', n, ' minions since the last run'),
     s.min_minions != null ? scope : '',
-    h('label', { title: 'Pause after its first real run, for a one-off' }, h('input', { type: 'checkbox', checked: !!s.once, onchange: (e) => save(s, { once: e.target.checked }) }), ' Run once'),
+    h('label', { title: 'Pause after its first real run, for a one-off' }, h('input', { type: 'checkbox', checked: !!s.once, onchange: (/** @type {Event} */ e) => save(s, { once: /** @type {HTMLInputElement} */ (e.target).checked }) }), ' Run once'),
   );
 }
 
 /** "runs after 150 ships" (#1798): its activity trigger, counted in gate_scope; the server's describeTrigger says the same for tools. */
+/** @param {Schedule} s @param {boolean} [count] */
 function triggerText(s, count = true) {
   return `${count ? `runs after ${s.trigger_count} ` : ''}${s.trigger_kind}${s.gate_scope === 'all' ? ' across all schemes' : ''}${s.trigger_gap_hours != null ? `, at most every ${s.trigger_gap_hours} h` : ''}`;
 }
@@ -357,7 +407,9 @@ function triggerText(s, count = true) {
  * The activity trigger (#1798): "Also run after N ships|minions since the last run" (blank: calendar only), and its floor
  * in hours (blank: a day). Checked hourly; an early run takes the coming calendar slot. Each change shows at once and saves behind.
  */
+/** @param {Schedule} s */
 function triggerFields(s) {
+  /** @param {string} v @param {number} max */
   const whole = (v, max) => v === '' || (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= max);
   const n = h('input', {
     type: 'number',
@@ -368,13 +420,19 @@ function triggerFields(s) {
     placeholder: 'off',
     value: s.trigger_count ?? '',
     'aria-label': 'Count that runs it early',
-    onchange: (e) => {
-      const v = e.target.value.trim();
-      if (!whole(v, 100000)) return e.target.reportValidity();
+    onchange: (/** @type {Event} */ e) => {
+      const t = /** @type {HTMLInputElement} */ (e.target);
+      const v = t.value.trim();
+      if (!whole(v, 100000)) return t.reportValidity();
       save(s, v === '' ? { trigger_count: null, trigger_kind: null, trigger_gap_hours: null } : { trigger_count: Number(v), trigger_kind: s.trigger_kind ?? 'ships' });
     },
   });
-  const kind = h('select', { class: 'small', 'aria-label': 'What it counts', onchange: (e) => save(s, { trigger_kind: e.target.value }) }, h('option', { value: 'ships', selected: s.trigger_kind !== 'minions' }, 'ships to main'), h('option', { value: 'minions', selected: s.trigger_kind === 'minions' }, 'minions made'));
+  const kind = h(
+    'select',
+    { class: 'small', 'aria-label': 'What it counts', onchange: (/** @type {Event} */ e) => save(s, { trigger_kind: /** @type {HTMLSelectElement} */ (e.target).value }) },
+    h('option', { value: 'ships', selected: s.trigger_kind !== 'minions' }, 'ships to main'),
+    h('option', { value: 'minions', selected: s.trigger_kind === 'minions' }, 'minions made'),
+  );
   const gap = h('input', {
     type: 'number',
     min: 1,
@@ -384,9 +442,10 @@ function triggerFields(s) {
     placeholder: '24',
     value: s.trigger_gap_hours ?? '',
     'aria-label': 'Hours between early runs',
-    onchange: (e) => {
-      const v = e.target.value.trim();
-      if (!whole(v, 720)) return e.target.reportValidity();
+    onchange: (/** @type {Event} */ e) => {
+      const t = /** @type {HTMLInputElement} */ (e.target);
+      const v = t.value.trim();
+      if (!whole(v, 720)) return t.reportValidity();
       save(s, { trigger_gap_hours: v === '' ? null : Number(v) });
     },
   });
@@ -399,13 +458,14 @@ function triggerFields(s) {
 }
 
 /** Its category (#1083): any short name, with the scheme's others offered; blank puts it under Other. */
+/** @param {Schedule} s */
 function categoryField(s) {
   const list = `schedule-cats-${s.id}`;
-  const cats = [...new Set(data.schedules.map((x) => x.category).filter(Boolean))].sort();
+  const cats = [...new Set(/** @type {PageData} */ (data).schedules.map((x) => x.category).filter(Boolean))].sort();
   return h(
     'div',
     { class: 'schedule-gate small' },
-    h('label', {}, 'Show it under ', h('input', { type: 'text', maxlength: 40, list, value: s.category, placeholder: 'Other', 'aria-label': 'Category', onchange: (e) => save(s, { category: e.target.value.trim().replace(/\s+/g, ' ') }) })),
+    h('label', {}, 'Show it under ', h('input', { type: 'text', maxlength: 40, list, value: s.category, placeholder: 'Other', 'aria-label': 'Category', onchange: (/** @type {Event} */ e) => save(s, { category: /** @type {HTMLInputElement} */ (e.target).value.trim().replace(/\s+/g, ' ') }) })),
     h(
       'datalist',
       { id: list },
@@ -418,8 +478,12 @@ function categoryField(s) {
  * Save a change: the list and page redraw with it at once, and a refusal puts the old values back. Edits to one field
  * share `sets`, so after several quick ones fail it ends at what the server last took.
  */
+/**
+ * @param {Schedule} s
+ * @param {Record<string, unknown>} patch
+ */
 function save(s, patch) {
-  const was = Object.fromEntries(Object.keys(patch).map((k) => [k, s[k]]));
+  const was = Object.fromEntries(Object.keys(patch).map((k) => [k, s[/** @type {keyof Schedule} */ (k)]]));
   optimistic({
     key: `schedule:${s.id}`,
     sets: `schedule-${Object.keys(patch).join()}:${s.id}`,
@@ -437,6 +501,7 @@ function save(s, patch) {
 }
 
 // Shows at once and sends behind; the server's broadcast then refetches, and a refusal puts it back.
+/** @param {Schedule} s */
 function pause(s) {
   const was = s.paused;
   optimistic({
@@ -456,19 +521,22 @@ function pause(s) {
 }
 
 /** Delete: gone from the list at once and back to the overview; a refusal puts it back. Only its own scheme's list changes. */
+/** @param {Schedule} s */
 function remove(s) {
   const mine = () => data?.schedules && data.projectId === s.project_id;
   optimistic({
     key: `schedule:${s.id}`,
     apply: () => {
       if (!mine()) return;
-      data.schedules = data.schedules.filter((x) => x.id !== s.id);
+      const d = /** @type {PageData} */ (data);
+      d.schedules = d.schedules.filter((x) => x.id !== s.id);
       if (current === s.id) location.hash = href(null);
       draw();
     },
     send: () => api(`api/schedules/${s.id}`, { method: 'DELETE' }),
     undo: () => {
-      if (mine() && !data.schedules.some((x) => x.id === s.id)) data.schedules = [...data.schedules, s];
+      const d = /** @type {PageData} */ (data);
+      if (mine() && !d.schedules.some((x) => x.id === s.id)) d.schedules = [...d.schedules, s];
       draw();
     },
     label: `delete the schedule "${s.name}"`,

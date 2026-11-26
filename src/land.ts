@@ -14,10 +14,12 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { access, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
 import type { Probe } from './live-probe.ts';
 import { pacificStamp } from './pacific.ts';
+import { thrown } from './thrown.ts';
 
 export interface Landing {
   /** The tail of what land.sh printed so far. */
@@ -56,6 +58,13 @@ export interface Handoff {
   touched?: string[];
   /** Its live probe (#1741, src/live-probe.ts): run once the ship is live, with no model. */
   probe?: Probe;
+  /** The branch's commit when it was handed off, before land.sh's rebase: a re-queue (#2030) needs the same change. */
+  head?: string;
+  /** hand_off_land's fix and outage, kept for a re-queue's land.sh (LAND_FIX, LAND_URGENT). */
+  fix?: true;
+  outage?: true;
+  /** The server put this hand-off back in line itself after a refusal that wasn't the change's (#2030): its next refusal wakes the minion. */
+  requeued?: true;
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -122,7 +131,7 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
  */
 export function landConflict(cwd: string, env: Record<string, string>, args: string[], timeout = 30_000): Promise<string | null> {
   return new Promise((done) => {
-    execFile('bash', ['tools/land.sh', '--check', ...args], { cwd, env, timeout, maxBuffer: MAX_OUTPUT }, (err: any, _out, stderr) => {
+    execFile('bash', ['tools/land.sh', '--check', ...args], { cwd, env, timeout, maxBuffer: MAX_OUTPUT }, (err, _out, stderr) => {
       done(
         err?.code === 3
           ? String(stderr)
@@ -196,9 +205,12 @@ export class Landings {
    * (LandHandoffs). The hand-off sits in the landing's folder, so a restart mid-land (the deploy's own,
    * most often) still reports it. False when a landing already runs for this minion.
    */
-  handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff): boolean {
+  handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff, again = false): boolean {
     const now = this.get(ticketId);
-    if ((now && now.code === null) || existsSync(join(this.dir(ticketId), HANDOFF))) return false;
+    if (now && now.code === null) return false;
+    // A re-queue (#2030) takes the ended, unreported hand-off's place with no await between, so a restart can't lose both.
+    if (again) this.settled(ticketId);
+    if (existsSync(join(this.dir(ticketId), HANDOFF))) return false;
     this.start(ticketId, cwd, env, args);
     writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
     this.waiting.add(ticketId);
@@ -449,6 +461,8 @@ const ALWAYS_TESTS = ['access-matrix', 'prompt-budget', 'schema-compat', 'pipeli
  * the wake then keeps its plain text. The first match wins, most specific first.
  */
 export function classifyLandFailure(output: string): { kind: string; line: string } | null {
+  // Indented under the smoke or guard prefix is a failing test's own output, quoted: nothing below may read it (#1961).
+  output = output.replace(/^land: (smoke|guard): {3}.*$/gm, '');
   // After a retry in place (#1360), only the second attempt counts: the first one's flake labels are no proof now.
   const again = output.lastIndexOf('not your change: keeping its place in line');
   if (again >= 0) output = output.slice(again);
@@ -458,7 +472,8 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   const failedFiles = [...new Set([...output.matchAll(/✖ ([^ :]+\.test\.ts)(?::\d+)? › /gm), ...suiteLog.matchAll(/run-tests: (\S+\.test\.ts): (?:failed again alone|hung when rerun alone|rerun alone stopped)/g)].map((m) => m[1]))];
   const k = (kind: string, line: string) => ({ kind, line });
   if (/(won't (rebase|merge) \S+ .*cleanly|^land: smoke: it conflicts with main|^CONFLICT \(|the (rebase onto|merging) .* failed \(see git's output)/m.test(output)) return k('conflict', "Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions' changes, re-test, commit, hand off again.");
-  if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
+  // The refusal's own line, from either ship script. A "SyntaxError" alone says nothing: tests log them on purpose (#1961).
+  if (/^(land: smoke: )?a \.ts file does not parse/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
   // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
   if (/failed its burn-in in CI/.test(output)) return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
   // The fallback's no-answers on perigee (#1863): the log shown above them can hold a ✖ of a file that then passed alone.
@@ -480,6 +495,22 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   const always = failedFiles.filter((f) => ALWAYS_TESTS.some((a) => f.includes(a)));
   if (always.length) return k('always-test', `Kind: repo-wide snapshot or budget test (${always.join(', ')}). Your change moved it: regenerate the snapshot, or trim what you added (prompt text, tools, routes), then re-test that file and hand off again.`);
   if (failedFiles.length) return k('own-test', `Kind: a test failed (${failedFiles.join(', ')}). Probably yours: run that file alone with citadel-test, fix the code (or the test, if it is out of date), then hand off again.`);
+  return null;
+}
+
+/**
+ * Why a refused hand-off goes back in line with no turn (#2030, Josh, 2026-11-25, "Yes, re-queue it"), said in its note;
+ * null when it wakes the minion. Only a red the box or the pipeline caused: load alone, and since #2051 a cut-off run, a
+ * boot-check copy failure, a run on perigee out of time. Once a hand-off, never
+ * with deploy refusing, nor past what already says it isn't load: a broken test (#1487), land.sh's own keeps in place used
+ * up (flake_keep), the leak guard's red. requeueShip asks about broken tests too.
+ */
+export function requeueReason(output: string, cls: { kind: string } | null, h: Handoff): string | null {
+  if (h.requeued || /^land: (broken test, not a flake: |deploy has been refusing since )/m.test(output) || /has kept its place \d+ times already/.test(output) || /The tests left \d+ process\(es\) running/.test(output)) return null;
+  if (output.endsWith(NO_CODE)) return 'land.sh was cut off with no exit code';
+  if (cls?.kind === 'passed-alone') return 'the failed test files passed when rerun alone';
+  if (cls?.kind === 'boot-copy') return 'the boot check failed on its copy of the database';
+  if (/^land: the suite on perigee ran out of its time limit and no test is known to be/m.test(output)) return 'the test run on perigee ran out of its time limit';
   return null;
 }
 
@@ -594,7 +625,7 @@ const DEPLOY_WAIT_MS = 60 * 60_000;
  * a newer land's deploy) isn't deployed again; a deploy that went to a commit without it (GitHub didn't have it yet) didn't ship it.
  */
 export async function deployApps(ticketId: number, names: string[], commit: string | undefined, ops: DeployOps): Promise<AppDeploy[]> {
-  const sleep = ops.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  const rest = ops.sleep ?? sleep;
   const now = ops.now ?? Date.now;
   const holds = async (name: string, to: string | null) => !!(commit && to && (to.startsWith(commit) || (await ops.has?.(name, commit, to).catch(() => false))));
   const healthy = (name: string, to: string | null) => `Deployed ${name}${to ? ` at ${to.slice(0, 9)}` : ''}, healthy.`;
@@ -602,7 +633,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
   apps: for (const name of names) {
     const until = now() + DEPLOY_WAIT_MS;
     for (let tries = 0; ; tries++) {
-      while (ops.running(name) && now() < until) await sleep(3000);
+      while (ops.running(name) && now() < until) await rest(3000);
       const before = await ops.last(name);
       if (before?.state === 'deployed' && (await holds(name, before.to))) {
         out.push({ name, ok: true, line: healthy(name, before.to) });
@@ -611,18 +642,18 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
       try {
         await ops.start(name, ticketId);
         break;
-      } catch (err: any) {
+      } catch (err) {
         // Another deploy started between the check and this start (auto-deploy's own, still starting): wait, then try once more.
         if (tries) {
-          out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(err?.message ?? err).trim()}` });
+          out.push({ name, ok: false, line: `${name}'s deploy couldn't start: ${String(thrown(err).message ?? err).trim()}` });
           continue apps;
         }
-        await sleep(3000);
+        await rest(3000);
       }
     }
     let d = await ops.last(name);
     while (d?.state === 'running' && now() < until) {
-      await sleep(3000);
+      await rest(3000);
       d = await ops.last(name);
     }
     // The log's tail holds its said lines and the build's output between them.
@@ -675,6 +706,8 @@ export interface HandoffDeps {
   failed?(id: number, kind: string | null): void;
   /** A clean land, wherever it went (main or a build): queue the minion's lines (#1119). Its errors are caught. */
   learned?(id: number, h: Handoff): void;
+  /** Put a refused hand-off back in line with no turn (#2030): null once it is, else why not, said in the wake. */
+  requeue?(id: number, h: Handoff & { args: string[] }, output: string): Promise<string | null>;
   /** A ship on main with a live probe (#1741, LiveProbes.shipped): true when it failed and woke the minion. */
   probe?(id: number, probe: Probe, commit: string | null, when: 'live' | 'later' | 'nowhere'): Promise<boolean>;
 }
@@ -706,10 +739,10 @@ export class LandHandoffs {
       if (!h || !run || run.code === null) continue;
       this.busy.add(id);
       try {
-        await this.settle(id, run, h);
-        this.d.landings.settled(id);
-      } catch (err: any) {
-        console.error(`Reporting minion ${id}'s land failed: ${err?.message ?? err}`);
+        // A re-queued one (#2030) is a new hand-off already: settling it now would drop that one.
+        if (!(await this.settle(id, run, h))) this.d.landings.settled(id);
+      } catch (err) {
+        console.error(`Reporting minion ${id}'s land failed: ${thrown(err).message ?? err}`);
       } finally {
         this.busy.delete(id);
       }
@@ -754,7 +787,8 @@ export class LandHandoffs {
     runner.relayMinion(id, owner, `${by} ${t.title}`, `${by} ${t.title} merged into ${into}: ${what}`, true, true, parked);
   }
 
-  private async settle(id: number, run: Landing, h: Handoff & { args: string[] }) {
+  /** True when the hand-off was put back in line (#2030), so it is the new one's and not to be settled. */
+  private async settle(id: number, run: Landing, h: Handoff & { args: string[] }): Promise<boolean | void> {
     const { store, runner, from } = this.d;
     const r = landResult(run.output, run.code!);
     // Each step that says, counts or deploys something runs once per hand-off, even when a throw or a kill cuts the
@@ -769,8 +803,8 @@ export class LandHandoffs {
     };
     try {
       await once('flakes', () => this.d.flakes?.(id, run.output));
-    } catch (err: any) {
-      console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Recording minion ${id}'s flakes failed: ${thrown(err).message ?? err}`);
     }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
     const stop = r.kind === 'failed' ? this.d.landings.stopped?.(id) : null;
@@ -790,24 +824,32 @@ export class LandHandoffs {
       return;
     }
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land sealed because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
-      store.updateTicket(id, { state: null, note: null });
-      runner.broadcastTicket(id);
-      const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
       try {
         await once('failed', () => this.d.failed?.(id, cls?.kind ?? null));
-      } catch (err: any) {
-        console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Counting minion ${id}'s failed ship failed: ${thrown(err).message ?? err}`);
       }
-      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
+      // Not in once(): the new hand-off starts in a fresh folder, and a step marked done would carry over into it.
+      const again = r.kind === 'failed' && this.d.requeue && !('told' in done) ? requeueReason(run.output, cls, h) : null;
+      const notAgain = again ? await this.d.requeue!(id, h, run.output) : '';
+      if (notAgain === null) {
+        runner.emit(id, 'note', { text: `Shipping was refused (${again}), so the server put this ship back in line by itself, once, with no turn. It wakes you only if it is refused again.` });
+        return true;
+      }
+      store.updateTicket(id, { state: null, note: null });
+      runner.broadcastTicket(id);
+      const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
+      const kept = notAgain ? ` It wasn't put back in line by itself: ${notAgain}.` : '';
+      await once('told', () => runner.send(id, from, `${cls || kept ? `${`${cls?.line ?? ''}${kept}`.trim()}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).
-    if (r.kind !== 'failed' && r.kind !== 'no-ci') {
+    if (r.kind !== 'no-ci') {
       try {
         await once('learned', () => this.d.learned?.(id, h));
-      } catch (err: any) {
-        console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Queueing minion ${id}'s ship lines failed: ${thrown(err).message ?? err}`);
       }
     }
     if (r.kind === 'unpushed') {

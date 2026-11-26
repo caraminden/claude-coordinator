@@ -6,12 +6,16 @@ import { optimistic } from './ui/optimistic.js';
 
 const SIDE = 256;
 
-/** The middle of a picture as a small square, so what is sent and shown is never a camera's 12 MB. */
+/**
+ * The middle of a picture as a small square, so what is sent and shown is never a camera's 12 MB.
+ * @param {File} file
+ * @returns {Promise<Blob>}
+ */
 async function square(file) {
   const img = await createImageBitmap(file);
   const from = Math.min(img.width, img.height);
   const canvas = h('canvas', { width: SIDE, height: SIDE });
-  canvas.getContext('2d').drawImage(img, (img.width - from) / 2, (img.height - from) / 2, from, from, 0, 0, SIDE, SIDE);
+  /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d')).drawImage(img, (img.width - from) / 2, (img.height - from) / 2, from, from, 0, 0, SIDE, SIDE);
   img.close();
   // A browser that can't write WebP gives a PNG, which keeps a picture's see-through parts too.
   return new Promise((ok, no) => canvas.toBlob((b) => (b ? ok(b) : no(new Error('no picture'))), 'image/webp', 0.9));
@@ -25,6 +29,11 @@ export function avatarsCard() {
   const remove = h('button', { type: 'button', class: 'secondary' }, 'Remove it');
   const status = h('span', { class: 'error small', role: 'alert' });
   const mine = asSpeaker(h('div', { class: 'who' }, account?.name ?? 'You'), 'person', account?.name ?? 'You');
+  /**
+   * @param {Node} who
+   * @param {string} text
+   * @param {string} [cls]
+   */
   const said = (who, text, cls = '') => h('div', { class: `msg ${cls}` }, who, h('p', {}, text));
   const preview = h(
     'div',
@@ -43,7 +52,10 @@ export function avatarsCard() {
     pick.textContent = pic ? 'Change your picture' : 'Upload your picture';
     remove.hidden = !pic;
   };
-  /** Show `next` here and in every chat on the page; a kept page reopens with it. */
+  /**
+   * Show `next` here and in every chat on the page; a kept page reopens with it.
+   * @param {ReturnType<typeof avatars>} next
+   */
   const show = (next) => {
     setAvatars(account ? { ...next, people: { ...next.people, [account.name]: next.pic } } : next);
     if (account) account.avatars = avatars();
@@ -63,6 +75,11 @@ export function avatarsCard() {
   };
   // What the server has: where a refused picture goes back to.
   let saved = avatars().pic;
+  /**
+   * @param {string | null} pic
+   * @param {() => Promise<{ pic: string | null }>} send
+   * @param {string} label
+   */
   const setPicture = (pic, send, label) => {
     optimistic({
       key: 'avatar-pic',
@@ -80,10 +97,11 @@ export function avatarsCard() {
     });
   };
   picker.onchange = async () => {
-    const file = picker.files[0];
+    const file = /** @type {FileList} */ (picker.files)[0];
     picker.value = '';
     if (!file) return;
     status.textContent = '';
+    /** @type {Blob} */
     let blob;
     try {
       blob = await square(file);

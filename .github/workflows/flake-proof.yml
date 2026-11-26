@@ -88,21 +88,27 @@ jobs:
           fi
           echo "$dir/$v" >>"$GITHUB_PATH"
           "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
+      # Each batch is a window in the machine's log, so a ship's suite beside it keeps no suite time (#2082).
       - name: 10 clean runs (1 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: tools/flake-proof.sh "$FILE" 10
+        run: tools/ci-window.sh tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (2 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: tools/flake-proof.sh "$FILE" 10
+        run: tools/ci-window.sh tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (3 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: tools/flake-proof.sh "$FILE" 10
+        run: tools/ci-window.sh tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (4 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: tools/flake-proof.sh "$FILE" 10
+        run: tools/ci-window.sh tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (5 of 5)
         env: { FILE: '${{ inputs.file }}' }
-        run: tools/flake-proof.sh "$FILE" 10
+        run: tools/ci-window.sh tools/flake-proof.sh "$FILE" 10
+      # A cancel leaves a window open (tools/ci-window.sh --close).
+      - name: close this job's window
+        if: always()
+        continue-on-error: true
+        run: if [ -x tools/ci-window.sh ]; then tools/ci-window.sh --close; fi
       # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
       - name: clear what this job left running
         if: always()

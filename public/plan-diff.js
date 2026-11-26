@@ -1,6 +1,9 @@
 // What a revised plan changed against the plan it replaces (#907): a line diff, grouped into runs.
 
 /** Line diff of two texts: [{ op: ' ' | '+' | '-', text }], blank lines ignored (they only space paragraphs). */
+/** @typedef {{ op: ' ' | '+' | '-', text: string }} DiffOp */
+
+/** @param {unknown} oldText @param {unknown} newText @returns {DiffOp[]} */
 export function diffLines(oldText, newText) {
   const a = lines(oldText),
     b = lines(newText);
@@ -8,6 +11,7 @@ export function diffLines(oldText, newText) {
     m = b.length;
   const lcs = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  /** @type {DiffOp[]} */
   const out = [];
   let i = 0,
     j = 0;
@@ -22,6 +26,7 @@ export function diffLines(oldText, newText) {
   return out;
 }
 
+/** @param {unknown} t */
 const lines = (t) =>
   String(t ?? '')
     .split('\n')
@@ -32,6 +37,7 @@ const lines = (t) =>
  * The diff plus its counts. In each run of changes, as many removed lines as added ones pair up as "changed";
  * the rest are plain additions or removals. `summary` is true when the title line differs.
  */
+/** @param {unknown} oldPlan @param {unknown} newPlan @param {string} [oldSummary] @param {string} [newSummary] */
 export function planChanges(oldPlan, newPlan, oldSummary = '', newSummary = '') {
   const ops = diffLines(oldPlan, newPlan);
   let changed = 0,
@@ -58,7 +64,9 @@ export function planChanges(oldPlan, newPlan, oldSummary = '', newSummary = '') 
 }
 
 /** "3 lines changed, 1 added, 2 removed, summary changed", or "No changes to the text". */
+/** @param {{ changed: number, added: number, removed: number, summaryChanged: boolean }} c */
 export function changesLine(c) {
+  /** @param {number} n @param {string} w */
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const parts = [];
   if (c.changed) parts.push(`${plural(c.changed, 'line')} changed`);
@@ -69,7 +77,9 @@ export function changesLine(c) {
 }
 
 /** The ops as runs: changed lines stay, a stretch of more than `keep` unchanged lines becomes { gap: [lines] } with `keep` shown either side. */
+/** @param {DiffOp[]} ops @param {number} [keep] */
 export function collapseRuns(ops, keep = 1) {
+  /** @type {(DiffOp & { gap?: undefined } | { gap: DiffOp[], op?: undefined, text?: undefined })[]} */
   const out = [];
   for (let k = 0; k < ops.length; ) {
     if (ops[k].op !== ' ') {

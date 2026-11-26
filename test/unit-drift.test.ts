@@ -24,11 +24,11 @@ function setup() {
   return { deploy, inst, root };
 }
 
-test('installed, different and missing, with the fish command; symlinks and copies count; other files and folders are ignored', () => {
+test('installed, different and missing, with the fish command; symlinks and copies count; other files and folders are ignored', async () => {
   const { deploy, inst, root } = setup();
   symlinkSync(join(deploy, 'a.service'), join(inst, 'a.service'));
   writeFileSync(join(inst, 'b.slice'), 'old');
-  const rows = checkUnits(deploy, inst, root);
+  const rows = await checkUnits(deploy, inst, root);
   assert.deepEqual(
     rows.map((r) => [r.name, r.state]),
     [
@@ -45,16 +45,16 @@ test('installed, different and missing, with the fish command; symlinks and copi
   assert.equal(summary(rows), 'Units: 1 installed, 1 missing (a.service.d/w.conf, c.timer)'.replace('1 missing (a.service.d/w.conf, c.timer)', '2 missing (a.service.d/w.conf, c.timer), 1 different (b.slice)'));
 });
 
-test('a unit marked not installed on purpose stops showing', () => {
+test('a unit marked not installed on purpose stops showing', async () => {
   const { deploy, inst, root } = setup();
   writeFileSync(join(deploy, 'not-installed.txt'), '# why\nc.timer  # kept out\na.service\n');
   assert.deepEqual(
-    checkUnits(deploy, inst, root).map((r) => r.name),
+    (await checkUnits(deploy, inst, root)).map((r) => r.name),
     ['b.slice'],
   );
 });
 
-test('the real deploy/ lists the watchdog and both slices as units', () => {
-  const names = checkUnits(join(import.meta.dirname, '..', 'deploy'), join(tmpdir(), 'nowhere-units')).map((r) => r.name);
+test('the real deploy/ lists the watchdog and both slices as units', async () => {
+  const names = (await checkUnits(join(import.meta.dirname, '..', 'deploy'), join(tmpdir(), 'nowhere-units'))).map((r) => r.name);
   for (const n of ['citadel-watchdog.timer', 'citadel-watchdog.service', 'citadel.slice', 'citadel-turns.slice']) assert.ok(names.includes(n), n);
 });

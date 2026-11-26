@@ -8,16 +8,26 @@ import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { startUpload } from './ui/upload.js';
 
+/** @import { ArtifactFile, SharedFile, View } from './types.js' */
+/** @import { UploadResult } from './ui/upload.js' */
+/** @typedef {{ file: File, path: string, at: number, progress: number, failed?: boolean }} PendingUpload */
+/** @typedef {{ files: File[], folder: string }} Staged */
+/** @typedef {{ projectId: number, sel: string, q: string, kind: string, open: string | null, limit: number, pending: PendingUpload[], staged: Staged | null }} FilesState */
+/** One row of the view: a shared-folder file, a minion's artifact, or an upload on its way. @typedef {{ key: string, folder: string, where: string, href?: string, src?: string, file?: ArtifactFile | SharedFile, pending?: PendingUpload, name: string, kind: string, size: number, mtime: number, path: string, missing?: boolean, pinned?: boolean }} FileItem */
+/** The element the staged panel is drawn into remembers which pick it drew. @typedef {HTMLElement & { __staged?: Staged | null }} StageEl */
+
 /** Folders the README names, in its order; the rest follow by name, then the top level. */
 const ORDER = ['inbox', 'handoffs', 'reports', 'specs', 'mockups'];
 /** Folders tooling writes (the retro log, rule drafts): kept out of All and its sections, still a folder of their own. */
 const TOOLING = new Set(['retro-log', 'rule-drafts']);
 const TOP = '';
 // What the server lists (sharedListable in src/artifacts.ts): any known kind in inbox/, else no code or data.
+/** @param {string} path */
 const listed = (path) => (path.startsWith('inbox/') ? !!fileKind(path) : !!fileKind(path) && fileKind(path) !== 'text');
 const MINIONS = '@minions';
 const SECTION = 5; // files each folder shows on All
 const PAGE = 200; // rows a folder or search draws before "Show more"
+/** @type {[string, string, (k: string) => boolean][]} */
 const KINDS = [
   ['all', 'All kinds', () => true],
   ['docs', 'Docs', (k) => k === 'markdown' || k === 'pdf' || k === 'canvas' || k === 'text'],
@@ -30,32 +40,60 @@ const KINDS = [
 // What the view shows, kept while the scheme stays open: the folder, search, kind, the file previewed, and
 // uploads on their way. A different scheme starts afresh.
 // One per scheme, so another scheme's uploads (and their progress rows and Retry) are kept while it is open.
+/** @type {Map<number, FilesState>} */
 const states = new Map();
+/** @returns {FilesState} */
 const state = () => {
-  if (!states.has(view.projectId)) states.set(view.projectId, { projectId: view.projectId, sel: 'all', q: '', kind: 'all', open: null, limit: PAGE, pending: [], staged: null });
-  return states.get(view.projectId);
+  if (!states.has(/** @type {View} */ (view).projectId)) states.set(/** @type {View} */ (view).projectId, { projectId: /** @type {View} */ (view).projectId, sel: 'all', q: '', kind: 'all', open: null, limit: PAGE, pending: [], staged: null });
+  return /** @type {FilesState} */ (states.get(/** @type {View} */ (view).projectId));
 };
 
 /** Whether a file is still uploading in any scheme; a reload now would lose it. */
 export const filesUploading = () => [...states.values()].some((s) => s.pending.some((p) => !p.failed));
 
+/** @param {string} folder */
 const label = (folder) => (folder === MINIONS ? 'Linked by minions' : folder === TOP ? 'Top level' : folder === 'all' ? 'All' : folder === 'pinned' ? 'Pinned' : ORDER.includes(folder) ? folder[0].toUpperCase() + folder.slice(1) : folder);
+/** @param {string} path */
 const folderOf = (path) => (path.includes('/') ? path.slice(0, path.indexOf('/')) : TOP);
+/** @param {string} path */
 const dirOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '');
 
-/** Every file the view lists, newest first: the shared folder's, the minions' artifacts, and uploads on their way. */
+/**
+ * Every file the view lists, newest first: the shared folder's, the minions' artifacts, and uploads on their way.
+ * @returns {FileItem[]}
+ */
 function items() {
   const s = state();
-  const shared = (view.shared ?? []).map((f) => ({ key: `s:${f.path}`, folder: folderOf(f.path), where: dirOf(f.path) || 'top level', href: sharedHref(view.projectId, f.path), src: `${sharedUrl(view.projectId, f.path)}&v=${f.mtime}`, file: f, ...pick(f) }));
-  const linked = (view.artifacts ?? []).map((a) => ({ key: `a:${a.id}`, folder: MINIONS, where: threadLabel({ id: a.ticket_id, kind: a.ticket_kind, project_id: a.project_id, number: a.ticket_number, title: a.ticket_title }), href: `#/a/${a.id}`, src: `api/artifacts/${a.id}/raw?v=${a.mtime}`, file: a, ...pick(a) }));
+  const shared = /** @type {SharedFile[]} */ (/** @type {View} */ (view).shared ?? []).map((f) => ({
+    key: `s:${f.path}`,
+    folder: folderOf(f.path),
+    where: dirOf(f.path) || 'top level',
+    href: sharedHref(/** @type {View} */ (view).projectId, f.path),
+    src: `${sharedUrl(/** @type {View} */ (view).projectId, f.path)}&v=${f.mtime}`,
+    file: f,
+    ...pick(f),
+  }));
+  const linked = /** @type {ArtifactFile[]} */ (/** @type {View} */ (view).artifacts ?? []).map((a) => ({
+    key: `a:${a.id}`,
+    folder: MINIONS,
+    where: threadLabel({ id: a.ticket_id, kind: /** @type {'ticket' | 'coordinator'} */ (a.ticket_kind), project_id: a.project_id, number: a.ticket_number, title: a.ticket_title }),
+    href: `#/a/${a.id}`,
+    src: `api/artifacts/${a.id}/raw?v=${a.mtime}`,
+    file: a,
+    ...pick(a),
+  }));
   const pending = s.pending.map((p) => ({ key: `u:${p.path}`, folder: folderOf(p.path), where: dirOf(p.path) || 'top level', pending: p, name: p.file.name, kind: fileKind(p.file.name) ?? 'text', size: p.file.size, mtime: p.at, path: p.path }));
   return [...pending, ...[...shared, ...linked].sort((a, b) => b.mtime - a.mtime)];
 }
 /** Previews (key@mtime) whose body 404ed: their Open and Download stay off (#882); a newer copy starts fresh. */
 const goneKeys = new Set();
+/** @param {ArtifactFile | SharedFile} f */
 const pick = (f) => ({ name: f.name, kind: f.kind, size: f.size, mtime: f.mtime, path: f.path, missing: !!f.missing, pinned: !!f.pinned_at });
 
-/** The folders, in the README's order, with their counts. */
+/**
+ * The folders, in the README's order, with their counts.
+ * @param {FileItem[]} all
+ */
 function folders(all) {
   const n = new Map();
   for (const it of all) n.set(it.folder, (n.get(it.folder) ?? 0) + 1);
@@ -70,12 +108,13 @@ const uploadFolder = () => {
   return sel === 'all' || sel === 'pinned' || sel === MINIONS ? 'inbox' : sel;
 };
 
+/** @param {string} [folder] */
 export function filesView(folder) {
   const s = state();
   if (folder) Object.assign(s, { sel: folder, q: '', open: null, limit: PAGE });
   const picker = h('input', { type: 'file', multiple: true, hidden: true, id: 'files-picker' });
   picker.addEventListener('change', () => {
-    stage([...picker.files]);
+    stage([.../** @type {FileList} */ (picker.files)]);
     picker.value = '';
   });
   // The section is the size container; the grid inside it picks rail, chips and preview by the room it gets.
@@ -101,6 +140,7 @@ export function filesView(folder) {
   );
   // Files dropped anywhere on the view go into the upload panel.
   let depth = 0;
+  /** @param {DragEvent} e */
   const dragging = (e) => e.dataTransfer?.types?.includes('Files');
   section.addEventListener('dragenter', (e) => {
     if (!dragging(e)) return;
@@ -116,7 +156,7 @@ export function filesView(folder) {
     e.preventDefault();
     depth = 0;
     section.classList.remove('dropping');
-    stage([...e.dataTransfer.files]);
+    stage([.../** @type {DataTransfer} */ (e.dataTransfer).files]);
   });
   return section;
 }
@@ -139,38 +179,44 @@ export function renderFiles() {
   const f = folders(all);
   if (s.sel !== 'all' && s.sel !== 'pinned' && !f.n.has(s.sel)) s.sel = 'all'; // its last file went, or its upload failed
   const terms = s.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const inScope = (it) => (terms.length ? (!TOOLING.has(it.folder) || s.sel === it.folder) && terms.every((t) => `${it.path} ${it.where}`.toLowerCase().includes(t)) : s.sel === 'all' ? !TOOLING.has(it.folder) : s.sel === 'pinned' ? it.pinned : it.folder === s.sel);
+  /** @param {FileItem} it */
+  const inScope = (it) => (terms.length ? (!TOOLING.has(it.folder) || s.sel === it.folder) && terms.every((/** @type {string} */ t) => `${it.path} ${it.where}`.toLowerCase().includes(t)) : s.sel === 'all' ? !TOOLING.has(it.folder) : s.sel === 'pinned' ? it.pinned : it.folder === s.sel);
   const scoped = all.filter(inScope);
   const kind = KINDS.find(([k]) => k === s.kind) ?? KINDS[0];
   const shown = scoped.filter((it) => kind[2](it.kind));
   const pinned = all.filter((it) => it.pinned).length;
 
   // The rail on a wide screen, the same folders as chips on a narrow one.
+  /**
+   * @param {string} key
+   * @param {number} n
+   */
   const railButton = (key, n) => h('button', { type: 'button', 'aria-pressed': String(s.sel === key && !terms.length), onclick: () => choose(key) }, h('span', { class: 'name' }, label(key)), h('span', { class: 'count' }, n));
   const total = all.filter((it) => !TOOLING.has(it.folder)).length;
-  document
-    .getElementById('files-rail')
-    .replaceChildren(
-      railButton('all', total),
-      pinned ? railButton('pinned', pinned) : '',
-      f.shared.length ? h('h5', {}, 'Shared folder') : '',
-      ...f.shared.map((k) => railButton(k, f.n.get(k))),
-      f.minions ? h('h5', {}, 'Minions') : '',
-      f.minions ? railButton(MINIONS, f.n.get(MINIONS)) : '',
-      f.tooling.length ? h('h5', {}, 'Tooling') : '',
-      ...f.tooling.map((k) => railButton(k, f.n.get(k))),
-    );
-  document
-    .getElementById('files-chips')
-    .replaceChildren(
-      ...['all', ...(pinned ? ['pinned'] : []), ...f.shared, ...(f.minions ? [MINIONS] : []), ...f.tooling].map((k) =>
-        h('button', { type: 'button', class: `chip${s.sel === k && !terms.length ? ' on' : ''}`, onclick: () => choose(k) }, label(k), h('span', { class: 'count' }, k === 'all' ? total : k === 'pinned' ? pinned : f.n.get(k))),
-      ),
-    );
+  /** @type {HTMLElement} */ (document.getElementById('files-rail')).replaceChildren(
+    railButton('all', total),
+    pinned ? railButton('pinned', pinned) : '',
+    f.shared.length ? h('h5', {}, 'Shared folder') : '',
+    ...f.shared.map((k) => railButton(k, f.n.get(k))),
+    f.minions ? h('h5', {}, 'Minions') : '',
+    f.minions ? railButton(MINIONS, f.n.get(MINIONS)) : '',
+    f.tooling.length ? h('h5', {}, 'Tooling') : '',
+    ...f.tooling.map((k) => railButton(k, f.n.get(k))),
+  );
+  /** @type {HTMLElement} */ (document.getElementById('files-chips')).replaceChildren(
+    ...['all', ...(pinned ? ['pinned'] : []), ...f.shared, ...(f.minions ? [MINIONS] : []), ...f.tooling].map((k) =>
+      h('button', { type: 'button', class: `chip${s.sel === k && !terms.length ? ' on' : ''}`, onclick: () => choose(k) }, label(k), h('span', { class: 'count' }, k === 'all' ? total : k === 'pinned' ? pinned : f.n.get(k))),
+    ),
+  );
 
   const title = terms.length ? 'Search' : label(s.sel);
-  document.getElementById('files-head').replaceChildren(h('h2', {}, title), h('span', { class: 'muted' }, String(shown.length)), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'upload', onclick: () => document.getElementById('files-picker').click() }, 'Upload'));
-  document.getElementById('files-kinds').replaceChildren(
+  /** @type {HTMLElement} */ (document.getElementById('files-head')).replaceChildren(
+    h('h2', {}, title),
+    h('span', { class: 'muted' }, String(shown.length)),
+    h('span', { class: 'spacer' }),
+    h('button', { type: 'button', class: 'upload', onclick: () => /** @type {HTMLElement} */ (document.getElementById('files-picker')).click() }, 'Upload'),
+  );
+  /** @type {HTMLElement} */ (document.getElementById('files-kinds')).replaceChildren(
     ...KINDS.map(([k, name, match]) => {
       const n = scoped.filter((it) => match(it.kind)).length;
       if (!n && k !== 'all' && k !== s.kind) return '';
@@ -191,10 +237,14 @@ export function renderFiles() {
   );
   renderStage();
 
-  const list = document.getElementById('files-list');
-  const drop = () => h('button', { type: 'button', class: 'files-drop', onclick: () => document.getElementById('files-picker').click() }, 'Drop files here or ', h('u', {}, 'choose files'), ' · they go to ', h('b', {}, `${uploadFolder()}/`), ', or a folder you pick');
+  const list = /** @type {HTMLElement} */ (document.getElementById('files-list'));
+  const drop = () => h('button', { type: 'button', class: 'files-drop', onclick: () => /** @type {HTMLElement} */ (document.getElementById('files-picker')).click() }, 'Drop files here or ', h('u', {}, 'choose files'), ' · they go to ', h('b', {}, `${uploadFolder()}/`), ', or a folder you pick');
   if (!terms.length && s.sel === 'all') {
     // All: the newest few of each folder, as sections, each opening its folder.
+    /**
+     * @param {string} key
+     * @param {FileItem[]} rows
+     */
     const section = (key, rows) => {
       const of = rows.filter((it) => kind[2](it.kind));
       if (!of.length && key !== 'inbox') return '';
@@ -206,6 +256,7 @@ export function renderFiles() {
         ...of.slice(0, SECTION).map((it) => row(it, key !== TOP && it.where.split('/').length > 2)),
       );
     };
+    /** @param {string} k */
     const byFolder = (k) => all.filter((it) => it.folder === k);
     const sections = [
       pinned
@@ -242,15 +293,20 @@ export function renderFiles() {
   renderPreview(all);
 }
 
+/** @param {string} key */
 function choose(key) {
   Object.assign(state(), { sel: key, q: '', limit: PAGE });
-  const search = document.getElementById('files-search');
+  const search = /** @type {HTMLInputElement | null} */ (document.getElementById('files-search'));
   if (search) search.value = '';
   renderFiles();
   document.getElementById('files-list')?.scrollTo(0, 0);
 }
 
-/** One file: its badge (or the picture itself), name, where it is, when, size and pin. */
+/**
+ * One file: its badge (or the picture itself), name, where it is, when, size and pin.
+ * @param {FileItem} it
+ * @param {boolean} where
+ */
 function row(it, where) {
   const s = state();
   const thumb = it.kind === 'image' && !it.pending && !it.missing ? h('span', { class: 'badge thumb' }, h('img', { src: it.src, alt: '', loading: 'lazy' })) : h('span', { class: `badge k-${it.kind}` }, fileExt(it.name));
@@ -269,10 +325,10 @@ function row(it, where) {
     it.file ? pinButton(it.file) : h('span', { class: 'pin-space' }),
   );
   if (it.href)
-    a.addEventListener('click', (e) => {
+    /** @type {HTMLElement} */ (a).addEventListener('click', (e) => {
       // With room for the preview, a plain click shows it there; otherwise the link opens the full viewer.
       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      if (getComputedStyle(document.getElementById('files-preview')).display === 'none') return;
+      if (getComputedStyle(/** @type {HTMLElement} */ (document.getElementById('files-preview'))).display === 'none') return;
       e.preventDefault();
       s.open = it.key;
       renderFiles();
@@ -280,10 +336,11 @@ function row(it, where) {
   return a;
 }
 
+/** @param {FileItem[]} all */
 function renderPreview(all) {
-  const el = document.getElementById('files-preview');
+  const el = /** @type {HTMLElement} */ (document.getElementById('files-preview'));
   const s = state();
-  const it = s.open && all.find((x) => x.key === s.open);
+  const it = /** @type {FileItem | undefined} */ (s.open && all.find((x) => x.key === s.open));
   if (!it?.file) {
     if (el.dataset.key !== '') el.replaceChildren(h('p', { class: 'muted empty' }, 'Pick a file to preview it here.'));
     el.dataset.key = '';
@@ -298,11 +355,11 @@ function renderPreview(all) {
     h('div', { class: 'meta' }, `${it.where} · ${formatSize(it.size)} · ${ago(it.mtime)}`),
     h('div', { class: 'row' }, goneKeys.has(id) ? '' : h('a', { class: 'button secondary', href: it.href }, 'Open'), goneKeys.has(id) ? '' : h('a', { class: 'button secondary', href: `${it.src}&download` }, 'Download'), h('span', { class: 'spacer' }), pinButton(it.file)),
   );
-  if (el.dataset.key === id) return el.firstChild.replaceWith(head);
+  if (el.dataset.key === id) return /** @type {ChildNode} */ (el.firstChild).replaceWith(head);
   el.dataset.key = id;
   el.replaceChildren(
     head,
-    previewBody(it.file, it.src, () => {
+    previewBody(it.file, /** @type {string} */ (it.src), () => {
       goneKeys.add(id);
       if (el.dataset.key !== id) return; // another file is showing by now
       const now = el.querySelector('.files-preview-head .row');
@@ -314,6 +371,7 @@ function renderPreview(all) {
 // ---------- upload ----------
 
 /** Files picked or dropped wait in a panel naming where they'll go, until Upload. */
+/** @param {File[]} files */
 function stage(files) {
   if (!files.length) return;
   const s = state();
@@ -322,7 +380,7 @@ function stage(files) {
 }
 
 function renderStage() {
-  const el = document.getElementById('files-stage');
+  const el = /** @type {StageEl | null} */ (document.getElementById('files-stage'));
   if (!el) return;
   const s = state();
   if (!s.staged) return (el.replaceChildren(), void (el.__staged = null));
@@ -332,13 +390,15 @@ function renderStage() {
   const { files } = s.staged;
   const known = folders(items()).shared.filter((k) => k !== TOP);
   const input = h('input', { type: 'text', list: 'files-folders', value: s.staged.folder, 'aria-label': 'Folder', spellcheck: 'false', autocomplete: 'off' });
-  input.addEventListener('input', () => (s.staged.folder = input.value));
+  input.addEventListener('input', () => {
+    /** @type {Staged} */ (s.staged).folder = input.value;
+  });
   const go = () => {
     const folder = input.value.trim().replace(/^\/+|\/+$/g, '');
     s.staged = null;
     // Show the folder they're going to, so the new rows are in sight.
     Object.assign(s, { sel: folder.split('/')[0] || TOP, q: '', kind: 'all', limit: PAGE });
-    const search = document.getElementById('files-search');
+    const search = /** @type {HTMLInputElement | null} */ (document.getElementById('files-search'));
     if (search) search.value = '';
     renderStage();
     for (const file of files) upload(file, folder);
@@ -374,10 +434,15 @@ function renderStage() {
   );
 }
 
-/** One file, shown in its folder at once with its progress; a failure takes it back out, with a toast and Retry. */
+/**
+ * One file, shown in its folder at once with its progress; a failure takes it back out, with a toast and Retry.
+ * @param {File} file
+ * @param {string} folder
+ */
 function upload(file, folder) {
   const s = state();
-  const projectId = view.projectId;
+  const projectId = /** @type {View} */ (view).projectId;
+  /** @type {PendingUpload} */
   const p = { file, path: `${folder ? `${folder}/` : ''}${file.name}`, at: Date.now(), progress: 0 };
   optimistic({
     label: `upload ${file.name}`,
@@ -390,7 +455,7 @@ function upload(file, folder) {
       put(projectId, folder, file, (progress) => {
         p.progress = progress;
         const when = document.querySelector(`.files-row[data-key="u:${CSS.escape(p.path)}"] .when`);
-        if (when) when.firstChild.textContent = `${Math.round(progress * 100)}%`;
+        if (when) /** @type {ChildNode} */ (when.firstChild).textContent = `${Math.round(progress * 100)}%`;
       }),
     undo: () => {
       s.pending = s.pending.filter((x) => x !== p);
@@ -401,19 +466,29 @@ function upload(file, folder) {
       s.pending = s.pending.filter((x) => x !== p);
       if (!listed(saved.path)) toast(`Uploaded ${saved.path}. Minions can read it, but this view lists only docs, pages, pictures, clips, sound and archives outside inbox/.`, { ms: 10000 });
       // Listed now, as the server will list it; the shared folder's next scan brings the same row.
-      else if (view.projectId === projectId && !view.shared?.some((f) => f.path === saved.path)) {
-        view.shared = [{ path: saved.path, name: saved.name, kind: fileKind(saved.name) ?? 'text', display_path: `scheme shared/${saved.path}`, size: saved.size, mtime: saved.mtime, pinned_at: null, pinned_by: null, missing: 0 }, ...(view.shared ?? [])];
+      else if (/** @type {View} */ (view).projectId === projectId && !(/** @type {View} */ (view).shared?.some((f) => f.path === saved.path))) {
+        /** @type {View} */ (view).shared = [
+          { path: saved.path, name: saved.name, kind: fileKind(saved.name) ?? 'text', display_path: `scheme shared/${saved.path}`, size: saved.size, mtime: /** @type {number} */ (saved.mtime), pinned_at: null, pinned_by: null, missing: 0 },
+          .../** @type {SharedFile[]} */ (/** @type {View} */ (view).shared ?? []),
+        ];
       }
       redraw();
     },
     () => {},
   );
   function redraw() {
-    if (view.projectId === projectId) renderFiles();
+    if (/** @type {View} */ (view).projectId === projectId) renderFiles();
   }
 }
 
-/** Send it in chunks (ui/upload.js); a stop after its own retries fails the action, and Retry carries on from the server's offset. */
+/**
+ * Send it in chunks (ui/upload.js); a stop after its own retries fails the action, and Retry carries on from the server's offset.
+ * @param {number} projectId
+ * @param {string} folder
+ * @param {File} file
+ * @param {(fraction: number) => void} onProgress
+ * @returns {Promise<UploadResult>}
+ */
 function put(projectId, folder, file, onProgress) {
   return new Promise((resolve, reject) => {
     const up = startUpload(`api/projects/${projectId}/shared/uploads`, file, {
@@ -423,6 +498,6 @@ function put(projectId, folder, file, onProgress) {
         if (u.state === 'paused') reject(new Error(u.error || 'the upload stopped'));
       },
     });
-    up.done.then(resolve);
+    up.done.then(/** @type {(r: UploadResult | null) => void} */ (resolve)); // done never rejects; null only on a cancel, which nothing here does
   });
 }

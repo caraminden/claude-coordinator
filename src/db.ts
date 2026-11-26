@@ -34,6 +34,7 @@ import { credentialQueries } from './db/credentials.ts';
 import { turnQueries } from './db/turns.ts';
 import { healthQueries } from './db/health.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
+import { cabalQueries } from './db/cabals.ts';
 import { waitRecordQueries } from './db/wait-records.ts';
 import { viewQueries } from './db/views.ts';
 
@@ -341,9 +342,10 @@ export const SCHEMA_HISTORY = [
   [118, 'wait_records (#1992)'],
   [119, 'claims.handed, beside, beside_since, beside_handed, beside_landed, claim_queue.ready (#1985)'],
   [120, 'time_log_explains (#1994)'],
-  [121, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
-  [122, 'machine_joins, machines.report (Build 7 M2, #2053)'],
-  [123, 'machines.priority (Build 7 M6, #2056)'],
+  [121, 'cabals, cabal_rows, cabal_asks, cabal_log (#2090)'],
+  [122, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
+  [123, 'machine_joins, machines.report (Build 7 M2, #2053)'],
+  [124, 'machines.priority (Build 7 M6, #2056)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -860,6 +862,7 @@ const AREAS = [
   readWarmQueries,
   settingQueries,
   slowMomentQueries,
+  cabalQueries,
   waitRecordQueries,
   viewQueries,
 ];
@@ -887,6 +890,7 @@ type Areas = typeof healthQueries &
   typeof readWarmQueries &
   typeof settingQueries &
   typeof slowMomentQueries &
+  typeof cabalQueries &
   typeof waitRecordQueries &
   typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.

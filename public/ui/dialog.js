@@ -15,29 +15,37 @@
 
 const mounted = new WeakSet();
 
-/** Whether a pointer event is outside the dialog's box (on its backdrop). */
+/**
+ * Whether a pointer event is outside the dialog's box (on its backdrop).
+ * @param {HTMLDialogElement} dialog
+ * @param {MouseEvent} e
+ */
 function outside(dialog, e) {
   const r = dialog.getBoundingClientRect();
   return e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom;
 }
 
-/** Close any open .cui-dialog under `root` on a click on its backdrop. Call once; calling again does nothing. */
+/**
+ * Close any open .cui-dialog under `root` on a click on its backdrop. Call once; calling again does nothing.
+ * @type {typeof import('./dialog.js').mountDialogs}
+ */
 export function mountDialogs(root = document) {
   if (mounted.has(root)) return;
   mounted.add(root);
+  /** @type {HTMLDialogElement | null} */
   let pressed = null; // the dialog whose backdrop the press started on
   root.addEventListener(
     'pointerdown',
     (e) => {
       const d = e.target;
-      pressed = d instanceof HTMLDialogElement && d.matches('.cui-dialog[open]') && outside(d, e) ? d : null;
+      pressed = d instanceof HTMLDialogElement && d.matches('.cui-dialog[open]') && outside(d, /** @type {PointerEvent} */ (e)) ? d : null;
     },
     true,
   );
   root.addEventListener('click', (e) => {
     const d = pressed;
     pressed = null;
-    if (!d || e.target !== d || !d.open || !outside(d, e)) return;
+    if (!d || e.target !== d || !d.open || !outside(d, /** @type {MouseEvent} */ (e))) return;
     if (typeof d.requestClose === 'function') d.requestClose();
     else d.close();
   });
@@ -49,6 +57,9 @@ let ids = 0;
  * Build a .cui-dialog, open it with showModal() and return it: the head (an h2 of `title`, which names it, and
  * the ✕), then `body`. `className` adds classes (a width, a sheet); it leaves the page once closed unless
  * `keep`; `onClose` runs on close. Backdrop clicks close it (it mounts mountDialogs on the document).
+ * Called with no options it still opens, with an empty title (the .d.ts asks for one).
+ * @param {Partial<Parameters<typeof import('./dialog.js').openDialog>[0]>} [opts]
+ * @returns {HTMLDialogElement}
  */
 export function openDialog({ title, body = [], className = '', keep = false, onClose } = {}) {
   mountDialogs();

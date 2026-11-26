@@ -6,6 +6,7 @@
  * or Explorer has only its name as text, with no HTML, and a copied image has no text, or HTML that is just
  * the image (a browser's Copy image): those attach.
  */
+/** @param {DataTransfer} data */
 export function pastedFiles(data) {
   const files = [...(data?.files ?? [])];
   if (!files.length) return files;

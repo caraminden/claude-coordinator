@@ -213,13 +213,14 @@ citadel_smoke() {
   fi
   if [ -x tools/citadel-test ] && [ -f tools/always-tests.txt ]; then
     mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ -n "$build" ] || git diff --name-only --diff-filter=d "$mb" HEAD -- 'test/*.test.ts')
-    # The route test by the affected map (#1544); a map that can't answer runs it, never skips it.
+    # The map's @pinned tests when it picks them (#1544, #2037; an older map: the route test alone); a map that can't answer runs them all.
     if [ -f tools/affected.ts ]; then
+      local pinned=" $(sed -n 's/^@pinned[[:space:]]//p' tools/affected-map.txt 2>/dev/null | tr '\n' ' ') " && [ -n "${pinned// /}" ] || pinned=" test/access-matrix.test.ts "
       if out=$(tools/citadel-node --no-warnings tools/affected.ts --root . --base "$mb" 2>/dev/null); then
-        if grep -q $'^run\ttest/access-matrix\\.test\\.ts\t' <<<"$out"; then tests+=(test/access-matrix.test.ts); fi
+        for f in $(awk -F'\t' '$1 == "run" { print $2 }' <<<"$out"); do case "$pinned" in *" $f "*) [ ! -f "$f" ] || tests+=("$f") ;; esac; done
       else
-        citadel_tell "smoke: the affected map couldn't answer, so the route test runs"
-        tests+=(test/access-matrix.test.ts)
+        citadel_tell "smoke: the affected map couldn't answer, so its pinned tests run"
+        for f in $pinned; do [ ! -f "$f" ] || tests+=("$f"); done
       fi
     fi
     if [ ${#tests[@]} -gt 0 ]; then

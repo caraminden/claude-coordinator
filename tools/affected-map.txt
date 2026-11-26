@@ -11,6 +11,9 @@
 # A changed source file also runs every test file that imports it directly (#1809), so a test needs no line here for a module it imports.
 # test/affected.test.ts fails when a test imports a module and its change would not pick that test.
 @imports src/** public/** tools/**
+# Pinning tests too slow for tools/always-tests.txt (#2037, Josh 2026-11-25 "Run when their code changes"): the narrow pick
+# (citadel-test --affected) and land.sh's smoke run these when a rule below picks them, though they skip other rules' tests.
+@pinned test/access-matrix.test.ts test/list-reads.test.ts test/boot-check.test.ts
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts
@@ -18,6 +21,7 @@ src/db-schema.ts: test/db-setup.test.ts test/host-check.test.ts test/schema-comp
 src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
+tools/judge-replay.ts: test/host-check.test.ts
 
 # The property tests (#1657): random orderings of the minion lane and the claim queue, on the real code.
 src/lanes.ts: test/lanes-property.test.ts
@@ -46,6 +50,17 @@ src/turn-wrapper.mjs: test/steer.test.ts test/turn-survives.test.ts test/claude-
 # A running turn's signal, stop, liveness and re-attach, per kind of process (#1937).
 src/running-turn.ts: test/running-turn.test.ts test/claude-container.test.ts test/turn-supervisor.test.ts test/outside-kill.test.ts test/stop-sigint.test.ts test/side-ask.test.ts test/wrapper-argv-replay.test.ts test/minion-lane.test.ts
 # closed-cleanup and background-jobs broke ships #1449-#1464 and #1364-#1383 (#1622); each runs in about 1 s.
+# list-reads counts the list routes' statements (#1757); the boot check boots the server, calls the turn tools and builds a
+# turn's launch (#1799), and breaks each of the files below on purpose.
+src/runner.ts: test/list-reads.test.ts test/boot-check.test.ts
+src/db.ts: test/list-reads.test.ts
+src/db/*.ts: test/list-reads.test.ts
+src/routes/projects.ts: test/list-reads.test.ts
+server.ts: test/boot-check.test.ts
+src/mcp.ts: test/boot-check.test.ts
+src/mcp-minions.ts: test/boot-check.test.ts
+src/routes/files.ts: test/boot-check.test.ts
+src/turn-launch.ts: test/boot-check.test.ts
 src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
@@ -92,7 +107,8 @@ src/previews.ts: test/relative-urls.test.ts
 # thread), so it runs by path, not from always-tests.txt. A .mjs edit can raise a count in a .ts file that imports it.
 **/*.ts: test/typecheck.test.ts
 **/*.mjs: test/typecheck.test.ts
-tsconfig.json: test/typecheck.test.ts
+tsconfig*.json: test/typecheck.test.ts
+public/**/*.js: test/typecheck.test.ts
 package-lock.json: test/typecheck.test.ts
 **/*.ts: test/format.test.ts
 **/*.js: test/format.test.ts
@@ -140,12 +156,12 @@ test/**: test/one-until.test.ts test/raw-log-read.test.ts
 
 # The test tooling's own tests.
 tools/citadel-test: test/citadel-test.test.ts test/affected.test.ts
-tools/mem-room: test/mem-room.test.ts test/citadel-test.test.ts test/citadel-heavy.test.ts
+tools/mem-room: test/mem-room.test.ts test/container-room.test.ts test/citadel-test.test.ts test/citadel-heavy.test.ts
 tools/heavy-ci.ts: test/heavy-ci.test.ts test/long-jobs.test.ts test/citadel-heavy.test.ts
 tools/who-touches: test/who-touches.test.ts
 tools/who-uses: test/who-uses.test.ts
 tools/affected.ts: test/affected.test.ts
-tools/affected-map.txt: test/affected.test.ts
+tools/affected-map.txt: test/affected.test.ts test/land.test.ts
 tools/always-tests.txt: test/citadel-test.test.ts
 src/backup.html: test/backup.test.ts
 src/backup.ts: test/backup.test.ts
@@ -174,3 +190,37 @@ tools/review-escapes/**: test/reviewer-benchmark.test.ts
 # The answer-time probe and the per-turn cost budget (#1559).
 src/answer-time.ts: test/answer-time.test.ts test/turn-cost.test.ts test/status-page.test.ts
 test/turn-cost.json: test/turn-cost.test.ts
+
+# Tests that read a source file's text, so an edit to it alone can turn them red (#2037): test/pinned-tests.test.ts finds them.
+tools/land.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
+tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts test/land.test.ts
+public/sw.js: test/backup.test.ts test/shell.test.ts
+tools/deploy-queue.sh: test/ci-runner-choice.test.ts
+deploy/claude-container/Containerfile: test/claude-container.test.ts
+server.ts: test/deploy.test.ts test/off-thread-fs.test.ts test/one-home.test.ts test/flake-start-model.test.ts test/held-starts.test.ts
+kit/skills/scheme-setup/templates/biome.config.json: test/format.test.ts
+deploy/citadel-heavy.slice: test/heavy-unit.test.ts
+kit/skills/writing-for-agents/HOOKS.md: test/kit-hooks.test.ts
+src/turn-launch.ts: test/kit-hooks.test.ts
+src/db.ts: test/land-numbers.test.ts
+public/sidebar.js: test/land-train.test.ts
+kit/skills/scheme-setup/templates/land.sh: test/land.test.ts test/scheme-setup-land-build.test.ts
+public/style.css: test/media-browser.test.ts
+public/composer.js: test/model-effort.test.ts
+src/routes/machines.ts: test/off-thread-fs.test.ts
+public/manifest.webmanifest: test/own-path.test.ts
+deploy/claude-coordinator-prune.service: test/prune.test.ts
+src/mcp-scheme.ts: test/schedule-templates.test.ts
+tools/land.local.sh: test/ship-core-parity.test.ts
+public/slow-moments.js: test/slow-recorder-browser.test.ts
+kit/skills/skills-survey/survey.workflow.js: test/survey-workflow.test.ts
+kit/.claude-plugin/plugin.json: test/turn-setup.test.ts
+tools/citadel-heavy: test/turn-setup.test.ts test/pressure.test.ts
+tools/citadel-wait: test/turn-setup.test.ts
+tools/citadel-dev-copy: test/turn-setup.test.ts
+tools/ci-failures: test/turn-setup.test.ts
+public/error-beacon.js: test/deploy-watch.test.ts
+public/minion-rules.js: test/held-list.test.ts
+src/wake.ts: test/held-starts.test.ts
+kit/skills/android-app/scripts/gen-icons.mjs: test/icon-gen.test.ts
+tools/deploy.sh: test/pressure.test.ts

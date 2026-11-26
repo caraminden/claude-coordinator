@@ -38,7 +38,7 @@ export function replayStore(path: string, shadow: string[], seed: Record<string,
  * Each scheme's list is read once per `now`: a judge may list them per file it checks.
  */
 export function minionsAsOf(store: Store, now: () => number, extra: Ticket[] = [], hide = new Set<number>()) {
-  const then = (t: Ticket): Ticket | undefined => (t.created_at > now() || hide.has(t.id) ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'working' } as Ticket) : t);
+  const then = (t: Ticket): Ticket | undefined => (t.created_at > now() || hide.has(t.id) ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'running' } satisfies Ticket) : t);
   const list = store.listTickets.bind(store);
   const get = store.getTicket.bind(store);
   const read = new Map<number, { at: number; rows: Ticket[] }>();

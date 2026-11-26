@@ -12,6 +12,7 @@ const RANDOM = /[A-Za-z0-9_+/=-]{24,}/g;
 /**
  * The part of `text` that looks like a password or key, or null. Links and `code` are left out, and a value
  * already written as $CITADEL_SECRET_<NAME> is fine.
+ * @param {unknown} text
  */
 export function looksSecret(text) {
   const plain = String(text ?? '')

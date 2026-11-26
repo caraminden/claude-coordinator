@@ -11,6 +11,7 @@ import type { Runner } from '../src/runner.ts';
 import { fake } from './typed.ts';
 import { GithubWatcher, type Check, type PrSnapshot } from '../src/github.ts';
 import { git } from './git.ts';
+import { deliveriesOf } from '../src/outbox.ts';
 
 // Armed for CI (#715): a card or a Taskmaster message goes out when CI passes on the pushed commit, with no turn.
 const root = mkdtempSync(join(tmpdir(), 'ci-armed-'));
@@ -44,7 +45,7 @@ function setup(name: string, prCi = true) {
   const outbox = new Outbox(store, { send: () => ({ event: { id: 1 } }), holds: () => false, onLane: (_i: number, _w: string, step: () => unknown) => Promise.resolve().then(step), leaveMail: () => {} } as unknown as OutboxRunner, { author: 'Citadel' });
   const app = fake<App>({ store, runner, outbox, dataDir: join(root, `${name}-data`), notify: (_id: number, n: { kind?: string }) => log.notified.push(n) });
   registerCiArmed(() => app, store, outbox);
-  const armedRow = () => store.listDeliveries({ kind: 'ci_armed', to: ticket.id, states: ['waiting'] })[0];
+  const armedRow = () => deliveriesOf(store, 'ci_armed', { to: ticket.id, states: ['waiting'] })[0];
   return { dir, sha, store, ticket, app, log, outbox, armedRow };
 }
 const boot = (s: { outbox: Outbox }) => s.outbox.boot();
@@ -233,7 +234,7 @@ test('a second arm on a new commit replaces the first', async () => {
   await armForCi(s.app, s.ticket, { card });
   git(s.dir, 'commit', '-q', '--allow-empty', '-m', 'two');
   await armForCi(s.app, s.ticket, { coordinator: { text: 'm', urgent: false } });
-  const rows = s.store.listDeliveries({ kind: 'ci_armed' });
+  const rows = deliveriesOf(s.store, 'ci_armed');
   assert.equal(rows.length, 1);
   assert.notEqual(rows[0].when_arg, s.sha);
   assert.equal(rows[0].payload.card, undefined);
@@ -271,5 +272,5 @@ test("a dismissed minion's armed row is held for 3 days", async () => {
   s.store.updateTicket(s.ticket.id, { status: 'closed' });
   await s.outbox.poke({ type: 'closed' });
   assert.equal(s.store.listDeliveries({ kind: 'ci_armed' })[0].state, 'held');
-  assert.match(s.store.listDeliveries({ kind: 'ci_armed' })[0].payload.note, /armed card for CI/);
+  assert.match(deliveriesOf(s.store, 'ci_armed')[0].payload.note ?? '', /armed card for CI/);
 });

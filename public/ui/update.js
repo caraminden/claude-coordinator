@@ -12,11 +12,28 @@
 // Android shell (kit/android-shell, #1138) asks natively instead, so there the banner steps aside.
 
 /**
+ * Capacitor's global inside the Android app, as far as this file reads it.
+ * @typedef {{
+ *   isNativePlatform?: () => boolean,
+ *   isPluginAvailable?: (name: string) => boolean,
+ *   Plugins?: {
+ *     App?: { getInfo?: () => Promise<{ build?: string } | undefined> },
+ *     Browser?: { open?: (o: { url: string }) => unknown },
+ *     AppLauncher?: { openUrl?: (o: { url: string }) => unknown },
+ *   },
+ * }} Capacitor
+ */
+
+/** The page's Capacitor global: there only inside the app. */
+const capacitor = () => /** @type {{ Capacitor?: Capacitor }} */ (globalThis).Capacitor;
+
+/**
  * The update waiting for this app, or null: none newer, not inside the Android app, or the feed can't be read.
  * `feed` is resolved against the page (default 'android/latest.json').
+ * @type {typeof import('./update.js').checkUpdate}
  */
 export async function checkUpdate(opts = {}) {
-  const cap = globalThis.Capacitor;
+  const cap = capacitor();
   const app = cap?.isNativePlatform?.() ? cap.Plugins?.App : null;
   if (!app?.getInfo) return null;
   try {
@@ -30,9 +47,12 @@ export async function checkUpdate(opts = {}) {
   }
 }
 
-/** Open `url` outside the app's WebView: Capacitor's Browser or AppLauncher plugin when the app has one, else a plain navigation. */
+/**
+ * Open `url` outside the app's WebView: Capacitor's Browser or AppLauncher plugin when the app has one, else a plain navigation.
+ * @param {string} url
+ */
 function openOutside(url) {
-  const p = globalThis.Capacitor?.Plugins ?? {};
+  const p = capacitor()?.Plugins ?? {};
   if (p.Browser?.open) return p.Browser.open({ url });
   if (p.AppLauncher?.openUrl) return p.AppLauncher.openUrl({ url });
   location.href = url;
@@ -42,9 +62,10 @@ function openOutside(url) {
  * Check for an update and, when there is one, put the banner at the top of `parent` (default document.body). `open(url)`
  * replaces how the APK is opened (an app with a plugin of its own); `text` and `button` replace the words. Resolves to the
  * banner element, or null when there's nothing to show.
+ * @type {typeof import('./update.js').mountUpdate}
  */
 export async function mountUpdate(parent = document.body, opts = {}) {
-  if (globalThis.Capacitor?.isPluginAvailable?.('CitadelShell')) return null;
+  if (capacitor()?.isPluginAvailable?.('CitadelShell')) return null;
   const update = await checkUpdate(opts);
   if (!update) return null;
   const banner = document.createElement('div');

@@ -25,7 +25,7 @@ import { relay } from '../relay.ts';
 import { adoptApp, makeApp } from '../make-app.ts';
 import { pushToPeople } from '../fcm.ts';
 import type { ContraptionRow, Ticket } from '../db.ts';
-import { HttpError, json, oneOf, ownWrites, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, isInt, json, oneOf, ownWrites, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
@@ -588,7 +588,7 @@ export const contraptionRoutes: Route[] = [
   // the id), or { steered: false, reason: 'ended' | 'replied' }, when the app sends it as the next turn.
   fromContraption('POST', '/api/contraptions/turns/:turn/messages', async ({ req, res, app, params }, c) => {
     const body = await readJson(req, 4_000_000);
-    if (!Number.isInteger(body?.person) || body.person < 1) throw new HttpError(400, "person must be a person's id");
+    if (!isInt(body.person) || body.person < 1) throw new HttpError(400, "person must be a person's id");
     if (typeof body.text !== 'string' || !body.text.trim()) throw new HttpError(400, 'text is required');
     const out = app.contraptionTurns.steer(c.id, Number(params.turn), body.person, body.text);
     if (!out) throw new HttpError(404, 'No such turn');
@@ -836,12 +836,12 @@ export const contraptionRoutes: Route[] = [
     async handler({ req, res, app, contraption: c }) {
       // Base64 is 4/3 of the files, plus room for the text.
       const body = (await readJson(req, Math.ceil((ASK_FILES_MAX * 4) / 3) + 1_000_000)) ?? {};
-      const person = Number.isInteger(body.person) ? app.store.getUser(body.person) : undefined;
+      const person = isInt(body.person) ? app.store.getUser(body.person) : undefined;
       if (!person || !app.contraptions.enabled(c.name, person.id)) throw new HttpError(403, `${c.title} isn't enabled for that person`);
       const kind = oneOf(body.kind, ['bug', 'feature', 'data'], 'Kind') as 'bug' | 'feature' | 'data' | null;
       if (!kind) throw new HttpError(400, 'Kind is required: bug, feature or data');
       const minion = body.minion ?? null;
-      if (minion !== null && (!Number.isInteger(minion) || minion < 1)) throw new HttpError(400, 'Minion must be a minion number');
+      if (minion !== null && (!isInt(minion) || minion < 1)) throw new HttpError(400, 'Minion must be a minion number');
       if (minion !== null && kind === 'data') throw new HttpError(400, 'A data ask goes to no one: send a bug or feature to a minion');
       // A contraption stuck in a loop would wake the Taskmaster on every call, or fill the disk with data.
       const key = `${c.name}:${person.id}${kind === 'data' ? ':data' : ''}`;

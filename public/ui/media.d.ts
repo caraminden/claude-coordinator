@@ -5,6 +5,8 @@
 // The parts store nothing: Start/End pins and pan directions come in as options and go out through callbacks,
 // and the app saves them. They need base.css (buttons, notices, the dialog) and bring the rest themselves.
 
+import type { Mark } from './marks.js';
+
 /** A time in seconds as m:ss, the way the parts write it: clock(75) is "1:15". */
 export function clock(sec: number): string;
 
@@ -21,6 +23,8 @@ export interface ScrubberOptions {
   onStart?: (ms: number | null) => void;
   /** Given: an "End here" button (and E) pins the End; null when it is cleared. */
   onEnd?: (ms: number | null) => void;
+  /** The clip's length in seconds, for the bar before the file has said (default 0, read from the file once it loads). */
+  duration?: number;
   /** false: don't jump to the Start pin when the clip loads. */
   seekToStart?: boolean;
   /**
@@ -136,6 +140,8 @@ export interface LightboxItem {
   /** A panorama's direction, as PannerOptions has it. Giving it opts this item in to panning when it's wide. */
   pan?: PanDirection;
   onPan?: (pan: PanDirection) => void;
+  /** Marks already drawn on a picture (what parseMarks gives back), for a `render` that draws on pictures to start from. The lightbox itself doesn't draw them. */
+  marks?: { w: number; h: number; marks: Mark[] };
 }
 
 export interface LightboxOptions {

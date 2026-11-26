@@ -8,7 +8,14 @@ import { usage } from './core.js';
 import { rowState, spokenCell } from './threadstate.js';
 import { emptyCard, schemeTag, statTiles, toneChip } from './look.js';
 import { loadingLine } from './ui/state.js';
+/** @import { Chain, ChainNode, EdgeKind, Ticket, View } from './types.js' */
+/** The screen on show: these run on a scheme's page, where `view` is set. */
+const cur = () => /** @type {View} */ (view);
+/** @typedef {{ at: number, chains: Chain[] | null, error?: string | null, loading?: Promise<void> | null, after: (() => void)[] }} ChainRead */
+/** @typedef {{ word: string, label?: string, spoken?: string | null, fam: string, pulse?: boolean, t?: Ticket }} NodeState */
+/** @typedef {HTMLDivElement & { chain: Chain, watching?: ResizeObserver }} Flow */
 
+/** @type {Record<EdgeKind, { word: string, tone: string, hue: string }>} */
 const KIND = {
   claim: { word: 'Queue', tone: 'warn', hue: 'waiting' },
   build: { word: 'Build', tone: 'violet', hue: 'teal' },
@@ -19,24 +26,34 @@ const POLL_MS = 15_000;
 const STALE_MS = 20_000;
 
 /** Each scheme's last read: { at, chains, error, loading, after }. The page and the chat head's link share it, and every caller's `after` runs when it lands. */
+/** @type {Map<number, ChainRead>} */
 const cache = new Map();
+/** @type {HTMLElement | null} */
 let pageEl = null,
+  /** @type {number | null} */
   pageProject = null,
+  /** @type {number | null} */
   focus = null,
   drawnSig = '',
   entered = false,
   scrolledToFocus = false; // the focused card is scrolled to once per visit: the redraws replace its node, so a flag on it never held
 
+/**
+ * @param {number} projectId
+ * @param {() => void} [after]
+ * @returns {Promise<void>}
+ */
 function read(projectId, after) {
+  /** @type {ChainRead} */
   const c = cache.get(projectId) ?? { at: 0, chains: null, after: [] };
   if (after) c.after.push(after);
   if (c.loading) return c.loading;
   c.loading = api(`api/projects/${projectId}/chains`)
-    .then(({ chains }) => {
+    .then((/** @type {{ chains: Chain[] }} */ { chains }) => {
       c.chains = chains;
       c.error = null;
     })
-    .catch((ex) => {
+    .catch((/** @type {Error} */ ex) => {
       c.error = ex.message;
     })
     .finally(() => {
@@ -48,20 +65,26 @@ function read(projectId, after) {
   return c.loading;
 }
 
+/** @param {number} projectId @param {number | null} [number] */
 export const chainsHref = (projectId, number) => `#/p/${projectId}/chains${number ? `/${number}` : ''}`;
 
-/** The page at #/p/N/chains, `number` a minion whose chain to highlight. */
+/**
+ * The page at #/p/N/chains, `number` a minion whose chain to highlight.
+ * @param {number} projectId
+ * @param {number | null} [number]
+ */
 export function chainsPage(projectId, number) {
   focus = number ?? null;
   entered = false;
   scrolledToFocus = false;
   drawnSig = '';
   pageProject = projectId;
-  pageEl = h('section', { class: 'artifacts-main chains-main' });
+  const page = h('section', { class: 'artifacts-main chains-main' });
+  pageEl = page;
   draw(projectId);
   read(projectId, () => draw(projectId));
   // Fresh while it's on screen: the poller waits while the tab is hidden and stops once the page is gone.
-  const el = pageEl;
+  const el = page;
   let first = true; // the read above is this one: the page isn't attached yet, so the first tick only starts the wait
   poller(async () => {
     if (first) {
@@ -71,12 +94,16 @@ export function chainsPage(projectId, number) {
     if (!el.isConnected) return false;
     await read(projectId, () => draw(projectId));
   }, POLL_MS).now();
-  return pageEl;
+  return page;
 }
 
-/** A node's state as the minions list shows it, from the list's own copy when it has one. */
+/**
+ * A node's state as the minions list shows it, from the list's own copy when it has one.
+ * @param {ChainNode} n
+ * @returns {NodeState}
+ */
 function stateOf(n) {
-  const t = n.project === view.projectId ? view.tickets?.get(n.id) : null;
+  const t = n.project === cur().projectId ? cur().tickets?.get(/** @type {number} */ (n.id)) : null;
   if (t) {
     const st = rowState(t, usage);
     return { word: st.cell || st.label, label: st.label, spoken: st.cell ? spokenCell(st) : null, fam: t.asleep && t.status !== 'closed' ? 'idle' : st.fam || 'idle', pulse: !!st.pulse, t };
@@ -87,11 +114,13 @@ function stateOf(n) {
   return { word: n.state === 'parked' ? 'sealed' : n.state || n.status, fam: n.status === 'running' ? 'work' : 'idle', pulse: n.status === 'running' };
 }
 
+/** @param {number} projectId */
 function draw(projectId) {
   // A read for a scheme whose page has since been left (switched schemes mid-fetch) draws nothing.
   if (projectId !== pageProject || (!pageEl?.isConnected && pageEl?.childNodes.length)) return;
   const c = cache.get(projectId);
   const chains = c?.chains;
+  const page = /** @type {HTMLElement} */ (pageEl);
   // A redraw that would change nothing keeps what's on screen (and the hover a person is tracing).
   const sig = JSON.stringify([
     c?.error,
@@ -128,18 +157,18 @@ function draw(projectId) {
           ? [emptyCard('No minion waits on another right now', 'When one starts after another, waits on its work, queues for the pipeline lane or feeds a build, its chain shows here.', { mark: '⛓' })]
           : [summary(chains), legend(), ...chains.map((ch) => chainCard(ch))];
   // Each chain's sideways scroll survives the rebuild, by its key.
-  const sideways = new Map([...pageEl.querySelectorAll('.chain-card')].map((card) => [card.dataset.key, card.querySelector('.chain-flow')?.scrollLeft ?? 0]));
-  pageEl.replaceChildren(head, ...body);
-  for (const card of pageEl.querySelectorAll('.chain-card')) {
-    const x = sideways.get(card.dataset.key);
+  const sideways = new Map([...page.querySelectorAll('.chain-card')].map((card) => [/** @type {HTMLElement} */ (card).dataset.key, card.querySelector('.chain-flow')?.scrollLeft ?? 0]));
+  page.replaceChildren(head, ...body);
+  for (const card of page.querySelectorAll('.chain-card')) {
+    const x = sideways.get(/** @type {HTMLElement} */ (card).dataset.key);
     const flow = card.querySelector('.chain-flow');
     if (x && flow) flow.scrollLeft = x;
   }
-  pageEl.classList.toggle('enter', !entered && !!chains?.length);
+  page.classList.toggle('enter', !entered && !!chains?.length);
   if (chains?.length) entered = true;
   requestAnimationFrame(() => {
-    for (const flow of pageEl.querySelectorAll('.chain-flow')) wire(flow);
-    const hit = focus != null && pageEl.querySelector('.chain-card.focus');
+    for (const flow of page.querySelectorAll('.chain-flow')) wire(/** @type {Flow} */ (flow));
+    const hit = focus != null && page.querySelector('.chain-card.focus');
     if (hit && !scrolledToFocus) {
       scrolledToFocus = true;
       hit.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
@@ -147,6 +176,7 @@ function draw(projectId) {
   });
 }
 
+/** @param {Chain[]} chains */
 function summary(chains) {
   // A build with no build minion is a node, not a minion: it counts in neither total.
   const waiting = new Set(chains.flatMap((c) => c.edges.map((e) => e.from)).filter((k) => !k.startsWith('build:')));
@@ -156,22 +186,25 @@ function summary(chains) {
 
 const legend = () => h('div', { class: 'chain-legend', 'aria-hidden': 'true' }, ...Object.entries(KIND).map(([k, v]) => h('span', { class: 'chain-legend-item', 'data-kind': k }, h('i'), v.word)));
 
+/** @param {Chain} ch */
 function chainCard(ch) {
-  const here = focus != null && ch.nodes.some((n) => n.number === focus && n.project === view.projectId);
+  const here = focus != null && ch.nodes.some((n) => n.number === focus && n.project === cur().projectId);
   const cols = Math.max(...ch.nodes.map((n) => n.col)) + 1;
   const rowIn = new Map();
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'chain-wires');
   svg.setAttribute('aria-hidden', 'true');
-  const flow = h(
-    'div',
-    { class: 'chain-flow' },
-    svg,
-    ...treeOrder(ch).map((n) => {
-      const r = (rowIn.get(n.col) ?? 0) + 1;
-      rowIn.set(n.col, r);
-      return node(n, ch, r, here && n.number === focus);
-    }),
+  const flow = /** @type {Flow} */ (
+    h(
+      'div',
+      { class: 'chain-flow' },
+      svg,
+      ...treeOrder(ch).map((n) => {
+        const r = (rowIn.get(n.col) ?? 0) + 1;
+        rowIn.set(n.col, r);
+        return node(n, ch, r, here && n.number === focus);
+      }),
+    )
   );
   flow.chain = ch;
   flow.style.setProperty('--cols', String(cols));
@@ -184,12 +217,19 @@ function chainCard(ch) {
   );
 }
 
+/** @param {number} n */
 const minions = (n) => `${n} minion${n === 1 ? '' : 's'}`;
 
 /** Each minion straight after the one it comes after, so a phone's indented list reads as a tree; the desktop grid places them by column either way. */
+/**
+ * @param {Chain} ch
+ * @returns {ChainNode[]}
+ */
 function treeOrder(ch) {
+  /** @type {ChainNode[]} */
   const out = [],
     seen = new Set();
+  /** @param {ChainNode} n */
   const visit = (n) => {
     if (seen.has(n.key)) return;
     seen.add(n.key);
@@ -201,9 +241,16 @@ function treeOrder(ch) {
   return out;
 }
 
+/**
+ * @param {ChainNode} n
+ * @param {Chain} ch
+ * @param {number} row
+ * @param {boolean} here
+ */
 function node(n, ch, row, here) {
   const s = stateOf(n);
   // One entry per minion it comes after, with each claim or build that puts it there (a pair can be both start_after and a queue).
+  /** @type {Map<string, string[]>} */
   const byTo = new Map();
   for (const e of ch.edges.filter((x) => x.from === n.key)) {
     const labels = byTo.get(e.to) ?? [];
@@ -214,7 +261,7 @@ function node(n, ch, row, here) {
     const to = ch.nodes.find((x) => x.key === key);
     return `${to?.number ? `#${to.number}` : (to?.title ?? '?')}${labels.length ? ` · ${labels.join(' · ')}` : ''}`;
   });
-  const other = n.project !== view.projectId ? view.projects?.find((p) => p.id === n.project) : null;
+  const other = n.project !== cur().projectId ? cur().projects?.find((p) => p.id === n.project) : null;
   const tag = n.number ? 'a' : 'div';
   const el = h(
     tag,
@@ -226,10 +273,10 @@ function node(n, ch, row, here) {
       'data-row': Math.min(row, 12),
       'aria-current': here ? 'true' : null,
       title: after.length ? `After ${after.join(', ')}` : 'Nobody in this chain is ahead of it',
-      onpointerenter: (e) => trace(e.currentTarget),
-      onpointerleave: (e) => untrace(e.currentTarget),
-      onfocus: (e) => trace(e.currentTarget),
-      onblur: (e) => untrace(e.currentTarget),
+      onpointerenter: (/** @type {Event} */ e) => trace(/** @type {HTMLElement} */ (e.currentTarget)),
+      onpointerleave: (/** @type {Event} */ e) => untrace(/** @type {HTMLElement} */ (e.currentTarget)),
+      onfocus: (/** @type {Event} */ e) => trace(/** @type {HTMLElement} */ (e.currentTarget)),
+      onblur: (/** @type {Event} */ e) => untrace(/** @type {HTMLElement} */ (e.currentTarget)),
     },
     h(
       'span',
@@ -248,10 +295,12 @@ function node(n, ch, row, here) {
 }
 
 /** The chain's wires, measured from where the nodes landed; redrawn when the flow resizes. */
+/** @param {Flow} flow */
 function wire(flow) {
   const svg = flow.querySelector('.chain-wires');
   if (!svg || getComputedStyle(svg).display === 'none') return;
   const box = flow.getBoundingClientRect();
+  /** @param {string} key */
   const at = (key) => flow.querySelector(`.chain-node[data-key="${CSS.escape(key)}"]`)?.getBoundingClientRect();
   svg.setAttribute('width', String(flow.scrollWidth));
   svg.setAttribute('height', String(flow.scrollHeight));
@@ -283,43 +332,50 @@ function wire(flow) {
       dot.dataset.to = e.to;
       return [p, dot];
     })
-    .filter(Boolean)
+    .filter((x) => x != null)
     .flat();
   svg.replaceChildren(...paths);
   fade(flow);
   if (!flow.watching) {
     flow.addEventListener('scroll', () => fade(flow), { passive: true });
-    flow.watching = new ResizeObserver(() => (flow.isConnected ? wire(flow) : flow.watching.disconnect()));
+    flow.watching = new ResizeObserver(() => (flow.isConnected ? wire(flow) : flow.watching?.disconnect()));
     flow.watching.observe(flow);
   }
 }
 
 /** A chain wider than its card fades at the edge it scrolls on, until it's scrolled to the end. */
+/** @param {HTMLElement} flow */
 const fade = (flow) => flow.classList.toggle('more', flow.scrollLeft + flow.clientWidth < flow.scrollWidth - 4);
 
 /** Light what a node waits on, all the way back, and what waits on it, all the way on; dim the rest of its chain. */
+/** @param {HTMLElement} el */
 function trace(el) {
-  const flow = el.closest('.chain-flow');
+  const flow = /** @type {Flow | null} */ (el.closest('.chain-flow'));
   const ch = flow?.chain;
   if (!ch) return;
+  /**
+   * @param {string} start
+   * @param {(key: string) => string[]} next
+   */
   const walk = (start, next) => {
     const seen = new Set([start]);
     const todo = [start];
     while (todo.length)
-      for (const k of next(todo.pop()))
+      for (const k of next(/** @type {string} */ (todo.pop())))
         if (!seen.has(k)) {
           seen.add(k);
           todo.push(k);
         }
     return seen;
   };
-  const k = el.dataset.key;
+  const k = /** @type {string} */ (el.dataset.key);
   const lit = new Set([...walk(k, (x) => ch.edges.filter((e) => e.from === x).map((e) => e.to)), ...walk(k, (x) => ch.edges.filter((e) => e.to === x).map((e) => e.from))]);
   flow.classList.add('tracing');
-  for (const n of flow.querySelectorAll('.chain-node')) n.classList.toggle('lit', lit.has(n.dataset.key));
-  for (const w of flow.querySelectorAll('.chain-wires > *')) w.classList.toggle('lit', lit.has(w.dataset.from) && lit.has(w.dataset.to));
+  for (const n of flow.querySelectorAll('.chain-node')) n.classList.toggle('lit', lit.has(/** @type {HTMLElement} */ (n).dataset.key ?? ''));
+  for (const w of flow.querySelectorAll('.chain-wires > *')) w.classList.toggle('lit', lit.has(/** @type {SVGElement} */ (w).dataset.from ?? '') && lit.has(/** @type {SVGElement} */ (w).dataset.to ?? ''));
 }
 
+/** @param {HTMLElement} el */
 function untrace(el) {
   const flow = el.closest('.chain-flow');
   if (!flow || (flow.contains(document.activeElement) && document.activeElement !== el)) return;
@@ -330,6 +386,10 @@ function untrace(el) {
 /**
  * The chat head's link to a minion's chain, or '' when it's in none. Drawn from the scheme's last read; a stale one
  * reads again behind and calls `redraw` once the answer arrives, if that changed whether the link shows.
+ */
+/**
+ * @param {Ticket} t
+ * @param {() => void} [redraw]
  */
 export function chainLink(t, redraw) {
   if (!t?.number || t.kind === 'coordinator') return '';

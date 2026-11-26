@@ -190,6 +190,8 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
     }
     // Rachel isn't in Delve: her ask reaches Citadel's schemes no further than she could.
     if (who === Rachel) assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', saw: 'hi', checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' })).status, 404);
+    // A judge replay reads the database too (#2074).
+    assert.equal((await as('POST', '/api/host-check', { what: 'judge_replay', judge: 'container-relief' })).status, 403, `judge_replay for ${name}`);
     // Service status isn't anyone's chat: any turn reads it.
     assert.equal((await as('POST', '/api/host-check', { what: 'units', unit: 'citadel-*' })).status, 200, `units for ${name}`);
   }
@@ -206,6 +208,10 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
   for (const who of [Josh, Cara]) {
     askedBy(who);
     for (const [method, path, body] of admin) assert.equal((await as(method, path, body)).status, 200, `${method} ${path} for ${who.name}`);
+    // Past the gate, a judge replay needs the caller's own worktree, which a Taskmaster hasn't.
+    const replay = await as('POST', '/api/host-check', { what: 'judge_replay', judge: 'container-relief' });
+    assert.equal(replay.status, 400, `judge_replay for ${who.name}`);
+    assert.match(replay.body.error, /worktree has none/);
   }
   assert.equal(store.appInstructions().text, 'Be nice.');
   assert.equal((await as('POST', '/api/taskmaster', { scheme: 'Delve', saw: 'hi', checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' })).status, 202);

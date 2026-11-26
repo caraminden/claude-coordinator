@@ -10,8 +10,22 @@
 //          generic route, breadcrumb and dispatch skip it, but its menu entry and scheme switch still come from here.
 //   item   a page whose URL can name one item (a memory file): switching scheme opens that page's list.
 // A group: [label, hue, rows, adminOnly?]. Admin-only groups are hidden from, and refused to, non-admins.
+/** @typedef {{ kind: string, label: string, icon: string, blurb: string, module: string, page: string, crumb?: string, own?: boolean, item?: boolean }} PageRow */
+/** @typedef {[string, string, PageRow[], boolean?]} PageGroup */
+
+/**
+ * @param {string} kind
+ * @param {string} label
+ * @param {string} icon
+ * @param {string} blurb
+ * @param {string} module
+ * @param {string} page
+ * @param {{ crumb?: string, own?: boolean, item?: boolean }} [extra]
+ * @returns {PageRow}
+ */
 const row = (kind, label, icon, blurb, module, page, extra = {}) => ({ kind, label, icon, blurb, module, page, ...extra });
 
+/** @type {PageGroup[]} */
 export const ORDERS_GROUPS = [
   [
     'What minions read',
@@ -29,6 +43,7 @@ export const ORDERS_GROUPS = [
   ['How work runs', 'teal', [row('properties', 'Properties', 'tag', 'Type, stage and your own keys', 'properties.js', 'propertiesPage'), row('schedules', 'Schedules', 'rows', 'Minions that start on a timer', 'schedules.js', 'schedulesPage', { own: true })]],
 ];
 
+/** @type {PageGroup[]} */
 export const SETTINGS_GROUPS = [
   ['Scheme', 'running', [row('members', 'Members', 'users', 'Who works in this scheme', 'people.js', 'membersPage'), row('orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions', 'settings.js', 'settingsHome', { own: true })]],
   [
@@ -62,8 +77,8 @@ export const PAGES = [...ORDERS_GROUPS.flatMap(([, , rows, admin]) => rows.map((
 const BY_KIND = new Map(PAGES.map((p) => [p.kind, p]));
 
 /** The row for a URL kind, or undefined for a page that isn't a Settings or Orders page. */
-export const pageRow = (kind) => BY_KIND.get(kind);
+export const pageRow = (/** @type {string} */ kind) => BY_KIND.get(kind);
 /** True for a page that lives in Orders, not Settings. */
-export const isOrdersPage = (kind) => !!BY_KIND.get(kind)?.orders;
+export const isOrdersPage = (/** @type {string} */ kind) => !!BY_KIND.get(kind)?.orders;
 /** The kinds the route regex matches on their own: every row but the ones with a route of their own. */
 export const plainKinds = () => PAGES.filter((p) => !p.own).map((p) => p.kind);

@@ -14,23 +14,38 @@ import { opening } from './releases.js';
 import { workersPanel } from './workers.js';
 import { capacityPanel } from './box-capacity.js';
 import { dayStripsPanel } from './day-strips.js';
+/** @import { Child } from './base.js' */
+/** @import { StatusApp, StatusChecks, StatusCitadel, StatusCpuRow, StatusData, StatusEaseNow, StatusEaseWaiting, StatusEaseHeld, StatusJob, StatusLook, StatusShipLine, StatusShipTarget, StatusSlowMoment, StatusStorm, StatusTone, StatusVerdict, StatusAnswer } from './types.js' */
+/** @typedef {{ target: string, looks: Record<string, StatusLook>, verdict: StatusVerdict, ask: boolean }} Investigating */
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
+/** @param {string} day */
 const dayLabel = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+/** @type {Record<string, string>} */
 export const DOT = { ok: 'ready', warn: 'fix', bad: 'down' };
+/** @type {Record<string, string>} */
 const CHIP = { ok: 'ok', warn: 'warn', bad: 'danger' };
+/** @type {Record<string, string>} */
 export const WORD = { ok: 'OK', warn: 'Worth a look', bad: 'Needs a person' };
+/** @type {Record<string, number>} */
 export const RANK = { ok: 0, warn: 1, bad: 2 };
 const SVG = 'http://www.w3.org/2000/svg';
 
+/**
+ * @param {string} tag
+ * @param {Record<string, unknown>} [attrs]
+ * @param {...(Node | string)} kids
+ */
 const svg = (tag, attrs = {}, ...kids) => {
   const el = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) el.setAttribute(k, String(v));
   el.append(...kids);
   return el;
 };
+/** @param {number[]} xs */
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
+/** @param {number | null | undefined} n */
 export function bytes(n) {
   if (n === null || n === undefined) return '–';
   const u = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -41,24 +56,31 @@ export function bytes(n) {
   }
   return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
+/** @param {number | null | undefined} s */
 export function secs(s) {
   if (s === null || s === undefined) return '–';
   if (s < 90) return `${Math.round(s)} s`;
   if (s < 5400) return `${Math.round(s / 60)} min`;
   return `${(s / 3600).toFixed(1)} h`;
 }
+/** @param {number} ms */
 const span = (ms) => {
   const m = Math.floor(ms / 60_000);
   if (m < 60) return `${m} min`;
   const hrs = Math.floor(m / 60);
   return hrs < 48 ? `${hrs} h ${m % 60} min` : `${Math.floor(hrs / 24)} days ${hrs % 24} h`;
 };
+/** @param {number} n */
 const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`);
+/** @param {number} n @param {string} word */
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
  * Eight daily bars, one hue, `bad[i]` of each drawn in the error hue on top; a hover title per day (its whole column is the
  * target). The last bar is today. Rounded data ends, 2px gaps; the height is fixed whatever the numbers.
+ * @param {string[]} days
+ * @param {number[]} counts
+ * @param {{ bad?: number[] | null, tip?: (i: number) => string, label?: string }} [opts]
  */
 export function dayBars(days, counts, { bad = null, tip = (i) => `${counts[i]}`, label } = {}) {
   const W = 160,
@@ -67,12 +89,14 @@ export function dayBars(days, counts, { bad = null, tip = (i) => `${counts[i]}`,
     n = counts.length,
     bw = (W - gap * (n - 1)) / n;
   const max = Math.max(1, ...counts);
+  /** @param {number} x @param {number} y @param {number} w @param {number} hgt @param {number} r */
   const top = (x, y, w, hgt, r) => (hgt <= 0 ? '' : `M${x},${y + hgt}V${y + Math.min(r, hgt)}Q${x},${y} ${x + Math.min(r, w / 2)},${y}H${x + w - Math.min(r, w / 2)}Q${x + w},${y} ${x + w},${y + Math.min(r, hgt)}V${y + hgt}Z`);
   const marks = counts.flatMap((c, i) => {
     const x = i * (bw + gap);
     const hgt = c ? Math.max(2, (c / max) * H) : 0;
     const b = bad ? Math.min(bad[i] ?? 0, c) : 0;
     const bh = b ? Math.max(2, (b / max) * H) : 0;
+    /** @type {Element[]} */
     const out = [];
     // The good part sits on the baseline; the bad part is its top, with the rounded end.
     if (hgt - bh > 0) out.push(svg('path', { d: bh ? `M${x},${H}V${H - (hgt - bh)}H${x + bw}V${H}Z` : top(x, H - hgt, bw, hgt, 4), class: 'st-bar' }));
@@ -84,13 +108,20 @@ export function dayBars(days, counts, { bad = null, tip = (i) => `${counts[i]}`,
   return h('figure', { class: 'st-chart' }, svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': label ?? `last ${n} days` }, ...marks), h('figcaption', { class: 'st-axis' }, h('span', {}, dayLabel(days[0]).replace(/^\w+, /, '')), h('span', {}, 'today')));
 }
 
-/** A week of hourly readings as a line, 0 to `max` (percentages by default), its rule at `rule`, with a hover title per hour. */
+/**
+ * A week of hourly readings as a line, 0 to `max` (percentages by default), its rule at `rule`, with a hover title per hour.
+ * @param {[number, ...(number | null)[]][]} series
+ * @param {number} idx
+ * @param {{ from: number, to: number, label: string, max?: number, rule?: number, tip?: (v: number) => string }} opts
+ */
 export function hourLine(series, idx, { from, to, label, max = 100, rule = 90, tip = (v) => `${v}% used at worst` }) {
   const W = 160,
     H = 36;
+  /** @param {number} t */
   const x = (t) => ((t - from) / (to - from)) * W;
+  /** @param {number} v */
   const y = (v) => H - (Math.min(v, max) / max) * H;
-  const pts = series.map((s) => `${x(s[0]).toFixed(1)},${y(s[idx]).toFixed(1)}`);
+  const pts = series.map((s) => `${x(s[0]).toFixed(1)},${y(/** @type {number} */ (s[idx])).toFixed(1)}`);
   const step = Math.max(1, W / ((to - from) / 3_600_000));
   return h(
     'figure',
@@ -100,7 +131,7 @@ export function hourLine(series, idx, { from, to, label, max = 100, rule = 90, t
       { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': label },
       svg('line', { x1: 0, x2: W, y1: y(rule), y2: y(rule), class: 'st-rule' }),
       pts.length > 1 ? svg('polyline', { points: pts.join(' '), class: 'st-line' }) : '',
-      ...series.map((s) => svg('rect', { x: x(s[0]) - step / 2, y: 0, width: step, height: H, class: 'st-hit' }, svg('title', {}, `${when(s[0])}: ${tip(s[idx])}`))),
+      ...series.map((s) => svg('rect', { x: x(s[0]) - step / 2, y: 0, width: step, height: H, class: 'st-hit' }, svg('title', {}, `${when(s[0])}: ${tip(/** @type {number} */ (s[idx]))}`))),
     ),
     h('figcaption', { class: 'st-axis' }, h('span', {}, series.length ? `since ${when(series[0][0]).replace(/,? \d+:\d+.*$/, '')}` : 'no readings yet'), h('span', {}, 'now')),
   );
@@ -111,8 +142,11 @@ export function hourLine(series, idx, { from, to, label, max = 100, rule = 90, t
 // bars split into their steps. The day with the worst tail is open until a person picks another.
 const SLOW_S = 600;
 const STAGE_ORDER = ['line', 'rebase', 'test', 'build', 'deploy', 'restart', 'live'];
+/** @type {Map<string, string | null>} */
 const shipPick = new Map();
+/** @param {string} day */
 const shortDay = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric' });
+/** @param {(number | null)[]} vals @param {(i: number) => number} x @param {(v: number) => number} y */
 const dayPath = (vals, x, y) => {
   let d = '';
   let pen = false;
@@ -125,18 +159,23 @@ const dayPath = (vals, x, y) => {
   });
   return d;
 };
+/** @param {(number | null)[]} vals @param {(i: number) => number} x @param {(v: number) => number} y */
 const dotPath = (vals, x, y) => vals.map((v, i) => (v === null ? '' : `M${x(i).toFixed(1)},${y(v).toFixed(1)}h0`)).join('');
 
+/** @param {StatusShipTarget} t @param {string[]} days @param {() => void} redraw */
 export function shipChart(t, days, redraw) {
   const n = days.length,
     W = 400,
     H = 110;
   const peak = Math.max(SLOW_S * 1.2, ...t.p90.filter((v) => v !== null));
+  /** @param {number} i */
   const x = (i) => ((i + 0.5) / n) * W;
+  /** @param {number} v */
   const y = (v) => H - (v / peak) * H;
-  const worst = t.p90.reduce((w, v, i) => (v !== null && (w < 0 || v > t.p90[w]) ? i : w), -1);
+  const worst = t.p90.reduce(/** @param {number} w @param {number | null} v @param {number} i */ (w, v, i) => (v !== null && (w < 0 || v > /** @type {number} */ (t.p90[w])) ? i : w), -1);
   const picked = shipPick.get(t.key);
   const pick = picked !== undefined && (picked === null || days.includes(picked)) ? picked : days[worst];
+  /** @param {string} day */
   const choose = (day) => {
     shipPick.set(t.key, pick === day ? null : day);
     redraw();
@@ -163,7 +202,7 @@ export function shipChart(t, days, redraw) {
     ),
     h('span', { class: 'st-rule-label muted' }, '10 min'),
   );
-  plot.querySelector('.st-rule-label').style.setProperty('top', `${(y(SLOW_S) / H) * 100}%`);
+  /** @type {HTMLElement} */ (plot.querySelector('.st-rule-label')).style.setProperty('top', `${(y(SLOW_S) / H) * 100}%`);
   const buttons = h(
     'div',
     { class: 'st-days', role: 'group', 'aria-label': 'Pick a day to see its ships' },
@@ -204,6 +243,7 @@ export function shipChart(t, days, redraw) {
 }
 
 /** A ship chart's tile key: an app's is its own `ship-time`; each release chart on Citadel's page gets its own, so their looks don't mix. */
+/** @param {string} key */
 const shipTile = (key) =>
   key.startsWith('release:')
     ? `ship-${key
@@ -214,15 +254,19 @@ const shipTile = (key) =>
     : 'ship-time';
 
 /** That day's ships, slowest first (at most 8), each a bar of its steps; the rest of its time, the steps don't name, is grey. */
+/** @param {StatusShipTarget} t @param {string} day */
 function shipWaterfall(t, day) {
   const todays = t.ships.filter((s) => pacificIso(s.at) === day).sort((a, b) => b.took - a.took);
   const shown = todays.slice(0, 8);
   const order = [...new Set(todays.flatMap((s) => Object.keys(s.stages)))].sort((a, b) => (STAGE_ORDER.indexOf(a) + 1 || 99) - (STAGE_ORDER.indexOf(b) + 1 || 99));
+  /** @param {string} name */
   const step = (name) => Math.min(order.indexOf(name) + 1, 6);
   const top = Math.max(1, ...shown.map((s) => s.took));
+  /** @param {StatusShipTarget['ships'][number]} s */
   const row = (s) => {
     const named = sum(Object.values(s.stages));
-    const segs = [...order.filter((k) => s.stages[k]).map((k) => [k, s.stages[k], step(k)]), ...(s.took - named > 1 ? [['other', s.took - named, 0]] : [])];
+    /** @type {[string, number, number][]} */
+    const segs = [...order.filter((k) => s.stages[k]).map((k) => /** @type {[string, number, number]} */ ([k, s.stages[k], step(k)])), ...(s.took - named > 1 ? [/** @type {[string, number, number]} */ (['other', s.took - named, 0])] : [])];
     const bar = h(
       'div',
       { class: 'st-wbar', role: 'img', 'aria-label': `${secs(s.took)}: ${segs.map(([k, v]) => `${k} ${secs(v)}`).join(', ')}` },
@@ -248,9 +292,12 @@ function shipWaterfall(t, day) {
 // Investigate (#1273; Cara, 2026-11-20: "each of the boxes should have an "investigate" button that sends the data to the relevant
 // taskmaster"): each tile's foot says who is on it, a link to the minion that quotes its tag, and its button sends the tile's numbers
 // to your own Taskmaster in its scheme. `ix` is the target the tiles being drawn belong to, set by draw.
+/** @type {Investigating | null} */
 let ix = null;
 /** This page's own clicks by tag, kept so a re-read before the server shows them still says Sent. */
+/** @type {Map<string, { at: number, busy: boolean }>} */
 const asks = new Map();
+/** @param {StatusLook | undefined} look @param {{ at: number } | undefined} ask */
 const lookLine = (look, ask) => {
   const m = look?.minion;
   if (m) return h('span', { class: 'st-look' }, m.closed ? 'Looked into by ' : 'Looking into it: ', h('a', { href: `#/p/${m.project}/t/${m.number}`, title: m.title }, `#${m.number} ${m.title}`.trim()));
@@ -258,18 +305,22 @@ const lookLine = (look, ask) => {
   return h('span', { class: 'st-look muted' }, sent ? `Sent ${pacificClock(sent)}` : 'Nobody on it');
 };
 /** The newest foot drawn per tag: a reply that lands after a re-read paints the button on screen, not the one it replaced. */
+/** @type {Map<string, (busy: boolean) => void>} */
 const feet = new Map();
+/** @param {string} x @param {number} n */
 const clip = (x, n) => (x.length > n ? `${x.slice(0, n - 1)}…` : x);
+/** @param {{ target: string, tile: string, title: string, value: Child, sub?: Child, chart?: string, reasons: string[] }} raw */
 function foot(raw) {
   // Clipped to what the server takes, so a long backups list still sends.
   const payload = { ...raw, title: clip(raw.title, 60), value: clip(String(raw.value), 200), sub: clip(String(raw.sub ?? ''), 400), chart: clip(raw.chart ?? '', 2000), reasons: raw.reasons.slice(0, 10).map((r) => clip(r, 300)) };
   const tag = `${payload.target}/${payload.tile}`;
-  const look = ix.looks[payload.tile];
+  const look = /** @type {Investigating} */ (ix).looks[payload.tile];
   const btn = h('button', { type: 'button', class: 'secondary st-ask' }, 'Investigate');
   const el = h('div', { class: 'st-foot' }, lookLine(look, asks.get(tag)), btn);
   // The button keeps its width whatever it says, so Sent and back moves nothing.
+  /** @param {boolean} busy */
   const paint = (busy) => {
-    el.firstChild.replaceWith(lookLine(look, asks.get(tag)));
+    /** @type {ChildNode} */ (el.firstChild).replaceWith(lookLine(look, asks.get(tag)));
     btn.disabled = busy;
     btn.textContent = busy ? 'Sent' : 'Investigate';
   };
@@ -281,20 +332,27 @@ function foot(raw) {
     paint(true);
     api('api/status/investigate', { method: 'POST', body: payload }).then(
       () => {
-        asks.set(tag, { at: asks.get(tag).at, busy: false });
+        asks.set(tag, { at: /** @type {{ at: number }} */ (asks.get(tag)).at, busy: false });
         setTimeout(() => feet.get(tag)?.(false), 3000);
       },
       (err) => {
         if (prev) asks.set(tag, prev);
         else asks.delete(tag);
         feet.get(tag)?.(false);
-        toast(`Couldn't send ${payload.title} to your Taskmaster: ${err.message}`, { action: { label: 'Retry', run: send } });
+        toast(`Couldn't send ${payload.title} to your Taskmaster: ${/** @type {Error} */ (err).message}`, { action: { label: 'Retry', run: send } });
       },
     );
   };
   btn.onclick = send;
   return el;
 }
+/**
+ * @param {string} name
+ * @param {Child} value
+ * @param {Child} sub
+ * @param {Child} [body]
+ * @param {{ tone?: string | null, wide?: boolean, key?: string | null, chart?: string }} [opts]
+ */
 const tile = (name, value, sub, body = null, { tone = null, wide = false, key = null, chart = '' } = {}) =>
   h(
     'section',
@@ -303,21 +361,27 @@ const tile = (name, value, sub, body = null, { tone = null, wide = false, key = 
     h('b', { class: 'st-value' }, value),
     h('div', { class: 'st-sub muted' }, sub),
     body ?? h('div', { class: 'st-chart st-empty' }),
-    key && ix?.ask ? foot({ target: ix.target, tile: key, title: name, value, sub, chart, reasons: ix.verdict.reasons.filter((_, i) => ix.verdict.tiles?.[i] === key) }) : '',
+    key && ix?.ask ? foot({ target: ix.target, tile: key, title: name, value, sub, chart, reasons: ix.verdict.reasons.filter((_, i) => /** @type {Investigating} */ (ix).verdict.tiles?.[i] === key) }) : '',
   );
 /** A chart's numbers for the Taskmaster: a week by day, or the last day by hour. */
+/** @param {string[]} days @param {readonly unknown[]} xs */
 const perDay = (days, xs) => days.map((d, i) => `${shortDay(d)} ${xs[i]}`).join(', ');
+/** @param {[number, ...unknown[]][]} series @param {number} idx */
 const perHour = (series, idx) =>
   series
     .slice(-24)
     .map((s) => `${pacificClockBare(s[0])} ${s[idx]}`)
     .join(', ');
+/** @param {{ key: string, title: string, note: string }} s */
 const slot = (s) => h('section', { class: 'st-tile st-slot', 'data-slot': s.key }, h('h4', {}, s.title), h('div', { class: 'st-sub muted' }, s.note));
 
 /** Every periodic job (#1311): how often, its last run and how long it took; overdue (3 periods without a run), slow (over 1 s) or failing ones first. */
+/** @param {StatusJob[]} jobs @param {number} now */
 function jobsTile(jobs, now) {
-  const flags = (j) => [j.overdue && ['danger', 'overdue'], j.slow && ['warn', 'slow'], j.error && j.errorAt >= (j.last ?? 0) && ['danger', 'failed']].filter(Boolean);
+  /** @param {StatusJob} j @returns {[string, string][]} */
+  const flags = (j) => /** @type {[string, string][]} */ ([j.overdue && ['danger', 'overdue'], j.slow && ['warn', 'slow'], j.error && /** @type {number} */ (j.errorAt) >= (j.last ?? 0) && ['danger', 'failed']].filter(Boolean));
   const bad = jobs.filter((j) => flags(j).length);
+  /** @param {number} ms */
   const every = (ms) => (ms >= 3_600_000 ? `every ${ms / 3_600_000} h` : ms >= 60_000 ? `every ${ms / 60_000} min` : `every ${ms / 1000} s`);
   const sorted = [...bad, ...jobs.filter((j) => !flags(j).length)];
   return tile(
@@ -337,7 +401,7 @@ function jobsTile(jobs, now) {
             ...flags(j).map(([tone, word]) => toneChip(tone, word)),
           ),
           // The last error under its job, in full: a fixed-width list row would cut it.
-          j.error ? h('li', { class: 'st-job-error muted' }, `${j.name}: last error ${ago(j.errorAt)}: ${j.error}`) : '',
+          j.error ? h('li', { class: 'st-job-error muted' }, `${j.name}: last error ${ago(/** @type {number} */ (j.errorAt))}: ${j.error}`) : '',
         ])
         .filter(Boolean),
     ),
@@ -358,9 +422,10 @@ function jobsTile(jobs, now) {
 }
 
 /** The standing checks (#1415): Citadel's recovery promises, checked hourly; each broken one with its check and since when. Report only. */
+/** @param {StatusChecks} c @param {number} now */
 function checksTile(c, now) {
   const found = c.last?.findings ?? [];
-  const named = new Map(c.checks.map((x) => [x.name, x.promise]));
+  const named = new Map(c.checks.map((x) => /** @type {[string, string]} */ ([x.name, x.promise])));
   const sub = c.last ? `${plural(c.checks.length, 'promise')} checked hourly · last ${ago(c.last.ranAt)}${c.last.error ? ` · last run failed: ${c.last.error}` : ''}` : `${plural(c.checks.length, 'promise')} checked hourly, from a few minutes after a start`;
   const list = found.length ? found.map((f) => h('li', { title: named.get(f.check) ?? '' }, h('code', {}, f.check), h('span', {}, f.text), h('span', { class: 'muted' }, `since ${ago(f.since)}`))) : c.checks.map((x) => h('li', {}, h('code', {}, x.name), h('span', { class: 'muted' }, x.promise)));
   return tile('Standing checks', !c.last ? 'Not run yet' : found.length ? `${plural(found.length, 'broken promise')}` : c.last.error ? 'Last run failed' : 'All kept', sub, h('ul', { class: 'st-list st-checks' }, ...list), {
@@ -373,12 +438,18 @@ function checksTile(c, now) {
 
 /** CPU by source (#1332): cores each source averaged over the last hour, day and week with its kernel share, and the week by hour as stacked bars. */
 const GROUP_CLASS = ['server', 'turns', 'containers', 'builds', 'godot', 'apps', 'mine', 'others'];
+/** @param {StatusCitadel['host']['cpu']} cpu @param {number} now */
 function cpuTile(cpu, now) {
   const { windows: w, hours, groups } = cpu;
+  /** @param {number} x */
   const cores = (x) => (x >= 10 ? x.toFixed(0) : x.toFixed(2));
   const wk = w.week;
+  /** @param {StatusCitadel['host']['cpu']['windows']['hour']} win @param {string} key */
   const lookup = (win, key) => win.rows.find((r) => r.key === key);
+  /** The row of a key one of the windows has: it is there where this is used. */
+  const row = (/** @type {typeof w.hour} */ win, /** @type {string} */ key) => /** @type {StatusCpuRow} */ (lookup(win, key));
   const keys = [...new Set([...w.hour.rows, ...w.day.rows, ...w.week.rows].map((r) => r.key))].sort((a, b) => (lookup(wk, b)?.cores ?? 0) - (lookup(wk, a)?.cores ?? 0));
+  /** @param {typeof w.hour} win @param {string} key */
   const cell = (win, key) => {
     const r = lookup(win, key);
     return h('td', { class: 'num' }, r ? cores(r.cores) : '–');
@@ -392,7 +463,7 @@ function cpuTile(cpu, now) {
       {},
       ...keys.map((k) => {
         const r = lookup(wk, k) ?? lookup(w.day, k) ?? lookup(w.hour, k);
-        return h('tr', {}, h('td', {}, r.label), cell(w.hour, k), cell(w.day, k), cell(w.week, k), h('td', { class: 'num' }, lookup(wk, k) ? `${Math.round(lookup(wk, k).kernel * 100)}%` : '–'));
+        return h('tr', {}, h('td', {}, /** @type {StatusCpuRow} */ (r).label), cell(w.hour, k), cell(w.day, k), cell(w.week, k), h('td', { class: 'num' }, lookup(wk, k) ? `${Math.round(row(wk, k).kernel * 100)}%` : '–'));
       }),
     ),
     h(
@@ -431,21 +502,25 @@ function cpuTile(cpu, now) {
     key: 'cpu-sources',
     chart: keys
       .slice(0, 8)
-      .map((k) => `${lookup(wk, k)?.label ?? k}: hour ${lookup(w.hour, k) ? cores(lookup(w.hour, k).cores) : '–'}, day ${lookup(w.day, k) ? cores(lookup(w.day, k).cores) : '–'}, week ${lookup(wk, k) ? cores(lookup(wk, k).cores) : '–'}`)
+      .map((k) => `${lookup(wk, k)?.label ?? k}: hour ${lookup(w.hour, k) ? cores(row(w.hour, k).cores) : '–'}, day ${lookup(w.day, k) ? cores(row(w.day, k).cores) : '–'}, week ${lookup(wk, k) ? cores(row(wk, k).cores) : '–'}`)
       .join('; '),
   });
 }
 
 /** How old a live reading is, to the second ("read 4 s ago"); the 5-minute rows stay on `ago`. */
+/** @param {number} at */
 const readAge = (at) => {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   return s < 60 ? `read ${s} s ago` : `read ${ago(at)}`;
 };
 /** While the box is easing or tight, the headline tiles say so from the live reading: warn for easing, bad for tight. */
+/** @param {StatusEaseNow | null} n */
 const easeTone = (n) => (n ? (n.level === 'tight' ? 'bad' : 'warn') : null);
 /** "reclaiming 98,233 pages/s, swapping out 40 MB/s", the numbers the 5 s reading has. */
+/** @param {StatusEaseNow} n */
 const churn = (n) => `${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages/s` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
 
+/** @param {StatusCitadel} c @param {string[]} days @param {number} now @param {StatusShipTarget[]} ships @param {() => void} redraw */
 function citadelTiles(c, days, now, ships, redraw) {
   const n = c.easing?.now ?? null;
   const today = days.length - 1;
@@ -562,7 +637,9 @@ function citadelTiles(c, days, now, ships, redraw) {
  * Answer time (#1559): one real GET /api/health a second from a worker thread, closed into a window every 5 minutes. The tile shows the
  * newest probe (and beside it a reader thread's, #1628), the last window's p95 against the target and the last day's p95 as a line with the target's p95 as its rule.
  */
+/** @param {number | null | undefined} v */
 const ms = (v) => (v == null ? '–' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
+/** @param {StatusAnswer} a @param {number} now @param {StatusEaseNow | null} n */
 function answerTile(a, now, n) {
   const key = 'answer';
   if (!a?.probing) return tile('Answer time', 'Not probing here', 'Only the live server probes', h('div', {}, toneChip('neutral', 'Off here')), { key, chart: '' });
@@ -587,8 +664,10 @@ function answerTile(a, now, n) {
 }
 
 /** Where a page was (its address then), in words: `scheme` is its scheme's name when the viewer may see it. */
+/** @param {string} page @param {string | null | undefined} scheme */
 export function slowPlace(page, scheme) {
   const of = scheme ?? 'a scheme';
+  /** @param {string} w */
   const named = (w) => `${w[0].toUpperCase()}${w.slice(1).replace(/-/g, ' ')} page`;
   if (/^#\/(p\/\d+\/)?t\/\d+/.test(page)) return scheme ? `a minion in ${scheme}` : 'a minion';
   const m = /^#\/p\/\d+(?:\/([a-z-]+))?/.exec(page);
@@ -597,42 +676,51 @@ export function slowPlace(page, scheme) {
   const top = /^#\/([a-z-]+)/.exec(page);
   return top ? `the ${named(top[1])}` : page;
 }
+/** @param {number} v */
 const s1 = (v) => `${(v / 1000).toFixed(1)} s`;
 /** What the moment was waiting on: "Opening Citadel", "Opening Seeded's Status page", "Waiting for GET /api/status on the Status page". */
+/** @param {StatusSlowMoment} m */
 const slowDoing = (m) => (m.kind === 'freeze' ? `The tab was frozen on ${slowPlace(m.page, m.scheme)}` : m.kind === 'load' ? 'Opening Citadel' : m.kind === 'open' ? `Opening ${slowPlace(m.page, m.scheme)}${m.what ? `, slowest ${m.what}` : ''}` : `Waiting for ${m.what} on ${slowPlace(m.page, m.scheme)}`);
 /** Where its time went, parts under 0.05 s left out: "0.1 s server, 0.2 s network, 19.8 s the tab was frozen". */
+/** @param {StatusSlowMoment} m */
 const slowSplit = (m) => {
   if (m.kind === 'freeze') return '';
+  /** @type {[number | null, string][]} */
   const parts = [
     [m.server_ms, 'server'],
     [m.network_ms, m.server_ms == null ? 'with no answer from the server' : 'network'],
     [m.tab_ms, 'the tab was frozen'],
   ];
   return parts
-    .filter(([v]) => v >= 50)
+    .filter(/** @param {[number | null, string]} p @returns {p is [number, string]} */ (p) => p[0] != null && p[0] >= 50)
     .map(([v, w]) => `${s1(v)} ${w}`)
     .join(', ');
 };
 /** One slow moment in plain words (#1752): "20.1 s opening Citadel: 0.1 s server, 0.2 s network, 19.8 s the tab was frozen". */
+/** @param {StatusSlowMoment} m */
 export function slowWords(m) {
   const doing = slowDoing(m),
     split = slowSplit(m);
   return `${s1(m.total_ms)} ${doing[0].toLowerCase()}${doing.slice(1)}${split ? `: ${split}` : ''}`;
 }
 /** What took most of it, as [hue, chip tone, word]: the server, the network or the tab. */
+/** @param {StatusSlowMoment} m @returns {[string, string, string, number?]} */
 const slowCause = (m) =>
   m.server_ms == null && m.network_ms >= m.tab_ms
     ? ['muted', 'neutral', 'no answer']
     : // No answer came, so the server and the network can't be told apart.
-      [
+      /** @type {[string, string, string, number][]} */ ([
         ['danger', 'danger', 'server', m.server_ms ?? 0],
         ['running', 'info', 'network', m.network_ms],
         ['waiting', 'warn', 'tab frozen', m.tab_ms],
-      ].reduce((a, b) => (b[3] > a[3] ? b : a));
+      ]).reduce((a, b) => (b[3] > a[3] ? b : a));
 /** A request's path, free to wrap after each slash but the leading one, rather than mid-word. */
+/** @param {string} text */
 const pathText = (text) => text.split(/(?<=\w\/)/).flatMap((part, i) => (i ? [h('wbr'), part] : [part]));
 /** Slow moments (#1752): every load, click or freeze over 2 s on people's pages in the last day, and where its time went. */
+/** @param {StatusCitadel['slow']} slow */
 function slowTile(slow) {
+  /** @param {StatusSlowMoment} m */
   const row = (m) => {
     const [hue, tone, cause] = slowCause(m);
     return hueRow({ hue, lead: s1(m.total_ms) }, h('div', {}, ...pathText(slowDoing(m))), h('div', { class: 'st-slow-split' }, toneChip(tone, cause), ' ', slowSplit(m)), h('div', { class: 'muted' }, `${pacificClock(m.at)} · ${m.person} · ${m.device}`));
@@ -658,9 +746,11 @@ function slowTile(slow) {
  * File cache (#1501): how much of the database is in memory and how hard the kernel discards and re-reads file cache. A database
  * mostly out of memory is what stalled the server for two days (#1492); the alert is a 'cache-cold' event in the verdict.
  */
+/** @param {StatusCitadel['host']} host @param {number} now @param {StatusVerdict} verdict */
 function cacheTile(host, now, verdict) {
   const l = host.latest;
   const from = now - 8 * 24 * 3_600_000;
+  /** @param {number | null | undefined} pages */
   const MB = (pages) => (pages == null ? '-' : `${((pages * 4) / 1024).toFixed(1)} MB/s`);
   if (!l || l.db_size == null) return tile('File cache', 'No reading yet', 'Read every 5 minutes', null, { key: 'cache', chart: '' });
   const pct = Math.round(((l.db_cached ?? 0) / l.db_size) * 100);
@@ -685,9 +775,11 @@ function cacheTile(host, now, verdict) {
  * Memory limits (#1280): times a slice or container sat at its memory limit while its work stalled, which burns cores
  * reclaiming. The headline is today's stalled time; the line names the group and its largest unit, now or last.
  */
+/** @param {StatusCitadel['storms']} s @param {string[]} days @param {number} now */
 function stormTile(s, days, now) {
   if (!s) return '';
   const today = days.length - 1;
+  /** @param {StatusStorm} x */
   const one = (x) => `${x.group}${x.limit ? ` (limit ${bytes(x.limit)})` : ''}: ${secs(x.stalled)} stalled over ${secs(x.seconds)}${x.unit ? `, largest ${bytes(x.unitBytes)}: ${x.unit}` : ''}`;
   const live = s.now[0];
   const stalledToday = s.stalled[today] + sum(s.now.map((x) => x.stalled));
@@ -704,11 +796,14 @@ function stormTile(s, days, now) {
  * Memory easing (#1748): while the box's free memory runs low, scheduled starts, heavy jobs and nested Claude sessions
  * wait and the fastest-growing big turn is held at its size; nothing is killed. Now: why, what waits and who is held.
  */
+/** @param {StatusCitadel['easing']} e @param {string[]} days @param {number} now */
 function easeTile(e, days, now) {
   if (!e) return '';
   const today = days.length - 1;
   const n = e.now;
+  /** @param {StatusEaseWaiting} w */
   const waits = (w) => [w.starts && plural(w.starts, 'scheduled start'), w.heavy && plural(w.heavy, 'heavy job'), w.nested && plural(w.nested, 'nested session')].filter(Boolean).join(', ');
+  /** @param {StatusEaseHeld[]} s */
   const held = (s) => s.map((x) => `${x.minion ? `${x.minion}'s turn` : 'a turn'} held at ${bytes(x.bytes)}`).join(', ');
   const sub = n
     ? [
@@ -729,11 +824,12 @@ function easeTile(e, days, now) {
     chart: `minutes eased off a day: ${perDay(days, e.minutes)}; spells a day: ${perDay(days, e.counts)}`,
   });
   // While easing the headline is a toned chip, so it reads as "slowing down" at a glance and not as the stripe alone.
-  if (n) el.querySelector('.st-value').replaceChildren(toneChip(n.level === 'tight' ? 'danger' : 'warn', value));
+  if (n) /** @type {Element} */ (el.querySelector('.st-value')).replaceChildren(toneChip(n.level === 'tight' ? 'danger' : 'warn', value));
   return el;
 }
 
 /** Backup freshness (#1142): the last database backup, the last off-box pull, and each app yes or no. Red when a night is missing. */
+/** @param {StatusCitadel['backup']} b @param {number} now */
 function backupTile(b, now) {
   const bad = b.problems.length > 0;
   return tile(
@@ -745,6 +841,7 @@ function backupTile(b, now) {
   );
 }
 
+/** @param {StatusApp} a @param {string[]} days @param {StatusShipTarget[]} ships @param {() => void} redraw */
 function appTiles(a, days, ships, redraw) {
   const today = days.length - 1;
   const d = a.deploys;
@@ -809,12 +906,19 @@ const LINES_MS = 3_000;
  * cleanly (it leaves the line and main stays as it was): it shows "Stopping…" at once, and a refusal puts the button back
  * with a toast and a Retry. The tile is last and wide, so rows coming and going move nothing above it.
  */
+/** @typedef {StatusShipLine['rows'][number]} LineRow */
+/** @param {Element} page */
 export function shipLinePanel(page) {
+  /** @type {StatusShipLine[] | null} */
   let lines = null;
+  /** @type {string | null} */
   let failed = null;
+  /** @type {Set<string>} */
   const stopping = new Set(); // "<projectId>:<seq>" sent and not yet gone from the line
-  const el = h('section', { class: 'st-tile wide st-lines' });
+  const el = /** @type {HTMLElement & { resume: () => void }} */ (h('section', { class: 'st-tile wide st-lines' }));
+  /** @param {StatusShipLine} l @param {LineRow} r */
   const key = (l, r) => `${l.projectId}:${r.seq}`;
+  /** @param {StatusShipLine} l @param {LineRow} r */
   const stop = (l, r) =>
     optimistic({
       apply: () => {
@@ -828,10 +932,11 @@ export function shipLinePanel(page) {
       },
       label: `stop ${r.name}'s ship`,
     }).catch(() => {});
+  /** @param {StatusShipLine} l @param {LineRow} r */
   const row = (l, r) => {
     const gone = stopping.has(key(l, r));
     const name = r.ticketId != null ? h('a', { href: `#/t/${r.ticketId}`, 'data-key': `a${key(l, r)}` }, r.name) : h('span', {}, r.name);
-    const time = r.holds ? `held ${shortAgo(r.heldSince)}` : `waiting ${shortAgo(r.since)}`;
+    const time = r.holds ? `held ${shortAgo(/** @type {number} */ (r.heldSince))}` : `waiting ${shortAgo(r.since)}`;
     const act = !r.holds
       ? null
       : gone
@@ -841,12 +946,13 @@ export function shipLinePanel(page) {
           : h('button', { type: 'button', class: 'cui-btn cui-small cui-danger', 'data-key': `b${key(l, r)}`, title: 'End this land.sh run: it leaves the line and lets go of the lock, main stays as it was, and its minion is told who stopped it', onclick: () => stop(l, r) }, 'Stop this ship');
     return hueRow({ hue: r.holds ? 'running' : 'waiting', lead: r.place, meta: h('span', { class: 'st-line-meta' }, h('span', { class: 'muted small' }, time), act) }, schemeTag(l.scheme), ' ', name, ' ', h('span', { class: 'muted' }, r.text));
   };
+  /** @type {() => void} */
   const draw = () => {
     const all = lines ?? [];
     const holders = all.flatMap((l) => l.rows.filter((r) => r.holds).map((r) => `${r.name} holds ${l.scheme}'s`));
     const waiting = all.reduce((n, l) => n + l.rows.filter((r) => !r.holds).length, 0);
     // The redraw every 3 s would drop the keyboard focus: it goes back to the same link or button.
-    const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
+    const focused = el.contains(document.activeElement) ? /** @type {HTMLElement} */ (document.activeElement).dataset.key : undefined;
     const value = lines === null ? 'Reading…' : !all.length ? 'Nobody is shipping' : holders.length ? `${holders.join(', ')} line` : `${plural(waiting, 'ship')} waiting`;
     el.replaceChildren(
       h('h4', {}, 'Ship lines'),
@@ -854,19 +960,19 @@ export function shipLinePanel(page) {
       h('div', { class: 'st-sub muted' }, failed ? `Couldn't read the lines: ${failed}` : `${holders.length && waiting ? `${plural(waiting, 'ship')} waiting behind · ` : ''}Read every 3 s. Any member can stop a ship until it moves main.`),
       all.length ? h('div', { class: 'hue-rows st-line-rows' }, ...all.flatMap((l) => l.rows.map((r) => row(l, r)))) : h('div', { class: 'st-line-rows' }),
     );
-    if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+    if (focused) /** @type {HTMLElement | null} */ (el.querySelector(`[data-key="${CSS.escape(focused)}"]`))?.focus();
   };
   let running = false;
   const load = async () => {
     if (!page.isConnected && lines !== null) return void (running = false);
     if (!document.hidden && (el.isConnected || lines === null)) {
       try {
-        lines = (await api('api/ship-lines')).lines;
+        lines = /** @type {StatusShipLine[]} */ ((await api('api/ship-lines')).lines);
         failed = null;
         const there = new Set(lines.flatMap((l) => l.rows.map((r) => key(l, r))));
         for (const k of stopping) if (!there.has(k)) stopping.delete(k);
       } catch (err) {
-        failed = err.message;
+        failed = /** @type {Error} */ (err).message;
       }
       draw();
     }
@@ -884,6 +990,7 @@ export function shipLinePanel(page) {
 }
 
 /** "4 min", "1 h 5 min": how long since `ms`. */
+/** @param {number} ms */
 const shortAgo = (ms) => (Date.now() - ms < 60_000 ? `${Math.max(0, Math.round((Date.now() - ms) / 1000))} s` : span(Date.now() - ms));
 
 /** The Status page for scheme `projectId`: Citadel first, then the apps you can see, this scheme's first. */
@@ -892,20 +999,27 @@ const shortAgo = (ms) => (Date.now() - ms < 60_000 ? `${Math.max(0, Math.round((
  * (every app on All), the one picked showing its tiles. The page's list picks the scheme, so other schemes' apps are a click
  * there. `onData` gets each read, for the list's dots on this tab; `show` points it at a scheme.
  */
+/** @type {typeof import('./contraptions.js').servicePanel | null} */
 let servicePanel = null;
+/** @param {(data: StatusData) => void} [onData] */
 export function statusPane(onData = () => {}) {
+  /** @type {number | 'all' | null} */
   let scope = null;
   let picked = 'citadel';
+  /** @type {StatusData | null} */
   let data = null;
+  /** @type {import('./contraptions.js').Contraption[] | false | null} */
   let contraptions = null; // api/contraptions, once: admins only, so a 403 leaves it empty and no controls show
+  /** @type {Map<string, Element | null>} */
   const panels = new Map(); // one built panel per app, so a redraw keeps its status text, journal and followed deploy
   const pills = h('nav', { class: 'chips st-apps', 'aria-label': 'Citadel and the apps' });
   const detail = h('div', { class: 'st-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
-  const strips = dayStripsPanel(); // the picked scheme's, whichever of Citadel or its apps is picked above
-  const el = h('div', { class: 'st-page' }, pills, detail, strips);
+  const strips = /** @type {HTMLElement & { show: (to: number | 'all') => void }} */ (dayStripsPanel()); // the picked scheme's, whichever of Citadel or its apps is picked above
+  const el = /** @type {HTMLDivElement & { show: (to: number | 'all') => void }} */ (h('div', { class: 'st-page' }, pills, detail, strips));
   const lines = shipLinePanel(el);
   const workers = workersPanel(el);
-  const fit = capacityPanel(el);
+  const fit = /** @type {HTMLElement & { dragging: () => boolean, resume: () => void }} */ (capacityPanel(el));
+  /** @param {string} key @param {string} name @param {StatusVerdict} v */
   const pill = (key, name, v) =>
     h(
       'button',
@@ -925,11 +1039,12 @@ export function statusPane(onData = () => {}) {
       name,
     );
   /** Start, Restart, Stop and Deploy for an app, the very panel Settings → Contraptions draws; admins only, as there. */
+  /** @param {string} name */
   const controls = (name) => {
     if (panels.has(name)) return panels.get(name) ?? '';
     if (contraptions) {
       const c = contraptions.find((x) => x.name === name);
-      panels.set(name, c ? h('div', { class: 'st-controls' }, servicePanel(c)) : null);
+      panels.set(name, c ? h('div', { class: 'st-controls' }, /** @type {NonNullable<typeof servicePanel>} */ (servicePanel)(c)) : null);
       return panels.get(name) ?? '';
     }
     if (contraptions === null) {
@@ -951,7 +1066,7 @@ export function statusPane(onData = () => {}) {
   // Putting the page in again would end a drag on the slider; the next read draws it.
   const draw = () => fit.dragging() || keepView(el, drawNow);
   const drawNow = () => {
-    const { citadel, apps, days, now, shipTimes = [] } = data;
+    const { citadel, apps, days, now, shipTimes = [] } = /** @type {StatusData} */ (data);
     const mine = apps.filter((a) => scope === 'all' || a.scheme === scope).sort((x, y) => x.title.localeCompare(y.title));
     const app = mine.find((a) => `app:${a.name}` === picked);
     if (!app) picked = 'citadel';
@@ -960,7 +1075,7 @@ export function statusPane(onData = () => {}) {
     ix = { target: app ? `app:${app.name}` : 'citadel', looks: (app ?? citadel).looks ?? {}, verdict: v, ask: !!app || citadel.canInvestigate !== false };
     // Each reason names the minion on its tile (#1273), the way the CI page names a red's fix minion.
     const why = v.reasons.flatMap((r, i) => {
-      const m = ix.looks[v.tiles?.[i]]?.minion;
+      const m = /** @type {Investigating} */ (ix).looks[v.tiles?.[i]]?.minion;
       return [i ? ' · ' : '', r, ...(m ? [' (', h('a', { href: `#/p/${m.project}/t/${m.number}`, title: m.title }, `#${m.number}`), ')'] : [])];
     });
     detail.replaceChildren(
@@ -981,7 +1096,7 @@ export function statusPane(onData = () => {}) {
         onData(data);
       } else detail.replaceChildren(h('p', { class: 'muted' }, 'This server keeps no status.'));
     } catch (err) {
-      if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read status: ${err.message}`));
+      if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read status: ${/** @type {Error} */ (err).message}`));
     }
   }, REFRESH_MS);
   /** Show it for `to` (a scheme's id or 'all'), once it's on the page: the first call reads, and the reads go on while it shows. */
@@ -1000,19 +1115,24 @@ export function statusPane(onData = () => {}) {
 }
 
 /** The worst verdict on the page: Citadel's or any of your apps'. */
+/** @param {StatusData} data */
 export function worstOf(data) {
-  return [data.citadel.verdict, ...data.apps.map((a) => a.verdict)].reduce((w, v) => (RANK[v.tone] > RANK[w.tone] ? v : w), { tone: 'ok' });
+  return [data.citadel.verdict, ...data.apps.map((a) => a.verdict)].reduce((w, v) => (RANK[v.tone] > RANK[w.tone] ? v : w), /** @type {Pick<StatusVerdict, 'tone'>} */ ({ tone: 'ok' }));
 }
 
 // The chips (the shelf's and the top bar's) share one read a minute, like CI's.
+/** @type {Set<WeakRef<HTMLAnchorElement>>} */
 const chips = new Set();
+/** @type {{ tone: string, title: string } | null} */
 let chipRead = null;
+/** @param {HTMLAnchorElement} c @param {{ title: string, tone: string }} read */
 const paintChip = (c, { title, tone }) => {
   c.title = title;
   c.setAttribute('aria-label', title);
-  c.querySelector('.dot').className = `dot ${DOT[tone]}`;
+  /** @type {Element} */ (c.querySelector('.dot')).className = `dot ${DOT[tone]}`;
 };
 // Held weakly: a chip in a page left behind would otherwise keep that whole page until the next minute's read (#1747).
+/** @param {(c: HTMLAnchorElement) => void} f */
 const eachChip = (f) => {
   for (const r of chips) {
     const c = r.deref();
@@ -1024,11 +1144,12 @@ const chipPoll = poller(async () => {
   eachChip(() => {});
   if (!chips.size) return false;
   try {
+    /** @type {StatusData | null} */
     const data = await api('api/status');
     if (data) {
-      const bad = [['Citadel', data.citadel.verdict], ...data.apps.map((a) => [a.title, a.verdict])].filter(([, v]) => v.tone !== 'ok');
+      const bad = /** @type {[string, StatusVerdict][]} */ ([['Citadel', data.citadel.verdict], ...data.apps.map((a) => [a.title, a.verdict])]).filter(([, v]) => v.tone !== 'ok');
       chipRead = { tone: worstOf(data).tone, title: bad.length ? `Status: ${bad.map(([n, v]) => `${n} ${WORD[v.tone].toLowerCase()}`).join('; ')}` : 'Status: Citadel and your apps are OK' };
-      eachChip((c) => paintChip(c, chipRead));
+      eachChip((c) => paintChip(c, /** @type {{ tone: string, title: string }} */ (chipRead)));
     }
   } catch {
     // The last colour stays: the next minute asks again.
@@ -1036,7 +1157,9 @@ const chipPoll = poller(async () => {
 }, 60_000);
 
 /** The Status chip: a dot and "Status", opening the page for the scheme on screen (or `projectId`). */
+/** @param {number | null} [projectId] */
 export function statusChip(projectId = null) {
+  /** @type {HTMLAnchorElement} */
   const c = h(
     'a',
     {

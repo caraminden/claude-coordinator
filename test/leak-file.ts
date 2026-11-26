@@ -11,8 +11,12 @@
 // Anything left fails the file, naming what it was, unless test/leak-baseline.json allows that many (a list that only
 // shrinks, for files that leaked before the guard). Then it cleans up: stops the units, kills the processes, removes the
 // folder, so a leak costs one red, never a pile on the box.
+// A file killed by a signal (the run's time limit, a killed runner) never gets to 'exit' (#1999: a land.sh ran for 15
+// hours after citadel-test's limit). So each file also starts a reaper, in a session of its own and in nobody's tree, that
+// waits for the file's process to go (and kills it when the runner is gone first: nobody is left to hear it) and, if its
+// folder is still there, does the same cleanup.
 // Node builtins only: it loads in every test file, before the file's own imports.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -290,6 +294,19 @@ function afterFailsTheFile() {
   syncBuiltinESMExports();
 }
 
+/** The reaper's own variables: the file it waits for. Not FILE_ENV or an argument, so nobody counts it as a leftover. */
+const REAP_ID = 'CITADEL_LEAK_REAP_ID';
+const REAP_DIR = 'CITADEL_LEAK_REAP_DIR';
+
+/** Wait for `pid` or its `runner` to go, and take the file with the runner; if it left `dir` behind it never cleaned up, so run this module again to do that. */
+function startReaper(pid: number, runner: number, id: string, dir: string) {
+  const env: NodeJS.ProcessEnv = { ...process.env, [REAP_ID]: id, [REAP_DIR]: dir };
+  delete env[FILE_ENV]; // an outer file's, in a nested run
+  const wait = 'while kill -0 "$1" && kill -0 "$2"; do sleep 0.5; done; kill -0 "$2" || kill -KILL "$1"; sleep 0.5; [ ! -d "$CITADEL_LEAK_REAP_DIR" ] || exec "$3" --no-warnings "$4"';
+  // The outer sh returns at once, so the reaper is init's child, not the file's.
+  spawnSync('sh', ['-c', 'setsid sh -c "$0" reap "$@" </dev/null >/dev/null 2>&1 &', wait, String(pid), String(runner), process.execPath, import.meta.filename], { env, stdio: 'ignore' });
+}
+
 function install() {
   afterFailsTheFile();
   const id = randomUUID();
@@ -300,6 +317,7 @@ function install() {
   const dir = mkdtempSync(join(tmpdir(), 'f-'));
   process.env.TMPDIR = dir;
   const file = relative(import.meta.dirname, process.argv[1] ?? '?');
+  startReaper(process.pid, process.ppid, id, dir);
   // After every 'exit' listener: some remove a test's scratch folder or stop its child there (test/helpers.ts testPins).
   const emit = process.emit;
   process.emit = function (this: NodeJS.Process, event: string | symbol, ...args: unknown[]) {
@@ -324,4 +342,6 @@ function install() {
   } as typeof process.emit;
 }
 
-if (isMainThread && process.env[PARENT_ENV] && process.env[PARENT_ENV] === String(process.ppid)) install();
+const reap = process.env[REAP_DIR];
+if (reap && process.argv[1] === import.meta.filename) cleanUp({ self: process.pid, id: process.env[REAP_ID]!, dir: reap });
+else if (isMainThread && process.env[PARENT_ENV] && process.env[PARENT_ENV] === String(process.ppid)) install();

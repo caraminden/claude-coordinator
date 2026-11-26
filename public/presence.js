@@ -2,14 +2,18 @@
 // open or wrote in it in the last 10 minutes (src/presence.ts). This tab reports the chat it has open.
 import { api, chatInSight, h, me, view } from './base.js';
 
+/** @import { Ticket } from './types.js' */
+
 const HEARTBEAT_MS = 30_000; // src/presence.ts HEARTBEAT_MS
+/** @type {string | null} */
 let stream = null;
+/** @type {number | null | undefined} */
 let sent; // the chat last reported, so a route change reports at once and nothing else does
-/** projectId → { ticketId: [names] }, as the server last said. */
+/** projectId → { ticketId: [names] }, as the server last said. @type {Map<number, Record<number, string[]>>} */
 const byScheme = new Map();
 
 /** The stream's hello: a new stream id, so report again under it. */
-export function presenceHello(id) {
+export function presenceHello(/** @type {string} */ id) {
   stream = id;
   sent = undefined;
   // The server sends who is where right after the hello; anything kept from before it may have gone meanwhile.
@@ -30,21 +34,24 @@ export function reportPresence(force = false) {
 setInterval(() => document.visibilityState === 'visible' && reportPresence(true), HEARTBEAT_MS);
 document.addEventListener('visibilitychange', () => reportPresence());
 
-/** A presence message from the stream; true when it's about the scheme on screen. */
+/**
+ * A presence message from the stream (src/presence.ts Msg); true when it's about the scheme on screen.
+ * @param {{ projectId: number, tickets: Record<number, string[]> }} msg
+ */
 export function onPresenceMsg(msg) {
   byScheme.set(msg.projectId, msg.tickets);
   return view?.projectId === msg.projectId;
 }
 
 /** Other people in a chat right now, never you. */
-export function othersIn(t) {
+export function othersIn(/** @type {Pick<Ticket, 'id' | 'project_id'>} */ t) {
   return (byScheme.get(t.project_id)?.[t.id] ?? []).filter((n) => n !== me);
 }
 
-const hereText = (names) => (names.length === 1 ? `${names[0]} is here` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are here`);
+const hereText = (/** @type {string[]} */ names) => (names.length === 1 ? `${names[0]} is here` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are here`);
 
 /** The row's chip: a green dot and the first person's initial (+N for more); nothing when it's only you. */
-export function presenceChip(t) {
+export function presenceChip(/** @type {Pick<Ticket, 'id' | 'project_id'>} */ t) {
   const names = othersIn(t);
   if (!names.length) return '';
   const text = hereText(names);
@@ -52,7 +59,7 @@ export function presenceChip(t) {
 }
 
 /** The chat header's line: "● Josh is here". */
-export function presenceHead(t) {
+export function presenceHead(/** @type {Pick<Ticket, 'id' | 'project_id'>} */ t) {
   const names = othersIn(t);
   if (!names.length) return '';
   return h('span', { class: 'presence-head', title: 'Has this chat open or wrote in it in the last 10 minutes' }, h('i', { class: 'presence-dot', 'aria-hidden': 'true' }), hereText(names));

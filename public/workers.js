@@ -8,11 +8,15 @@ import { tooCold, waitsLine } from './threadstate.js';
 import { optimistic } from './ui/optimistic.js';
 import { lineMoved, openLine, quickLane } from './worker-line.js';
 
+/** @import { WorkerLimit, WorkerMachine, WorkerPlace, WorkersTile } from './types.js' */
+
 const READ_MS = 3_000;
 const SIZES = Array.from({ length: 50 }, (_, i) => i + 1);
+/** @param {number} n @param {string} word */
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The line moved: `line` is every waiting minion's id, next first, `paused` who paused them all. */
+/** @param {{ line: number[]; paused: string | null }} msg */
 export function onWorkers({ line, paused }) {
   lineMoved();
   if (view?.kind !== 'project') return;
@@ -25,21 +29,25 @@ export function onWorkers({ line, paused }) {
 }
 
 /** The tile, reading the pool every 3 s while `page` shows. */
+/** @param {HTMLElement} page */
 export function workersPanel(page) {
+  /** @type {WorkersTile | null} */
   let w = null;
+  /** @type {string | null} */
   let failed = null;
   let first = true; // the page is put in after this returns
   let open = false; // the size list
   const limitsOpen = new Set(); // the collapsed Limits sections that are open, by place
   let sent = 0; // changes on their way: a read started before one lands would show the old state
   const el = h('section', { class: 'st-tile wide st-lines st-workers', 'data-tile': 'workers' });
+  /** @param {Record<string, unknown>} body @param {Partial<WorkersTile>} next @param {string} label */
   const set = (body, next, label) => {
     const was = w;
     sent++;
     return optimistic({
       key: el,
       apply: () => {
-        w = { ...w, ...next };
+        w = /** @type {WorkersTile} */ ({ ...w, ...next });
         draw();
       },
       send: () => api('api/workers', { method: 'PUT', body }),
@@ -56,17 +64,21 @@ export function workersPanel(page) {
       .catch(() => {})
       .finally(() => sent--);
   };
+  /** @param {boolean | 'stop'} how */
   const pause = (how) => {
-    if (how === 'stop' && !confirm(`Stop the ${plural(w.running, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
+    if (how === 'stop' && !confirm(`Stop the ${plural(/** @type {WorkersTile} */ (w).running, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
     set({ pause: how }, { paused: how ? { by: 'you', at: Date.now(), ...(how === 'stop' ? { stop: true } : {}) } : null }, how ? 'pause minions' : 'resume minions');
   };
   /** A change to one place's size or limits: perigee's (id 0) are the tile's own, a machine's its row's. */
-  const setPlace = (place, body, next, label) => (place.id ? set({ ...body, place: place.id }, { machines: w.machines.map((m) => (m.id === place.id ? { ...m, ...next } : m)) }, `${label} on ${place.name}`) : set(body, next, label));
+  /** @param {WorkerPlace} place @param {Record<string, unknown>} body @param {Partial<WorkerPlace>} next @param {string} label */
+  const setPlace = (place, body, next, label) => (place.id ? set({ ...body, place: place.id }, { machines: /** @type {WorkersTile} */ (w).machines.map((m) => (m.id === place.id ? { ...m, ...next } : m)) }, `${label} on ${place.name}`) : set(body, next, label));
+  /** @param {WorkerPlace} place @param {WorkerLimit} row @param {number | null} value */
   const setLimit = (place, row, value) => {
     const limits = place.limits.map((l) => (l.key === row.key ? { ...l, value: value ?? l.default, ...(value === null ? { by: undefined, at: undefined } : { by: 'you', at: Date.now() }) } : l));
     return setPlace(place, { limits: { [row.key]: value } }, { limits }, `set ${row.label.toLowerCase()}`);
   };
   /** One limit: its number, what the last 7 days did against it, who set it, and Reset to default. */
+  /** @param {WorkerPlace} place @param {WorkerLimit} row */
   const limitRow = (place, row) => {
     const input = h('input', {
       type: 'number',
@@ -77,9 +89,11 @@ export function workersPanel(page) {
       max: row.hi,
       step: row.unit === 'GB' ? 0.5 : 1,
       value: String(row.value),
+      /** @param {Event} e */
       onchange: (e) => {
-        const n = Number(e.target.value);
-        if (e.target.value === '' || !Number.isFinite(n) || n === row.value) return draw();
+        const { value } = /** @type {HTMLInputElement} */ (e.target);
+        const n = Number(value);
+        if (value === '' || !Number.isFinite(n) || n === row.value) return draw();
         setLimit(place, row, n === row.default ? null : n);
       },
     });
@@ -93,16 +107,18 @@ export function workersPanel(page) {
       row.by ? button(`reset-${place.id}-${row.key}`, 'Reset to default', `Put back ${row.default} ${row.unit}`, () => setLimit(place, row, null)) : '',
     );
   };
+  /** @param {WorkerPlace} place @param {string} line */
   const limitsOf = (place, line) => {
     const changed = place.limits.filter((l) => l.by).length;
     return h(
       'details',
-      { class: 'st-limits', open: limitsOpen.has(place.id), ontoggle: (e) => limitsOpen[e.target.open ? 'add' : 'delete'](place.id) },
+      { class: 'st-limits', open: limitsOpen.has(place.id), ontoggle: /** @param {Event} e */ (e) => limitsOpen[/** @type {HTMLDetailsElement} */ (e.target).open ? 'add' : 'delete'](place.id) },
       h('summary', {}, 'Limits ', changed ? toneChip('info', `${changed} changed`) : toneChip('neutral', 'all defaults')),
       h('p', { class: 'muted small' }, line),
       ...place.limits.map((row) => limitRow(place, row)),
     );
   };
+  /** @param {WorkerPlace} place @param {number} [most] all sizes when left out */
   const sizePick = (place, most) => {
     const { pool } = place;
     const sizes = [...new Set([...SIZES.slice(0, most), ...(pool.fixed ? [pool.fixed.size] : [])])].sort((a, b) => a - b);
@@ -114,9 +130,11 @@ export function workersPanel(page) {
         onpointerdown: () => (open = true),
         onkeydown: () => (open = true),
         onblur: () => (open = false),
+        /** @param {Event} e */
         onchange: (e) => {
           open = false;
-          const n = e.target.value === 'auto' ? null : Number(e.target.value);
+          const { value } = /** @type {HTMLSelectElement} */ (e.target);
+          const n = value === 'auto' ? null : Number(value);
           const { fixed: _, ...auto } = pool;
           setPlace(place, { size: n }, { size: n ?? pool.size, pool: n === null ? auto : { ...pool, fixed: { size: n, by: 'you' } } }, 'set the workers');
         },
@@ -126,6 +144,7 @@ export function workersPanel(page) {
     );
   };
   /** One place's row (Josh, 2026-11-25, take S-tile): its workers, why Auto moved, and what keeps new turns off it. */
+  /** @param {WorkerPlace} p @param {HTMLElement | string | null} chip @param {(string | false | null | 0)[][]} notes @param {(HTMLElement | string)[] | false | null} controls */
   const placeRow = (p, chip, notes, controls) =>
     h(
       'div',
@@ -135,12 +154,14 @@ export function workersPanel(page) {
       ...notes.map((line) => h('div', { class: 'st-sub muted' }, line.filter(Boolean).join(' · '))),
       controls ? h('div', { class: 'st-place-act' }, ...controls) : '',
     );
+  /** @param {WorkerMachine} m */
   const autoLine = (m) => {
     const { pool } = m;
     if (pool.fixed) return `Set to ${pool.fixed.size} by ${pool.fixed.by}`;
     if (m.pressed && m.size <= m.min) return `Auto: at its fewest, though ${m.pressed} (CI's tests there count too)`;
     return pool.why ? `Auto: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}` : 'Auto';
   };
+  /** @param {WorkerMachine} m */
   const machineRow = (m) =>
     placeRow(
       m,
@@ -151,9 +172,10 @@ export function workersPanel(page) {
       ],
       m.mine && [h('label', { class: 'small' }, 'Turns at once', sizePick(m, m.cap)), limitsOf(m, `What Auto steers by on ${m.name}. The number it takes is never over ${m.cap}, the cap set on that computer.`)],
     );
+  /** @param {string} key @param {string} text @param {string} title @param {() => void} onclick */
   const button = (key, text, title, onclick) => h('button', { type: 'button', class: 'cui-btn cui-small', 'data-key': key, title, onclick }, text);
   const draw = () => {
-    const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
+    const focused = el.contains(document.activeElement) ? /** @type {HTMLElement} */ (document.activeElement).dataset.key : undefined;
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
     page.dispatchEvent(new CustomEvent('pool', { detail: w.size })); // the mark on How many minions fit (box-capacity.js)
@@ -196,7 +218,7 @@ export function workersPanel(page) {
         ),
       ),
     );
-    if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+    if (focused) /** @type {HTMLElement | null} */ (el.querySelector(`[data-key="${CSS.escape(focused)}"]`))?.focus();
   };
   const load = async () => {
     if (!page.isConnected && !first) return;
@@ -207,7 +229,7 @@ export function workersPanel(page) {
         if (!sent) w = now;
         failed = null;
       } catch (err) {
-        failed = err.message;
+        failed = /** @type {Error} */ (err).message;
       }
       // An open size list would close under the redraw.
       if (!open && !el.querySelector('.st-limits input:focus')) draw();

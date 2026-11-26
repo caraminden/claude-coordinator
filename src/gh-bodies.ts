@@ -7,6 +7,7 @@
 export interface GhRun {
   id: number;
   name?: string | null;
+  display_title?: string;
   path?: string;
   workflow_id?: number;
   event?: string;

@@ -1,5 +1,8 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
+/** @import { ArtifactFile, SharedFile, Ticket, View } from './types.js' */
+/** @typedef {Pick<View, 'project' | 'coordinator' | 'taskmasters' | 'seen' | 'personNotes' | 'pins' | 'builds' | 'buildPreviews' | 'artifacts' | 'shared' | 'machines'> & { tickets: Ticket[], closed: ReturnType<typeof closedSnapshot> }} Cached A scheme as it was left (rememberScheme). */
+/** @typedef {{ kind: string, number?: number | null, id?: number, home?: boolean, orders?: boolean, folder?: string, machine?: string, schedule?: number | null, focus?: number | null, artifact?: ArtifactFile, file?: SharedFile & { path: string } }} Main What the route asks the main panel to show. */
+import { account, api, h, isCoordinator, loadPanelState, me, openView, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { goReleases, releasesShell } from './ci.js';
 import * as settings from './settings.js';
@@ -23,6 +26,7 @@ import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox, stripWaits, t
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { chainsPage } from './chains.js';
+import { cabalPage } from './cabal.js';
 import { replaceHash } from './navstack.js';
 import * as memory from './memory.js';
 import * as decisions from './decisions.js';
@@ -56,7 +60,7 @@ const PAGE_MODULES = {
   'properties.js': properties,
 };
 /** The function that draws a Settings or Orders page, from its row. */
-const pageFn = (kind) => PAGE_MODULES[pageRow(kind).module][pageRow(kind).page];
+const pageFn = (kind) => PAGE_MODULES[/** @type {import('./settings-pages.js').PageRow} */ (pageRow(kind)).module][/** @type {import('./settings-pages.js').PageRow} */ (pageRow(kind)).page];
 
 /**
  * The Releases page (#626) on `scope` ('all' or a scheme's id), `hl` a change to highlight. On the scheme already on
@@ -67,10 +71,10 @@ const pageFn = (kind) => PAGE_MODULES[pageRow(kind).module][pageRow(kind).page];
 // Defender. Offered in a browser or the installed web app on Windows; the app itself says so through its preload.
 // Its install zip is #1148's feed for the Citadel scheme (2), which publishes it as "citadel".
 const DESKTOP_APP = 'api/desktop/2/citadel/install.zip';
-export const offersApp = (nav = navigator, desktop = window.citadelDesktop) => !desktop && /Windows/.test(nav.userAgentData?.platform ?? nav.userAgent ?? '');
+export const offersApp = (nav = /** @type {Navigator & { userAgentData?: { platform?: string } }} */ (navigator), desktop = window.citadelDesktop) => !desktop && /Windows/.test(nav.userAgentData?.platform ?? nav.userAgent ?? '');
 const getApp = () => (offersApp() ? h('a', { class: 'get-app', href: DESKTOP_APP, download: '', title: 'Download the Citadel app: Citadel in its own window on this PC. Unzip it and run citadel.exe', 'aria-label': 'Download the Citadel app' }, 'Get app') : null);
 
-/** The Releases page (#1423: Releases, CI and Status as its tabs) on `to` = { scope, tab, hl }: an open one switches in place. */
+/** The Releases page (#1423: Releases, CI and Status as its tabs) on `to` = { scope, tab, hl }: an open one switches in place. @param {number} projectId @param {Parameters<typeof goReleases>[1]} to */
 export async function showReleases(projectId, to) {
   if (goReleases(projectId, to) && view?.main === 'releases') return;
   if (!(view?.kind === 'project' && view.projectId === projectId && !view.home && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
@@ -98,16 +102,19 @@ export async function showReleases(projectId, to) {
     ...chatView(null, null),
   });
   renderCrumbs({ kind: 'releases' });
-  document.querySelector('#app .split').lastElementChild.replaceWith(releasesShell());
+  mainPane().replaceWith(releasesShell());
   // On phones the panels sit above the page; collapse them away as switchChat does.
-  if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.citadel-drawer)')) el.open = false;
+  if (matchMedia('(max-width: 800px)').matches) for (const el of /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySelectorAll('#app .panels > details:not(.citadel-drawer)'))) el.open = false;
   renderShelf();
   renderSidebar();
   renderSchemesShelf();
   window.scrollTo(0, 0);
 }
 
-/** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
+/** The main panel's element, which a switch of chat or page replaces. */
+const mainPane = () => /** @type {Element} */ (/** @type {Element} */ (document.querySelector('#app .split')).lastElementChild);
+
+/** Old links address a thread by its global id (#/t/<id>); send them to its project address. @param {number} ticketId */
 export async function showTicket(ticketId) {
   const seq = routeSeq;
   const { ticket } = await api(`api/tickets/${ticketId}`);
@@ -117,7 +124,7 @@ export async function showTicket(ticketId) {
 }
 
 /** The Minions | Orders tabs in the panel's header; a tab switches the panel, never collapses it (a button inside a summary doesn't toggle it). */
-const panelTabs = (...labels) => {
+const panelTabs = (/** @type {(Node | string)[]} */ ...labels) => {
   const box = tabs({
     items: [
       ['minions', labels[0]],
@@ -125,7 +132,7 @@ const panelTabs = (...labels) => {
     ],
     current: 'minions',
     className: 'label panel-tabs',
-    onSelect: (name) => clickPanelTab(box.element.closest('.sidebar'), name),
+    onSelect: (/** @type {string} */ name) => clickPanelTab(/** @type {HTMLElement} */ (box.element.closest('.sidebar')), name),
   });
   const [minionsTab, ordersTab] = box.element.querySelectorAll('button');
   minionsTab.dataset.part = 'minions-tab'; // literal names: test/show-parts.test.ts greps for them
@@ -135,7 +142,7 @@ const panelTabs = (...labels) => {
 };
 
 /** Per scheme, the last chat hash and the last Orders hash you were on, so a tab click goes back to where you were. */
-const lastHash = new Map();
+/** @type {Map<string, { chat?: string, orders?: string }>} */ const lastHash = new Map();
 function noteHash() {
   const m = location.hash.match(/^#\/p\/(\d+)(?:\/(t\/\d+|[a-z-]+))?(?:[?/].*)?$/);
   if (!m) return;
@@ -148,7 +155,7 @@ function noteHash() {
 addEventListener('hashchange', noteHash);
 noteHash();
 
-/** A tab click: the tab that's already selected does nothing; the other swaps the panel and the main pane. */
+/** A tab click: the tab that's already selected does nothing; the other swaps the panel and the main pane. @param {HTMLElement} sidebar @param {string} name */
 function clickPanelTab(sidebar, name) {
   const orders = name === 'orders';
   if (sidebar.classList.contains('show-orders') === orders) return;
@@ -160,23 +167,25 @@ function clickPanelTab(sidebar, name) {
   if (location.hash.split('?')[0] !== to) location.hash = to;
 }
 
-/** Show the minions or the Orders pages in the panel. */
+/** Show the minions or the Orders pages in the panel. @param {HTMLElement} sidebar @param {string} name */
 function showPanelTab(sidebar, name) {
   const orders = name === 'orders';
   sidebar.classList.toggle('show-orders', orders);
-  for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) {
+  for (const t of /** @type {NodeListOf<HTMLElement>} */ (sidebar.querySelectorAll(':scope > summary .panel-tab'))) {
     const on = t.classList.contains('orders-tab') === orders;
     t.setAttribute('aria-selected', String(on));
     t.tabIndex = on ? 0 : -1;
   }
 }
 
+/** @param {Main} main */
 function renderCrumbs(main) {
-  const { project } = view;
+  const v = openView();
+  const { project } = v;
   // The scheme list's row carries the icon's version; the scheme's own doesn't.
-  const icon = () => schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project);
+  const icon = () => schemeIcon(v.projects?.find((p) => p.id === project.id) ?? project);
   const projectLink = h('a', { href: `#/p/${project.id}`, class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name));
-  const filesLink = (to) => h('a', { href: `#/p/${project.id}/${to}` }, 'Files');
+  const filesLink = (/** @type {string} */ to) => h('a', { href: `#/p/${project.id}/${to}` }, 'Files');
   // Orders pages (#1071) sit under Orders, the rest under Settings.
   const settingsLink = isOrdersPage(main.kind) ? h('a', { href: `#/p/${project.id}/orders` }, 'Orders') : h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(
@@ -188,28 +197,30 @@ function renderCrumbs(main) {
           ? [projectLink, ' / ', 'Settings']
           : main.kind === 'orders'
             ? [projectLink, ' / ', 'Orders']
-            : pageRow(main.kind) && !pageRow(main.kind).own
-              ? [projectLink, ' / ', settingsLink, ' / ', pageRow(main.kind).crumb ?? pageRow(main.kind).label]
+            : pageRow(main.kind) && !(/** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).own)
+              ? [projectLink, ' / ', settingsLink, ' / ', /** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).crumb ?? /** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).label]
               : main.kind === 'artifact'
-                ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
+                ? [projectLink, ' / ', filesLink('artifacts'), ' / ', /** @type {ArtifactFile} */ (main.artifact).name]
                 : main.kind === 'releases'
                   ? [projectLink, ' / ', 'Releases']
                   : main.kind === 'chains'
                     ? [projectLink, ' / ', main.focus ? h('a', { href: `#/p/${project.id}/chains` }, 'Chains') : 'Chains']
-                    : main.kind === 'schedules'
-                      ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
-                      : main.kind === 'shared'
-                        ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
-                        : view.id !== view.coordinator.id
-                          ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
-                          : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]),
+                    : main.kind === 'cabal'
+                      ? [projectLink, ' / ', `Cabal of #${main.focus}`]
+                      : main.kind === 'schedules'
+                        ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
+                        : main.kind === 'shared'
+                          ? [projectLink, ' / ', filesLink('shared'), ' / ', /** @type {SharedFile} */ (main.file).name]
+                          : v.id !== v.coordinator.id
+                            ? [projectLink, ' / ', `#${/** @type {Ticket} */ (v.ticket).number ?? /** @type {Ticket} */ (v.ticket).id}`]
+                            : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]),
   );
 }
 
 let phoneWidth = null;
 /**
  * A project page: artifacts and threads on the side, and in the main panel a chat with the
- * coordinator (or the chosen ticket), the artifact browser, or one artifact.
+ * coordinator (or the chosen ticket), the artifact browser, or one artifact. @param {number} projectId @param {Main} [main]
  */
 export async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const seq = routeSeq;
@@ -263,12 +274,12 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const [artifacts, shared, machines] = stale ? [stale.artifacts, stale.shared, stale.machines] : files ? await files : [[], [], []]; // null: that read failed
   let tickets = open;
   // A link to a dismissed minion fetches that one minion; any other open draws without it.
-  const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((t) => t.number === main.number);
+  const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((/** @type {Ticket} */ t) => t.number === main.number);
   const found = numbered && (await numbered);
   if (findClosed) tickets = open.concat(found?.status === 'closed' ? [found] : (await api(`api/projects/${projectId}?tickets=closed&number=${main.number}`)).tickets);
   let chatId = null;
   if (main.kind === 'chat') {
-    chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
+    chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((/** @type {Ticket} */ t) => t.number === main.number)?.id);
     if (!chatId) {
       // An old or mistyped link: open the scheme, with the page around it, and say why.
       if (seq === routeSeq) {
@@ -279,14 +290,14 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     }
   }
   // The minion came with the scheme's list; its history is drawn from the cache when it's there (#527).
-  const ticket = !chatId ? null : chatId === coordinator.id ? coordinator : (tickets.find((t) => t.id === chatId) ?? (await api(`api/tickets/${chatId}`)).ticket);
+  const ticket = !chatId ? null : chatId === coordinator.id ? coordinator : (tickets.find((/** @type {Ticket} */ t) => t.id === chatId) ?? (await api(`api/tickets/${chatId}`)).ticket);
   // Your Taskmaster in a scheme with several (#919) opens as Mine or Everyone, merged across them (#920).
   const merged = chatId === coordinator.id ? mergedView(projectId, chatId, taskmasters, tmViewMode()) : null;
   const src = merged?.src ?? chatId;
   const head = await early;
   const guessed = chatId && chatId === head?.id && !merged;
-  const cached = guessed ? head.cached : chatId ? cachedEvents(src) : null;
-  const page = cached ?? (guessed ? await head.page : null) ?? (chatId ? await loadEvents(src) : null);
+  const cached = guessed ? head?.cached : chatId ? cachedEvents(/** @type {number | string} */ (src)) : null;
+  const page = cached ?? (guessed ? await head?.page : null) ?? (chatId ? await loadEvents(/** @type {number | string} */ (src)) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
   // Coming to Home from elsewhere is a new visit: its rows start afresh.
@@ -298,7 +309,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     projectId,
     project,
     coordinator,
-    tickets: new Map(tickets.map((t) => [t.id, t])),
+    tickets: new Map(tickets.map((/** @type {Ticket} */ t) => /** @type {[number, Ticket]} */ ([t.id, t]))),
     taskmasters: taskmasters ?? [], // every Taskmaster session once the scheme has several (#919): { id, person_id, person_name }
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
@@ -314,8 +325,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     file: main.file ?? null,
     ...chatView(chatId, ticket, merged),
   });
-  if (stale) restoreClosed(view.tickets, stale.closed);
-  else setClosedTotal(view.tickets, dismissed);
+  if (stale) restoreClosed(openView().tickets, stale.closed);
+  else setClosedTotal(openView().tickets, dismissed);
   renderCrumbs(main);
   try {
     localStorage.setItem(LAST_SCHEME, String(projectId));
@@ -326,7 +337,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   // One watcher for the page's life, its handler replaced by each draw: a watcher with a handler is never freed, so one
   // made per draw kept every scheme page ever drawn, and the tab grew until it froze (#1747).
   const narrowQuery = (phoneWidth ??= matchMedia('(max-width: 800px)'));
-  const panelOpen = (name) => !narrowQuery.matches && loadPanelState()[name] !== false;
+  const panelOpen = (/** @type {string} */ name) => !narrowQuery.matches && loadPanelState()[name] !== false;
   // The overview panel: account and usage (standing in for the top bar, which wider screens hide
   // on project pages), the projects, then this project's pinned and recent artifacts.
   const shelf = h(
@@ -346,7 +357,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
           href: '#',
           class: 'point-entry',
           'data-part': 'point-at-drawer',
-          onclick: (e) => {
+          onclick: (/** @type {Event} */ e) => {
             e.preventDefault();
             startPick();
           },
@@ -398,10 +409,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   // An Orders page, or the Orders crumb, opens on the Orders tab; anything else on the minions.
   showPanelTab(sidebar, isOrdersPage(main.kind) || main.orders ? 'orders' : 'minions');
   if (main.orders) sidebar.open = true;
-  for (const [name, el] of [
+  for (const [name, el] of /** @type {[string, HTMLDetailsElement][]} */ ([
     ['shelf', shelf],
     ['threads', sidebar],
-  ]) {
+  ])) {
     el.addEventListener('toggle', () => {
       if (!narrowQuery.matches) savePanelState({ ...loadPanelState(), [name]: el.open });
     });
@@ -420,7 +431,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
           ? settingsHome()
           : main.kind === 'orders'
             ? settingsHome(true)
-            : pageRow(main.kind) && !pageRow(main.kind).own
+            : pageRow(main.kind) && !(/** @type {import('./settings-pages.js').PageRow} */ (pageRow(main.kind)).own)
               ? pageFn(main.kind)(main)
               : main.kind === 'releases'
                 ? releasesShell()
@@ -428,11 +439,13 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
                   ? schedulesPage(projectId, main.schedule)
                   : main.kind === 'chains'
                     ? chainsPage(projectId, main.focus)
-                    : main.kind === 'artifact'
-                      ? artifactViewer(main.artifact)
-                      : main.kind === 'shared'
-                        ? sharedViewer(main.file)
-                        : chatSection(chatId, ticket);
+                    : main.kind === 'cabal'
+                      ? cabalPage(projectId, Number(main.focus))
+                      : main.kind === 'artifact'
+                        ? artifactViewer(/** @type {ArtifactFile} */ (main.artifact))
+                        : main.kind === 'shared'
+                          ? sharedViewer(/** @type {NonNullable<typeof main.file>} */ (main.file))
+                          : chatSection(chatId, ticket);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.
@@ -465,10 +478,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 }
 
 /** A scheme's artifacts and shared files, and your machines (an admin's: every one, #306). An empty shelf beats a broken page if the server is older than this front end. */
-const shelfFiles = (projectId) => Promise.all([api(`api/projects/${projectId}/artifacts`).catch(() => null), api(`api/projects/${projectId}/shared`).catch(() => null), api('api/machines').catch(() => [])]);
+const shelfFiles = (/** @type {number} */ projectId) => Promise.all([api(`api/projects/${projectId}/artifacts`).catch(() => null), api(`api/projects/${projectId}/shared`).catch(() => null), api('api/machines').catch(() => [])]);
 
 /** A chat's or Home's first paint left the files and machines till after (#1533): fill them in, unless the page has moved on. */
-async function fillShelf(projectId) {
+async function fillShelf(/** @type {number} */ projectId) {
   const [artifacts, shared, machines] = await shelfFiles(projectId);
   if (view?.kind !== 'project' || view.projectId !== projectId) return;
   view.machines = machines; // only the Machines page draws them, and it isn't one of these
@@ -476,7 +489,7 @@ async function fillShelf(projectId) {
 }
 
 // The schemes you've left this session, each as you left it, most recent last (#538).
-const schemeCache = new Map();
+/** @type {Map<number, Cached>} */ const schemeCache = new Map();
 const SCHEME_CACHE = 6;
 
 function rememberScheme() {
@@ -484,7 +497,7 @@ function rememberScheme() {
   const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, machines } = view;
   schemeCache.delete(projectId);
   schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], closed: closedSnapshot(tickets), seen, personNotes, pins, builds, buildPreviews, artifacts, shared, machines });
-  if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(schemeCache.keys().next().value);
+  if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(/** @type {number} */ (schemeCache.keys().next().value));
 }
 
 /** Signing out: the next person mustn't see this one's schemes drawn, even for a moment. */
@@ -496,13 +509,13 @@ export function forgetSchemes() {
  * Bring a scheme drawn from its last payload up to date in place (#538), with a ring by "Minions" meanwhile.
  * A failed fetch (a restart's gap) tries again, backing off to 30 s.
  */
-async function refreshScheme(projectId) {
-  let list = view.tickets;
+async function refreshScheme(/** @type {number} */ projectId) {
+  let list = openView().tickets;
   // The chat you're on, if the refresh brought a newer copy of it (one dismissed while you were away, say).
   const headUp = () => {
-    const shown = view.id === view.coordinator.id ? view.coordinator : list.get(view.id);
-    if (view.tickets !== list || !shown || shown === view.ticket) return;
-    view.ticket = shown;
+    const shown = openView().id === openView().coordinator.id ? openView().coordinator : list.get(/** @type {number} */ (openView().id));
+    if (openView().tickets !== list || !shown || shown === openView().ticket) return;
+    openView().ticket = shown;
     renderTicketHead();
   };
   const panel = document.querySelector('#app .sidebar');
@@ -511,27 +524,27 @@ async function refreshScheme(projectId) {
     before;
   for (let wait = 1000; !got; wait = Math.min(30_000, wait * 2)) {
     before = new Map(list); // what the stream changes meanwhile is newer than the answer
-    got = await Promise.all([api(`api/projects/${projectId}?tickets=open`), api(`api/projects/${projectId}/artifacts`).catch(() => view.artifacts), api(`api/projects/${projectId}/shared`).catch(() => view.shared), api('api/machines').catch(() => view.machines)]).catch(() => null);
+    got = await Promise.all([api(`api/projects/${projectId}?tickets=open`), api(`api/projects/${projectId}/artifacts`).catch(() => openView().artifacts), api(`api/projects/${projectId}/shared`).catch(() => openView().shared), api('api/machines').catch(() => openView().machines)]).catch(() => null);
     if (view?.kind !== 'project' || view.projectId !== projectId) return void panel?.removeAttribute('aria-busy'); // left the scheme; its page is gone
-    list = view.tickets; // a reconnect's resync may have swapped the list meanwhile: the answer goes onto the one shown
+    list = openView().tickets; // a reconnect's resync may have swapped the list meanwhile: the answer goes onto the one shown
     if (!got) await new Promise((r) => setTimeout(r, wait));
   }
   panel?.removeAttribute('aria-busy');
   const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, machines] = got;
   closedState(list).total = dismissed ?? 0;
-  const now = new Set(open.map((t) => t.id));
+  const now = new Set(open.map((/** @type {Ticket} */ t) => t.id));
   // Dismissed since you left: gone until the Dismissed list brings it back as it is now.
   let gone = false;
   for (const [id, t] of list)
-    if (t.status !== 'closed' && !now.has(id) && before.get(id) === t) {
+    if (t.status !== 'closed' && !now.has(id) && /** @type {Map<number, Ticket>} */ (before).get(id) === t) {
       list.delete(id);
       gone = true;
     }
   // The pages read so far start below these: read from the newest again (the rows already in hand are skipped).
   if (gone) Object.assign(closedState(list), { cursor: null, more: true });
-  for (const t of open) if (!(list.get(t.id)?.updated_at > t.updated_at)) list.set(t.id, t);
-  if (!(view.coordinator.updated_at > coordinator.updated_at)) view.coordinator = coordinator;
-  Object.assign(view, { project, taskmasters: taskmasters ?? view.taskmasters, seen: seen ?? view.seen, personNotes: person_notes ?? view.personNotes, pins: pins ?? view.pins, builds: builds ?? view.builds, buildPreviews: build_previews ?? view.buildPreviews, machines });
+  for (const t of open) if (!((list.get(t.id)?.updated_at ?? 0) > t.updated_at)) list.set(t.id, t);
+  if (!(openView().coordinator.updated_at > coordinator.updated_at)) openView().coordinator = coordinator;
+  Object.assign(openView(), { project, taskmasters: taskmasters ?? openView().taskmasters, seen: seen ?? openView().seen, personNotes: person_notes ?? openView().personNotes, pins: pins ?? openView().pins, builds: builds ?? openView().builds, buildPreviews: build_previews ?? openView().buildPreviews, machines });
   headUp();
   renderSidebar();
   setArtifacts(artifacts, shared);
@@ -543,20 +556,21 @@ async function refreshScheme(projectId) {
  * Show another chat of the project on screen in place of the main panel, fetching only that thread
  * (and only its events not already cached). False when the thread is not one we know of yet.
  */
+/** @param {Main} main @param {number} seq */
 async function switchChat(main, seq) {
-  let chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
+  let chatId = main.id ?? (main.number == null ? openView().coordinator.id : [...openView().tickets.values()].find((t) => t.number === main.number)?.id);
   // A dismissed minion the page hasn't read (one a search found, say): that one minion comes, not the list.
   if (!chatId && main.number != null) chatId = (await fetchClosedByNumber(main.number).catch(() => null))?.id;
   if (!chatId) return false;
   // The list already has the minion, kept current by the stream: draw the chat from it at once, with the
   // cached history when there is one, and fetch behind it (#527). Only a history not yet downloaded waits.
-  const ticket = chatId === view.coordinator.id ? view.coordinator : view.tickets.get(chatId);
+  const ticket = chatId === openView().coordinator.id ? openView().coordinator : openView().tickets.get(chatId);
   if (!ticket) return false; // a dismissed one the page hasn't read: the full load fetches it
-  const merged = chatId === view.coordinator.id ? mergedView(view.projectId, chatId, view.taskmasters, tmViewMode()) : null;
+  const merged = chatId === openView().coordinator.id ? mergedView(openView().projectId, chatId, openView().taskmasters, tmViewMode()) : null;
   const cached = cachedEvents(merged?.src ?? chatId);
   const page = cached ?? (await loadEvents(merged?.src ?? chatId));
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = openView();
   setView({
     kind,
     home,
@@ -580,15 +594,15 @@ async function switchChat(main, seq) {
     file: null,
     ...chatView(chatId, ticket, merged),
   });
-  if (isCoordinator(ticket)) view.coordinator = ticket;
-  else view.tickets.set(ticket.id, ticket);
+  if (isCoordinator(ticket)) openView().coordinator = ticket;
+  else openView().tickets.set(ticket.id, ticket);
   renderCrumbs(main);
-  document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket));
+  mainPane().replaceWith(chatSection(chatId, ticket));
   // On phones the panels sit above the chat; collapse them away as a fresh load would.
-  if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.citadel-drawer)')) el.open = false;
+  if (matchMedia('(max-width: 800px)').matches) for (const el of /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySelectorAll('#app .panels > details:not(.citadel-drawer)'))) el.open = false;
   renderShelf();
   renderSidebar();
-  if (view.home) homePanel(); // its row for the chat now open
+  if (openView().home) homePanel(); // its row for the chat now open
   revealActiveRow();
   const v = view;
   api(`api/tickets/${chatId}`)

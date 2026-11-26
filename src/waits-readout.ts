@@ -44,9 +44,12 @@ const hhmm = (ms: number, now: number) => {
   return `${Math.abs(ms - now) < 20 * 3_600_000 ? '' : `${p.weekday} `}${p.hour}:${p.minute}`;
 };
 
+/** Field `k` of a row's JSON column, whatever its kind (undefined when it has none): the readout reads every kind alike. */
+const field = (o: unknown, k: string): unknown => (typeof o === 'object' && o !== null ? Object.getOwnPropertyDescriptor(o, k)?.value : undefined);
+
 /** The minion a wait names: a relay's sender, a chain's leader, a wait on another minion's work. */
 export function otherId(r: Pick<Delivery, 'kind' | 'when_arg' | 'payload'>): number | null {
-  const id = Number(r.when_arg?.ticket ?? r.when_arg?.after ?? r.payload?.after ?? (r.kind === 'relay' ? r.payload?.ticket : null));
+  const id = Number(field(r.when_arg, 'ticket') ?? field(r.when_arg, 'after') ?? field(r.payload, 'after') ?? (r.kind === 'relay' ? field(r.payload, 'ticket') : null));
   return Number.isFinite(id) && id ? id : null;
 }
 function otherOf(store: Store, r: Delivery): Ticket | null {
@@ -91,7 +94,7 @@ function headlineOf(r: Delivery, other: Ticket | null, now: number): string {
 }
 
 /** The waiter's full words: a relay's text, a wake's note, a chain's reason. */
-const textOf = (r: Delivery) => String(r.payload?.note ?? r.payload?.reason ?? r.payload?.text ?? r.when_arg?.reason ?? '').slice(0, 2000);
+const textOf = (r: Delivery) => String(field(r.payload, 'note') ?? field(r.payload, 'reason') ?? field(r.payload, 'text') ?? field(r.when_arg, 'reason') ?? '').slice(0, 2000);
 
 /** The first sentence of `text`, minus a leading "#824 here:"; a long one is cut at its first colon (if that leaves a
  * phrase), else at a word, with "…". */
@@ -122,10 +125,10 @@ function setter(store: Store, by: string): string {
 
 function factsOf(store: Store, r: Delivery, now: number): string[] {
   const s = sha(r);
-  return [`Set by ${setter(store, r.payload?.setBy === 'Taskmaster' ? 'Taskmaster' : r.set_by)} ${at(r.created_at, now)}`, r.due != null ? `due ${hhmm(r.due, now)}` : s ? `waits for ${s} to ${r.when_kind === 'merged' ? 'reach main' : 'go live'}` : ''].filter(Boolean);
+  return [`Set by ${setter(store, field(r.payload, 'setBy') === 'Taskmaster' ? 'Taskmaster' : r.set_by)} ${at(r.created_at, now)}`, r.due != null ? `due ${hhmm(r.due, now)}` : s ? `waits for ${s} to ${r.when_kind === 'merged' ? 'reach main' : 'go live'}` : ''].filter(Boolean);
 }
 
-const whatOf = (r: Delivery) => String(r.payload?.note ?? r.payload?.reason ?? r.payload?.text ?? r.when_arg?.reason ?? r.kind).slice(0, 300);
+const whatOf = (r: Delivery) => String(field(r.payload, 'note') ?? field(r.payload, 'reason') ?? field(r.payload, 'text') ?? field(r.when_arg, 'reason') ?? r.kind).slice(0, 300);
 
 /** `ticket`'s waits: live ones in id order, then recently dropped ones. A Taskmaster's are its scheme's `taskmaster` rows. */
 export function waitsFor(store: Store, t: Ticket, legacy: LegacyWaits = () => [], now = Date.now()): WaitRow[] {

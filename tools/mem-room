@@ -4,18 +4,32 @@
 #   mem-room mb                  the room, in whole MB
 #   mem-room workers [per-MB]    --test-concurrency: room / per-worker MB (default 350), at least 1, at most half the cores, rounded up
 # Room is the smaller of the box's MemAvailable and, where citadel-heavy.slice can be read from this unit's own cgroup
-# path (a host turn), the slice's headroom below its MemoryHigh/MemoryMax (deploy/citadel-heavy.slice: 8G/10G). Without
-# either reading (a container, no /proc/meminfo) it says nothing and fails, so a caller keeps its old default.
+# path (a host turn), the slice's headroom below its MemoryHigh/MemoryMax (deploy/citadel-heavy.slice: 8G/10G). In a
+# person's container, whose /proc/meminfo is the whole box's, it is the smaller of MemAvailable and the container's own
+# headroom, which the server writes every 5 s (#1982, src/container-room.ts: $CITADEL_HEAVY_DIR/container-room, its line
+# the one starting with the inode of this /sys/fs/cgroup). No such line (a host turn, CI, a container with no limit) or
+# a file over 60 s old (a stopped server) is no reading. Without any reading it says nothing and fails, so a caller
+# keeps its old default.
 # 350 MB a worker: node --test boots a server.ts copy per test file (130-320 MB each, the #1335 report); on 2026-11-20
 # a run of 8 of the heaviest files (boot-check, apk-build, app-services...) at 4 workers peaked at 7.2 GB summed RSS
 # (shared pages counted once per process), so the heaviest files take several times that: this is the typical file.
 # Tests: CITADEL_MEM_ROOM_MB fakes the room; CITADEL_MEMINFO and CITADEL_HEAVY_CGROUP name other files/folders;
-# CITADEL_MEM_CORES fakes the core count; CITADEL_TEST_MB_PER_WORKER changes the per-worker number.
+# CITADEL_OWN_CGROUP stands in for /sys/fs/cgroup; CITADEL_MEM_CORES fakes the core count; CITADEL_TEST_MB_PER_WORKER changes the per-worker number.
 set -uo pipefail
+
+# This container's own room in MB, as the server last wrote it; fails without a fresh line for it.
+container_room() {
+  local f=${CITADEL_HEAVY_DIR:-${HOME:-}/.local/share/claude-coordinator/projects/.heavy}/container-room ino wrote mb age
+  ino=$(stat -c %i "${CITADEL_OWN_CGROUP:-/sys/fs/cgroup}" 2>/dev/null) && wrote=$(stat -c %Y "$f" 2>/dev/null) || return 1
+  age=$(($(date +%s) - wrote))
+  [ "$age" -le 60 ] && [ "$age" -ge -5 ] || return 1 # dated ahead (a clock step): no reading either
+  mb=$(sed -n "s/^$ino \([0-9][0-9]*\) .*/\1/p" "$f" 2>/dev/null | head -n 1)
+  [ -n "$mb" ] && echo "$mb"
+}
 
 room_mb() {
   if [[ ${CITADEL_MEM_ROOM_MB:-} =~ ^[0-9]+$ ]]; then echo "$CITADEL_MEM_ROOM_MB"; return 0; fi
-  local avail="" cg="${CITADEL_HEAVY_CGROUP:-}" kb limit cur best
+  local avail="" cg="${CITADEL_HEAVY_CGROUP:-}" kb limit cur best own_room
   kb=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB.*/\1/p' "${CITADEL_MEMINFO:-/proc/meminfo}" 2>/dev/null | head -n 1)
   [ -z "$kb" ] || avail=$((kb / 1024))
   if [ -z "$cg" ]; then
@@ -36,6 +50,7 @@ room_mb() {
       [ -n "$best" ] && [ "$best" -le "$limit" ] || best=$limit
     done
   fi
+  own_room=$(container_room) && { [ -n "$best" ] && [ "$best" -le "$own_room" ] || best=$own_room; }
   [ -n "$best" ] || return 1
   echo "$best"
 }

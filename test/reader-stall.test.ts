@@ -90,6 +90,50 @@ test('with both readers stalled, page reads are answered by the readers started 
   }
 });
 
+// #2086 (Nov 25): both live readers were alive and answered nothing for 30 minutes; every page read was a 503 and the journal was empty.
+test('readers that are alive but answer nothing are replaced, and the journal and the health log say what they waited on', { timeout: 90_000 }, async () => {
+  const srv = await bootServer({ root, env: KNOBS, log: join(root, 'wedge.log') });
+  const log = () => readFileSync(join(root, 'wedge.log'), 'utf8');
+  try {
+    await readersAnswer(srv, 'wedge.log');
+    const gone = new AbortController();
+    const sent = [1, 2].map((n) => get(srv, `/api/tickets/${M.id}/events?citadel-test-reader=wedge&n=${n}`, gone.signal).catch(() => null));
+    await until('both readers are wedged', () => log().split('Reader test hook: wedged').length === 3);
+    const pages = Promise.all(
+      [1, 2, 3].map(async () => {
+        for (;;) {
+          const got = await get(srv, PAGE);
+          if (got.status !== 503) return got;
+          assert.equal(JSON.parse(got.body).retry, true);
+        }
+      }),
+    );
+    const worst = await slowestHealth(srv, pages);
+    for (const got of await pages) assert.deepEqual([got.status, got.by], [200, 'reader']);
+    // timing-ok: one page read reaching the main thread holds it 2 s; a health answer takes a few ms
+    assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
+    gone.abort();
+    await Promise.all(sent);
+    await until('the wedged readers are gone', () => log().split('Reader thread replaced').length === 3);
+    // Said once for the two of them, with the steps, the queue and each reader's unanswered asks.
+    const said = log().match(/^.*Page reads: a reader thread is alive but hasn't answered.*$/gm) ?? [];
+    assert.equal(said.length, 1, log());
+    assert.match(said[0], /steps opened \d+, closed \d+, -?\d+ queued DB writes; readers' unanswered asks: \d/);
+  } finally {
+    await srv.stop();
+  }
+  const after = new Store(join(root, 'data', 'coordinator.db'));
+  try {
+    const rows = after.healthEventsSince(['reader-stuck', 'reader-busy'], 0);
+    assert.equal(rows.filter((r) => r.kind === 'reader-stuck').length, 1);
+    assert.match(rows.find((r) => r.kind === 'reader-stuck')!.detail, /replacing it once another is ready; \d+ page reads told to retry/);
+    // The pages were told to retry meanwhile: that is recorded too, once.
+    assert.equal(rows.filter((r) => r.kind === 'reader-busy').length, 1);
+  } finally {
+    after.db.close();
+  }
+});
+
 test('with no reader to be had, a page read fails within its wait, saying to retry, and a reader that comes back answers again', { timeout: 90_000 }, async () => {
   const may = join(root, 'readers-may-start');
   writeFileSync(may, '');

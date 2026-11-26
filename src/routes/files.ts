@@ -16,19 +16,19 @@ import { place } from '../chunked-uploads.ts';
 import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, uploadFolder } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
 import type { PageItem } from '../ideas.ts';
-import { connection, HttpError, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
+import { connection, HttpError, isInt, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 import { imageSize } from '../image-size.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks, type Mark } from '../../public/ui/marks.js';
 
 /** A ticket as the files helpers need it: the row, or the API's view of it (whose replies are a list). */
 type TicketLike = Omit<Ticket, 'replies'>;
-/** The page a viewer asks to open (body.open): what the checks below look for. */
+/** The page a viewer asks to open (body.open), unchecked: the checks in openedPage look for these. */
 interface OpenRef {
-  artifact: number;
-  ticket: number;
-  project: number;
-  path: string;
+  artifact?: unknown;
+  ticket?: unknown;
+  project?: unknown;
+  path?: unknown;
 }
 /** One mark as a minion writes it, before the checks. */
 interface MarkIn {
@@ -290,19 +290,20 @@ function pageItems(raw: unknown): PageItem[] {
   });
 }
 
-async function openedPage(app: App, open: OpenRef): Promise<{ project: Project; file: string; abs: string; name: string; ticket: Ticket | null }> {
+async function openedPage(app: App, raw: unknown): Promise<{ project: Project; file: string; abs: string; name: string; ticket: Ticket | null }> {
   let found: Awaited<ReturnType<typeof resolveFile>> = null;
   let projectId = 0;
   // The chat the viewer opened it from: the artifact's minion, or the chat that linked the file.
   let ticket: Ticket | null = null;
-  if (Number.isInteger(open?.artifact)) {
+  const open: OpenRef = raw && typeof raw === 'object' ? raw : {};
+  if (isInt(open.artifact)) {
     const a = app.store.getArtifact(open.artifact);
     ticket = (a && app.store.getTicket(a.ticket_id)) ?? null;
     if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, a!.path), ticket.project_id];
-  } else if (Number.isInteger(open?.ticket) && typeof open.path === 'string') {
+  } else if (isInt(open.ticket) && typeof open.path === 'string') {
     ticket = app.store.getTicket(open.ticket) ?? null;
     if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, open.path), ticket.project_id];
-  } else if (Number.isInteger(open?.project) && typeof open.path === 'string' && !isAbsolute(open.path)) {
+  } else if (isInt(open.project) && typeof open.path === 'string' && !isAbsolute(open.path)) {
     const dir = projectSharedDir(app.dataDir, open.project);
     if (app.store.getProject(open.project)) [found, projectId] = [await resolveFile(open.path, dir, [dir]), open.project];
   }

@@ -374,7 +374,7 @@ test("a ship stopped at the gate of its counted early run cancels that run, whos
     (r) => {
       two.env = { FAKE_CI_GATE: join(r.dir, 'go') };
       // The early run is listed for early_look and early_gate, and not for the gate's own questions after them.
-      four.env = { FAKE_UNLISTED: `f4.txt ${join(r.dir, 'listed')} 2`, LAND_CI_LATE_POLL: '0.2' };
+      four.env = { FAKE_UNLISTED: `f4.txt ${join(r.dir, 'listed')} 2`, LAND_CI_LATE: '20', LAND_CI_LATE_POLL: '0.2' };
     },
   );
   const all = l.go();
@@ -396,7 +396,7 @@ test('a ship stopped while it pushes an early run leaves it to the next landing,
     (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }),
     (r) => {
       two.env = { FAKE_CI_GATE: join(r.dir, 'go') };
-      three.env = { FAKE_UNLISTED: `f4.txt ${join(r.dir, 'listed')}`, LAND_CI_LATE_POLL: '0.2' };
+      three.env = { FAKE_UNLISTED: `f4.txt ${join(r.dir, 'listed')}`, LAND_CI_LATE: '20', LAND_CI_LATE_POLL: '0.2' };
       // GitHub has the early push, and is slow to say so.
       const hook = join(r.dir, 'hub.git', 'hooks', 'post-receive');
       writeFileSync(hook, `#!/bin/sh\nwhile read -r _ _ ref; do case $ref in refs/heads/early/*) until [ -e "${join(r.dir, 'stopped')}" ]; do sleep 0.05; done ;; esac; done\n`, { mode: 0o755 });

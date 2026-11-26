@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import type { NewDelivery } from '../src/db/deliveries.ts';
 import { DROPPED_SHOWN_MS, firstLine, waitsFor } from '../src/waits-readout.ts';
 import { testPins } from './helpers.ts';
 testPins();
@@ -21,7 +20,13 @@ test('chips: a time, another minion, an event; dropped rows age out after 7 days
   const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const a = mk(),
     b = mk();
-  const add = (d: Partial<NewDelivery>) => store.addDelivery({ project_id: p.id, kind: 'k', to_kind: 'minion', to_id: a.id, set_by: 'minion:1', when_kind: 'at', ...d }, NOW);
+  // Rows of a kind no code writes, with when_arg shapes no kind has: the readout's fallback for a kind it has no words for.
+  // Written as stored, since the row types hold only the real kinds.
+  const add = (d: { when_kind?: string; when_arg?: unknown; payload?: unknown; due?: number; state?: string; reason?: string }) => {
+    const cols = 'project_id, kind, to_kind, to_id, set_by, when_kind, when_arg, payload, state, due, reason, created_at, updated_at';
+    const r = store.db.prepare(`INSERT INTO deliveries (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(p.id, 'k', 'minion', a.id, 'minion:1', d.when_kind ?? 'at', JSON.stringify(d.when_arg ?? null), JSON.stringify(d.payload ?? {}), d.state ?? 'waiting', d.due ?? null, d.reason ?? null, NOW, NOW);
+    return { id: Number(r.lastInsertRowid) };
+  };
   add({ when_arg: NOW + 14 * 3_600_000, due: NOW + 14 * 3_600_000, payload: { note: 'check' } }); // 02:00 next day PST
   add({ when_kind: 'live', when_arg: { ticket: b.id } });
   add({ when_kind: 'ci', when_arg: { sha: 'abc' } });
@@ -46,7 +51,7 @@ test('a chain row (its held brief) shows its leader and has no Cancel: Start now
   const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const a = mk(),
     lead = mk();
-  store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: a.id, set_by: 'Taskmaster', when_kind: 'merged', when_arg: { after: lead.id }, payload: { message: 'go', reason: 'its work' } }, NOW);
+  store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: a.id, set_by: 'Taskmaster', when_kind: 'merged', when_arg: { after: lead.id, base: null }, payload: { message: 'go', from: 'Taskmaster', reason: 'its work' } }, NOW);
   const [row] = waitsFor(store, store.getTicket(a.id)!, () => [], NOW);
   assert.deepEqual([row.chip, row.what, row.cancellable], [`⇢ #${lead.number}`, 'its work', false]);
 });
@@ -60,7 +65,7 @@ test("a relay shows its sender's number and a headline; its words become the sec
   const to = mk(),
     from = mk();
   const text = "#824 here: main's windows-check is green again. crates/app/src/run/tests.rs now uses #808's CaptureError::Unsupported. Rebase onto main and hand off again.";
-  store.addDelivery({ project_id: p.id, kind: 'relay', to_kind: 'minion', to_id: to.id, set_by: `minion:${from.id}`, when_kind: 'live', when_arg: 'fa4fb3f6d0000000000000000000000000000000', payload: { ticket: from.id, to: { minion: to.id, number: to.number }, text } }, NOW - 3_600_000);
+  store.addDelivery({ project_id: p.id, kind: 'relay', to_kind: 'minion', to_id: to.id, set_by: `minion:${from.id}`, when_kind: 'live', when_arg: 'fa4fb3f6d0000000000000000000000000000000', payload: { ticket: from.id, to: { minion: to.id, number: to.number ?? 0 }, text } }, NOW - 3_600_000);
   store.addDelivery({ project_id: p.id, kind: 'wake_at', to_kind: 'minion', to_id: to.id, set_by: 'minion:1', when_kind: 'at', when_arg: NOW + 1_800_000, due: NOW + 1_800_000, payload: { note: 'Check the run.', setBy: 'Taskmaster' } }, NOW);
   const [relay, wake] = waitsFor(store, store.getTicket(to.id)!, () => [], NOW);
   assert.equal(relay.chip, `⇢ #${from.number}`);

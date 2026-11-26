@@ -8,6 +8,7 @@
 import { readFileSync, watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { thrown } from '../src/thrown.ts';
 
 export interface CountsBody {
   done: number;
@@ -71,7 +72,7 @@ async function main(path: string) {
       // A run token lasts minutes: a fresh one every 4, or after a refusal.
       if (!token || Date.now() - got > 240_000) {
         const r = await fetch(`${env.ACTIONS_ID_TOKEN_REQUEST_URL}&audience=citadel-ci-store`, { headers: { authorization: `Bearer ${env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` }, signal: AbortSignal.timeout(15_000) });
-        token = r.ok ? String((await r.json())?.value ?? '') : '';
+        token = r.ok ? String(((await r.json()) as { value?: string } | null)?.value ?? '') : '';
         got = Date.now();
         if (!token) return warn(`GitHub didn't hand out a run token (HTTP ${r.status})`);
       }
@@ -83,8 +84,8 @@ async function main(path: string) {
       });
       if (r.status === 401) token = '';
       if (r.status !== 202) warn(`Citadel at ${store} refused the counts (HTTP ${r.status}): ${(await r.text()).slice(0, 300)}`);
-    } catch (err: any) {
-      warn(`couldn't send the counts to ${store}: ${err?.cause?.code ?? err?.message ?? err}`);
+    } catch (err) {
+      warn(`couldn't send the counts to ${store}: ${(thrown(err).cause as NodeJS.ErrnoException | undefined)?.code ?? thrown(err).message ?? err}`);
     }
   };
   // One send at a time, in order, so an older count never lands after the last one.

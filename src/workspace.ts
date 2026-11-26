@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { buildOwnerKey, type Store, type Ticket } from './db.ts';
 import { asEnv, identity, type GithubEnv } from './scheme-repo.ts';
 import { restoreSaved } from './worktree-sweep.ts';
 import { thrown } from './thrown.ts';
@@ -163,6 +164,12 @@ export function buildBranch(repoDir: string | null, build: number | null | undef
     }
   }
   return null;
+}
+
+/** A minion in a build under way (its branch merges there, not to main), or the build's own minion, which ships the build. */
+export function inBuild(store: Pick<Store, 'getProject' | 'getSetting'>, ticket: Pick<Ticket, 'id' | 'project_id' | 'build'>): boolean {
+  if (ticket.build == null) return false;
+  return store.getSetting<number>(buildOwnerKey(ticket.project_id, ticket.build)) === ticket.id || !!buildBranch(store.getProject(ticket.project_id)?.repo_dir ?? null, ticket.build);
 }
 
 /**

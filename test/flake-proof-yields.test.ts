@@ -61,7 +61,7 @@ test('the workflow asks Citadel whether ships go first before it sets anything u
 test('every batch step keeps a name cleanRuns counts', () => {
   const names = [...yml.matchAll(/- name: (\d+ clean runs[^\n]*)/g)].map((m) => m[1]);
   assert.ok(names.length > 0);
-  assert.equal(yml.match(/run: tools\/flake-proof\.sh/g)?.length, names.length);
+  assert.equal(yml.match(/run: tools\/ci-window\.sh tools\/flake-proof\.sh/g)?.length, names.length);
   const steps = names.map((name) => ({ name, conclusion: 'success' }));
   assert.equal(cleanRuns(steps.slice(0, 3), null), 30);
 });

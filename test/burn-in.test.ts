@@ -200,3 +200,71 @@ test('on CI a burn-in runs as before: no citadel-heavy, no clamp, no nice of its
   assert.equal(log, '', 'neither citadel-heavy nor nice was called');
   assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 6 of 6 copies at once passed/m);
 });
+
+// #2073: copies × the file's own concurrency fits the slot. Each test of an 8-way concurrent describe holds a marker in
+// a folder every copy shares for 300 ms and records how many markers it saw, so the run's peak is the box's peak.
+const SLOT = 4;
+const wide = (concurrency: string) =>
+  [
+    "import { describe, it } from 'node:test';",
+    "import { mkdirSync, readdirSync, rmdirSync, appendFileSync } from 'node:fs';",
+    "import { join } from 'node:path';",
+    "import { setTimeout as sleep } from 'node:timers/promises';",
+    'const probe = process.env.BURN_IN_PROBE as string;',
+    `describe('eight at once', { concurrency: ${concurrency} }, () => {`,
+    '  for (let i = 0; i < 8; i++) it(`check ${i}`, async () => {',
+    '    const me = join(probe, `${process.pid}-${i}`);',
+    '    mkdirSync(me);',
+    "    appendFileSync(join(probe, '..', 'peaks'), `${readdirSync(probe).length}\\n`);",
+    '    await sleep(300); // timing-ok: holds the marker so overlapping checks see it',
+    "    appendFileSync(join(probe, '..', 'peaks'), `${readdirSync(probe).length}\\n`);",
+    '    rmdirSync(me);',
+    '  });',
+    '});',
+    '',
+  ].join('\n');
+function inFile(body: string, env: Record<string, string>) {
+  const dir = repo({ 'test/wide.test.ts': body });
+  writeFileSync(join(dir, 'tools/citadel-heavy'), `#!/usr/bin/env bash\necho "heavy $*" >>${dir}/log\nshift\nexec "$@"\n`);
+  chmodSync(join(dir, 'tools/citadel-heavy'), 0o755);
+  mkdirSync(join(dir, 'probe'));
+  const r = spawnSync('bash', ['tools/burn-in.sh', 'test/wide.test.ts'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), BURN_IN_PROBE: join(dir, 'probe'), ...env } });
+  const peaks = existsSync(join(dir, 'peaks')) ? readFileSync(join(dir, 'peaks'), 'utf8').trim().split('\n').map(Number) : [];
+  return { r, peak: Math.max(0, ...peaks), log: existsSync(join(dir, 'log')) ? readFileSync(join(dir, 'log'), 'utf8') : '' };
+}
+const HONOURS = 'Number(process.env.BURN_IN_INNER) || true';
+
+test('outside CI, 4 copies of a file with an 8-way concurrent describe run at most the slot (4) checks at once (#2073)', () => {
+  const { r, peak } = inFile(wide(HONOURS), { ...NO_CI, BURN_IN_COPIES: '4' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts: 4 of 4 copies at once passed/m);
+  assert.ok(peak >= 1 && peak <= SLOT, `peak ${peak} checks at once, slot ${SLOT}`);
+});
+
+test('outside CI, one copy of it still runs at most the slot at once', () => {
+  const { r, peak } = inFile(wide(HONOURS), { ...NO_CI, BURN_IN_COPIES: '1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(peak >= 1 && peak <= SLOT, `peak ${peak}`);
+});
+
+test('outside CI, a file with a fixed concurrency of 2 runs 2 copies, not 4', () => {
+  const { r, peak, log } = inFile(wide('2'), { ...NO_CI, BURN_IN_COPIES: '4' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: .*concurrency 2.*2 copies/m, 'says why it runs fewer');
+  assert.match(log, /test\/wide\.test\.ts 2$/m);
+  assert.ok(peak <= SLOT, `peak ${peak}`);
+});
+
+test("outside CI, a file asking concurrency: true that can't be capped is refused before any copy runs", () => {
+  const { r, peak, log } = inFile(wide('true'), { ...NO_CI, BURN_IN_COPIES: '4' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true.*BURN_IN_INNER/m);
+  assert.equal(log, '', 'nothing queued');
+  assert.equal(peak, 0);
+});
+
+test('on CI the file runs at its own concurrency: no cap', () => {
+  const { r, peak } = inFile(wide(HONOURS), { ...NO_CI, GITHUB_ACTIONS: 'true', BURN_IN_COPIES: '2' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(peak > SLOT, `peak ${peak}: CI's runner sizes itself`);
+});

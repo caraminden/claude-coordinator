@@ -53,7 +53,7 @@ import { briefNumbers } from './ci-brief.ts';
 import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
 import { runnerLabel, schemeLabels } from './ci-runner.ts';
-import type { Outbox } from './outbox.ts';
+import { deliveriesOf, type Outbox } from './outbox.ts';
 import type { Project, Store, Ticket, User } from './db.ts';
 import type { GreenRun } from './last-green.ts';
 import { repoSlug } from './prlinks.ts';
@@ -297,7 +297,7 @@ export interface CiHealthDeps {
   /** Dismiss a fix minion whose re-run went green, the way a live deploy does. */
   dismiss?: (ticketId: number, text: string) => void;
   /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing: a dispatched run that passed, which also runs at low effort (#951). No message, no wakes. */
-  wake?: (ticketId: number, text: string, fyi?: boolean) => void;
+  wake?: (ticketId: number, text: string, fyi?: boolean, run?: Run) => void;
   /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
   /** `people`: the admins its alert rings, whose own Taskmasters in the scheme hear of it (taskmastersFor). */
   tell?: (project: Project, text: string, wake?: boolean, people?: number[]) => boolean | number;
@@ -867,7 +867,7 @@ export class CiHealth {
       told.add(r.id);
       save(); // before sending, so a restart can't send it twice
       try {
-        this.deps.wake(minion.id, text, r.conclusion === 'success');
+        this.deps.wake(minion.id, text, r.conclusion === 'success', r);
       } catch (err) {
         console.error(`Waking #${minion.number} for run ${r.id} failed:`, err);
       }
@@ -1421,7 +1421,7 @@ ${text}`,
     const up = runners && onlineRunners(runners, p.name);
     if (up && !up.length) return;
     const names = up?.map((r) => r.name).join(', ');
-    for (const r of this.store.listDeliveries({ kind: 'runners_back', states: ['waiting'] })) {
+    for (const r of deliveriesOf(this.store, 'runners_back', { states: ['waiting'] })) {
       if (r.project_id !== p.id || r.met_at != null) continue;
       const reason = String(r.payload.reason).replace(/[.\s]+$/, '');
       const text = !up

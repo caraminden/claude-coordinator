@@ -6,34 +6,50 @@
 import { account, api, formatSize, h, sharedHref, pacificClock, pacificStamp, pacificZone, pacificMinutes } from './base.js';
 import { optimistic } from './ui/optimistic.js';
 
+/** @import { JobKindView, JobSettings, JobState, JobView } from './types.js' */
+/** @typedef {{ hash: string; name: string; allowed_by: string; at: number }} AllowedKind a standing go (src/db/machines.ts jobKinds) */
+/** @typedef {{ id: number; jobs?: unknown; job_settings?: JobSettings | null }} MachineRow the machine view's fields this page reads */
+/** @import { Child } from './base.js' */
+
 /** The newest view of each job this page has seen. */
+/** @type {Map<number, JobView>} */
 const known = new Map();
 /** Each job's cards on the page: element → its redraw. */
+/** @type {Map<number, Map<HTMLElement & { wasShown?: boolean }, () => void>>} */
 const drawn = new Map();
 /** Jobs whose log someone opened, so a redraw keeps it open. */
+/** @type {Set<number>} */
 const openLogs = new Set();
 /** Whoever else wants every job update (the Machines page's list). */
+/** @type {Set<(v: JobView) => void>} */
 const listeners = new Set();
 
+/** @type {JobState[]} */
 const ACTIVE = ['starting', 'running', 'paused', 'uploading'];
+/** @type {Record<string, string>} */
 const PILL = { 'needs-go': 'needs go', queued: 'queued', starting: 'starting', running: 'running', paused: 'paused', uploading: 'uploading', done: 'done', failed: 'failed', stopped: 'stopped', refused: 'refused' };
 
 /** The machine owner or an admin: the only people with buttons on a job (spec, "who decides"); the go itself is the owner's alone. */
+/** @param {JobView} v */
 export const mayAct = (v) => !!account && (account.admin || (v.decider_id != null && account.id === v.decider_id));
 
 /** The machine's owner alone: the go, Run now, Always allow and job hours are theirs (spec, "who decides"); an admin only pauses, resumes and stops. */
+/** @param {JobView} v */
 const isOwner = (v) => !!account && v.decider_id != null && account.id === v.decider_id;
 
 /** A clock time people read: always Pacific, labelled (Citadel-wide rule), with the day once it's over 12 hours ago. */
+/** @param {number | null | undefined} ms */
 export function pacific(ms) {
   if (!ms) return '';
   if (Math.abs(Date.now() - ms) > 12 * 3600e3) return pacificDay(ms);
   return pacificClock(ms);
 }
 /** A day and time, for a job list row: "Nov 16, 11:00 PM PST". */
+/** @param {number | null | undefined} ms */
 export function pacificDay(ms) {
   return ms ? pacificStamp(ms) : '';
 }
+/** @param {number | null | undefined} s */
 export function duration(s) {
   s = Math.max(0, Math.round(s ?? 0));
   if (s < 60) return `${s} s`;
@@ -41,16 +57,20 @@ export function duration(s) {
   const m = Math.floor((s % 3600) / 60);
   return `${Math.floor(s / 3600)} h${m ? ` ${m} m` : ''}`;
 }
+/** @param {number} s */
 const limitText = (s) => (s % 3600 ? `${Math.round(s / 60)} min` : `${s / 3600} h`);
+/** @param {number} mb */
 const gb = (mb) => `${(mb / 1024).toFixed(1)} GB`;
 
 /** How long it has run: the server's count, plus the time since the agent last reported while it runs. */
+/** @param {JobView} v @param {number} [now] */
 export function elapsed(v, now = Date.now()) {
   const live = v.state === 'running' && v.live_at ? Math.max(0, (now - v.live_at) / 1000) : 0;
   return Math.min(v.run_s + live, v.limit_s);
 }
 
 /** The colour a state draws in, as a class: the card's left edge, its pill and a list row's dot. */
+/** @param {string} state */
 export function tone(state) {
   if (state === 'needs-go') return 'jt-held';
   if (state === 'queued' || state === 'starting' || state === 'paused') return 'jt-waiting';
@@ -60,27 +80,32 @@ export function tone(state) {
 }
 
 /** Keep a view this page fetched or was sent. */
+/** @param {JobView} v */
 export function rememberJob(v) {
   known.set(v.id, v);
   return v;
 }
+/** @param {number} id */
 export const jobView = (id) => known.get(id);
 
 /** A `machine_job` event: redraw every card of that job, and tell the Machines page. */
+/** @param {JobView} v */
 export function onJobUpdate(v) {
   known.set(v.id, v);
   redraw(v.id);
   for (const fn of listeners) fn(v);
 }
+/** @param {(v: JobView) => void} fn */
 export function onJobs(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
+/** @param {number} id */
 function redraw(id) {
   for (const [el, draw] of drawn.get(id) ?? []) {
     // A card that was on the page and has left it (another chat opened, the list redrawn) is forgotten.
-    if (!el.isConnected && el.wasShown) drawn.get(id).delete(el);
+    if (!el.isConnected && el.wasShown) /** @type {Map<HTMLElement, () => void>} */ (drawn.get(id)).delete(el);
     else draw();
   }
 }
@@ -106,13 +131,14 @@ function forgetLeft() {
 }
 
 // Running cards tick their time between the agent's reports: one timer for the page, only while one runs.
+/** @type {ReturnType<typeof setInterval> | null} */
 let ticker = null;
 function tick() {
   if (ticker) return;
   ticker = setInterval(() => {
     const running = [...known.values()].filter((v) => v.state === 'running' && drawn.get(v.id)?.size);
     if (!running.length) {
-      clearInterval(ticker);
+      clearInterval(/** @type {NonNullable<typeof ticker>} */ (ticker));
       ticker = null;
       return;
     }
@@ -124,10 +150,12 @@ function tick() {
  * The live job card. `where` is 'chat' (the minion's chat: names the machine) or 'machines' (the Machines page:
  * names who asked). It redraws itself on every update of the job.
  */
+/** @param {number} id @param {JobView | null | undefined} first @param {'chat' | 'machines'} [where] */
 export function jobCard(id, first, where = 'chat') {
   // A chat's history replays its job events oldest first, so the view an event carries is the newest it knew;
   // one that hasn't ended is fetched again, since it may have moved on since.
   if (first) rememberJob(first);
+  /** @type {HTMLElement & { wasShown?: boolean }} */
   const el = h('div', { class: 'jobcard', 'data-job-card': id });
   const draw = () => {
     const v = known.get(id);
@@ -141,13 +169,13 @@ export function jobCard(id, first, where = 'chat') {
   };
   forgetSoon();
   if (!drawn.has(id)) drawn.set(id, new Map());
-  drawn.get(id).set(el, draw);
+  /** @type {Map<HTMLElement, () => void>} */ (drawn.get(id)).set(el, draw);
   draw();
   // By the next task it's on the page; once it leaves, redraw() lets it go.
   setTimeout(() => {
     el.wasShown = true;
   });
-  if (!known.has(id) || ['needs-go', 'queued', 'starting', ...ACTIVE].includes(known.get(id).state))
+  if (!known.has(id) || ['needs-go', 'queued', 'starting', ...ACTIVE].includes(/** @type {JobView} */ (known.get(id)).state))
     api(`api/jobs/${id}`).then(
       (v) => {
         rememberJob(v);
@@ -158,7 +186,9 @@ export function jobCard(id, first, where = 'chat') {
   return el;
 }
 
+/** @param {JobView} v @param {'chat' | 'machines'} where */
 function cardParts(v, where) {
+  /** @type {HTMLElement[]} */
   const parts = [h('div', { class: 'jc-top' }, h('span', { class: 'jc-kind' }, `Job #${v.id} · ${v.kind.name}`), h('span', { class: 'jc-pill' }, PILL[v.state] ?? v.state), h('span', { class: 'jc-where' }, where === 'chat' ? machineLink(v) : askerLink(v)))];
   parts.push(...body(v));
   if (!['needs-go', 'queued', 'refused'].includes(v.state)) parts.push(logPart(v));
@@ -168,16 +198,22 @@ function cardParts(v, where) {
 }
 
 /** The machine, linked to the Machines page of the scheme the job runs for. */
+/** @param {JobView} v */
 const machineLink = (v) => h('a', { href: `#/p/${v.project_id}/machines` }, v.machine ?? `machine #${v.machine_id}`);
 /** Who queued it: the minion's chat, or the app by name. */
+/** @param {JobView} v */
 function askerLink(v) {
   if (v.ticket_id !== null && v.ticket_number != null) return h('span', {}, 'from ', h('a', { href: `#/p/${v.project_id}/t/${v.ticket_number}` }, v.asked_by));
   return `from ${v.asked_by}`;
 }
 
+/** @param {JobView} v */
 function body(v) {
+  /** @type {HTMLElement[]} */
   const out = [];
+  /** @param {...Child | null} items */
   const facts = (...items) => h('div', { class: 'jc-facts' }, ...items.filter(Boolean));
+  /** @param {string} text */
   const b = (text) => h('b', {}, text);
   const goText = v.go === 'now' ? 'run now' : v.go === 'standing' ? 'always allowed' : 'run in job hours';
   if (v.state === 'needs-go') {
@@ -214,6 +250,7 @@ function body(v) {
   return out;
 }
 
+/** @param {number} pct */
 function bar(pct) {
   const fill = h('span', {});
   fill.style.width = `${pct.toFixed(1)}%`;
@@ -222,6 +259,7 @@ function bar(pct) {
 export { bar as jobBar };
 
 /** Pause tells the truth: a resumable kind freed its VRAM; one that can't resume is frozen and still holds it. */
+/** @param {JobView} v */
 function pausedParts(v) {
   const by = v.paused_by === 'hours' ? 'Paused: its job hours closed, and it resumes when they open.' : v.paused_by === 'machine' ? `Paused: ${v.machine} is paused for jobs.` : 'Paused by its owner.';
   if (v.kind.resumable) return [h('p', { class: 'jc-why' }, `${by} All its VRAM is freed, and Resume picks up from its files. Paused time doesn't count against the limit.`)];
@@ -230,15 +268,18 @@ function pausedParts(v) {
 }
 
 /** The result files, linked where people can open them: the scheme's shared folder's jobs/<id>/. */
+/** @param {JobView} v */
 function results(v) {
   const files = (v.outputs ?? []).filter((o) => o.uploaded);
   if (!files.length) return h('p', { class: 'jc-why muted' }, v.swept ? 'Its results were cleared after 14 days.' : 'No result files.');
   const shown = files.slice(0, 8);
+  /** @param {{ path: string }} o */
   const link = (o) => (v.ticket_id !== null && !v.swept ? h('a', { href: sharedHref(v.project_id, `jobs/${v.id}/${o.path}`) }, `jobs/${v.id}/${o.path}`) : h('span', {}, o.path));
   return h('ul', { class: 'jc-files' }, ...shown.map((o) => h('li', {}, link(o), h('span', { class: 'muted' }, ` ${formatSize(o.size)}`))), files.length > shown.length ? h('li', { class: 'muted' }, `and ${files.length - shown.length} more (${formatSize(files.reduce((n, o) => n + o.size, 0))} in all)`) : '');
 }
 
 /** The log's last lines: nothing until opened (Cara's pick), then in place. */
+/** @param {JobView} v */
 function logPart(v) {
   const open = openLogs.has(v.id);
   const toggle = h(
@@ -265,9 +306,12 @@ function logPart(v) {
 }
 
 /** The owner's buttons; others see none. */
+/** @param {JobView} v @param {'chat' | 'machines'} where */
 function actions(v, where) {
   if (!mayAct(v) || (ACTIVE.includes(v.state) && v.error)) return null;
+  /** @param {string} label @param {string} action @param {string} [cls] */
   const btn = (label, action, cls = 'small') => h('button', { type: 'button', class: cls, onclick: () => act(v, action) }, label);
+  /** @type {Child[]} */
   let items = [];
   if (v.state === 'needs-go') {
     if (!isOwner(v)) items = [btn('Stop', 'stop', 'small secondary')];
@@ -279,6 +323,7 @@ function actions(v, where) {
               'a',
               {
                 href: '#',
+                /** @param {Event} e */
                 onclick: (e) => {
                   e.preventDefault();
                   goCard.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -302,6 +347,7 @@ function actions(v, where) {
 }
 
 /** What a click shows at once, before the server answers. */
+/** @type {Record<string, (v: JobView) => Partial<JobView>>} */
 const GUESS = {
   pause: () => ({ state: 'paused', paused_by: 'owner' }),
   resume: () => ({ state: 'running', paused_by: null, live_at: Date.now() }),
@@ -312,9 +358,11 @@ const GUESS = {
   'go:always': () => ({ state: 'queued', go: 'standing', go_by: account?.name }),
   'go:no': () => ({ state: 'refused', go_by: account?.name, ended_at: Date.now() }),
 };
+/** @type {Record<string, string>} */
 const LABEL = { pause: 'pause', resume: 'resume', stop: 'stop', 'run-now': 'run now', 'go:hours': 'give the go', 'go:now': 'give the go', 'go:always': 'give the go', 'go:no': 'refuse' };
 
 /** A button's action, shown at once and rolled back with a toast if the server refuses. */
+/** @param {JobView} v @param {string} action */
 export function act(v, action) {
   const before = known.get(v.id) ?? v;
   return optimistic({
@@ -323,7 +371,7 @@ export function act(v, action) {
     apply: () => {
       known.set(v.id, { ...before, ...GUESS[action](before) });
       redraw(v.id);
-      for (const fn of listeners) fn(known.get(v.id));
+      for (const fn of listeners) fn(/** @type {JobView} */ (known.get(v.id)));
     },
     send: async () => {
       const [path, choice] = action.split(':');
@@ -342,6 +390,7 @@ export function act(v, action) {
 }
 
 /** The one-line note a card leaves where it was, when it moves to the bottom of the chat. */
+/** @param {{ stage: string; job: number; view?: { kind?: { name?: string } } | null }} data @param {string} href */
 export function jobMovedNote(data, href) {
   const what = { waiting: 'was queued', running: 'started', paused: 'paused', ended: 'ended' }[data.stage] ?? 'changed';
   const name = data.view?.kind?.name ? ` (${data.view.kind.name})` : '';
@@ -349,8 +398,11 @@ export function jobMovedNote(data, href) {
 }
 
 /** The go card's question, laid out: what runs, what it reads, GPU and network, the limit, inputs and why now. */
+/** @param {{ asked_by: string; kind: JobKindView; limit_s: number; inputs: { name: string; size: number }[]; when: string; reason: string | null }} r */
 export function jobRecipe(r) {
+  /** @param {string} label @param {...Child} value */
   const row = (label, ...value) => [h('dt', {}, label), h('dd', {}, ...value)];
+  /** @param {string} t */
   const code = (t) => h('code', {}, t);
   return h(
     'dl',
@@ -368,6 +420,7 @@ export function jobRecipe(r) {
 }
 
 /** Every job of a minion, for its chat: one fetch fills the cards that came without a view. */
+/** @param {number} ticketId @returns {Promise<JobView[]>} */
 export async function loadTicketJobs(ticketId) {
   const { jobs } = await api(`api/tickets/${ticketId}/jobs`);
   for (const v of jobs) {
@@ -380,8 +433,10 @@ export async function loadTicketJobs(ticketId) {
 // ---- The Machines page: a machine's Jobs section (its owner and admins only; the read API says 404 to others). ----
 
 /** Each machine's section, kept across the machine list's redraws so open rows and a typed time survive them. */
+/** @type {Map<number, ReturnType<typeof newSection>>} */
 const sections = new Map();
 /** The next time the Pacific clock reads hh:mm. shortcut: off by an hour across a DST change, which lands at 2 AM. */
+/** @param {string} hhmm @param {number} [now] */
 export function nextPacific(hhmm, now = Date.now()) {
   const want = Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
   const ahead = (want - pacificMinutes(now) + 1440) % 1440 || 1440;
@@ -389,6 +444,7 @@ export function nextPacific(hhmm, now = Date.now()) {
 }
 
 /** The Jobs section of an opened machine on the Machines page; `m` is its newest machine view. */
+/** @param {MachineRow} m */
 export function machineJobsSection(m) {
   let s = sections.get(m.id);
   if (!s) {
@@ -399,8 +455,10 @@ export function machineJobsSection(m) {
   return s.el;
 }
 
+/** @param {number} machineId */
 function newSection(machineId) {
   const el = h('div', { class: 'mjobs', hidden: true });
+  /** @type {{ machine: MachineRow | null; jobs: JobView[]; kinds: AllowedKind[]; settings: JobSettings | null; open: Set<number>; cards: Map<number, HTMLElement>; allowed: boolean }} */
   const st = { machine: null, jobs: [], kinds: [], settings: null, open: new Set(), cards: new Map(), allowed: false };
   const head = h('div', { class: 'mjobs-head' });
   const settingsEl = h('div', { class: 'mjobs-settings' });
@@ -445,13 +503,14 @@ function newSection(machineId) {
   }
   function drawSettings(force = false) {
     // Someone typing a time keeps what they typed; the next redraw after they leave the field catches up.
-    const typing = document.activeElement;
+    const typing = /** @type {HTMLInputElement | null} */ (document.activeElement);
     if (typing?.type === 'time' && settingsEl.contains(typing) && !force) return;
-    const set = st.settings;
+    const set = /** @type {JobSettings} */ (st.settings);
     const zone = pacificZone();
+    /** @param {'start' | 'end'} key */
     const time = (key) => {
       const input = h('input', { type: 'time', value: set[key], 'aria-label': key === 'start' ? 'Job hours start' : 'Job hours end' });
-      input.onchange = () => input.value && input.value !== st.settings[key] && patch({ [key]: input.value }, 'change its job hours');
+      input.onchange = () => input.value && input.value !== /** @type {JobSettings} */ (st.settings)[key] && patch({ [key]: input.value }, 'change its job hours');
       return input;
     };
     const untilOn = set.until && set.until > Date.now();
@@ -468,13 +527,14 @@ function newSection(machineId) {
       h('label', { class: 'row mjobs-pause' }, pause, h('span', {}, set.paused ? 'Paused: the running job is paused and nothing new starts' : 'Pause every job on this machine')),
     );
   }
+  /** @param {Partial<JobSettings>} fields @param {string} label */
   function patch(fields, label) {
-    const was = { ...st.settings };
+    const was = /** @type {JobSettings} */ ({ ...st.settings });
     optimistic({
       key: `jobsettings:${machineId}`,
       label,
       apply: () => {
-        st.settings = { ...st.settings, ...fields };
+        st.settings = /** @type {JobSettings} */ ({ ...st.settings, ...fields });
         drawSettings();
       },
       send: async () => {
@@ -497,6 +557,7 @@ function newSection(machineId) {
       h('div', { class: 'mjobs-chips' }, ...st.kinds.map((k) => h('span', { class: 'mjobs-chip', title: `Allowed by ${k.allowed_by}, ${pacificDay(k.at)}` }, k.name, h('button', { type: 'button', class: 'small secondary', onclick: () => removeKind(k) }, 'Remove')))),
     );
   }
+  /** @param {AllowedKind} k */
   function removeKind(k) {
     const was = st.kinds;
     optimistic({
@@ -519,9 +580,10 @@ function newSection(machineId) {
       return;
     }
     // The one running or paused on top, then newest first.
-    const rows = [...st.jobs].sort((a, b) => ACTIVE.includes(b.state) - ACTIVE.includes(a.state) || b.created_at - a.created_at);
+    const rows = [...st.jobs].sort((a, b) => Number(ACTIVE.includes(b.state)) - Number(ACTIVE.includes(a.state)) || b.created_at - a.created_at);
     listEl.replaceChildren(...rows.map((v) => jobRow(v)));
   }
+  /** @param {JobView} v */
   function jobRow(v) {
     const isOpen = st.open.has(v.id);
     const toggle = () => {
@@ -542,6 +604,7 @@ function newSection(machineId) {
       // Cara's note on her pick (2026-11-17): "with a simple progress bar on the currently running job".
       v.state === 'running' || v.state === 'paused' ? bar(Math.min(100, (run / v.limit_s) * 100)) : '',
     );
+    /** @type {HTMLElement | string | undefined} */
     let card = '';
     if (isOpen) {
       // Kept while it stays live; one redraw() let go of (closed, or the page left) is built again.
@@ -559,6 +622,7 @@ function newSection(machineId) {
 
   return {
     el,
+    /** @param {MachineRow} m */
     setMachine(m) {
       const first = !st.machine;
       st.machine = m;
@@ -575,6 +639,7 @@ function newSection(machineId) {
   };
 }
 
+/** @param {number} pct */
 function meter(pct) {
   const fill = h('span', {});
   fill.style.width = `${Math.max(0, Math.min(100, pct)).toFixed(0)}%`;

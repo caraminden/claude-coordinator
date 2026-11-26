@@ -195,7 +195,7 @@ test('chat lines queued when the worker dies are lost whole, and the next line t
   );
 });
 
-// Found by #1778: the gone mark is set only by the worker's own 'exit' handler, which these deaths skip.
+// Found by #1778: terminate() and running out of memory skip the worker's own 'exit' handler, so the server's marks it gone.
 test("once the worker is gone no reader thread answers on its own: the server writes in place, where a step can't be told from the next", async () => {
   const { store, w } = open();
   const t = minion(store);

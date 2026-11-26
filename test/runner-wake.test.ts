@@ -202,8 +202,9 @@ test("the server splits a PC's runners between its Windows and Linux agents by t
     { key: 'windows', repos: new Set(['o/peek']) },
     { key: 'linux', repos: new Set(['o/citadel', 'o/twi']) },
   ];
-  const share = (n: number, q: [string, number][]) => Object.fromEntries([...runnerShares(n, agents, new Map(q))].map(([k, v]) => [k, v]));
-  assert.deepEqual(share(4, []), { windows: { runners: 2, queued: {} }, linux: { runners: 2, queued: {} } }, 'nothing waits: an even split');
+  const share = (n: number, q: [string, number][]) => Object.fromEntries([...runnerShares(n, agents, new Map(q))].map(([k, v]) => [k, v.runners]));
+  assert.deepEqual(share(4, []), { windows: 2, linux: 2 }, 'nothing waits: an even split');
+  // Weights 1+1 and 1+3: 4 runners split 1.33 and 2.67.
   assert.deepEqual(
     share(4, [
       ['O/Citadel', 2],
@@ -211,9 +212,21 @@ test("the server splits a PC's runners between its Windows and Linux agents by t
       ['o/peek', 1],
       ['o/elsewhere', 5],
     ]),
-    { windows: { runners: 1, queued: { 'o/peek': 1 } }, linux: { runners: 3, queued: { 'o/citadel': 2, 'o/twi': 1 } } },
+    { windows: 1, linux: 3 },
   );
-  assert.deepEqual(share(1, [['o/peek', 1]]), { windows: { runners: 1, queued: { 'o/peek': 1 } }, linux: { runners: 0, queued: {} } });
-  assert.deepEqual(share(3, []), { windows: { runners: 1, queued: {} }, linux: { runners: 2, queued: {} } }, 'an odd one goes by key when the parts tie');
-  assert.deepEqual(share(0, [['o/peek', 1]]).windows, { runners: 0, queued: { 'o/peek': 1 } });
+  assert.deepEqual(share(5, [['o/citadel', 6]]), { windows: 1, linux: 4 }, 'an agent with nothing waiting keeps a part: its runners may all be asleep');
+  assert.deepEqual(share(1, [['o/peek', 1]]), { windows: 1, linux: 0 });
+  assert.deepEqual(share(3, []), { windows: 1, linux: 2 }, 'an odd one goes by key when the parts tie');
+  assert.deepEqual(
+    runnerShares(
+      2,
+      agents,
+      new Map([
+        ['O/Peek', 1],
+        ['o/none', 0],
+      ]),
+    ).get('linux'),
+    { runners: 1, queued: { 'o/peek': 1 } },
+    'each hears every repo waiting',
+  );
 });

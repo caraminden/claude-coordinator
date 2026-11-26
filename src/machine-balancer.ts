@@ -218,17 +218,17 @@ export interface RunnerShare {
 
 /**
  * The plan's runners split among one PC's CI runner agents (a Windows one and a Linux one in WSL can share a PC, M2b),
- * by the CI jobs waiting for each one's repos, evenly when none wait; the remainder to the largest part, then by key.
- * Each also hears the jobs waiting for its own repos, so it wakes those repos' runners first.
+ * each by the CI jobs waiting for its repos, plus one, so an agent whose runners all sleep (and so leave its samples)
+ * still gets its part back; the remainder to the largest fraction, then the most waiting, then by key. Each hears every
+ * repo's waiting jobs and wakes its own runners for them first.
  */
 export function runnerShares(runners: number, agents: { key: string; repos: ReadonlySet<string> }[], queued: ReadonlyMap<string, number>): Map<string, RunnerShare> {
-  const mine = agents.map((a) => Object.fromEntries([...queued].filter(([repo, n]) => n > 0 && a.repos.has(repo.toLowerCase())).map(([repo, n]) => [repo.toLowerCase(), n])));
-  const waiting = mine.map((q) => Object.values(q).reduce((s, n) => s + n, 0));
-  const weights = waiting.some((w) => w > 0) ? waiting : agents.map(() => 1);
+  const all = Object.fromEntries([...queued].filter(([, n]) => n > 0).map(([repo, n]) => [repo.toLowerCase(), n]));
+  const weights = agents.map((a) => 1 + Object.entries(all).reduce((s, [repo, n]) => s + (a.repos.has(repo) ? n : 0), 0));
   const total = weights.reduce((s, w) => s + w, 0);
-  const exact = weights.map((w) => (total ? (runners * w) / total : 0));
+  const exact = weights.map((w) => (runners * w) / total);
   const parts = exact.map(Math.floor);
-  const order = agents.map((a, i) => i).sort((i, j) => exact[j] - parts[j] - (exact[i] - parts[i]) || weights[j] - weights[i] || agents[i].key.localeCompare(agents[j].key));
+  const order = agents.map((_, i) => i).sort((i, j) => exact[j] - parts[j] - (exact[i] - parts[i]) || weights[j] - weights[i] || agents[i].key.localeCompare(agents[j].key));
   for (let left = runners - parts.reduce((s, n) => s + n, 0), k = 0; left > 0 && order.length; left--, k++) parts[order[k % order.length]]++;
-  return new Map(agents.map((a, i) => [a.key, { runners: parts[i], queued: mine[i] }]));
+  return new Map(agents.map((a, i) => [a.key, { runners: parts[i], queued: all }]));
 }

@@ -2902,8 +2902,9 @@ export class Runner {
     // The place startPlace found a moment ago; one whose machine went since waits there for it. Codex turns, keepalives and fresh-session steps run here (turnAtHome).
     const at = codex || keepalive || step ? 0 : this.turnLine.placeOf(ticket.id);
     const worker = at ? { id: at, name: this.pools!.nameOf(at) } : null;
-    // Host reach (T8): marked for that machine, on its owner's turn. Its tools, container and chat lines follow from it.
-    const reach = worker && hostReach(this.runsOn.get(ticket.id), this.store.getMachine(worker.id) ?? null, person) ? worker.name : null;
+    // Host reach (T8): marked for that machine, on its owner's turn: the owner's login and the owner's ask (the asker the
+    // run_on_host route checks), so a relay that runs on the owner's login doesn't reach. Its tools, container and chat lines follow.
+    const reach = worker && asker === person && hostReach(this.runsOn.get(ticket.id), this.store.getMachine(worker.id) ?? null, person) ? worker.name : null;
     if (!keepalive && !step) this.runsOn.over(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {

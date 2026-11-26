@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { type SpawnOptions, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -91,7 +91,7 @@ test("a marked minion's turn runs in its own container with the owner's folders;
 
 test("the owner's folders: full paths only, never a drive's root, read-only unless they say write", () => {
   for (const p of ['C:\\Users\\me\\Art', 'D:\\Projects\\game', '/home/me/art']) assert.ok(folderPath(p), p);
-  for (const p of ['C:\\', 'C:', 'C:\\Users\\..\\Windows', 'relative\\x', '/', '/home/me/', '/home/../etc', 'C:\\a,b', 'C:\\Users\\me\\Art\\']) assert.ok(!folderPath(p), p);
+  for (const p of ['C:\\', 'C:', 'C:\\Users\\..\\Windows', 'relative\\x', '/', '/home/me/', '/home/../etc', 'C:\\a,b', '/srv/a\tb', 'C:\\a\rb', 'C:\\Users\\me\\Art\\']) assert.ok(!folderPath(p), p);
   const { folders, problems } = hostFolders({ art: { path: 'C:\\Users\\me\\Art' }, docs: { path: 'C:\\Users\\me\\Docs', write: true }, 'Bad Name': { path: 'C:\\x' }, root: { path: 'C:\\' }, odd: { path: 'C:\\y', write: 'yes' } });
   assert.deepEqual(folders, [
     { name: 'art', path: 'C:\\Users\\me\\Art', write: false },
@@ -109,13 +109,24 @@ test("root's copy of the folder check in citadel-worker agrees with the worker's
   const js = /^FOLDERS_JS='([^']*)'$/m.exec(script)?.[1];
   assert.ok(js, 'FOLDERS_JS is in the script');
   assert.doesNotMatch(script, /import\(|\$home\/app/, "root runs no code from the worker user's home");
-  const raw = { art: { path: 'C:\\Users\\me\\Art' }, docs: { path: 'C:\\Users\\me\\Docs', write: true }, lin: { path: '/srv/x' }, 'Bad Name': { path: 'C:\\x' }, root: { path: 'C:\\' }, up: { path: 'C:\\a\\..\\b' }, slash: { path: '/srv/x/' }, odd: { path: 'C:\\y', write: 'yes' }, comma: { path: 'C:\\a,b' } };
+  const raw = {
+    art: { path: 'C:\\Users\\me\\Art' },
+    docs: { path: 'C:\\Users\\me\\Docs', write: true },
+    lin: { path: '/srv/x' },
+    'Bad Name': { path: 'C:\\x' },
+    root: { path: 'C:\\' },
+    up: { path: 'C:\\a\\..\\b' },
+    slash: { path: '/srv/x/' },
+    odd: { path: 'C:\\y', write: 'yes' },
+    comma: { path: 'C:\\a,b' },
+    tab: { path: '/srv/a\tb' },
+  };
   const out = spawnSync(process.execPath, ['-e', `${js}\nconsole.log(JSON.stringify(hostFolders(cfg.folders)))`], { env: { ...process.env, CFG: JSON.stringify({ folders: raw }) }, encoding: 'utf8' });
   assert.equal(out.status, 0, out.stderr);
   assert.deepEqual(JSON.parse(out.stdout), hostFolders(raw));
 });
 
-test("a host turn's end counts the files it wrote to each read-write folder, and its chat gets one line", async () => {
+test("a host turn's end counts what changed in each read-write folder, and its chat gets one line", async () => {
   const { w, calls } = worker([
     { src: `${HOST_SRC}/docs`, dst: '/host/docs', ro: true },
     { src: `${HOST_SRC}/art`, dst: '/host/art', ro: false },
@@ -125,7 +136,7 @@ test("a host turn's end counts the files it wrote to each read-write folder, and
   assert.equal(w.counted(t), false, 'its end waits for the count');
   w.exec = async (_cmd: string, args: string[]) => {
     calls.push(args);
-    return { code: 0, out: '3\n', err: '' };
+    return { code: 0, out: '3 1\n', err: '' };
   };
   w.poke = () => {};
   await w.countWrites(t);
@@ -137,8 +148,27 @@ test("a host turn's end counts the files it wrote to each read-write folder, and
   );
   assert.equal(w.counted(t), true);
   const got = JSON.parse(readFileSync(join(t.local, 'host-writes.json'), 'utf8'));
-  assert.deepEqual(got, { folders: [{ name: 'art', files: 3 }] });
-  assert.equal(await writesLine(t.local, 'desk'), "This turn wrote to desk's folders: /host/art (3 files). Citadel can't roll those back.");
+  assert.deepEqual(got, { folders: [{ name: 'art', files: 3, dirs: true }] });
+  assert.equal(await writesLine(t.local, 'desk'), "Changed in desk's folders during this turn: /host/art (3 files new or changed). Citadel can't roll those back.");
+  writeFileSync(join(t.local, 'host-writes.json'), JSON.stringify({ folders: [{ name: 'art', files: 0, dirs: true }] }));
+  assert.equal(await writesLine(t.local, 'desk'), "Changed in desk's folders during this turn: /host/art (something removed or renamed). Citadel can't roll those back.");
+
+  // The count itself, run by a real sh and find: a turn that only deletes still shows.
+  const sh = finds[0][finds[0].indexOf('-c') + 1];
+  const box = join(root, 'count');
+  mkdirSync(join(box, 'sub'), { recursive: true });
+  writeFileSync(join(box, 'sub', 'old.txt'), '');
+  writeFileSync(join(box, 'keep.txt'), '');
+  const mark = join(root, 'count-began');
+  writeFileSync(mark, '');
+  const past = new Date(Date.now() - 60_000);
+  for (const p of [join(box, 'sub', 'old.txt'), join(box, 'keep.txt'), join(box, 'sub'), box, mark]) utimesSync(p, past, past);
+  const count = () => spawnSync('sh', ['-c', sh, 'sh', box, mark], { encoding: 'utf8' }).stdout.trim();
+  assert.equal(count(), '0 0', 'nothing changed since the mark');
+  rmSync(join(box, 'sub', 'old.txt'));
+  assert.equal(count(), '0 1', 'a delete shows as its folder changing');
+  writeFileSync(join(box, 'keep.txt'), 'x');
+  assert.equal(count(), '1 1');
 
   writeFileSync(join(t.local, 'host-writes.json'), JSON.stringify({ folders: [] }));
   assert.equal(await writesLine(t.local, 'desk'), null, 'nothing written, no line');
@@ -192,14 +222,22 @@ test("the agent starts only its owner's listed programs, by name, never through 
     queueMicrotask(() => child.emit('spawn'));
     return child;
   };
-  assert.equal(await startProgram(programs, { program: 'tool' }, run), 99);
+  const own = [join(root, 'agent')];
+  const ask = (a: { program: string; args?: string[] }) => ({ ...a, writable: [] as string[] });
+  assert.equal(await startProgram(programs, ask({ program: 'tool' }), own, run), 99);
   assert.deepEqual(spawned[0], { path: exe, args: [], opts: { cwd: root, detached: true, stdio: 'ignore', shell: false, windowsHide: false } });
-  assert.equal(await startProgram(programs, { program: 'wide', args: ['--open', 'a b'] }, run), 99);
+  assert.equal(await startProgram(programs, ask({ program: 'wide', args: ['--open', 'a b'] }), own, run), 99);
   assert.deepEqual(spawned[1].args, ['--open', 'a b']);
 
-  assert.throws(() => startProgram(programs, { program: 'cmd' }, run), /"cmd" isn't one of the programs .* They are: tool, wide, gone\./);
-  assert.throws(() => startProgram(programs, { program: 'tool', args: ['x'] }, run), /takes no arguments/);
-  assert.throws(() => startProgram(programs, { program: 'gone' }, run), /isn't there any more/);
-  assert.throws(() => startProgram(new Map(), { program: 'tool' }, run), /They list none/);
-  assert.equal(spawned.length, 2, 'nothing else was started');
+  assert.throws(() => startProgram(programs, ask({ program: 'cmd' }), own, run), /"cmd" isn't one of the programs .* They are: tool, wide, gone\./);
+  assert.throws(() => startProgram(programs, ask({ program: 'tool', args: ['x'] }), own, run), /takes no arguments/);
+  assert.throws(() => startProgram(programs, ask({ program: 'gone' }), own, run), /isn't there any more/);
+  assert.throws(() => startProgram(new Map(), ask({ program: 'tool' }), own, run), /They list none/);
+  // A folder minions can write to that holds the agent, its list or the program: nothing starts.
+  assert.throws(() => startProgram(programs, { program: 'tool' }, own, run), /didn't say which of this PC's folders/);
+  assert.throws(() => startProgram(programs, { program: 'tool', writable: [root] }, own, run), /This agent and its list of programs are in .* starts nothing/);
+  assert.throws(() => startProgram(programs, { program: 'tool', writable: [join(root, 'agent', 'data')] }, own, run), /This agent and its list/, "a writable folder inside the agent's too");
+  assert.throws(() => startProgram(programs, { program: 'tool', writable: [root] }, [join(tmpdir(), 'elsewhere')], run), /tool is in .* inside a folder minions .* can write to/);
+  assert.equal(await startProgram(programs, { program: 'tool', writable: [join(root, 'agent2'), join(root, 'too')] }, own, run), 99, 'a sibling folder whose name starts the same is not inside');
+  assert.equal(spawned.length, 3, 'nothing else was started');
 });

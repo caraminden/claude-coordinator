@@ -368,17 +368,19 @@ export class Worker {
    */
   async countWrites(t) {
     t.counting = true;
-    /** @type {{ name: string, files: number, more?: true }[]} */
+    /** @type {{ name: string, files: number, more?: true, dirs?: true }[]} */
     const folders = [];
     let error = null;
     try {
       const since = join(t.dir, 'host-began');
       for (const m of this.cfg.host.filter((b) => !b.ro)) {
         if (!existsSync(join(t.local, 'host-began'))) throw new Error('its start mark is gone');
-        const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `find "$1" -xdev -type f -newer "$2" 2>/dev/null | head -n ${COUNT_MAX + 1} | wc -l`, 'sh', m.dst, since], 5 * 60_000);
-        const n = Number(r.out.trim());
-        if (r.code || !Number.isFinite(n)) throw new Error(`counting ${m.dst} failed: ${r.err.trim().split('\n').pop() || `exit ${r.code}`}`);
-        if (n) folders.push({ name: m.dst.slice(HOST_IN.length + 1), files: Math.min(n, COUNT_MAX), ...(n > COUNT_MAX ? { more: /** @type {const} */ (true) } : {}) });
+        // Files new or changed since, and whether a folder changed: a delete or rename shows only there.
+        const sh = `f=$(find "$1" -xdev -type f -newer "$2" 2>/dev/null | head -n ${COUNT_MAX + 1} | wc -l) && d=$(find "$1" -xdev -type d -newer "$2" 2>/dev/null | head -n 1 | wc -l) && echo "$f $d"`;
+        const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', sh, 'sh', m.dst, since], 5 * 60_000);
+        const [n, d] = r.out.trim().split(/\s+/).map(Number);
+        if (r.code || !Number.isFinite(n) || !Number.isFinite(d)) throw new Error(`counting ${m.dst} failed: ${r.err.trim().split('\n').pop() || `exit ${r.code}`}`);
+        if (n || d) folders.push({ name: m.dst.slice(HOST_IN.length + 1), files: Math.min(n, COUNT_MAX), ...(n > COUNT_MAX ? { more: /** @type {const} */ (true) } : {}), ...(d ? { dirs: /** @type {const} */ (true) } : {}) });
       }
     } catch (err) {
       error = err.message;
@@ -415,7 +417,7 @@ export class Worker {
         await first();
         const program = await this.syncProgram(t);
         // Its container may have stopped with the machine since the turn began.
-        if (!ask.start) await this.ensureContainer(t.launch);
+        if (!ask.start) await this.ensureBox(t.launch);
         const arg = Buffer.from(JSON.stringify({ app: `http://127.0.0.1:${this.port}`, dir: t.dir, state: at, ...ask })).toString('base64');
         const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), this.cfg.node ?? t.launch.wrapper[0], program, arg], ask.start ? 60 * 60_000 : 15 * 60_000);
         const last = r.out.trim().split('\n').pop() ?? '';
@@ -510,6 +512,10 @@ export class Worker {
     const pid = this.pid(t);
     if (pid && !existsSync(join(t.local, 'exit.json'))) await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
     rmSync(t.local, { recursive: true, force: true });
+    // The last marked turn here gone, its container goes with it: nothing it left running keeps the owner's folders, and
+    // the next one mounts the folders as they are listed then (T8).
+    const box = boxOf(this.cfg, t.launch);
+    if (box !== this.cfg.container && ![...this.turns.values()].some((o) => boxOf(this.cfg, o.launch) === box)) await this.exec(this.cfg.podman, ['rm', '-f', '-t', '0', box]);
   }
 
   /** Fetch a turn's folder and start its wrapper in the worker container. @param {string} dir @param {Launch} launch */
@@ -526,7 +532,7 @@ export class Worker {
       this.fitSpec(t);
       // A host turn's start (T8): the folders' files written after it are the ones its end counts.
       if (launch.host === true) writeFileSync(join(t.local, 'host-began'), '');
-      await this.ensureContainer(launch, launch.host === true ? this.cfg.host : [], boxOf(this.cfg, launch));
+      await this.ensureBox(launch);
       if (launch.sync && !t.dropped) await this.bring(t);
       if (t.dropped || !existsSync(join(t.local, 'spec.json'))) return;
       const wrapper = [this.cfg.node ?? launch.wrapper[0], ...launch.wrapper.slice(1)];
@@ -587,6 +593,11 @@ export class Worker {
     if (this.cfg.claude) spec.command = this.cfg.claude;
     if (this.cfg.node && spec.pool) spec.pool.node = this.cfg.node;
     writeFileSync(file, JSON.stringify(spec), { mode: 0o600 });
+  }
+
+  /** The container a turn runs in, with its folders when it is a marked minion's (boxOf). @param {Launch} launch */
+  ensureBox(launch) {
+    return this.ensureContainer(launch, launch.host === true ? this.cfg.host : [], boxOf(this.cfg, launch));
   }
 
   /**

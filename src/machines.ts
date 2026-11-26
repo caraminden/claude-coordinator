@@ -543,7 +543,8 @@ export class MachineRelay {
   readonly hostStarts = new HostStarts((machineId, msg) => {
     const agent = this.agents.get(machineId);
     if (!agent || agent.runners) return false;
-    agent.res.write(`data: ${JSON.stringify({ host_start: msg })}\n\n`);
+    // The worker's read-write folders go along: the agent refuses a start while one holds it, its list or the program.
+    agent.res.write(`data: ${JSON.stringify({ host_start: { ...msg, writable: this.workers?.writable(machineId) ?? null } })}\n\n`);
     return true;
   });
 

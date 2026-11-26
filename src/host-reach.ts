@@ -59,19 +59,23 @@ export function cleanFolders(v: unknown): HostFolder[] {
 /** The chat line for a program a turn started. */
 export const startedLine = (program: string, machine: string, args: string[]) => `Started ${program}${args.length ? ` ${args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}` : ''} on ${machine}.`;
 
-/** The one line a host turn's end adds (from host-writes.json, public/machine-worker.mjs countWrites), or null when it wrote nothing. */
+/**
+ * The one line a host turn's end adds (from host-writes.json, public/machine-worker.mjs countWrites), or null when nothing
+ * changed. What changed during the turn, which may include the owner's own edits: files new or changed by count, and a
+ * folder whose only change is a delete or rename by name.
+ */
 export async function writesLine(dir: string, machine: string): Promise<string | null> {
-  let got: { folders?: { name?: unknown; files?: unknown; more?: unknown }[]; error?: unknown };
+  let got: { folders?: { name?: unknown; files?: unknown; more?: unknown; dirs?: unknown }[]; error?: unknown };
   try {
     got = JSON.parse(await readFile(join(dir, 'host-writes.json'), 'utf8'));
   } catch {
     return null;
   }
-  const folders = (Array.isArray(got.folders) ? got.folders : []).filter((f) => typeof f?.name === 'string' && typeof f.files === 'number' && f.files > 0);
+  const folders = (Array.isArray(got.folders) ? got.folders : []).filter((f) => typeof f?.name === 'string' && typeof f.files === 'number' && (f.files > 0 || f.dirs === true));
   const error = typeof got.error === 'string' ? got.error.slice(0, 200) : null;
-  if (!folders.length) return error ? `This turn's writes to ${machine}'s folders couldn't be counted: ${error}.` : null;
-  const each = folders.map((f) => `/host/${f.name} (${f.more ? 'more than ' : ''}${f.files} file${f.files === 1 ? '' : 's'})`);
-  return `This turn wrote to ${machine}'s folders: ${each.join(', ')}.${error ? ` Not all could be counted: ${error}.` : ''} Citadel can't roll those back.`;
+  if (!folders.length) return error ? `This turn's changes to ${machine}'s folders couldn't be counted: ${error}.` : null;
+  const each = folders.map((f) => `/host/${f.name} (${f.files ? `${f.more ? 'more than ' : ''}${f.files} file${f.files === 1 ? '' : 's'} new or changed` : 'something removed or renamed'})`);
+  return `Changed in ${machine}'s folders during this turn: ${each.join(', ')}.${error ? ` Not all could be counted: ${error}.` : ''} Citadel can't roll those back.`;
 }
 
 /** What run_on_host gets from the agent. */

@@ -78,7 +78,7 @@ export function hostFolders(raw) {
 
 /** A folder's path as the owner gives it: C:\\Users\\me\\Photos, or /home/me/photos on Linux. Never a drive's root, nor / . @param {string} p */
 export function folderPath(p) {
-  if (/[\0\n,]/.test(p)) return false;
+  if (/[\0-\x1f,]/.test(p)) return false;
   if (/^[A-Za-z]:\\/.test(p)) return /^[A-Za-z]:\\(?!\\)[^:*?"<>|]*[^\\:*?"<>|\s]$/.test(p) && !/(^|\\)\.\.(\\|$)/.test(p);
   return isAbsolute(p) && normalize(p) === p && p !== '/' && !p.endsWith('/');
 }

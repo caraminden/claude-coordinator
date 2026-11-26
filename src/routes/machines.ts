@@ -805,13 +805,19 @@ export const machineRoutes: Route[] = [
     path: '/api/machines/run-on-host',
     ...turns,
     async handler({ req, res, app, caller }) {
-      const at = app.runner.hostReachOf(caller!.id);
-      // Again here, not only at its start: a mark cleared or a machine given away mid-turn ends its reach.
-      const machine = at && app.store.getMachine(at.id);
-      if (!at || !machine || !hostReach(app.runner.runsOn.get(caller!.id), machine, app.store.turnAsker(caller!.id))) {
-        throw new HttpError(403, "This turn doesn't reach a machine's host: only a minion marked to run on a machine, on a turn of that machine's owner, while it runs there");
-      }
+      // Again here, not only at its start: a mark cleared or a machine given away mid-turn ends its reach. Before the body
+      // and after it, so a turn that ended while it was read starts nothing.
+      const reached = () => {
+        const at = app.runner.hostReachOf(caller!.id);
+        const machine = at && app.store.getMachine(at.id);
+        if (!at || !machine || !hostReach(app.runner.runsOn.get(caller!.id), machine, app.store.turnAsker(caller!.id))) {
+          throw new HttpError(403, "This turn doesn't reach a machine's host: only a minion marked to run on a machine, on a turn of that machine's owner, while it runs there");
+        }
+        return machine;
+      };
+      reached();
       const body = await readJson(req, 100_000);
+      const machine = reached();
       const program = str(body.program, 'program', 40);
       const args = body.args === undefined ? [] : body.args;
       if (!Array.isArray(args) || !args.every((a) => typeof a === 'string')) throw new HttpError(400, 'args must be a list of text');

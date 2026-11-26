@@ -308,7 +308,7 @@ function hostFolders(m, k) {
 }
 
 const PROGRAMS_EXAMPLE = `"programs": {
-  "notepad": { "path": "C:\\Windows\\notepad.exe", "about": "Notepad", "args": true }
+  "notepad": { "path": "C:\\\\Windows\\\\notepad.exe", "about": "Notepad", "args": true }
 }`;
 
 /** The programs its owner lets marked minions start (run_on_host), from that PC's agent config, and how to change them. */
@@ -335,7 +335,7 @@ function hostPrograms(m, k) {
                 h('p', { class: 'small' }, 'In PowerShell on that PC, open its agent config, add a "programs" block like this one and save; the agent picks it up within seconds:'),
                 shell('powershell', `notepad ${quoted(true, m.config_file)}`),
                 markdownElement(`\`\`\`json\n${PROGRAMS_EXAMPLE}\n\`\`\``),
-                h('p', { class: 'muted small' }, 'A minion starts one by its name, with arguments only where "args" is true. The agent starts nothing that is not on this list.'),
+                h('p', { class: 'muted small' }, 'A minion starts one by its name, with arguments only where "args" is true. The agent starts nothing that is not on this list, and nothing at all while a folder minions may write to holds the agent, its config or that program.'),
               )
             : h('p', { class: 'muted small' }, 'Its agent runs without a config file. Install it again with one (the install command on that machine) to list programs.'),
         )

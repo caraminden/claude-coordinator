@@ -197,20 +197,41 @@ function loadPrograms(raw, into, problems, env) {
   }
 }
 
+/** A path as this PC resolves it, links and short names followed (as it is when it doesn't exist). @param {string} p */
+function hostPath(p) {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
 /**
  * Start one of the owner's programs for a marked minion (run_on_host): only one on the list, its arguments only where
  * the owner said args, never through a shell. Resolves with its pid, or throws a ToolError naming the list.
- * @param {Map<string, { name: string, path: string, args: boolean }>} programs @param {{ program?: unknown, args?: unknown }} ask
+ * Nothing starts while a folder minions can write (`ask.writable`, the worker's read-write folders) holds this agent
+ * or its list (`own`), or a program's own folder: a minion could change what runs.
+ * @param {Map<string, { name: string, path: string, args: boolean }>} programs @param {{ program?: unknown, args?: unknown, writable?: unknown }} ask
+ * @param {string[]} own the folders of this agent and its config file
  * @param {(path: string, args: string[], opts: import('node:child_process').SpawnOptions) => { pid?: number, once(event: string, on: (err: Error) => void): unknown, unref(): void }} [run]
  */
-export function startProgram(programs, ask, run = spawn) {
+export function startProgram(programs, ask, own, run = spawn) {
   const name = String(ask.program ?? '');
   const p = programs.get(name);
   const list = [...programs.keys()];
+  if (!Array.isArray(ask.writable)) throw new ToolError("The app didn't say which of this PC's folders minions can write to, so this agent starts nothing.");
+  const writable = ask.writable.map((w) => hostPath(String(w)));
+  for (const o of own.map(hostPath)) {
+    const w = writable.find((w) => within(w, o) || within(o, w));
+    if (w) throw new ToolError(`This agent and its list of programs are in ${o}, which minions marked for this PC can write to through the folder ${w}. It starts nothing until its owner moves one of them, or makes that folder read-only.`);
+  }
   if (!p) throw new ToolError(`"${name}" isn't one of the programs this PC's owner lists for minions. ${list.length ? `They are: ${list.join(', ')}.` : 'They list none (programs in machine-agent.json).'}`);
   const args = Array.isArray(ask.args) ? ask.args.map(String) : [];
   if (args.length && !p.args) throw new ToolError(`${name} takes no arguments here: its owner didn't allow them.`);
   if (!existsSync(p.path)) throw new ToolError(`${name}'s program isn't there any more (${p.path}).`);
+  const dir = hostPath(dirname(p.path));
+  const w = writable.find((w) => within(w, dir));
+  if (w) throw new ToolError(`${name} is in ${dir}, inside a folder minions marked for this PC can write to (${w}), so this agent won't start it.`);
   return new Promise((done, fail) => {
     const child = run(p.path, args, { cwd: dirname(p.path), detached: true, stdio: 'ignore', shell: false, windowsHide: false });
     child.once('error', (err) => fail(new ToolError(`${name} could not start: ${err.message}`)));
@@ -2567,7 +2588,7 @@ async function main() {
         const ask = msg.host_start;
         const answer = (body) => fetch(new URL('/api/machines/host-started', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ask.id, ...body }) }).catch((err) => log(`Could not tell the app about ${ask.program}: ${err.message}`));
         Promise.resolve()
-          .then(() => startProgram(host?.programs ?? new Map(), ask))
+          .then(() => startProgram(host?.programs ?? new Map(), ask, [dirname(fileURLToPath(import.meta.url)), ...(configFile ? [dirname(configFile)] : [])]))
           .then((pid) => {
             log(`Started ${ask.program} for a minion (process ${pid}).`);
             return answer({ ok: true, pid });

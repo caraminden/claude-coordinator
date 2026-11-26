@@ -152,6 +152,12 @@ export class WorkerJoin {
   }
 
   /** The name of the computer its worker runs on, while it does. */
+  /** The paths of the owner's read-write folders while its worker is here (T8: the agent starts nothing they hold), else null. */
+  writable(machineId: number): string[] | null {
+    const f = this.here(machineId) ? this.facts.get(machineId) : null;
+    return f ? f.folders.filter((x) => x.write).map((x) => x.path) : null;
+  }
+
   host(machineId: number): string {
     return this.here(machineId) ? (this.facts.get(machineId)?.host ?? '') : '';
   }

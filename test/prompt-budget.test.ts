@@ -12,7 +12,7 @@ import { fake } from './typed.ts';
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
 const BUDGET = {
   minion: 35_060 /* +160 on 2026-11-25 for citadel-job and a wait the server takes over (#1890); +250 on 2026-11-22 for the callers-and-twins and no-multi-file-dump lines (#1644);  -1,096 on 2026-11-22: the citadel-heavy line moved to the kit's heavy-nudge hook (#1577); +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5); -1,750 on 2026-11-22: seven lines moved to their homes (#1574) */,
-  taskmaster: 42_000 /* +150 on 2026-11-24 for the mark_urgent line (#1888); +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */,
+  taskmaster: 42_450 /* +450 on 2026-11-26 for the cabals line, when to suggest a goal cabal and create its Overseer (#2095); +150 on 2026-11-24 for the mark_urgent line (#1888); +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */,
 };
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
@@ -87,7 +87,7 @@ test('saving instructions says what they cost, the same in the settings page and
 // next to the built-in prompt, so they get a budget too. Characters of name + description, today's size
 // plus about 5% on 2026-11-14. This never asks for shorter text: a skill with a longer description is a
 // deliberate decision, made by raising the number with the reason in the commit message.
-const KIT_BUDGET = 10_850; // +200 on 2026-11-24 for citadel:citadel-words, Citadel's glossary every scheme reads (#1773); +200 for the desktop-app skill (#1148, Build 6); +250 on 2026-11-19 for citadel:briefing (#1108); +300 for the trigger-eval descriptions (#1110); +200 on 2026-11-20 for the citadel:scout agent (#1156); +100 on 2026-11-23 for measured trigger fixes (#1744: research 55->85%, critique 60->87%)
+const KIT_BUDGET = 11_000; // +150 on 2026-11-26 for citadel:cabal, the Overseer's steps, which replace the build minion's steps in prompts (#2095); +200 on 2026-11-24 for citadel:citadel-words, Citadel's glossary every scheme reads (#1773); +200 for the desktop-app skill (#1148, Build 6); +250 on 2026-11-19 for citadel:briefing (#1108); +300 for the trigger-eval descriptions (#1110); +200 on 2026-11-20 for the citadel:scout agent (#1156); +100 on 2026-11-23 for measured trigger fixes (#1744: research 55->85%, critique 60->87%)
 
 /** A skill's or agent's `name` and `description` frontmatter, a folded or plain description joined on one line. */
 function listing(file: string): string {

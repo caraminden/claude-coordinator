@@ -1,6 +1,6 @@
 ---
 name: cabal
-description: "The Overseer's steps: forming a cabal's roster, starting and routing its members from the board, a build cabal's branch, merges and go card, and closing. Use when your prompt says you are a cabal's Overseer, at each shift change, and before suggesting or reshaping a cabal."
+description: "Leading a cabal as its Overseer: the roster, starting members, routing fixes, a build's branch and go card. Use when you are a cabal's Overseer."
 ---
 
 # Leading a cabal

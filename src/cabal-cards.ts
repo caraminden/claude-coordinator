@@ -12,6 +12,8 @@ export interface CabalCardMember {
   title: string;
   state: BoardMember['state'];
   word: string;
+  /** Its scheme's name when it runs in another (#2094): it isn't in this scheme's list, so the card lists it by name. */
+  scheme: string | null;
 }
 
 export interface CabalCard {
@@ -64,7 +66,7 @@ export async function cabalCards(store: Store, projectId: number, deps: BoardDep
       overseer: overseerOf(board),
       build: store.getTicket(leadId)?.build ?? null,
       done: board.kind === 'build' ? 'merged' : 'shipped',
-      members: board.members.map((m) => ({ id: ids.get(m.row) ?? null, number: m.number, label: m.label, title: m.title, state: m.state, word: m.word })),
+      members: board.members.map((m) => ({ id: ids.get(m.row) ?? null, number: m.number, label: m.label, title: m.title, state: m.state, word: m.word, scheme: m.scheme })),
       finished: board.counts.merged,
       next: nextUp(board.members),
       asks: board.asks.length,

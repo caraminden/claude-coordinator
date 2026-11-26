@@ -19,7 +19,7 @@ export interface CabalCard {
   overseer: string;
   build: number | null;
   done: 'merged' | 'shipped';
-  members: { id: number | null; number: number | null; label: string; title: string; state: string; word: string }[];
+  members: { id: number | null; number: number | null; label: string; title: string; state: string; word: string; scheme?: string | null }[];
   finished: number;
   next: number;
   asks: number;

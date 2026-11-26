@@ -36,6 +36,8 @@ export interface BoardAsk {
   id: number;
   from: string;
   number: number | null;
+  /** The asker's scheme when it isn't the lead's (#2094). */
+  scheme: string | null;
   text: string;
   blocking: boolean;
   opened_at: number;
@@ -46,6 +48,11 @@ export interface BoardMember {
   label: string;
   title: string;
   number: number | null;
+  /** A member in another scheme (#2094): its scheme's id and name; null in the lead's. */
+  project_id: number | null;
+  scheme: string | null;
+  /** Whether the reader may open its chat (src/access.ts cabalBoardFor); a member of the lead's scheme always may. */
+  open: boolean;
   lane: string;
   role: string;
   state: MemberState;
@@ -67,7 +74,8 @@ export interface BoardMember {
 }
 
 export interface Board {
-  lead: { id: number; number: number | null; title: string; spend: number };
+  /** `project_id` is the lead's scheme; `open` whether the reader may open its chat (src/access.ts cabalBoardFor). */
+  lead: { id: number; number: number | null; title: string; spend: number; project_id: number; open: boolean };
   /** "Build 7", the Goal's name, or the lead's title. */
   name: string;
   kind: 'build' | 'goal';
@@ -130,16 +138,22 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   for (const [i, r] of rows.entries()) {
     const t = r.ticket_id != null ? tickets.get(r.ticket_id) : undefined;
     const ship = parseShipNote(t ? (store.lastShipNote(t.id) ?? '') : '');
-    const state = await stateOf(t, ship?.kind ?? null, ref, repoDir, asks, deps);
+    // A member in another scheme ships to its own main: it never merges into this repo's build branch (#2094).
+    const where = t?.project_id ?? r.project_id ?? lead.project_id;
+    const scheme = where === lead.project_id ? null : (store.getProject(where)?.name ?? `scheme ${where}`);
+    const state = await stateOf(t, ship?.kind ?? null, scheme ? null : ref, repoDir, asks, deps);
     members.push({
       row: r.id,
       label: r.label,
       title: r.title || t?.title || '',
       number: t?.number ?? null,
+      project_id: scheme ? where : null,
+      scheme,
+      open: true,
       lane: r.lane,
       role: r.role,
       state,
-      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : state === 'roster' && r.next_at != null ? 'next up' : state === 'roster' && r.approved_at != null ? 'approved' : STATE_WORD[state],
+      word: state === 'idle' && t?.state && t.state !== 'parked' ? t.state : state === 'roster' && r.asked_at != null ? `asked ${scheme}'s Taskmaster` : state === 'roster' && r.next_at != null ? 'next up' : state === 'roster' && r.approved_at != null ? 'approved' : STATE_WORD[state],
       plan: t ? '' : [r.handoff, r.model && tierLabel(r.model, r.effort), r.cost != null && money(r.cost), r.approved_at != null && `approved by ${r.approved_by}`].filter(Boolean).join(' · '),
       after: (t && afterOf(store, t)) || r.after || null,
       note: r.note,
@@ -155,12 +169,12 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   const byTicket = new Map(rows.map((r) => [r.ticket_id, r]));
   const leadSpend = store.ticketCost(leadId);
   return {
-    lead: { id: lead.id, number: lead.number, title: lead.title, spend: leadSpend },
+    lead: { id: lead.id, number: lead.number, title: lead.title, spend: leadSpend, project_id: lead.project_id, open: true },
     name: cabalName(store, lead, cabal.name),
     kind: ref ? 'build' : 'goal',
     build: ref ? lead.build : null,
     members,
-    asks: asks.map((a) => askOf(a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
+    asks: asks.map((a) => askOf(store, lead.project_id, a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
     log: store.cabalLog(leadId),
     red: cabal.red ? { text: cabal.red, at: cabal.red_at ?? cabal.created_at } : null,
     width: cabal.width,
@@ -194,10 +208,11 @@ function afterOf(store: Store, t: Ticket): string | null {
   return leader?.number != null ? `#${leader.number}` : null;
 }
 
-const askOf = (a: CabalAsk, row: CabalMemberRow | undefined, t: Ticket | undefined): BoardAsk => ({
+const askOf = (store: Store, leadScheme: number, a: CabalAsk, row: CabalMemberRow | undefined, t: Ticket | undefined): BoardAsk => ({
   id: a.id,
   from: row?.label || t?.title || `#${t?.number ?? '?'}`,
   number: t?.number ?? null,
+  scheme: t && t.project_id !== leadScheme ? (store.getProject(t.project_id)?.name ?? null) : null,
   text: a.text,
   blocking: !!a.blocking,
   opened_at: a.opened_at,
@@ -212,20 +227,21 @@ export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}${/s$/i.
 const money = (n: number) => `$${n.toFixed(2)}`;
 
 /** The board as compact text, for cabal_board's read: what an agent needs, a line a member. */
-export function boardText(b: Board, me: number | null = null): string {
+/** `me`: the reader, marked "(you)" on its row (a #N alone could be another scheme's). */
+export function boardText(b: Board, me: Pick<TicketFields, 'number' | 'project_id'> | null = null): string {
   const c = b.counts;
   const out = [
     `${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
   ];
   if (b.red) out.push(`RED (${pacificClock(b.red.at)}): ${b.red.text}`);
   out.push(b.asks.length ? `Open asks (${b.asks.length}):` : 'No open asks.');
-  for (const a of b.asks) out.push(`- ask ${a.id}${a.blocking ? ' BLOCKING' : ''} from ${a.from}${a.number != null ? ` #${a.number}` : ''} (${pacificClock(a.opened_at)}): ${a.text}`);
+  for (const a of b.asks) out.push(`- ask ${a.id}${a.blocking ? ' BLOCKING' : ''} from ${a.from}${a.number != null ? ` ${a.scheme ? `${a.scheme} ` : ''}#${a.number}` : ''} (${pacificClock(a.opened_at)}): ${a.text}`);
   if (!b.members.length) out.push('Roster: empty.');
   else out.push('Members (row id · label #N title | state | waits on | note | spend | risk | claims or files):');
   for (const m of b.members) {
     const files = m.claims.length ? `claims ${m.claims.join(' ')}` : m.files.length ? `files ${m.files.join(' ')}` : '';
     const cells = [
-      `${m.row} · ${[m.label, m.number != null ? `#${m.number}` : 'roster', m.title].filter(Boolean).join(' ')}${m.number != null && m.number === me ? ' (you)' : ''}${m.role ? ` [${m.role}]` : ''}${m.lane ? ` {${m.lane}}` : ''}`,
+      `${m.row} · ${[m.label, m.scheme ? `[${m.scheme}]` : '', m.number != null ? `#${m.number}` : 'roster', m.title].filter(Boolean).join(' ')}${m.number != null && m.number === me?.number && (m.project_id ?? b.lead.project_id) === me.project_id ? ' (you)' : ''}${m.role ? ` [${m.role}]` : ''}${m.lane ? ` {${m.lane}}` : ''}`,
       m.word,
       m.after ? `after ${m.after}` : '',
       m.note,

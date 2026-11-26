@@ -31,7 +31,7 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
   const open = openCabals.has(c.lead);
   const waiting = mine.filter((t) => t.open_cards?.length).length;
   const asks = c.asks + waiting;
-  const unstarted = c.members.filter((m) => m.id == null);
+  const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {
     if (!openCabals.delete(c.lead)) openCabals.add(c.lead);
@@ -65,7 +65,7 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
           'div',
           { class: 'cabal-members' },
           rows.map(row),
-          unstarted.map((m) => h('p', { class: 'cabal-planned' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, ' not started'))),
+          unstarted.map((m) => h('p', { class: 'cabal-planned' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
         )
       : '',
   );

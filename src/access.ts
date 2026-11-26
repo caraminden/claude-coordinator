@@ -231,3 +231,20 @@ export const messagePerson =
     const u = store.findUser('name', author);
     return u && !u.disabled_at ? u.id : null;
   };
+
+/**
+ * A cabal's board as one reader sees it (#2094), `sees` saying which schemes they are in. A member of the lead's scheme
+ * sees the whole board, members in other schemes included. A reader in only a member's scheme sees the lead's name and
+ * the rows and asks of the schemes they are in, without its log or red-run line. A chat opens only for its scheme's members.
+ */
+export function cabalBoardFor<B extends { lead: { project_id: number; open: boolean }; members: { project_id: number | null; scheme: string | null; number: number | null; open: boolean }[]; asks: { number: number | null; scheme: string | null }[]; log: unknown[]; red: unknown }>(
+  board: B,
+  sees: (projectId: number) => boolean,
+): B {
+  const lead = board.lead.project_id;
+  const whole = sees(lead);
+  const members = board.members.filter((m) => whole || (m.project_id != null && sees(m.project_id))).map((m) => ({ ...m, open: sees(m.project_id ?? lead) }));
+  if (whole) return { ...board, lead: { ...board.lead, open: true }, members };
+  const mine = new Set(members.map((m) => `${m.scheme}#${m.number}`));
+  return { ...board, lead: { ...board.lead, open: false }, members, asks: board.asks.filter((a) => a.scheme != null && mine.has(`${a.scheme}#${a.number}`)), log: [], red: null };
+}

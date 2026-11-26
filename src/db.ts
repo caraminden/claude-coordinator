@@ -220,6 +220,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['cabal_rows', 'approved_by', 'ALTER TABLE cabal_rows ADD COLUMN approved_by TEXT'],
   ['cabal_rows', 'approved_at', 'ALTER TABLE cabal_rows ADD COLUMN approved_at INTEGER'],
   ['cabal_rows', 'next_at', 'ALTER TABLE cabal_rows ADD COLUMN next_at INTEGER'],
+  ['cabal_rows', 'project_id', 'ALTER TABLE cabal_rows ADD COLUMN project_id INTEGER'],
+  ['cabal_rows', 'asked_at', 'ALTER TABLE cabal_rows ADD COLUMN asked_at INTEGER'],
 ];
 
 /**
@@ -349,6 +351,7 @@ export const SCHEMA_HISTORY = [
   [120, 'time_log_explains (#1994)'],
   [121, 'cabals, cabal_rows, cabal_asks, cabal_log (#2090)'],
   [122, 'cabals.width; cabal_rows handoff, model, effort, cost, approved_by, approved_at, next_at (#2091)'],
+  [123, 'cabal_rows project_id, asked_at (#2094)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

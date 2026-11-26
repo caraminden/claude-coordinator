@@ -819,6 +819,16 @@
   "m1": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
   "m2": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store"
  },
+ "GET /api/heavy/held": {
+  "anon": "400 Send ?repo=owner/name&run=<run id>",
+  "person": "400 Send ?repo=owner/name&run=<run id>",
+  "member": "400 Send ?repo=owner/name&run=<run id>",
+  "outsider": "400 Send ?repo=owner/name&run=<run id>",
+  "tmA": "400 Send ?repo=owner/name&run=<run id>",
+  "tmB": "400 Send ?repo=owner/name&run=<run id>",
+  "m1": "400 Send ?repo=owner/name&run=<run id>",
+  "m2": "400 Send ?repo=owner/name&run=<run id>"
+ },
  "GET /api/home": {
   "anon": "401 Not logged in",
   "person": "200",

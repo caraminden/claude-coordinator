@@ -308,6 +308,17 @@ function queueLong(argv: string[]): number {
   return 0;
 }
 
+/** Whether Citadel holds this run's heavy job for room on a PC (src/heavy-place.ts); no answer counts as no. */
+export async function heldByCitadel(slug: string, run: number | string): Promise<boolean> {
+  const store = (process.env.CITADEL_STORE_URL || 'http://perigee.tail59477f.ts.net:8574').replace(/\/$/, '');
+  try {
+    const res = await fetch(`${store}/api/heavy/held?repo=${encodeURIComponent(slug)}&run=${encodeURIComponent(String(run))}`, { signal: AbortSignal.timeout(10_000) });
+    return res.ok && ((await res.json()) as { held?: unknown }).held === true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const poll = pollSeconds();
   const findLimit = Number(process.env.CITADEL_HEAVY_CI_FIND) || 60;
@@ -440,6 +451,10 @@ async function main(argv: string[]): Promise<number> {
         // the desktop off, sends the job back here. Reading the runners themselves needs admin, so other runs tell.
         if (gh<{ total_count: number }>([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {
           queued = Date.now();
+        } else if (await heldByCitadel(slug, runId)) {
+          // Citadel holds it for room on a PC that's up (#2120): it starts there within 30 min, late if it must.
+          queued = Date.now();
+          say('Citadel is holding it until a PC has room for it');
         } else {
           if (!cancel()) {
             say(`no runner took the job and GitHub wouldn't cancel the run (${run.html_url}); nothing runs here`);

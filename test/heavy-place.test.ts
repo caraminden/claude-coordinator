@@ -145,6 +145,8 @@ test('a label no runner took in time comes off and the job is placed again', asy
   w.tick(HAND_MS);
   await w.pass();
   assert.ok(w.log.some((l) => /no runner took it/.test(l)));
+  assert.deepEqual(w.labelled(), [], 'the label came off');
+  assert.equal(w.placer.view()[0].state, 'waiting');
   await w.pass();
   assert.deepEqual(w.labelled(), ['desk1-linux-1'], 'handed out again');
 });
@@ -176,4 +178,22 @@ test("a Windows test run holds its PC's room while its agent asks, and lets go w
   w.placer.agentAsk(1, 'job-b', 'Windows test run');
   w.placer.agentDone(1, 'job-b');
   assert.equal(w.balancer.plan(1)!.workers, 2);
+});
+
+test('a job its run no longer lists as queued (another of its jobs started) is still placed, and heavy-ci hears it is held', async () => {
+  const w = world();
+  await w.pass();
+  assert.equal(w.placer.holds('Cara/Peek', 77), true, 'it waits on the first PC: heavy-ci keeps waiting');
+  assert.equal(w.placer.holds(REPO, 78), false);
+  w.running.set(1, 0);
+  await w.pass([]); // GitHub still says queued
+  assert.deepEqual(w.labelled(), ['desk1-linux-1']);
+  assert.equal(w.placer.holds(REPO, 77), false, 'handed out: heavy-ci falls back as before if no runner takes it');
+});
+
+test('with no PC of the owner up, Citadel holds nothing, so heavy-ci falls back to perigee as before', async () => {
+  const w = world();
+  for (const r of w.runners) r.status = 'offline';
+  await w.pass();
+  assert.equal(w.placer.holds(REPO, 77), false);
 });

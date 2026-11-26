@@ -958,7 +958,7 @@ export class WorkspaceHost {
     }
     let ticket = null;
     // A run that waits for room on this PC joins the screen's line only once it has room, so it never holds the screen meanwhile.
-    const roomed = !!this.room && task.screen;
+    const roomed = !!this.room;
     try {
       // Every screen task joins the line, even with the screen free: it is the line that keeps arrival order.
       if (this.screenLock && task.screen && !roomed) ticket = joinScreenLine(this.screenLock, `task ${name} in ${w.name}`, who);
@@ -1015,6 +1015,14 @@ export class WorkspaceHost {
         try {
           child = spawn(argv[0], argv.slice(1), { cwd: w.path, env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: OWN_GROUP });
           if (OWN_GROUP && child.pid) trackGroup(child.pid);
+          // Started late (its 30 min waited with no room): it runs below the turns on this PC (the spec's rule 3).
+          if (job.late && child.pid) {
+            try {
+              nodeOs.setPriority(child.pid, nodeOs.constants.priority.PRIORITY_BELOW_NORMAL);
+            } catch {
+              /* it runs at normal priority, that's all */
+            }
+          }
         } catch (err) {
           return finish(null, `Could not start ${argv[0]}: ${err.message}`);
         }
@@ -1034,7 +1042,7 @@ export class WorkspaceHost {
         child.on('exit', (code) => setTimeout(() => finish(code, null), 1000));
       };
       const queue = () => {
-        if (roomed && this.screenLock) {
+        if (roomed && task.screen && this.screenLock) {
           try {
             ticket = joinScreenLine(this.screenLock, `task ${name} in ${w.name}`, who);
           } catch (err) {
@@ -1081,6 +1089,7 @@ export class WorkspaceHost {
               return;
             }
             job.room = null;
+            job.late = go === 'late';
             renew = setInterval(() => this.room('ask', job.id, `${name} in ${w.name}`).catch(() => {}), this.roomPollMs);
             renew.unref?.();
             queue();

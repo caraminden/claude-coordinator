@@ -410,7 +410,7 @@ export interface App {
   ciHold?: Pick<CiHold, 'ask' | 'state'>;
   runnerCap?: Pick<RunnerCap, 'text'>;
   /** Heavy jobs off the server waiting for room on a PC (src/heavy-place.ts, #2120); absent in tests that don't need it. */
-  heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone'>;
+  heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone' | 'holds'>;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
   /** Each scheme's files by size and by how many minions changed them, counted daily (src/code-counts.ts, #1988). */

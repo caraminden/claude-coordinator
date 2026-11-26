@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { BEGIN, END, commandLine, commandOutput, slugOf } from '../tools/heavy-ci.ts';
@@ -175,6 +176,7 @@ const run = (r: ReturnType<typeof repo>, mode: string, extra: NodeJS.ProcessEnv 
       CITADEL_HEAVY_JUDGE: undefined,
       CITADEL_HEAVY_GUESS: 'heavy',
       CITADEL_HEAVY_WHO: 'Peek #9',
+      CITADEL_STORE_URL: 'http://127.0.0.1:9', // no Citadel: it holds nothing (#2120)
       ...extra,
     },
   });
@@ -421,4 +423,50 @@ test('with no minion to wake, a stopped job waits here for the same run to come 
   assert.equal(res.status, 3, res.stderr);
   assert.equal(res.stdout, 'hello from CI\n');
   assert.ok(Number(readFileSync(join(r.gh, 'polls'), 'utf8')) >= 7, 'it watched the run past its cancelled end');
+});
+
+test('a job Citadel holds for room on a PC (#2120) keeps waiting on CI past the queue limit, then goes back as before', async () => {
+  const r = repo();
+  const asked: string[] = [];
+  const citadel = createServer((req, res) => {
+    asked.push(req.url ?? '');
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ held: asked.length <= 2 }));
+  });
+  await new Promise<void>((ok) => citadel.listen(0, '127.0.0.1', ok));
+  try {
+    const { port } = citadel.address() as { port: number };
+    const child = spawn(heavy, ['sh', '-c', 'echo ran here; exit 5'], {
+      cwd: r.d,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        FAKE_GH_DIR: r.gh,
+        FAKE_GH_MODE: 'queued',
+        CITADEL_HEAVY_DIR: join(r.gh, 'locks'),
+        CITADEL_HEAVY_HELD: undefined,
+        CITADEL_HEAVY_HERE: undefined,
+        CITADEL_HEAVY_PRIORITY: undefined,
+        CITADEL_HEAVY_CI_POLL: '0.05',
+        CITADEL_HEAVY_PRESSURE: join(root, 'no-psi'),
+        CITADEL_HEAVY_JUDGE: undefined,
+        CITADEL_HEAVY_GUESS: 'heavy',
+        CITADEL_HEAVY_WHO: 'Peek #9',
+        CITADEL_HEAVY_CI_QUEUE: '0.2',
+        CITADEL_STORE_URL: `http://127.0.0.1:${port}`,
+      },
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (b) => (out += b));
+    child.stderr.on('data', (b) => (err += b));
+    const status = await new Promise<number | null>((ok) => child.on('close', ok));
+    assert.equal(asked.length, 3, err);
+    assert.match(asked[0], /^\/api\/heavy\/held\?repo=o%2Fr&run=\d+$/);
+    assert.match(err, /Citadel is holding it until a PC has room/);
+    assert.equal(status, 5, err);
+    assert.equal(out, 'ran here\n', 'once Citadel holds it no more, a job no runner takes comes back here');
+  } finally {
+    citadel.close();
+  }
 });

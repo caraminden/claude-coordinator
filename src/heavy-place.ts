@@ -127,6 +127,11 @@ export class HeavyPlacer {
     this.d.log?.(`Heavy jobs: ${line}`);
   }
 
+  /** Whether a job of this run waits for room on a PC with its runners up (tools/heavy-ci.ts: then it waits, not back to perigee). */
+  holds(repo: string, run: number): boolean {
+    return [...this.held.values()].some((h) => h.job.run === run && h.job.repo.toLowerCase() === repo.toLowerCase() && h.state === 'waiting' && h.home !== null);
+  }
+
   view(): HeavyView[] {
     return [...this.held.values()].map((h) => ({ key: h.key, what: h.what, state: h.state, machine: h.home, runner: h.runner?.name ?? null, since: h.since, late: h.late }));
   }
@@ -195,10 +200,9 @@ export class HeavyPlacer {
         if (!repoRead) return;
         // Not queued any more and never handed out: cancelled, or a runner took it some other way (a label added by hand).
         const j = await this.d.job(h.job.repo, h.job.id);
-        if (j?.status === 'in_progress' || j?.status === 'queued') {
-          if (j.status === 'in_progress') this.running(h, now, j.runner);
-          return;
-        }
+        if (j?.status === 'in_progress') return this.running(h, now, j.runner);
+        // Its run went in progress (another of its jobs started), so ShipWatch's queued runs no longer list it: still placed.
+        if (j?.status === 'queued') return this.place(h, now, await runners(h.job.repo));
         return this.finish(h, j ? `it ${j.status === 'completed' ? 'ended' : j.status} before it was placed` : 'GitHub no longer lists it');
       }
       return this.place(h, now, await runners(h.job.repo));

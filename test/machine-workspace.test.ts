@@ -452,7 +452,7 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
 });
 
 // Build 7 M6c (#2120): a Windows test run asks Citadel for its size on the PC before it joins the screen's line.
-test('a screen task waits for room on the PC, then runs and says done; a build task and a failed ask go straight on', async () => {
+test('a task waits for room on the PC, then runs and says done; a build task asks too; a failed ask goes straight on', async () => {
   const asks: string[] = [];
   let answer: 'wait' | 'start' | 'fail' = 'wait';
   const roomy = new WorkspaceHost({
@@ -478,7 +478,10 @@ test('a screen task waits for room on the PC, then runs and says done; a build t
   await until('done said', () => asks.includes(`done:${id}`));
   asks.length = 0;
   assert.match((await call('run_task', { workspace: 'peek', task: 'build', args: [] })).text, /succeeded/);
-  assert.ok(!asks.some((a) => a.startsWith('ask:')), 'a build task asks for no room');
+  assert.ok(
+    asks.some((a) => a.startsWith('ask:')),
+    'a build task compiles, so it asks for room too',
+  );
   answer = 'fail';
   assert.match((await call('run_task', { workspace: 'peek', task: 'shell', args: ['y'] })).text, /succeeded/);
 });

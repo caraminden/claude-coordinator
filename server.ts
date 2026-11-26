@@ -715,6 +715,9 @@ function settleCard(card: { ticket: number; question: string }, by: string, line
 // One balancer per machine (Build 7 M6, src/machine-balancer.ts): each connected machine's threads split across its ships,
 // waiting CI, heavy jobs and minion workers. Perigee is never one of them (Josh, "Machines only for now").
 let ciQueued = new Map<string, number>();
+// Heavy jobs Citadel holds (#2120) keep their repo's runners awake on the owner's later PCs, so one can move there; they
+// stay out of ciQueued, which shrinks workers: their room is the balancer's ask.
+let ciHeavy = new Map<string, number>();
 const ciWaitingAt = (id: number) => {
   const pcs = ciLoad.runnersByPc();
   for (let host = workers.host(id); host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) {
@@ -759,7 +762,7 @@ const sendRunnerPlans = () => {
     const caps = agents.map((a) => a.cap ?? Infinity).reduce((a, n) => a + n, 0);
     return [{ id: m.id, owner: m.owner_id, priority: m.priority ?? null, runners: Math.min(plan.runners, caps), repos: new Set(agents.flatMap((a) => [...a.repos])), agents }];
   });
-  const order = runnerOrder(pcs, ciQueued);
+  const order = runnerOrder(pcs, new Map([...new Set([...ciQueued.keys(), ...ciHeavy.keys()])].map((r) => [r, (ciQueued.get(r) ?? 0) + (ciHeavy.get(r) ?? 0)])));
   for (const pc of pcs) {
     const part = order.get(pc.id)!;
     for (const [os, share] of runnerShares(part.runners, pc.agents, part.queued)) machines.sendRunnerPlan(pc.id, os as 'windows' | 'linux', share);
@@ -2225,7 +2228,11 @@ const shipWatch = new ShipWatch({
   as: asScheme,
   send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
-  heavy: (jobs, read) => void heavyPlacer.pass(jobs, read),
+  heavy: (jobs, read) => {
+    ciHeavy = new Map();
+    for (const j of jobs) ciHeavy.set(j.repo, (ciHeavy.get(j.repo) ?? 0) + 1);
+    void heavyPlacer.pass(jobs, read);
+  },
   queued: (byRepo, labels) => {
     ciQueued = byRepo;
     ciQueuedLabels = labels;

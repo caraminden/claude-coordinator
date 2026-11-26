@@ -1,5 +1,5 @@
 // Heavy jobs off the server tell Citadel about their room (Build 7 M6c, #2120, src/heavy-place.ts):
-//  - a heavy CI job's last step (tools/heavy-done.ts), with its own GitHub run token (Josh's pick, "GitHub's run token"):
+//  - a heavy CI job's last step (the "tell Citadel its room is free" step in the workflows), with its own GitHub run token (Josh's pick, "GitHub's run token"):
 //    its room on the PC is free at once, rather than at Citadel's next look at GitHub;
 //  - a PC's agent, with the PC's token, before and while it runs a Windows test run (public/machine-agent.mjs).
 import { HttpError, json, readJson, type Route } from '../http.ts';
@@ -37,6 +37,19 @@ export const heavyRoutes: Route[] = [
       if (body.op !== 'ask') throw new HttpError(400, 'op is ask or done');
       const label = typeof body.label === 'string' && body.label.length <= 100 ? body.label : 'Windows test run';
       return json(res, 200, { go: app.heavy.agentAsk(machine.id, body.key, label) });
+    },
+  },
+  // tools/heavy-ci.ts, from a turn or its job (which has no Citadel token): a heavy job Citadel holds for room keeps waiting,
+  // rather than going back to perigee after CITADEL_HEAVY_CI_QUEUE as one no runner is up for does. Only a yes or no.
+  {
+    method: 'GET',
+    path: '/api/heavy/held',
+    who: 'anyone',
+    handler({ res, app, url }) {
+      const repo = url.searchParams.get('repo') ?? '';
+      const run = Number(url.searchParams.get('run'));
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isSafeInteger(run)) throw new HttpError(400, 'Send ?repo=owner/name&run=<run id>');
+      return json(res, 200, { held: app.heavy?.holds(repo, run) ?? false });
     },
   },
 ];

@@ -32,6 +32,7 @@ import { UNINSTALL } from '../machine-away.ts';
 import { BLOB_BYTES } from '../worker-join.ts';
 import { joinState, makeJoin, redeemJoin } from '../machine-join.ts';
 import { roleSetupAgentRoutes } from './role-setup.ts';
+import { heavyRoutes } from './heavy.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -451,6 +452,8 @@ export const agentRoutes: Route[] = [
   ciUploadRoute,
   ciNumbersRoute,
   ...ciJobReadRoutes,
+  // A heavy job's room on a PC (#2120): its last step with its run token, and a PC's agent for its Windows test runs.
+  ...heavyRoutes,
   // A CI job's test file counts while its suite runs, about every 2 s (#1368, #1667): its run comes from its run token, as an
   // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines; failed: the
   // files failed so far; phase 'rerun' while run-tests.sh reruns them alone, the counts then being the reruns'.

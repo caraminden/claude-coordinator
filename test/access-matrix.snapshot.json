@@ -1825,13 +1825,13 @@
  },
  "GET /api/projects/:p/flow": {
   "anon": "401 Not logged in",
-  "person": "400 from and to are days like 2026-11-25, at most 400 apart",
-  "member": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "person": "200",
+  "member": "200",
   "outsider": "404 No such scheme",
-  "tmA": "400 from and to are days like 2026-11-25, at most 400 apart",
+  "tmA": "200",
   "tmB": "403 Outside this Taskmaster's scheme",
-  "m1": "400 from and to are days like 2026-11-25, at most 400 apart",
-  "m2": "400 from and to are days like 2026-11-25, at most 400 apart"
+  "m1": "200",
+  "m2": "200"
  },
  "POST /api/projects/:p/github": {
   "anon": "401 Not logged in",

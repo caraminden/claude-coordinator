@@ -1143,7 +1143,7 @@ const memoryEase = new MemoryEase({
 });
 pressure.useEase(() => memoryEase.get());
 if (!BOOT_CHECK) memoryEase.start();
-// Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
+// Idle Taskmasters and cabal leads with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
 if (!BOOT_CHECK && !PREVIEW) every('fresh sessions', 60_000, () => runner.freshSweep());
 // Waiting minions' prompt caches stay warm in working hours (#862, src/keepalive.ts).

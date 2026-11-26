@@ -2605,7 +2605,7 @@ export class Runner {
               // and forget its size, or the idle check would ask again each minute.
               this.store.deleteSetting(freshKey(ticketId));
               this.store.deleteSetting(contextKey(ticketId));
-              this.emit(ticketId, 'note', { text: mark.stopped ? `The handoff turn was stopped, so the fresh start is off: the ${roleWord(ticket)} keeps its session.` : 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
+              this.emit(ticketId, 'note', { text: mark.stopped ? `The handoff turn was stopped, so the fresh start is off: the ${roleWord(ticket)} keeps its session.` : `The fresh start could not run a turn, so the ${roleWord(ticket)} keeps its session.` });
               return rest();
             });
         }),
@@ -4081,7 +4081,7 @@ export class Runner {
     if (ev.type === 'result') {
       const status = this.statuses.get(ticketId);
       this.statuses.delete(ticketId);
-      if (status && !ev.is_error) this.onStatusTrailer(ticketId, status);
+      if (status && !ev.is_error && !(this.store.getCabal(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId))?.fresh)) this.onStatusTrailer(ticketId, status);
       if (status) this.saveTurn(ticketId, { status: undefined });
     }
     // Likewise the model: remembered from turns that ran without one chosen.

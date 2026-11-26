@@ -2,7 +2,7 @@
 
 Build minion #1935. Nineteen feeders merged into `build/7` between 02:37 PST on 2026-11-25 and 10:15 PST on 2026-11-26[^merges]:
 #1937, #1962, #1973, #1972, #2006, #2011, #2044, #2070, #2052–#2057 (machine connections M1–M6), #2088, #2085, #2064, #2061 and #2105.
-Main was taken in 12 times[^takeins]. The build's full runs were tried 35 times: 19 merged, 13 were refused at CI, 2 at guards and 1 at rebase[^full].
+Main was taken in 14 times[^takeins]. The build's full runs were tried 38 times: 22 merged, 13 were refused at CI, 2 at guards and 1 at rebase[^full].
 The feeders and the build minion cost $389.50 together. The build minion's share was $61.55, against the $25 its brief expected[^cost].
 
 ## Fixes, ranked by what they'd have saved
@@ -26,6 +26,7 @@ The feeders and the build minion cost $389.50 together. The build minion's share
    - The take-in at 11-26 10:23 resolved conflicts in ci-armed card fields, size budgets and sync-calls.json. The one at 11:12 resolved the types split[^takeins].
    - sync-calls cost the most. Its 16 new rows were unclassed, the owed total went past main's 253 cap, and two machine-turn writes had to become async (a reviewer then found a race in them, fixed in 414abe7f1).
    - A third take-in at 12:10 PST, after the go card was up, brought #2142, which started counting `as unknown as` as a type escape. The build's 16 such casts were written before that rule, and recording them in the baseline cost one more full run.
+   - A fourth, after Cara's go, was forced by the ship itself refusing a main that wouldn't merge: #2134 had moved the poll and stop off the thread. Build 7's running-turn code had to go async to match, and its reviewer caught a stop that would have signalled a machine turn's pid on the server (fixed in d6fd08a38).
    - This is a repeat of the ledger row on shared counts files (size-budget, the type baseline). sync-calls.json is now a third such file. **Not made:** the row's proposed fix (regenerated files that merge by themselves) is in the same pipeline-lane handoff. This retro and the file are added to the row.
 5. **Two feeders' briefs named a handoff file that didn't exist (#1937, #1962)**[^briefs]. Both found the spec instead, so the cost was one lookup each. This falls under the ledger row on briefs stating a guess as fact. **No new fix:** the briefing skill's part 6 already covers it. The row gets this retro.
 
@@ -71,7 +72,7 @@ Mostly no; see fix 1. They did make the merge order visible: every lend is a dat
 - Feeders' merge notes naming their risk and what they didn't fix. The go card's "not verified" list was built from them.
 
 [^merges]: `grep -E "timing.*into build/7" shared/project/retro-log/2026-11-2{5,6}/land.md`, Z times minus 8 h, run 2026-11-26 11:30 PST.
-[^takeins]: `git log --first-parent --merges --format=%s main..build/7 | grep -ci main` → 12; conflict files from `git show --diff-merges=cc --name-only <sha>`, 2026-11-26.
+[^takeins]: `git log --first-parent --merges --format=%s main..build/7 | grep -ci main` → 14 (2026-11-26 13:25 PST); conflict files from `git show --diff-merges=cc --name-only <sha>`, 2026-11-26.
 [^full]: `cat shared/project/retro-log/2026-11-2{5,6}/land.md | grep -E 'timing.*build/7, full' | grep -oE '(merged|refused[^,;]*)' | sort | uniq -c`, 2026-11-26.
 [^cost]: `host_check db`: `SELECT t.number, round(sum(u.cost_usd),2) FROM tickets t JOIN turns u ON u.ticket_id=t.id WHERE t.project_id=2 AND t.number IN (1935, the 19 feeders) GROUP BY t.number`, summed, 2026-11-26 ~12:00 PST. It excludes the turns after that query.
 [^refusals]: `grep -c 'writes outside its claim in build/7'` over each feeder's transcript under `~/.claude/projects/*-tickets-<worktree>/*.jsonl`, 2026-11-26. Transcripts only, so it is a lower bound.

@@ -56,9 +56,9 @@ export function renderRemovals(el, redraw) {
   if (!el) return;
   const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => key(m) === id)]);
   // Left alone while nothing changed, so a selection in a command survives the list's redraws.
-  const key = JSON.stringify(shown);
-  if (el.dataset.key === key) return;
-  el.dataset.key = key;
+  const drawn = JSON.stringify(shown);
+  if (el.dataset.drawn === drawn) return;
+  el.dataset.drawn = drawn;
   el.replaceChildren(
     ...shown.map(([id, { name, command }, there]) => {
       const done = h('button', { type: 'button', class: 'secondary small' }, 'Done');

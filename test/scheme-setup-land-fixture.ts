@@ -16,7 +16,7 @@ export const root = mkdtempSync(join(tmpdir(), 'scheme-land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // COORDINATOR_CONTAINER: the template refuses in a container turn (#577), and these tests run there too.
 // COORDINATOR_SHARED_DIR: a turn's real shared folder, where the timing line would go (the retro log); unset, it goes in .git.
-export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined }), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined }), LAND_CI_LATE: '0', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 
 // The timing lines in a log folder (#1320), every day's land.md: a run may cross midnight UTC.
 export const timingLines = (dir: string) =>

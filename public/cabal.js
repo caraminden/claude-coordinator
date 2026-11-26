@@ -2,7 +2,7 @@
 // #/p/N/cabal/M. Both draw the same ledger (Josh, 2026-11-25, picked "A · A ledger"): one row per member, open ones
 // first and a blocking ask pinned on top, a red-run bar when the lead set one, and "Roster of N, nobody started yet"
 // before anyone starts. It only reads: src/cabal-board.ts builds the board, and people answer by writing in the lead's chat.
-import { api, h, threadHref, view } from './base.js';
+import { api, h, icon, threadHref, view } from './base.js';
 import { emptyCard, toneChip } from './look.js';
 import { loadingLine } from './ui/state.js';
 
@@ -25,7 +25,7 @@ const clock = (/** @type {number} */ ms) => new Date(ms).toLocaleTimeString([], 
 export const cabalHref = (projectId, number) => `#/p/${projectId}/cabal/${number}`;
 
 /** "Build 7 cabal" and "Build 7's Overseer #1935": the names people read (code says lead). */
-const overseer = (/** @type {Board} */ b) => `${b.name}'s Overseer${b.lead.number ? ` #${b.lead.number}` : ''}`;
+const overseer = (/** @type {Board} */ b) => `${b.name}${/s$/i.test(b.name) ? "'" : "'s"} Overseer${b.lead.number ? ` #${b.lead.number}` : ''}`;
 
 /** The header line and the meter: one segment a member, in its state's colour. @param {Board} b @param {number} projectId */
 function boardHead(b, projectId) {
@@ -42,7 +42,7 @@ function pinned(b, all, reply) {
   const out = [];
   if (b.red) out.push(h('div', { class: 'cabal-red', role: 'status' }, h('b', {}, 'Red run '), h('span', { class: 'cabal-when' }, clock(b.red.at)), ' ', b.red.text));
   const blocking = b.asks.filter((a) => a.blocking);
-  for (const a of all ? b.asks : blocking.slice(0, 1))
+  for (const a of all ? [...blocking, ...b.asks.filter((x) => !x.blocking)] : blocking.slice(0, 1))
     out.push(h('div', { class: 'cabal-ask', 'data-blocking': a.blocking ? '' : null }, h('div', {}, h('b', {}, a.blocking ? 'Blocking ask' : 'Ask'), ` · ${a.from}${a.number ? ` #${a.number}` : ''}: `, a.text), reply ? h('button', { type: 'button', class: 'small secondary', onclick: () => reply(a) }, 'Reply') : null));
   const rest = b.asks.length - (all ? b.asks.length : Math.min(1, blocking.length));
   if (!all && rest > 0) out.push(h('div', { class: 'cabal-more' }, `${rest} more open ask${rest === 1 ? '' : 's'} on the board`));
@@ -228,9 +228,11 @@ async function readPage(p) {
 /** @param {NonNullable<typeof page>} p */
 function drawPage(p) {
   const b = p.board;
-  if (!b) return p.el.replaceChildren(emptyCard('No board here.', p.error ?? '', { mark: '?' }));
+  const head = h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, b ? `${b.name} cabal` : 'Cabal board'), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${p.projectId}/t/${p.number}`, title: "Back to the Overseer's chat", 'aria-label': 'Close' }, icon('close'))));
+  if (!b) return p.el.replaceChildren(head, emptyCard('No board here.', p.error ?? '', { mark: '?' }));
   const redraw = () => drawPage(p);
   p.el.replaceChildren(
+    head,
     h(
       'div',
       { class: 'cabal-panel cabal-page' },

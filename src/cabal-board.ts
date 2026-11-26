@@ -192,8 +192,8 @@ const askOf = (a: CabalAsk, row: CabalMemberRow | undefined, t: Ticket | undefin
   opened_at: a.opened_at,
 });
 
-/** People's name for the lead: "Build 7's Overseer". */
-export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}'s Overseer`;
+/** People's name for the lead: "Build 7's Overseer", "Worker machines' Overseer". */
+export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}${/s$/i.test(board.name) ? "'" : "'s"} Overseer`;
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 

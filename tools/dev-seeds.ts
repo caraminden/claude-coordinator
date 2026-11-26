@@ -27,6 +27,7 @@ import { addMention } from '../src/mentions.ts';
 import { heldPlan, settingsOverlaps } from '../src/instructions-save.ts';
 import { lendAfter, lendLines, type LendChange } from '../src/machine-lend.ts';
 import { flowSeed } from './dev-seeds-flow.ts';
+import { cabalSeeds } from './dev-seeds-cabal.ts';
 
 export interface SeedCtx {
   store: Store;
@@ -2103,4 +2104,5 @@ mock.boards('#takes', { boards: [
     },
   },
   flow: flowSeed,
+  ...cabalSeeds,
 };

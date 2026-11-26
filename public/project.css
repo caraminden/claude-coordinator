@@ -931,6 +931,7 @@ a.chain-node:is(:hover, :focus-visible) { transform: translateY(-1px); box-shado
 dialog.viewer #chat-cabal { display: none; }
 .cabal-panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); margin-bottom: var(--space-2); overflow: hidden; }
 .cabal-page { margin: var(--space-4); }
+.cabal-page .cabal-head > b { display: none; } /* the page head says it */
 .cabal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3) 0; }
 .cabal-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-width: 0; flex: 1; }
 .cabal-sub { color: var(--muted); font-size: 0.85em; }
@@ -985,4 +986,6 @@ dialog.viewer #chat-cabal { display: none; }
   .cabal-note-col { display: none; }
   .cabal-narrow { display: block; }
   .cabal-ask { flex-direction: column; }
+  /* Over the composer, the chat keeps the room: two lines each, the board page has them whole. */
+  #chat-cabal :is(.cabal-red, .cabal-ask > div) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 }

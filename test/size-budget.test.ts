@@ -31,7 +31,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'src/routes/projects.ts': [2122, 'every /projects route; split by page is queued (+2: create_ticket puts a minion on a cabal board, #2090) (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859) (+3: the claim keep checks and who ships beside it, #1985) (+4: a first open answers with the folder of its Taskmaster while that write is queued, #1903) (+8: createMinion, the create path a card pick shares, #2050)'],
   'src/tripwire.ts': [1841, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792) (+10: types replacing any, #1816) (+1: a turn may change its own copies of app data, #1884)'],
   'src/routes/tickets.ts': [1936, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792) (+3: a hand-off and a deploy report move its place in line, #1888)'],
-  'tools/dev-seeds.ts': [2106, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792; by 2 for the Flow seed moved out to dev-seeds-flow.ts, #1989)'],
+  'tools/dev-seeds.ts': [2108, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792; by 2 for the Flow seed moved out to dev-seeds-flow.ts, #1989; by 2 for the cabal seeds in dev-seeds-cabal.ts, #2090)'],
 };
 
 // Symlinks are skipped on purpose: their target is counted where it really lives.

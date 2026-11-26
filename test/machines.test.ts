@@ -147,6 +147,7 @@ test('a machine being removed takes no new token and no Minion turns switch-on (
     const patch = await srv.call(`/api/machines/${machine.id}`, { worker: true }, 'PATCH');
     assert.equal(patch.status, 409);
     assert.match(patch.data.error, /being removed/);
+    assert.equal((await srv.call(`/api/machines/${machine.id}`, { lend: { server: null, workspaces: [], worker: true } }, 'PATCH')).status, 409, 'nor through its lend ticks');
     assert.equal((await srv.call(`/api/machines/${machine.id}/token`, {}, 'POST')).status, 409);
     assert.equal((await srv.call(`/api/machines/${machine.id}`, { worker: false }, 'PATCH')).status, 200, 'switching it off still works');
     store.deleteSetting('machines-removing');

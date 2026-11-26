@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -10,18 +11,13 @@ const skip = !bin && skipMessage;
 const q = (n: number, multi = false) => ({ header: `Q${n}`, question: `Question ${n}?`, ...(multi ? { multiSelect: true } : {}), options: [{ label: `A${n}`, recommended: true }, { label: `B${n}` }, { label: `C${n}` }] });
 const ALL = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => q(n, n === 2 || n === 6));
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   window.sent = [];
   const ALL = ${JSON.stringify(ALL)};
-  const now = Date.now();
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const minion = (n) => ({ id: n, project_id: 1, kind: 'ticket', number: n, title: 'Minion ' + n, status: 'idle', updated_at: 0, created_at: now - 1000 });
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input, init) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url, init) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [minion(7), ...Array.from({ length: 16 }, (_, i) => minion(20 + i))], seen: {}, person_notes: {}, pins: [] });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
@@ -36,11 +32,8 @@ const STUB = `<script>
         { id: 2, ticket_id: Number(m[1]), kind: 'question_more', data: JSON.stringify({ id: 'q7', questions: ALL }), created_at: now - 59_000 },
       ], tasks: [], more: false });
     }
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+  }
+`);
 
 let app: App;
 let browser: Browser;

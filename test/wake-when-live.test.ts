@@ -8,7 +8,7 @@ import { APP_NAME } from '../src/appname.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { LiveWaiters, type PrMerge } from '../src/wake.ts';
-import { bootServer, REPO, stopTurns, testPins } from './helpers.ts';
+import { bootServer, fakeClaude, REPO, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -112,17 +112,7 @@ test('resolve accepts hashes the live checkout or the scheme repo knows, and not
 });
 
 test('wake messages go through the runner without counting toward or being held by the loop guard', async () => {
-  const fake = join(root, 'claude-fake');
-  writeFileSync(
-    fake,
-    `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-  );
-  chmodSync(fake, 0o755);
+  const fake = fakeClaude(root);
   const runner = new Runner(
     store,
     () => {},

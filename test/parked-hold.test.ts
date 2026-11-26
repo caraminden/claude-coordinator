@@ -4,7 +4,7 @@
 // on the next turn. Unpark, the Taskmaster's unpark option, and the minion's own wait (wake_when_live, the
 // start_after start) all start that turn. A stand-in `claude -p` writes each turn's prompt to prompts.jsonl.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -15,7 +15,7 @@ import type { TicketState } from '../src/db.ts';
 import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { COLD_HOLD_MAX_MS, LOOP_LIMIT, Runner } from '../src/runner.ts';
 import { LiveWaiters, startChained } from '../src/wake.ts';
-import { bootServer, jsonLines, withoutTurnNote, lines, PASSWORD, SECRET, stopTurns, testPins, until } from './helpers.ts';
+import { bootServer, fakeClaude, jsonLines, withoutTurnNote, lines, PASSWORD, SECRET, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'parked-hold-'));
@@ -26,18 +26,7 @@ after(async () => {
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const prompts = join(root, 'prompts.jsonl');
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root, { log: { path: prompts } });
 
 const NOW = Date.UTC(2026, 10, 14, 18, 2);
 const SENT = '2026-11-14 18:02';

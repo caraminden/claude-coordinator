@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createServer as createHttpServer } from 'node:http';
-import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { turnSettings } from '../src/turn-launch.ts';
 import { bootServer, tempRoot, type Booted } from './helpers.ts';
+import { mcpAgent } from './mcp-agent.ts';
 import type { ApiEvent } from './typed.ts';
 
 const repo = join(import.meta.dirname, '..');
@@ -179,32 +179,10 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
       });
   });
   const apiPort = await tmp.serve(api);
-  const mcp = tmp.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
-    env: {
-      // No COORDINATOR_MEMORY from a turn running the tests: create_ticket's duplicate check would call first.
-      ...process.env,
-      MACHINES_URL: undefined,
-      COORDINATOR_MEMORY: undefined,
-      COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
-      COORDINATOR_TOKEN: 'c.sig',
-      COORDINATOR_PROJECT: '2',
-      COORDINATOR_ROLE: 'coordinator',
-      COORDINATOR_TICKET: '1',
-    },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
+  // No COORDINATOR_MEMORY from a turn running the tests: create_ticket's duplicate check would call first.
+  const mcp = mcpAgent({ COORDINATOR_API: `http://127.0.0.1:${apiPort}`, COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' }, tmp.track);
   try {
-    const replies = new Map<number, (r: { id: number; result: ToolResult }) => void>();
-    createInterface({ input: mcp.stdout! }).on('line', (l) => {
-      const r = JSON.parse(l);
-      replies.get(r.id)?.(r);
-    });
-    let rid = 0;
-    const tool = (name: string, args: object) =>
-      new Promise<ToolResult>((r) => {
-        replies.set(++rid, (x) => r(x.result));
-        mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-      });
+    const tool = (name: string, args: object) => mcp.call('tools/call', { name, arguments: args }) as Promise<ToolResult>;
     const created = await tool('create_ticket', { title: 'T', properties: { type: 'chore' }, message: 'go', model: 'claude-haiku-5-5', effort: 'low', workflow: true, plugin_folders: ['tools/plugins/devtools'] });
     assert.ok(!created.isError, created.content[0].text);
     assert.match(created.content[0].text, /model: claude-haiku-5-5 \| effort: low/);
@@ -223,7 +201,7 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
     assert.deepEqual(bodies[2].body, { effort: 'high' }, 'what is left out stays');
     assert.deepEqual(bodies[4].body, { workflow: false, plugin_dirs: [] }, 'false and [] are sent, not dropped');
   } finally {
-    mcp.kill();
+    mcp.close();
   }
 });
 
@@ -233,20 +211,9 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
 
   // The MCP server's own list, as a client sees it: every tool that takes a model offers exactly MODELS; only update_ticket
   // offers null (back to the default), and the creates require a model and effort (#698).
-  const mcp = tmp.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
-    env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
+  const mcp = mcpAgent({ COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' }, tmp.track);
   try {
-    const listed = new Promise<ToolResult>((resolve) =>
-      createInterface({ input: mcp.stdout! }).on('line', (l) => {
-        const r = JSON.parse(l);
-        if (r.id === 2) resolve(r.result);
-      }),
-    );
-    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }) + '\n');
-    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
-    const withModel = (await listed).tools.filter((t: ToolInfo) => t.inputSchema.properties?.model && t.name !== 'review_set'); // review_set's model is a critic's alias (opus, sonnet, haiku), not a ticket's model id
+    const withModel = ((await mcp.list()) as ToolInfo[]).filter((t: ToolInfo) => t.inputSchema.properties?.model && t.name !== 'review_set'); // review_set's model is a critic's alias (opus, sonnet, haiku), not a ticket's model id
     assert.ok(withModel.some((t: ToolInfo) => t.name === 'create_ticket') && withModel.some((t: ToolInfo) => t.name === 'update_ticket'), 'create_ticket and update_ticket take a model');
     for (const t of withModel) assert.deepEqual(t.inputSchema.properties!.model!.enum, t.name === 'update_ticket' ? [...MODELS, null] : [...MODELS], `${t.name}'s model enum`);
     for (const name of ['create_ticket', 'schedule_minion']) {
@@ -257,7 +224,7 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
       );
     }
   } finally {
-    mcp.kill();
+    mcp.close();
   }
 
   // The composer can't be imported without a browser (it needs the page's DOM), so read its two lists

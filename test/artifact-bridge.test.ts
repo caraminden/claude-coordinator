@@ -4,20 +4,19 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { cleanEntries, injectBridge, linkPageText, LIMITS, writeStore } from '../src/artifact-data.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { attachBridge, bridgeTypedAt, bridgeUnsaved, onArtifactData, ownPicture, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
-import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { mcpOnce } from './mcp-agent.ts';
 import { json } from './typed.ts';
 
 // The parts of the API's answers these tests read.
 type Entry = { key: string; value?: unknown; by?: string };
 type Posted = { bridge?: string; op?: string; ok?: boolean; retry?: boolean; entries?: Entry[] };
-type McpReply = { result: { tools: { name: string }[]; isError?: boolean; content: { text: string }[] } };
 type Answer = { person: string; entries: Entry[]; error: string; id: string; to: { id: number; label: string } };
 
 const tmp = tempRoot('artifact-bridge-');
@@ -410,12 +409,7 @@ test("agents read and write their scheme's pages, by artifact or path, and no ot
 });
 
 test('artifact_data is offered to minions and Taskmasters, and reads a page', async () => {
-  const call = (role: string, msg: object, env: object = {}) => {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_TICKET: undefined, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
-    const reply = new Promise<McpReply>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, ...msg }) + '\n');
-    return reply.finally(() => child.kill());
-  };
+  const call = async (role: string, msg: { method: string; params?: object }, env: Record<string, string> = {}) => ({ result: await mcpOnce({ COORDINATOR_ROLE: role, ...env }, msg.method, msg.params, tmp.track) });
   for (const role of ['coordinator', 'thread']) {
     const names = (await call(role, { method: 'tools/list' })).result.tools.map((t) => t.name);
     assert.ok(names.includes('artifact_data'), role);

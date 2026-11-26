@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer, jsonLines, stopProcs, stopTurns, until } from './helpers.ts';
+import { bootServer, fakeClaude, jsonLines, stopProcs, stopTurns, until } from './helpers.ts';
 import { json } from './typed.ts';
 
 // edit_instructions (#961): a minion edits Settings text through the same setters and history as a person.
@@ -17,20 +17,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
-const { createInterface } = require('node:readline');
-createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ token: process.env.COORDINATOR_TOKEN }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fake = fakeClaude(root, { log: { path: join(root, 'turns.jsonl'), record: 'JSON.stringify({ token: process.env.COORDINATOR_TOKEN })' } });
 
 let base = '';
 let cookie = '';
@@ -64,7 +51,7 @@ const api = async <T = Api>(path: string, method = 'GET', body?: unknown, as = c
 };
 
 before(async () => {
-  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
+  const srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);

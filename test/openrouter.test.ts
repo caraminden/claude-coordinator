@@ -3,12 +3,12 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { agentToken, bootServer, tempRoot } from './helpers.ts';
+import { mcpOnce } from './mcp-agent.ts';
 import { imageEstimate, INPUT_IMAGE, mediaCode, monthStart, mp3Seconds, OpenRouter, perRequestPrice, resetsAt, speechEstimate, speechLimit } from '../src/openrouter.ts';
 import { decodePng, encodePng } from '../src/png-matte.ts';
 
@@ -319,19 +319,8 @@ test('through the server: a person connects on their account page and their mini
   s.db.close();
 
   const srv = await bootServer({ root: boot, env: { OPENROUTER_BASE_URL: `http://127.0.0.1:${orPort}/api/v1` } });
-  const mcp = async (media: boolean, method: string, params: object = {}) => {
-    const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-      env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, minion.id), COORDINATOR_PROJECT: String(scheme.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: media ? '1' : '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const reply = new Promise<{ result: { tools: { name: string }[]; isError?: boolean; content: { text: string }[] } }>((ok) => createInterface({ input: child.stdout! }).once('line', (l) => ok(JSON.parse(l))));
-      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-      return (await reply).result;
-    } finally {
-      child.kill();
-    }
-  };
+  const mcp = (media: boolean, method: string, params: object = {}) =>
+    mcpOnce({ COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, minion.id), COORDINATOR_PROJECT: String(scheme.id), COORDINATOR_TICKET: String(minion.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: media ? '1' : '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '' }, method, params, tmp.track);
   try {
     assert.equal((await srv.call('/api/me/openrouter')).data.connected, false);
     assert.equal((await srv.call('/api/me/openrouter', { key: 'sk-or-v1-wrong', cap: 5 })).status, 400);

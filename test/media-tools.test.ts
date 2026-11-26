@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { tempRoot } from './helpers.ts';
+import { mcpOnce } from './mcp-agent.ts';
 
 const tmp = tempRoot('media-tools-');
 const root = tmp.dir;
@@ -27,19 +27,8 @@ process.stderr.write('Codex usage: 5-hour 13%, weekly 30%\\n');
 );
 chmodSync(join(root, 'citadel-codex-review'), 0o755);
 
-async function mcp(env: Record<string, string>, method: string, params: object = {}) {
-  const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
-    env: { ...process.env, PATH: `${root}:${process.env.PATH}`, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: 't', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '2', COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '', ...env },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  try {
-    const reply = new Promise<{ result: { tools: { name: string; description: string }[]; isError?: boolean; content: { text: string }[] } }>((ok) => createInterface({ input: child.stdout! }).once('line', (l) => ok(JSON.parse(l))));
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
-    return (await reply).result;
-  } finally {
-    child.kill();
-  }
-}
+const mcp = (env: Record<string, string>, method: string, params: object = {}) =>
+  mcpOnce({ PATH: `${root}:${process.env.PATH}`, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: 't', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '2', COORDINATOR_ROLE: 'thread', COORDINATOR_MEDIA: '', COORDINATOR_CODEX_IMAGES: '', COORDINATOR_MEMORY: '', ...env }, method, params, tmp.track);
 const tools = async (env: Record<string, string>) => (await mcp(env, 'tools/list')).tools;
 const both = { COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1' };
 

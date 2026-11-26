@@ -2,7 +2,7 @@
 // inside their bounds, a chat's view says what is held and Continue / Deliver now send it, a never-hold kind wakes its
 // reader, and no number is typed into tool text.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -14,7 +14,7 @@ import { Runner } from '../src/runner.ts';
 import { loopKey, minionPairKey } from '../src/minion-relay.ts';
 import { NEVER_HOLD_KINDS as CLIENT_KINDS } from '../public/heldmsg.js';
 import { transcriptPath } from '../src/sessions.ts';
-import { stopTurns, testPins, until } from './helpers.ts';
+import { fakeClaude, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'held-list-'));
@@ -24,17 +24,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
-const fake = join(root, 'claude-fake');
-writeFileSync(
-  fake,
-  `#!${process.execPath}
-require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fake, 0o755);
+const fake = fakeClaude(root);
 
 const NOW = Date.UTC(2026, 10, 8, 14, 5);
 const store = new Store(join(root, 'test.db'));

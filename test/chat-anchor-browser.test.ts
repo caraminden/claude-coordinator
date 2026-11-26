@@ -6,15 +6,16 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
 // Runs before app.js: a fake server with one running minion. Its turn so far: a line, work, a line, work,
 // a Taskmaster message steered in, a line, work, and the newest line. push(n) sends line n live.
-const STUB = `<script>
+const STUB = pageStub(
+  `
   window.ready = true;
-  const now = Date.now();
   const started = now - 600_000;
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const minion = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'A minion', status: 'running', turnStartedAt: started, updated_at: 0, created_at: started };
@@ -23,11 +24,7 @@ const STUB = `<script>
   const line = (text) => ev('claude', { type: 'assistant', message: { content: [{ type: 'text', text }, { type: 'tool_use', id: 'tu' + id, name: 'Bash', input: { command: 'true' } }] } });
   const events = [ev('user_message', { author: 'Cara', text: 'Start.' }), ev('claude', { type: 'system', subtype: 'init', model: 'opus' })];
   for (let i = 0; i < 30; i++) events.push(ev('user_message', { author: 'Cara', text: 'History line ' + i + ' ' + 'filler '.repeat(60) }));
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [minion], seen: {}, person_notes: {}, pins: [] });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
@@ -37,14 +34,12 @@ const STUB = `<script>
       if (url.search.includes('after=')) return reply(200, []);
       return reply(200, { events: m[1] === '101' ? events : [], tasks: [], more: false });
     }
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  let stream;
-  window.EventSource = class { constructor() { stream = this; setTimeout(() => this.onopen?.()); } close() {} };
-  window.push = (text) => stream.onmessage({ data: JSON.stringify({ type: 'event', event: line(text) }) });
-  window.pushTool = () => stream.onmessage({ data: JSON.stringify({ type: 'event', event: ev('claude', { type: 'user', message: { content: [] } }) }) });
-</script>`;
+  }
+  window.push = (text) => es.onmessage({ data: JSON.stringify({ type: 'event', event: line(text) }) });
+  window.pushTool = () => es.onmessage({ data: JSON.stringify({ type: 'event', event: ev('claude', { type: 'user', message: { content: [] } }) }) });
+`,
+  { open: true },
+);
 
 let app: App;
 let browser: Browser;

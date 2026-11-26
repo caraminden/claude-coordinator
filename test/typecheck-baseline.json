@@ -93,7 +93,7 @@
   "test/releases.test.ts": [3, 0],
   "test/restart-anywhere.test.ts": [1, 16],
   "test/restart-hold.test.ts": [2, 0],
-  "test/review-set-api.test.ts": [4, 25],
+  "test/review-set-api.test.ts": [4, 22],
   "test/review-set.test.ts": [0, 3],
   "test/run-tests.test.ts": [0, 1],
   "test/runner-agent.test.ts": [8, 0],

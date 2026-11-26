@@ -8,6 +8,7 @@ import { toneChip } from './look.js';
 import { WORKER_LIMITS } from './machine-setup.js';
 import { removing } from './machine-remove.js';
 import { heldCaps, workerSection, workerState } from './machine-worker-row.js';
+import { setupPart } from './role-setup-card.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 
@@ -31,7 +32,8 @@ const setsCaps = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id ===
 const current = (m) => view.machines?.find((x) => x.id === m.id) ?? m;
 const roleOf = (m, role) => current(m).roles?.find((r) => r.role === role);
 const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
-const hasGpu = (m) => (m.workspaces ?? []).some((w) => w.tasks?.some((t) => t.name === 'run-gpu'));
+// A run-gpu task (a test box's), or GPU jobs on in its agent's jobs block (what Set up turns on, Build 7 M4).
+const hasGpu = (m) => !!m.jobs?.gpu || (m.workspaces ?? []).some((w) => w.tasks?.some((t) => t.name === 'run-gpu'));
 
 /** Which machines have their caps editor open, and what is typed there, over redraws. */
 const editing = new Map();
@@ -63,7 +65,7 @@ function cannot(m, r) {
   if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this PC runs Linux.';
   if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';
   if (r.role === 'turns' && !(m.owner_id === account?.id)) return 'Only its owner can switch Minion turns on.';
-  if (r.role === 'gpu' && m.online && !hasGpu(m)) return 'No GPU job task on that PC: a run-gpu task in its machine-agent.json offers one.';
+  if (r.role === 'gpu' && m.report && !m.report.gpu && !hasGpu(m)) return 'That PC reported no GPU.';
   return null;
 }
 
@@ -83,7 +85,7 @@ function standing(m, r) {
   }
   if (r.role === 'screen') return m.screen ? { text: `✓ screen ${m.screen.holder ? 'busy' : 'free'}`, tone: 'ok' } : { text: 'not set up yet', tone: 'info' };
   if (r.role === 'ci') return m.runners ? (m.online ? { text: '✓ runner host connected', tone: 'ok' } : { text: 'offline', tone: 'neutral' }) : { text: 'not set up yet', tone: 'info' };
-  return hasGpu(m) ? { text: '✓ run-gpu ready', tone: 'ok' } : { text: 'no run-gpu task there', tone: 'warn' };
+  return hasGpu(m) ? { text: '✓ GPU jobs ready', tone: 'ok' } : { text: 'not set up yet', tone: 'info' };
 }
 
 /** The schemes a role is lent to, as chips that switch: every scheme the viewer sees, and any already on its list. */
@@ -216,6 +218,7 @@ function roleCard(m, r, redraw, extra) {
     // Its set-up part (T5's) steps aside while the caps editor is open: one set of fields at a time.
     r.on && r.role === 'turns' && m.worker && !editing.has(`${m.id}:turns`) ? workerSection(m, redraw, { bare: true }) : null,
     r.on && extra ? extra : null,
+    r.on && !why ? setupPart(m, r, redraw) : null,
   );
 }
 

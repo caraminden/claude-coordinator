@@ -96,6 +96,7 @@ const FILL: Record<string, string> = {
   id: '1',
   row: 'nope',
   wait: '1',
+  role: 'tools',
 };
 // Routes probed at other paths than FILL gives: a query the route needs, or more than one case.
 const PATHS: Record<string, string[]> = {

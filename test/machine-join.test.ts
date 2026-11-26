@@ -7,7 +7,7 @@ import { bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpe
 import { json } from './typed.ts';
 import { Store } from '../src/db.ts';
 import { cleanReport, hashJoinCode, JOIN_CODE, JOIN_MS, joinState, makeJoin, nameFromHost, newJoinCode, redeemJoin } from '../src/machine-join.ts';
-import { joinWithCode, machineReport } from '../public/machine-agent.mjs';
+import { AGENT_VERSION, joinWithCode, machineReport } from '../public/machine-agent.mjs';
 import { machineJoinPosix, machineJoinWindows, machineSetupWindows } from '../public/machine-setup.js';
 import { guessJoinOs, reportLine } from '../public/machine-connect.js';
 
@@ -123,7 +123,7 @@ test('the report reads a Windows PC: its version, WSL (whose tools write UTF-16)
   const r = await machineReport({ platform: 'win32', env: { USERNAME: 'josh' }, run, home: tmp.dir });
   assert.equal(r.os, 'windows');
   assert.match(r.os_name, /^Windows 1[01]$/);
-  assert.deepEqual([r.wsl, r.gpu, r.screen, r.admin, r.agent], [{ present: true, version: '2.3.26.0' }, 'NVIDIA GeForce RTX 4080', true, true, 3]);
+  assert.deepEqual([r.wsl, r.gpu, r.screen, r.admin, r.agent], [{ present: true, version: '2.3.26.0' }, 'NVIDIA GeForce RTX 4080', true, true, AGENT_VERSION]);
   assert.ok(r.threads > 0 && r.memory_gb > 0);
   // No nvidia-smi: Windows' own list, without the remote and basic adapters; no WSL --version: an inbox WSL with distros.
   const r2 = await machineReport({ platform: 'win32', env: {}, home: tmp.dir, run: async (c: string, a: string[]) => (c === 'powershell.exe' ? 'Microsoft Remote Display Adapter\r\nAMD Radeon RX 7900\r\n' : c === 'wsl.exe' && a[0] === '--list' ? 'Ubuntu' : null) });

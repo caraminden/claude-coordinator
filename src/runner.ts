@@ -1122,7 +1122,7 @@ export class Runner {
       // Its turn waits for a worker (#1868): it shows as working, and its activity line says where it stands.
       worker_wait: closed ? null : this.turnLine.wait(ticket.id),
       runs_on: closed ? null : this.runsOn.view(ticket.id),
-      machine_away: closed || !this.turns.has(ticket.id) ? null : awayLine(runningTurn(this.turns.get(ticket.id)!)),
+      machine_away: closed || !this.turns.has(ticket.id) ? null : awayLine(this.turns.get(ticket.id)!.dir ?? ''),
       // Who marked it Urgent, when and why (#1888).
       urgent: closed ? null : this.urgent.view(ticket.id),
       start_now: closed ? null : this.startNow.view(ticket.id),

@@ -10,9 +10,8 @@
 import { dirname } from 'node:path';
 import type { Store } from './db.ts';
 import { syncDir, type TurnState } from './machine-sync.ts';
-import { type AwayEnd, endAway, machineAway, MachineTurn, type Placed, placedAt } from './machine-turn.ts';
+import { type AwayEnd, awayAt, endAway, machineAway, type Placed, placedAt } from './machine-turn.ts';
 import { pacificStamp } from './pacific.ts';
-import type { RunningTurn } from './running-turn.ts';
 import type { RunsOn } from './runs-on.ts';
 import { GRACE_MS } from './worktree-sweep.ts';
 
@@ -192,8 +191,9 @@ export function awayNote(a: AwayEnd): string {
 export const awayResume = (a: AwayEnd | undefined, otherwise: { note: string; prompt: string }) => (a ? { note: `Carried on from ${a.name}'s last checkpoint`, prompt: awayPrompt(a) } : otherwise);
 
 /** A running turn's working line while its machine is away. */
-export function awayLine(turn: RunningTurn): string | null {
-  const a = turn instanceof MachineTurn ? turn.away() : null;
+/** A running minion's "Machine away" status line, from the turn's folder: memory only, as Runner.view runs on every status change (test/off-thread-fs.test.ts). */
+export function awayLine(dir: string): string | null {
+  const a = awayAt(dir);
   return a && `Machine away: ${a.name}${a.since ? `, since ${pacificStamp(a.since)}` : ''}`;
 }
 

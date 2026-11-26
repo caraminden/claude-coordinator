@@ -153,6 +153,8 @@ export async function liveOn(machineId: number): Promise<string[]> {
 
 /** The turns the runner follows on each machine, by folder: filled as the runner asks about them (MachineTurn), so a restart rebuilds it. */
 const placed = new Map<number, Set<string>>();
+/** Each noted turn's machine, by folder: what a running minion's status line asks (Runner.view), with no file read on the server's thread. */
+const placedOn = new Map<string, { id: number; name: string }>();
 const workers = new Map<number, WorkerInfo>();
 
 /** A machine turn's sync counts as its heartbeat; one silent this long, with its agent connected, is gone. */
@@ -185,15 +187,22 @@ export async function placeTurn(dir: string, machine: { id: number; name: string
   await writeFile(join(dir, 'signals'), '');
   await writeFile(join(dir, 'beat'), '');
   await writeFile(join(dir, 'machine'), JSON.stringify({ id: machine.id, name: machine.name, ...launch } satisfies Placed), { mode: 0o600 });
-  note(machine.id, dir);
+  note(machine.id, dir, machine.name);
   machineAway.placed(machine.id, dir, { id: machine.id, name: machine.name, ...launch });
   machineLink.poke(machine.id);
 }
 
-function note(machineId: number, dir: string) {
+function note(machineId: number, dir: string, name: string) {
   let dirs = placed.get(machineId);
   if (!dirs) placed.set(machineId, (dirs = new Set()));
   dirs.add(dir);
+  placedOn.set(dir, { id: machineId, name });
+}
+
+/** The machine the turn in `dir` was placed on, if it is away now (memory only: safe on the server's thread). Since is unknown until the agent's first sync after this server started. */
+export function awayAt(dir: string): { name: string; since: number | null } | null {
+  const m = placedOn.get(dir);
+  return !m || machineLink.online(m.id) ? null : { name: m.name, since: contact.get(m.id)?.at ?? null };
 }
 
 /** Both known and the same version (the first word of `claude --version`): the only case a turn is placed in. */
@@ -223,7 +232,7 @@ export class MachineTurn implements RunningTurn {
     this.dir = dir;
     this.machine = at.id;
     this.where = `machine ${at.name}`;
-    note(at.id, dir);
+    note(at.id, dir, at.name);
   }
 
   /** Recorded, then applied by the agent in order; the runner keeps its clock (SIGINT, SIGTERM, SIGKILL), as for every kind. */
@@ -260,7 +269,7 @@ export class MachineTurn implements RunningTurn {
   /** Its machine is away: which, and since when, for the minion's working line. */
   away(): { name: string; since: number | null } | null {
     // shortcut: since is unknown until the agent's first sync after this server started; the row then says only "away".
-    return machineLink.online(this.machine) ? null : { name: this.where.replace(/^machine /, ''), since: contact.get(this.machine)?.at ?? null };
+    return awayAt(this.dir);
   }
 
   /** Always: its folder says whose it is, and the agent sends from wherever this copy stops. */
@@ -377,7 +386,10 @@ async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
   const start: Sync['start'] = [];
   for (const dir of [...(placed.get(machineId) ?? [])]) {
     const at = await placedNow(dir);
-    if (!at || at.id !== machineId) placed.get(machineId)?.delete(dir);
+    if (!at || at.id !== machineId) {
+      placed.get(machineId)?.delete(dir);
+      if (placedOn.get(dir)?.id === machineId) placedOn.delete(dir);
+    }
     // Not one that has ended here (a stop before it started): there is nothing to run.
     else if (!held.has(dir) && !(await there(join(dir, 'exit.json')))) start.push({ dir, launch: { wrapper: at.wrapper, cwd: at.cwd, home: at.home, roots: at.roots, ...(at.state ? { sync: { at: syncDir(dir), key: at.cwd ? dirname(at.cwd) : dir } } : {}) } });
   }

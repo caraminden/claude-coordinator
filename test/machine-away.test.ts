@@ -89,7 +89,7 @@ test('back within 10 minutes it is running, and a turn there is not ended; a res
   const turn = new MachineTurn(dir, placedAt(dir)!);
   assert.deepEqual({ ...turn.away(), since: 0 }, { name: 'box-13', since: 0 });
   // The minions list's working line for it.
-  assert.equal(awayLine(turn), `Machine away: box-13, since ${pacificStamp(turn.away()!.since!)}`);
+  assert.equal(awayLine(turn.dir), `Machine away: box-13, since ${pacificStamp(turn.away()!.since!)}`);
   await awayTick(t0 + 5 * 60_000 - 1000);
   for (let at = t0 + 5 * 60_000; at <= t0 + 2 * AWAY_MS; at += 30_000) {
     if (at === t0 + 5 * 60_000) offline();
@@ -97,7 +97,7 @@ test('back within 10 minutes it is running, and a turn there is not ended; a res
   }
   assert.equal(exit(dir), null, 'online again: its turn carries on there');
   assert.equal(turn.away(), null);
-  assert.equal(awayLine(turn), null, 'no away line once it is back');
+  assert.equal(awayLine(turn.dir), null, 'no away line once it is back');
   const old = new Date(Date.now() - 120_000);
   utimesSync(join(dir, 'beat'), old, old);
   assert.equal(turn.alive(), true, 'just back, its beat is stale until its first sync names the turn');

@@ -269,6 +269,8 @@ Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card ("one fla
 
 Josh, 2026-11-25, picked "Wait for a gap, max 4 h" on #1902's card about main's full run (30 minutes before): it starts in a gap of 2 quiet minutes, or beside ships after 4 hours. It is still first once ships are through; the hours it waits keep no early run or own check off the desktop.
 
+Josh, 2026-11-25, picked "After 4 h, ships wait" on #1902's card once main's run beside ships ran out of time again (every red on main since Nov 24 overlapped a ship): past its 4 hours main's run waits for the ship that runs to end, not for the line, and starts then. Till it is over Citadel's ship label stays only on its side runner (src/runner-cap.ts, an hour at most), so the next ships wait in GitHub's queue, which land.sh allows for 15 minutes.
+
 ### While the train ahead's CI runs (#1568)
 
 Cara, 2026-11-21, "Go" on fix F of #1549's report (ship stalls), and 2026-11-22, picked "Low-priority run on a ship

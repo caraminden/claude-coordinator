@@ -2051,8 +2051,28 @@ const runnerCap = new RunnerCap({
   store,
   report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
 });
-runnerTokens.owed = (id, label) => runnerCap.owes(id, label);
-if (!BOOT_CHECK && !PREVIEW) runnerCap.start();
+// Main's run past its 4 hours has Citadel's runners to itself (Josh, 2026-11-25, "After 4 h, ships wait"): the label ships ask for
+// stays only on a runner main's run can take (the side label), so the next ship waits in GitHub's queue, as land.sh allows for 15 minutes.
+const mainCap = new RunnerCap({
+  project: ownScheme,
+  label: (p) => runnerLabel(p.name),
+  why: () => ciHold.mainAlone(),
+  here: () => (liveSlug ? runnersBeside(ciLoad.runnersByPc(), liveSlug, liveSlug) : null),
+  keepOn: (x) => {
+    const p = ownScheme();
+    return !!p && x.labels.includes(`${runnerLabel(p.name)}-side`);
+  },
+  key: 'runner-cap-main',
+  capMs: 3600_000, // tests.yml stops main's run at 45 minutes
+  tokens: runnerTokens,
+  store,
+  report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
+});
+runnerTokens.owed = (id, label) => runnerCap.owes(id, label) || mainCap.owes(id, label);
+if (!BOOT_CHECK && !PREVIEW) {
+  runnerCap.start();
+  mainCap.start();
+}
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));

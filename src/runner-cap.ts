@@ -47,6 +47,12 @@ export interface CapDeps {
   store: Pick<Store, 'getSetting' | 'setSetting'>;
   report: (project: Project, text: string) => void;
   log?: (line: string) => void;
+  /** The setting it keeps what it took off in: one per cap. */
+  key?: string;
+  /** The longest one stretch keeps the labels off; RUNNER_CAP_MS when left out. */
+  capMs?: number;
+  /** The runners the label may stay on (one does); any when left out. */
+  keepOn?: (runner: Listed) => boolean;
 }
 
 const KEY = 'runner-cap';
@@ -88,11 +94,11 @@ export class RunnerCap {
 
   /** Read each time: across a handover two servers may each be in a tick. */
   private get s(): CapState {
-    return { ...NONE, ...this.d.store.getSetting<CapState>(KEY) };
+    return { ...NONE, ...this.d.store.getSetting<CapState>(this.d.key ?? KEY) };
   }
 
   private save(change: Partial<CapState>) {
-    this.d.store.setSetting(KEY, { ...this.s, ...change });
+    this.d.store.setSetting(this.d.key ?? KEY, { ...this.s, ...change });
   }
 
   async tick(now = Date.now()): Promise<void> {
@@ -104,7 +110,7 @@ export class RunnerCap {
       const ship = !!this.d.why();
       this.clear(ship);
       if (ship && this.s.since === null) this.save({ since: now });
-      const cap = ship && now - this.s.since! < RUNNER_CAP_MS;
+      const cap = ship && now - this.s.since! < (this.d.capMs ?? RUNNER_CAP_MS);
       const changed = cap !== this.was;
       this.was = cap;
       if ((!cap && !this.s.off.length) || (!changed && now - this.looked < LOOK_MS)) return;
@@ -128,7 +134,7 @@ export class RunnerCap {
     const on = this.d.here();
     if (!label || !on) return;
     const here = (await this.d.tokens.listed(p)).filter((x) => on(x.name) && (x.labels.includes(label) || this.s.off.some((o) => o.id === x.id)));
-    const online = here.filter((x) => x.status === 'online');
+    const online = here.filter((x) => x.status === 'online' && (this.d.keepOn?.(x) ?? true));
     const keep = online.find((x) => x.labels.includes(label) && x.busy) ?? online.find((x) => x.labels.includes(label)) ?? online[0];
     // No runner of it is there to build on: nothing to cap, and the labels go back for whichever comes first.
     if (!keep) return this.back(p, here);
@@ -160,7 +166,7 @@ export class RunnerCap {
     if (this.s.told || now - this.s.late! < REPORT_MS) return;
     this.save({ told: true });
     const names = this.s.off.map((o) => o.name).join(', ');
-    this.d.report(p, `Citadel took the label ${this.s.off[0].label} off ${names} while its ships went first and can't put it back (${failed}). It keeps trying. By hand: give each that label in the repo's Settings → Actions → Runners.`);
+    this.d.report(p, `Citadel took the label ${this.s.off[0].label} off ${names} to keep its CI desktop free and can't put it back (${failed}). It keeps trying. By hand: give each that label in the repo's Settings → Actions → Runners.`);
   }
 
   /** Put the label back on the runners written down (or only those with these ids), forgetting one GitHub neither lists nor finds. */

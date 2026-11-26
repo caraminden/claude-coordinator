@@ -603,7 +603,7 @@ would cancel the land waiting there), niced.
 `src/ci-hold.ts` stops heavy jobs and suites started by hand on a branch while a ship is in line or
 testing, or main's full run waits or runs, and starts each again, from its beginning, once the line has been empty for
 5 minutes (1 at night, 23:00 to 06:00 Pacific; longer each time the same run is stopped again). Main's full run waits for
-a gap in the ships, 4 hours at most, then goes beside them (Josh, 2026-11-25, picked "Wait for a gap, max 4 h": beside a ship it hit its 10-minute limit and gave no verdict); while it waits, ships' own checks and early runs still go. A ship's `land/**` run is never touched, and another scheme's heavy jobs are
+a gap in the ships, 4 hours at most, then goes once the ship running ends, and the next ships wait for it: Citadel's label stays only on the side runner till main's run is over, an hour at most (Josh, 2026-11-25, picked "Wait for a gap, max 4 h", then "After 4 h, ships wait": beside a ship it hit its 10-minute limit and gave no verdict); while it waits, ships' own checks and early runs still go. A ship's `land/**` run is never touched, and another scheme's heavy jobs are
 held 4 hours at most.
 **One flake proof beside ships** (Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card; it narrows both his earlier
 picks, for flake proofs only): one proof starts and runs on whatever the ship line does, and the next, the longest held first, starts when it ends.

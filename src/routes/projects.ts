@@ -37,7 +37,7 @@ import { MODEL_REQUIRED, scheduleFields, scheduleTemplate, scheduleView } from '
 import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
-import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
+import { deleteNote, indexNote, inFolder, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { thrown } from '../thrown.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
 import { timerBroken } from '../timer-alerts.ts';
@@ -1575,9 +1575,8 @@ export const projectRoutes: Route[] = [
         if (!folder || !file) throw new HttpError(400, 'Say which folder and note');
         try {
           if (req.method === 'DELETE') {
-            deleteNote(folder.dir, file);
-            // The saved copy of it too, or the next turn's restore puts the note back (sessions.ts writeBack).
-            app.store.deleteClaudeState(join(folder.rel, file));
+            // The saved copy goes too, or the next turn's restore puts the note back (sessions.ts writeBack).
+            await inFolder(folder.dir, () => (deleteNote(folder.dir, file), app.store.deleteClaudeState(join(folder.rel, file))));
           } else if (body.index === true) await indexNote(folder.dir, file);
           else {
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');

@@ -198,11 +198,28 @@ export async function writeAtomicOff(path: string, text: string) {
   }
 }
 
+// The note edits that await take turns per folder (#2136), or two would read the same text and one write would be lost.
+const writing = new Map<string, Promise<unknown>>();
+export function inFolder<T>(dir: string, job: () => T | Promise<T>): Promise<T> {
+  const run = (writing.get(dir) ?? Promise.resolve()).then(job);
+  const settled = run.then(
+    () => {},
+    () => {},
+  );
+  writing.set(dir, settled);
+  void settled.then(() => writing.get(dir) === settled && writing.delete(dir));
+  return run;
+}
+/** A synchronous writer (a tidy's apply or Put back) can't wait its turn, so it refuses while one is under way. */
+export const noteWriteOn = (dir: string) => writing.has(dir);
+
 const lstatOr = (path: string) => lstat(path).catch(() => null);
 const plainOff = async (path: string) => (await lstatOr(path))?.isFile() ?? false;
 
 /** Replace one note's text (it must exist: this edits, never adds). */
-export async function saveNote(dir: string, file: string, text: string, was?: string) {
+export const saveNote = (dir: string, file: string, text: string, was?: string) => inFolder(dir, () => replaceNote(dir, file, text, was));
+
+async function replaceNote(dir: string, file: string, text: string, was?: string) {
   if (!(await plainOff(join(dir, file)))) throw new Error('No such note');
   // `was` is the text the page showed: a note written since (a session's update) isn't overwritten unseen (2ME4). Without it, the save is unchecked.
   if (was !== undefined && (await readFile(join(dir, file), 'utf8')) !== was) throw Object.assign(new Error('This note changed since you opened it (a session may have updated it). Reload the page to see the new text, then make your edit again.'), { status: 409 });
@@ -210,7 +227,9 @@ export async function saveNote(dir: string, file: string, text: string, was?: st
 }
 
 /** Add a note's line to MEMORY.md (made if missing), as `- [name](file) — description`. False when the index already links it. */
-export async function indexNote(dir: string, file: string): Promise<boolean> {
+export const indexNote = (dir: string, file: string): Promise<boolean> => inFolder(dir, () => addToIndex(dir, file));
+
+async function addToIndex(dir: string, file: string): Promise<boolean> {
   const path = join(dir, file);
   if (!(await plainOff(path))) throw new Error('No such note');
   const indexPath = join(dir, 'MEMORY.md');

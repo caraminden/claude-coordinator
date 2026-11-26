@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deleteNote, indexNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags, type MemoryFolder } from '../src/memory-files.ts';
+import { deleteNote, indexNote, memoryDir, noteWriteOn, memoryFolders, noteFile, readFolder, saveNote, staleFlags, type MemoryFolder } from '../src/memory-files.ts';
 import { fake } from './typed.ts';
 
 test("memoryFolders maps a repo path to each login's projects/<slug>/memory, once per distinct dir", () => {
@@ -177,5 +177,20 @@ test('a note counts as listed when MEMORY.md links it by [[name]] or through a n
   writeFileSync(join(dir, 'MEMORY.md'), '- [Topics](topic-index.md) — every note by topic\n- see [[named]]\n');
   const listed = Object.fromEntries((await readFolder(fake<MemoryFolder>({ label: 'x', dir }), () => false)).notes.map((n) => [n.file, n.inIndex]));
   assert.deepEqual(listed, { 'topic-index.md': true, 'named.md': true, 'deep-note.md': true, 'by-stem.md': true, 'two-hops.md': false, 'orphan.md': false });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('note edits that overlap take turns: no index line is lost and a stale save is refused (#2136)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'memory-overlap-'));
+  for (const n of ['a.md', 'b.md']) writeFileSync(join(dir, n), 'old');
+  await Promise.all([indexNote(dir, 'a.md'), indexNote(dir, 'b.md')]);
+  const index = readFileSync(join(dir, 'MEMORY.md'), 'utf8');
+  assert.ok(index.includes('](a.md)') && index.includes('](b.md)'), index);
+  const first = saveNote(dir, 'a.md', 'one', 'old');
+  assert.equal(noteWriteOn(dir), true);
+  await assert.rejects(() => saveNote(dir, 'a.md', 'two', 'old'), /changed since you opened it/);
+  await first;
+  assert.equal(readFileSync(join(dir, 'a.md'), 'utf8'), 'one');
+  assert.equal(noteWriteOn(dir), false);
   rmSync(dir, { recursive: true, force: true });
 });

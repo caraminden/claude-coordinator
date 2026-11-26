@@ -24,6 +24,8 @@ test('next up: unstarted members whose wait is over or on a member already under
   const m = (label: string, state: 'running' | 'sealed' | 'roster', after: string | null = null) => ({ label, number: null, state, after });
   assert.equal(nextUp([m('M1', 'running'), m('M2', 'sealed', 'M1'), m('M3', 'roster', 'M1'), m('M4', 'sealed', 'M2')]), 2);
   assert.equal(nextUp([m('T1', 'roster'), m('T2', 'roster', 'T1')]), 1);
+  // A list waits for all of it, and words that name nobody ("everything") keep a row waiting.
+  assert.equal(nextUp([m('M1', 'running'), m('M2', 'running'), m('M3', 'roster', 'M1, M2'), m('M4', 'roster', 'M1 and M3'), m('T7', 'roster', 'everything')]), 1);
 });
 
 test('one card per open cabal: its Overseer by name, a member a roster row, counts, asks and spend; gone with its lead', async () => {

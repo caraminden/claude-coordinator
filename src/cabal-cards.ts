@@ -35,10 +35,19 @@ export interface CabalCard {
 
 const UNSTARTED = new Set<BoardMember['state']>(['roster', 'sealed']);
 
-/** Unstarted members whose wait is over or is on a member already under way: they start next. */
+/** Unstarted members whose wait is over or is on members all under way: they start next. */
 export function nextUp(members: Pick<BoardMember, 'state' | 'after' | 'number' | 'label'>[]): number {
-  const waitsOnUnstarted = (after: string) => members.some((m) => UNSTARTED.has(m.state) && (`#${m.number}` === after || m.label === after));
-  return members.filter((m) => UNSTARTED.has(m.state) && !(m.after && waitsOnUnstarted(m.after))).length;
+  // `after` is free text ("M1", "#12", "M1, M2", "everything"): a name that is no member under way keeps its row waiting.
+  const underWay = (name: string) => members.some((m) => !UNSTARTED.has(m.state) && (`#${m.number}` === name || m.label === name));
+  return members.filter(
+    (m) =>
+      UNSTARTED.has(m.state) &&
+      (!m.after ||
+        m.after
+          .split(/\s*(?:,|\+|&|\band\b)\s*/)
+          .filter(Boolean)
+          .every(underWay)),
+  ).length;
 }
 
 /** A scheme's open cabals, by build then lead. */

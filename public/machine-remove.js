@@ -11,8 +11,8 @@ const seen = new Set();
 // A removed machine's id goes to the next one added, so its created time is part of the key.
 const key = (m) => `${m.id}:${m.created_at}`;
 
-/** Its row shows Removing… */
-export const removing = (m) => removals.has(key(m));
+/** Its row shows Removing…: clicked here, or the server says it is draining. */
+export const removing = (m) => !!m.removing || removals.has(key(m));
 
 /** The command that takes a removed worker off its PC, for the shell that PC's worker ran in; null when it had none. */
 export function uninstallFor(machine, reply) {
@@ -54,6 +54,8 @@ const WHERE = { powershell: 'in a normal PowerShell window on that PC (not as ad
 /** The commands to run, above the list. */
 export function renderRemovals(el, redraw) {
   if (!el) return;
+  // One draining that this page never clicked (a reload, another tab or person): its command is kept from here on too.
+  for (const m of view.machines) if (m.removing) removals.set(key(m), { name: m.name, command: uninstallFor(m, { removing: true, uninstall: m.removing }) });
   const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => key(m) === id)]);
   // Left alone while nothing changed, so a selection in a command survives the list's redraws.
   const drawn = JSON.stringify(shown);

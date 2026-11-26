@@ -21,6 +21,7 @@ import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
 import { every } from './every.ts';
+import { UNINSTALL } from './machine-away.ts';
 import { thrown } from './thrown.ts';
 import { asData } from './quote.ts';
 import type { WorkerJoin } from './worker-join.ts';
@@ -490,6 +491,8 @@ export class MachineRelay {
       screen: agent?.screen ?? null,
       /** Its minion-turn worker as its row shows it (Build 7 T5). */
       worker,
+      /** Being removed while it drains (#2044): what its owner runs once its row goes. The list is MachineCopies' own. */
+      removing: this.store.getSetting<number[]>('machines-removing')?.includes(machine.id) ? UNINSTALL : null,
     };
   }
 

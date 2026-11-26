@@ -2,6 +2,8 @@
 // the command that takes the worker off that PC is shown with its shell, and a plain machine just goes. A real browser
 // against the real server; a 202 (copies still to clear) is stubbed at fetch, as test/machine-away.test.ts covers it.
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { bootServer, ok, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
@@ -32,6 +34,7 @@ async function worker(name: string) {
   const post = (path: string, body: object) => fetch(srv.base + path, { method: 'POST', headers: { Authorization: `Bearer ${made.token}`, 'Content-Type': 'application/json', 'X-Citadel-Worker': 'b' }, body: JSON.stringify(body) });
   await post('/api/machines/turns', { worker: { claude: '2.0.0', max: 3, signedIn: false }, turns: [] });
   await post('/api/machines/worker', { boot: 'b', installed: 1, host: 'MY-PC', wsl: true, caps: { workers: 3, threads: 4, memory_gb: 10, disk_gb: 80 }, image: { state: 'ready', text: 'ok' }, github: false, disk_gb: 1, full: false, test: null });
+  return { id: made.machine.id as number, token: made.token as string };
 }
 
 before(async () => {
@@ -132,4 +135,25 @@ test('a machine added later under a removed one’s id starts clean', { skip }, 
   await wait('the new row', `!!${row('new-pc')}`);
   assert.doesNotMatch(await page.eval<string>(`${row('new-pc')}.querySelector('summary').textContent`), /Removing…/);
   assert.match(await page.eval<string>(`${panel('old-pc')}.textContent`), /old-pc is removed/);
+});
+
+test('a reload while it drains keeps Removing… and the command, from the server', { skip }, async () => {
+  const pc = await worker('drain-pc');
+  // A real 202: its agent is connected and a minion's copy is there.
+  const agent = new AbortController();
+  const stream = await fetch(`${srv.base}/api/machines/connect?v=2&host=MY-PC`, { headers: { Authorization: `Bearer ${pc.token}` }, signal: agent.signal });
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(`machine-copies:${pc.id}`, JSON.stringify({ '/nonexistent/t': { ticket: 999, name: 'drain-pc', wrapper: ['node'], home: '/h', roots: [], cwd: '/w/1/repo' } }));
+    assert.equal((await srv.call(`/api/machines/${pc.id}`, undefined, 'DELETE')).status, 202);
+    await page.send('Page.reload', {});
+    await wait('the command again', `!!${panel('drain-pc')}?.querySelector('pre.cui-shell[data-tone=powershell]')`);
+    assert.match(await page.eval<string>(`${row('drain-pc')}.querySelector('summary').textContent`), /Removing…/);
+    assert.match(await page.eval<string>(`${panel('drain-pc')}.textContent`), /Don't run this yet[^]*wsl --unregister citadel-workers/);
+  } finally {
+    db.close();
+    agent.abort();
+    await stream.body?.cancel().catch(() => {});
+  }
 });

@@ -17,6 +17,36 @@ export const CHAIN_FLOOR = 4;
 /** How long an effort stays closed before its retro starts, so a follow-up the Taskmaster starts joins it instead. */
 export const QUIET_MS = 6 * 3_600_000;
 const AUTO = /^chain from #\d+$/;
+/** The ticket id a closed minion's ask moved into (close_ticket's and close_self's `into`). */
+const movedKey = (ticketId: number) => `moved-into:${ticketId}`;
+
+/**
+ * Records where a closing minion's ask went (none: forgets an older close's), and hands its effort to that minion when it
+ * has none (#2080; Josh, 2026-11-25, "Effort follows moved asks"). Answers the effort that minion joined.
+ */
+export function moveEffort(store: Store, from: Pick<Ticket, 'id'>, into: Pick<Ticket, 'id' | 'project_id'> | null, by: string): string | null {
+  if (!into) {
+    store.deleteSetting(movedKey(from.id));
+    return null;
+  }
+  store.setSetting(movedKey(from.id), into.id);
+  const name = store.props.forTarget('minion', from.id)[EFFORT_KEY];
+  if (typeof name !== 'string' || store.props.forTarget('minion', into.id)[EFFORT_KEY]) return null;
+  store.props.set('minion', into.id, into.project_id, { [EFFORT_KEY]: name }, by);
+  return name;
+}
+
+/** Every minion `t`'s ask moved into, one hop after another. */
+export function movedTo(store: Store, t: Ticket): Ticket[] {
+  const seen = new Set([t.id]);
+  const out: Ticket[] = [];
+  for (let id = store.getSetting<number>(movedKey(t.id)); id != null && !seen.has(id); id = store.getSetting<number>(movedKey(id))) {
+    seen.add(id);
+    const next = store.getTicket(id);
+    if (next) out.push(next);
+  }
+  return out;
+}
 
 export const doneKey = (projectId: number, name: string) => `effort-retro:${projectId}:${name}`;
 
@@ -47,9 +77,10 @@ export const TRIES = 3;
  * The efforts of one scheme that are ready for a verdict: big enough, all closed and quiet for QUIET_MS, not yet done.
  * `since(name)` is when that name last got a verdict (undefined: never); only minions made after it count, so a name the
  * Taskmaster reuses for a later goal gets its own retro. `majorBuild(n)` says Build n has its own build minion, whose
- * retro covers its feeders: a bare build number (Delve's "found in" build on a bug) doesn't.
+ * retro covers its feeders: a bare build number (Delve's "found in" build on a bug) doesn't. `movedInto(t)` is where t's ask
+ * went: those must be closed and quiet too, in the effort or not.
  */
-export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean): EffortVerdict[] {
+export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, since: (name: string) => number | undefined, now: number, majorBuild: (n: number) => boolean, movedInto: (t: Ticket) => Ticket[] = () => []): EffortVerdict[] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
     const name = effortOf.get(t.id);
@@ -62,8 +93,9 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
     const members = cut === undefined ? all : all.filter((t) => t.created_at > cut);
     const floor = AUTO.test(name) ? CHAIN_FLOOR : NAMED_FLOOR;
     if (members.length < floor) continue;
-    if (members.some((t) => t.status !== 'closed')) continue;
-    const last = Math.max(...members.map((t) => t.closed_at ?? t.updated_at));
+    const waited = [...members, ...members.flatMap(movedInto)];
+    if (waited.some((t) => t.status !== 'closed')) continue;
+    const last = Math.max(...waited.map((t) => t.closed_at ?? t.updated_at));
     if (now - last < QUIET_MS) continue;
     members.sort((a, b) => a.number - b.number);
     // A major build's retro (citadel:retro, the build minion's step 5) already covers an effort that is mostly that build.
@@ -151,7 +183,14 @@ export class EffortRetros {
       const effortOf = new Map(rows.map((r) => [r.id, r.value]));
       const tickets = rows.map((r) => store.getTicket(r.id)).filter((t): t is Ticket => !!t);
       const majorBuild = (n: number) => store.getSetting(buildOwnerKey(project.id, n)) != null;
-      for (const v of effortsDue(tickets, effortOf, (name) => since(project.id, name), now, majorBuild)) {
+      for (const v of effortsDue(
+        tickets,
+        effortOf,
+        (name) => since(project.id, name),
+        now,
+        majorBuild,
+        (t) => movedTo(store, t),
+      )) {
         const before = store.getSetting<Marker>(doneKey(project.id, v.name));
         // Marked before the start: a crash between the two loses one retro rather than starting it twice.
         store.setSetting(doneKey(project.id, v.name), { act: v.act, why: v.why, at: now });

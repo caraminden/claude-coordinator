@@ -252,12 +252,14 @@ export const LIST_CLAIMS = {
 };
 
 /** Why a minion closes (`closedAs`, src/property-seed.ts; Josh, 2026-11-25, "Save one word"). */
-const CLOSED_AS = { type: 'string', enum: ['done', 'replaced', 'dropped'], description: 'replaced: another minion has the work; dropped: nobody does' };
+const CLOSED_AS = { type: 'string', enum: ['done', 'replaced', 'dropped'], description: 'replaced: minion `into` has the work; dropped: nobody does' };
+const CLOSED_INTO = { type: 'integer' };
+const joinedLine = (into: unknown, joined?: string) => (joined ? ` #${into} joined the effort "${joined}".` : '');
 
 export const CLOSE_TICKET = {
   name: 'close_ticket',
   description: 'Dismiss a finished or abandoned minion. Its worktree and branch are kept. A running minion must be stopped first.',
-  inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, as: CLOSED_AS }, required: ['ticket_id', 'as'] },
+  inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, as: CLOSED_AS, into: CLOSED_INTO }, required: ['ticket_id', 'as'] },
 };
 
 export const REOPEN_TICKET = {
@@ -478,7 +480,7 @@ export const CLOSE_SELF = () => ({
     `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${C().DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}.`,
   inputSchema: {
     type: 'object',
-    properties: { as: CLOSED_AS, reason: { type: 'string', maxLength: 500, description: 'One line shown with it, e.g. "Shipped abc1234; live after the restart"' } },
+    properties: { as: CLOSED_AS, into: CLOSED_INTO, reason: { type: 'string', maxLength: 500, description: 'One line shown with it' } },
     required: ['as'],
   },
 });
@@ -662,9 +664,9 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
     case 'plan':
       return planResult(args);
     case 'close_self': {
-      let closed: { cleared?: boolean } | undefined;
+      let closed: { cleared?: boolean; joined?: string } | undefined;
       try {
-        closed = await call<{ cleared?: boolean }>('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null, as: args.as ?? null });
+        closed = await call<{ cleared?: boolean; joined?: string }>('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null, as: args.as ?? null, into: args.into ?? null });
       } catch (err) {
         // A server from before close_self refuses the route with its generic "only itself" error.
         if (/only update itself|Not found/.test(thrown(err).message!)) {
@@ -672,10 +674,12 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
         }
         throw err;
       }
-      return closeSelfResult(!!closed?.cleared);
+      return closeSelfResult(!!closed?.cleared) + joinedLine(args.into, closed?.joined);
     }
-    case 'close_ticket':
-      return `Closed. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed', as: args.as ?? null }))}`;
+    case 'close_ticket': {
+      const t = await call<TicketView & { joined?: string }>('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed', as: args.as ?? null, into: args.into ?? null });
+      return `Closed. ${ticketLine(t)}${joinedLine(args.into, t.joined)}`;
+    }
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'fresh_session':

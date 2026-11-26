@@ -1,7 +1,7 @@
 // The effort-retros judge (src/effort-retros.ts, #1751) over each scheme's real efforts: every hour of the window, the real
 // effortsDue sees the minions as they were then (closed ones closed later read as open), and the retros it would start
 // are set beside the real ones, the effort-retro:* settings rows. Nothing is started: the replay calls effortsDue only.
-import { effortsDue, EFFORT_KEY } from '../../src/effort-retros.ts';
+import { effortsDue, EFFORT_KEY, movedTo } from '../../src/effort-retros.ts';
 import { buildOwnerKey, type Ticket } from '../../src/db.ts';
 import { Registry } from '../../src/properties.ts';
 import { minionsAsOf, replayStore } from './store.ts';
@@ -11,7 +11,7 @@ const STEP_MS = 3_600_000;
 
 export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   const start = ctx.now - ctx.days * 86_400_000;
-  const store = replayStore(ctx.db, ['settings'], { settings: "key LIKE 'effort-retro:%' OR key LIKE 'build-owner:%'" });
+  const store = replayStore(ctx.db, ['settings'], { settings: "key LIKE 'effort-retro:%' OR key LIKE 'build-owner:%' OR key LIKE 'moved-into:%'" });
   let now = start;
   minionsAsOf(store, () => now);
   // The registry's constructor writes its schema: a read-only replay takes its reads only.
@@ -28,7 +28,14 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     const majorBuild = (n: number) => store.getSetting(buildOwnerKey(p.id, n)) != null;
     for (now = start; now <= ctx.now; now += STEP_MS) {
       const tickets = rows.map((r) => store.getTicket(r.id)).filter((t): t is Ticket => !!t);
-      for (const v of effortsDue(tickets, effortOf, (name) => done.get(name), now, majorBuild)) {
+      for (const v of effortsDue(
+        tickets,
+        effortOf,
+        (name) => done.get(name),
+        now,
+        majorBuild,
+        (t) => movedTo(store, t),
+      )) {
         done.set(v.name, now);
         hits.push({ at: now, key: `${p.id}:${v.name}`, text: `${p.name} "${v.name}": ${v.act === 'skip' ? 'no retro' : 'start a retro'}, ${v.why}` });
       }

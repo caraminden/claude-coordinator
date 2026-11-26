@@ -19,6 +19,7 @@ import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
+import { moveEffort } from '../effort-retros.ts';
 import { unsealedBy } from '../held-mail.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
@@ -302,6 +303,15 @@ async function choicesDoc(app: App, ticket: Ticket | TicketView, raw: unknown): 
 }
 
 /** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
+/** The minion a close's `into` names, where the closing one's ask moved; refused before anything closes. */
+function movedInto(app: App, ticket: Ticket | TicketView, body: Record<string, unknown>): Ticket | null {
+  if (body.into == null) return null;
+  if (body.as !== 'replaced') throw new HttpError(400, 'into goes with as: replaced');
+  const into = app.store.getTicketByNumber(ticket.project_id, Number(body.into));
+  if (!into || into.id === ticket.id || into.kind === 'coordinator') throw new HttpError(400, `into: no other minion #${body.into} here`);
+  return into;
+}
+
 function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
   const stopped = app.runner.stop(ticket.id);
   // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
@@ -1429,13 +1439,20 @@ export const ticketRoutes: Route[] = [
       // Why it closed, in one word (#1989; Josh, 2026-11-25, "Save one word"): an agent says it, a person's one click doesn't.
       const as = body.status === 'closed' && body.as != null ? { closedAs: body.as } : null;
       if (as) store.props.check(ticket.project_id, as);
+      const into = movedInto(app, ticket, body);
       // Already as asked: a second dismissal, or a reopen of a minion that isn't dismissed, changes nothing.
       if ((body.status === 'closed') === (ticket.status === 'closed')) {
         if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
+        const joined = into ? moveEffort(store, ticket, into, session.name) : null;
         if (as) runner.broadcastTicket(id);
-        return json(res, 200, ticketView(app, id));
+        if (joined) runner.broadcastTicket(into!.id);
+        return json(res, 200, { ...ticketView(app, id), ...(joined ? { joined } : {}) });
       }
+      let joined: string | null = null;
       if (body.status === 'closed') {
+        // Before the close: a dismissal's cleanup is no place to lose it.
+        joined = moveEffort(store, ticket, into, session.name);
+        if (joined) runner.broadcastTicket(into!.id);
         const closed = runner.close(id, `${session.name} dismissed this minion.`);
         if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
         if (as) runner.broadcastTicket(id);
@@ -1450,7 +1467,7 @@ export const ticketRoutes: Route[] = [
         void app.outbox?.poke({ type: 'reopened', ticket: id }); // its held deliveries (wake_at, ADR 0021) go now
       }
       await ownWrites();
-      return json(res, 200, ticketView(app, id));
+      return json(res, 200, { ...ticketView(app, id), ...(joined ? { joined } : {}) });
     },
   },
   {
@@ -1887,9 +1904,12 @@ export const ticketRoutes: Route[] = [
       const cleared = app.store.getTicket(id)!.state === 'ready';
       // Checked before the close, written after it: a refused one leaves no word.
       if (body.as != null) app.store.props.check(ticket.project_id, { closedAs: body.as });
+      const into = movedInto(app, ticket, body);
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
       if (body.as != null) app.store.props.set('minion', id, ticket.project_id, { closedAs: body.as }, session.name);
-      return json(res, 202, { ...ticketView(app, id), cleared });
+      const joined = moveEffort(app.store, ticket, into, session.name);
+      if (joined) runner.broadcastTicket(into!.id);
+      return json(res, 202, { ...ticketView(app, id), cleared, ...(joined ? { joined } : {}) });
     },
   },
 ];

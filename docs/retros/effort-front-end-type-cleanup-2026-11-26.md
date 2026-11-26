@@ -117,6 +117,6 @@ The effort's own cost was its seams, not its typing.
 [^s]: `git log main --since=2026-11-25 --format='%h %s' --grep='types.d.ts'`: e540eea1e (#2022, "types.d.ts allowed 1584 lines"), 9bb97abf6 (#2026, "size budget lets types.d.ts hold InboxItem") and 21f317aaa (#2087, "raise types.d.ts's size allowance"). The row's note is at `test/size-budget.test.ts` line 21. Run 2026-11-26.
 [^w]: `wc -l public/types.d.ts` = 1828 at main 615a2625e, run 2026-11-26.
 [^v]: `host_check db`: `select t.number, r.round, r.verdict, re.name from review_runs r join tickets t on t.id=r.ticket_id left join review_entries re on re.id=r.entry_id where t.project_id=2 and t.number in (…)` → 6 `fail` rows, all "UI screenshots". Run 2026-11-26.
-[^g]: `src/critic-gate.ts` lines 42–80 (`isCommentLine`, `commentOnlyFiles`) at 615a2625e.
+[^g]: `src/critic-gate.ts` lines 43–84 (`isCommentLine`, `commentOnlyFiles`) at 615a2625e.
 [^f]: `ls shared/project/handoffs shared/project/handoffs/shipped | grep burn` → only `-3` and `-4` (in `handoffs/shipped/`) and `qp-reliability-test-burn-in.md`. Run 2026-11-26.
 [^r]: The minions' chats, read with `read_minion` by two Sonnet Grunts on 2026-11-26. Only each chat's tail came back, with no timestamps, so the earliest turns of #2022 (27 entries), #2023 (20) and #2026 (73) were not read. Quotes and counts are from what was read.

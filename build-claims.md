@@ -21,7 +21,7 @@ shared: server.ts src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt
 #2057: (merged in)
 #2085: (merged in)
 #2061: (merged in)
-#2105: src/machine-balancer.ts src/ci-load.ts public/settings-machines.js public/runner-agent.mjs tools/ci-runner/keep-runners.ps1 test/runner-wake.test.ts src/routes/machines.ts
+#2105: (merged in)
 #2064: (merged in)
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
@@ -65,3 +65,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - #2064 (CI runners join schemes by themselves) merged in on 2026-11-26. src/ci-load.ts is back on #2105's line and server.ts back on shared; its other files are unclaimed. Its kit/skills/scheme-setup/templates/ edits are high by file and go on the go card. Still open: #2061 and #2105, each borrowing server.ts for its own merge, in the order of their gos.
 - 2026-11-26: #2061 has Josh's go. Lent to it for its merge: server.ts (off shared; it changes the WorkerJoin constructor line and runner.placeFor) and public/machine-types.d.ts (unclaimed since #2064; #2061 adds an `accounts` field). After it merges, server.ts goes back to shared for #2105 to borrow.
 - #2061 (both Claude accounts on worker PCs) merged in on 2026-11-26 (Josh's go). server.ts is back on shared; its other files are unclaimed. Only #2105 is still open, and its server.ts change is added lines only.
+- #2105 (M6b) merged in on 2026-11-26 (Josh's go). Every feeder is in.

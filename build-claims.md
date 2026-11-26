@@ -2,7 +2,7 @@
 
 build: #1935
 
-shared: src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts test/judges.test.ts test/db-areas.test.ts src/routes/all.ts public/machine-agent.mjs test/size-budget.test.ts src/db/machines.ts src/machines.ts
+shared: src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/running-turn.test.ts test/access-matrix.snapshot.json src/http.ts src/routes/tickets.ts src/config.ts test/config.test.ts test/judges.test.ts test/db-areas.test.ts src/routes/all.ts public/machine-agent.mjs test/size-budget.test.ts src/db/machines.ts src/machines.ts server.ts
 
 #1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: (merged in)
@@ -18,10 +18,10 @@ shared: src/turn-launch.ts src/db.ts src/mcp.ts tools/affected-map.txt test/type
 #2055: (merged in)
 #2056: (merged in)
 #2088: (merged in)
-#2057: src/machine-pick.ts test/machine-pick.test.ts src/pool-machine.ts src/mcp-pool.ts test/mcp-pool.test.ts src/machine-mcp.ts test/machine-mcp.test.ts src/prompts.ts src/routes/jobs.ts src/mcp-lookup.ts kit/skills/run-on-windows/ test/machine-jobs-state.test.ts README.md server.ts src/routes/machines.ts
+#2057: (merged in)
 #2085: tools/worker/citadel-worker tools/worker/install-worker.sh public/worker-agent.mjs public/machine-role-cards.js public/machine-worker-row.js src/worker-join.ts test/worker-install.test.ts test/machine-role-cards.test.ts
 #2061: src/machine-pools.ts test/machine-pools.test.ts src/machine-turn.ts public/machine-worker.mjs public/machines.css test/machine-turn.test.ts src/access.ts src/claude-link.ts test/claude-link.test.ts test/machine-accounts.test.ts src/runner.ts
-#2105: src/machine-balancer.ts src/ci-load.ts public/settings-machines.js public/runner-agent.mjs tools/ci-runner/keep-runners.ps1 test/runner-wake.test.ts
+#2105: src/machine-balancer.ts src/ci-load.ts public/settings-machines.js public/runner-agent.mjs tools/ci-runner/keep-runners.ps1 test/runner-wake.test.ts src/routes/machines.ts
 #2064: src/ci-auto.ts test/ci-auto.test.ts src/ci-runner.ts src/ci-ships.ts src/role-setup.ts public/role-setup.js public/role-setup-card.js src/mcp-ship.ts test/ci-runner.test.ts test/role-setup.test.ts test/ci-ships.test.ts kit/skills/scheme-setup/ kit/skills/ci-store/SKILL.md tools/ci-runner/README.md
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
@@ -59,3 +59,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - M2b (#2088) merged in on 2026-11-26 (Josh's go); src/machines.ts, server.ts and src/routes/machines.ts are shared again, its other files unclaimed. #2085 (page can raise worker caps) started on build/7 bac74743c: its line holds the worker files it changes. #2061 (every linked Claude account) also changes tools/worker/citadel-worker, public/worker-agent.mjs, public/machine-worker-row.js and src/worker-join.ts: whichever of #2085 and #2061 merges second gets them then, rebasing on the first.
 - 2026-11-26 ~2:45 AM PST: build/7 8a65bfe8e green with main in. Lent to M5 (#2057) for its merge, as planned: README.md, server.ts and src/routes/machines.ts (off shared; src/machines.ts and src/turn-launch.ts stay shared, added lines only). #2085 merges on its line as it stands. #2061 (every linked Claude account) gets its own files and src/runner.ts (off shared) now; tools/worker/citadel-worker, public/worker-agent.mjs, src/worker-join.ts and public/machine-worker-row.js pass to it when #2085 is in, and server.ts when M5 is in. M6b (#2105) gets its own files now; src/routes/machines.ts passes to it when M5 is in, and server.ts too, one at a time with #2061 in the order their gos come (src/machines.ts: added lines only, shared).
 - 2026-11-26 ~3:00 AM PST: #2064 (CI runners join schemes by themselves) started on build/7 8a65bfe8e; its line holds its new files and the ones only it changes (src/ci-runner.ts and src/ci-ships.ts were M2b's and M6's, the role-setup files M4's). public/machine-role-cards.js passes to it when #2085 is in, src/ci-load.ts when M6b (#2105) is in, README.md when M5 is in; server.ts after M5 joins the queue behind #2061 and M6b (it adds CiAuto's wiring: added lines only, so it may go shared again then). Its kit/skills/scheme-setup/templates/ edits are high risk by file (templates other schemes copy): on Build 7's go card.
+- M5 (#2057) merged in on 2026-11-26 (58fe984ea). src/routes/machines.ts goes to M6b (#2105), as planned. server.ts is shared again until #2061 or M6b asks for it just before merging: whichever asks first gets it lent. Its other files are unclaimed, and README.md counts as M5's.

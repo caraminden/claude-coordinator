@@ -499,7 +499,7 @@ export class Runner {
   sharedDir: (project: Project) => string | null = () => null;
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
-  /** Machines online now and lent to this scheme (access.ts lendsMachine); a thread's turn gets each one's MCP tools. */
+  /** Machines online now whose Tools role is lent to this scheme (access.ts lendsRole); a thread's turn gets each one's MCP tools. */
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
   /** The connected machines as places for turns (Build 7 T4), set by server.ts; none yet: a turn marked for one waits. */

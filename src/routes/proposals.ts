@@ -3,7 +3,7 @@
 // verdict on it.
 import { join } from 'node:path';
 import { lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
-import { lendsMachine, managesMachine } from '../access.ts';
+import { lendsRole, managesMachine } from '../access.ts';
 import { APP_NAME } from '../appname.ts';
 import { cardHref } from '../card-links.ts';
 import { keyFiles } from '../release-key.ts';
@@ -64,7 +64,7 @@ export const proposalRoutes: Route[] = [
       const asker = store.turnAsker(ticket.id);
       const machine = store.listMachines().find((m) => m.name === name);
       // As a turn of this minion's gets it (src/runner.ts): lent to this scheme, and someone's own only on its owner's ask.
-      if (!machine || !lendsMachine(store, machine, project, asker === null ? [] : [asker])) throw new HttpError(404, `No machine called ${name} that this minion gets`);
+      if (!machine || !lendsRole(store, machine, 'tools', project, asker === null ? [] : [asker])) throw new HttpError(404, `No machine called ${name} that this minion gets`);
       if (notes === machine.notes) throw new HttpError(400, `Those are already ${name}'s notes`);
       const owner = machine.owner_id === null ? null : (store.getUser(machine.owner_id)?.name ?? null);
       const event = postPlan(app, ticket.id, {

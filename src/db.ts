@@ -16,6 +16,7 @@ import { deliveryQueries } from './db/deliveries.ts';
 import { flakeQueries } from './db/flakes.ts';
 import { flowQueries } from './db/flow.ts';
 import { machineQueries } from './db/machines.ts';
+import { legacyFromRoles, parseLegacyLend, ROLE_NAMES, rolesFromLegacy, sameLend } from './machine-roles.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
 import { readWarmQueries } from './db/read-warm.ts';
@@ -337,6 +338,7 @@ export const SCHEMA_HISTORY = [
   [118, 'wait_records (#1992)'],
   [119, 'claims.handed, beside, beside_since, beside_handed, beside_landed, claim_queue.ready (#1985)'],
   [120, 'time_log_explains (#1994)'],
+  [121, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -434,6 +436,7 @@ export class Store {
     if ((this.getSetting<number>('schema_version') ?? 0) < 82) this.schedules.categorize();
     this.shippingFromRules();
     this.lendingLists();
+    this.machineRoleTables();
     this.noteSchemaVersion();
   }
 
@@ -568,7 +571,8 @@ export class Store {
           if (!m.scoped) this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
           continue;
         }
-        const rows = this.machineProjects(m.id);
+        // machine_projects itself: this runs before the roles exist (machineRoleTables), and Store.machineProjects reads them.
+        const rows = (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(m.id) as { project_id: number }[]).map((r) => r.project_id);
         const owner = m.owner_id === null ? undefined : this.getUser(m.owner_id);
         const ids =
           m.owner_id !== null
@@ -582,6 +586,38 @@ export class Store {
         this.db.prepare('UPDATE machines SET scoped = 1 WHERE id = ?').run(m.id);
         const was = m.owner_id !== null ? `${owner?.name ?? 'its owner'}'s turns in the schemes they are in` : m.scoped ? `only ${names(rows)}` : 'every scheme an admin owns';
         console.log(`Lending lists (#438): ${m.name}: was ${was}, where machine tools are on; its list is now ${names(ids)}.`);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * A machine's roles (Build 7 M1, src/machine-roles.ts rolesFromLegacy): each machine's lend and one list of schemes
+   * become its roles and a list per role, so every turn, tool and runner token goes where it went before. Every boot,
+   * for a machine with no role rows (the first boot from schema 121, or one an older release added after a rollback)
+   * and one whose old columns no longer say what its roles do (an older release changed them): this release writes
+   * those columns from the roles on every change, so a difference is a rollback's, and the old columns win.
+   * Says what it did, for the deploy's notes.
+   */
+  private machineRoleTables() {
+    const machines = this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[];
+    const has = new Set((this.db.prepare('SELECT DISTINCT machine_id FROM machine_roles').all() as { machine_id: number }[]).map((r) => r.machine_id));
+    const list = (id: number) => (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(id) as { project_id: number }[]).map((r) => r.project_id);
+    const stale = machines.filter((m) => {
+      if (!has.has(m.id)) return true;
+      const now = legacyFromRoles(this.machineRoles(m.id));
+      return !sameLend(parseLegacyLend(m.lend), now.lend) || list(m.id).join() !== now.projects.join();
+    });
+    if (!stale.length) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const m of stale) {
+        const roles = this.writeMachineRoles(m.id, () => rolesFromLegacy(m, list(m.id)));
+        const on = roles.filter((r) => r.on).map((r) => `${ROLE_NAMES[r.role]} (${r.projects.join(', ') || 'no scheme'})`);
+        console.log(`Machine roles (M1): ${m.name}${has.has(m.id) ? ', changed by an older release,' : ''} now lends ${on.join('; ') || 'nothing'}.`);
       }
       this.db.exec('COMMIT');
     } catch (err) {

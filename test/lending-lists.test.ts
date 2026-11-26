@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { lendsMachine, ownerAsked } from '../src/access.ts';
+import { lendsRole, ownerAsked } from '../src/access.ts';
 import { mayFetch } from '../src/ci-runner.ts';
 import { Store } from '../src/db.ts';
 import type { Machine } from '../src/db-rows.ts';
@@ -85,7 +85,7 @@ test('opening an older database gives every machine a list that lends it exactly
     for (const p of old.schemes) {
       const project = store.getProject(p.id)!;
       for (const askers of [[], [cara.id], [josh.id], [cara.id, josh.id]]) {
-        const now = lendsMachine(store, m, project, askers);
+        const now = lendsRole(store, m, 'tools', project, askers);
         // The one change: a CI runner host, which offers turns no tools, is no longer lent to them on paper.
         assert.equal(now, !ci && lentBefore(was, p, askers), `${m.name} in ${p.name} for askers ${askers}`);
         lent += Number(now);
@@ -134,7 +134,7 @@ test('the move runs once: a later change to a list stays, and a machine an older
       .map((p) => p.id),
     [1],
   );
-  assert.ok(!store.listProjects().some((p) => lendsMachine(store, turned, p, [1, 2])), 'a runner host lends turns nothing');
+  assert.ok(!store.listProjects().some((p) => lendsRole(store, turned, 'tools', p, [1, 2])), 'a runner host lends turns nothing');
   assert.equal(store.getMachine(id('ci-host'))!.scoped, 0, 'a runner host is never converted');
   store.db.close();
 });

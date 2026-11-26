@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { adminOwned, lendsMachine, mayReceive, messagePerson, messageScope, turnPayer, turnPlace, turnRefusal } from '../src/access.ts';
+import { adminOwned, lendsRole, mayReceive, messagePerson, messageScope, turnPayer, turnPlace, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { APP_NAME } from '../src/appname.ts';
@@ -380,12 +380,12 @@ test("a wake from no person runs on the minion's own person, not on another pers
 test("a machine goes to exactly the schemes on its list, even a non-admin's, and a new one to none (#303, #438)", () => {
   const { store, citadel, games } = world();
   const vault = store.createMachine('vault', '', 'Cara');
-  assert.ok(!lendsMachine(store, vault, citadel) && !lendsMachine(store, vault, games), "a new machine is lent to no scheme, an admin's included");
+  assert.ok(!lendsRole(store, vault, 'tools', citadel) && !lendsRole(store, vault, 'tools', games), "a new machine is lent to no scheme, an admin's included");
   store.setMachineProjects(vault.id, [games.id]);
-  assert.ok(lendsMachine(store, vault, games) && !lendsMachine(store, vault, citadel));
+  assert.ok(lendsRole(store, vault, 'tools', games) && !lendsRole(store, vault, 'tools', citadel));
   assert.deepEqual(store.machineProjects(vault.id), [games.id]);
   store.setMachineProjects(vault.id, []);
-  assert.ok(!lendsMachine(store, vault, games) && !lendsMachine(store, vault, citadel));
+  assert.ok(!lendsRole(store, vault, 'tools', games) && !lendsRole(store, vault, 'tools', citadel));
 });
 
 // ---------- the real server ----------

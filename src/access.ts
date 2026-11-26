@@ -5,6 +5,7 @@ import type { TurnPlace } from './claude-link.ts';
 import type { Machine, Project, Store, Ticket, TicketFields, User } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { storedCheck } from './machines.ts';
+import type { Role } from './machine-roles.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
 /** Stream messages only admins get: Citadel-wide instructions. (The machines list goes to each person filtered: server.ts broadcast.) */
@@ -166,25 +167,27 @@ export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Sessi
 }
 
 /**
- * Whether a turn in this scheme, asked for by `askers`, gets this machine: only if the machine's list of schemes
- * has this one (#438, Cara: "Yes, one list per machine"), whoever owns the scheme. A person's own (#306, Josh:
- * "any scheme they are in ... can use their machine to do stuff on their behalf") also needs its owner to have
- * asked for the turn and to be in the scheme. A CI runner host lends turns nothing: its rows are for runner tokens
- * (ci-runner.ts mayFetch).
+ * Whether a machine lends this role to this scheme, for a turn `askers` asked for (Build 7 M1): only if the role is
+ * switched on and its list of schemes has this one (#438's one list, a list per role since M1), whoever owns the
+ * scheme. A person's own (#306, Josh: "any scheme they are in ... can use their machine to do stuff on their behalf")
+ * also needs its owner to have asked for the turn and to be in the scheme; for CI runners, which no turn asks for,
+ * only to be in it. A CI runner host lends nothing but its runners (ci-runner.ts mayFetch).
  */
-export function lendsMachine(store: Store, machine: Machine, project: Project, askers: readonly number[] = []): boolean {
-  if (storedCheck(machine)?.runners || !store.machineGranted(machine.id, project.id)) return false;
+export function lendsRole(store: Store, machine: Machine, role: Role, project: Project, askers: readonly number[] = []): boolean {
+  if (!store.roleGrants(machine.id, role, project.id)) return false;
+  if (role === 'ci') return machine.owner_id === null || ownerAsked(store, machine.owner_id, [machine.owner_id], project.id);
+  if (storedCheck(machine)?.runners) return false;
   return machine.owner_id === null || ownerAsked(store, machine.owner_id, askers, project.id);
 }
 
 /**
  * Whether a Taskmaster's turn may list and check this machine (#307): any machine for an admin's ask, else
- * one that a turn its asker started in this scheme would get (lendsMachine).
+ * one whose tools a turn its asker started in this scheme would get (lendsRole).
  */
 export function taskmasterSeesMachine(store: Store, machine: Machine, project: Project, askerId: number | null): boolean {
   const asker = askerId === null ? undefined : store.getUser(askerId);
   if (store.isAdmin(asker)) return true;
-  return lendsMachine(store, machine, project, askerId === null ? [] : [askerId]);
+  return lendsRole(store, machine, 'tools', project, askerId === null ? [] : [askerId]);
 }
 
 /** Whether a machine's owner is among a turn's askers and, for a scheme's turn, in that scheme. */

@@ -7,7 +7,7 @@ import { byMinion, REAPED, reapedRows } from '../reaper.ts';
 import { readEmulatorLease } from '../emulator-lease.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
+import { lendsRole, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { readLongJobsA } from '../long-jobs.ts';
 import { runnerAsk } from '../ci-runner.ts';
 import { heldRows } from '../ci-hold.ts';
@@ -16,6 +16,7 @@ import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
+import { cleanCaps, isRole, ROLE_NAMES, ROLES, type RoleRow } from '../machine-roles.ts';
 import { HttpError, json, publicOrigin, ownWrites, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { uploadsDir } from './files.ts';
 import { ensureCoordinatorFor } from './projects.ts';
@@ -105,6 +106,55 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.machineGranted(machine.id, id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return app.machines.view(app.store.getMachine(machine.id)!);
+}
+
+/** A machine's roles as GET and PATCH roles answer them: each with its name people read; the Tools ticks stay in the machine's own view (lend). */
+const rolesView = (roles: RoleRow[]) => roles.map(({ caps: { ticks: _, ...caps }, ...r }) => ({ ...r, name: ROLE_NAMES[r.role], caps }));
+
+/**
+ * Change one of a machine's roles (Build 7 M1): { role, on?, projects? (the whole list), caps? }. Its owner and admins
+ * (managesMachine). Switched on with no list, a role keeps the list it had, or with none is lent to every scheme its
+ * owner is in (Josh, 2026-11-25: "Every scheme you're in"; an ownerless machine's: the ones the person switching it can see).
+ */
+export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: Record<string, unknown>) {
+  if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
+  if (!isRole(body.role)) throw new HttpError(400, `role must be one of ${ROLES.join(', ')}`);
+  const role = body.role;
+  if (body.on !== undefined && typeof body.on !== 'boolean') throw new HttpError(400, 'on must be true or false');
+  const was = app.store.machineRoles(machine.id).find((r) => r.role === role)!;
+  let projects: number[] | undefined;
+  if (body.projects !== undefined) {
+    // As the machine's PATCH: a scheme the person can't see isn't theirs to add; one already on the list (an admin's doing) may stay.
+    if (!(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number) && (was.projects.includes(id as number) || app.store.canSee(session, id as number))))) {
+      throw new HttpError(400, 'projects must be a list of scheme ids');
+    }
+    projects = body.projects;
+  }
+  let caps: ReturnType<typeof cleanCaps> | undefined;
+  try {
+    caps = body.caps === undefined ? undefined : cleanCaps(body.caps);
+  } catch (err) {
+    throw new HttpError(400, (err as Error).message);
+  }
+  // A machine runs only its owner's turns, on a sign-in they make there themselves: nobody else offers it, though an admin may switch it off.
+  if (role === 'turns' && body.on === true && !was.on && machine.owner_id !== session.uid) {
+    throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
+  }
+  const owner = machine.owner_id === null ? null : app.store.getUser(machine.owner_id);
+  const who = owner ? { uid: owner.id, admin: !!owner.admin } : session;
+  const everyScheme = app.store
+    .listProjects()
+    .filter((p) => app.store.canSee(who, p.id))
+    .map((p) => p.id);
+  const roles = app.store.setMachineRole(machine.id, role, { ...(typeof body.on === 'boolean' ? { on: body.on } : {}), ...(projects ? { projects } : {}), ...(caps ? { caps } : {}), everyScheme });
+  await ownWrites(); // what follows re-reads the grants (#1244)
+  app.machines.rolesChanged(machine.id);
+  if (role === 'turns') app.runner.turnLine.pump();
+  // A job already running goes on to its end; one that hasn't started never will (2MA9). A turn mid-call loses the tools now.
+  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.machineGranted(machine.id, j.project_id));
+  if (role === 'tools') app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
+  app.broadcast({ type: 'machines', machines: app.machines.list() });
+  return { roles: rolesView(roles), machine: app.machines.view(app.store.getMachine(machine.id)!) };
 }
 
 /** A file a workspace session's fetch_file sends: saved in that minion's shared files, under machine-files/<machine>/. */
@@ -387,7 +437,7 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
         owner_name: m.owner_id === null ? null : (app.store.getUser(m.owner_id)?.name ?? null),
         project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
         // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
-        minions_get_it: lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
+        minions_get_it: lendsRole(app.store, m, 'tools', project, asker === null ? [] : [asker]),
         // The machine on the Machines page (#1638), for tool replies and cards to link.
         page: `#/p/${project.id}/machines/${m.name}`,
       };
@@ -655,6 +705,19 @@ export const machineRoutes: Route[] = [
     handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await patchMachine(app, session, machine, await readJson(req)))),
   },
   {
+    // Its roles, each switched on or off with its schemes and caps (Build 7 M1).
+    method: 'GET',
+    path: '/api/machines/:machine/roles',
+    ...people,
+    handler: managed(({ res, app, machine }) => json(res, 200, { roles: rolesView(app.store.machineRoles(machine.id)) })),
+  },
+  {
+    method: 'PATCH',
+    path: '/api/machines/:machine/roles',
+    ...people,
+    handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await patchRoles(app, session, machine, await readJson(req)))),
+  },
+  {
     // Its worker's self-test (Build 7 T5); its lines come over the machines broadcast.
     method: 'POST',
     path: '/api/machines/:machine/self-test',
@@ -693,7 +756,7 @@ export const machineRoutes: Route[] = [
       // with ?now, it goes at once: what is there stays there, and its turns carry on at perigee.
       if (copies && url.searchParams.get('now') === null && machineLink.online(machine.id) && (Object.keys(copies.all(machine.id)).length || (await liveOn(machine.id)).length)) {
         copies.remove(machine.id);
-        if (app.machines.lendsWorker(machine)) app.store.updateMachine(machine.id, { lend: JSON.stringify({ ...JSON.parse(machine.lend!), worker: undefined }) });
+        if (app.machines.lendsWorker(machine)) app.store.setMachineRole(machine.id, 'turns', { on: false });
         app.machines.pokeWorker(machine.id);
         await ownWrites();
         app.broadcast({ type: 'machines', machines: app.machines.list() });

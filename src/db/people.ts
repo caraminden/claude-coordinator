@@ -47,6 +47,7 @@ export const peopleQueries = {
       this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
       // Ownerless and lent to no scheme, so a gone person's computer reaches no one's turns; an admin removes it.
       this.db.prepare('DELETE FROM machine_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
+      this.db.prepare('DELETE FROM machine_role_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
       this.db.prepare('UPDATE machines SET owner_id = NULL, scoped = 1 WHERE owner_id = ?').run(id);
       this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
       // People added before user_id_high existed: remember the removed id so it is never reused.

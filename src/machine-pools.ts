@@ -2,7 +2,7 @@
 // a turn may run there. The line that starts turns (src/turn-line.ts) asks this; nothing here starts one. A machine runs
 // only its owner's turns (Josh, 2026-11-25, "owner's turns only"), in schemes it is lent to, and starts none while a ship's
 // tests run on that computer. Its size stays under its owner's cap, which its agent holds too.
-import { lendsMachine } from './access.ts';
+import { lendsRole } from './access.ts';
 import type { Machine, Store, Ticket } from './db.ts';
 import { sameClaude, type WorkerInfo } from './machine-turn.ts';
 import { pacificStamp } from './pacific.ts';
@@ -51,7 +51,7 @@ const SEEN_MS = 5 * 60_000;
 const SEEN = 'worker-seen';
 
 export interface MachinePoolsDeps {
-  store: Pick<Store, 'listMachines' | 'getMachine' | 'getProject' | 'getUser' | 'getSetting' | 'setSetting' | 'machineGranted' | 'canSee'>;
+  store: Pick<Store, 'listMachines' | 'getMachine' | 'getProject' | 'getUser' | 'getSetting' | 'setSetting' | 'machineGranted' | 'roleGrants' | 'canSee'>;
   online: (machineId: number) => boolean;
   /** Its owner's Minion turns switch. */
   lends: (m: Machine) => boolean;
@@ -136,7 +136,7 @@ export class MachinePools {
     if (!this.d.lends(m)) return never(`${owner} has switched Minion turns off there`);
     if (person !== m.owner_id) return never(`it runs only ${owner}'s turns, and this one is ${person === null ? 'nobody' : (this.d.store.getUser(person)?.name ?? 'someone else')}'s`);
     const project = this.d.store.getProject(ticket.project_id);
-    if (!project || !lendsMachine(this.d.store as Store, m, project, [m.owner_id])) return never('it is not lent to this scheme');
+    if (!project || !lendsRole(this.d.store as Store, m, 'turns', project, [m.owner_id])) return never('it is not lent to this scheme');
     return this.d.info(m.id)?.signedIn === false ? never(`${owner} is not signed in to Claude there`) : null;
   }
 

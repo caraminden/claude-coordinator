@@ -163,6 +163,24 @@ CREATE TABLE IF NOT EXISTS machine_projects (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   PRIMARY KEY (machine_id, project_id)
 );
+-- A machine's roles (Build 7 M1, src/machine-roles.ts): tools, screen, ci, turns, gpu; each switched on or off, with the owner's caps
+-- (JSON; the Tools role's ticks too) and its setup's state (JSON: state, report, at). The truth since schema 121: machines.lend
+-- and machine_projects are written from these for one build, for a rollback, and read by nothing else.
+CREATE TABLE IF NOT EXISTS machine_roles (
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  "on" INTEGER NOT NULL DEFAULT 0,
+  caps TEXT NOT NULL DEFAULT '{}',
+  setup TEXT,
+  PRIMARY KEY (machine_id, role)
+);
+-- The schemes each of a machine's roles is lent to.
+CREATE TABLE IF NOT EXISTS machine_role_projects (
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (machine_id, role, project_id)
+);
 -- A CI runner agent's load samples (#534), one every 30 seconds as JSON (src/ci-load.ts Sample), kept 14 days.
 CREATE TABLE IF NOT EXISTS runner_load (
   machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,

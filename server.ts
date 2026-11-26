@@ -16,7 +16,7 @@ import { isArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
 import { shellWorker } from './src/shell.ts';
-import { lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnPlace, turnRefusal } from './src/access.ts';
+import { lendsRole, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnPlace, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from './src/build-cache.ts';
 import { diskUsage, low, size } from './src/build-output.ts';
@@ -726,7 +726,7 @@ const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: r
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
-runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
+runner.machines = (project, askers) => machines.online().filter((m) => lendsRole(store, m, 'tools', project, askers));
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 const serverClaude = () => new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0])));
 const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });

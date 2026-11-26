@@ -138,6 +138,8 @@ export const VALUE_WRITES = [
   // Machines and their jobs: the code reads a row back at once (a job's card, the slot, the go; the lend sent to the agent and
   // checked), so a read that gave up on the queue never acts on the state before (main red, Nov 21). Rare writes: none per beat.
   'updateMachine',
+  'setMachineRole',
+  'writeMachineRoles',
   'updateMachineJob',
   'allowJobKind',
   'savePushSubscription',

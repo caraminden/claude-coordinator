@@ -15,7 +15,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { lendsMachine } from './access.ts';
+import { lendsRole } from './access.ts';
 import type { Ship } from './ci-ships.ts';
 import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
@@ -75,13 +75,8 @@ export function cleanLend(input: unknown): Lend | null {
   return { server: v.server as string | null, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}), ...((input as WorkerLend).worker === true ? { worker: true as const } : {}) };
 }
 
-function storedLend(m: Machine): Lend | null {
-  try {
-    return m.lend ? cleanLend(JSON.parse(m.lend)) : null;
-  } catch {
-    return null;
-  }
-}
+/** What a machine lends, from its roles (Build 7 M1: machines.lend is only written, for a rollback). */
+const storedLend = (store: Pick<Store, 'machineLend'>, m: Pick<Machine, 'id'>): Lend | null => store.machineLend(m.id);
 
 /** The servers an agent can offer: the MCP server it lends, and its built-in workspace tools. */
 export type MachineServer = 'mcp' | 'ws';
@@ -346,15 +341,15 @@ function cleanFound(v: unknown): FoundServer[] {
 }
 
 /** The servers a turn gets from a connected machine: what is ticked and found (#439), or as an old agent says with its switch. */
-function lentServers(m: Machine, agent: Agent): MachineServer[] {
+function lentServers(store: Pick<Store, 'machineLend'>, m: Machine, agent: Agent): MachineServer[] {
   if (!agent.managed) return agent.servers.filter((s) => s === 'mcp' || m.workspace_tools);
-  const lend = storedLend(m);
+  const lend = storedLend(store, m);
   if (!lend) return [];
   return [...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []), ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : [])];
 }
 
 /** The MCP server a turn gets by name, as its tools are remembered (src/pool-machine.ts): null without one, or when the agent alone knows. */
-const lentName = (m: Machine, agent: Agent, servers: MachineServer[]) => (agent.managed && servers.includes('mcp') ? (storedLend(m)?.server ?? null) : null);
+const lentName = (store: Pick<Store, 'machineLend'>, m: Machine, agent: Agent, servers: MachineServer[]) => (agent.managed && servers.includes('mcp') ? (storedLend(store, m)?.server ?? null) : null);
 
 const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'contraptionTurn' in h ? `c${h.contraptionTurn}` : `k${h.check}`);
 
@@ -431,7 +426,7 @@ export class MachineRelay {
     const owner = machine.owner_id === null ? [] : [machine.owner_id];
     const gets = this.store
       .listProjects()
-      .filter((p) => lendsMachine(this.store, machine, p, owner))
+      .filter((p) => lendsRole(this.store, machine, 'tools', p, owner))
       .map((p) => p.id);
     const offers = this.online().find((m) => m.id === machine.id)?.servers ?? [];
     const worker = this.workers?.view(machine) ?? null;
@@ -484,7 +479,7 @@ export class MachineRelay {
       managed: agent ? agent.managed : null,
       /** The MCP servers its agent found there, and what is ticked; lend is null until a managed agent first reports. */
       found: agent?.found ?? [],
-      lend: storedLend(machine),
+      lend: storedLend(this.store, machine),
       runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
@@ -522,8 +517,8 @@ export class MachineRelay {
   online(): OnlineMachine[] {
     return this.store.listMachines().flatMap((m) => {
       const agent = this.agents.get(m.id);
-      const servers = agent ? lentServers(m, agent) : [];
-      return servers.length ? [{ ...m, servers, lent: lentName(m, agent!, servers) }] : [];
+      const servers = agent ? lentServers(this.store, m, agent) : [];
+      return servers.length ? [{ ...m, servers, lent: lentName(this.store, m, agent!, servers) }] : [];
     });
   }
 
@@ -534,9 +529,9 @@ export class MachineRelay {
     return this.agents.has(machineId);
   }
 
-  /** Its owner switched Minion turns on (Lend.worker). */
+  /** Its owner switched its Minion turns role on (Build 7 M1; Lend.worker before). */
   lendsWorker(machine: Machine): boolean {
-    return storedLend(machine)?.worker === true;
+    return this.store.machineRoles(machine.id).some((r) => r.role === 'turns' && r.on);
   }
 
   /** Starts of the owner's programs for marked minions (T8, run_on_host): sent to the agent, which checks its own list. */
@@ -644,7 +639,7 @@ export class MachineRelay {
     if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
-      const prev = storedLend(machine);
+      const prev = storedLend(this.store, machine);
       if (!prev || prev.before_ticks) {
         const was = machine.mcp_kind === 'claude' ? machine.mcp_command || DEFAULT_CLAUDE_MCP : null;
         const lend: Lend = {
@@ -658,18 +653,28 @@ export class MachineRelay {
       this.sendLend(machine.id);
     }
     // A server it no longer offers is gone for the sessions using it.
-    const offers = lentServers(this.store.getMachine(machine.id)!, agent);
+    const offers = lentServers(this.store, this.store.getMachine(machine.id)!, agent);
     for (const id of agent.sessions) if (!offers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
     this.onChange();
     this.checkIfDue(machine.id);
     return true;
   }
 
+  /**
+   * A role was switched or its schemes changed (routes/machines.ts PATCH roles, Build 7 M1): its agent hears what it
+   * lends, a GPU job running when GPU jobs went off stops (as setLend does), and the page hears the rest.
+   */
+  rolesChanged(machineId: number) {
+    this.sendLend(machineId);
+    if (this.store.machineLend(machineId)?.gpu_off) for (const job of this.gpuJobs.get(machineId) ?? []) this.stopGpuJob(machineId, job);
+    this.onChange();
+  }
+
   /** Tell a managed agent what is ticked; it serves nothing else. */
   private sendLend(machineId: number) {
     const agent = this.agents.get(machineId);
     const machine = this.store.getMachine(machineId);
-    if (agent?.managed && machine) agent.res.write(`data: ${JSON.stringify({ lend: storedLend(machine) ?? { server: null, workspaces: [] } })}\n\n`);
+    if (agent?.managed && machine) agent.res.write(`data: ${JSON.stringify({ lend: storedLend(this.store, machine) ?? { server: null, workspaces: [] } })}\n\n`);
   }
 
   /**
@@ -680,7 +685,7 @@ export class MachineRelay {
   setLend(machineId: number, to: Lend | null, worker?: boolean) {
     const machine = this.store.getMachine(machineId);
     if (!machine) return;
-    const was = storedLend(machine);
+    const was = storedLend(this.store, machine);
     // The Minion turns switch is its own: ticks saved by a page that doesn't send it leave it as it is.
     const { worker: sent, ...ticks } = to ?? was ?? { server: null, workspaces: [], before_ticks: true as const };
     const lend: Lend = { ...ticks, ...((worker ?? sent ?? was?.worker) ? { worker: true as const } : {}) };
@@ -796,7 +801,7 @@ export class MachineRelay {
   private async runCheck(machineId: number, timeoutMs: number, only?: MachineServer[]): Promise<CheckResult[]> {
     const servers = (this.online().find((m) => m.id === machineId)?.servers ?? []).filter((s) => !only || only.includes(s));
     const agent = this.agents.get(machineId);
-    const ticked = () => storedLend(this.store.getMachine(machineId) ?? ({} as Machine))?.server ?? null;
+    const ticked = () => this.store.machineLend(machineId)?.server ?? null;
     const was = ticked();
     let results: CheckResult[] = [];
     for (const server of servers) results.push(await this.checkServer(machineId, { check: machineId }, server, "Citadel's check", timeoutMs));
@@ -1088,7 +1093,7 @@ export class MachineRelay {
         for (const old of jobs) if (jobs.size > 20) jobs.delete(old);
         // Switched off while the call was on its way.
         const now = this.store.getMachine(machine.id);
-        if (now && storedLend(now)?.gpu_off) this.stopGpuJob(s.machineId, job);
+        if (now && storedLend(this.store, now)?.gpu_off) this.stopGpuJob(s.machineId, job);
       }
     }
     const message = s.jobAsks?.delete(reply?.id) ? this.heardJob(s, reply) : body.message;
@@ -1123,7 +1128,7 @@ export class MachineRelay {
     const call = message as { id?: unknown; method?: string; params?: { name?: string; arguments?: { task?: string } } } | null | undefined;
     if (s.server === 'ws' && call?.method === 'tools/call' && call.params?.name === 'run_task' && call.params?.arguments?.task === GPU_TASK) {
       const machine = this.store.getMachine(s.machineId);
-      if (machine && storedLend(machine)?.gpu_off) {
+      if (machine && storedLend(this.store, machine)?.gpu_off) {
         const text = `GPU jobs are switched off for ${machine.name} on Citadel's Machines page. Nothing was run. Don't retry: use the run task (software drawing), or ask a person to switch GPU jobs back on.`;
         s.res.write(`data: ${JSON.stringify({ message: { jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text }], isError: true } } })}\n\n`);
         return true;

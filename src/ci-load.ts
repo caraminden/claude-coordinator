@@ -389,8 +389,9 @@ export class CiLoad {
   private timer: Job | null = null;
   private flusher: Job | null = null;
   private busy = false;
-  // Each agent's newest sample since the server started: which repos have runners on its PC (runnerRepos).
-  private latest = new Map<number, Sample>();
+  // Each agent's newest sample since the server started, by `<machine id>:<os>` (one PC's row can have a Windows and a Linux
+  // runner agent, Build 7 M2b): which repos have runners on its PC (runnerRepos).
+  private latest = new Map<string, Sample>();
 
   constructor(store: Store, deps: CiLoadDeps) {
     this.store = store;
@@ -425,7 +426,8 @@ export class CiLoad {
   /** A runner agent's sample, kept for 14 days. */
   add(machineId: number, body: unknown, now = Date.now()) {
     const data = JSON.stringify(cleanSample(body, now));
-    this.latest.set(machineId, JSON.parse(data));
+    const sample = JSON.parse(data) as Sample;
+    this.latest.set(`${machineId}:${sample.os}`, sample);
     this.pending.push({ machine: machineId, at: now, data });
     if (this.recent) {
       this.recent.push({ machine: machineId, at: now, s: JSON.parse(data) });
@@ -461,9 +463,20 @@ export class CiLoad {
 
   /** A deleted machine's samples go with it (its rows cascade). */
   forget(machineId: number) {
-    this.latest.delete(machineId);
+    for (const k of this.latest.keys()) if (k.startsWith(`${machineId}:`)) this.latest.delete(k);
     this.recent = this.recent?.filter((r) => r.machine !== machineId) ?? null;
     this.pending = this.pending.filter((r) => r.machine !== machineId);
+    this.kept = null;
+  }
+
+  /** Two rows that were one PC merged (Build 7 M2b): the samples of the one that goes are the kept one's now, as in runner_load. */
+  moved(from: number, into: number) {
+    for (const [k, v] of [...this.latest]) {
+      if (!k.startsWith(`${from}:`)) continue;
+      this.latest.delete(k);
+      if (!this.latest.has(`${into}:${v.os}`)) this.latest.set(`${into}:${v.os}`, v);
+    }
+    for (const r of [...(this.recent ?? []), ...this.pending]) if (r.machine === from) r.machine = into;
     this.kept = null;
   }
 

@@ -99,6 +99,7 @@ import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, js
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes, dropRemoved } from './src/routes/machines.ts';
+import { finishMerge } from './src/routes/machine-merge.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
 import { CodeCounts, countApart } from './src/code-counts.ts';
 import { readApart, WorkFlow } from './src/work-flow.ts';
@@ -755,6 +756,8 @@ const jobs = new MachineJobs({
   },
 });
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
+// One row per PC (Build 7 M2b): a runner agent connecting to the row a merge keeps finishes that merge.
+machines.onRunner = (m) => void finishMerge(app, m).catch((err) => console.error(`Machine merge into ${m.name}:`, err));
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
 if (!BOOT_CHECK)
   machines.watchBoxes((id, text) => {
@@ -2061,11 +2064,7 @@ if (!BOOT_CHECK)
 // holds is a quiet Mandate item for every admin, cleared when it ends.
 const ciLoad = new CiLoad(store, {
   jobs: () => store.listProjects().map((project) => ({ project, jobs: ciHealth.recent.get(project.id) ?? [] })),
-  hosts: () =>
-    machines
-      .list()
-      .filter((m) => m.runners && m.online)
-      .map((m) => m.host ?? ''),
+  hosts: () => machines.runnerHosts(),
   mandate: (project, person, key, title) => mandateAlert('CI load', project, person, key, title, undefined, true),
 });
 if (!BOOT_CHECK) ciLoad.start();

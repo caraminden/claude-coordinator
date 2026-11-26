@@ -434,7 +434,8 @@ export const agentRoutes: Route[] = [
   }),
   // A CI runner agent's load sample, every 30 seconds (#534, src/ci-load.ts).
   agent('POST', '/api/machines/runner-load', async ({ req, res, app }, machine) => {
-    if (!storedCheck(machine)?.runners) throw new HttpError(403, 'Only a CI runner host sends load samples');
+    // A runner agent on its own row, or beside the PC's agent on one row (Build 7 M2b).
+    if (!storedCheck(machine)?.runners && !app.machines.runnersOn(machine.id).length) throw new HttpError(403, 'Only a CI runner agent sends load samples');
     app.ciLoad.add(machine.id, await readJson(req, 500_000));
     return json(res, 202, {});
   }),

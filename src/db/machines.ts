@@ -62,6 +62,11 @@ export const machineQueries = {
     return this.db.prepare('SELECT machine_id, at, data FROM runner_load WHERE at >= ? ORDER BY at').all(since) as { machine_id: number; at: number; data: string }[];
   },
 
+  /** Two rows that were one PC merged (Build 7 M2b): the one that goes keeps its CI load history on the kept one. */
+  moveRunnerLoad(this: Store, from: number, into: number) {
+    this.db.prepare('UPDATE runner_load SET machine_id = ? WHERE machine_id = ?').run(into, from);
+  },
+
   pruneRunnerLoad(this: Store, before: number) {
     this.db.prepare('DELETE FROM runner_load WHERE at < ?').run(before);
   },

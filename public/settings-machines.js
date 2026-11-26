@@ -3,6 +3,7 @@ import { account, ago, api, h, icon, view } from './base.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { machineJobsSection } from './jobs.js';
 import { openConnectPanel, reportLine } from './machine-connect.js';
+import { openMergePanel } from './machine-merge.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
 import { pauseButton, roleCards } from './machine-role-cards.js';
 import { forgetWorkerLink, workerReason, workerWord } from './machine-worker-row.js';
@@ -184,7 +185,20 @@ function connectComputer(m = null) {
   if (!el) return;
   // One panel at a time: the one before stops watching its code, or its next look would draw over this one.
   connectPanel?.close({ quiet: true });
+  mergePanel?.close({ quiet: true });
   connectPanel = openConnectPanel(el, { machine: m });
+  el.scrollIntoView({ block: 'nearest' });
+}
+
+let mergePanel = null;
+
+/** "These are one computer: merge" (Build 7 M2b): in Connect a computer's place, one panel at a time. */
+function mergeMachines(m, other) {
+  const el = document.getElementById('machine-connect');
+  if (!el) return;
+  connectPanel?.close({ quiet: true });
+  mergePanel?.close({ quiet: true });
+  mergePanel = openMergePanel(el, m, other, { machines: () => view.machines ?? [] });
   el.scrollIntoView({ block: 'nearest' });
 }
 
@@ -287,6 +301,7 @@ function renderMachineList() {
   const el = document.getElementById('machine-list');
   if (!el) return;
   view.machineOpen ??= new Set();
+  mergePanel?.redraw();
   renderRemovals(document.getElementById('machine-removals'), renderMachineList);
   const scheme = view.project?.name ?? 'This scheme';
   const runners = view.machines.filter((m) => m.runners);
@@ -536,8 +551,11 @@ function machineLine(m) {
   const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
+  // Two rows for one PC (Build 7 M2b): its owner merges them into one. It shows the kept row's token, so only to its owner.
+  const other = !gone && tokenIsMine(m) && m.same_pc?.find((x) => view.machines.some((y) => y.id === x.id && tokenIsMine(y)));
+  const merge = other && h('button', { type: 'button', class: 'secondary small', title: `${m.name} and ${other.name} report one hostname. Opens the line that moves the CI runner agent onto one row`, onclick: () => mergeMachines(m, other) }, m.merging ? 'Merging: show the line' : 'These are one computer: merge');
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
-  if (fix || update) sum.after(h('span', { class: 'machine-fix' }, update || '', fix || ''));
+  if (fix || update || merge) sum.after(h('span', { class: 'machine-fix' }, merge || '', update || '', fix || ''));
   row.classList.add('machine-row', 'machine-line', m.status);
   row.dataset.name = m.name;
   row.addEventListener('toggle', () => {

@@ -71,6 +71,7 @@ export const WRITES = [
   'addRunnerLoad',
   'addRunnerLoads',
   'pruneRunnerLoad',
+  'moveRunnerLoad',
   'setMachineProjects',
   'deleteMachine',
   'saveView',

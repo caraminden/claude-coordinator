@@ -70,18 +70,20 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 
 /**
  * Whether this machine's key may fetch a runner token for the scheme. Its CI role on: if lent there, and a person's
- * own one's owner is in the scheme (access.ts lendsRole). A CI runner host with CI off: never. A machine that isn't
- * one yet and never had CI switched on, as a runner agent connecting with its key would make it (its CI role then goes
- * on, lent where the machine was: db/machines.ts updateMachine): a person's own if its owner is in the scheme (an
+ * own one's owner is in the scheme (access.ts lendsRole). A CI runner host, or a row a runner agent connected to, with
+ * CI off: never. A machine no runner agent has connected to yet that never had CI switched on (the first connection
+ * switches it on, lent where the machine is: MachineRelay.connectRunner): a person's own if its owner is in the scheme (an
  * admin is in all of them), an ownerless one if any of its roles that's on is lent there. An ownerless CI runner host
  * from before #438 that was never given a list (machines.scoped 0, which nothing else reads now): with CI on, if an
  * admin owns the scheme, so `ci_runners` keeps working for a new scheme. The token lets a PC run the repo's CI jobs,
  * which a member can already do by pushing a workflow.
  */
 export function mayFetch(store: Store, machine: Machine, project: Project): boolean {
-  const ci = store.machineRoles(machine.id).find((r) => r.role === 'ci')?.on ?? false;
+  const role = store.machineRoles(machine.id).find((r) => r.role === 'ci');
+  const ci = role?.on ?? false;
   if (machine.owner_id === null && !machine.scoped) return ci && adminOwned(store, project);
-  if (ci || storedCheck(machine)?.runners) return lendsRole(store, machine, 'ci', project);
+  // A PC's row a runner agent has connected to (Build 7 M2b) is one too: its CI role decides, so off is off.
+  if (ci || storedCheck(machine)?.runners || role?.setup?.runner_agent) return lendsRole(store, machine, 'ci', project);
   if (machine.owner_id === null) return store.machineGranted(machine.id, project.id);
   return ownerAsked(store, machine.owner_id, [machine.owner_id], project.id);
 }
@@ -351,7 +353,8 @@ export class RunnerJobs {
   /** The running or last job of each scheme, by scheme id. */
   private jobs = new Map<number, { view: RunnerJobView; done: Promise<void> }>();
   /** Machines with a job out: an agent runs one at a time. */
-  private busy = new Set<number>();
+  // By `<machine id>:<os>`: a PC's Windows and Linux runner agents (one row since Build 7 M2b) each take their own job.
+  private busy = new Set<string>();
   /** Told each add's or remove's outcome, for the scheme Taskmaster's chat: one line, and the output to show under it. */
   onNote: (project: Project, words: string, detail: string) => void = () => {};
   /** Token notes a running job's scripts caused, by scheme id, with the job's machine: they go under its note, not beside it. */
@@ -380,9 +383,9 @@ export class RunnerJobs {
     if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
     const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project));
     const named = ask.host?.toLowerCase();
-    const machines = named ? online.filter((m) => m.name.toLowerCase() === named || this.relay.runnerHost(m.id)?.toLowerCase() === named) : online;
+    const machines = named ? online.filter((m) => m.name.toLowerCase() === named || this.relay.runnerHost(m.id, ask.os)?.toLowerCase() === named) : online;
     if (online.length && !machines.length) {
-      throw new HttpError(409, `No CI runner host named ${ask.host} may act for ${project.name} here; the ones online are ${online.map((m) => `${m.name} (${this.relay.runnerHost(m.id) ?? '?'})`).join(', ')}.`);
+      throw new HttpError(409, `No CI runner host named ${ask.host} may act for ${project.name} here; the ones online are ${online.map((m) => `${m.name} (${this.relay.runnerHost(m.id, ask.os) ?? '?'})`).join(', ')}.`);
     }
     if (!machines.length) {
       const where = ask.os === 'linux' ? 'Linux CI runner agent' : 'CI runner agent';
@@ -393,14 +396,14 @@ export class RunnerJobs {
       );
     }
     // An add goes to one PC (the named one, else the first idle); list and remove reach every PC asked, which must all be free.
-    const free = machines.filter((m) => !this.busy.has(m.id));
+    const free = machines.filter((m) => !this.busy.has(`${m.id}:${ask.os}`));
     const targets = ask.op === 'add' ? free.slice(0, 1) : free.length === machines.length ? machines : [];
-    if (!targets.length) throw new HttpError(409, `The runner agent on ${(free.length ? machines.filter((m) => this.busy.has(m.id)) : machines).map((m) => m.name).join(', ')} is busy with another scheme's job; try again in a few minutes.`);
+    if (!targets.length) throw new HttpError(409, `The runner agent on ${(free.length ? machines.filter((m) => this.busy.has(`${m.id}:${ask.os}`)) : machines).map((m) => m.name).join(', ')} is busy with another scheme's job; try again in a few minutes.`);
     const machine = targets[0];
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
     const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false);
     const view: RunnerJobView = { op: ask.op, count: ask.count, os: ask.os, scheme: project.name, machine: targets.map((m) => m.name).join(', '), by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
-    for (const m of targets) this.busy.add(m.id);
+    for (const m of targets) this.busy.add(`${m.id}:${ask.os}`);
     this.tokenNotes.set(project.id, { machineIds: new Set(targets.map((m) => m.id)), lines: [] });
     // A Linux runner's label (#510): add-runner.sh makes the same one from the label Citadel hands it.
     const label = names ? (ask.os === 'linux' ? `${names.label}-linux` : names.label) : '';
@@ -409,7 +412,7 @@ export class RunnerJobs {
       .then(() => this.note(project, view))
       .catch((err) => console.error(`Couldn't note ${project.name}'s runner job:`, err))
       .finally(() => {
-        for (const m of targets) this.busy.delete(m.id);
+        for (const m of targets) this.busy.delete(`${m.id}:${ask.os}`);
         this.tokenNotes.delete(project.id);
       }) as Promise<void>;
     this.jobs.set(project.id, { view, done });
@@ -422,8 +425,8 @@ export class RunnerJobs {
     const parts: string[] = [];
     let given: { ok: boolean; text: string; none?: true } | null = null;
     for (const machine of machines) {
-      const sent = this.relay.runnerJob(machine.id, job);
-      const host = this.relay.runnerHost(machine.id);
+      const sent = this.relay.runnerJob(machine.id, job, ask.os);
+      const host = this.relay.runnerHost(machine.id, ask.os);
       const role = ask.op === 'add' ? (ask.role ?? defaultRole(before, label, host)) : undefined;
       if (role) given = await this.giveRole(project, role, label, host, before, sent);
       const r = await sent;
@@ -439,7 +442,7 @@ export class RunnerJobs {
       ok = given.ok;
       text += `\n\nOn GitHub: ${given.text}`;
     } else if (ok && ask.op === 'add') {
-      const idle = await this.waitIdle(project, ask.count!, label, this.relay.runnerHost(machines[0].id));
+      const idle = await this.waitIdle(project, ask.count!, label, this.relay.runnerHost(machines[0].id, ask.os));
       ok = idle.ok;
       text += `\n\nOn GitHub (label ${label}): ${idle.text}`;
     }

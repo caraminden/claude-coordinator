@@ -202,7 +202,10 @@ export class LongJobs {
       this.reads++;
       // One long job per repo at a time, and one quiet one beside it: they run on different runners.
       const lane = (j: LongJob) => `${j.quiet ? 'quiet ' : ''}${j.slug.toLowerCase()}`;
-      const held = new Set(jobs.filter((j) => ACTIVE.includes(j.state)).map(lane));
+      // A run the hold stopped runs nowhere, so it keeps no other job of its repo from asking the hold, and its cap (#2121:
+      // on Nov 25 one such run kept Peek's older jobs from their 4 h cap, and #942's waited 5 h 32 min). Should it come back
+      // while one started meanwhile still runs, the two overlap: accepted, as each runner takes one job and the other queues on GitHub.
+      const held = new Set(jobs.filter((j) => ACTIVE.includes(j.state) && !(j.run_id && this.d.heldRun?.(j.run_id))).map(lane));
       for (const j of jobs) {
         const s = this.d.scheme(j.ticket);
         if (ENDED.includes(j.state)) {

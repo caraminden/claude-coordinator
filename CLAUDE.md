@@ -49,7 +49,9 @@ skill step is skipped or uses its default.
   (`src/tripwire.ts`, `src/tripwire-git.ts`, `src/tripwire-base.ts`, `tools/guard.sh`, `.githooks/`); who sees what and whose turns run
   (`src/access.ts`, and `turnPerson` in `src/runner.ts`: whose Claude login a turn runs on); the kit's scheme-setup templates, which other schemes copy
   (`kit/skills/scheme-setup/templates/`). `src/db.ts` (setup, migrations, settings) and its area files `src/db/<area>.ts` hold every query, a new one in its area's file (`test/db-areas.test.ts`): judge an
-  edit there by what it does.
+  edit there by what it does. A change that `node tools/types-only.ts` calls `same` (the file's code unchanged once
+  types and comments are stripped) is judged by what it does too: by-file high risk doesn't apply to it, though the
+  pipeline lane still orders a pipeline file (#2143).
 - **How a change ships:** the scheme instructions, "Shipping fixes" (`tools/land.sh`).
 - **UI rules:** the scheme instructions, "UI checks"; tokens, parts and design rules in the living
   design-system home, `docs/design-system/index.html` (a token or part change updates it in the same

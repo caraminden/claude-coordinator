@@ -7,7 +7,8 @@ import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 
-/** @import { ChatEvent, InboxItem, ListedTicket, SchemeListed, Ticket, View } from './types.js' */
+/** @import { ChatEvent, SchemeListed, Ticket, View } from './types.js' */
+/** @import { InboxItem, ListedTicket } from './types/list.js' */
 /** @import { MinionLike, SeenHere } from './schemecounts.js' */
 /** What a row of the strip names its minion by: a whole minion, or the little the page knows of one. @typedef {Pick<Ticket, 'id' | 'project_id' | 'number' | 'kind' | 'title'>} RowTicket */
 

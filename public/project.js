@@ -1,5 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-/** @import { ArtifactFile, SharedFile, Ticket, View } from './types.js' */
+/** @import { ArtifactFile, SharedFile } from './types/files.js' */
+/** @import { Ticket, View } from './types.js' */
 /** @typedef {Pick<View, 'project' | 'coordinator' | 'taskmasters' | 'seen' | 'personNotes' | 'pins' | 'builds' | 'cabals' | 'buildPreviews' | 'artifacts' | 'shared' | 'machines'> & { tickets: Ticket[], closed: ReturnType<typeof closedSnapshot> }} Cached A scheme as it was left (rememberScheme). */
 /** @typedef {{ kind: string, number?: number | null, id?: number, home?: boolean, orders?: boolean, folder?: string, machine?: string, schedule?: number | null, focus?: number | null, artifact?: ArtifactFile, file?: SharedFile & { path: string } }} Main What the route asks the main panel to show. */
 import { account, api, h, isCoordinator, loadPanelState, me, openView, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';

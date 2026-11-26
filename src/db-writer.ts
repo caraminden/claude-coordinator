@@ -180,6 +180,12 @@ export const VALUE_WRITES = [
   'deliveryTransaction',
 ];
 
+/** Mark the worker gone and wake everyone waiting on it: readers stop answering on their own. */
+function markGone(shared: BigInt64Array) {
+  Atomics.store(shared, 1, -1n);
+  for (const i of [0, 1, 3]) Atomics.notify(shared, i);
+}
+
 /** What a write makes the server forget of its own caches: when it is sent, and again when it lands, since a read in
  * between caches what the file still holds. */
 const FORGETS: Record<string, (store: Store, args: number[]) => void> = {
@@ -478,6 +484,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     for (const w of waiters) if (applied() >= w.seq) w.done();
   });
   worker.once('exit', (code) => {
+    // Here too: terminate() and running out of memory kill the worker without running its own 'exit' handler (#2130).
+    markGone(shared);
     alive = false;
     unlist();
     unwritten.clear();
@@ -510,12 +518,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
 
 if (!isMainThread && workerData?.writer) {
   const { path, shared, delayMs } = workerData.writer as { path: string; shared: BigInt64Array; delayMs: number };
-  process.on('exit', () => {
-    Atomics.store(shared, 1, -1n);
-    Atomics.notify(shared, 1);
-    Atomics.notify(shared, 0);
-    Atomics.notify(shared, 3);
-  });
+  // Sooner than the server's handler, which can't run while that thread is blocked in a drain.
+  process.on('exit', () => markGone(shared));
   const store = new Store(path, { writer: true });
   Atomics.store(shared, 1, 1n);
   Atomics.notify(shared, 1);

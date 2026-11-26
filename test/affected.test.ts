@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { affected, directImports, globRe, parseMap } from '../tools/affected.ts';
+import { landText } from './land-files.ts';
 
 // tools/affected.ts and tools/affected-map.txt (#1112): the format is specs/affected-tests-map.md in the shared folder.
 const repo = join(import.meta.dirname, '..');
@@ -97,7 +98,7 @@ test('the guard tests land.sh runs before CI are picked for every path that can 
   for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts']) assert.ok(always.includes(t), `${t} runs on every citadel-test run`);
   for (const path of ['test/anything.test.ts', 'test/land-fixture.ts']) assert.ok(picked(path).includes('test/one-until.test.ts'), path);
   for (const path of ['public/app.js', 'public/ui/chat.js', 'public/style.css', 'src/theme.ts', 'test/ui-contract.json']) assert.ok(picked(path).includes('test/ui-contract.test.ts'), path);
-  const sh = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
+  const sh = landText();
   for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts', 'test/one-until.test.ts', 'test/ui-contract.test.ts', 'test/size-budget.test.ts']) assert.ok(sh.includes(t), `land.sh's guards run ${t}`);
 });
 

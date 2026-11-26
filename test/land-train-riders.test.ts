@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { ci, git, seen, setup, tickets, issued, quietProc } from './land-fixture.ts';
 import { line, shipped, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
+import { landText } from './land-files.ts';
 
 // #1479: the guard tests (land.sh's guards(), #1240) on the train, not just its front. On Nov 21, 03:46 to 04:20 PST,
 // #1460 rode trains with a break of the one-until guard that passed on its front in 1 s, and it took 6 CI runs to
@@ -559,7 +560,7 @@ test('a retried ship whose train goes red goes back in line as any rider does, i
 });
 
 test("a rider whose file its front removes as it reads it is back in line, like one with no file: it doesn't die (#1914)", () => {
-  const land = readFileSync(join(import.meta.dirname, '../tools/land.sh'), 'utf8');
+  const land = landText();
   const body = /^train_verdict\(\) \{\n[\s\S]*?^\}$/m.exec(land)?.[0];
   assert.ok(body, 'tools/land.sh has no train_verdict()');
   const dir = mkdtempSync(join(tmpdir(), 'land-verdict-read-'));

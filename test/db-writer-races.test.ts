@@ -195,6 +195,35 @@ test('chat lines queued when the worker dies are lost whole, and the next line t
   );
 });
 
+// Found by #1778: terminate() and running out of memory skip the worker's own 'exit' handler, so the server's marks it gone.
+test("once the worker is gone no reader thread answers on its own: the server writes in place, where a step can't be told from the next", async () => {
+  const { store, w } = open();
+  const t = minion(store);
+  await until('the step closes', () => w.shared[3] >= w.shared[4]);
+  await w.stop();
+  const reader = new Store(store.path, { reader: true });
+  store.updateTicket(t.id, { title: 'half a step' });
+  assert.equal(atWholeStep(reader.db, w.shared), null);
+});
+
+test('a reader whose pin the worker died during gives it up: what it pinned may hold half an in-place step', async () => {
+  const { store, w } = open();
+  minion(store);
+  await until('the step closes', () => w.shared[3] >= w.shared[4]);
+  const reader = new Store(store.path, { reader: true });
+  const db = Object.create(reader.db, {
+    exec: {
+      value: (sql: string) => {
+        if (sql === 'BEGIN') Atomics.store(w.shared, 1, -1n); // gone between the reader's check and its pin
+        reader.db.exec(sql);
+      },
+    },
+    prepare: { value: (sql: string) => reader.db.prepare(sql) },
+  });
+  assert.equal(atWholeStep(db, w.shared), null);
+  assert.equal(reader.db.isTransaction, false);
+});
+
 /** Run `body` in a process of its own (`store` and `w` are there), which kills itself as a crash would; its database. */
 function crash(name: string, body: string) {
   const dir = join(root, name);
@@ -382,6 +411,29 @@ const manyRecords: { what: string; refuse: [on: string, when?: string]; ready: (
         .prepare('SELECT key FROM artifact_data')
         .all()
         .map((r) => r.key),
+  },
+  {
+    what: "a schedule's slot and its place in the history",
+    refuse: ['UPDATE ON schedules'],
+    ready: (s) => {
+      s.createProject('p', null);
+      s.schedules.create({ project_id: 1, name: 'Nightly', cron: '0 3 * * *', brief: 'b', type: 'chore', created_by: 'cara' }, 1_000);
+    },
+    act: (s) => s.schedules.ran(1, { skip: 'nothing moved' }, 2_000),
+    see: (s) => s.schedules.runs(1).map((r) => r.skip),
+  },
+  {
+    what: 'a minion and its chat, deleted',
+    refuse: ['DELETE ON tickets'],
+    ready: (s) => {
+      const p = s.createProject('p', null);
+      const t = s.createTicket({ project_id: p.id, title: 'a minion', permission_mode: 'default', created_by: 'cara' });
+      s.addEvent(t.id, 'note', { text: 'kept' });
+      // A held claim passes on inside the delete, in the delete's own transaction.
+      s.claims.take(p.id, 'lane', t.id, 'cara');
+    },
+    act: (s) => s.deleteTicket(1),
+    see: (s) => [s.listEvents(1).length, s.claims.get(1, 'lane')?.holder],
   },
 ];
 for (const c of manyRecords)

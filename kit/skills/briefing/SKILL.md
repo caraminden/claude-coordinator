@@ -15,6 +15,10 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    minions (a chain only when the second needs the first's code), above all when only one waits on a
    person's card: a read-only Flow tab and a saved closing word whose word list a person picks were
    one brief, and should have been two.
+   A sweep split across several minions is split from the tool's per-file list (a baseline,
+   `git ls-files`, a report's per-file counts), never from name patterns: every file goes to exactly
+   one brief, and the leftovers are a round of their own, named. When several of them add to one
+   shared file at once, each brief names its own file or section in it.
 2. **Their words**: the person's own words that asked for it, in quotation marks, with who and the
    date: `Josh, 2026-11-19: "Go on A1"`. Quote the ask itself, not your summary of it, and each
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.
@@ -29,6 +33,9 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    (checked 2026-11-19)". A minion that starts on work already shipped repeats it. For anything
    bigger than a one-file fix, first send a `citadel:scout` Grunt the area or your draft: its
    "Touched" lines go here, its "Tried or ruled out" and "Reusable" lines in part 6.
+   Look in the minions list for an open minion deciding or building the same mechanism too (a design
+   minion has no files yet). When there is one, send it the new ask as a message instead, or name the
+   seam in both briefs (message it its half): which piece each builds, which ships second.
 5. **Leave alone**: what the minion must not touch (files, lanes, another minion's branch, live
    data). "Nothing in particular" when true.
    Run `who-touches <the files it will edit>` (on every turn's PATH) and name each open minion

@@ -159,7 +159,20 @@ case ${1:-} in
   *) refuse "takes no arguments besides --into build/<n> <test files>, --into build/<n> --full and --build (for --now, land first, then run tools/deploy.sh --now with a person's OK)" ;;
 esac
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below, which would break a relative path to it
-self=$(stat -c %d:%i "$tools/land.sh") # which file bash is reading; the rebase below may replace it
+# The parts (tools/land/<part>.sh, #2099): definitions only, all sourced up front, never lazily (a ship whose branch
+# predates a part would miss it). They use $tools, not BASH_SOURCE, and touch no state when sourced (--check has none).
+for land_part in "$tools"/land/*.sh; do
+  # shellcheck source=/dev/null
+  [ ! -e "$land_part" ] || . "$land_part"
+done
+unset land_part
+# Which files bash is reading: land.sh and its parts (tools/land/*.sh), each by name and inode. The rebase below may
+# replace any of them; a part-only change must hand over too (#2099).
+land_self() {
+  local f
+  for f in "$tools/land.sh" "$tools"/land/*.sh; do [ ! -e "$f" ] || stat -c '%n %d:%i' "$f"; done
+}
+self=$(land_self)
 here=$(git rev-parse --show-toplevel)
 cd "$here" # the tests run from the worktree's top, wherever in it this was started
 branch=$(git branch --show-current)
@@ -900,10 +913,10 @@ case $mode in
       numbers_git theirs merge -q --no-edit main || conflict main merge "merging main into $build failed (see git's output above), so nothing landed"
     fi ;;
 esac
-# Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
+# Bash goes on reading the files it started from, so a rebase that replaced land.sh or a part would land with the old one (#500):
 # go on in the rebased one instead. It keeps the lock on fd 9 (and the build's on fd 6), and its own rebase finds
 # nothing to do. Not --into: that holds no deploy lock for the copy to find, and only tests and moves a branch.
-[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}"
+[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(land_self)" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}"
 
 # ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
 # while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.

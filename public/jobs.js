@@ -6,7 +6,7 @@
 import { account, api, formatSize, h, sharedHref, pacificClock, pacificStamp, pacificZone, pacificMinutes } from './base.js';
 import { optimistic } from './ui/optimistic.js';
 
-/** @import { JobKindView, JobSettings, JobState, JobView } from './types.js' */
+/** @import { JobKindView, JobSettings, JobState, JobView } from './types/jobs.js' */
 /** @typedef {{ hash: string; name: string; allowed_by: string; at: number }} AllowedKind a standing go (src/db/machines.ts jobKinds) */
 /** @typedef {{ id: number; jobs?: unknown; job_settings?: JobSettings | null }} MachineRow the machine view's fields this page reads */
 /** @import { Child } from './base.js' */

@@ -562,18 +562,26 @@ export class Schedules {
       // The calendar is a trigger's fallback (Cara, 2026-11-24): a triggered run takes the coming slot's place.
       if ('ticketId' in outcome && outcome.triggered) next = nextRun(s.cron, next!);
     } catch {}
-    if ('ticketId' in outcome || 'skip' in outcome) {
-      this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
-    }
-    if ('ticketId' in outcome) {
-      const done = !!s.once;
-      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
-    } else if ('skip' in outcome) {
-      // The gate was reached, so an older "didn't start" is stale.
-      this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
-    } else {
-      // Never earlier than it was: a triggered run's error keeps the slot that run took.
-      this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next == null ? null : Math.max(next, s.next_run_at ?? 0), id);
+    // One commit: a crash between the history row and the schedule would leave the slot owed, and a second row for it.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if ('ticketId' in outcome || 'skip' in outcome) {
+        this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
+      }
+      if ('ticketId' in outcome) {
+        const done = !!s.once;
+        this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
+      } else if ('skip' in outcome) {
+        // The gate was reached, so an older "didn't start" is stale.
+        this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
+      } else {
+        // Never earlier than it was: a triggered run's error keeps the slot that run took.
+        this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next == null ? null : Math.max(next, s.next_run_at ?? 0), id);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw err;
     }
   }
 
@@ -688,7 +696,7 @@ export function runBrief(s: Schedule, when: string, window: string): string {
   return [
     `Scheduled run of "${s.name}" (${describeCron(s.cron)}, this run ${when}). A schedule started this minion, not a person, and nobody is watching it live.`,
     window,
-    'Do the brief below. If you find nothing a person needs to see or act on, file the run away quietly: set only the note (e.g. "nothing to report"), leaving state null, since state ready pings people; call close_self; end your turn with one line on what you checked. If you do find something, leave the minion open in state ready with a short report: that pings people and shows in the Needs-you inbox. If the run writes handoff files, end with one multi-select ask_question card, one option per handoff (or per item when one file holds several), the option for each handoff with its `start` so a plain pick starts that minion by itself, your recommendation marked, and start no minions yourself. Once a person answers (if every pick started, you hear it as held mail), keep only the picked handoffs (or items), delete the rest, and send the picks that did not start to your Taskmaster with message_coordinator, naming each handoff path.',
+    'Do the brief below. If you find nothing a person needs to see or act on, file the run away quietly: set only the note (e.g. "nothing to report"), leaving state null, since state ready pings people; call close_self; end your turn with one line on what you checked. If you do find something, leave the minion open in state ready with a short report: that pings people and shows in the Needs-you inbox. If the run writes handoff files, end with one multi-select ask_question card, one option per handoff (or per item when one file holds several), the option for each handoff with its `start` so a plain pick starts that minion by itself, your recommendation marked, and start no minions yourself. A handoff for another scheme\'s repo gets no option: send its path to your Taskmaster and leave the file. Once a person answers (if every pick started, you hear it as held mail), keep the picked handoffs (or items), delete the others the card offered, and send the picks that did not start to your Taskmaster with message_coordinator, naming each handoff path.',
     '',
     s.brief,
   ].join('\n');

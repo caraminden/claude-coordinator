@@ -1,6 +1,6 @@
 // The machines' API shapes (Build 7, worker machines): the Machines page, its panels, the Workers tile's machine rows and
 // the Runs on mark. Kept apart from types.d.ts, which re-exports them, so that file's size budget holds.
-import type { WorkerLimit, WorkersTile } from './types.js';
+import type { WorkerLimit, WorkersTile } from './types/workers.js';
 
 /** A machine's row on the Workers tile (src/turn-line.ts machinePools, src/routes/workers.ts). */
 export interface WorkerMachine {

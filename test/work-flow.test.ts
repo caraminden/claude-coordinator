@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { layout, rows } from '../public/flowmath.js';
 import { Store } from '../src/db.ts';
-import { dayStart, namedBy, rangeOf, readApart, settle, WorkFlow, type End, type FlowAsk, type FlowMinion } from '../src/work-flow.ts';
+import { pacificDayStart } from '../src/pacific.ts';
+import { namedBy, rangeOf, readApart, settle, WorkFlow, type End, type FlowAsk, type FlowMinion } from '../src/work-flow.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'work-flow-'));
 const db = join(root, 'x.db');
@@ -268,7 +269,7 @@ test('a range is whole Pacific days, two weeks by default, through a clock chang
     ['2024-01-01', '2026-01-01'],
   ] as const)
     assert.equal(rangeOf(from, to), null, `${from}..${to}`);
-  assert.equal(dayStart('2026-03-08'), at('2026-03-08T00:00:00-08:00'));
+  assert.equal(pacificDayStart('2026-03-08'), at('2026-03-08T00:00:00-08:00'));
 });
 
 test('which minion a commit names: the number its subject starts or ends with; GitHub’s own merges end with a pull request’s', () => {

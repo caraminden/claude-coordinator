@@ -116,7 +116,8 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
     // As the ship's own app deploys pick them (server.ts, LandHandoffs' apps): a home app on main.
     const served = !(await app.waiters.elsewhere(ticket.id)) || (body.deploy !== false && app.store.listContraptions().some((c) => c.home_scheme === ticket.project_id && !!c.repo && (c.branch ?? 'main') === 'main'));
     const lines = served ? await changedLines(ticket.cwd) : 0;
-    if (lines >= PROBE_LINES) throw new HttpError(400, `Not handed off: this change is ${lines} lines (${PROBE_LINES} or more), so it names one check the server runs once it's live, with no model: a pass is a line in your chat, a fail wakes you. Pick what would show it broken live. ${PROBE_HELP}`);
+    if (lines >= PROBE_LINES)
+      throw new HttpError(400, `Not handed off: this change is ${lines} changed lines, moves left out (${PROBE_LINES} or more), so it names one check the server runs once it's live, with no model: a pass is a line in your chat, a fail wakes you. Pick what would show it broken live. ${PROBE_HELP}`);
   }
   let args: string[];
   try {

@@ -1,7 +1,7 @@
 // The warm handover (#1170, src/handover.ts): a deploy boots the new server beside the old one, then swaps them.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { Agent, get, type IncomingMessage } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import { after, test } from 'node:test';
 import { COLD, handOver, handoverState, standby } from '../src/handover.ts';
-import { SCHEMA_VERSION } from '../src/db.ts';
+import { SCHEMA_VERSION, Store } from '../src/db.ts';
 import { STOP_MARK } from '../src/sd-watchdog.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot, TEST_ZONE, until } from './helpers.ts';
 import { json } from './typed.ts';
@@ -39,10 +39,17 @@ async function heldSocket(): Promise<{ server: NetServer; fd: number; port: numb
 const COPY = join(tmp.dir, 'copy.mjs');
 writeFileSync(
   COPY,
-  `import { standby } from ${JSON.stringify(join(REPO, 'src/handover.ts'))};
+  `import { appendFileSync } from 'node:fs';
+import { standby } from ${JSON.stringify(join(REPO, 'src/handover.ts'))};
 if (process.env.COPY_MODE === 'exit') process.exit(1);
 if (process.env.COPY_MODE === 'hang') setInterval(() => {}, 1000);
-else { const h = await standby(Number(process.env.COPY_SCHEMA)); console.log('copy got go'); if (process.env.COPY_MODE === 'die') process.exit(3); h.live(); }
+else {
+  // COPY_OUT: what the copy did, in order: its warm-up, then what it was handed.
+  const out = process.env.COPY_OUT;
+  const h = await standby(Number(process.env.COPY_SCHEMA), process.env, 4, out ? async () => appendFileSync(out, 'warm\\n') : undefined);
+  if (out) appendFileSync(out, 'handed ' + h.handed + '\\n');
+  console.log('copy got go'); if (process.env.COPY_MODE === 'die') process.exit(3); h.live();
+}
 `,
 );
 
@@ -60,13 +67,13 @@ held.listen(0, '127.0.0.1', () => handOver(
 `,
 );
 
-function oldSide(env: Record<string, string>, opts: { readyMs?: number; onSocket?: boolean } = {}) {
+function oldSide(env: Record<string, string>, opts: { readyMs?: number; onSocket?: boolean; handOff?: () => string | null; onLine?: (l: string) => void } = {}) {
   const lines: string[] = [];
   const order: string[] = [];
   return {
     lines,
     order,
-    run: (fd: number) => handOver({ quiesce: () => order.push('quiesce'), finish: () => order.push('finish') }, { schema: 7, onSocket: opts.onSocket ?? true, env: { ...process.env, ...env }, argv: [COPY], socketFd: fd, readyMs: opts.readyMs, log: (l) => lines.push(l) }),
+    run: (fd: number) => handOver({ handOff: opts.handOff, quiesce: () => order.push('quiesce'), finish: () => order.push('finish') }, { schema: 7, onSocket: opts.onSocket ?? true, env: { ...process.env, ...env }, argv: [COPY], socketFd: fd, readyMs: opts.readyMs, log: (l) => (lines.push(l), opts.onLine?.(l)) }),
   };
 }
 
@@ -103,11 +110,25 @@ test("a server that isn't on systemd's socket refuses at once", () => {
 test('the old server lets go once the copy is ready, and finishes once it is live', async () => {
   const notify = fakeNotify(join(tmp.dir, 'taken'));
   const held = await heldSocket();
-  const side = oldSide({ PATH: notify.PATH, NOTIFY_SOCKET: notify.NOTIFY_SOCKET, COPY_SCHEMA: '7' });
+  const out = join(tmp.dir, 'taken', 'copy.out');
+  // What the copy had done when the old server heard "ready" (#2119): its warm-up is over by then.
+  let atReady = '';
+  // The readers' snapshot goes over as one line, whatever its text holds: readline ends lines at U+2028 and U+2029 too.
+  const snapshot = JSON.stringify({ live: { 7: { activity: 'a\u2028b\u2029c\nd' } }, other: null });
+  const side = oldSide({ PATH: notify.PATH, NOTIFY_SOCKET: notify.NOTIFY_SOCKET, COPY_SCHEMA: '7', COPY_OUT: out }, { handOff: () => snapshot, onLine: (l) => /is ready/.test(l) && (atReady = readFileSync(out, 'utf8')) });
   side.run(held.fd);
   held.server.close();
   await until('the handover finishes', () => side.order.includes('finish'));
   assert.deepEqual(side.order, ['quiesce', 'finish']);
+  assert.equal(atReady, 'warm\n', 'warmed up before it said ready');
+  const [warmed, handed, rest] = readFileSync(out, 'utf8').split('\n');
+  assert.equal(warmed, 'warm');
+  assert.deepEqual(JSON.parse(handed.slice('handed '.length)), JSON.parse(snapshot), 'the snapshot it was handed reads back whole');
+  assert.equal(rest, '', 'on one line');
+  assert.ok(
+    side.lines.some((l) => /^Handover: sent it the readers' snapshot \(\d+ KB\)\.$/.test(l)),
+    side.lines.join('\n'),
+  );
   // The copy told systemd it is the main process, with its own pid.
   const pid = Number(/pid (\d+) is the server now/.exec(side.lines.join('\n'))?.[1]);
   assert.ok(pid > 0, side.lines.join('\n'));
@@ -135,6 +156,35 @@ test('a standby copy of the real server does nothing before go, and goes when th
   const ready = await new Promise<string>((r) => createInterface({ input: ctl as Readable }).once('line', r));
   assert.equal(ready, 'ready');
   assert.ok(!existsSync(data), 'it made its data folder before go');
+  const exited = new Promise((r) => copy.once('exit', r));
+  ctl.destroy();
+  assert.equal(await exited, 0);
+});
+
+test("a standby copy of the real server reads Home's ship notes and the card rows before it says ready, and writes nothing", async () => {
+  const data = join(tmp.dir, 'warm-data');
+  mkdirSync(data);
+  const db = join(data, 'coordinator.db');
+  const seed = new Store(db);
+  const t = seed.createTicket({ project_id: seed.createProject('Warm', null).id, title: 'one', permission_mode: 'bypassPermissions', created_by: 'cara' });
+  seed.addEvent(t.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
+  seed.addEvent(t.id, 'question', { id: 'q1', questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] });
+  seed.db.close();
+  const mtimes = () => ['coordinator.db', 'events.db', 'state.db'].map((f) => statSync(join(data, f)).mtimeMs);
+  const before = mtimes();
+  const log = join(tmp.dir, 'warm.log');
+  const logFd = openSync(log, 'a');
+  const copy = tmp.spawn(process.execPath, [join(REPO, 'server.ts')], {
+    env: { ...process.env, DATA_DIR: data, PORT: '0', COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET, CITADEL_HANDOVER: String(SCHEMA_VERSION), CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE },
+    stdio: ['ignore', logFd, logFd, 'ignore', 'pipe'],
+  });
+  const ctl = copy.stdio[4]!;
+  assert.equal(await new Promise<string>((r) => createInterface({ input: ctl as Readable }).once('line', r)), 'ready');
+  // Logged before "ready" went out: console.log to a file writes at once.
+  const out = readFileSync(log, 'utf8');
+  assert.match(out, /Home's ship notes read: 1 in \d+ ms/);
+  assert.match(out, /Handover: warmed up in \d+ ms \(Home's ship notes, 1 card rows\)\./);
+  assert.deepEqual(mtimes(), before, 'the database files are as they were: the copy only read them');
   const exited = new Promise((r) => copy.once('exit', r));
   ctl.destroy();
   assert.equal(await exited, 0);
@@ -215,6 +265,8 @@ test('the real server hands over under a request loop with no failed request and
       q.on('timeout', () => q.destroy(new Error('the kept-alive request had no answer in 20 s')));
     });
   assert.equal((await onKept()).handover, 'ready');
+  // It hands over its readers' snapshot once it has one.
+  await until("the old server's readers' snapshot", () => /Readers' snapshot: \d+ minions/.test(readFileSync(log, 'utf8')), undefined, serverLog);
   proc.kill('SIGUSR2');
   await until('the old server lets go', () => /handing it the socket/.test(readFileSync(log, 'utf8')), undefined, serverLog);
   // On it, a request after the old server let go of its work goes on to the new server ("ready"; the old one says "busy").
@@ -252,6 +304,10 @@ test('the real server hands over under a request loop with no failed request and
   again.destroy();
   const out = readFileSync(log, 'utf8');
   assert.doesNotMatch(out, /still open after/, 'the old server sat out its grace');
+  // #2119: the new server warmed up before it said ready, and its readers started from the old server's snapshot.
+  assert.ok(out.indexOf('Handover: warmed up in') < out.indexOf('is ready; handing it the socket'), out.slice(-3000));
+  assert.match(out, /is ready; handing it the socket\.\n(.*\n)*Handover: sent it the readers' snapshot \(\d+ KB\)\./);
+  await until("the new server's own readers' snapshot", () => /Readers' snapshot: \d+ minions in \d+ ms, at most \d+ ms at a time, after \d+ handed over/.test(readFileSync(log, 'utf8')), undefined, serverLog);
   process.kill(newPid, 'SIGTERM');
   await until('the new server exits', () => {
     try {

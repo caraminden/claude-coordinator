@@ -1,24 +1,12 @@
 // How many minions fit (#1987), beside the Status page's Workers tile: each reading a dot, load against the turns
 // running at the time, and a slider that says what the readings near a number show. The numbers come worked out
 // (src/box-capacity.ts); it changes nothing, and the pool's size, which workers.js tells it, is a mark on the chart.
-import { api, h, pacificStamp, poller } from './base.js';
+import { api, h, pacificStamp, poller, svg } from './base.js';
 import { emptyCard, statTiles, toneChip } from './look.js';
 
-/** @import { BoxCapacity, BoxRow } from './types.js' */
+/** @import { BoxCapacity, BoxRow } from './types/workers.js' */
 
 const READ_MS = 60_000;
-const SVG = 'http://www.w3.org/2000/svg';
-/**
- * @param {string} tag
- * @param {Record<string, string | number>} [attrs]
- * @param {...(Node | string)} kids
- */
-const svg = (tag, attrs = {}, ...kids) => {
-  const el = document.createElementNS(SVG, tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
-  el.append(...kids);
-  return el;
-};
 const plural = (/** @type {number} */ n, /** @type {string} */ word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
 const load = (/** @type {number | null} */ v) => (v === null ? '–' : v >= 100 ? `${Math.round(v)}` : `${Math.round(v * 10) / 10}`);
 const pct = (/** @type {Pick<BoxRow, 'stalls' | 'stallOf'>} */ r) => (r.stallOf ? `${Math.round((r.stalls / r.stallOf) * 1000) / 10}%` : '–');

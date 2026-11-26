@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { ci, git, land, setup } from './land-fixture.ts';
 import { line, shared, shipped } from './land-train-fixture.ts';
+import { landText } from './land-files.ts';
 
 type Line = Awaited<ReturnType<typeof line>>;
 type Done = { status: number | null; stderr: string }[];
@@ -120,7 +121,7 @@ test("a split's front red twice on flakes keeps its place: no verdict on it, and
 });
 
 test('where a red train is cut: the middle', () => {
-  const body = /^split_cut\(\) \{.*\}$/m.exec(readFileSync(land, 'utf8'))?.[0] ?? assert.fail('no split_cut in land.sh');
+  const body = /^split_cut\(\) \{.*\}$/m.exec(landText())?.[0] ?? assert.fail('no split_cut in land.sh');
   const cut = (n: number) => Number(execFileSync('bash', ['-euc', `${body}\nsplit_cut "$@"`, '-', String(n)], { encoding: 'utf8' }));
   assert.deepEqual([2, 3, 4, 5, 6, 7].map(cut), [0, 0, 1, 1, 2, 2]);
 });

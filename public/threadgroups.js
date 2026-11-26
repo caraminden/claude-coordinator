@@ -15,7 +15,7 @@
 // a running or stuck turn or a waiting approval sends it back to its type. Open question cards that don't hold the land up keep
 // it here; its row's question chip still puts it in the Needs-you strip.
 
-/** @import { CabalCard, ListedTicket as Row } from './types.js' */
+/** @import { CabalCard, ListedTicket as Row } from './types/list.js' */
 import { LOOK } from './threadstate.js';
 
 /** @param {Row} t Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */

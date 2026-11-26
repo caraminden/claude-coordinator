@@ -12,6 +12,24 @@ export const pacific = (ms: number) => new Date(ms).toLocaleString('en-US', { ti
 const DAY = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }); // made once: inbox calls it per row
 export const pacificDay = (ms: number) => DAY.format(ms);
 
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The first ms of Pacific day `day` ("2026-11-25"); null for a string that isn't a day. */
+export function pacificDayStart(day: string): number | null {
+  if (!DAY_RE.test(day)) return null;
+  const [y, m, d] = day.split('-').map(Number);
+  // Pacific midnight is 07:00 or 08:00 UTC; a zone a test fixes may be anything, so look across the whole UTC day.
+  for (let h = -14; h <= 14; h++) {
+    const t = Date.UTC(y, m - 1, d, h);
+    if (pacificDay(t) === day && pacificDay(t - 1) !== day) return t;
+  }
+  // A zone whose midnight isn't on the hour: step back from noon a minute at a time.
+  let t = Date.UTC(y, m - 1, d, 12);
+  if (pacificDay(t) !== day) return null;
+  while (pacificDay(t - 60_000) === day) t -= 60_000;
+  return t;
+}
+
 /** `ms` as "6:30 AM PST": a time today. */
 export const pacificClock = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 

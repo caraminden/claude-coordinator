@@ -2,7 +2,7 @@
 // move makes of them. No page in here, so Node tests it.
 import { moved } from './reorder.js';
 
-/** @import { LineData, LineGroups, LineRow } from './types.js' */
+/** @import { LineData, LineGroups, LineRow } from './types/workers.js' */
 
 /**
  * GET /api/line as two lists of rows: the Urgent group whole, waiting or not, then everyone else in the line. One on a worker of its own is in neither, unless it's Urgent.

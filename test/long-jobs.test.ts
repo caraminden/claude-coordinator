@@ -332,3 +332,22 @@ test('a minion closed while its job was starting gets no dispatch', async () => 
   await pump.pump();
   assert.equal(readLongJobs(s.dir)[0].state, 'lost');
 });
+
+// #2121: on Nov 25 Peek #964's heavy job, whose run the hold had stopped, kept Peek's quiet lane from 16:58 to 20:58, so
+// #942's job, queued 1 h 20 min before it, never asked the hold again: its own 4 h cap (OTHERS_CAP_MS) never applied, and it
+// went to CI after 5 h 32 min. A run the hold stopped runs nowhere: it doesn't keep another job of its repo waiting.
+test("a job whose run the hold stopped doesn't keep an older job of its repo from its own cap", async () => {
+  const s = setup([1, 2], { now: NOON, slug: 'own/repo1' });
+  const at = (t: number) => join(s.dir, 'long', `j${t}-1700000000-abc.json`);
+  const edit = (t: number, o: Record<string, unknown>) => writeFileSync(at(t), JSON.stringify({ ...JSON.parse(readFileSync(at(t), 'utf8')), quiet: true, ...o }));
+  const CAP = 4 * 3600_000;
+  edit(1, { held_at: NOON - CAP - 60_000, held_why: '9 ships are in line' });
+  edit(2, { state: 'dispatched', run_id: 100, url: 'https://github.com/run/100', dispatched_at: NOON - 3600_000 });
+  s.deps.heldRun = (run) => run === 100;
+  s.deps.hold = (_slug, since) => (since !== undefined && NOON - since >= CAP ? null : '9 ships are in line');
+  await s.pump.pump();
+  const byTicket = new Map(readLongJobs(s.dir).map((j) => [j.ticket, j]));
+  assert.equal(byTicket.get(1)!.state, 'dispatched', 'the older job, past its cap, goes');
+  assert.equal(s.dispatches().length, 1);
+  assert.equal(byTicket.get(2)!.state, 'dispatched', 'the held run is left to the hold');
+});

@@ -137,6 +137,9 @@ stay high whatever the edit, since a slip there can stop the service or open it 
 One exception: the section 1 facts print `SHIP SCRIPT SYNC` when the diff's only touch of `tools/land.sh` or
 `tools/land.local.sh` leaves it byte-identical to the kit's template (`scheme-setup/templates/`): that sync is medium.
 `SHIP SCRIPT EDIT`, or any other high-by-file file in the diff, stays high.
+A second exception: a high-by-file file the section 1 facts list as `TYPES ONLY` (the repo's `tools/types-only.ts` found
+its code the same once types and comments are stripped) takes its risk from what the change does. Text-pinning tests
+still run on it: a types-only edit can still break a test that pins a line.
 
 | Risk | When the change |
 |---|---|
@@ -152,7 +155,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 ## 5. Report and ship
 
-- **A live probe** (`hand_off_land` to main, 600+ changed lines; #1741): pick the one check that would show
+- **A live probe** (`hand_off_land` to main, 600+ changed lines, moves left out; #1741): pick the one check that would show
   this change broken once live, e.g. `{kind:"timing", path:"/api/x", ms:800}` for a speed fix, `{kind:"sql",
   query:"SELECT count(*) FROM ...", min:1}` for a new writer, `{kind:"http", path, text}` for a route or the data
   a screen reads (an app's paths are `/apps/<name>/...`). Nothing live can show it (a prompt, a PC build)?

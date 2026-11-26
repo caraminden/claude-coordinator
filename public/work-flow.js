@@ -1,12 +1,12 @@
 // The Releases page's Flow tab (#1989; Josh, 2026-11-25, "Flow A: A river with the leaks drawn in"): every minion started in a
 // range, from its kind, through how it got to main, to how it ended, by count or dollars. A click on any part lists its
 // minions, costliest first, and draws their way through the river. src/work-flow.ts decides each one's path and ending.
-import { api, h, icon, todayPacific as today } from './base.js';
+import { api, h, icon, todayPacific as today, svg as svgEl } from './base.js';
 import { COLS, dayBefore, layout, money, nodesOf, ribbon, rows, value } from './flowmath.js';
 import { emptyCard, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
 
-/** @import { FlowMinion, FlowView } from './types.js' */
+/** @import { FlowMinion, FlowView } from './types/workers.js' */
 /** @import { FlowCol, FlowUnit, FlowNode, FlowLink } from './flowmath.js' */
 /** @typedef {FlowView & { asked: number, key: string, error?: undefined }} FlowOk */
 /** A read that failed: ours names its range, ci.js's own does not. @typedef {{ error: string | true, key?: string, asked?: undefined, minions?: undefined, unread?: undefined, repo?: undefined }} FlowFail */
@@ -25,14 +25,8 @@ const PRESETS = [
   [30, '30 days'],
   [90, '90 days'],
 ];
-const NS = 'http://www.w3.org/2000/svg';
 /** A name and its shorter one: the page's width shows one (ci.css). */
 const both = (/** @type {string} */ name, /** @type {string} */ short) => [h('span', { class: 'full' }, name), h('span', { class: 'short' }, short)];
-const svgEl = (/** @type {string} */ tag, /** @type {Record<string, string | number>} */ attrs) => {
-  const el = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
-  return el;
-};
 /**
  * @template {HTMLElement | SVGElement} E
  * @param {E} el

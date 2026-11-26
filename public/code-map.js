@@ -2,14 +2,14 @@
 // across and the minions that changed it in two weeks up, bigger for more bug fixes; the corner where a split pays most is
 // marked, with the ranked list beside it (above it on a phone). Numbers are the server's daily count (src/code-counts.ts).
 // "Start a split minion" drafts a message into your Taskmaster's box in that scheme; nothing starts until a person sends it.
-import { api, h, icon, pacificStamp, view } from './base.js';
+import { api, h, icon, pacificStamp, view, svg as svgEl } from './base.js';
 import { BIG, candidates, folders, score, shortName, splitDraft, zone } from './codemath.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { emptyCard, meter, showFirst, toneChip } from './look.js';
 import { openDialog } from './ui/dialog.js';
 import { toast } from './ui/status.js';
 
-/** @import { CodeCountsAnswer, CodeFile } from './types.js' */
+/** @import { CodeCountsAnswer, CodeFile } from './types/code-map.js' */
 /** @typedef {Record<string, { number: number; title: string }[]>} Splitting */
 /** @typedef {{ f: CodeFile; x: number; y: number; r: number; el: SVGElement | null }} Dot */
 /** @typedef {Partial<CodeCountsAnswer> & { error?: unknown }} CodeRead the read, or what ci.js keeps when it failed */
@@ -38,13 +38,6 @@ const put = (el, props) => {
 /** Files with one change or a few lines are never an answer: they would only fill the bottom left. */
 /** @param {CodeFile} f */
 const drawn = (f) => f.changed >= 2 && f.lines >= 30;
-const NS = 'http://www.w3.org/2000/svg';
-/** @param {string} tag @param {Record<string, string | number>} attrs */
-const svgEl = (tag, attrs) => {
-  const el = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
-  return el;
-};
 
 // ---------- the draft ----------
 

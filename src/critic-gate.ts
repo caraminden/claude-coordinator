@@ -5,10 +5,12 @@
 import { gitOut } from './git.ts';
 import { posix } from 'node:path';
 import type { ReviewEntry, ReviewSet } from './review-set.ts';
+import { CODE_FILE, sameCode } from './types-only.ts';
 
 /**
  * One changed file of a branch: its path in the repo and its lines added plus removed (0 for a binary file). `comments`
- * is true when every changed line is a comment or blank, so a critic's screenshots could show nothing.
+ * is true when every changed line is a comment or blank, or the file's code is the same once types and comments are
+ * gone (a JSDoc cast and its parentheses, #2143), so a critic's screenshots could show nothing.
  */
 export type DiffFile = { path: string; lines: number; comments?: boolean };
 
@@ -98,14 +100,19 @@ export function diffFiles(cwd: string, bases: string[]): Promise<DiffFile[] | nu
       if (out === null) continue;
       const patch = await git(['diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff', `${base}...HEAD`]);
       const quiet = patch === null ? new Set<string>() : commentOnlyFiles(patch);
-      return out
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => {
-          const [add, del, ...rest] = l.split('\t');
-          const path = rest.join('\t');
-          return { path, lines: (Number(add) || 0) + (Number(del) || 0), ...(quiet.has(path) ? { comments: true } : {}) };
-        });
+      const from = (await git(['merge-base', base, 'HEAD']))?.trim();
+      const rows = out.split('\n').filter(Boolean);
+      for (const l of rows) {
+        const path = l.split('\t').slice(2).join('\t');
+        if (!from || quiet.has(path) || !CODE_FILE.test(path)) continue;
+        const [a, b] = await Promise.all([git(['show', `${from}:${path}`]), git(['show', `HEAD:${path}`])]);
+        if (a !== null && b !== null && sameCode(a, b, path).same) quiet.add(path);
+      }
+      return rows.map((l) => {
+        const [add, del, ...rest] = l.split('\t');
+        const path = rest.join('\t');
+        return { path, lines: (Number(add) || 0) + (Number(del) || 0), ...(quiet.has(path) ? { comments: true } : {}) };
+      });
     }
     return null;
   })();

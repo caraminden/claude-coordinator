@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { cutStrip, dayBounds, dayStartMs, dayStrips, PARTS } from '../src/day-strips.ts';
+import { cutStrip, dayBounds, dayStrips, PARTS } from '../src/day-strips.ts';
+import { pacificDayStart } from '../src/pacific.ts';
 import type { TimeSeg } from '../src/time-log.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'day-strips-'));
@@ -42,12 +43,12 @@ function minion(made: number, projectId = scheme.id) {
 }
 
 test('a Pacific day starts at its own midnight, summer or winter; anything else is no day', () => {
-  assert.equal(dayStartMs('2026-11-20'), DAY0);
-  assert.equal(dayStartMs('2026-07-01'), Date.UTC(2026, 6, 1, 7));
-  assert.equal(dayStartMs('2026-03-08'), Date.UTC(2026, 2, 8, 8)); // the day clocks spring forward starts in PST
-  assert.equal(dayStartMs('nope'), null);
-  assert.equal(dayStartMs('2026-02-31'), null, 'a day the calendar lacks is no day (the route answers 400, not 500)');
-  assert.equal(dayStartMs('2026-13-01'), null);
+  assert.equal(pacificDayStart('2026-11-20'), DAY0);
+  assert.equal(pacificDayStart('2026-07-01'), Date.UTC(2026, 6, 1, 7));
+  assert.equal(pacificDayStart('2026-03-08'), Date.UTC(2026, 2, 8, 8)); // the day clocks spring forward starts in PST
+  assert.equal(pacificDayStart('nope'), null);
+  assert.equal(pacificDayStart('2026-02-31'), null, 'a day the calendar lacks is no day (the route answers 400, not 500)');
+  assert.equal(pacificDayStart('2026-13-01'), null);
   assert.deepEqual(dayBounds('2026-11-20'), { from: DAY0, to: DAY0 + 24 * 60 * MIN });
   assert.equal(dayBounds('9999-12-31'), null, 'a day with no next day is no day either (the route answers 400)');
 });

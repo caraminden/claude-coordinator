@@ -492,21 +492,29 @@ export const CLOSE_SELF = () => ({
   },
 });
 
-/**
- * A brief that sends a minion to a file in the scheme's shared folder that isn't there yet stops it on its
- * first turn (#481): refuse it. A path in a sentence that asks for it to be written or created passes.
- */
-function sharedFilesExist(text: unknown, then: string): void {
+/** The paths in the scheme's shared folder that the text names and that aren't there. A path in a sentence that asks for it to be written or created doesn't count. */
+function missingShared(text: unknown): string[] {
   const shared = C().SHARED_DIR;
-  if (!shared || typeof text !== 'string') return;
+  if (!shared || typeof text !== 'string') return [];
   const paths = new RegExp(`${shared.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/[^\\s\`'"()<>\\[\\]]+`, 'g');
+  const missing = new Set<string>();
   for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
     if (/\b(write|writes|writing|written|create|creates|creating|created)\b/i.test(sentence)) continue;
     for (const [match] of sentence.matchAll(paths)) {
       const path = match.replace(/[.,;:!?*_]+$/, '');
-      if (!existsSync(path)) throw new Error(`${path} does not exist yet. ${then} once it is written, or drop the path. Nothing was sent.`);
+      if (!existsSync(path)) missing.add(path);
     }
   }
+  return [...missing];
+}
+
+/**
+ * A brief that sends a minion to a shared file that isn't there yet stops it on its first turn (#481):
+ * refuse it. A chained create (start_after) only warns (#2129): a minion ahead of it may write the file.
+ */
+function sharedFilesExist(text: unknown, then: string): void {
+  const [path] = missingShared(text);
+  if (path) throw new Error(`${path} does not exist yet. ${then} once it is written, or drop the path. Nothing was sent.`);
 }
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */
@@ -560,7 +568,6 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
       const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? ({ ...args.properties } as Record<string, unknown>) : {};
       const untyped = !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
       if (untyped) properties.type = 'other';
-      // A chained minion's brief waits for its leader, which may be the one writing the file.
       if (args.start_after == null) sharedFilesExist(args.message, 'Start this minion');
       const twins = C().MEMORY && args.not_duplicate !== true ? await openTwins(String(args.title ?? ''), String(args.message ?? '')) : [];
       if (twins.length) {
@@ -590,7 +597,8 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
         not_duplicate: args.not_duplicate === true || undefined,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
-      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n');
+      const absent = args.start_after == null ? [] : missingShared(args.message).map((path) => `Warning: the brief names ${path}, which does not exist. Unless a minion ahead of #${t.number} writes it, send it the right path (message_ticket).`);
+      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...absent, ...fallback].join('\n');
     }
     case 'message_ticket': {
       const ticketId = await id(args);

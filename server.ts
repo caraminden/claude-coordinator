@@ -152,7 +152,8 @@ import { FrozenShips } from './src/frozen-ships.ts';
 import { AppShots, killRun, runAlive, startRun } from './src/app-shots.ts';
 import { ErrorDigest, RESTART_WINDOW_MS } from './src/contraption-errors.ts';
 import { ensureCoordinatorFor } from './src/routes/projects.ts';
-import { warmHome } from './src/inbox.ts';
+import { homeBuckets, warmHome } from './src/inbox.ts';
+import { warmUp } from './src/warm-up.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { MinionIndexer } from './src/minion-index.ts';
@@ -216,8 +217,10 @@ const PUBLIC_DIR = join(import.meta.dirname, 'public');
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 // A deploy's warm handover (#1170, src/handover.ts): a copy the running server started has loaded its code by here,
-// and waits for the old one to let go before it does anything else. Null in a server started any other way.
-const handover = await standby(SCHEMA_VERSION);
+// warms its slowest caches read-only (src/warm-up.ts, #2119) and waits for the old one to let go before it does anything
+// else. Null in a server started any other way, which warms nothing here.
+let warmed: Store | null = null;
+const handover = await standby(SCHEMA_VERSION, process.env, 4, async () => (warmed = await warmUp(join(DATA_DIR, 'coordinator.db'))));
 // The environment as this server got it, for the next one's handover: secrets and systemd's variables leave process.env below.
 const bootEnv = { ...process.env };
 await mkdir(DATA_DIR, { recursive: true });
@@ -333,6 +336,13 @@ await Promise.all([loadAssets(), probeThp()]);
 const eventsMove = await moveEventsOffThread(join(DATA_DIR, 'coordinator.db'));
 if (eventsMove) console.log(eventsMove);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
+// Home's ship notes, read before "ready", move to this Store, and warmHome below is left out.
+const homeWarm = !!warmed;
+if (warmed) {
+  homeBuckets.adopt(warmed, store);
+  (warmed as Store).db.close();
+  warmed = null;
+}
 // First in line for a core (#1561): on live by default, off in dev copies and tests unless the realtime_priority setting is true.
 if (!BOOT_CHECK) startRealtime({ enabled: () => store.getSetting<boolean>('realtime_priority') ?? DATA_DIR === DEFAULT_DATA_DIR });
 // Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
@@ -498,7 +508,7 @@ if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
   void runner.warmCards();
-  void warmHome(store).catch((err) => console.error("Reading Home's ship notes failed:", err));
+  if (!homeWarm) void warmHome(store).catch((err) => console.error("Reading Home's ship notes failed:", err));
   runner.recover();
 }
 if (runner.units && !BOOT_CHECK) {
@@ -2903,6 +2913,8 @@ const listened = (port: number) => {
   // Only a change of this server's own code moves what it asks for, so once per start (#2004).
   if (!BOOT_CHECK) void claudeLink.raiseLimits();
 };
+// What the readers' snapshot is now, for the next server's handover (reader-live.ts `dump`); null with no reader threads.
+let readersLive: ReturnType<typeof publishLive> | null = null;
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
 if (config.front) {
@@ -2933,7 +2945,8 @@ if (config.front) {
   );
   if (STATICS) throughFront.statics(STATICS);
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
-  publishLive({
+  readersLive = publishLive({
+    handed: handover?.handed,
     publish: throughFront.publish,
     coming: throughFront.coming,
     store,
@@ -3068,6 +3081,7 @@ function passOn(req: IncomingMessage, res: ServerResponse) {
 process.on('SIGUSR2', () =>
   handOver(
     {
+      handOff: () => readersLive?.dump() ?? null,
       quiesce() {
         // Stop accepting; the socket's queue holds what comes in until the new server listens. net's close, not http's: that
         // one also closes "idle" connections, which takes in one just accepted whose request isn't read yet (ECONNRESET).

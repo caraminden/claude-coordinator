@@ -1,6 +1,6 @@
 // The Flow tab's sums (#1989), apart from the page so a test can pin them.
 
-/** @import { FlowMinion } from './types.js' */
+/** @import { FlowMinion } from './types/workers.js' */
 /** @typedef {'kind' | 'path' | 'end'} FlowCol */
 /** @typedef {'n' | 'cost'} FlowUnit */
 /** [key, its name, the shorter one] @typedef {[string, string, string?]} FlowName */

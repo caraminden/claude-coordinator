@@ -13,7 +13,7 @@ Status: accepted as a trial, 2026-11-23. Minion #1741, fix 4 of the rework deep 
 
 ## The rule
 
-A `hand_off_land` to main whose branch changes 600 lines or more (added plus removed, `git diff --numstat main...HEAD`)
+A `hand_off_land` to main whose branch changes 600 lines or more (added plus removed; since #2123 moved blocks and pure renames are left out, `changedLines`)
 carries `probe`: one check from a fixed list, or `{kind:"none", reason}`. The route refuses it without one, and its
 refusal lists the shapes (`src/live-probe.ts`, `PROBE_HELP`). The count is against a branch named `main`; a scheme
 whose trunk has another name counts 0 and is never asked (a `shortcut:` in `changedLines`).

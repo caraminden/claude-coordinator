@@ -7,6 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, setup } from './land-fixture.ts';
+import { copyLand } from './land-files.ts';
 
 type R = ReturnType<typeof setup>;
 // The "formatter": every .txt file upper-cased in place.
@@ -124,6 +125,7 @@ test('a declared commit the rebase empties still ships its command when the reba
   const r = setup();
   const tools = join(import.meta.dirname, '..', 'tools');
   for (const f of readdirSync(tools, { withFileTypes: true })) if (f.isFile() && f.name !== 'deploy.sh') copyFileSync(join(tools, f.name), join(r.source, 'tools', f.name));
+  copyLand(join(r.source, 'tools'), tools);
   write(r.source, {}, 'the real tools');
   git(r.wt, 'merge', '-q', '--ff-only', 'main');
   write(r.wt, { 'a.txt': 'ONE\n' }, '#1: format a.txt', declare(FMT, '*.txt'));

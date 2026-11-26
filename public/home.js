@@ -16,7 +16,8 @@ import { rowTarget } from './schemecounts.js';
 import { threadRow } from './sidebar.js';
 import { byUrgency, mentions } from './threadstate.js';
 
-/** @import { InboxItem, Ticket, View } from './types.js' */
+/** @import { InboxItem } from './types/list.js' */
+/** @import { Ticket, View } from './types.js' */
 /** One scheme's line on Home: its counts and its last days' ships (src/routes/projects.ts /api/home). @typedef {{ id: number, name: string, waiting: number, working: number, shipped: number, daily: number[] }} HomeScheme */
 /** What's broken now (src/ci-health.ts BrokenRow). @typedef {{ scheme: string, schemeId: number, key: string, what: string, next?: string, since: number | null, ringing: boolean, ringsAt?: number, who: { kind: 'minion' | 'taskmaster' | 'person', label: string, href: string } }} BrokenRow */
 /** The /api/home answer, plus whose it is. @typedef {{ items: InboxItem[], tickets: Ticket[], seen: Record<number, number>, schemes: HomeScheme[], since?: number, days: string[], broken: BrokenRow[], me: string | null }} HomeData */

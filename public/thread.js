@@ -1,5 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-/** @import { ChatEvent, EventsPage, NarrationSorter, Ticket, View } from './types.js' */
+/** @import { ChatEvent, EventsPage, Ticket, View } from './types.js' */
+/** @import { NarrationSorter } from './types/chat.js' */
 /** @typedef {NonNullable<View['merged']>} Merged */
 /** @typedef {Parameters<typeof markQueued>[0] & import('./thread-head.js').Bubble & { source?: string, ticketId?: number }} Bubble A chat bubble with the fields composer.js and this file hang on it. */
 import { account, api, baseName, noAutofill, clearHighlights, h, highlight, isCoordinator, jumpHref, me, openView, uploadUrl, view } from './base.js';

@@ -9,7 +9,8 @@ import { noteStrike, struckSource } from './strike.js';
 import { optimistic } from './ui/optimistic.js';
 import { threadNumberHref } from './threadrefs.js';
 
-/** @import { Bubble, ComposerForm, SavedItem, Ticket } from './types.js' */
+/** @import { Bubble, ComposerForm, SavedItem } from './types/chat.js' */
+/** @import { Ticket } from './types.js' */
 /** @typedef {{ quote: string, reason: string, chat?: { project: number, number: number | null } | null }} Strike */
 /** Show a long message's first lines, with a button for the rest. @param {HTMLElement} msg */
 export function clamp(msg) {

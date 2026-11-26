@@ -15,7 +15,8 @@ import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { loadingLine } from './ui/state.js';
-/** @import { Release, ReleaseChange, ReleaseNext, ReleaseProgress, SchemeReleases, TargetView, TestCopy, LineEntry, Ticket, View, Placed, EarlyTest, Pin, LastTry } from './types.js' */
+/** @import { Release, ReleaseChange, ReleaseNext, ReleaseProgress, SchemeReleases, TargetView, TestCopy, LineEntry, Placed, EarlyTest, Pin, LastTry } from './types/releases.js' */
+/** @import { Ticket, View } from './types.js' */
 /** @typedef {{ scope: string | number, hl: number | null, target: string | null, shown?: boolean }} PageWant */
 /** @typedef {{ c?: ReleaseChange, e?: LineEntry, i: number, key: number, wait?: LineEntry | null, why?: string | null, placed?: Placed | null }} ChangeRow */
 

@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { env, git, setup } from './land-fixture.ts';
 import { line, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
+import { copyLand } from './land-files.ts';
 
 const repo = join(import.meta.dirname, '..');
 const biome = join(repo, 'node_modules/.bin/biome');
@@ -140,7 +141,8 @@ test('a test the formatting breaks (a pinned hash, a size budget) refuses the sh
 
 test("main moved, land.sh with it: the format commit is rebased, and the rebased copy doesn't format again", { skip }, () => {
   const r = fmtRepo();
-  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-heavy', 'ship-format.sh']) cpSync(join(repo, 'tools', f), join(r.source, 'tools', f));
+  copyLand(join(r.source, 'tools'));
+  for (const f of ['deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-heavy', 'ship-format.sh']) cpSync(join(repo, 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   git(r.wt, 'rebase', '-q', 'main');

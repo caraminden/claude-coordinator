@@ -1,7 +1,7 @@
 // Host load on the CI page (#1060): citadel-heavy's slots and line, the CPU-pressure gate and a week of waits per
 // scheme (src/host-load.ts). Read-only: the slot count is a file, and more slots made every suite slower (Nov 10).
 // Three rows that open, in Citadel's look (#1068): each says its state on its closed line; the detail is inside.
-/** @import { HostLoad, HostWeek, HostLongJob } from './types.js' */
+/** @import { HostLoad, HostWeek, HostLongJob } from './types/ci.js' */
 import { h } from './base.js';
 import { emptyCard, hueRow, meter, pips, schemeHue, schemeTag, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';

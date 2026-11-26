@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { buildOwnerKey, Store, type Project, type Ticket } from '../src/db.ts';
-import { CHAIN_FLOOR, doneKey, EFFORT_KEY, effortFor, EffortRetros, effortsDue, NAMED_FLOOR, QUIET_MS, TRIES } from '../src/effort-retros.ts';
+import { CHAIN_FLOOR, doneKey, EFFORT_KEY, effortBrief, effortFor, EffortRetros, effortsDue, NAMED_FLOOR, QUIET_MS, START_CARD_STEP, TRIES } from '../src/effort-retros.ts';
 
 const H = 3_600_000;
 const NOW = 1_800_000_000_000;
@@ -192,5 +193,13 @@ test('a start that fails is tried again on later ticks, three times in all (#175
     assert.equal(made, 0);
   } finally {
     console.error = errors;
+  }
+});
+
+test('every retro brief ends on the same start card step (#2140)', () => {
+  const brief = effortBrief({ name: 'One' }, { name: 'e', members: [{ number: 1, title: 't', created_at: 0, updated_at: 0 } as Ticket], act: 'start', why: '' });
+  assert.ok(brief.includes(`\n${START_CARD_STEP}\n`));
+  for (const f of ['schedules/monthly-retro.md', 'schedules/ship-lessons.md', 'skills/retro/SKILL.md']) {
+    assert.ok(readFileSync(new URL(`../kit/${f}`, import.meta.url), 'utf8').includes(START_CARD_STEP), f);
   }
 });

@@ -235,3 +235,21 @@ test('a brief naming a shared file that does not exist yet is refused; one askin
   assert.ok(!ok.isError, ok.text);
   assert.ok(!(await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, text: `Create ${missing} with the plan.` }, env)).isError);
 });
+
+test('a chained brief naming shared files that are not there is created, with a warning for each', async () => {
+  const shared = join(root, 'shared', 'chained');
+  mkdirSync(join(shared, 'handoffs'), { recursive: true });
+  const there = join(shared, 'handoffs', 'there.md');
+  writeFileSync(there, '# Here\n');
+  const gone = join(shared, 'handoffs', 'burn-down-2.md');
+  const fenced = join(shared, 'handoffs', 'fenced.md');
+  const report = join(shared, 'reports', 'out.md');
+  const message = `Read the rules: ${gone}. Then ${there}, and ${gone} again.\n\n\`\`\`bash\ncat ${fenced}\n\`\`\`\n\nWrite your report to ${report}.`;
+  const r = await tool(TM, 'coordinator', 'create_ticket', { title: 'Chained brief', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', start_after: Minion.number, message }, { COORDINATOR_SHARED_DIR: shared });
+  assert.ok(!r.isError, r.text);
+  assert.match(r.text, /^Created #\d+/);
+  assert.deepEqual(
+    [...r.text.matchAll(/^Warning: the brief names (\S+), which does not exist/gm)].map((m) => m[1]),
+    [gone, fenced],
+  );
+});

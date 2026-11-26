@@ -1,7 +1,8 @@
 // The cards in a chat that wait on a person: approval (and merge), plan, loop and question cards.
 // appendEvent in thread.js builds them, and each registers itself in view.cards so later events settle it.
 /**
- * @import { PlanMemo, QuestionCard, Ticket } from './types.js'
+ * @import { PlanMemo } from './types/chat.js'
+ * @import { QuestionCard, Ticket } from './types.js'
  * @import { CardAttachments } from './composer.js'
  * @typedef {{ pr?: { number: number, title: string, url?: string, head?: string, base?: string, additions: number, deletions: number, files: number, commits: number, checks?: string, state?: string, draft?: boolean }, target?: string | null, repo?: string, method?: string, auto?: boolean, admin?: boolean, moved?: boolean }} MergeInfo
  * @typedef {{ id: string, tool: string, input?: Record<string, unknown>, merge?: MergeInfo, tripwire?: { reason: string }, to?: string }} ApprovalCard

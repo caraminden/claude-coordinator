@@ -152,8 +152,9 @@ export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms =
       closed = Atomics.load(shared, 3);
     if (closed >= opened) {
       pin();
-      // No step opened while it pinned, so nothing committed since the check.
-      if (Atomics.load(shared, 4) === opened) return opened;
+      // No step opened while it pinned, so nothing committed since the check. The worker still up: once it is gone the
+      // server writes in place and opens no steps, and it marks that before its first such write.
+      if (Atomics.load(shared, 4) === opened && writerUp(shared)) return opened;
       db.exec('ROLLBACK');
     }
     const left = until - Date.now();

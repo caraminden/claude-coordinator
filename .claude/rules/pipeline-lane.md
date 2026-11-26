@@ -2,6 +2,7 @@
 paths:
   - "tools/pipeline-files.txt"
   - "tools/land.sh"
+  - "tools/land/**"
   - "tools/land-core.sh"
   - "tools/land.local.sh"
   - "tools/ship-format.sh"

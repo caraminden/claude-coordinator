@@ -12,7 +12,8 @@ import { emptyCard, toneChip } from './look.js';
 import { dragReorder } from './reorder.js';
 import { applyMove, applyStart, dropped, laneSaid, lineGroups, lineWhy, nextUrgent, ownSaid } from './worker-linemath.js';
 
-/** @import { LaneRow, LineData, LineGroups, LineRow, Ticket, WorkersTile } from './types.js' */
+/** @import { LaneRow, LineData, LineGroups, LineRow, WorkersTile } from './types/workers.js' */
+/** @import { Ticket } from './types.js' */
 /** A press on its way: Urgent's move, or Start now and Release. @typedef {{ row: LineRow, on: boolean, before?: number | null, by: string | null, dead: boolean }} Op */
 /** @typedef {{ row: LineRow, on: boolean, by: string | null, at: number, dead: boolean }} StartOp */
 /** @typedef {{ dialog: HTMLDialogElement, list: HTMLElement, line: LineData | null, workers: WorkersTile | null, failed: string | null, from: number | null, drawn?: LineGroups | null, dropping?: boolean, later?: ReturnType<typeof setTimeout> | null }} Drawer */

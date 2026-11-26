@@ -9,6 +9,7 @@ import { scriptEnv } from './script-env.ts';
 import { git } from './git.ts';
 import { quietProc } from './quiet-proc.ts';
 import { until as waitUntil } from './wait.ts';
+import { copyLand } from './land-files.ts';
 export { git };
 
 // A bad commit can't stay on main (#553, the pipeline failure drill): the real land.sh and deploy.sh on a throwaway
@@ -69,7 +70,8 @@ export async function pipe(t: { after: (fn: () => void) => void }, worktrees: nu
   mkdirSync(join(source, 'tools'), { recursive: true });
   mkdirSync(join(source, 'test'));
   git(source, 'init', '-q', '-b', 'main');
-  for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(tools, f), join(source, 'tools', f));
+  copyLand(join(source, 'tools'), tools);
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(tools, f), join(source, 'tools', f));
   // TEST_MARK gets a line per run; TEST_GATE holds a run until that file is there; TEST_FAIL makes it red.
   writeFileSync(
     join(source, 'test', 'ok.test.mjs'),

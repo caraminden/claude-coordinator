@@ -2,7 +2,7 @@
 // scheme's own edits while the kit's change comes in.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { until } from './wait.ts';
@@ -43,6 +43,14 @@ const edit = (text: string, i: number, to: string) =>
 async function tidy(jobs: { running(): number }, root: string) {
   await until('the sync jobs to end', () => jobs.running() === 0);
   rmSync(root, { recursive: true, force: true });
+}
+
+/**
+ * A round's job env. Its checks run under the real citadel-heavy, so every KitSync here takes this: a heavy folder of the
+ * test's own, or they wait in the box's real line behind minions' jobs (#2112).
+ */
+function jobEnv(root: string) {
+  return { PATH: process.env.PATH!, HOME: process.env.HOME!, CITADEL_HEAVY_DIR: join(root, 'heavy'), CITADEL_HEAVY_PLAIN_SLOTS: '4', CITADEL_HEAVY_MAX_PRESSURE: '101', CITADEL_HEAVY_MEM_NEED: '0' };
 }
 
 function fixture() {
@@ -207,7 +215,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
       ],
       home: () => 2,
       chat: async (p) => 100 + p,
-      env: (person) => ({ PATH: process.env.PATH!, HOME: process.env.HOME!, KIT_TEST_LOG: log, KIT_TEST_WHO: String(person) }),
+      env: (person) => ({ ...jobEnv(root), KIT_TEST_LOG: log, KIT_TEST_WHO: String(person) }),
       canPush: async (dir) => !dir.includes('/5/'),
       postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
       settle: () => {},
@@ -218,6 +226,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     await polled('the checks end and the card is posted', () => cards.length > 0);
     const states = () => Object.fromEntries(saved!.round!.schemes.map((x) => [x.name, x.state]));
     assert.deepEqual(states(), { Green: 'green', Red: 'red', Elsewhere: 'green' });
+    assert.ok(existsSync(join(root, 'heavy', 'history')), "the checks queued in the test's own heavy folder, not the box's");
     assert.equal(saved!.round!.kit, kitHead);
     assert.deepEqual(
       cards.map((c) => [c.ticket, c.card.kind, c.card.kitSync]),
@@ -283,7 +292,7 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
       ],
       home: () => 2,
       chat: async (p) => 100 + p,
-      env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME!, CITADEL_HEAVY_DIR: join(root, 'heavy'), CITADEL_HEAVY_PLAIN_SLOTS: '4', CITADEL_HEAVY_MAX_PRESSURE: '101' }),
+      env: () => jobEnv(root),
       canPush: async () => true,
       postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
       settle: () => {},
@@ -464,7 +473,7 @@ test("a round is saved as each scheme's check starts, so a restart mid-round fin
       ],
       home: () => 2,
       chat: async (p) => 100 + p,
-      env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME!, CITADEL_HEAVY_DIR: join(root, 'heavy'), CITADEL_HEAVY_PLAIN_SLOTS: '4', CITADEL_HEAVY_MAX_PRESSURE: '101' }),
+      env: () => jobEnv(root),
       canPush: async () => true,
       postCard: () => 'q',
       settle: () => {},
@@ -504,7 +513,7 @@ test("a scheme's check runs in a citadel-heavy slot, so a round with several sch
       projects: () => [{ id: 3, name: 'One' }],
       home: () => 2,
       chat: async (p: number) => 100 + p,
-      env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME!, CITADEL_HEAVY_DIR: join(root, 'heavy'), CITADEL_HEAVY_PLAIN_SLOTS: '4', CITADEL_HEAVY_MAX_PRESSURE: '101' }),
+      env: () => jobEnv(root),
       canPush: async () => true,
       postCard: () => 'q',
       settle: () => {},

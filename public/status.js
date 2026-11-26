@@ -3,7 +3,7 @@
 // tiles, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
 // nothing. Every tile keeps its size whatever its numbers say, so a re-read moves nothing. The Status chip beside
 // CI's opens that tab, its dot the worst verdict it shows.
-import { ago, api, h, keepView, view, poller, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
+import { ago, api, h, keepView, view, poller, pacificStamp, pacificIso, pacificClockBare, pacificClock, svg } from './base.js';
 import { toast } from './ui/status.js';
 import { emptyCard, hueRow, schemeTag, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
@@ -15,7 +15,7 @@ import { workersPanel } from './workers.js';
 import { capacityPanel } from './box-capacity.js';
 import { dayStripsPanel } from './day-strips.js';
 /** @import { Child } from './base.js' */
-/** @import { StatusApp, StatusChecks, StatusCitadel, StatusCpuRow, StatusData, StatusEaseNow, StatusEaseWaiting, StatusEaseHeld, StatusJob, StatusLook, StatusShipLine, StatusShipTarget, StatusSlowMoment, StatusStorm, StatusTone, StatusVerdict, StatusAnswer } from './types.js' */
+/** @import { StatusApp, StatusChecks, StatusCitadel, StatusCpuRow, StatusData, StatusEaseNow, StatusEaseWaiting, StatusEaseHeld, StatusJob, StatusLook, StatusShipLine, StatusShipTarget, StatusSlowMoment, StatusStorm, StatusTone, StatusVerdict, StatusAnswer } from './types/status.js' */
 /** @typedef {{ target: string, looks: Record<string, StatusLook>, verdict: StatusVerdict, ask: boolean }} Investigating */
 
 const REFRESH_MS = 30_000;
@@ -30,19 +30,7 @@ const CHIP = { ok: 'ok', warn: 'warn', bad: 'danger' };
 export const WORD = { ok: 'OK', warn: 'Worth a look', bad: 'Needs a person' };
 /** @type {Record<string, number>} */
 export const RANK = { ok: 0, warn: 1, bad: 2 };
-const SVG = 'http://www.w3.org/2000/svg';
 
-/**
- * @param {string} tag
- * @param {Record<string, unknown>} [attrs]
- * @param {...(Node | string)} kids
- */
-const svg = (tag, attrs = {}, ...kids) => {
-  const el = document.createElementNS(SVG, tag);
-  for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) el.setAttribute(k, String(v));
-  el.append(...kids);
-  return el;
-};
 /** @param {number[]} xs */
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 /** @param {number | null | undefined} n */

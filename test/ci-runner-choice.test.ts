@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { landText } from './land-files.ts';
 
 // Which desktop runner each CI run may take (#1240). On 2026-11-20 two flake proofs, each holding a runner up to 90
 // minutes, sent every ship for three hours to the whole suite on perigee: no runner started its job within 90 s. So a
@@ -71,7 +72,7 @@ test('every runner the setup script adds after the first carries the side label'
 // The reruns alone are a step of their own with a fresh window (#1374): land.sh, at its CI limit, waits CI_RERUN more for
 // a run in that step, and the step ends its reruns 30 s before that (the job's end and land.sh's next look).
 test("a ship's run reruns its failed files alone in a step of its own, inside the window land.sh gives that step", () => {
-  const land = read('tools/land.sh');
+  const land = landText();
   const yml = read('.github/workflows/tests.yml');
   const window = land.match(/CI_RERUN=\$\{LAND_CI_RERUN:-(\d+)\}/)?.[1];
   const limit = land.match(/CI_LIMIT=\$\{LAND_CI_TIMEOUT:-(\d+)\}/)?.[1];
@@ -98,7 +99,7 @@ test("a ship's run reruns its failed files alone in a step of its own, inside th
 // The burn-in (#1443): a land's run burns in its new and changed tests before the full suite, against the base land.sh
 // pushes beside it; land.sh reads a red in that step, by name, as the ship's own, and waits its time more at CI_LIMIT.
 test("a ship's run burns in its new and changed tests before the full suite, in the step land.sh names, within land.sh's extension", () => {
-  const land = read('tools/land.sh');
+  const land = landText();
   const yml = read('.github/workflows/tests.yml');
   const step = land.match(/CI_BURN_STEP='([^']+)'/)?.[1];
   const burn = Number(land.match(/CI_BURN=\$\{LAND_CI_BURN:-(\d+)\}/)?.[1]);
@@ -142,7 +143,7 @@ test("the early next train's run goes beside the lands' run, niced, on a ship ru
   assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);
   const ask = stepBody(yml, 'ask Citadel whether ships go first');
   assert.doesNotMatch(ask, /early\//, 'it asks: one Citadel job at a time (#1906)');
-  assert.match(read('tools/land.sh'), /"\+\$top:refs\/heads\/early\/\$nb" "\+\$tip:refs\/heads\/early-base\/\$nb"/, 'land.sh pushes it there, with its base');
+  assert.match(landText(), /"\+\$top:refs\/heads\/early\/\$nb" "\+\$tip:refs\/heads\/early-base\/\$nb"/, 'land.sh pushes it there, with its base');
 });
 
 // Deploys first (#1902): what isn't a ship's asks Citadel first, and a held run gives its runner back. A ship's run never asks.

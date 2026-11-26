@@ -36,6 +36,8 @@ export type LiveDeps = {
   ships: () => Ships;
   statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => StatusSnap['storms']; easing: () => StatusSnap['easing']; desktops: () => StatusSnap['desktops']; diskUse: (row: ContraptionRow) => DiskUse | null };
   sweepMs?: number;
+  /** The old server's snapshot in a warm handover (its `dump`): readers answer from it until this one's own first pass. */
+  handed?: string | null;
 };
 
 export function publishLive(d: LiveDeps) {
@@ -93,6 +95,22 @@ export function publishLive(d: LiveDeps) {
     lastOther = json;
   };
 
+  // The old server's views, posted whole and `ready` at once (#2119): the first pass below then posts only what differs.
+  // Its Status inputs aren't taken (its boot time and commit); readers send the Status page to main until others() runs.
+  let handedOver: number | null = null;
+  if (d.handed) {
+    try {
+      const h = JSON.parse(d.handed) as { live: Record<number, unknown>; other: SnapDelta | null };
+      for (const [id, live] of Object.entries(h.live)) sent.set(Number(id), JSON.stringify(live));
+      const { status: _theirs, ...other } = h.other ?? {};
+      d.publish({ ...other, live: h.live, ready: true });
+      handedOver = sent.size;
+    } catch (err) {
+      sent.clear();
+      console.error(`Readers' snapshot: the one handed over didn't read; building this server's own: ${(err as Error)?.message ?? err}`);
+    }
+  }
+
   // Every minion once, fifty at a time between other work, then `ready`: until then readers send these pages to main.
   let seeded = false;
   const seed = async () => {
@@ -114,7 +132,7 @@ export function publishLive(d: LiveDeps) {
     longest = Math.max(longest, performance.now() - from);
     d.publish({ ready: true });
     seeded = true;
-    console.log(`Readers' snapshot: ${ids.length} minions in ${Math.round(performance.now() - start)} ms, at most ${Math.round(longest)} ms at a time`);
+    console.log(`Readers' snapshot: ${ids.length} minions in ${Math.round(performance.now() - start)} ms, at most ${Math.round(longest)} ms at a time${handedOver === null ? '' : `, after ${handedOver} handed over`}`);
   };
 
   let tick = 0;
@@ -153,5 +171,10 @@ export function publishLive(d: LiveDeps) {
     .finally(() => (busy = false));
   const timer = setInterval(() => void sweep(), d.sweepMs ?? SWEEP_MS);
   timer.unref();
-  return { ready, stop: () => clearInterval(timer) };
+  return {
+    ready,
+    stop: () => clearInterval(timer),
+    /** What readers have now, for a warm handover's new server (standby's `handed`); null before the first pass. */
+    dump: () => (seeded ? `{"live":{${[...sent].map(([id, json]) => `"${id}":${json}`).join(',')}},"other":${lastOther || 'null'}}` : null),
+  };
 }

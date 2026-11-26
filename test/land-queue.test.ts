@@ -24,18 +24,23 @@ test('ten landings started together land in the order they arrived, each told it
   wts.forEach((wt, i) => r.commit(wt, `f${i + 1}.txt`, `${i + 1}\n`));
   const lands: ReturnType<typeof landAsync>[] = [];
   let last = '';
-  for (let i = 1; i <= 10; i++) {
-    // The ninth has a gate of its own: a waiter learns its place only when it looks, and on a loaded box the tenth's look
-    // took longer than the ninth's whole light landing, so it went from 3rd to the lock without being told 2nd (#2160).
-    lands.push(landAsync(wts[i - 1], i === 9 ? { ...extra, FAKE_DEPLOY_GATE: join(r.dir, 'gate9') } : extra, 120_000, (stderr) => i === 10 && (last = stderr)));
-    await until(`landing ${i}'s ticket`, () => issued(state) === i); // arrival order is the order of the tickets
+  try {
+    for (let i = 1; i <= 10; i++) {
+      // The ninth has a gate of its own: a waiter learns its place only when it looks, and on a loaded box the tenth's look
+      // took longer than the ninth's whole light landing, so it went from 3rd to the lock without being told 2nd (#2160).
+      lands.push(landAsync(wts[i - 1], i === 9 ? { ...extra, FAKE_DEPLOY_GATE: join(r.dir, 'gate9') } : extra, 120_000, (stderr) => i === 10 && (last = stderr)));
+      await until(`landing ${i}'s ticket`, () => issued(state) === i); // arrival order is the order of the tickets
+    }
+    // The first holds the lock until all ten are in line and the last has been told its place.
+    await until('the last to say its place', () => /queue: 10th in line for the deploy lock, about 45 min \(ahead: ticket\/1-x, deploying\)/.test(last));
+    writeFileSync(join(r.dir, 'gate'), '');
+    // The ninth holds the lock until the last has been told it is next behind it.
+    await until('the last to say it is 2nd', () => /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: ticket\/9-x, /.test(last));
+  } finally {
+    // A wait that failed still lets every landing end, so the failure is the wait's and not ten processes left running.
+    for (const gate of ['gate', 'gate9']) writeFileSync(join(r.dir, gate), '');
+    await Promise.allSettled(lands);
   }
-  // The first holds the lock until all ten are in line and the last has been told its place.
-  await until('the last to say its place', () => /queue: 10th in line for the deploy lock, about 45 min \(ahead: ticket\/1-x, deploying\)/.test(last));
-  writeFileSync(join(r.dir, 'gate'), '');
-  // The ninth holds the lock until the last has been told it is next behind it.
-  await until('the last to say it is 2nd', () => /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: ticket\/9-x, /.test(last));
-  writeFileSync(join(r.dir, 'gate9'), '');
   const done = await Promise.all(lands);
   done.forEach((d, i) => assert.equal(d.status, 0, `landing ${i + 1}: ${d.stderr}`));
   assert.deepEqual(git(r.source, 'log', '--reverse', '--format=%s', 'main').split('\n'), ['base', 'tools/lanes: light f*.txt', ...done.map((_, i) => `f${i + 1}.txt: ${i + 1}`)]);

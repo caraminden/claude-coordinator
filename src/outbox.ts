@@ -18,7 +18,6 @@ const PRUNE_EVERY_MS = 60 * MINUTE;
 const RECHECK_MS = 5 * MINUTE;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
-/** What pokes the outbox: `boot`, `tick` (the timer), `added`, `closed`, `reopened`, and the condition events later kinds read. */
 /** Whether `r` is a row of `kind`. */
 export const ofKind = <K extends DeliveryKind>(r: Delivery | undefined, kind: K): r is Delivery<K> => r?.kind === kind;
 /** listDeliveries of one kind, typed as that kind's rows (Store's methods can't carry a type parameter). */
@@ -29,6 +28,7 @@ export const deliveryOf = <K extends DeliveryKind>(store: Pick<Store, 'getDelive
   return ofKind(r, kind) ? r : undefined;
 };
 
+/** What pokes the outbox: `boot`, `tick` (the timer), `added`, `closed`, `reopened`, and the condition events later kinds read. */
 export type OutboxEvent = { type: string; ticket?: number; [k: string]: unknown };
 
 /**

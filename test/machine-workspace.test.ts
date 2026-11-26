@@ -88,7 +88,7 @@ test('the config keeps good workspaces and tasks and says what it left out', () 
   assert.match(problems, /bad task!: names use/);
   assert.match(problems, /empty: "run" must be/);
   assert.match(problems, /typo: "git_sync" must be true or false, so it is off/);
-  assert.deepEqual(loadConfig(join(root, 'none.json')), { workspaces: new Map(), servers: new Map(), problems: [], screenLock: null, screenshots: false, jobs: null });
+  assert.deepEqual(loadConfig(join(root, 'none.json')), { workspaces: new Map(), servers: new Map(), programs: new Map(), problems: [], screenLock: null, screenshots: false, jobs: null });
   assert.match(loadConfig(seed + '/readme.txt').problems[0], /JSON/);
   assert.equal(expand('%Home%/x', { HOME: '/h' }), '/h/x');
   assert.throws(() => expand('%NOPE%', {}), /NOPE is not set/);

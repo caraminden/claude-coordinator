@@ -140,6 +140,38 @@ test('a changed source file no test imports burns in nothing', () => {
   assert.equal(r.stdout.trim(), 'burn-in: this change adds or changes no test file, and no test is mapped to it or imports it: nothing to burn in');
 });
 
+// #2138: a file stopped at the ship's limit gives no verdict, so one whose last burn-in at the same content took longer
+// than the time left is not started (Build 7's machine-sync burned 67-93 s a run to that end, Nov 26).
+test('a file whose last burn-in here took longer than the time left is not started, and the next file still runs (#2138)', () => {
+  const dir = repo({ 'test/a-slow.test.ts': CLEAN, 'test/b-clean.test.ts': CLEAN });
+  const times = join(dir, '..', `times-${n}.tsv`);
+  const blob = spawnSync('git', ['hash-object', 'test/a-slow.test.ts'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+  // The same file at other content, and another file, say nothing about it.
+  writeFileSync(times, `400\ttest/a-slow.test.ts\t${blob}\n1\ttest/a-slow.test.ts\t0000\n`);
+  const r = ship(dir, { BURN_IN_TIMES: times, BURN_IN_COPIES: '2' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/a-slow\.test\.ts: not started: its last burn-in here, at this same content, took 400 s or more and 1\d\d s are left/m);
+  assert.doesNotMatch(r.stdout, /a-slow\.test\.ts: \d+ of 2 copies/, 'no copy of it ran');
+  assert.match(r.stdout, /^burn-in: test\/b-clean\.test\.ts: 2 of 2 copies at once passed/m);
+  assert.match(r.stdout, /^burn-in: NO VERDICT on test\/a-slow\.test\.ts: not started/m);
+  // The file that ran keeps its time at its content; the skipped one keeps its old line.
+  const lines = readFileSync(times, 'utf8').trim().split('\n');
+  const cleanBlob = spawnSync('git', ['hash-object', 'test/b-clean.test.ts'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+  assert.match(lines.at(-1)!, new RegExp(`^\\d+\\ttest/b-clean\\.test\\.ts\\t${cleanBlob}$`));
+  assert.equal(lines.length, 3);
+});
+
+test('with no times file kept, every file starts as before, and a time at other content is no reason to skip (#2138)', () => {
+  const dir = repo({ 'test/clean.test.ts': CLEAN });
+  const times = join(dir, '..', `times-${n}.tsv`);
+  writeFileSync(times, '400\ttest/clean.test.ts\t0000\n');
+  for (const env of [{}, { BURN_IN_TIMES: times }]) {
+    const r = ship(dir, { ...env, BURN_IN_COPIES: '2' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 2 of 2 copies at once passed/m);
+  }
+});
+
 // The real case (#795, Nov 16): the write queue changed src/db-writer.ts and src/routes/tickets.ts, and
 // test/fresh-session.test.ts went flaky though its file hadn't changed. The import walk can't pick it: fresh-session
 // imports neither file, nor any file that imports one (only server.ts and two routes do). Its race (the idle-handoff

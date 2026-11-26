@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { listeningPort } from '../src/ports.ts';
 import { until } from './wait.ts';
-import { PASSWORD, REPO, SECRET, tempRoot, TEST_ZONE } from './helpers.ts';
+import { compileCache, PASSWORD, REPO, SECRET, tempRoot, TEST_ZONE } from './helpers.ts';
 
 /** utime+stime of `pid` in clock ticks. */
 const cpu = (pid: number) => {
@@ -33,6 +33,8 @@ async function deadPipeServer(exitWithParent: boolean) {
       CLAUDE_CONFIG_DIR: join(tmp.dir, 'claude'),
       COORDINATOR_PASSWORD: PASSWORD,
       SESSION_SECRET: SECRET,
+      // As bootServer does (#1518): a cold boot compiles the whole app, which ten copies at once stretched past listeningPort's 20 s (#2035).
+      ...compileCache(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

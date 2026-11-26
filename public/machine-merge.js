@@ -50,7 +50,7 @@ export function openMergePanel(el, m, other, { onDone = () => {}, machines = () 
       h(
         'div',
         { class: 'machine-setup machine-connect', role: 'region', 'aria-label': `Merge ${m.name} and ${other.name}` },
-        h('div', { class: 'row' }, h('strong', {}, `${m.name} and ${other.name} are one computer`), h('span', { class: 'spacer' }), h('button', { type: 'button', class: merged ? 'small' : 'secondary small', onclick: () => close() }, merged ? 'Done' : 'Close')),
+        h('div', { class: 'row machine-merge-head' }, h('strong', {}, `${m.name} and ${other.name} are one computer`), h('button', { type: 'button', class: merged ? 'small' : 'secondary small', onclick: () => close() }, merged ? 'Done' : 'Close')),
         st.failed
           ? notice('danger', h('span', {}, `Couldn't merge them: ${st.failed} `), h('button', { type: 'button', class: 'secondary small', onclick: start }, 'Try again'))
           : !g

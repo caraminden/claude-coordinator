@@ -19,9 +19,10 @@ set -uo pipefail
 
 # This container's own room in MB, as the server last wrote it; fails without a fresh line for it.
 container_room() {
-  local f=${CITADEL_HEAVY_DIR:-${HOME:-}/.local/share/claude-coordinator/projects/.heavy}/container-room ino wrote mb
+  local f=${CITADEL_HEAVY_DIR:-${HOME:-}/.local/share/claude-coordinator/projects/.heavy}/container-room ino wrote mb age
   ino=$(stat -c %i "${CITADEL_OWN_CGROUP:-/sys/fs/cgroup}" 2>/dev/null) && wrote=$(stat -c %Y "$f" 2>/dev/null) || return 1
-  [ $(($(date +%s) - wrote)) -le 60 ] || return 1
+  age=$(($(date +%s) - wrote))
+  [ "$age" -le 60 ] && [ "$age" -ge -5 ] || return 1 # dated ahead (a clock step): no reading either
   mb=$(sed -n "s/^$ino \([0-9][0-9]*\) .*/\1/p" "$f" 2>/dev/null | head -n 1)
   [ -n "$mb" ] && echo "$mb"
 }

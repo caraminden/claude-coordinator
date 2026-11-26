@@ -87,6 +87,8 @@ test("in a container, room is the smaller of MemAvailable and the container's ow
   assert.equal(mb(mine.path), '1500', 'fresh enough');
   at(90);
   assert.equal(mb(mine.path), box20, 'over 60 s old: a stopped server, no reading');
+  at(-3600);
+  assert.equal(mb(mine.path), box20, 'dated an hour ahead: no reading either');
   for (const bad of ['', 'garbage\n', `${mine.ino} \n`, `${mine.ino} x12 a\n`, `${mine.ino} -5 a\n`, `${mine.ino}\n`]) {
     writeFileSync(file, bad);
     const r = run(['mb'], env(mine.path));

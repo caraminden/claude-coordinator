@@ -16,6 +16,8 @@ export const LIMIT = 1500;
 // Add your reason at the end. One line per entry (the runner's is older), so the formatter must not break a long one.
 // biome-ignore format: one line per entry is what the merge rule reads
 export const ALLOWED: Record<string, [number, string]> = {
+  'public/reviews.js': [1662, 'the Reviewers and critics page (+162: JSDoc types replacing implicit any, #2023)'],
+  'public/settings.js': [1609, "a scheme's settings pages (+109: JSDoc types replacing implicit any, #2023)"],
   'public/core.js': [1514, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [

@@ -140,7 +140,6 @@
   "test/minion-message.test.ts": [3, 3],
   "test/minion-status.test.ts": [0, 2],
   "test/new-minion.test.ts": [0, 1],
-  "test/off-thread-fs.test.ts": [0, 1],
   "test/outbox.test.ts": [0, 1],
   "test/outside-kill.test.ts": [0, 2],
   "test/overlord.test.ts": [0, 1],

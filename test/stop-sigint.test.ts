@@ -70,9 +70,8 @@ async function started(text: string) {
 
 /** Stop a started turn, and wait for the stop to act: it asks the turn's folder off the server's thread first (#2134). */
 let stops = 0;
-const insides = runner as unknown as { stopSignals(live: unknown, id: number): void };
-const stopSignals = insides.stopSignals.bind(runner);
-insides.stopSignals = (live, id) => {
+const stopSignals = runner['stopSignals'].bind(runner);
+runner['stopSignals'] = (live, id) => {
   stopSignals(live, id);
   stops++;
 };

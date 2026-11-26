@@ -27,7 +27,7 @@ import { LandsInFlight } from '../src/release-readers.ts';
 import { Releases } from '../src/releases.ts';
 import { moveShip } from '../src/ship-line.ts';
 import { shipLines, stopShip } from '../src/ship-stop.ts';
-import * as landNewsFile from '../src/land-news.ts';
+import { readTailA, tailNow, tailsRead } from '../src/land-news.ts';
 import { KitSync, templateBlobs, type KitSyncState } from '../src/kit-sync.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { Waits } from '../src/waits.ts';
@@ -570,7 +570,6 @@ test("a landing log's end reaches the release poll with no synchronous file call
   const f = join(dir, 'output.log');
   writeFileSync(f, 'land: early next train: CI started on this train at abc\n');
   // Releases' Next bar and the waits poll read it every 2 s while a ship holds the line.
-  const { tailNow, tailsRead, readTailA } = landNewsFile as unknown as { tailNow: (p: string) => string; tailsRead: () => Promise<void>; readTailA: (p: string) => Promise<string> };
   let first = 'unread',
     second = '',
     whole = '';
@@ -766,7 +765,7 @@ test("a turn the supervisor gave back or lost is found with no synchronous file 
   const dir = join(turns, `${t.id}-1`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'stream.jsonl'), '');
-  (runner as unknown as { follow(id: number, turn: { dir: string; startedAt: number }): unknown }).follow(t.id, { dir, startedAt: Date.now() });
+  runner['follow'](t.id, { dir, startedAt: Date.now() });
   const live = polled(runner, t.id);
   let restarts = 0;
   const calls = await syncCallsUnder(
@@ -798,13 +797,12 @@ test("the wait for a stray turn to end makes no synchronous file call on the ser
   const wrapper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', dir], { stdio: 'ignore' });
   try {
     writeFileSync(join(dir, 'pid.json'), JSON.stringify({ wrapper: wrapper.pid }));
-    const inside = runner as unknown as { strayPollMs: number; strayWaits: Set<number>; waitStray(id: number, dir: string): Promise<void> };
-    inside.strayPollMs = 10;
+    runner.strayPollMs = 10;
     const calls = await syncCallsUnder(turns, async () => {
-      await inside.waitStray(t.id, dir);
-      assert.equal(inside.strayWaits.has(t.id), true);
+      await runner['waitStray'](t.id, dir);
+      assert.equal(runner['strayWaits'].has(t.id), true);
       await writeFile(join(dir, 'exit.json'), '{"code":0,"signal":null}');
-      await until('the wait to end with the stray', () => !inside.strayWaits.has(t.id));
+      await until('the wait to end with the stray', () => !runner['strayWaits'].has(t.id));
     });
     assert.deepEqual(calls, []);
   } finally {
@@ -840,7 +838,7 @@ test("a side ask's poll, its answer and its thread's end make no synchronous fil
     signal: async (_live: unknown, sig: string) => void signals.push(sig),
   });
   const sides = new SideAsks(store, launch, () => {}, 10);
-  const threads = (sides as unknown as { threads: Map<number, { run: { dir: string; startedAt: number } | null; lastAt: number }> }).threads;
+  const threads = sides['threads'];
   const calls = await syncCallsUnder(dir, async () => {
     // An answer: its stream is read as it grows, and its exit ends the ask and deletes its folder.
     const ev = await sides.ask(t.id, 1, 'Cara', 'what now?');

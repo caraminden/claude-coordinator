@@ -12,22 +12,39 @@
 export const KEY = 'Backquote';
 const MAX_RECENT = 30;
 
+/** @typedef {{ name: string; title: string; a: HTMLAnchorElement; current: boolean; down: boolean }} Entry One app in the switcher: a rail link. */
+/** @typedef {{ type: string; code?: string; key?: string; altKey?: boolean; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; isComposing?: boolean }} KeyLike What the switcher reads of a key event. */
+
 /**
  * The apps in switching order: `current` first, then the rest most recently used first (`recent`,
  * newest first), then any never used, in the rail's order (`names`). '' is Citadel.
+ * @param {string[]} recent
+ * @param {string[]} names
+ * @param {string} current
+ * @returns {string[]}
  */
 export function appOrder(recent, names, current) {
   const ok = new Set(names);
   return [...new Set([current, ...recent, ...names])].filter((n) => ok.has(n));
 }
 
-/** `recent` with `name` moved to the front. */
+/**
+ * `recent` with `name` moved to the front.
+ * @param {string[]} recent
+ * @param {string} name
+ * @returns {string[]}
+ */
 export const remember = (recent, name) => [name, ...recent.filter((n) => n !== name)].slice(0, MAX_RECENT);
 
 /**
  * What one key event does to the switcher. `state` is null (shut) or { order, index }; `order` is the
  * list it would open on. Returns the next state, what happened (open, move, commit with `to`, cancel,
  * or null) and whether the event is the switcher's (so the page never sees it).
+ * @template T
+ * @param {{ order: T[]; index: number } | null} state
+ * @param {KeyLike} e
+ * @param {T[]} order
+ * @returns {{ state: { order: T[]; index: number } | null; act: string | null; to?: T; consume: boolean }}
  */
 export function switchKey(state, e, order) {
   const down = e.type === 'keydown';
@@ -38,7 +55,9 @@ export function switchKey(state, e, order) {
     return { state: { order, index: e.shiftKey ? order.length - 1 : 1 }, act: 'open', consume: true };
   }
   const n = state.order.length;
+  /** @param {number} by */
   const move = (by) => ({ state: { ...state, index: (state.index + by + n) % n }, act: 'move', consume: true });
+  /** @param {boolean} consume */
   const commit = (consume) => ({ state: null, act: 'commit', to: state.order[state.index], consume });
   // Letting go of Alt switches (its keyup no longer has altKey, whichever key name the system gives it).
   if (!down) return e.altKey ? { state, act: null, consume: false } : commit(true);
@@ -55,15 +74,19 @@ export function switchKey(state, e, order) {
 
 // ---------- in the page ----------
 
+/** @type {string | null} */
 let person = null;
+/** @type {{ order: Entry[]; index: number } | null} */
 let state = null;
+/** @type {HTMLDivElement | null} */
 let box = null;
 let cancelled = false; // Esc while Alt is held: its release is still the switcher's
 
 const storeKey = () => `citadel-app-switch:${person}`;
+/** @returns {string[]} */
 function recent() {
   try {
-    return JSON.parse(localStorage.getItem(storeKey())) ?? [];
+    return JSON.parse(/** @type {string} */ (localStorage.getItem(storeKey()))) ?? [];
   } catch {
     return [];
   }
@@ -79,15 +102,21 @@ function record() {
   } catch {}
 }
 
-/** Start switching for `name` (signed in), counting where they are now as used. */
+/**
+ * Start switching for `name` (signed in), counting where they are now as used.
+ * @param {string | null} name
+ */
 export function initAppSwitch(name) {
   person = name;
   record();
 }
 
-/** The rail's apps, the one you're in kept even if it's greyed out. */
+/**
+ * The rail's apps, the one you're in kept even if it's greyed out.
+ * @returns {Entry[]}
+ */
 function entries() {
-  return [...document.querySelectorAll('.citadel-rail a')]
+  return /** @type {HTMLAnchorElement[]} */ ([...document.querySelectorAll('.citadel-rail a')])
     .map((a) => ({
       name: a.dataset.app ?? '',
       title: a.querySelector('.label')?.textContent ?? a.title,
@@ -98,6 +127,7 @@ function entries() {
     .filter((x) => x.current || !x.down);
 }
 
+/** @param {KeyLike & { altKey: boolean; view?: Window | null; preventDefault(): void; stopPropagation(): void }} e */
 function onKey(e) {
   if (!person) return;
   if (cancelled && e.type === 'keyup' && !e.altKey) {
@@ -115,7 +145,7 @@ function onKey(e) {
       recent(),
       list.map((x) => x.name),
       list.find((x) => x.current)?.name ?? '',
-    ).map((n) => byName.get(n));
+    ).map((n) => /** @type {Entry} */ (byName.get(n)));
   }
   const r = switchKey(state, e, order);
   if (r.consume) {
@@ -137,12 +167,14 @@ function shut() {
   box = null;
 }
 
+/** @param {Entry | null | undefined} item */
 function go(item) {
   shut();
   if (item && !item.current) item.a.click(); // the rail's own link: Citadel's last view, or the contraption's frame
 }
 
 // Its own sheet, so a contraption's page gets it too: Citadel's colours as theme.css names them, else Citadel's own.
+/** @type {CSSStyleSheet | null} */
 let sheet = null;
 function addStyles() {
   if (sheet) return;
@@ -165,7 +197,7 @@ function draw() {
     box = document.createElement('div');
     box.className = 'app-switch';
     box.addEventListener('click', (e) => {
-      const tile = e.target.closest('[role=option]');
+      const tile = /** @type {HTMLElement | null} */ (/** @type {Element} */ (e.target).closest('[role=option]'));
       if (!tile) return shut();
       go(state?.order[Number(tile.dataset.i)]);
     });
@@ -178,13 +210,13 @@ function draw() {
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     box.append(list, status);
-    state.order.forEach((item, i) => {
+    /** @type {{ order: Entry[]; index: number }} */ (state).order.forEach((item, i) => {
       const tile = document.createElement('div');
       tile.setAttribute('role', 'option');
-      tile.dataset.i = i;
+      tile.dataset.i = String(i);
       tile.id = `app-switch-${i}`;
       tile.title = item.title;
-      const pic = item.a.querySelector('img, .tile')?.cloneNode(true) ?? document.createElement('span');
+      const pic = /** @type {HTMLElement} */ (item.a.querySelector('img, .tile')?.cloneNode(true) ?? document.createElement('span'));
       pic.classList.add('app-switch-pic');
       const label = document.createElement('span');
       label.className = 'app-switch-label';
@@ -194,10 +226,11 @@ function draw() {
     });
     document.body.append(box);
   }
-  const list = box.querySelector('[role=listbox]');
-  for (const tile of list.children) tile.setAttribute('aria-selected', String(Number(tile.dataset.i) === state.index));
-  list.setAttribute('aria-activedescendant', `app-switch-${state.index}`);
-  box.querySelector('[role=status]').textContent = `${state.order[state.index].title}, ${state.index + 1} of ${state.order.length}`;
+  const s = /** @type {{ order: Entry[]; index: number }} */ (state);
+  const list = /** @type {HTMLElement} */ (box.querySelector('[role=listbox]'));
+  for (const tile of /** @type {HTMLCollectionOf<HTMLElement>} */ (list.children)) tile.setAttribute('aria-selected', String(Number(tile.dataset.i) === s.index));
+  list.setAttribute('aria-activedescendant', `app-switch-${s.index}`);
+  /** @type {HTMLElement} */ (box.querySelector('[role=status]')).textContent = `${s.order[s.index].title}, ${s.index + 1} of ${s.order.length}`;
 }
 
 // Focus left the browser window mid-switch (the system's own Alt-Tab, say): no keyup will come.
@@ -206,7 +239,10 @@ const onBlur = () =>
     if (state && !document.hasFocus()) shut();
   });
 
-/** A key a contraption's frame passed on (rail.js forwardKeys) as { type, code, key, altKey, … }, or null: it lost focus. */
+/**
+ * A key a contraption's frame passed on (rail.js forwardKeys) as { type, code, key, altKey, … }, or null: it lost focus.
+ * @param {KeyLike | null | undefined} k
+ */
 export function frameKey(k) {
   if (!k) return onBlur();
   onKey({ type: k.type, code: k.code, key: k.key, altKey: !!k.altKey, shiftKey: !!k.shiftKey, ctrlKey: !!k.ctrlKey, metaKey: !!k.metaKey, isComposing: !!k.isComposing, preventDefault() {}, stopPropagation() {} });
@@ -220,6 +256,6 @@ if (typeof document !== 'undefined') {
     shut();
     record();
     // Back in Citadel from a frame: focus was in the now-hidden frame, so keys would go nowhere.
-    if (!showing() && document.activeElement?.tagName === 'IFRAME') document.activeElement.blur();
+    if (!showing() && document.activeElement?.tagName === 'IFRAME') /** @type {HTMLElement} */ (document.activeElement).blur();
   });
 }

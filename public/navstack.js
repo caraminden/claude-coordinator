@@ -10,11 +10,16 @@ const KEY = 'cc-nav';
 const MAX = 50; // entries kept per stack: about what browsers keep per tab
 const KEEP = 4; // stacks kept: one per time this tab loaded the app afresh
 
+/** @typedef {{ id: string; entries: string[]; idx: number; base: number; at?: number }} Stack */
+
 /**
  * The stack after landing on `hash`. `at` is the place the history entry carries when it is one of
  * this stack's (a move back or forward); otherwise the entry is new, and replaces the current one
  * when `replaced`, or else goes after it, dropping whatever was forward of it. Places count from
  * the stack's first entry ever, so the ones in older entries' marks stay right once the oldest go.
+ * @param {Stack} stack
+ * @param {{ hash: string; at?: number | null; replaced?: boolean }} move
+ * @returns {Stack}
  */
 export function step(stack, { hash, at, replaced }) {
   let entries = [...stack.entries];
@@ -35,23 +40,29 @@ export function step(stack, { hash, at, replaced }) {
   return { ...stack, entries, idx, base };
 }
 
+/** @param {Stack | null | undefined} stack */
 export const canGoBack = (stack) => !!stack && stack.idx > 0;
+/** @param {Stack | null | undefined} stack */
 export const canGoForward = (stack) => !!stack && stack.idx < stack.entries.length - 1;
 
+/** @type {Stack | null} */
 let stack = null;
+/** @type {string | null} */
 let replacing = null; // the hash replaceHash is going to, until its hashchange arrives
 
+/** @returns {Record<string, Stack>} */
 function load() {
   try {
-    return JSON.parse(sessionStorage.getItem(KEY)) ?? {};
+    return JSON.parse(/** @type {string} */ (sessionStorage.getItem(KEY))) ?? {};
   } catch {
     return {};
   }
 }
 
+/** @param {Record<string, Stack>} stacks */
 function save(stacks) {
-  stacks[stack.id] = { ...stack, at: Date.now() };
-  const ids = Object.keys(stacks).sort((a, b) => stacks[b].at - stacks[a].at);
+  stacks[/** @type {Stack} */ (stack).id] = { .../** @type {Stack} */ (stack), at: Date.now() };
+  const ids = Object.keys(stacks).sort((a, b) => /** @type {number} */ (stacks[b].at) - /** @type {number} */ (stacks[a].at));
   for (const id of ids.slice(KEEP)) delete stacks[id];
   try {
     sessionStorage.setItem(KEY, JSON.stringify(stacks));
@@ -78,7 +89,7 @@ function sync() {
 }
 
 /** Swap the current address for `hash` without adding a history entry (location.replace, told to the stack). */
-export function replaceHash(hash) {
+export function replaceHash(/** @type {string} */ hash) {
   const target = new URL(hash, location.href).hash;
   if (target !== location.hash) replacing = target;
   location.replace(hash);
@@ -96,8 +107,8 @@ export function goForward() {
 
 /** The thread bar's buttons are rebuilt often; between rebuilds, keep them in step with moves. */
 function updateButtons() {
-  for (const b of document.querySelectorAll('button.nav-back')) b.disabled = !canBack();
-  for (const b of document.querySelectorAll('button.nav-forward')) b.disabled = !canForward();
+  for (const b of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('button.nav-back'))) b.disabled = !canBack();
+  for (const b of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('button.nav-forward'))) b.disabled = !canForward();
 }
 
 if (typeof window !== 'undefined') {

@@ -16,6 +16,13 @@ import { optimistic } from './ui/optimistic.js';
 import { appHash, appLink, classifyLink, mountLinkHandler } from './extlinks.js';
 import { menu, mountAppMenu } from './app-menu.js';
 
+/** @typedef {{ name: string; title: string; icon?: string | null; up?: boolean; url?: string }} MyContraption */
+/** @typedef {{ name: string | null; title: string; href: string; icon: string | null; current: boolean; down?: boolean }} RailItem */
+/** @typedef {'prompt' | 'intent' | 'tab' | 'ios'} InstallMode */
+/** @typedef {Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }} InstallPromptEvent */
+/** @typedef {EventTarget & { matches: boolean }} Narrow A MediaQueryList, or in a frame an EventTarget that Citadel's state messages drive. */
+/** @typedef {{ hasRail: boolean; own: string[]; apps: Record<string, string>; domain: string | null; title: string | null; desktop: boolean }} HostState */
+
 /** An app's own right-click items (app-menu.js, #1665), also on `window.citadel.menu`. */
 export { menu };
 
@@ -36,11 +43,21 @@ let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
  * layer: layer { app }, go { app }, away (it's put away); and back: layer-close. Nothing secret goes in one, so the target is '*'.
  */
 export const FRAME = 'citadel-frame-1';
+/**
+ * @param {MessageEvent} e
+ * @param {MessageEventSource | null | undefined} from
+ */
 const isMessage = (e, from) => !!from && e.source === from && e.data?.protocol === FRAME && typeof e.data.type === 'string';
+/**
+ * @param {Window | null | undefined} win
+ * @param {string} type
+ * @param {Record<string, unknown>} [data]
+ */
 const post = (win, type, data = {}) => win?.postMessage({ protocol: FRAME, type, ...data }, '*');
 const framedIn = typeof window === 'object' && window.parent !== window ? window.parent : null;
 
 // Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it. Its state comes from Citadel.
+/** @type {HostState} */
 let hostState = { hasRail: false, own: [], apps: {}, domain: null, title: null, desktop: false };
 const host =
   inContraption && framedIn
@@ -58,10 +75,11 @@ const showing = () => (inContraption ? location.pathname.match(/\/apps\/([^/]+)\
  * a single-app window, where the switcher rail, its swipe handle and Alt+` have nothing to switch to. Needs nothing from
  * the app: Capacitor injects `window.Capacitor` even for a remote page (`isNativePlatform()` true, `getPlatform()` 'android'
  * or 'ios'), and a shell of another make can add "CitadelApp" to its user agent (capacitor.config `appendUserAgent`).
+ * @param {{ Capacitor?: unknown; navigator?: { userAgent?: string } } | null} [win]
  */
 export function inNativeApp(win = typeof window === 'object' ? window : null) {
   if (!win) return false;
-  const cap = win.Capacitor;
+  const cap = /** @type {{ isNativePlatform?: () => boolean; getPlatform?: () => string } | undefined} */ (win.Capacitor);
   try {
     if (typeof cap?.isNativePlatform === 'function' ? cap.isNativePlatform() : cap?.getPlatform?.() && cap.getPlatform() !== 'web') return true;
   } catch {}
@@ -75,6 +93,11 @@ export function inNativeApp(win = typeof window === 'object' ? window : null) {
  * contraption's own page. None at all when nothing is enabled. One that isn't up (its service is down,
  * or its keys don't open) is a greyed tile, so the page fetches nothing from it; the rail asks again every
  * 15 s until it's back (recheckSoon).
+ * @param {MyContraption[] | null | undefined} mine
+ * @param {string | null} current
+ * @param {string} [citadel]
+ * @param {boolean} [inCitadel]
+ * @returns {RailItem[]}
  */
 export function railItems(mine, current, citadel = '/', inCitadel = false) {
   if (!mine?.length) return [];
@@ -93,44 +116,60 @@ export function railItems(mine, current, citadel = '/', inCitadel = false) {
  * Josh 2026-11-04: "Same window, as Citadel"). A link would leave the app's scope: Chrome's strip with a
  * close X, a Custom Tab on Android, or a second window (#274's new-window handoff).
  * Findings: shared/project/reports/app-switching-across-apps-2026-11-04.md.
+ * @param {RailItem} item
+ * @param {boolean} installed
  */
 export const opensApart = (item, installed) => installed && !item.current;
 
+/** @type {HTMLElement | null} */
 let nav = null;
+/** @type {HTMLElement | null} */
 let backdrop = null;
+/** @type {HTMLButtonElement | null} */
 let handle = null;
 let shown = 0; // bumped by each show and hide, so a fetch that finishes after signing out draws nothing
+/** @type {HTMLElement | null} */
 let opener = null; // where focus was before the switcher opened
+/** @type {HTMLElement | null} */
 let slot = null; // the contraption's own container for it (mountRail), else it is fixed to the left edge
 let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its (leaveEdge)
 // Framed, it's Citadel's window that is narrow or not (the frame is the rail's width narrower), as Citadel's state says.
-const narrow = host ? Object.assign(new EventTarget(), { matches: false }) : typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
+// Null only with neither a frame nor matchMedia, where nothing reads it: typed as present, as before.
+const narrow = /** @type {Narrow} */ (host ? Object.assign(new EventTarget(), { matches: false }) : typeof matchMedia === 'function' ? matchMedia(NARROW) : null);
 const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches;
 // Citadel's page in a contraption's layer (below): the contraption under it, whose entry puts the layer away (its layer message).
 const inLayer = !inContraption && !!framedIn;
+/** @type {string | null | undefined} */
 let layerApp;
 // One that reloads while put away is so from the start: the parent's message only comes once it has loaded.
-if (inLayer && window.frameElement?.closest('.citadel-layer')?.hidden) document.documentElement.classList.add('put-away');
+if (inLayer && /** @type {HTMLElement | null | undefined} */ (window.frameElement?.closest('.citadel-layer'))?.hidden) document.documentElement.classList.add('put-away');
 
+/** @type {HTMLDivElement | null} */
 let layer = null; // a contraption's installed window: Citadel's page over it, kept once opened (#311)
+/** @type {HTMLElement | null} */
 let layerOpener = null;
+/** @type {Pick<RailItem, 'name' | 'href'> | null} */
 let layerGo = null; // the rail entry the layer is yet to go to
 let layerLoaded = false;
 
-/** In a contraption's installed window: show Citadel's page over this one at `item`, in the same window. */
+/**
+ * In a contraption's installed window: show Citadel's page over this one at `item`, in the same window.
+ * @param {Pick<RailItem, 'name' | 'href'>} item
+ */
 function openLayer(item) {
   closeRail();
   // Citadel's entry goes back to Citadel's last own view, as its own rail's does: Citadel's page knows which (go).
+  /** @param {HTMLIFrameElement} f */
   const go = (f) => {
     post(f.contentWindow, 'layer', { app: showing() });
     // A page that reloaded stays where it is (it only goes where it was last asked to), and put away if it was.
-    if (layer.hidden) post(f.contentWindow, 'away');
+    if (/** @type {HTMLDivElement} */ (layer).hidden) post(f.contentWindow, 'away');
     else if (layerGo) post(f.contentWindow, 'go', { app: layerGo.name });
     // One still loading hears it at its load. On an app's own host its document can't be read: loaded once is all that shows.
     if (layerLoaded && (f.contentDocument?.readyState ?? 'complete') === 'complete') layerGo = null;
   };
   layerGo = item;
-  const frame = layer?.firstChild;
+  const frame = /** @type {HTMLIFrameElement | null | undefined} */ (layer?.firstChild);
   if (!frame) {
     layer = document.createElement('div');
     layer.className = 'citadel-layer';
@@ -144,26 +183,31 @@ function openLayer(item) {
     layer.append(f);
     document.documentElement.append(layer); // beside <body>, which goes inert under it
   } else {
-    layer.hidden = false;
+    /** @type {HTMLDivElement} */ (layer).hidden = false;
     go(frame);
   }
-  if (!document.body.inert) layerOpener = document.activeElement;
+  if (!document.body.inert) layerOpener = /** @type {HTMLElement | null} */ (document.activeElement);
   document.body.inert = true;
-  layer.firstChild.focus();
+  /** @type {HTMLIFrameElement} */ (/** @type {HTMLDivElement} */ (layer).firstChild).focus();
 }
 
 /** Back to the contraption's own page. */
 function closeLayer() {
   if (!layer || layer.hidden) return;
   layer.hidden = true;
-  post(layer.firstChild.contentWindow, 'away'); // a hidden iframe still counts as visible to its page
+  const frame = /** @type {HTMLIFrameElement} */ (layer.firstChild);
+  post(frame.contentWindow, 'away'); // a hidden iframe still counts as visible to its page
   document.body.inert = false;
   if (layerOpener?.isConnected) layerOpener.focus({ preventScroll: true });
-  else layer.firstChild.blur();
+  else frame.blur();
   layerOpener = null;
 }
 
-/** Citadel's page in a layer: put away or back, for base.js chatInSight; core.js is told unless it is about to route. */
+/**
+ * Citadel's page in a layer: put away or back, for base.js chatInSight; core.js is told unless it is about to route.
+ * @param {boolean} on
+ * @param {boolean} [tell]
+ */
 function putAway(on, tell = true) {
   document.documentElement.classList.toggle('put-away', on);
   if (tell) document.dispatchEvent(new Event('citadel-layer'));
@@ -173,13 +217,15 @@ function putAway(on, tell = true) {
 export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
 
 /** Citadel: tell its contraption frames whether its rail is there to lend, and whether its window is narrow. */
-const frameWindows = () => [...document.querySelectorAll('#frames iframe')].map((f) => f.contentWindow);
+const frameEls = () => /** @type {HTMLIFrameElement[]} */ ([...document.querySelectorAll('#frames iframe')]);
+const frameWindows = () => frameEls().map((f) => f.contentWindow);
+/** @param {(MessageEventSource | null)[]} [to] */
 function tellFrames(to = frameWindows()) {
   if (inContraption) return;
-  const desktop = !!window.citadelDesktop; // the desktop app (desktop/preload.cjs), whose preload a frame doesn't get
+  const desktop = !!(/** @type {{ citadelDesktop?: unknown }} */ (window).citadelDesktop); // the desktop app (desktop/preload.cjs), whose preload a frame doesn't get
   for (const w of to) {
-    const name = [...document.querySelectorAll('#frames iframe')].find((f) => f.contentWindow === w)?.dataset.app;
-    post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches, own: ownHosts(), apps: appHosts(), domain: appsDomain(), title: titles.get(name) ?? null, desktop });
+    const name = frameEls().find((f) => f.contentWindow === w)?.dataset.app;
+    post(/** @type {Window} */ (w), 'state', { hasRail: !!nav, narrow: !!narrow?.matches, own: ownHosts(), apps: appHosts(), domain: appsDomain(), title: titles.get(name) ?? null, desktop });
   }
 }
 
@@ -193,7 +239,10 @@ const appsDomain = () => {
 };
 const appHosts = () => Object.fromEntries([...shortUrls].map(([name, u]) => [new URL(u).hostname, name]));
 
-/** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher (false: not any more). */
+/**
+ * drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher (false: not any more).
+ * @param {boolean} [taken]
+ */
 export function leaveEdge(taken = true) {
   edgeTaken = taken;
   handle?.remove();
@@ -220,30 +269,32 @@ export function openRail() {
   if (!nav || !narrow?.matches) return;
   if (nav.classList.contains('placed')) {
     // A slot showing on a phone is the contraption's own switcher page; a hidden one lends the switcher out.
-    if (slot.getClientRects().length) return;
+    if (/** @type {HTMLElement} */ (slot).getClientRects().length) return;
     nav.classList.remove('placed');
     backdrop ??= makeBackdrop();
     document.body.append(backdrop, nav);
     nav.getBoundingClientRect(); // lay it out shut first, so it slides in
   }
-  if (!nav.classList.contains('open')) opener = document.activeElement;
+  if (!nav.classList.contains('open')) opener = /** @type {HTMLElement | null} */ (document.activeElement);
   nav.classList.add('open');
-  backdrop.hidden = false;
-  (nav.querySelector('a.current') ?? nav.querySelector('a'))?.focus({ preventScroll: true });
+  /** @type {HTMLElement} */ (backdrop).hidden = false;
+  /** @type {HTMLElement | null} */ (nav.querySelector('a.current') ?? nav.querySelector('a'))?.focus({ preventScroll: true });
 }
 
 export function closeRail() {
   if (host) return host.closeRail();
   if (!nav?.classList.contains('open')) return;
   nav.classList.remove('open');
-  backdrop.hidden = true;
-  if (nav.contains(document.activeElement)) opener?.isConnected ? opener.focus({ preventScroll: true }) : document.activeElement.blur();
+  /** @type {HTMLElement} */ (backdrop).hidden = true;
+  if (nav.contains(document.activeElement)) opener?.isConnected ? opener.focus({ preventScroll: true }) : /** @type {HTMLElement} */ (document.activeElement).blur();
   opener = null;
 }
 
 /**
  * A contraption places the rail itself, in `el`: its left edge on wide screens (56px wide), its
  * leftmost swipe page on a phone. Resolves to whether there is a rail (false: nothing enabled, drop the page).
+ * @param {HTMLElement} el
+ * @returns {Promise<boolean>}
  */
 export function mountRail(el) {
   if (host) return showRail(); // false: drop the slot, Citadel's rail is beside the frame
@@ -261,6 +312,8 @@ export function mountRail(el) {
  *   intent: Android: open the app's page in Chrome proper (an installed app's links open in a Custom Tab, whose menu has no Install).
  *   tab:    open the app's page in a new tab, whose own button then installs it.
  *   ios:    iOS has no prompt: say Share, then Add to Home Screen.
+ * @param {{ own: boolean; standalone: boolean; prompt: boolean; installed: boolean; android: boolean; ios: boolean }} at
+ * @returns {InstallMode | null}
  */
 export function installMode({ own, standalone, prompt, installed, android, ios }) {
   if (installed || (own && standalone)) return null;
@@ -268,9 +321,13 @@ export function installMode({ own, standalone, prompt, installed, android, ios }
   return standalone && android ? 'intent' : 'tab';
 }
 
-/** An Android link that opens `url` in Chrome itself, or as a plain link where Chrome isn't there. */
+/**
+ * An Android link that opens `url` in Chrome itself, or as a plain link where Chrome isn't there.
+ * @param {URL} url
+ */
 export const chromeIntent = (url) => `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=${url.protocol.slice(0, -1)};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
 
+/** @type {Record<InstallMode, (t: string) => string>} */
 const INSTALL_TIPS = {
   prompt: (t) => `Install ${t} as its own app`,
   intent: (t) => `Open ${t} in Chrome, where you can install it as its own app`,
@@ -280,9 +337,12 @@ const INSTALL_TIPS = {
 const ua = typeof navigator === 'object' ? navigator.userAgent : '';
 const isAndroid = /Android/i.test(ua);
 const isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+/** @type {InstallPromptEvent | null} */
 let installPrompt = null; // beforeinstallprompt, kept for the button: a contraption's own page only
 // Shared by Citadel and every app on the origin, so Citadel's rail knows an app's page saw itself installed.
+/** @param {string | null} name */
 const installedKey = (name) => `citadel-installed:${name}`;
+/** @param {string | null} name */
 const knownInstalled = (name) => {
   try {
     return localStorage.getItem(installedKey(name)) === '1';
@@ -290,6 +350,10 @@ const knownInstalled = (name) => {
     return false;
   }
 };
+/**
+ * @param {string | null} name
+ * @param {boolean} on
+ */
 const markInstalled = (name, on) => {
   try {
     if (on) localStorage.setItem(installedKey(name), '1');
@@ -303,7 +367,7 @@ if (typeof window === 'object' && inContraption && !host) {
   if (me && installed) markInstalled(me, true);
   addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault(); // the rail's button offers it instead of Chrome's banner; Chrome's menu still has Install
-    installPrompt = e;
+    installPrompt = /** @type {InstallPromptEvent} */ (e);
     if (me) markInstalled(me, false); // offered, so not installed (any more)
     syncInstall();
   });
@@ -340,7 +404,7 @@ function installButton() {
       syncInstall();
     } else if (mode === 'intent') location.href = chromeIntent(url);
     else if (mode === 'tab')
-      open(shortUrls.get(name) ?? url, '_blank', 'noopener'); // a person sees the app's own host when there is one (#827)
+      open(shortUrls.get(/** @type {string} */ (name)) ?? url, '_blank', 'noopener'); // a person sees the app's own host when there is one (#827)
     else if (mode === 'ios') showHint(`To add ${b.dataset.title} to your Home Screen: in Safari, tap Share, then Add to Home Screen.`);
   });
   return b;
@@ -348,21 +412,25 @@ function installButton() {
 
 /** Show or hide the Install button for the app showing, and say what it will do. */
 function syncInstall() {
-  const b = nav?.querySelector('button.install');
+  const b = /** @type {HTMLButtonElement | null | undefined} */ (nav?.querySelector('button.install'));
   if (!b) return;
   const name = showing();
-  const title = name && nav.querySelector(`a[data-app="${CSS.escape(name)}"] .label`)?.textContent;
+  const title = name && /** @type {HTMLElement} */ (nav).querySelector(`a[data-app="${CSS.escape(name)}"] .label`)?.textContent;
   const mode = title ? installMode({ own: inContraption, standalone: installed, prompt: !!installPrompt, installed: knownInstalled(name), android: isAndroid, ios: isIOS }) : null;
   b.hidden = !mode;
   b.dataset.mode = mode ?? '';
   if (!mode) return;
-  b.dataset.title = title;
-  b.title = INSTALL_TIPS[mode](title);
-  b.querySelector('.label').textContent = `Install ${title}`;
+  b.dataset.title = /** @type {string} */ (title);
+  b.title = INSTALL_TIPS[mode](/** @type {string} */ (title));
+  /** @type {HTMLElement} */ (b.querySelector('.label')).textContent = `Install ${title}`;
 }
 
+/** @type {HTMLDivElement | null} */
 let hint = null;
-/** A short note by the rail's foot, gone at the next tap or after 10 s. */
+/**
+ * A short note by the rail's foot, gone at the next tap or after 10 s.
+ * @param {string} text
+ */
 function showHint(text) {
   hint?.remove();
   hint = document.createElement('div');
@@ -405,13 +473,13 @@ function syncRail() {
       localStorage.setItem(viewKey, lastView);
     } catch {}
   }
-  for (const a of nav.querySelectorAll('a[data-app]')) {
+  for (const a of /** @type {NodeListOf<HTMLAnchorElement>} */ (nav.querySelectorAll('a[data-app]'))) {
     const here = (a.dataset.app || null) === now;
     a.classList.toggle('current', here);
     if (here) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   }
-  nav.querySelector('a').href = root.pathname + lastView;
+  /** @type {HTMLAnchorElement} */ (nav.querySelector('a')).href = root.pathname + lastView;
   syncInstall();
 }
 
@@ -450,13 +518,17 @@ const RECHECK_MS = 15_000;
 const ICON_TRIES = 8; // about two minutes: a restart, not an icon that's gone
 let recheck = 0; // a timer while an app is greyed out, so it comes back once it's up (#311)
 let drawn = ''; // the entries drawn (but which is current, syncRail's), to redraw only when a recheck finds them changed
+/** @param {RailItem[]} items */
 const entries = (items) => JSON.stringify(items.map(({ current, ...i }) => i));
+/** @type {string | null} */
 let person = null; // a contraption's page: who is signed in, for Alt+` (appswitch.js)
 // Citadel's own answers (drag to reorder) only where Citadel is this page's origin: a contraption's own host can't reach them.
 const atCitadel = () => root.origin === location.origin;
 
 /** Each app's own address, https://<name>.<domain>/, from `mine` when Citadel serves apps on their own hosts (APPS_DOMAIN, #827). */
+/** @type {Map<string, string>} */
 const shortUrls = new Map();
+/** @type {Map<string | null | undefined, string>} */
 const titles = new Map(); // each app's name to its title, for its menu's "From <app>" line
 
 /**
@@ -480,7 +552,7 @@ const fetchItems = async () => {
     for (const c of mine ?? []) if (c?.url) shortUrls.set(c.name, c.url);
     if (!inContraption) tellFrames(); // a frame that loaded before this answer has no app hosts yet
     // A drop still saving: the rail keeps it, though this answer may predate it.
-    return railItems(dragged ? inOrder(mine, (c) => c.name, dragged) : mine, showing(), atCitadel() ? root.pathname : root.href, !inContraption);
+    return railItems(dragged ? inOrder(mine, (/** @type {MyContraption} */ c) => c.name, dragged) : mine, showing(), atCitadel() ? root.pathname : root.href, !inContraption);
   } catch {
     return null;
   }
@@ -501,7 +573,12 @@ function recheckSoon() {
   }, RECHECK_MS);
 }
 
-/** An icon that failed (its app restarting): its letter for now, the icon back in place once it loads. */
+/**
+ * An icon that failed (its app restarting): its letter for now, the icon back in place once it loads.
+ * @param {HTMLImageElement} pic
+ * @param {HTMLElement} tile
+ * @param {number} [tries]
+ */
 function retryIcon(pic, tile, tries = 1) {
   setTimeout(() => {
     if (!tile.isConnected) return;
@@ -548,6 +625,10 @@ function startSwitch() {
   );
 }
 
+/**
+ * @param {RailItem[]} items
+ * @returns {boolean}
+ */
 function drawRail(items) {
   clearRail();
   if (!items.length) return false;
@@ -559,7 +640,7 @@ function drawRail(items) {
   nav.className = slot ? 'citadel-rail placed' : 'citadel-rail';
   nav.setAttribute('aria-label', 'Apps');
   items.forEach((item, i) => {
-    if (i === 1) nav.append(document.createElement('hr'));
+    if (i === 1) /** @type {HTMLElement} */ (nav).append(document.createElement('hr'));
     const a = document.createElement('a');
     a.href = item.href;
     a.dataset.app = item.name ?? '';
@@ -572,16 +653,17 @@ function drawRail(items) {
     const tile = document.createElement('span');
     tile.className = 'tile';
     tile.textContent = item.title.slice(0, 1).toUpperCase();
+    /** @type {HTMLElement} */
     let pic = tile;
     if (item.icon) {
       pic = document.createElement('img');
-      pic.src = item.icon;
-      pic.alt = '';
+      /** @type {HTMLImageElement} */ (pic).src = item.icon;
+      /** @type {HTMLImageElement} */ (pic).alt = '';
       pic.addEventListener(
         'error',
         () => {
           pic.replaceWith(tile);
-          retryIcon(pic, tile);
+          retryIcon(/** @type {HTMLImageElement} */ (pic), tile);
         },
         { once: true },
       );
@@ -603,7 +685,7 @@ function drawRail(items) {
         openLayer(item);
       }
     });
-    nav.append(a);
+    /** @type {HTMLElement} */ (nav).append(a);
   });
   nav.append(installButton());
   // Press and hold an app (or drag it with a mouse) to move it; Citadel stays first (#649).
@@ -622,11 +704,16 @@ function drawRail(items) {
   return true;
 }
 
-const appLinks = () => [...nav.querySelectorAll('a[data-app]:not([data-app=""])')];
+const appLinks = () => /** @type {HTMLAnchorElement[]} */ ([.../** @type {HTMLElement} */ (nav).querySelectorAll('a[data-app]:not([data-app=""])')]);
+/** @type {string[] | null} */
 let dragged = null; // the app names of a drop not yet saved
 let drops = 0; // counts drops: each saves the whole list, so an older one's Retry has nothing to add
 
-/** Move an app from `from` to `to`: on the rail at once, saved behind; a failed save puts it back. */
+/**
+ * Move an app from `from` to `to`: on the rail at once, saved behind; a failed save puts it back.
+ * @param {number} from
+ * @param {number} to
+ */
 function reorderApps(from, to) {
   const keys = moved(
     appLinks().map((a) => a.dataset.app),
@@ -634,13 +721,15 @@ function reorderApps(from, to) {
     to,
   );
   const drop = ++drops;
+  /** @type {(string | undefined)[] | null} */
   let before = null; // the order just before this drop showed, to put back if its save fails
   let stale = false; // a Retry once a newer drop has been made: that one's order stands, so this does nothing
+  /** @param {(string | undefined)[]} order */
   const show = (order) => {
     if (!nav) return;
     const end = nav.querySelector('button.install');
-    for (const a of inOrder(appLinks(), (a) => a.dataset.app, order)) nav.insertBefore(a, end);
-    drawn = entries(inOrder(JSON.parse(drawn), (i) => i.name ?? '', ['', ...order]));
+    for (const a of inOrder(appLinks(), (/** @type {HTMLAnchorElement} */ a) => a.dataset.app, order)) nav.insertBefore(a, end);
+    drawn = entries(inOrder(JSON.parse(drawn), (/** @type {{ name: string | null }} */ i) => i.name ?? '', ['', ...order]));
   };
   optimistic({
     sets: 'order:apps',
@@ -679,6 +768,7 @@ if (typeof document !== 'undefined') {
     },
     true,
   );
+  /** @type {{ x: number; y: number; open: boolean | undefined } | null} */
   let swipe = null;
   document.addEventListener(
     'touchstart',
@@ -686,7 +776,10 @@ if (typeof document !== 'undefined') {
       const t = e.touches[0];
       const open = nav?.classList.contains('open');
       // Open: a drag on it or its backdrop. Shut, in a contraption without drawers.js or a slot: one from the left edge.
-      swipe = (nav || host) && !nav?.classList.contains('placed') && narrow.matches && e.touches.length === 1 && (open ? nav.contains(e.target) || e.target === backdrop : inContraption && !slot && !edgeTaken && t.clientX <= EDGE) ? { x: t.clientX, y: t.clientY, open } : null;
+      swipe =
+        (nav || host) && !nav?.classList.contains('placed') && narrow.matches && e.touches.length === 1 && (open ? /** @type {HTMLElement} */ (nav).contains(/** @type {Node} */ (e.target)) || e.target === backdrop : inContraption && !slot && !edgeTaken && t.clientX <= EDGE)
+          ? { x: t.clientX, y: t.clientY, open }
+          : null;
     },
     { passive: true },
   );
@@ -707,9 +800,9 @@ if (typeof document !== 'undefined') {
     const d = e.data;
     if (!inContraption) {
       // Citadel: a framed contraption's rail.js lends Citadel's rail through these.
-      const frame = [...document.querySelectorAll('#frames iframe')].find((f) => f.contentWindow === e.source);
+      const frame = frameEls().find((f) => f.contentWindow === e.source);
       if (isMessage(e, frame?.contentWindow)) {
-        const name = frame.dataset.app;
+        const name = /** @type {HTMLIFrameElement} */ (frame).dataset.app;
         if (d.type === 'hello') {
           if (name && typeof d.installed === 'boolean' && d.installed !== knownInstalled(name)) {
             markInstalled(name, d.installed);
@@ -737,7 +830,14 @@ if (typeof document !== 'undefined') {
       }
     } else if (host && isMessage(e, framedIn) && d.type === 'state') {
       // A framed contraption: Citadel's rail and window, as Citadel says.
-      hostState = { hasRail: !!d.hasRail, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [], apps: d.apps && typeof d.apps === 'object' ? d.apps : {}, domain: typeof d.domain === 'string' ? d.domain : null, title: typeof d.title === 'string' ? d.title : null, desktop: !!d.desktop };
+      hostState = {
+        hasRail: !!d.hasRail,
+        own: Array.isArray(d.own) ? d.own.filter((/** @type {unknown} */ x) => typeof x === 'string') : [],
+        apps: d.apps && typeof d.apps === 'object' ? d.apps : {},
+        domain: typeof d.domain === 'string' ? d.domain : null,
+        title: typeof d.title === 'string' ? d.title : null,
+        desktop: !!d.desktop,
+      };
       if (narrow.matches !== !!d.narrow) {
         narrow.matches = !!d.narrow;
         narrow.dispatchEvent(new Event('change'));
@@ -753,7 +853,7 @@ if (typeof document !== 'undefined') {
         post(framedIn, 'reloading');
         location.reload();
       }
-    } else if (!host && layer && isMessage(e, layer.firstChild?.contentWindow) && d.type === 'layer-close') closeLayer();
+    } else if (!host && layer && isMessage(e, /** @type {HTMLIFrameElement | null | undefined} */ (layer.firstChild)?.contentWindow) && d.type === 'layer-close') closeLayer();
   });
   narrow?.addEventListener('change', () => {
     tellFrames();
@@ -788,12 +888,13 @@ const TEXT_FIELDS = 'textarea, input:not([type]), input[type=text], input[type=s
 function unsentHere() {
   if (Date.now() - typedAt < TYPING_MS) return true;
   if (!document.dispatchEvent(new CustomEvent('citadel-before-reload', { cancelable: true }))) return true;
-  return [...document.querySelectorAll(TEXT_FIELDS)].some((el) => (el.isContentEditable ? el.textContent.trim() !== '' : el.value !== el.defaultValue));
+  return /** @type {HTMLInputElement[]} */ ([...document.querySelectorAll(TEXT_FIELDS)]).some((el) => (el.isContentEditable ? el.textContent.trim() !== '' : el.value !== el.defaultValue));
 }
 
 const STRIP_VARS = ['strip-h', 'strip-start', 'strip-end', 'strip-row', 'safe-top'];
 // What counts as a control on the bar (base.css's no-drag list): the window's drag regions leave holes over these.
 const CONTROLS = 'a, button, input, select, textarea, summary, label, [tabindex]';
+/** @type {Element | null | undefined} */
 let watchedBar;
 let barQueued = false;
 
@@ -804,6 +905,7 @@ let barQueued = false;
  */
 function reportBar() {
   const bar = document.querySelector('.cui-topbar');
+  /** @param {Element} el */
   const box = (el) => {
     const r = el.getBoundingClientRect();
     return { left: r.left, top: r.top, width: r.width, height: r.height };
@@ -844,6 +946,7 @@ function reportSoon() {
 /** A framed contraption: Alt+` and the keys that follow while Alt is held are Citadel's switcher's (appswitch.js), so they go to it. */
 function forwardKeys() {
   let switching = false;
+  /** @param {KeyboardEvent} e */
   const on = (e) => {
     if (!switching && !(e.type === 'keydown' && e.code === 'Backquote' && e.altKey && !e.ctrlKey && !e.metaKey)) return;
     if (!switching && document.querySelector('dialog:modal')) return;
@@ -861,7 +964,10 @@ function forwardKeys() {
   });
 }
 
-/** The switcher as a list (a phone, or a wide slot), for the rail matched by `r`. */
+/**
+ * The switcher as a list (a phone, or a wide slot), for the rail matched by `r`.
+ * @param {string} r
+ */
 const list = (r) => `
   ${r} { align-items: stretch; gap: 6px;
     padding: calc(14px + var(--top-inset, env(safe-area-inset-top, 0px))) 12px calc(14px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
@@ -872,6 +978,7 @@ const list = (r) => `
   ${r} hr { width: auto; margin: 4px 10px; }`;
 
 // A constructed sheet, since Citadel's Content-Security-Policy (and maybe a contraption's) refuses inline <style>.
+/** @type {CSSStyleSheet | null} */
 let sheet = null;
 function addStyles() {
   if (sheet) return;
@@ -933,8 +1040,8 @@ if (typeof document !== 'undefined' && !inContraption) {
     apps: appHosts,
     domain: appsDomain,
     self: () => null,
-    openWindow: (url) => location.assign(url),
-    openApp: (link) => {
+    openWindow: (/** @type {string} */ url) => location.assign(url),
+    openApp: (/** @type {{ name: string; to: string }} */ link) => {
       location.hash = appHash(link);
     },
   });
@@ -946,8 +1053,8 @@ if (typeof document !== 'undefined' && host) {
     apps: () => hostState.apps,
     domain: () => hostState.domain,
     self: showing,
-    openWindow: (url) => post(framedIn, 'go-url', { url }),
-    openApp: (_link, url) => post(framedIn, 'app', { url }),
+    openWindow: (/** @type {string} */ url) => post(framedIn, 'go-url', { url }),
+    openApp: (/** @type {unknown} */ _link, /** @type {string} */ url) => post(framedIn, 'app', { url }),
   });
 }
 
@@ -958,8 +1065,8 @@ if (typeof document !== 'undefined' && inContraption && !framedIn) {
     apps: appHosts,
     domain: appsDomain,
     self: () => showing() ?? appHosts()[location.hostname] ?? null,
-    openWindow: (url) => location.assign(url),
-    openApp: (link) => openLayer({ name: link.name, href: new URL(appHash(link), root).href }),
+    openWindow: (/** @type {string} */ url) => location.assign(url),
+    openApp: (/** @type {{ name: string; to: string }} */ link) => openLayer({ name: link.name, href: new URL(appHash(link), root).href }),
   });
 }
 
@@ -977,7 +1084,7 @@ if (typeof document !== 'undefined' && inContraption) {
     framed: !!host,
     title: () => hostState.title ?? titles.get(showing()) ?? (document.title || 'this app'),
     desktop: () => !!host && hostState.desktop,
-    post: (type, data) => post(framedIn, type, data),
+    post: (/** @type {string} */ type, /** @type {Record<string, unknown>} */ data) => post(framedIn, type, data),
   });
 }
 

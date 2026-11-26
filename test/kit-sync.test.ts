@@ -50,7 +50,7 @@ async function tidy(jobs: { running(): number }, root: string) {
  * test's own, or they wait in the box's real line behind minions' jobs (#2112).
  */
 function jobEnv(root: string) {
-  return { PATH: process.env.PATH!, HOME: process.env.HOME!, CITADEL_HEAVY_DIR: join(root, 'heavy'), CITADEL_HEAVY_PLAIN_SLOTS: '4', CITADEL_HEAVY_MAX_PRESSURE: '101' };
+  return { PATH: process.env.PATH!, HOME: process.env.HOME!, CITADEL_HEAVY_DIR: join(root, 'heavy'), CITADEL_HEAVY_PLAIN_SLOTS: '4', CITADEL_HEAVY_MAX_PRESSURE: '101', CITADEL_HEAVY_MEM_NEED: '0' };
 }
 
 function fixture() {

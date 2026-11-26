@@ -82,7 +82,8 @@ export function setupPart(m, r, redraw) {
     h('div', { class: 'worker-part-head' }, h('h4', {}, 'Set up and test'), chip(run), can && !turnsHere ? button('setup', !run?.ok) : null, can && run?.ok && r.role !== 'turns' ? button('test', false) : null),
     !run && can ? h('p', { class: 'muted small' }, ABOUT[r.role]) : null,
     !can && !run ? h('p', { class: 'muted small' }, 'Its owner sets it up.') : null,
-    run?.why ? h('p', { class: 'cui-notice', 'data-tone': 'danger' }, run.why) : null,
+    // With an administrator command, that block says what to do: the run's own why would only repeat it.
+    run?.why && !adminCommand(run.admin) ? h('p', { class: 'cui-notice', 'data-tone': 'danger' }, run.why) : null,
     run ? adminPart(run) : null,
     showSteps
       ? h(

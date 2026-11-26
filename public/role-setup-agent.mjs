@@ -163,7 +163,7 @@ async function gpu(ctx, say, end) {
   if (needs.length) {
     const pm = (await ctx.exec('apt-get', ['--version'])).code === 0 ? 'apt' : (await ctx.exec('dnf', ['--version'])).code === 0 ? 'dnf' : null;
     await ctx.post({ id: ctx.ask.id, admin: { needs, pm } });
-    return end(false, { why: 'Run the administrator command above on this PC, then press Set up again.' });
+    return end(false, { why: 'Run the administrator command on the card on this PC, then press Set up again.' });
   }
   if (ctx.ask.kind === 'setup') {
     const { raw, why } = readConfig(ctx.configFile);
@@ -220,7 +220,7 @@ async function turns(ctx, say, end) {
   if (/WSL 2 isn't installed/.test(r.out)) {
     await say(1, "WSL 2 isn't installed on this PC", 'fail');
     await ctx.post({ id: ctx.ask.id, admin: { needs: ['wsl'] } });
-    return end(false, { why: 'Run the administrator command above, restart the PC, then press Set up again.' });
+    return end(false, { why: 'Run the administrator command on the card, restart the PC, then press Set up again.' });
   }
   if (r.code !== 0) {
     const why = (r.out.match(/install-worker: (.*)/)?.[1] ?? r.out.split(/\r?\n/).at(-1) ?? 'it stopped').slice(0, 400);

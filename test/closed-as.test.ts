@@ -187,9 +187,19 @@ test('an effort follows an ask that moves into another minion, and its retro wai
   assert.equal((await get(e.id)).properties.effortName, 'Moves');
 
   // A close that is called off forgets where the ask was going.
+  const h = await mk();
   const g = await minion();
-  assert.equal((await close(g, { as: 'replaced', into: e.number })).status, 202);
+  assert.equal((await srv.call(`/api/tickets/${g.id}/properties`, { properties: { effortName: 'Called off' } }, 'PUT')).status, 200);
+  assert.deepEqual((await close(g, { as: 'replaced', into: h.number })).data.joined, 'Called off');
+  assert.equal((await get(h.id)).properties.effortName, undefined, 'nothing moves until it closes');
   assert.ok((await srv.call(`/api/tickets/${g.id}/stop`, {})).status < 300);
   await until('it to stop', async () => (await get(g.id)).status !== 'running');
+  assert.equal(setting(`moved-into:${g.id}`), null);
+  assert.equal((await get(h.id)).properties.effortName, undefined);
+
+  // Saying a closed one again replaces where its ask went; without `into`, it went nowhere.
+  await shut(g.id, { as: 'replaced', into: h.number });
+  assert.equal((await get(h.id)).properties.effortName, 'Called off');
+  await shut(g.id, { as: 'dropped' });
   assert.equal(setting(`moved-into:${g.id}`), null);
 });

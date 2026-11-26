@@ -4,6 +4,7 @@
 // by start_after followers and parent starts (effortFor), and `chain from #N` for a start_after chain nobody named.
 // docs/adr/0031-effort-retros.md has the picks.
 import { buildOwnerKey, type Project, type Store, type Ticket } from './db.ts';
+import { movedKey } from './properties.ts';
 import type { Runner } from './runner.ts';
 import { pickFor } from '../public/model-table.js';
 import { pacific } from './schedules.ts';
@@ -17,18 +18,18 @@ export const CHAIN_FLOOR = 4;
 /** How long an effort stays closed before its retro starts, so a follow-up the Taskmaster starts joins it instead. */
 export const QUIET_MS = 6 * 3_600_000;
 const AUTO = /^chain from #\d+$/;
-/** The ticket id a closed minion's ask moved into (close_ticket's and close_self's `into`). */
-export const movedKey = (ticketId: number) => `moved-into:${ticketId}`;
-
 /**
- * Records where a closing minion's ask went and hands its effort to that minion when it has none (#2080; Josh, 2026-11-25, "Effort follows moved asks"). Answers the effort that minion joined.
+ * Records where a closing minion's ask went (none: forgets what an earlier close said), and answers the effort that minion
+ * joins. The hand-over itself happens as the minion closes (Registry.statusChanged); one already closed hands over now.
  */
-export function moveEffort(store: Store, from: Pick<Ticket, 'id'>, into: Pick<Ticket, 'id' | 'project_id'> | null, by: string): string | null {
-  if (!into) return null;
+export function moveEffort(store: Store, from: Pick<Ticket, 'id' | 'status'>, into: Pick<Ticket, 'id'> | null): string | null {
+  if (!into) {
+    store.deleteSetting(movedKey(from.id));
+    return null;
+  }
   store.setSetting(movedKey(from.id), into.id);
-  const name = store.props.forTarget('minion', from.id)[EFFORT_KEY];
-  if (typeof name !== 'string' || store.props.forTarget('minion', into.id)[EFFORT_KEY]) return null;
-  store.props.set('minion', into.id, into.project_id, { [EFFORT_KEY]: name }, by);
+  const name = store.props.effortToJoin(from.id, into.id);
+  if (from.status === 'closed') store.props.joinEffort(from.id, into.id);
   return name;
 }
 

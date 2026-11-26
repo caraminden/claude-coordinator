@@ -254,7 +254,7 @@ export const LIST_CLAIMS = {
 /** Why a minion closes (`closedAs`, src/property-seed.ts; Josh, 2026-11-25, "Save one word"). */
 const CLOSED_AS = { type: 'string', enum: ['done', 'replaced', 'dropped'], description: 'replaced: minion `into` has the work; dropped: nobody does' };
 const CLOSED_INTO = { type: 'integer' };
-const joinedLine = (into: unknown, joined?: string) => (joined ? ` #${into} joined the effort "${joined}".` : '');
+const joinedLine = (into: unknown, joined?: string) => (joined ? ` #${into} joins the effort "${joined}" as this closes.` : '');
 
 export const CLOSE_TICKET = {
   name: 'close_ticket',

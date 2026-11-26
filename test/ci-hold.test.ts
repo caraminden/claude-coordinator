@@ -693,6 +693,14 @@ test('jobs past their two hours still go one at a time, and a check or a proof g
   assert.deepEqual([a.status, b.status, check.conclusion], ['queued', 'completed', 'cancelled']);
 });
 
+test('a job handed to Citadel with no run yet may start at two hours with ships in line', async () => {
+  const w = world();
+  w.line = 3;
+  await w.tick();
+  assert.equal(w.hold.why(OWN, w.now - OWN_CAP_MS + MIN, w.now), '3 ships are in line');
+  assert.equal(w.hold.why(OWN, w.now - OWN_CAP_MS, w.now), null);
+});
+
 test("Citadel's own job with no run yet is not told as stuck the moment its two hours are up", async () => {
   const w = world();
   w.waiting.push({ id: 'h1', repo: OWN, ticket: 7, what: 'burn-in', since: w.now, why: 'a ship is in line', reported: false });

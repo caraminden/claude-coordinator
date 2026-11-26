@@ -696,9 +696,8 @@ function typedDraft(el, saved, dirty = () => el.value.trim() !== saved().trim())
 }
 
 /**
- * A row that opens (#995, Cara picked "Side menu, rows that open"): an icon tile in its own hue, a title, a one-line
- * summary and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary
- * line, which its page keeps up to date.
+ * A row that opens (#995, Cara picked "Side menu, rows that open"): an icon tile in its own hue, a title, a one-line summary
+ * and a chevron; the body (help, field, Save) opens beneath it on a click. Returns the row and its summary line, which its page keeps up to date.
  * @param {{ icon?: string, hue?: string | null, title: Child, summary?: Child, open?: boolean, key?: string | null, part?: string | null }} row
  * @param {...Child} body
  * @returns {[HTMLDetailsElement, HTMLSpanElement]}

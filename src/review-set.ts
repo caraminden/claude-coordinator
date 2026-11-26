@@ -242,6 +242,7 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
       ['error-handling', 'Error handling', 'a try/catch, a default, an HTTP status or error message in the diff'],
       ['comments', 'Comments', 'a comment or doc that describes code, added or edited'],
       ['tests', 'Tests', 'logic changed, or tests added or changed'],
+      ['fix-proofs', 'Fix proofs', 'a proof list in its brief: the change fixes findings the minion was handed'],
       ['new-types', 'New types', 'a new type, class, table or JSON format'],
       ['access-and-secrets', 'Access and secrets', 'auth or access-control files, or code that reads a secret'],
       ['smells', 'Smells', 'a new module, or over about 100 new lines of logic'],

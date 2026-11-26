@@ -196,7 +196,8 @@ tools/land.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-
 tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts test/land.test.ts
 public/sw.js: test/backup.test.ts test/shell.test.ts
 tools/deploy-queue.sh: test/ci-runner-choice.test.ts
-deploy/claude-container/Containerfile: test/claude-container.test.ts
+deploy/claude-container/Containerfile: test/claude-container.test.ts test/worker-join.test.ts
+tools/worker/citadel-worker: test/host-reach.test.ts
 server.ts: test/deploy.test.ts test/off-thread-fs.test.ts test/one-home.test.ts test/flake-start-model.test.ts test/held-starts.test.ts
 kit/skills/scheme-setup/templates/biome.config.json: test/format.test.ts
 deploy/citadel-heavy.slice: test/heavy-unit.test.ts

@@ -466,7 +466,7 @@ export async function stateCall(d: StateDeps, op: string, dir: string, at: Place
   if (op === 'done') {
     // When the last whole checkpoint looked: a turn that ends away carries on from there.
     const { at: when } = await readJson(req);
-    if (Number.isFinite(when)) await writeFile(join(dir, 'checkpoint'), String(Math.round(when)));
+    if (typeof when === 'number' && Number.isFinite(when)) await writeFile(join(dir, 'checkpoint'), String(Math.round(when)));
     return json(res, 200, {});
   }
   if (op === 'away') return json(res, 200, await alone(t.id, async () => away(d, at.name, t, p, await readJson(req, 1_000_000))));

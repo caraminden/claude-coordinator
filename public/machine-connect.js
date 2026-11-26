@@ -3,6 +3,7 @@
 // once the PC's agent swaps it and connects, it turns to Connected with what the PC reported, named from its
 // hostname, which can be changed here. An agent from before reports nothing: its row's Update opens the same panel
 // for that row.
+/** @import { MachineJoin, MachineJoinLook, MachineReport, MachineRow } from './types.js' */
 import { api, h } from './base.js';
 import { markdownElement } from './ui/markdown.js';
 import { toast } from './ui/status.js';
@@ -14,16 +15,25 @@ const OSES = [
   { os: 'macos', tab: 'macOS', tag: 'bash', where: 'Open Terminal on the Mac (no sudo) and paste this. It needs Node 18 or newer.', note: 'A Mac lends tools and folders only: CI runners, Minion turns and the Windows screen need Windows or Linux.' },
 ];
 
-/** This browser's kind of computer; a phone or anything unknown gets Windows, the usual PC. */
-export function guessJoinOs(platform = globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || '', agent = globalThis.navigator?.userAgent ?? '') {
+/**
+ * This browser's kind of computer; a phone or anything unknown gets Windows, the usual PC.
+ * @param {string} [platform]
+ * @param {string} [agent]
+ * @returns {'windows' | 'linux' | 'macos'}
+ */
+export function guessJoinOs(platform = /** @type {Navigator & { userAgentData?: { platform?: string } }} */ (globalThis.navigator)?.userAgentData?.platform || globalThis.navigator?.platform || '', agent = globalThis.navigator?.userAgent ?? '') {
   if (/android|iphone|ipad/i.test(`${platform} ${agent}`)) return 'windows';
   if (/mac/i.test(platform)) return 'macos';
   return /linux|x11|cros/i.test(platform) ? 'linux' : 'windows';
 }
 
-/** What a PC reported, in one line: "Windows 11, 32 threads, 64 GB, RTX 4080, WSL 2.3.26". */
+/**
+ * What a PC reported, in one line: "Windows 11, 32 threads, 64 GB, RTX 4080, WSL 2.3.26".
+ * @param {MachineReport | null | undefined} r
+ */
 export function reportLine(r) {
   if (!r) return '';
+  /** @param {number} n */
   const gb = (n) => `${n >= 10 ? Math.round(n) : n} GB`;
   return [
     r.os_name || r.os,
@@ -39,16 +49,21 @@ export function reportLine(r) {
     .join(', ');
 }
 
+/** @param {number} at */
 const when = (at) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /**
  * The panel, drawn into `el`. machine: an Update of that row (an agent from before); none: a new computer.
  * onDone runs when it is closed.
+ * @param {HTMLElement} el
+ * @param {{ machine?: Pick<MachineRow, 'id' | 'name'> | null, onDone?: () => void }} [opts]
  */
 export function openConnectPanel(el, { machine = null, onDone = () => {} } = {}) {
+  /** @type {{ os: string, join: MachineJoin | null, state: string, got: MachineRow | null, timer: ReturnType<typeof setInterval> | 0, failed: string, closed?: boolean }} */
   const st = { os: guessJoinOs(), join: null, state: 'making', got: null, timer: 0, failed: '' };
+  /** @param {{ quiet?: boolean }} [opts] */
   const close = ({ quiet = false } = {}) => {
-    clearInterval(st.timer);
+    clearInterval(st.timer || undefined);
     st.closed = true;
     if (quiet) return;
     el.replaceChildren();
@@ -60,12 +75,12 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
     st.failed = '';
     draw();
     api(machine ? `api/machines/${machine.id}/join` : 'api/machines/joins', { method: 'POST' })
-      .then((j) => {
+      .then((/** @type {MachineJoin} */ j) => {
         if (st.closed) return;
         st.join = j;
         st.state = 'waiting';
         draw();
-        clearInterval(st.timer);
+        clearInterval(st.timer || undefined);
         st.timer = setInterval(look, 2000);
       })
       .catch((err) => {
@@ -76,20 +91,20 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
       });
   };
   const look = () => {
-    if (!el.isConnected) return clearInterval(st.timer);
-    api(`api/machines/joins/${st.join.id}`)
-      .then((r) => {
+    if (!el.isConnected) return clearInterval(st.timer || undefined);
+    api(`api/machines/joins/${/** @type {MachineJoin} */ (st.join).id}`)
+      .then((/** @type {MachineJoinLook} */ r) => {
         if (st.closed) return; // a look already on its way when the panel closed
         if (r.state === st.state && JSON.stringify(r.machine?.report) === JSON.stringify(st.got?.report)) return;
         st.state = r.state;
         st.got = r.machine;
-        if (r.state === 'connected' || r.state === 'expired') clearInterval(st.timer);
+        if (r.state === 'connected' || r.state === 'expired') clearInterval(st.timer || undefined);
         draw();
       })
       .catch(() => {}); // the next look tries again
   };
   const draw = () => {
-    const way = OSES.find((w) => w.os === st.os);
+    const way = /** @type {(typeof OSES)[number]} */ (OSES.find((w) => w.os === st.os)); // st.os is always one of them
     const command = st.join && (st.os === 'windows' ? machineJoinWindows : machineJoinPosix)(st.join.agent_url, st.join.code);
     const done = st.state === 'connected';
     el.replaceChildren(
@@ -101,6 +116,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
       ),
     );
   };
+  /** @param {(typeof OSES)[number]} way @param {string | null} command */
   const steps = (way, command) => [
     h(
       'div',
@@ -133,19 +149,21 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
   ];
   // Where the code stands, as a toned notice (Citadel's look: a status is never a bare grey sentence).
   const status = () => {
+    /** @param {string} label */
     const again = (label) => h('button', { type: 'button', class: 'secondary small', onclick: make }, label);
+    /** @param {string} tone @param {...(string | HTMLElement)} kids */
     const notice = (tone, ...kids) => h('div', { class: 'cui-notice machine-connect-status', 'data-tone': tone, role: 'status' }, ...kids);
     if (st.state === 'failed') return notice('danger', h('span', {}, `Couldn't make a code: ${st.failed} `), again('Try again'));
     if (st.state === 'making') return '';
     if (st.state === 'expired') return notice('warn', h('span', {}, 'This code ran out before a computer used it. '), again('New code'));
     if (st.state === 'joined') return notice('info', h('strong', {}, `It took the code${st.got ? ` as ${st.got.name}` : ''}`), ': waiting for its agent to connect…');
-    return [notice('info', h('strong', {}, 'Waiting for the computer…')), h('p', { class: 'small muted' }, `The code works once, until ${when(st.join.expires_at)}. It installs the agent as a service of your own and needs no admin.`)];
+    return [notice('info', h('strong', {}, 'Waiting for the computer…')), h('p', { class: 'small muted' }, `The code works once, until ${when(/** @type {MachineJoin} */ (st.join).expires_at)}. It installs the agent as a service of your own and needs no admin.`)];
   };
   const connected = () => {
-    const m = st.got;
+    const m = /** @type {MachineRow} */ (st.got);
     const name = h('input', { value: m.name, maxlength: 30, pattern: '[a-z0-9][a-z0-9\\-]*', 'aria-label': 'Its name', autocomplete: 'off' });
     const save = h('button', { type: 'button', class: 'secondary small' }, 'Rename');
-    save.onclick = () => {
+    const rename = () => {
       const to = name.value.trim().toLowerCase();
       if (!to || to === m.name) return;
       const was = m.name;
@@ -154,9 +172,10 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
       api(`api/machines/${m.id}`, { method: 'PATCH', body: { name: to } }).catch((err) => {
         m.name = was;
         draw();
-        toast(`Couldn't rename ${was}: ${err.message}`, { tone: 'error', action: { label: 'Retry', run: save.onclick } });
+        toast(`Couldn't rename ${was}: ${err.message}`, { tone: 'danger', action: { label: 'Retry', run: rename } });
       });
     };
+    save.onclick = rename;
     return [
       h('p', { class: 'cui-notice', 'data-tone': 'ok', role: 'status' }, h('strong', {}, `Connected: ${m.name}`), m.report ? `, ${reportLine(m.report)}` : ''),
       h('div', { class: 'row machine-connect-name' }, h('label', { class: 'small' }, 'Name ', name), save),

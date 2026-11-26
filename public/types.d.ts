@@ -7,6 +7,8 @@ import type { applyEvent, createProgress, planTrack } from './progress.js';
 import type { chatView } from './thread.js';
 import type { mergedView } from './mine.js';
 import type { narrationSorter } from './narration.js';
+import type { RunsOnMark } from './machine-types.js';
+export type * from './machine-types.js'; // the machines' shapes (Build 7)
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** src/db-rows.ts TICKET_STATES. */
@@ -87,6 +89,8 @@ export interface HeldMailItem {
 /** A minion or a Taskmaster as the API sends it: the row plus its live state (src/runner.ts Runner.view, src/http.ts TicketView). */
 export interface Ticket {
   id: number;
+  /** Its Runs on mark (Build 7 T4). */
+  runs_on?: RunsOnMark | null;
   project_id: number;
   /** Shown as #n; null for a Taskmaster. */
   number: number | null;
@@ -1192,32 +1196,8 @@ export interface WorkersTile {
   /** The waits that gave their worker back (src/routes/workers.ts waitsEnded). */
   waits: { count: number; median: number | null; woken: number; cold: number };
   /** The machines that lend workers (Build 7 T4), one row each. */
-  machines: WorkerMachine[];
+  machines: import('./machine-types.js').WorkerMachine[];
 }
-
-/** A machine's row on the Workers tile (src/turn-line.ts machinePools, src/routes/workers.ts). */
-export interface WorkerMachine {
-  id: number;
-  name: string;
-  owner: string | null;
-  mine: boolean;
-  used: number;
-  size: number;
-  cap: number;
-  pool: WorkersTile['pool'];
-  min: number;
-  max: number;
-  waiting: number;
-  block: string | null;
-  priority: number | null;
-  balanced: string | null;
-  away: number | null;
-  pressed: string | null;
-  limits: WorkerLimit[];
-}
-
-/** One place on the tile: perigee (id 0) or a machine. */
-export type WorkerPlace = Pick<WorkerMachine, 'id' | 'name' | 'used' | 'size' | 'pool' | 'limits'>;
 
 // Round 4b: work-flow.js and flowmath.js (GET /api/projects/:id/flow: src/work-flow.ts FlowView)
 export type FlowKind = 'feature' | 'bug' | 'chore' | 'research' | 'other';

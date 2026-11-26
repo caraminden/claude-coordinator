@@ -1,11 +1,10 @@
 {
   "public/cards.js": [1, 0],
   "public/core.js": [2, 0],
-  "public/machine-setup.js": [15, 0],
   "public/project.js": [5, 0],
   "public/release-extras.js": [65, 0],
   "public/releasemath.js": [15, 0],
-  "public/settings-machines.js": [130, 0],
+  "public/settings-machines.js": [127, 0],
   "public/skills.js": [3, 0],
   "public/workers.js": [1, 0],
   "src/backup.ts": [0, 3],

@@ -13,7 +13,11 @@ import { lastRun } from './role-setup.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 
+/** @import { MachineRole, MachineRoleCaps, MachineRoleKey, MachineRow } from './types.js' */
+/** @typedef {() => void} Redraw */
+
 // The caps each role's card edits (spec section 7). CI's runners cap is the most awake at once; Build 7's balancer (M6) holds it.
+/** @type {Record<string, [keyof MachineRoleCaps, string, string][]>} */
 const CAPS = {
   turns: [
     ['workers', 'Minions at once', ''],
@@ -24,24 +28,38 @@ const CAPS = {
   ci: [['runners', 'Runners awake', '']],
 };
 /** Bounds of each cap on the page; workers and runners may be 0 (none at once). */
+/** @type {Record<string, number[]>} */
 const LIMITS = { ...WORKER_LIMITS, workers: [0, WORKER_LIMITS.workers[1]], runners: [0, 64] };
 
-/** Its owner, or an admin (access.ts managesMachine). */
+/** Its owner, or an admin (access.ts managesMachine). @param {MachineRow} m */
 export const managesRoles = (m) => !!account?.admin || (m.owner_id !== null && m.owner_id === account?.id);
-/** Caps on a person's own machine are its owner's alone (spec section 7); a shared one's, an admin's. */
+/** Caps on a person's own machine are its owner's alone (spec section 7); a shared one's, an admin's. @param {MachineRow} m */
 const setsCaps = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
-const current = (m) => view.machines?.find((x) => x.id === m.id) ?? m;
+/** The page's newest view of the machine. @param {MachineRow} m */
+const current = (m) => /** @type {MachineRow[] | undefined} */ (view?.machines)?.find((x) => x.id === m.id) ?? m;
+/** @param {MachineRow} m @param {MachineRoleKey} role */
 const roleOf = (m, role) => current(m).roles?.find((r) => r.role === role);
-const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
+/** @param {number} id */
+const schemeName = (id) => (view?.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
 // A run-gpu task (a test box's), or GPU jobs on in its agent's jobs block (what Set up turns on, Build 7 M4).
+/** @param {MachineRow} m */
 const hasGpu = (m) => !!m.jobs?.gpu || (m.workspaces ?? []).some((w) => w.tasks?.some((t) => t.name === 'run-gpu'));
 
-/** Which machines have their caps editor open, and what is typed there, over redraws. */
+/** Which machines have their caps editor open, and what is typed there, over redraws. @type {Map<string, Record<string, string>>} */
 const editing = new Map();
 
-/** Change one role at once; the request goes behind, and a failure puts it back with a toast and Retry. */
+/**
+ * Change one role at once; the request goes behind, and a failure puts it back with a toast and Retry.
+ * @param {MachineRow} m
+ * @param {MachineRoleKey} role
+ * @param {Record<string, unknown>} fields
+ * @param {string} label
+ * @param {Redraw} redraw
+ * @param {Record<string, unknown>} [shown]
+ */
 function changeRole(m, role, fields, label, redraw, shown = fields) {
-  const was = Object.fromEntries(Object.keys(shown).map((k) => [k, structuredClone(roleOf(m, role)?.[k])]));
+  const was = Object.fromEntries(Object.keys(shown).map((k) => [k, structuredClone(/** @type {Record<string, unknown> | undefined} */ (roleOf(m, role))?.[k])]));
+  /** @param {Record<string, unknown>} vals */
   const set = (vals) => {
     const r = roleOf(m, role);
     if (r) Object.assign(r, vals);
@@ -58,7 +76,7 @@ function changeRole(m, role, fields, label, redraw, shown = fields) {
   });
 }
 
-/** Why a role can't be used on this PC, when it can't (shown greyed while off); null when it can. */
+/** Why a role can't be used on this PC, when it can't (shown greyed while off); null when it can. @param {MachineRow} m @param {MachineRole} r */
 function cannot(m, r) {
   if (r.on) return null;
   if (removing(m)) return 'It is being removed: nothing new starts there.';
@@ -70,7 +88,7 @@ function cannot(m, r) {
   return null;
 }
 
-/** How a role stands, in a few words, and the tone of its chip. */
+/** How a role stands, in a few words, and the tone of its chip. @param {MachineRow} m @param {MachineRole} r */
 function standing(m, r) {
   if (!r.on) return { text: m.paused?.includes(r.role) ? 'paused' : 'off', tone: 'neutral' };
   if (r.role === 'turns') {
@@ -78,7 +96,7 @@ function standing(m, r) {
     const st = workerState(m);
     return { text: st.word, tone: st.tone };
   }
-  if (r.role !== 'turns' && !m.online && !(r.role === 'ci' && m.runners)) return { text: 'offline', tone: 'neutral' };
+  if (/** @type {MachineRoleKey} */ (r.role) !== 'turns' && !m.online && !(r.role === 'ci' && m.runners)) return { text: 'offline', tone: 'neutral' };
   if (r.role === 'tools') {
     const lend = m.lend;
     const parts = [lend?.server, lend?.workspaces?.length ? `${lend.workspaces.length} folder${lend.workspaces.length === 1 ? '' : 's'}` : ''].filter(Boolean);
@@ -92,10 +110,10 @@ function standing(m, r) {
   return run?.done && !run.ok ? { text: 'set up failed', tone: 'danger' } : { text: 'not set up yet', tone: 'info' };
 }
 
-/** The schemes a role is lent to, as chips that switch: every scheme the viewer sees, and any already on its list. */
+/** The schemes a role is lent to, as chips that switch: every scheme the viewer sees, and any already on its list. @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw */
 function schemeChips(m, r, redraw) {
   const can = managesRoles(m);
-  const ids = [...new Set([...(view.projects ?? []).map((p) => p.id), ...r.projects])];
+  const ids = [...new Set([...(view?.projects ?? []).map((p) => p.id), ...r.projects])];
   const chips = ids.map((id) => {
     const on = r.projects.includes(id);
     return h(
@@ -108,7 +126,7 @@ function schemeChips(m, r, redraw) {
         title: can ? (on ? `Take ${r.name} on ${m.name} from ${schemeName(id)}: nothing new starts there for it` : `Lend ${r.name} on ${m.name} to ${schemeName(id)}`) : 'Only its owner or an admin changes this',
         onclick: () => {
           const list = roleOf(m, r.role)?.projects ?? r.projects;
-          const projects = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+          const projects = list.includes(id) ? list.filter((/** @type {number} */ x) => x !== id) : [...list, id];
           changeRole(m, r.role, { projects }, `change which schemes get ${r.name} on ${m.name}`, redraw);
         },
       },
@@ -118,7 +136,7 @@ function schemeChips(m, r, redraw) {
   return h('div', { class: 'chips role-schemes', role: 'group', 'aria-label': `Schemes that get ${r.name} on ${m.name}` }, chips.length ? chips : h('span', { class: 'muted small' }, 'No schemes to lend it to.'));
 }
 
-/** A role's caps: the numbers it holds, and "change" for whoever sets them. */
+/** A role's caps: the numbers it holds, and "change" for whoever sets them. @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw */
 function capsLine(m, r, redraw) {
   const key = `${m.id}:${r.role}`;
   let words;
@@ -134,38 +152,42 @@ function capsLine(m, r, redraw) {
 /**
  * Its owner's order among their computers (Build 7 M6; Josh, 2026-11-25: "put work on machine 1 before using machine 2"):
  * turns fill 1 before 2. Only its owner sets it, and only once they have two; shown read-only to others once set.
+ * @param {MachineRow} m
+ * @param {Redraw} redraw
  */
 function orderLine(m, redraw) {
   const c = current(m);
-  const theirs = m.owner_id === null ? 0 : (view.machines ?? []).filter((x) => x.owner_id === m.owner_id && !x.runners).length;
+  const theirs = m.owner_id === null ? 0 : /** @type {MachineRow[]} */ (view?.machines ?? []).filter((x) => x.owner_id === m.owner_id && !x.runners).length;
   if (c.priority == null && theirs < 2) return null;
   const words = c.priority === 1 ? "First among its owner's computers" : `Order ${c.priority} among its owner's computers`;
   if (m.owner_id !== account?.id) return c.priority == null ? null : h('div', { class: 'small muted role-caps' }, words);
   const most = Math.max(theirs, c.priority ?? 0);
-  const pick = h(
-    'select',
-    {
-      'aria-label': `Order of ${m.name} among your computers`,
-      onchange: () => {
-        const was = current(m).priority ?? null;
-        const to = pick.value === '' ? null : Number(pick.value);
-        const set = (v) => ((current(m).priority = v), redraw());
-        optimistic({
-          key: `machine-order:${m.id}`,
-          apply: () => set(to),
-          send: () => api(`api/machines/${m.id}`, { method: 'PATCH', body: { priority: to } }),
-          undo: () => set(was),
-          label: `set the order of ${m.name}`,
-        });
+  const pick = /** @type {HTMLSelectElement} */ (
+    h(
+      'select',
+      {
+        'aria-label': `Order of ${m.name} among your computers`,
+        onchange: () => {
+          const was = current(m).priority ?? null;
+          const to = pick.value === '' ? null : Number(pick.value);
+          const set = (/** @type {number | null} */ v) => ((current(m).priority = v), redraw());
+          optimistic({
+            key: `machine-order:${m.id}`,
+            apply: () => set(to),
+            send: () => api(`api/machines/${m.id}`, { method: 'PATCH', body: { priority: to } }),
+            undo: () => set(was),
+            label: `set the order of ${m.name}`,
+          });
+        },
       },
-    },
-    h('option', { value: '', selected: c.priority == null }, 'No order'),
-    ...Array.from({ length: most }, (_, i) => h('option', { value: String(i + 1), selected: c.priority === i + 1 }, i === 0 ? '1, first' : String(i + 1))),
+      h('option', { value: '', selected: c.priority == null }, 'No order'),
+      ...Array.from({ length: most }, (_, i) => h('option', { value: String(i + 1), selected: c.priority === i + 1 }, i === 0 ? '1, first' : String(i + 1))),
+    )
   );
   return h('label', { class: 'small muted role-caps role-order', title: 'Minion turns go to your first computer until it is full, then the next' }, 'Fill order ', pick);
 }
 
-/** A whole number in a cap's bounds, or null; blank is "that PC's own". */
+/** A whole number in a cap's bounds, or null; blank is "that PC's own". @param {string} key @param {string} text @returns {{ ok: boolean, n: number | null }} */
 const capValue = (key, text) => {
   const t = text.trim();
   if (t === '') return { ok: true, n: null };
@@ -174,14 +196,15 @@ const capValue = (key, text) => {
   return { ok: Number.isInteger(n) && n >= min && n <= max, n };
 };
 
+/** @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw */
 function capsEditor(m, r, redraw) {
   const key = `${m.id}:${r.role}`;
-  const typed = editing.get(key);
+  const typed = /** @type {Record<string, string>} */ (editing.get(key));
   const caps = CAPS[r.role];
-  const own = r.role === 'turns' ? (m.worker?.caps ?? null) : null;
-  const shown = (k) => typed[k] ?? (r.caps[k] != null ? String(r.caps[k]) : '');
+  const own = /** @type {Record<string, number> | null} */ (r.role === 'turns' ? (m.worker?.caps ?? null) : null);
+  const shown = (/** @type {keyof MachineRoleCaps} */ k) => typed[k] ?? (r.caps[k] != null ? String(r.caps[k]) : '');
   const fields = caps.map(([k, label, unit]) => {
-    const input = h('input', { type: 'text', inputmode: 'numeric', id: `role-cap-${m.id}-${k}`, value: shown(k), placeholder: own?.[k] != null ? String(own[k]) : '', 'aria-label': `${label}${unit ? ` (${unit})` : ''}` });
+    const input = /** @type {HTMLInputElement} */ (h('input', { type: 'text', inputmode: 'numeric', id: `role-cap-${m.id}-${k}`, value: shown(k), placeholder: own?.[k] != null ? String(own[k]) : '', 'aria-label': `${label}${unit ? ` (${unit})` : ''}` }));
     input.oninput = () => {
       typed[k] = input.value;
       input.setAttribute('aria-invalid', String(!capValue(k, input.value).ok));
@@ -191,10 +214,11 @@ function capsEditor(m, r, redraw) {
   const save = h('button', { type: 'button', class: 'small' }, 'Save');
   const cancel = h('button', { type: 'button', class: 'secondary small', onclick: () => (editing.delete(key), redraw()) }, 'Cancel');
   save.onclick = () => {
+    /** @type {Record<string, number | null>} */
     const next = {};
     for (const [k, label] of caps) {
       const v = capValue(k, shown(k));
-      if (!v.ok) return toast(`${label}: a whole number from ${LIMITS[k][0]} to ${LIMITS[k][1]}, or blank for ${r.role === 'ci' ? 'no cap' : "that PC's own"}`, { tone: 'error' });
+      if (!v.ok) return toast(`${label}: a whole number from ${LIMITS[k][0]} to ${LIMITS[k][1]}, or blank for ${r.role === 'ci' ? 'no cap' : "that PC's own"}`, { tone: 'danger' });
       next[k] = v.n;
     }
     editing.delete(key);
@@ -218,12 +242,12 @@ function capsEditor(m, r, redraw) {
       label: `set the ${r.name} caps on ${m.name}`,
     });
   };
-  const over = own && caps.some(([k]) => capValue(k, typed[k] ?? '').n > own[k]);
+  const over = own && caps.some(([k]) => /** @type {number} */ (capValue(k, typed[k] ?? '').n) > own[k]);
   const hint = r.role === 'ci' ? 'Blank: no cap here, every runner registered there may be awake.' : own ? `Blank is that PC's own cap. It holds the lower of these and its own${over ? ': a number above its own needs that raised first (below)' : ''}.` : "Blank is that PC's own cap, once it is set up.";
   return h('div', { class: 'role-caps-edit' }, h('b', { class: 'small' }, `${r.name} caps, set here`), h('div', { class: 'worker-caps' }, ...fields), h('p', { class: 'muted small' }, hint), h('div', { class: 'row' }, save, cancel));
 }
 
-/** One role's card. `extra` is what the row puts inside it while it's on (the Tools ticks). */
+/** One role's card. `extra` is what the row puts inside it while it's on (the Tools ticks). @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw @param {Node | null} [extra] */
 function roleCard(m, r, redraw, extra) {
   const why = cannot(m, r);
   const can = managesRoles(m) && !why;
@@ -241,7 +265,7 @@ function roleCard(m, r, redraw, extra) {
       const now = roleOf(m, r.role) ?? r;
       const on = !now.on;
       // Shown as the server does it: switched on with no list, every scheme its owner is in (for its owner, the ones they see here).
-      const shown = on && !now.projects.length && m.owner_id === account?.id ? { on, projects: (view.projects ?? []).map((p) => p.id) } : { on };
+      const shown = on && !now.projects.length && m.owner_id === account?.id ? { on, projects: (view?.projects ?? []).map((p) => p.id) } : { on };
       changeRole(m, r.role, { on }, `switch ${r.name} ${on ? 'on' : 'off'} on ${m.name}`, redraw, shown);
     },
   });
@@ -261,7 +285,12 @@ function roleCard(m, r, redraw, extra) {
   );
 }
 
-/** A machine's role cards, in the page's order. */
+/**
+ * A machine's role cards, in the page's order.
+ * @param {MachineRow} m
+ * @param {Redraw} redraw
+ * @param {{ tools?: () => Node | null }} [opts]
+ */
 export function roleCards(m, redraw, { tools } = {}) {
   if (!m.roles?.length) return h('p', { class: 'muted small' }, 'Its roles show once the server has them.');
   return h(
@@ -269,12 +298,12 @@ export function roleCards(m, redraw, { tools } = {}) {
     { class: 'role-cards' },
     // A CI runner host's row is that PC's runner agent: only its CI card belongs here, the PC's other roles on its own row.
     m.runners
-      ? [roleCard(m, m.roles.find((r) => r.role === 'ci') ?? { role: 'ci', name: 'CI runners', on: false, caps: {}, projects: [] }, redraw), h('p', { class: 'muted small' }, "This row is that PC's CI runner agent: its other roles are on the PC's own row.")]
+      ? [roleCard(m, m.roles.find((r) => r.role === 'ci') ?? /** @type {MachineRole} */ ({ role: 'ci', name: 'CI runners', on: false, caps: {}, setup: null, projects: [] }), redraw), h('p', { class: 'muted small' }, "This row is that PC's CI runner agent: its other roles are on the PC's own row.")]
       : m.roles.map((r) => roleCard(m, r, redraw, r.role === 'tools' ? tools?.() : null)),
   );
 }
 
-/** Pause all, or Resume once paused: every role that's on goes off (draining), and one click puts them back. */
+/** Pause all, or Resume once paused: every role that's on goes off (draining), and one click puts them back. @param {MachineRow} m @param {Redraw} redraw */
 export function pauseButton(m, redraw) {
   if (!managesRoles(m)) return null;
   const paused = !!m.paused?.length;
@@ -285,9 +314,10 @@ export function pauseButton(m, redraw) {
     {
       type: 'button',
       class: 'secondary small',
-      title: paused ? `Switch ${m.paused.map((r) => m.roles?.find((x) => x.role === r)?.name ?? r).join(', ')} back on` : 'Switch every role off: what runs finishes, nothing new starts. One click puts them back.',
+      title: paused ? `Switch ${/** @type {MachineRoleKey[]} */ (m.paused).map((r) => m.roles?.find((x) => x.role === r)?.name ?? r).join(', ')} back on` : 'Switch every role off: what runs finishes, nothing new starts. One click puts them back.',
       onclick: () => {
         const was = { paused: current(m).paused ?? null, on: Object.fromEntries((current(m).roles ?? []).map((r) => [r.role, r.on])) };
+        /** @param {MachineRoleKey[] | null} pausedTo @param {(r: MachineRole) => boolean} onOf */
         const set = (pausedTo, onOf) => {
           const c = current(m);
           c.paused = pausedTo;
@@ -300,10 +330,10 @@ export function pauseButton(m, redraw) {
           .map(([k]) => k);
         optimistic({
           key: `machine-pause:${m.id}`,
-          apply: () => (paused ? set(null, (r) => r.on || back.includes(r.role)) : set([...back, ...on], () => false)),
+          apply: () => (paused ? set(null, (r) => r.on || back.includes(r.role)) : set([...back, .../** @type {MachineRoleKey[]} */ (on)], () => false)),
           send: () =>
             api(`api/machines/${m.id}/pause`, { method: 'POST', body: { pause: !paused } }).then((res) => {
-              if (res?.errors?.length) toast(`Some of ${m.name}'s roles stayed off: ${res.errors.join('; ')}`, { tone: 'error' });
+              if (res?.errors?.length) toast(`Some of ${m.name}'s roles stayed off: ${res.errors.join('; ')}`, { tone: 'danger' });
             }),
           undo: () => set(was.paused, (r) => was.on[r.role] ?? r.on),
           label: paused ? `resume ${m.name}` : `pause ${m.name}`,

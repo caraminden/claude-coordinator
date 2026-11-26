@@ -2411,9 +2411,9 @@ export class Runner {
     return runningTurnOff(live).then((turn) => turn.signal(sig));
   }
 
-  /** signal, for a claude whose pid is in hand (0: not started). */
+  /** signal, for a claude whose pid is in hand (0: not started). Its kind is read on the thread: both callers drop the folder next, and a machine turn read late would pass for a child and its worker's pid be signalled here. */
   private signalPid(live: TurnAt, pid: number, sig: NodeJS.Signals) {
-    void runningTurnOff(live).then((turn) => turn.signal(sig, pid));
+    void runningTurn(live).signal(sig, pid);
   }
 
   // Fresh starts: src/fresh.ts.
@@ -3776,6 +3776,7 @@ export class Runner {
     this.closing.delete(ticketId);
     // What the ending means is src/turn-outcome.ts's (#1379); this carries it out.
     // A machine's turn ran in its worker's container, out of this server's reach: a kill there is never this server's restart.
+    // shortcut: read on the thread, once a turn; moves off with the turn end (#2137).
     const onMachine = runningTurn(live) instanceof MachineTurn;
     const end: TurnEnd = { turn, exit, stderr, closing, ran: { unit: !!live.unit || onMachine, container: !!live.container || onMachine } };
     let out = outcome(end);

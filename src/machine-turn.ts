@@ -181,7 +181,17 @@ export function placedAt(dir: string): Placed | null {
 }
 
 /** placedAt off the server's thread: for the agent's routes, a followed turn's poll and stop (#2134). */
-export const placedNow = (dir: string): Promise<Placed | null> => readFile(join(dir, 'machine'), 'utf8').then(asPlaced, () => null);
+export const placedNow = (dir: string): Promise<Placed | null> =>
+  readFile(join(dir, 'machine'), 'utf8').then(
+    (text) => {
+      try {
+        return asPlaced(text);
+      } catch {
+        return null; // mid-write: placeTurn truncates, then writes
+      }
+    },
+    () => null,
+  );
 
 function asPlaced(text: string): Placed | null {
   const p = JSON.parse(text);

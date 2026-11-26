@@ -1115,6 +1115,52 @@ test("git: --ours and --theirs mid-merge, and any checkout in a clone under the 
   }
 });
 
+test("git clean: only a dry run passes, except in a clone under the turn's TMPDIR (#2063)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-2063-'));
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: join(tmp, 'projects/2/tmp/9') } };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const clone = join(tmp, 'projects/2/tmp/9/clone');
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env });
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c, [])?.reason ?? null;
+  try {
+    mkdirSync(wt, { recursive: true });
+    sh('git init -q -b ticket/9 && echo a > a.txt && git add a.txt && git commit -qm a && echo work > new.txt');
+    // In a worktree, every spelling that deletes is refused, ignored-only (-X) too: no minion was found using it (#2063).
+    for (const no of [
+      'git clean -fd',
+      'git clean -fdx',
+      'git clean -qfdx',
+      'git clean -f',
+      'git clean --force -d',
+      'git clean -d -f',
+      'git clean -fX',
+      'git clean -ffdx -e .big',
+      'git clean -fenew -d',
+      'git clean -i',
+      'git clean -d',
+      `git -C ${wt} clean -fd`,
+      'git -c clean.requireForce=false clean -d',
+      'git clean -fd -- -n',
+    ]) {
+      assert.match(at(no) ?? '', /git clean .*is blocked: it deletes untracked files.*git clean -n.*`rm`/, no);
+    }
+    // A folder it can't follow is refused on the words alone.
+    assert.ok(at('cd "$D" && git clean -fd'));
+    // A dry run, in any spelling, and help pass.
+    for (const ok of ['git clean -n', 'git clean -nd', 'git clean -fdn', 'git clean -fdxn', 'git clean --dry-run -fdx', 'git clean -fd -e x -n', 'git clean -ne .big -fdx', 'git clean -h']) assert.equal(at(ok), null, ok);
+    // -e takes its pattern: the n in "-e n" or "-enew" is a pattern, not a dry run.
+    for (const no of ['git clean -fd -e n', 'git clean -fd --exclude -n', 'git clean -fdenew']) assert.ok(at(no), no);
+    // A clone under the turn's TMPDIR is scratch: it cleans freely, from inside or by -C; the worktree by -C from it stays refused.
+    mkdirSync(join(tmp, 'projects/2/tmp/9'), { recursive: true });
+    sh(`git clone -q ${wt} ${clone}`);
+    for (const ok of [`git -C ${clone} clean -fdx`, 'cd "$TMPDIR/clone" && git clean -qfd', `cd ${clone} && git clean -fX`]) assert.equal(at(ok), null, ok);
+    assert.ok(at(`git -C ${wt} clean -fd`, clone));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('systemd-run is a wrapper: the command it runs is checked past its options (#513)', () => {
   const db = '~/.local/share/claude-coordinator/state.db';
   for (const command of [

@@ -11,6 +11,26 @@ const STASH_WHY = 'The stash stack is shared by every worktree of the repo, so a
 const PROTECTED = /^(main|master)$/;
 const MAIN_WHY = "main changes only through the scheme's own route (tools/land.sh and tools/deploy.sh, or a merged pull request), never a push from a minion's worktree. Push your minion branch.";
 
+const CLEAN_HOW = 'List what would go with `git clean -n` (plus the -d, -x or -X you meant), move anything you need aside, and delete named scratch with `rm`. A clone in $TMPDIR is yours to clean.';
+
+/** Whether a `git clean` only lists (-n, --dry-run, or n in a short flag cluster before its -e pattern), or only shows help. */
+function cleanDryRun(args: Word[]): boolean {
+  for (let k = 0; k < args.length; k++) {
+    const { text, unknown } = args[k];
+    if (text === '--') break;
+    if (unknown) continue;
+    if (['--dry-run', '-h', '--help'].includes(text)) return true;
+    if (text === '--exclude') k++;
+    else if (/^-[^-]/.test(text)) {
+      // -e takes the rest of the cluster as its pattern, or the next word when it ends the cluster.
+      const e = text.indexOf('e');
+      if ((e < 0 ? text : text.slice(0, e)).includes('n')) return true;
+      if (e === text.length - 1) k++;
+    }
+  }
+  return false;
+}
+
 /** Runs git in dir: null when it can't run there (no such folder, not a repo), so the guard lets the call through. */
 function git(dir: string, ...args: string[]): { status: number; out: string } | null {
   const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 3000 });
@@ -56,7 +76,7 @@ function conflicted(dir: string, paths: Word[]): boolean {
  * The git habits every scheme shares: no stash; files or folders checked out or restored, from the index, HEAD or
  * another commit, only once their diff is saved (pushed onto `saves`, which the hook writes once the whole call
  * passes); no checkout, merge, rebase or reset over uncommitted tracked changes; from a minion's worktree,
- * no push to main and no plain force. With the folder unknown it checks only what the words alone show.
+ * no push to main and no plain force; outside a clone under the turn's TMPDIR, no `git clean` but a dry run. With the folder unknown it checks only what the words alone show.
  */
 export function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false, moved = false, saves?: Save[]): Verdict | null {
   const words = args.map((w) => w.text);
@@ -95,6 +115,9 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
       if (staged && !source) source = { text: 'HEAD', unknown: false };
       return savePaths(`git restore ${words.join(' ')}`, paths, source, staged, false, dir, cfg, saves);
     }
+    case 'clean':
+      // Only a dry run passes: -f, -i or clean.requireForce=false all delete untracked files nothing can bring back (#2063).
+      return (dir && scratchClone(dir, cfg)) || cleanDryRun(args) ? null : hard(`\`git clean ${words.join(' ')}\` is blocked: it deletes untracked files, which no commit or diff can bring back. ${CLEAN_HOW}`);
     case 'checkout': {
       // A clone under the turn's TMPDIR is scratch; --ours and --theirs pick a side of an open conflict (#485).
       if (dir && (scratchClone(dir, cfg) || (has('--ours', '--theirs') && midMerge(dir) && conflicted(dir, plain)))) return null;

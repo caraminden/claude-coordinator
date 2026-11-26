@@ -502,7 +502,7 @@ export class KitSync {
         // is inside the script, so it times the run and not the wait; the card shows 'checking' while it waits. --here: it needs
         // this worktree. A ship isn't wrapped: land.sh refuses under citadel-heavy and takes its own slot for its suite.
         argv: [join(import.meta.dirname, '../tools/citadel-heavy'), '--here', '--heavy', 'bash', '-c', CHECK_SCRIPT],
-        env: { ...this.d.env(null), KIT_SYNC_GUARD: guard ? '1' : '0' },
+        env: { ...this.d.env(null), CITADEL_HEAVY_WHO: `kit sync ${name}`, KIT_SYNC_GUARD: guard ? '1' : '0' },
         unit: `citadel-kit-sync-check-${project}-${Date.now()}`,
         description: `Kit sync check for ${name}`,
         ticketId: 0,

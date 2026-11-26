@@ -1,6 +1,6 @@
 // The host_check tool's checks (#621): the database with its secrets masked, and a user unit's journal and status.
 import assert from 'node:assert/strict';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -93,7 +93,10 @@ const wt = join(root, 'wt');
 mkdirSync(join(wt, 'tools'), { recursive: true });
 mkdirSync(join(wt, 'test'));
 copyFileSync(join(REPO, 'tools/judge-replay.ts'), join(wt, 'tools/judge-replay.ts'));
-symlinkSync(join(REPO, 'tools/judge-replays'), join(wt, 'tools/judge-replays'));
+mkdirSync(join(wt, 'tools/judge-replays'));
+for (const f of readdirSync(join(REPO, 'tools/judge-replays'))) symlinkSync(join(REPO, 'tools/judge-replays', f), join(wt, 'tools/judge-replays', f));
+// A replay file for a judge src/judges.ts doesn't register: judge-replay itself refuses it.
+writeFileSync(join(wt, 'tools/judge-replays/unregistered.ts'), 'export {};\n');
 symlinkSync(join(REPO, 'src'), join(wt, 'src'));
 writeFileSync(join(wt, 'test/judge-replays.json'), '{"other": {"hash": "kept"}}\n');
 const worktree = { cwd: wt, env: { PATH: process.env.PATH ?? '', HOME: root } };
@@ -106,6 +109,9 @@ test("judge_replay runs the worktree's judge-replay --record over the database, 
   assert.deepEqual(recs.other, { hash: 'kept' }, "another judge's record is left alone");
   assert.equal(recs['container-relief'].hash, judgeHash(judge('container-relief')!, REPO));
   assert.equal(recs['container-relief'].days, 2);
+  const refused = await hostCheck({ ...opts, worktree }, { what: 'judge_replay', judge: 'unregistered' });
+  assert.match(refused, /No judge unregistered/);
+  assert.equal(JSON.parse(readFileSync(join(wt, 'test/judge-replays.json'), 'utf8')).unregistered, undefined, 'an unregistered judge records nothing');
 });
 
 test('judge_replay refuses a bad judge, days or scheme, a judge with no replay, and a caller with no worktree', async () => {

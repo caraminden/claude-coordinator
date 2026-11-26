@@ -492,6 +492,7 @@ export class TurnLine {
         waiting: this.entries.filter((e) => this.need(e.ticket) === m.id).length,
         block: m.block?.why ?? null,
         // Why the balancer holds it under the owner's cap: "2 CI jobs waiting".
+        priority: m.priority,
         balanced: m.room && m.room.workers < Math.min(this.pool(m.id).fixed?.size ?? Infinity, m.cap) ? m.room.why : null,
         away: m.away,
         pressed,

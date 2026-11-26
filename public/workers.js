@@ -146,8 +146,8 @@ export function workersPanel(page) {
       m,
       m.block && toneChip(m.away === null ? 'warn' : 'neutral', m.away === null ? 'No new turns' : m.away ? 'Away' : 'Not connected'),
       [
-        [m.block && `${m.block[0].toUpperCase()}${m.block.slice(1)}`, m.waiting && `${m.waiting} waiting for it`, autoLine(m)],
-        [`Cap ${m.cap}`, m.owner && (m.used ? `${m.owner}'s ${plural(m.used, 'turn')} in it, and only theirs` : `${m.owner}'s turns only`)],
+        [m.block && `${m.block[0].toUpperCase()}${m.block.slice(1)}`, m.waiting && `${m.waiting} waiting for it`, m.balanced && `Held to ${m.size}: ${m.balanced}`, autoLine(m)],
+        [`Cap ${m.cap}`, m.priority != null && `Order ${m.priority} among its owner's computers`, m.owner && (m.used ? `${m.owner}'s ${plural(m.used, 'turn')} in it, and only theirs` : `${m.owner}'s turns only`)],
       ],
       m.mine && [h('label', { class: 'small' }, 'Turns at once', sizePick(m, m.cap)), limitsOf(m, `What Auto steers by on ${m.name}. The number it takes is never over ${m.cap}, the cap set on that computer.`)],
     );

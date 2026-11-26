@@ -314,9 +314,10 @@ function Get-ServiceDir($service) {
 }
 
 # Puts to sleep each runner service asleep.json names that runs no job ($busy: folder -> $true), and wakes each one
-# it put to sleep that the file no longer names. $services are Win32_Service rows (Name, State, PathName).
-function Set-Asleep($services, $busy) {
-  $asleep = @(Read-Asleep)
+# it put to sleep that the file no longer names. $services are Win32_Service rows (Name, State, PathName). -WakeAll
+# wakes every one it put to sleep: the agent is gone, so nothing holds the plan.
+function Set-Asleep($services, $busy, [switch]$WakeAll) {
+  $asleep = if ($WakeAll) { @() } else { @(Read-Asleep) }
   $slept = New-Object System.Collections.Generic.List[string]
   foreach ($d in @(Read-Slept)) { if (-not $slept.Contains($d)) { $slept.Add($d) } }
   $changed = $false
@@ -378,7 +379,11 @@ function Set-SlotRate {
 }
 
 for (;;) {
-  if ($AgentPid -and -not (Get-Process -Id $AgentPid -ErrorAction SilentlyContinue)) { exit 0 }
+  if ($AgentPid -and -not (Get-Process -Id $AgentPid -ErrorAction SilentlyContinue)) {
+    # The agent stopped or was removed: the runners it had asleep wake, as with no agent at all.
+    try { Set-Asleep @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'") @{} -WakeAll } catch { Write-Host "Couldn't wake the runners put to sleep: $($_.Exception.Message)" }
+    exit 0
+  }
   try {
     $procs = @(Get-CimInstance -Query 'SELECT ProcessId, ParentProcessId, Name, CreationDate, ExecutablePath FROM Win32_Process')
     $kids = @{}

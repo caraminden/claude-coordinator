@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake } from '../public/runner-agent.mjs';
+import { cleanSample } from '../src/ci-load.ts';
 import { Store } from '../src/db.ts';
 import { balance, runnerOrder, runnerShares } from '../src/machine-balancer.ts';
 import { MachineRelay } from '../src/machines.ts';
@@ -180,7 +181,7 @@ const skip = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0']).error ? 'no
 test('keep-runners.ps1 stops the idle services asleep.json names, wakes the ones it stopped once they leave it, and leaves the rest', { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   try {
-    const run = (asleep: object, services: string, extra = '') => {
+    const run = (asleep: object, services: string, extra = '', flags = '') => {
       writeFileSync(join(dir, 'asleep.json'), JSON.stringify(asleep));
       const file = join(dir, 'run.ps1');
       writeFileSync(
@@ -199,7 +200,7 @@ $working = @()
 function Test-RunnerWorking($dir) { $working -contains $dir }
 ${extra}
 $svc = { param($n, $state) [pscustomobject]@{ Name = "actions.runner.o-$n.pc"; State = $state; PathName = "\`"C:\\actions-runner-$n\\bin\\RunnerService.exe\`"" } }
-Set-Asleep @(${services}) @{ 'c:\\actions-runner-busy' = $true } | Out-Null
+Set-Asleep @(${services}) @{ 'c:\\actions-runner-busy' = $true } ${flags} | Out-Null
 ConvertTo-Json -Compress -InputObject @($calls)`,
       );
       const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8' });
@@ -221,6 +222,9 @@ ConvertTo-Json -Compress -InputObject @($calls)`,
     assert.deepEqual(run({ until: 0, dirs: [] }, all('Stopped', 'Stopped'), like51).sort(), ['start actions.runner.o-a.pc', 'start actions.runner.o-b.pc']);
     // One that took a job since the sweep looked is asked again right before its stop, and left up.
     assert.deepEqual(run(ab, all('Running', 'Running'), "$working = @('c:\\actions-runner-b')"), ['stop actions.runner.o-a.pc']);
+    // The agent is gone: every one it put to sleep wakes, though the plan it left hasn't run out.
+    assert.deepEqual(run(ab, all('Stopped', 'Running'), '', '-WakeAll'), ['start actions.runner.o-a.pc']);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'slept.json'), 'utf8')), []);
   } finally {
     // timing-ok: own temp dir
     rmSync(dir, { recursive: true, force: true });
@@ -320,4 +324,11 @@ test('the relay sends each runner agent its part, and a row whose runner agent i
     win.r.end();
     wsl.r.end();
   }
+});
+
+test("an agent's samples say which runners it can wake; anything but a short list of repo names is refused", () => {
+  const body = (wakeable: unknown) => ({ os: 'linux', host: 'desk', cores: 8, cpu: 10, mem_total: 1, mem_free: 1, runners: [], wakeable });
+  assert.deepEqual(cleanSample(body(['O/Citadel', 'o/citadel', 'o/twi']), 1).wakeable, ['o/citadel', 'o/citadel', 'o/twi']);
+  assert.equal('wakeable' in cleanSample({ ...body(null), wakeable: undefined }, 1), false, 'an older agent says nothing');
+  for (const bad of ['o/x', [1, 2], [''], Array(65).fill('o/x')]) assert.throws(() => cleanSample(body(bad), 1), /wakeable must be/);
 });

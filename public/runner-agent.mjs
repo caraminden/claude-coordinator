@@ -839,6 +839,17 @@ async function main() {
         .catch((err) => log(`Couldn't wake the runners: ${err.message}`)),
     10_000,
   ).unref();
+  // Stopped (systemd's stop, Ctrl+C): the runners it put to sleep wake first, as with no agent at all; at most 30 s.
+  for (const sig of ['SIGTERM', 'SIGINT'])
+    process.once(sig, () => {
+      log(`${sig}: waking the runners Citadel's plan had asleep, then stopping.`);
+      setTimeout(() => process.exit(0), 30_000).unref();
+      wake.plan = null;
+      wake
+        .next()
+        .catch((err) => log(`Couldn't wake the runners: ${err.message}`))
+        .finally(() => process.exit(0));
+    });
   // Runners a restarted agent put to sleep before stay so only until Citadel's first plan or PLAN_HOLD_MS.
   setTimeout(() => wake.next().catch((err) => log(`Couldn't wake the runners: ${err.message}`)), PLAN_HOLD_MS).unref();
 

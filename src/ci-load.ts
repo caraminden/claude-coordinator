@@ -84,6 +84,12 @@ const maybe = (v: unknown, what: string, max: number, min = 0) => (v === null ||
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, '').slice(0, max) : '');
 
 /** An agent's sample, field by field: anything that isn't a number in range is refused. The time is the server's: a PC's clock can be off. */
+/** An agent's wakeable runners' repos (M6b): a list of at most 64 repo names, lowercased. */
+function wakeable(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length > 64 || !v.every((r) => typeof r === 'string' && r && r.length <= 200)) throw new HttpError(400, 'wakeable must be a list of at most 64 repo names');
+  return v.map((r: string) => text(r, 200).toLowerCase());
+}
+
 export function cleanSample(raw: unknown, now: number): Sample {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, 'A sample is an object');
   const body = raw as Record<string, unknown>;
@@ -119,7 +125,7 @@ export function cleanSample(raw: unknown, now: number): Sample {
     hv,
     runners: body.runners.map((r: Record<string, unknown>) => ({ name: text(r?.name, 100), repo: text(r?.repo, 200).toLowerCase(), dir: text(r?.dir, 300), cpu: num(r?.cpu, "a runner's cpu", 100), mem: num(r?.mem, "a runner's mem", 1e15) })),
     restarts,
-    ...(Array.isArray(body.wakeable) ? { wakeable: body.wakeable.slice(0, 64).map((r: unknown) => text(r, 200).toLowerCase()) } : {}),
+    ...(body.wakeable === undefined ? {} : { wakeable: wakeable(body.wakeable) }),
   };
 }
 

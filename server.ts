@@ -728,19 +728,14 @@ const balancer = new MachineBalancer({
 });
 if (!BOOT_CHECK) every('machine balancer', MachineBalancer.TICK_MS, () => balancer.tick());
 // Runners awake (Build 7 M6b): each PC's CI runner agents hear their part of its plan every step, so one that stops
-// hearing it wakes its runners. The repos each agent has runners for are kept since boot: a runner asleep leaves its samples.
-const planRepos = new Map<string, Set<string>>();
+// hearing it wakes its runners. Its plan is no more than its agents can wake (their samples say, asleep ones included).
 const sendRunnerPlans = () => {
   const pcs = [...new Map([...machines.runnerMachines('windows'), ...machines.runnerMachines('linux')].map((m) => [m.id, m])).values()].flatMap((m) => {
     const plan = balancer.current(m.id);
     if (!plan || m.owner_id === null) return [];
-    const agents = machines.runnersOn(m.id).map(({ os }) => {
-      const repos = planRepos.get(`${m.id}:${os}`) ?? new Set<string>();
-      planRepos.set(`${m.id}:${os}`, repos);
-      for (const r of ciLoad.reposOf(m.id, os)) repos.add(r);
-      return { key: os, repos, cap: ciLoad.wakeableOf(m.id, os) };
-    });
-    return [{ id: m.id, owner: m.owner_id, priority: m.priority ?? null, runners: plan.runners, repos: new Set(agents.flatMap((a) => [...a.repos])), agents }];
+    const agents = machines.runnersOn(m.id).map(({ os }) => ({ key: os, repos: new Set(ciLoad.reposOf(m.id, os)), cap: ciLoad.wakeableOf(m.id, os) }));
+    const caps = agents.map((a) => a.cap ?? Infinity).reduce((a, n) => a + n, 0);
+    return [{ id: m.id, owner: m.owner_id, priority: m.priority ?? null, runners: Math.min(plan.runners, caps), repos: new Set(agents.flatMap((a) => [...a.repos])), agents }];
   });
   const order = runnerOrder(pcs, ciQueued);
   for (const pc of pcs) {

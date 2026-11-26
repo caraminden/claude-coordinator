@@ -817,8 +817,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   for (const m of machines) {
     for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
   }
-  // The pooled Windows tools (Build 7 M5): the app picks the machine when the session opens (routes/machines.ts).
-  const windows = machines.some((m) => m.screen);
+  // The pooled Windows tools (Build 7 M5): the app picks the machine when the session opens (routes/machines.ts). A machine
+  // named `windows` before the name was kept for them keeps its own tools there.
+  const windows = machines.some((m) => m.screen) && !servers[POOLED_WINDOWS];
   if (windows) servers[POOLED_WINDOWS] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), POOLED_WINDOWS, POOLED_WINDOWS, 'ws'] };
   const files: LaunchPlan['files'] = [];
   // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.

@@ -33,12 +33,12 @@ function jobMachine(app: App, name: unknown, project: Project, kind: JobKind): M
   const names = jobMachinesFor(app.store, project.id);
   if (name === undefined || name === null || name === '') {
     const open = JOB_STATES.filter((st) => !ENDED.includes(st));
-    const eligible = app.store
-      .listMachines()
-      .filter((m) => names.includes(m.name))
-      .map((m) => ({ id: m.id, name: m.name, online: app.machines.isOnline(m.id), paused: storedSettings(m).paused, allowed: !!app.store.jobKind(m.id, kindHash(kind)), ahead: app.store.machineJobs({ machine: m.id, states: open }).length }));
+    const lent = app.store.listMachines().filter((m) => names.includes(m.name));
+    if (!lent.length) throw new HttpError(404, `No machine runs GPU jobs for ${project.name}: a machine's GPU jobs role must be lent to it, and its owner's machine-agent.json needs a jobs block`);
+    // Eligible (spec section 6): online and not draining; a job for a PC that is away waits there only when named.
+    const eligible = lent.filter((m) => app.machines.isOnline(m.id) && !storedSettings(m).paused).map((m) => ({ id: m.id, name: m.name, priority: m.priority ?? null, allowed: !!app.store.jobKind(m.id, kindHash(kind)), ahead: app.store.machineJobs({ machine: m.id, states: open }).length }));
     const pick = pickJobMachine(eligible);
-    if (!pick) throw new HttpError(404, `No machine runs GPU jobs for ${project.name}: a machine's GPU jobs role must be lent to it, and its owner's machine-agent.json needs a jobs block`);
+    if (!pick) throw new HttpError(503, `No machine that runs GPU jobs for ${project.name} is online and taking jobs (${lent.map((m) => m.name).join(', ')}): name one to queue the job for when it's back`, true);
     return app.store.getMachine(pick.id)!;
   }
   if (typeof name !== 'string') throw new HttpError(400, "machine must be the machine's name, or left out to let Citadel pick one");

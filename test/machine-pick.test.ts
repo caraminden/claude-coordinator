@@ -12,8 +12,8 @@ import { pickJobMachine, WindowsPool, type JobMachine } from '../src/machine-pic
 
 test('the pooled Windows tools take a free screen first, then keep the minion on its machine while it is eligible, busy or not', () => {
   const pool = new WindowsPool();
-  const a = { id: 1, name: 'win-a', busy: 2 };
-  const b = { id: 2, name: 'win-b', busy: 0 };
+  const a = { id: 1, name: 'win-a', busy: 2, priority: null };
+  const b = { id: 2, name: 'win-b', busy: 0, priority: null };
   assert.deepEqual(pool.pick(10, [a, b]), { machine: b, movedFrom: null }, 'the free screen, though its id is higher');
   assert.deepEqual(pool.pick(10, [a, { ...b, busy: 3 }]), { machine: { ...b, busy: 3 }, movedFrom: null }, 'busy now (its own job, maybe), it stays');
   assert.deepEqual(pool.pick(11, [a, { ...b, busy: 3 }]), { machine: a, movedFrom: null }, 'another minion gets the shorter line');
@@ -23,15 +23,31 @@ test('the pooled Windows tools take a free screen first, then keep the minion on
   assert.deepEqual(pool.pick(10, [b]), { machine: b, movedFrom: 1 }, 'none eligible for a while forgets nothing: the move still says where from');
 });
 
-test('a GPU job with no machine named goes online first, then to one that allows its recipe, not paused, the shortest queue', () => {
-  const m = (name: string, o: Partial<JobMachine> = {}): JobMachine => ({ id: name.length, name, online: true, paused: false, allowed: false, ahead: 0, ...o });
+test("a new pick takes the owner's order among free screens (M6's rank), a free screen before an ordered busy one", () => {
+  const pool = new WindowsPool();
+  const free = (id: number, priority: number | null) => ({ id, name: `win-${id}`, busy: 0, priority });
+  assert.equal(pool.pick(1, [free(1, null), free(2, 5), free(3, 2)])!.machine.id, 3, 'order 2 before 5, both before no order');
+  assert.equal(pool.pick(2, [{ ...free(1, 1), busy: 1 }, free(2, null)])!.machine.id, 2, 'the first in order is busy: the free one');
+  assert.equal(
+    pool.pick(3, [
+      { ...free(1, 1), busy: 2 },
+      { ...free(2, 3), busy: 1 },
+    ])!.machine.id,
+    1,
+    'all busy: the order still comes first',
+  );
+  assert.equal(pool.pick(1, [free(1, null), free(2, 5), free(3, 2), free(4, 1)])!.machine.id, 3, 'a better-ordered machine joining does not move a minion off its checkout');
+});
+
+test('a GPU job with no machine named goes to the first in order with nothing queued, then one that allows its recipe, then the shortest queue', () => {
+  const m = (name: string, o: Partial<JobMachine> = {}): JobMachine => ({ id: name.length, name, priority: null, allowed: false, ahead: 0, ...o });
   assert.equal(pickJobMachine([]), null);
-  assert.equal(pickJobMachine([m('off', { online: false, allowed: true }), m('on', { ahead: 5 })])!.name, 'on');
-  assert.equal(pickJobMachine([m('asks', { ahead: 0 }), m('allows', { allowed: true, ahead: 3 })])!.name, 'allows', 'no go card beats a shorter queue');
-  assert.equal(pickJobMachine([m('paused', { paused: true }), m('open', { ahead: 2 })])!.name, 'open');
-  assert.equal(pickJobMachine([m('busy', { ahead: 2 }), m('idle', { ahead: 1 })])!.name, 'idle');
+  assert.equal(pickJobMachine([m('first', { priority: 1, ahead: 1 }), m('idle')])!.name, 'idle', 'a free machine before a busy one higher in order: load spreads');
+  assert.equal(pickJobMachine([m('later', { priority: 4 }), m('none'), m('first', { priority: 2 })])!.name, 'first', "among free ones, the owner's order");
+  assert.equal(pickJobMachine([m('asks'), m('allows', { allowed: true })])!.name, 'allows', 'same order and room: no go card');
+  assert.equal(pickJobMachine([m('allows', { allowed: true, ahead: 3 }), m('asks', { ahead: 1 })])!.name, 'allows', 'all busy and unordered: no go card, then the queue');
+  assert.equal(pickJobMachine([m('busy', { ahead: 2 }), m('less', { ahead: 1 })])!.name, 'less');
   assert.equal(pickJobMachine([m('b'), m('a')])!.name, 'a', 'then by name');
-  assert.equal(pickJobMachine([m('only', { online: false })])!.name, 'only', 'an offline one still queues: it runs when it is back');
 });
 
 const tmp = tempRoot('machine-pick-');
@@ -102,6 +118,13 @@ test('two Windows machines: a minion sticks to one and moves when it goes away; 
   assert.deepEqual(await pooled(token), { status: 200, machine: 'win-b', from: 'win-a', text: '' });
   assert.deepEqual(await pooled(token), { status: 200, machine: 'win-b', from: null, text: '' });
 
+  // A later turn of the same minion stays there too.
+  before = turns().length;
+  await call(`/api/tickets/${minion.id ?? minion.ticket.id}/messages`, { text: 'and again' }, 'POST');
+  const later = (await until('its next turn', () => turns().length > before && turns())).at(-1);
+  assert.notEqual(later.token, token);
+  assert.deepEqual(await pooled(later.token), { status: 200, machine: 'win-b', from: null, text: '' });
+
   // The other scheme isn't ticked: its turn gets no Windows tools at all, and can't open the pooled ones by hand.
   before = turns().length;
   await call(`/api/projects/${other.id}/tickets`, { message: 'windows too?' }, 'POST');
@@ -111,7 +134,6 @@ test('two Windows machines: a minion sticks to one and moves when it goes away; 
   const refused = await pooled(turn.token);
   assert.equal(refused.status, 503);
   assert.match(refused.text, /No Windows machine lent to Other/);
-  assert.ok(minion);
 });
 
 test('a GPU job with no machine named goes to a machine whose GPU jobs role is lent to the scheme; another scheme is refused', async () => {
@@ -121,22 +143,30 @@ test('a GPU job with no machine named goes to a machine whose GPU jobs role is l
   mkdirSync(join(dir, 'jobs'), { recursive: true });
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ jobs: { dir: join(dir, 'jobs'), folders: {}, max_disk_gb: 10, gpu: true } }));
   const { machine, token } = await call('/api/machines', { name: 'gpu-a' }, 'POST');
-  startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
+  const gpu = startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
   await until('gpu-a online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'gpu-a' && m.online));
   await call(`/api/machines/${machine.id}/roles`, { role: 'gpu', on: true, projects: [lent.id] }, 'PATCH');
 
   const kind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], max_limit_h: 1 };
-  const queue = async (project: { id: number }) => {
+  const queue = async (project: { id: number }, machine?: string) => {
     const before = turns().length;
     const t = await call(`/api/projects/${project.id}/tickets`, { message: 'a job' }, 'POST');
     const { token } = (await until('a turn', () => turns().length > before && turns())).at(-1);
-    return fetch(`${srv.base}/api/tickets/${t.ticket?.id ?? t.id}/jobs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) });
+    return fetch(`${srv.base}/api/tickets/${t.ticket?.id ?? t.id}/jobs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, machine }) });
   };
   const queued = await until('the agent reported its jobs block', async () => {
     const r = await queue(lent);
     return r.status === 201 ? ((await r.json()) as { machine: string }) : null;
   });
   assert.equal(queued.machine, 'gpu-a');
+  const named = await queue(lent, 'gpu-a');
+  assert.equal(named.status, 201, 'named, as before');
+  // Gone offline, it isn't eligible: a job with no machine named finds none, and is told to name one to wait for it.
+  gpu.agent.kill();
+  await until('gpu-a offline', async () => !(await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'gpu-a').online);
+  const none = await queue(lent);
+  assert.equal(none.status, 503);
+  assert.match(await none.text(), /No machine that runs GPU jobs for Gpu is online and taking jobs \(gpu-a\)/);
   const refused = await queue(other);
   assert.equal(refused.status, 404);
   assert.match(await refused.text(), /No machine runs GPU jobs for NoGpu/);

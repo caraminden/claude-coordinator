@@ -1142,15 +1142,20 @@ test("git clean: only a dry run passes, except in a clone under the turn's TMPDI
       `git -C ${wt} clean -fd`,
       'git -c clean.requireForce=false clean -d',
       'git clean -fd -- -n',
+      // The last of -n, --dry-run and --no-dry-run decides, abbreviated as git takes them; a word it can't read could be either.
+      'git clean -n -fd --no-dry-run',
+      'git clean -nfd --no-dry',
+      'git clean -n "$X" -fd',
+      'git clean -h',
     ]) {
       assert.match(at(no) ?? '', /git clean .*is blocked: it deletes untracked files.*git clean -n.*`rm`/, no);
     }
     // A folder it can't follow is refused on the words alone.
     assert.ok(at('cd "$D" && git clean -fd'));
-    // A dry run, in any spelling, and help pass.
-    for (const ok of ['git clean -n', 'git clean -nd', 'git clean -fdn', 'git clean -fdxn', 'git clean --dry-run -fdx', 'git clean -fd -e x -n', 'git clean -ne .big -fdx', 'git clean -h']) assert.equal(at(ok), null, ok);
-    // -e takes its pattern: the n in "-e n" or "-enew" is a pattern, not a dry run.
-    for (const no of ['git clean -fd -e n', 'git clean -fd --exclude -n', 'git clean -fdenew']) assert.ok(at(no), no);
+    // A dry run passes, in any spelling.
+    for (const ok of ['git clean -n', 'git clean -nd', 'git clean -fdn', 'git clean -fdxn', 'git clean --dry-run -fdx', 'git clean --dry -fd', 'git clean -fd --no-dry-run -n', 'git clean -fd -e x -n', 'git clean -ne .big -fdx']) assert.equal(at(ok), null, ok);
+    // -e and --exclude take their pattern: the n in "-e n" or "-enew" is a pattern, not a dry run.
+    for (const no of ['git clean -fd -e n', 'git clean -fd --exclude -n', 'git clean -fd --excl -n', 'git clean -fdenew']) assert.ok(at(no), no);
     // A clone under the turn's TMPDIR is scratch: it cleans freely, from inside or by -C; the worktree by -C from it stays refused.
     mkdirSync(join(tmp, 'projects/2/tmp/9'), { recursive: true });
     sh(`git clone -q ${wt} ${clone}`);

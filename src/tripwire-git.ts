@@ -13,22 +13,29 @@ const MAIN_WHY = "main changes only through the scheme's own route (tools/land.s
 
 const CLEAN_HOW = 'List what would go with `git clean -n` (plus the -d, -x or -X you meant), move anything you need aside, and delete named scratch with `rm`. A clone in $TMPDIR is yours to clean.';
 
-/** Whether a `git clean` only lists (-n, --dry-run, or n in a short flag cluster before its -e pattern), or only shows help. */
+/**
+ * Whether a `git clean` only lists: the last of -n (alone or in a short cluster, before its -e pattern), --dry-run
+ * and --no-dry-run decides, abbreviated as git takes them (--dry, --no-d). A word it can't read could be any of them.
+ */
 function cleanDryRun(args: Word[]): boolean {
+  let dry = false;
   for (let k = 0; k < args.length; k++) {
     const { text, unknown } = args[k];
     if (text === '--') break;
-    if (unknown) continue;
-    if (['--dry-run', '-h', '--help'].includes(text)) return true;
-    if (text === '--exclude') k++;
-    else if (/^-[^-]/.test(text)) {
+    if (unknown) return false;
+    if (text.startsWith('--')) {
+      const name = text.slice(2).split('=')[0];
+      if (name && 'dry-run'.startsWith(name)) dry = true;
+      else if (name.length >= 4 && 'no-dry-run'.startsWith(name)) dry = false;
+      else if (name && 'exclude'.startsWith(name) && !text.includes('=')) k++;
+    } else if (text.length > 1 && text.startsWith('-')) {
       // -e takes the rest of the cluster as its pattern, or the next word when it ends the cluster.
       const e = text.indexOf('e');
-      if ((e < 0 ? text : text.slice(0, e)).includes('n')) return true;
+      if ((e < 0 ? text : text.slice(0, e)).includes('n')) dry = true;
       if (e === text.length - 1) k++;
     }
   }
-  return false;
+  return dry;
 }
 
 /** Runs git in dir: null when it can't run there (no such folder, not a repo), so the guard lets the call through. */

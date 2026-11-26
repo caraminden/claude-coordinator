@@ -196,23 +196,25 @@ export class Landings {
     const now = this.get(ticketId);
     // Nor over a hand-off that ended but isn't reported yet: starting afresh would wipe its output (the land tool then reads that one).
     if (now && (now.code === null || existsSync(join(this.dir(ticketId), HANDOFF)))) return now;
-    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId });
+    this.run(ticketId, cwd, env, args);
     return { output: '', code: null };
+  }
+
+  private run(ticketId: number, cwd: string, env: Record<string, string>, args: string[], files?: Record<string, string>) {
+    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh', ...args], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId, files });
   }
 
   /**
    * Start land.sh as a hand-off (#706): the minion ends its turn and the server reports how it went
-   * (LandHandoffs). The hand-off sits in the landing's folder, so a restart mid-land (the deploy's own,
-   * most often) still reports it. False when a landing already runs for this minion.
+   * (LandHandoffs). The hand-off sits in the landing's folder from before land.sh starts, so a restart mid-land (the
+   * deploy's own, most often) or a server death at the start still reports it. False when a landing already runs for this minion.
    */
   handOff(ticketId: number, cwd: string, env: Record<string, string>, args: string[], h: Handoff, again = false): boolean {
     const now = this.get(ticketId);
     if (now && now.code === null) return false;
-    // A re-queue (#2030) takes the ended, unreported hand-off's place with no await between, so a restart can't lose both.
-    if (again) this.settled(ticketId);
-    if (existsSync(join(this.dir(ticketId), HANDOFF))) return false;
-    this.start(ticketId, cwd, env, args);
-    writeFileSync(join(this.dir(ticketId), HANDOFF), JSON.stringify({ ...h, args }));
+    // A re-queue (#2030) takes the ended, unreported hand-off's place: its folder, and note, replace the old one's.
+    if (!again && existsSync(join(this.dir(ticketId), HANDOFF))) return false;
+    this.run(ticketId, cwd, env, args, { [HANDOFF]: JSON.stringify({ ...h, args }) });
     this.waiting.add(ticketId);
     return true;
   }

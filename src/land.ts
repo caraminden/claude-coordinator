@@ -795,7 +795,8 @@ export class LandHandoffs {
       const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
       try {
-        await once('failed', () => this.d.failed?.(id, cls?.kind ?? null));
+        // No exit code and no kind of red: stopped from outside or cut off by a restart (#2047).
+        await once('failed', () => this.d.failed?.(id, cls?.kind ?? (run.output.includes(NO_CODE) ? 'cut-off' : null)));
       } catch (err: any) {
         console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
       }

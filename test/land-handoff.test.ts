@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, landConflict, Landings, NO_CODE, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { addReview, agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
 import { git } from './git.ts';
@@ -1200,6 +1200,20 @@ test('a prep line from a running land wakes the minion once, with the scratch-wo
   assert.deepEqual(s.landings.handoffs(), [1]);
   writeFileSync(gate, '');
   await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+});
+
+test('a land that ended with no exit code is counted as cut off, so the stall signals skip it (#2047)', async () => {
+  const s = setup('cut-off');
+  const failed: (string | null)[] = [];
+  s.deps.failed = (_id, kind) => {
+    failed.push(kind);
+  };
+  // A quoted heredoc: NO_CODE's backticks must reach the log as they are.
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `cat <<'END'\nland: rebasing onto main${NO_CODE}\nEND\nexit 1\n`);
+  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
+  await s.handoffs.poll();
+  assert.deepEqual(failed, ['cut-off']);
 });
 
 test('a land stopped from the Status page says who stopped it and that nothing landed, not "fix the cause", and counts no failure (#1168)', async () => {

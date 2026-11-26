@@ -1,17 +1,21 @@
 // The server notices a stall (#1139, G5 from #1092; Josh picked it 2026-11-19). Three signals, counted per minion from what
-// its turns stream: the same test red three times, the same file edited after four failed checks in a row, two failed ships.
+// its turns stream: the same test red three times, the same file edited after four failed checks in a row, two failed ships (not counting
+// refusals the box made, NOT_THE_MODELS).
 // On a signal the minion's Taskmaster gets one message with the evidence and the step-up the model table names
 // (nextStep in public/model-table.js). It suggests; it changes nothing. One suggestion per minion per tier.
 // The parsing half (testCommand, checkCommand, failingTests, editedFiles) is pure and shared: the third-fix flag (B4) reads
 // the same signals across minions.
 import type { Store, Ticket } from './db.ts';
 import { nextStep, tierLabel } from '../public/model-table.js';
+import { classifyLandFailure } from './land.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 
 /** Thresholds, from the handoff (starting values: the two-week read says whether they hold). */
 export const RED_TIMES = 3;
 export const CHURN_ROUNDS = 4;
 export const SHIP_FAILS = 2;
+/** Refusals the minion couldn't help, so they say nothing about its model and don't count (#2047, Josh, 2026-11-25). */
+const NOT_THE_MODELS = new Set(['conflict', 'passed-alone', 'boot-copy', 'cut-off']);
 
 // A tool name only counts as the command a segment runs (at the start, or after ;, &, |, a bracket or a newline), past any
 // VAR=value, cd, timeout or wrapper (citadel-heavy, npx), and as a whole word: `cat $TMPDIR/citadel-test.log` and
@@ -113,7 +117,7 @@ export function observe(s: StallState, ev: ClaudeEvent): { signals: Signal[]; ch
       changed = true;
       const out = typeof b.content === 'string' ? b.content : '';
       if (cmd === SHIP) {
-        if (b.is_error || /^tools\/land\.sh exited [1-9]/.test(out)) signals.push(...shipFailed(s, 'land.sh run by the minion'));
+        if (b.is_error || /^tools\/land\.sh exited [1-9]/.test(out)) signals.push(...shipFailed(s, classifyLandFailure(out)?.kind ?? 'land.sh run by the minion'));
         continue;
       }
       const names = testCommand(cmd) ? failingTests(out) : [];
@@ -138,6 +142,7 @@ export function observe(s: StallState, ev: ClaudeEvent): { signals: Signal[]; ch
 
 /** A failed ship (src/land.ts settle, a land.sh run in the minion's own turn, or red CI on a PR scheme's PR); `kind` is classifyLandFailure's, or what failed. */
 export function shipFailed(s: StallState, kind: string): Signal[] {
+  if (NOT_THE_MODELS.has(kind)) return [];
   s.ships.push(kind);
   return s.ships.length === SHIP_FAILS ? [{ kind: 'failed-ships', what: `${SHIP_FAILS} failed ships`, evidence: [`kinds: ${s.ships.join(', ')}`] }] : [];
 }

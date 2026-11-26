@@ -3,7 +3,7 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-/** @import { CiRead, CiScheme, CiProblem, CiRun, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, View, ReadFailed, Scheme, StatusData, TestHealth, CiNumbersView } from './types.js' */
+/** @import { CiRead, CiScheme, CiProblem, CiRun, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, ListedTicket, PcView, HostLoad, View, ReadFailed, Scheme, StatusData, TestHealth, CiNumbersView } from './types.js' */
 /** @import { Child } from './base.js' */
 import { ago, api, h, icon, keepView, view, pacificStamp, poller } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
@@ -77,8 +77,9 @@ export function fixBox(x, now = Date.now()) {
     const n = /** @type {NonNullable<CiProblem['noFix']>} */ (x.noFix);
     return h('div', { class: `ci-fix none${n.late ? ' late' : ''}` }, h('b', {}, n.late ? 'No fix minion started' : 'No fix minion yet'), h('div', { class: 'muted' }, n.late ? 'This is ringing now: press Investigate to start one.' : `If none starts, this rings at ${when(n.ringsAt)}.`));
   }
-  const st = rowState(t, usage, now);
-  const barOf = rowBar(t, st);
+  const row = /** @type {ListedTicket} */ (t); // the minions list's row (src/routes/machines.ts fixTicket), drawn as the list draws one
+  const st = rowState(row, usage, now);
+  const barOf = rowBar(row, st);
   // The bar's and the re-run's room are kept whether or not they show, so a read that adds or drops one moves nothing.
   const bar = (barOf && (progressTrack(barOf) || waitBar(barOf))) || h('div', { class: 'ci-fix-gap' });
   const closed = t.status === 'closed';

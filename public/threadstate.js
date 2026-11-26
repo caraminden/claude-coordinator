@@ -1,9 +1,12 @@
 // A minion's state pill as plain data, so node tests can import it: the list rows and the chat's
 // head (sidebar.js, thread.js) build the nodes. `usage` and `now` come in as arguments.
+/** @import { CardLink, ListedTicket as Row, PlanUsage as Usage, RowState, TicketState, Wait, WorkerWait } from './types.js' */
+/** @typedef {NonNullable<Row['activity']>} Activity */
+/** @import { UsageWindow } from './types.js' */
 import { isCoordinator, me, STATES, view, pacificClock, pacificWeekdayClock } from './base.js';
 import { waitFam, waitShows, waitWords } from './wait.js';
 
-/** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
+/** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. @param {Row} a @param {Row} b @param {Usage | null} [usage] @param {number} [now] */
 export function byUrgency(a, b, usage, now = Date.now()) {
   const sa = rowState(a, usage, now),
     sb = rowState(b, usage, now);
@@ -16,6 +19,7 @@ export function byUrgency(a, b, usage, now = Date.now()) {
  * person: your move, ready or complete, stuck or blocked. Never while it works, waits on a land, CI, a deploy or the usage
  * limit, or is parked or dismissed (#576; Cara, 2026-11-11: "isnt that for when there is something you need to do?").
  * By rank, not family: a wait recolours the chip (CI passed is green) without making it your move. `st` is its rowState.
+ * @param {Row} t @param {RowState} st @param {unknown} seen
  */
 export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || st.rank === LOOK || (st.rank === 2 && t.state === 'blocked'));
 
@@ -25,6 +29,7 @@ export const rowUnread = (t, st, seen) => !seen && (st.rank === 0 || st.rank ===
  * ready to try), wait (violet: waiting on another person's card, the usage reset, a deploy, CI, parked until
  * something wakes it), idle (grey: idle, parked, dismissed). `cell` is the pill's text and `pulse` says it gets the
  * working dot.
+ * @param {Row} t @param {Usage | null} [usage] @param {number} [now] @returns {RowState}
  */
 export function rowState(t, usage, now = Date.now()) {
   const st = baseState(t, usage, now);
@@ -43,6 +48,7 @@ export function rowState(t, usage, now = Date.now()) {
  * its own turn runs (or a new minion's first turn sets up, not parked on start_after, #261), 'server' while the server
  * works for it with no turn (`t.server_work`: a handed-off land, or a job or wait it handed over, #1890), else null. A new kind of server work joins through
  * server_work, not here.
+ * @param {Row} t @returns {'turn' | 'server' | null}
  */
 export function workingBy(t) {
   // Nor one waiting on its start card (#1757): it hasn't run, and its card is a person's to answer.
@@ -51,25 +57,34 @@ export function workingBy(t) {
 }
 
 /** Whose turn it is, in words (Cara, 2026-11-14: "This Minion is working" and "This Taskmaster is working"). */
+/** @param {Row} t @param {string} [verb] */
 export const workingLabel = (t, verb = 'working') => `This ${isCoordinator(t) ? 'Taskmaster' : 'Minion'} is ${verb}`;
 
+/** @param {number} n */
 const nth = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 /** A minion with a turn to start and no worker yet (#1868): it shows as working, and this is its one line of truth. `hold`: a person started it now (#1957). */
+/** @param {WorkerWait} w @param {unknown} hold */
 export const workerWaitLabel = (w, hold) => (hold ? (w.held ? `Waiting: ${w.held}` : 'Starting now, on a worker of its own') : w.paused ? `Waiting: ${w.paused} paused all minions` : `Waiting for a worker, ${nth(w.place)} in line${w.quick ? ', or the quick lane' : ''}`);
 
-/** The waits that gave their worker back (#1890), and whether too many of their wakes came cold (past 10%). */
+/** @typedef {{ count: number, woken: number, cold: number, median: number | null }} WaitStats */
+
+/** The waits that gave their worker back (#1890), and whether too many of their wakes came cold (past 10%). @param {WaitStats | null | undefined} w */
 export function waitsLine(w) {
+  /** @param {number} n @param {string} word */
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   if (!w?.count) return 'No waits handed over in the last 7 days';
   const cold = w.woken ? Math.round((w.cold / w.woken) * 100) : 0;
-  return `${plural(w.count, 'wait')} gave their worker back in 7 days, the middle one ${span(w.median)}${w.woken ? ` · ${w.cold} of ${plural(w.woken, 'wake')} cold (${cold}%)` : ''}`;
+  return `${plural(w.count, 'wait')} gave their worker back in 7 days, the middle one ${span(/** @type {number} */ (w.median))}${w.woken ? ` · ${w.cold} of ${plural(w.woken, 'wake')} cold (${cold}%)` : ''}`;
 }
+/** @param {WaitStats | null | undefined} w */
 export const tooCold = (w) => !!w?.woken && w.cold / w.woken > 0.1;
 
 /** A job or a wait of its own that runs on past its turn (#1890, src/minion-jobs.ts): `{ text, since }`, or null. */
+/** @param {Row} t */
 export const jobOf = (t) => (t.status !== 'closed' && t.server_work?.kind === 'job' ? t.server_work : null);
 
 /** The server's work in words, at its landing's stage (t.wait, src/waits.ts): "Server: testing (CI: the full suite)". */
+/** @param {Wait | null} w */
 export function serverLabel(w) {
   if (!w) return 'Server is shipping…';
   if (w.stage === 'line') return `Server: in the ship line${/ · (.+)$/.test(w.chip) ? ` (${w.chip.split(' · ').pop()})` : ''}`;
@@ -84,24 +99,30 @@ export function serverLabel(w) {
 export const LOOK = 0.5;
 
 /** Whose answer a card waits on (#1121): its `to`, else whose the server says the minion is (#1449), else its assignee; '' for anyone's, which is yours. */
+/** @param {{ to?: string } | null | undefined} c @param {Row} t */
 const cardFor = (c, t) => String(c?.to || (t.assignee !== undefined ? t.assignee : t.properties?.assigned) || '').trim();
+/** @param {string} who */
 const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCase();
-/** The minion's open cards that wait on you, oldest first. */
+/** The minion's open cards that wait on you, oldest first. @param {Row} t */
 export const cardsYours = (t) => (t.open_cards ?? []).filter((c) => isYou(cardFor(c, t)));
 
 /** The open scheme's mentions of you (#1149), ticket id -> the newest's { by, at }: inbox.js fills it from your Needs you. */
+/** @type {Map<number, { by: string, at: number }>} */
 export const mentions = new Map();
 /** A mention of you in this minion's chat that you haven't opened it since. */
+/** @param {Row} t */
 const mentionOf = (t) => {
   const m = mentions.get(t.id);
   return m && (view?.seen?.[t.id] ?? 0) < m.at ? m : null;
 };
 
+/** @param {Row} t @param {Usage | null | undefined} usage @param {number} now @returns {RowState} */
 function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
   // A wait shows its age alone, the colour saying whose and the chip what (#1692; Cara picked "The time alone" for every
   // word-plus-time cell, 2026-11-23): "answer 3h" and "ready 2h" read "3h" and "2h"; the label keeps the words for the popover and
   // screen readers. A wait on someone else keeps their name ("Josh 2h"), and a mention its "@": they say who, not what.
+  /** @param {string} [who] */
   const waited = (who = '') => `${who ? `${who} ` : ''}${shortAgo(t.updated_at, now)}`;
   // An approval is its assignee's to answer, as the server's Needs you counts it (src/inbox.ts).
   if (t.approvals) {
@@ -112,14 +133,14 @@ function baseState(t, usage, now) {
   const by = workingBy(t);
   // Gone quiet (#906; Cara picked "Running blue, dot stopped", 2026-11-17): no output well past its usual gap (src/quiet.ts).
   const quiet = by === 'turn' && t.activity?.quiet_since;
-  if (quiet) return { rank: 1, fam: 'work', cell: shortAgo(t.activity.at, now), quiet: true, label: 'Quiet: no output for a while' };
+  if (quiet) return { rank: 1, fam: 'work', cell: shortAgo(/** @type {Activity} */ (t.activity).at, now), quiet: true, label: 'Quiet: no output for a while' };
   if (by === 'turn') return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, label: workingLabel(t) };
   // On its way in a release (#764, releases.js pendingRelease): the release's name where "landing" or "deploying" would be.
   const rel = t.release;
   const relLabel = rel ? `${rel.target} ${rel.name}: ${rel.stage}${rel.text ? `, ${rel.text}` : ''}` : '';
   // A job of its own runs on (#1890): working, unless it stopped on an error or a card of yours, which want you first.
   const job = by === 'server' && jobOf(t);
-  if (job && t.status !== 'error' && !(t.pending_card_at && cardsYours(t).length)) return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, server: true, label: job.text };
+  if (job && t.status !== 'error' && !(t.pending_card_at && cardsYours(t).length)) return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, server: true, label: /** @type {string} */ (job.text) };
   if (by === 'server' && !job) return { rank: 1, fam: 'work', cell: rel?.name ?? 'shipping', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited(), label: 'Stuck: the last turn failed' };
@@ -131,7 +152,7 @@ function baseState(t, usage, now) {
   // A mention of you (#1149) is yours to see to until you open its chat, as your Needs you counts it; a card of yours says more.
   const m = mentionOf(t);
   if (m && !(t.pending_card_at && cardsYours(t).length)) return { rank: 0, fam: 'you', cell: `@ ${shortAgo(m.at, now)}`, label: `${m.by} mentioned you`, since: m.at, mention: m };
-  const state = STATES[t.state];
+  const state = STATES[/** @type {TicketState} */ (t.state)];
   // Parked until something wakes it by itself (start_after, wake_when_live, runners back) reads as waiting, not grey (Cara, 2026-11-14).
   if (t.state === 'parked' && t.wakes_on) return { rank: 3, fam: 'wait', cell: 'waiting', label: `Waiting: ${t.parked_for ? `starts when ${t.wakes_on}` : t.wakes_on}` };
   if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'sealed', label: state.label };
@@ -141,6 +162,7 @@ function baseState(t, usage, now) {
   // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.
   // Amber only when one is yours (#1121; Josh picked "Say what is owed", 2026-11-19); else it waits on whose it is.
   if (t.pending_card_at) {
+    /** @type {{ to?: string }[]} */
     const cards = t.open_cards?.length ? t.open_cards : [{}];
     const age = shortAgo(t.pending_card_at, now);
     if (cards.some((c) => isYou(cardFor(c, t)))) return { rank: 0, fam: 'you', cell: age, label: 'Answer needed', since: t.pending_card_at };
@@ -164,6 +186,7 @@ function baseState(t, usage, now) {
 }
 
 /** The words a minion link in chat carries in its hover title (refBucket): waiting on people, working, live; neutral has none. */
+/** @type {Record<string, string>} */
 export const REF_WORDS = { waiting: 'waiting', working: 'working', deployed: 'deployed' };
 
 /**
@@ -176,6 +199,7 @@ export const REF_WORDS = { waiting: 'waiting', working: 'working', deployed: 'de
  *   deployed: its change is live, open and idle or dismissed (or shipped to main where nothing deploys it)
  *   neutral:  anything else, or no row (another scheme's list isn't loaded)
  * `t` carries `release` (releases.js pendingRelease) when its change is on its way, as the sidebar adds it.
+ * @param {Row | null | undefined} t
  */
 export function refBucket(t) {
   if (!t || isCoordinator(t)) return 'neutral';
@@ -193,11 +217,12 @@ export function refBucket(t) {
   if (by === 'server') return t.wait?.stage === 'line' ? 'waiting' : 'working';
   if (t.state === 'pending-deploy') return 'working';
   if (t.status === 'error' || t.approvals || t.pending_card_at || t.replies?.length) return 'waiting';
-  if (['try', 'ready', 'complete', 'blocked', 'outside', 'parked', 'limited'].includes(t.state) || stage === 'failed') return 'waiting';
+  if (['try', 'ready', 'complete', 'blocked', 'outside', 'parked', 'limited'].includes(String(t.state)) || stage === 'failed') return 'waiting';
   return stage === 'live' ? 'deployed' : 'neutral';
 }
 
 /** A link's hover title with the state in words: "#12 · working · Title", "Delve #12 · working · Title", or "#12 · working" with no title. */
+/** @param {string} base @param {number | string} number @param {string} word */
 export function refTitle(base, number, word) {
   if (!word) return base;
   if (!base) return `#${number} · ${word}`;
@@ -208,21 +233,24 @@ export function refTitle(base, number, word) {
 /**
  * A minion that hit the usage limit: a countdown to its own resume when it has one, else a countdown while the account's limit is still hit, your move
  * once a later turn shows it has reset, and just "limit hit" when neither is known (the note says when).
+ * @param {Row} t @param {(who?: string) => string} waited @param {Usage | null | undefined} usage @param {number} now @returns {RowState}
  */
 function limitState(t, waited, usage, now) {
   if (t.limit_resume_at) return { rank: 2, fam: 'wait', cell: `resumes ${shortIn(t.limit_resume_at, now)}`, label: 'Usage limit: resumes by itself' };
-  const hit = [usage?.session, usage?.weekly].find((w) => w?.status === 'rejected' && w.resetsAt > now);
-  if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt, now)}`, label: STATES.limited.label };
-  if (usage?.updatedAt > t.updated_at) return { rank: 4, fam: 'idle', cell: waited(), label: 'Idle: the usage limit has reset; send a message to carry on' };
+  const hit = [usage?.session, usage?.weekly].find((/** @type {UsageWindow | null | undefined} */ w) => w?.status === 'rejected' && Number(w.resetsAt) > now);
+  if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(/** @type {number} */ (hit.resetsAt), now)}`, label: STATES.limited.label };
+  if (Number(usage?.updatedAt) > t.updated_at) return { rank: 4, fam: 'idle', cell: waited(), label: 'Idle: the usage limit has reset; send a message to carry on' };
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
 /** "11:24 AM PST", with the day once it's over 20 hours ago: every clock time people read is Pacific. */
+/** @param {number} ms @param {number} [now] */
 export function pacific(ms, now = Date.now()) {
   return (now - ms > 20 * 3_600_000 ? pacificWeekdayClock : pacificClock)(ms);
 }
 
 /** "under a minute", "14m", "1h 5m", "2d 3h": a span in the popover's words. */
+/** @param {number} ms */
 export function span(ms) {
   const m = Math.floor(Math.max(0, ms) / 60_000);
   if (m < 1) return 'under a minute';
@@ -235,16 +263,21 @@ export function span(ms) {
  * Why a row's chip says what it says (#906), for its popover: a title (what), lines (since when, Pacific, and how long;
  * the usual time where the server knows one), a muted aside and a link to what it waits on. Built from the minion as the
  * stream sent it, so opening it fetches nothing. `st` is its rowState; every state rowState gives has lines (the test).
+ * @param {Row} t @param {RowState} st @param {number} [now]
  */
 export function rowWhy(t, st, now = Date.now()) {
+  /** @param {number} ms */
   const at = (ms) => `${pacific(ms, now)}, ${span(now - ms)} ago`;
+  /** @type {string[]} */
   const lines = [];
-  let more = null,
-    link = null;
+  /** @type {string | null} */
+  let more = null;
+  /** @type {{ href: string, text: string } | null} */
+  let link = null;
   const card = cardsYours(t)[0] ?? t.open_cards?.[0],
     w = t.status !== 'closed' && !st.quiet ? t.wait : null;
   if (st.quiet) {
-    const a = t.activity,
+    const a = /** @type {Activity} */ (t.activity),
       tool = a.tool;
     lines.push(`No output for ${span(now - a.at)}, since ${pacific(a.at, now)}.`);
     if (tool) {
@@ -271,12 +304,13 @@ export function rowWhy(t, st, now = Date.now()) {
   if (t.note && st.rank !== 1 && !st.label.includes(t.note)) lines.push(`Note: ${t.note}`);
   if (card && (st.rank === 0 || t.pending_card_at)) link = { href: card.href, text: `Open the ${card.what ?? card.kind} card →` };
   else if (t.release) link = { href: `#/p/${t.project_id}/releases/${t.project_id}${t.release.targetId ? `/target/${encodeURIComponent(t.release.targetId)}` : ''}`, text: 'Releases →' };
-  return { title: st.quiet ? `Quiet ${shortAgo(t.activity.at, now)}` : st.label, lines, more, link, quiet: !!st.quiet };
+  return { title: st.quiet ? `Quiet ${shortAgo(/** @type {Activity} */ (t.activity).at, now)}` : st.label, lines, more, link, quiet: !!st.quiet };
 }
 
 /**
  * Why an item is in your Needs you (#906), for its inbox chip's popover: what it is, since when (Pacific) and when it
  * leaves. `item` is src/inbox.ts's; `t` its minion, when this page has it. Every kind the server sends has one (the test).
+ * @param {{ at: number, kind: string, card?: { notice?: unknown, doc?: unknown, secret?: unknown, stage?: number, n?: number, text?: string, by?: string } }} item @param {Row | undefined} t @param {number} [now]
  */
 export function askWhy(item, t, now = Date.now()) {
   const since = pacific(item.at, now);
@@ -306,6 +340,7 @@ export function askWhy(item, t, now = Date.now()) {
 /**
  * Why a release stands where it does (#906), for a Releases row's popover: its stage, what it waits on, since when
  * (Pacific) and its usual length. `p` is src/releases.ts's Progress; `stage` the stage's name in words.
+ * @param {{ waitingOn?: string | null, text?: string, usual?: number | null, since: number }} p @param {string} stage @param {number} [now]
  */
 export function progressWhy(p, stage, now = Date.now()) {
   const what = p.waitingOn ?? p.text; // waitingOn is already a sentence ("2 changes … wait on a version bump")
@@ -314,6 +349,7 @@ export function progressWhy(p, stage, now = Date.now()) {
 }
 
 /** A track with one piece, not started: the bar's line while a working minion has no plan yet (#696). */
+/** @type {[null, string][]} */
 export const EMPTY_TRACK = [[null, 'p']];
 
 /**
@@ -321,6 +357,8 @@ export const EMPTY_TRACK = [[null, 'p']];
  * older server) while the minion works, and the `wait` (a land, CI, a deploy) while it works or after its turn. A row waiting on a person (a card,
  * an approval, ready, try it), blocked, parked or at the usage limit has none; the card badge flags a card (Cara,
  * 2026-11-11: "if a minion is asking a question it shouldnt have a progress bar right?"). `st` is its rowState.
+ * @param {Row} t @param {RowState} st
+ * @returns {{ track: [number | null, string][] | null, wait?: Wait, done?: number, total?: number, since?: number, usual?: number } | null}
  */
 export function rowBar(t, st) {
   if (st.rank === 0 || t.status === 'closed') return null;
@@ -339,17 +377,20 @@ export function rowBar(t, st) {
  * The open-card chip's text for a row's open_cards, oldest first (#575; Cara, 2026-11-11: "lets give them different
  * ones, question, merge, plan, etc"): the kind of ask (CardLink.what), counted when they're all one kind ("2 plans"),
  * else the oldest's kind and how many more ("plan +1"), as the chip opens the oldest.
+ * @param {CardLink[]} cards
  */
 export function cardChip(cards) {
   const first = cardWord(cards[0]);
   if (cards.length === 1) return first;
   if (!cards.every((c) => cardWord(c) === first)) return `${first} +${cards.length - 1}`;
-  return CARD_WORDS[cards[0].what] ? `${first} ×${cards.length}` : `${cards.length} ${first}s`;
+  return CARD_WORDS[String(cards[0].what)] ? `${first} ×${cards.length}` : `${cards.length} ${first}s`;
 }
 
 /** A card's kind as its chip says it: the go card reads "Ship It" (Cara, 2026-11-19: "The Chip and card should say "Ship It""). */
+/** @type {Record<string, string>} */
 const CARD_WORDS = { ship: 'Ship It', merge: 'Merge' };
-export const cardWord = (c) => CARD_WORDS[c.what] ?? c.what ?? c.kind;
+/** @param {CardLink} c */
+export const cardWord = (c) => CARD_WORDS[String(c.what)] ?? c.what ?? c.kind;
 
 /** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
 export const SHIP = {
@@ -362,6 +403,7 @@ export const SHIP = {
 };
 
 /** "40m", "1h40", "14h", "2d": time left, for tight spaces. */
+/** @param {number} ms @param {number} now */
 function shortIn(ms, now) {
   const m = Math.max(1, Math.ceil((ms - now) / 60_000));
   if (m < 60) return `${m}m`;
@@ -371,14 +413,16 @@ function shortIn(ms, now) {
 }
 
 /** A cell as a screen reader says it (#1692): its label, then a bare age in words ("Answer needed, 3 hours"); a cell with words of its own follows as it is. */
+/** @param {RowState} st */
 export function spokenCell(st) {
   const m = /^(@ )?(?:(now)|(\d+)([mhd]))$/.exec(st.cell ?? '');
   if (!m) return st.cell ? `${st.label}, ${st.cell}` : st.label;
   const n = Number(m[3]);
-  return `${st.label}, ${m[2] ? 'just now' : `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[m[4]]}${n === 1 ? '' : 's'}`}`;
+  return `${st.label}, ${m[2] ? 'just now' : `${n} ${/** @type {Record<string, string>} */ ({ m: 'minute', h: 'hour', d: 'day' })[m[4]]}${n === 1 ? '' : 's'}`}`;
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */
+/** @param {number} ms @param {number} now */
 function shortAgo(ms, now) {
   const s = Math.round((now - ms) / 1000);
   if (s < 60) return 'now';

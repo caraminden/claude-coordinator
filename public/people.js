@@ -627,7 +627,7 @@ function claudeCard() {
   return card;
 }
 
-/** @typedef {{ error?: string, state?: string, override?: { on?: boolean }, url?: string, code?: string }} CodexState */
+/** @typedef {{ error?: string, state?: string, override?: import('./types.js').CodexState | null, url?: string, code?: string }} CodexState */
 
 /** Your own Codex (#330): a second-opinion reviewer on your ChatGPT plan, signed in inside your Claude container. */
 function codexCard() {

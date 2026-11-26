@@ -1,7 +1,8 @@
 // The message box under a chat, on Citadel UI's composer (public/ui/composer.js: autogrow, Enter rules,
 // IME guard, list continuation, the text back on a failed send, the text draft). Citadel's own around it:
 // pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
-import { account, api, formatSize, h, noAutofill, isCoordinator, me, uploadUrl, view } from './base.js';
+/** @import { ComposerForm, PendingMessage, SavedItem, Ticket } from './types.js' */
+import { account, api, formatSize, h, noAutofill, isCoordinator, me, openView, uploadUrl, view } from './base.js';
 import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
 import { adoptTicket } from './thread-head.js';
 import { renderTyping } from './thread.js';
@@ -16,6 +17,7 @@ import { pastedFiles } from './paste.js';
 import { sideColdCost } from './payer.js';
 import { looksSecret } from './secret-check.js';
 import { startPick } from './pick.js';
+/** @import { SlashCommand } from './slash-commands.js' */
 import { chatCommandList, matchCommands, mentionQuery, menuQuery, parseCommand } from './slash-commands.js';
 import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 
@@ -24,14 +26,16 @@ import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 // Unsent text survives reloads and switching threads: it is saved per thread as you type.
 // Text goes to localStorage; images are too big for it, so they go to IndexedDB, with the names of
 // files already uploaded.
+/** @param {string} key */
 export function loadDraft(key) {
   try {
-    return JSON.parse(localStorage.getItem(key)) ?? null;
+    return JSON.parse(/** @type {string} */ (localStorage.getItem(key))) ?? null;
   } catch {
     return null;
   }
 }
 
+/** @param {string} key @param {unknown} value */
 export function saveDraft(key, value) {
   try {
     if (value) localStorage.setItem(key, JSON.stringify(value));
@@ -42,7 +46,9 @@ export function saveDraft(key, value) {
 // Shared with every app (public/ui/composer.js).
 export { fitHeight } from './ui/composer.js';
 
+/** @type {Promise<IDBDatabase> | null} */
 let draftDb = null;
+/** @param {IDBTransactionMode} mode @param {(s: IDBObjectStore) => IDBRequest} fn */
 function draftStore(mode, fn) {
   draftDb ??= new Promise((resolve, reject) => {
     const req = indexedDB.open('cc-drafts', 1);
@@ -51,7 +57,7 @@ function draftStore(mode, fn) {
     req.onerror = () => reject(req.error);
   });
   return draftDb.then(
-    (db) =>
+    (/** @type {IDBDatabase} */ db) =>
       new Promise((resolve, reject) => {
         const tx = db.transaction('images', mode);
         const req = fn(tx.objectStore('images'));
@@ -61,14 +67,17 @@ function draftStore(mode, fn) {
   );
 }
 
+/** @param {number} ticketId */
 const loadDraftImages = (ticketId) =>
   draftStore('readonly', (s) => s.get(ticketId)).then(
     (v) => v ?? [],
     () => [],
   );
+/** @param {number} ticketId @param {unknown[]} items */
 const saveDraftImages = (ticketId, items) => draftStore('readwrite', (s) => (items.length ? s.put(items, ticketId) : s.delete(ticketId))).catch(() => {});
 
 /** The message box's hint; a dismissed minion's says a message brings it back. */
+/** @param {Ticket} ticket */
 export function composerPlaceholder(ticket) {
   const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
   const ask = isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…' : ticket.status === 'closed' ? 'Dismissed: send a message to reopen…' : 'Message this minion…';
@@ -79,43 +88,50 @@ export function composerPlaceholder(ticket) {
 
 // Each chat's messages on their way or not sent, oldest first, as { el, text, sendId, saved, state, retry }.
 // The chat shows them below its history (thread.js chatView), so they outlive redraws and switching chats.
+/** @type {Map<number, PendingMessage[]>} */
 const outboxes = new Map();
+/** @param {number} chatId */
 export function outbox(chatId) {
   let box = outboxes.get(chatId);
   if (!box) outboxes.set(chatId, (box = []));
   return box;
 }
+/** @type {Map<number, number>} */
 const onTheWay = new Map(); // chatId → sends started and not yet answered, for "This Minion is thinking…"
+/** @param {number} chatId */
 const chatOpen = (chatId) => view?.kind === 'project' && view.id === chatId;
 
 // Ctrl+V with no field focused pastes into the open chat's box (#654). A field keeps its own paste (Find in
 // chat, a note, a card's box, a rename), and so does a dialog the chat isn't in.
 document.addEventListener('paste', (e) => {
-  const form = document.querySelector('form.composer');
+  const form = /** @type {ComposerForm | null} */ (document.querySelector('form.composer'));
   const el = e.target instanceof Element ? e.target : null;
   if (e.defaultPrevented || !form?.pasteAnywhere || !form.checkVisibility()) return;
-  if (el?.closest('input, textarea, select') || el?.isContentEditable) return;
+  if (el?.closest('input, textarea, select') || (el instanceof HTMLElement && el.isContentEditable)) return;
   // Any open modal without the chat (the image viewer over the file viewer that holds it, say) keeps the paste.
   if ([...document.querySelectorAll('dialog[open]')].some((d) => d.matches(':modal') && !d.contains(form))) return;
   form.pasteAnywhere(e);
 });
 
 /** One fewer send of this chat's on its way: "thinking…" goes once none are. */
+/** @param {number} chatId */
 function arrived(chatId) {
-  const left = onTheWay.get(chatId) - 1;
+  const left = /** @type {number} */ (onTheWay.get(chatId)) - 1;
   left ? onTheWay.set(chatId, left) : onTheWay.delete(chatId);
   if (!left && view?.sendingTo === chatId) {
-    view.sendingTo = null;
+    openView().sendingTo = null;
     renderTyping();
   }
 }
 
 /** No connection, or Citadel restarting (Caddy's 502-504): the send waits for the network rather than failing (#1144). */
-const noConnection = (err) => err instanceof TypeError || [502, 503, 504].includes(err?.status);
+/** @param {unknown} err */
+const noConnection = (err) => err instanceof TypeError || [502, 503, 504].includes(/** @type {{ status?: number } | null} */ (err)?.status ?? 0);
 
 /** Until the device says it's back online, or `ms` pass (it can't always tell). */
+/** @param {number} ms */
 const backOnline = (ms) =>
-  new Promise((ok) => {
+  new Promise((/** @type {(v?: undefined) => void} */ ok) => {
     const go = () => {
       clearTimeout(timer);
       removeEventListener('online', go);
@@ -129,6 +145,7 @@ const backOnline = (ms) =>
  * Mark a message that didn't reach the server: "not sent" with Retry, or (no connection) "waiting to send", which goes
  * by itself once the connection is back. Both have a ✎ to take it back into the box, which is also how a wait is cancelled.
  */
+/** @param {number} chatId @param {PendingMessage} entry */
 function notSent(chatId, entry, waiting = false) {
   entry.state = waiting ? 'waiting' : 'failed';
   const { el } = entry;
@@ -138,7 +155,7 @@ function notSent(chatId, entry, waiting = false) {
       'span',
       { class: `msg-tag unsent-tag${waiting ? ' waiting-tag' : ''}` },
       waiting ? 'waiting to send' : 'not sent',
-      waiting ? null : h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry() }, '↻'),
+      waiting ? null : h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry?.() }, '↻'),
       h(
         'button',
         {
@@ -154,12 +171,12 @@ function notSent(chatId, entry, waiting = false) {
             for (const url of entry.urls ?? []) URL.revokeObjectURL(url);
             const box = outbox(chatId);
             if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
-            const form = chatOpen(chatId) && document.querySelector('.composer');
-            if (form?.editBack) return form.editBack(entry.text, entry.saved);
+            const form = chatOpen(chatId) ? /** @type {ComposerForm | null} */ (document.querySelector('.composer')) : null;
+            if (form?.editBack) return void form.editBack(entry.text, /** @type {SavedItem[]} */ (entry.saved));
             // Moved to another chat meanwhile: the text waits in this chat's draft, the attachments in its box.
             const draft = loadDraft(`cc-draft:${chatId}`)?.trim();
             saveDraft(`cc-draft:${chatId}`, draft ? `${entry.text}\n${draft}` : entry.text);
-            chatAttachments(chatId).restore(entry.saved);
+            chatAttachments(chatId).restore(/** @type {SavedItem[]} */ (entry.saved));
           },
         },
         '✎',
@@ -169,6 +186,7 @@ function notSent(chatId, entry, waiting = false) {
 }
 
 /** The message box under a chat: text, pasted images, model and effort, and Send. */
+/** @param {number} chatId @param {Ticket} ticket */
 export function composer(chatId, ticket) {
   const attachments = chatAttachments(chatId);
   // Mid-turn, Send steers the running turn; the ▾ (shown only then, style.css) offers queueing instead.
@@ -182,8 +200,9 @@ export function composer(chatId, ticket) {
   // own login. A cold copy (idle past the cache, or last run on another plan) says what it costs first.
   let sideOk = false;
   const sideStrip = h('div', { class: 'payer-line cold side-cold', hidden: true });
+  /** @param {string} text */
   const askSide = (text) => {
-    const t = view?.ticket?.id === chatId ? view.ticket : ticket;
+    const t = view?.ticket?.id === chatId ? openView().ticket : ticket;
     const cold = !sideOk && sideColdCost(t);
     sideOk = false;
     if (cold) {
@@ -225,10 +244,10 @@ export function composer(chatId, ticket) {
       return;
     }
     sideStrip.hidden = true;
-    const kept = textarea._asideDraft;
-    textarea._asideDraft = null;
+    const kept = /** @type {{ aside: string, draft: string } | null | undefined} */ (/** @type {{ _asideDraft?: unknown }} */ (textarea)._asideDraft);
+    /** @type {{ _asideDraft?: unknown }} */ (textarea)._asideDraft = null;
     box.value = kept && box.value.trim() === kept.aside.trim() ? kept.draft : '';
-    api(`api/tickets/${chatId}/side`, { method: 'POST', body: { text } }).catch((ex) => {
+    api(`api/tickets/${chatId}/side`, { method: 'POST', body: { text } }).catch((/** @type {Error} */ ex) => {
       if (!box.value.trim()) box.value = text;
       alertNote(`Side question not asked: ${ex.message}`);
     });
@@ -254,7 +273,7 @@ export function composer(chatId, ticket) {
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
-    canSend: (text) => {
+    canSend: (/** @type {string} */ text) => {
       // Slash commands (#937): Citadel's own run here; one the chat's turns load goes as text; any other is refused.
       const cmd = parseCommand(text);
       // `/btw <question>` asks on the side (#932), as the button does; it never goes to the minion.
@@ -278,7 +297,7 @@ export function composer(chatId, ticket) {
         const [wasAfter, wasUnpark] = [after, unparkWith];
         return (
           askToSaveSecret(ticket, found, {
-            saved: (name) => {
+            saved: (/** @type {string} */ name) => {
               box.value = box.value.split(found).join(`$${SECRET_ENV}${name}`);
               textarea.focus();
             },
@@ -298,16 +317,17 @@ export function composer(chatId, ticket) {
       return !!text || attachments.items.length > 0 || attachments.busy > 0 || attachments.adding > 0;
     },
     // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
-    send: (text) => {
+    send: (/** @type {string} */ text) => {
       // A file still uploading or an image still being prepared: the message shows at once as waiting on it, and goes when it's done.
       if (attachments.working) return holdForUploads(text, after, unparkWith);
       const sent = attachments.items.slice();
       attachments.remove(sent);
       send(text, sent, after, unparkWith);
     },
-    onError: (ex) => alertNote(ex.message),
+    onError: (ex) => alertNote(/** @type {Error} */ (ex).message),
   });
-  const { form, textarea, row, sendButton: sendBtn } = box;
+  const { textarea, row, sendButton: sendBtn } = box;
+  const form = /** @type {ComposerForm} */ (box.form);
   // The chat's commands, loaded once per composer; until they come (or if they don't), nothing is refused.
   const commands = { loaded: false, names: new Set(), list: chatCommandList([], minion) };
   api(`api/tickets/${chatId}/commands`)
@@ -322,9 +342,10 @@ export function composer(chatId, ticket) {
   const slash = slashMenu(form, textarea, () => commands.list);
   // @mentions (#1149): the scheme's members but you. A person's own Taskmaster is theirs alone, so no one to mention there.
   if (minion || ticket.coordinator_of == null) {
+    /** @type {Member[]} */
     const people = [];
     api(`api/projects/${ticket.project_id}/members`)
-      .then((list) => people.push(...list.filter((m) => m.name.toLowerCase() !== String(me).toLowerCase())))
+      .then((/** @type {Member[]} */ list) => people.push(...list.filter((m) => m.name.toLowerCase() !== String(me).toLowerCase())))
       .catch(() => {});
     mentionMenu(form, textarea, () => people);
   }
@@ -333,9 +354,11 @@ export function composer(chatId, ticket) {
    * stands in the chat, and when the strip is idle the message goes with what's in it. If an upload failed meanwhile, the text
    * comes back to the box with a note and a toast, and sending again is the retry.
    */
+  /** @type {{ el: HTMLElement, text: string, queue: boolean, unpark: boolean, failedAtStart: number }[]} */
   const holds = [];
+  /** @param {string} text @param {boolean} queue @param {boolean} unpark */
   const holdForUploads = (text, queue, unpark) => {
-    const el = userBubble(me, text, [], null, null, []);
+    const el = userBubble(/** @type {string} */ (me), text, [], null, null, []);
     el.classList.add('pending');
     el.querySelector('.who')?.append(h('span', { class: 'msg-tag unsent-tag waiting-tag' }, 'waiting on the upload'));
     if (chatOpen(chatId)) {
@@ -356,7 +379,7 @@ export function composer(chatId, ticket) {
         if (!form.isConnected) {
           // You left the chat: the box is gone, and a new one may hold fresh text. Put it in the saved draft, never over live text.
           // The chat may be open again in a new composer: it takes the text the way a taken-back message does.
-          const live = chatOpen(chatId) && document.querySelector('.composer');
+          const live = chatOpen(chatId) ? /** @type {ComposerForm | null} */ (document.querySelector('.composer')) : null;
           if (live?.editBack) live.editBack(back);
           else {
             const cur = loadDraft(`cc-draft:${chatId}`) ?? '';
@@ -385,7 +408,7 @@ export function composer(chatId, ticket) {
     const how = minion ? 'It replies with a handoff' : 'It saves what lasts to memory and writes a handoff';
     if (!confirm(`Start ${who} on a fresh session? ${how}, then its context resets and its next turn starts from that. The chat stays as it is.`)) return;
     box.value = '';
-    api(`api/tickets/${chatId}/fresh-session`, { method: 'POST', body: {} }).catch((ex) => {
+    api(`api/tickets/${chatId}/fresh-session`, { method: 'POST', body: {} }).catch((/** @type {Error} */ ex) => {
       if (!box.value.trim()) box.value = '/fresh';
       alertNote(`No fresh session: ${ex.message}`);
     });
@@ -431,14 +454,14 @@ export function composer(chatId, ticket) {
   const openMenu = () => {
     menu.hidden = false;
     moreBtn.setAttribute('aria-expanded', 'true');
-    menu.querySelector('button').focus();
+    /** @type {HTMLButtonElement} */ (menu.querySelector('button')).focus();
   };
   const closeMenu = () => {
     menu.hidden = true;
     moreBtn.setAttribute('aria-expanded', 'false');
   };
   const sendGroup = h('span', { class: 'send-group' }, sendBtn, moreBtn, menu);
-  sendGroup.addEventListener('focusout', (e) => !sendGroup.contains(e.relatedTarget) && closeMenu());
+  sendGroup.addEventListener('focusout', (e) => !sendGroup.contains(/** @type {Node | null} */ (e.relatedTarget)) && closeMenu());
   sendGroup.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !menu.hidden) {
       closeMenu();
@@ -448,7 +471,7 @@ export function composer(chatId, ticket) {
   // No accept filter, so a phone offers its files as well as the photo library.
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
   picker.addEventListener('change', () => {
-    attachments.add(picker.files);
+    attachments.add(/** @type {FileList} */ (picker.files));
     picker.value = '';
   });
   textarea.before(attachments.el, account && !account.turns ? h('p', { class: 'muted small composer-note' }, "Your messages don't start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.") : '');
@@ -469,8 +492,9 @@ export function composer(chatId, ticket) {
     sendGroup,
   );
   pointTip();
+  /** @param {ClipboardEvent} e */
   const pasteFiles = (e) => {
-    const files = pastedFiles(e.clipboardData);
+    const files = pastedFiles(/** @type {DataTransfer} */ (e.clipboardData));
     if (!files.length) return false;
     e.preventDefault();
     attachments.add(files);
@@ -494,10 +518,10 @@ export function composer(chatId, ticket) {
     }
   };
   form.addEventListener('dragover', (e) => {
-    if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+    if (/** @type {DataTransfer} */ (e.dataTransfer).types.includes('Files')) e.preventDefault();
   });
   form.addEventListener('drop', (e) => {
-    const files = [...e.dataTransfer.files];
+    const files = [.../** @type {DataTransfer} */ (e.dataTransfer).files];
     if (!files.length) return;
     e.preventDefault();
     attachments.add(files);
@@ -508,23 +532,25 @@ export function composer(chatId, ticket) {
    * retried (src/send-ids.ts). One that fails stays in the chat marked not sent, with Retry and Edit, and
    * the ones after it still go. The promise settles as optimistic()'s does.
    */
+  /** @param {string} text @param {AttachItem[]} [sent] @param {boolean} [queue] @param {boolean} [unpark] */
   const send = (text, sent = [], queue = false, unpark = false) => {
     // What was pointed at (#1141) goes as text after the message.
-    text = [text, ...sent.filter((i) => i.note).map((i) => i.note.text)].filter(Boolean).join('\n\n');
-    const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
-    const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
+    text = [text, ...sent.filter((i) => i.note).map((i) => /** @type {{ text: string }} */ (i.note).text)].filter(Boolean).join('\n\n');
+    const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType: /** @type {string} */ (mediaType), data: /** @type {string} */ (data) }));
+    const uploads = sent.filter((i) => i.upload).map((i) => /** @type {Upload} */ (i.upload));
     const files = uploads.map(({ name, type }) => ({ name, type }));
     // The server's copy of the message replaces this one when it arrives (thread.js, by sendId).
     // Its images' object URLs are let go when the bubble goes (taken back here, swapped for the server's copy in thread.js).
     const urls = images.map(({ mediaType, data }) => base64Url(mediaType, data));
     const el = userBubble(
-      me,
+      /** @type {string} */ (me), // sending needs a sign-in
       text,
       urls,
       null,
       null,
       uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })),
     );
+    /** @type {PendingMessage} */
     const entry = { el, urls, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
     const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), ...(unpark ? { unpark: true } : {}), sendId: entry.sendId };
     setSending(sending + 1); // until it's in or taken back: a reload now would lose it
@@ -545,7 +571,7 @@ export function composer(chatId, ticket) {
           onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
           if (chatOpen(chatId)) {
             document.getElementById('log')?.append(el);
-            view.sendingTo = chatId;
+            openView().sendingTo = chatId;
             renderTyping();
             scrollToBottom();
           }
@@ -576,18 +602,18 @@ export function composer(chatId, ticket) {
               counted = false;
               // Nothing is thinking while it waits, the messages queued behind it included.
               if (view?.sendingTo === chatId) {
-                view.sendingTo = null;
+                openView().sendingTo = null;
                 renderTyping();
               }
               await backOnline(wait);
               // Taken back to edit, or its server copy came in (its reply was lost): nothing more to send.
-              if (entry.state !== 'waiting') return null;
+              if (/** @type {string} */ (entry.state) !== 'waiting') return null;
               entry.state = 'sending';
               el.querySelector('.unsent-tag')?.remove();
               onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
               counted = true;
               if (chatOpen(chatId)) {
-                view.sendingTo = chatId;
+                openView().sendingTo = chatId;
                 renderTyping();
               }
             }
@@ -604,15 +630,15 @@ export function composer(chatId, ticket) {
           setSending(sending - 1);
         },
       });
-    return entry.retry();
+    return /** @type {() => Promise<unknown>} */ (entry.retry)();
   };
   // A one-tap reply (replies.js) sends its text the same way, leaving any draft in the box alone.
-  form.sendText = (text) => send(text);
+  form.sendText = (/** @type {string} */ text) => send(text);
   /**
    * A queued message taken back to edit (thread.js): its text goes in ahead of any draft, its attachments with it.
    * Returns how to take them back out (the take-back was refused): its attachments, and its text unless edited since.
    */
-  form.editBack = (text, saved = []) => {
+  form.editBack = (/** @type {string} */ text, /** @type {SavedItem[]} */ saved = []) => {
     const draft = textarea.value.trim();
     const before = box.value;
     box.value = draft ? `${text}\n${draft}` : text;
@@ -626,21 +652,25 @@ export function composer(chatId, ticket) {
     };
   };
   /** More of a taken-back message's attachments, once they have loaded (thread.js). */
-  form.attach = (saved) => attachments.restore(saved);
+  form.attach = (/** @type {SavedItem[]} */ saved) => attachments.restore(saved);
   return form;
 }
 
 // ---------- slash commands ----------
+
+/** @typedef {{ name: string, login: string, owner?: boolean }} Member */
 
 /**
  * The menu of slash commands above the box (#937): it opens while the box holds one `/word`, filters as you type,
  * and fills the box with the one picked (arrows and Enter or Tab, or a tap). It floats over the chat, so it moves
  * nothing (test/no-reflow-browser.test.ts). `open(true)` shows every command (/help).
  */
+/** @param {HTMLFormElement} form @param {HTMLTextAreaElement} textarea @param {() => SlashCommand[]} list */
 function slashMenu(form, textarea, list) {
   const menu = h('div', { class: 'slash-menu', role: 'listbox', id: `slash-${Math.random().toString(36).slice(2)}`, hidden: true });
   form.prepend(menu);
   textarea.setAttribute('aria-controls', menu.id);
+  /** @type {SlashCommand[]} */
   let shown = [];
   let active = 0;
   let all = false;
@@ -657,6 +687,7 @@ function slashMenu(form, textarea, list) {
     textarea.setAttribute('aria-activedescendant', el.id);
     el.scrollIntoView({ block: 'nearest' });
   };
+  /** @param {SlashCommand} c */
   const pick = (c) => {
     textarea.value = `/${c.name} `;
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
@@ -718,9 +749,11 @@ function slashMenu(form, textarea, list) {
  * The member picker (#1149): typing "@" opens the scheme's members over the box, filtering by name or login as you type;
  * a pick (arrows and Enter or Tab, or a tap) writes "@Name ". It floats like the slash menu, so it moves nothing.
  */
+/** @param {HTMLFormElement} form @param {HTMLTextAreaElement} textarea @param {() => Member[]} people */
 function mentionMenu(form, textarea, people) {
   const menu = h('div', { class: 'slash-menu mention-menu', role: 'listbox', id: `mention-${Math.random().toString(36).slice(2)}`, hidden: true });
   form.prepend(menu);
+  /** @type {Member[]} */
   let shown = [];
   let active = 0;
   const close = () => {
@@ -736,6 +769,7 @@ function mentionMenu(form, textarea, people) {
     textarea.setAttribute('aria-activedescendant', el.id);
     el.scrollIntoView({ block: 'nearest' });
   };
+  /** @param {Member} m */
   const pick = (m) => {
     const caret = textarea.selectionStart;
     const q = mentionQuery(textarea.value, caret);
@@ -746,7 +780,7 @@ function mentionMenu(form, textarea, people) {
   };
   const update = () => {
     const q = textarea.selectionStart === textarea.selectionEnd ? mentionQuery(textarea.value, textarea.selectionStart) : null;
-    const lower = q?.toLowerCase();
+    const lower = /** @type {string} */ (q?.toLowerCase());
     shown = q === null ? [] : people().filter((m) => m.name.toLowerCase().startsWith(lower) || m.login.toLowerCase().startsWith(lower));
     if (!shown.length) return close();
     active = Math.min(active, shown.length - 1);
@@ -804,7 +838,16 @@ const MAX_FILE_BYTES = 200 * 1024 * 1024; // the server's cap (src/uploads.ts)
 
 // A chat's attachments outlive its composer: switching chats and back builds a new composer, and a
 // file still uploading must stay on the message, not go with the old composer (#134).
+/**
+ * @typedef {{ name: string, size: number, type: string, label?: string }} Upload
+ * @typedef {{ url?: string, mediaType?: string, data?: string }} Clean
+ * @typedef {Clean & { upload?: Upload, note?: { text: string, label: string }, file?: File, progress?: number, xhr?: XMLHttpRequest, clean?: Clean, marks?: never[] }} AttachItem
+ * @typedef {{ el: HTMLDivElement, items: AttachItem[], busy: number, adding: number, readonly working: boolean, readonly uploading: boolean, failures: number, whenIdle: (f: () => void) => void, add: (files: Iterable<File>, marked?: boolean) => Promise<void>, addNote: (note: { text: string, label: string }) => void, remove: (items: AttachItem[]) => void, restore: (saved: SavedItem[]) => AttachItem[], drawOn: (item: AttachItem) => void }} Attachments
+ */
+
+/** @type {Map<number, Attachments>} */
 const attachmentsByChat = new Map();
+/** @param {number} chatId */
 function chatAttachments(chatId) {
   // A strip left in a composer that's off the page would keep that whole page in memory (#1747).
   for (const a of attachmentsByChat.values()) if (!a.el.isConnected) a.el.remove();
@@ -812,15 +855,19 @@ function chatAttachments(chatId) {
   if (!attachments) {
     attachments = createAttachments(chatId, (items) => saveDraftImages(chatId, items));
     attachmentsByChat.set(chatId, attachments);
-    loadDraftImages(chatId).then((items) => attachments.restore(items));
+    loadDraftImages(chatId).then((items) => /** @type {Attachments} */ (attachments).restore(items));
   }
   return attachments;
 }
 
 /** A card's answer box takes pictures the way the composer does (pasted, dropped or attached); `onChange` runs as its strip changes. */
+/** @typedef {Attachments & { onChange?: () => void }} CardAttachments */
+
+/** @param {number} chatId @param {(items: SavedItem[]) => unknown} onChange @returns {CardAttachments} */
 export const cardAttachments = (chatId, onChange) => createAttachments(chatId, onChange);
 
 /** Put a marked picture (#946: drawn on a chat image) in a chat's message box, as if pasted. */
+/** @param {number} chatId @param {Blob} blob */
 export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })], true);
 
 /** On a mouse the 🎯 is hidden (composer.css) and right-click points instead (#1663): said once, the first time a chat box shows. */
@@ -839,10 +886,11 @@ function pointTip() {
  * What a person pointed at (#1141, pick.js): its chip, then its crop if there is one, in the chat's message box. With
  * `draw` (the right-click menu's "Point and draw…", #1663), the crop opens in the drawing tools (#960) once it's added.
  */
+/** @param {number} chatId @param {Blob | null} crop @param {{ text: string, label: string } | null} note @param {{ draw?: boolean }} [opts] */
 export async function pointAt(chatId, crop, note, { draw = false } = {}) {
   const attachments = chatAttachments(chatId);
   if (note) attachments.addNote(note);
-  if (chatOpen(chatId)) document.querySelector('.composer textarea')?.focus();
+  if (chatOpen(chatId)) /** @type {HTMLElement | null} */ (document.querySelector('.composer textarea'))?.focus();
   if (!crop) return;
   const before = new Set(attachments.items);
   await attachments.add([new File([crop], 'pointed.png', { type: crop.type })], true);
@@ -860,11 +908,12 @@ export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => 
  * Items are { url, mediaType, data } for an image or { upload: { name, size, type } } for a file,
  * whose name is empty until its upload is done.
  */
+/** @param {number} chatId @param {(items: SavedItem[]) => unknown} onChange @returns {Attachments} */
 function createAttachments(chatId, onChange) {
   const el = h('div', { class: 'attachments', hidden: true });
-  const state = {
+  const state = /** @type {Attachments} */ ({
     el,
-    items: [],
+    items: /** @type {AttachItem[]} */ ([]),
     busy: 0,
     // Files an add() still has to go through: busy dips to 0 between images, so Send would go after the first (C3).
     adding: 0,
@@ -875,7 +924,8 @@ function createAttachments(chatId, onChange) {
       return state.items.some((i) => i.upload && !i.upload.name);
     },
     failures: 0,
-  };
+  });
+  /** @type {(() => void)[]} */
   const idleWaiters = [];
   // Waiters run once nothing is being prepared or uploaded (a microtask later, so an image's original has started by then).
   const settle = () =>
@@ -887,6 +937,7 @@ function createAttachments(chatId, onChange) {
     idleWaiters.push(f);
     settle();
   };
+  /** @param {AttachItem} item */
   const removeButton = (item) => h('button', { type: 'button', class: 'remove', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
     onChange(state.items.filter((i) => i.data || i.upload?.name || i.note).map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { mediaType, data })));
@@ -908,35 +959,39 @@ function createAttachments(chatId, onChange) {
       ),
     );
   };
+  /** @param {File} file @param {string} [label] */
   const addFile = async (file, label) => {
     if (state.items.filter((i) => i.upload).length >= MAX_FILES) return alertNote(`At most ${MAX_FILES} files per message.`);
     if (file.size > MAX_FILE_BYTES) return alertNote(`${file.name} is ${formatSize(file.size)}; files must be under ${formatSize(MAX_FILE_BYTES)}.`);
+    /** @type {AttachItem} */
     const item = { file, upload: { name: '', size: file.size, type: file.type || 'application/octet-stream', label }, progress: 0 };
     state.items.push(item);
     render();
     try {
       const saved = await uploadFile(chatId, file, item, () => {
         const size = el.children[state.items.indexOf(item)]?.querySelector('.size');
-        if (size) size.textContent = `${Math.round(item.progress * 100)}%`;
+        if (size) size.textContent = `${Math.round(/** @type {number} */ (item.progress) * 100)}%`;
       });
-      Object.assign(item.upload, saved);
+      Object.assign(/** @type {Upload} */ (item.upload), saved);
       delete item.file;
       delete item.xhr;
       render();
       settle();
-    } catch (err) {
+    } catch (/** @type {unknown} */ err) {
       if (!state.items.includes(item)) return settle(); // removed while uploading
       state.items.splice(state.items.indexOf(item), 1);
       state.failures++;
       render();
       settle();
-      alertNote(`Could not attach ${file.name}: ${err.message}`);
+      alertNote(`Could not attach ${file.name}: ${/** @type {Error} */ (err).message}`);
     }
   };
+  /** @param {File} file @param {boolean} [marked] */
   const addImage = async (file, marked) => {
     // Past the image limit, an image still goes, as a file Claude can open.
     if (state.items.filter((i) => i.data).length + state.busy >= MAX_IMAGES) return addFile(file);
     state.busy++;
+    /** @type {Blob | null} */
     let blob;
     try {
       blob = await prepareImage(file);
@@ -987,7 +1042,7 @@ function createAttachments(chatId, onChange) {
   /** Put saved attachments back in front; returns the items it added, for remove(). */
   state.restore = (saved) => {
     if (!saved.length) return [];
-    const restored = saved.map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { url: base64Url(mediaType, data), mediaType, data }));
+    const restored = saved.map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { url: base64Url(/** @type {string} */ (mediaType), /** @type {string} */ (data)), mediaType, data }));
     state.items = [...restored, ...state.items];
     render();
     return restored;
@@ -997,18 +1052,19 @@ function createAttachments(chatId, onChange) {
    * the marked copy; Esc, its ✕ or a backdrop click closes it unchanged. The clean picture and the marks stay on the
    * item, so reopening it can undo back to the original.
    */
+  /** @param {AttachItem} item */
   const drawOn = (item) => {
     const clean = item.clean ?? { url: item.url, mediaType: item.mediaType, data: item.data };
-    const lb = lightbox([{ src: clean.url, caption: 'Image to send', alt: 'Image to send, full size' }], {
+    const lb = lightbox([{ src: /** @type {string} */ (clean.url), caption: 'Image to send', alt: 'Image to send, full size' }], {
       render: (_, stage) =>
         annotator(stage, clean.url, {
           marks: item.marks,
-          onDone: async (canvas, marks) => {
+          onDone: async (/** @type {HTMLCanvasElement | null} */ canvas, /** @type {never[]} */ marks) => {
             lb.close();
             const blob = canvas && (await encodeCanvas(canvas).catch(() => null));
             if (canvas && !blob) return alertNote('Could not save the marked image: it came out too large.');
             if (!state.items.includes(item)) return; // removed while open
-            if (item.url !== clean.url) URL.revokeObjectURL(item.url);
+            if (item.url !== clean.url) URL.revokeObjectURL(/** @type {string} */ (item.url));
             if (!blob) {
               Object.assign(item, clean, { clean: undefined, marks: undefined });
             } else {
@@ -1025,6 +1081,7 @@ function createAttachments(chatId, onChange) {
 }
 
 /** PUT a file into the thread's uploads folder, streamed, with progress (fetch can't report upload progress). */
+/** @param {number} chatId @param {File} file @param {AttachItem} item @param {() => void} onProgress @returns {Promise<object>} */
 function uploadFile(chatId, file, item, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -1036,7 +1093,7 @@ function uploadFile(chatId, file, item, onProgress) {
       onProgress();
     };
     xhr.onload = () => {
-      let data = {};
+      let data = /** @type {{ error?: string }} */ ({});
       try {
         data = JSON.parse(xhr.responseText);
       } catch {}
@@ -1056,6 +1113,7 @@ const SECRET_ENV = 'CITADEL_SECRET_';
  * A message about to go out looks like it holds a password or key (#838): offer to save it as a secret instead.
  * Saved, the message says $CITADEL_SECRET_<NAME> where the value was, for the person to look over and send.
  */
+/** @param {Ticket} ticket @param {string} found @param {{ saved: (name: string) => void, sendAnyway: () => void }} cbs */
 function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
   const value = h('input', { type: 'password', value: found, ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', required: true, 'aria-label': 'The value' });
   const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', required: true, placeholder: 'SITE_PASSWORD', pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'aria-label': 'Name' });
@@ -1099,8 +1157,8 @@ function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
       const r = await api('api/secrets', { method: 'PUT', body: { scope, ...(scope === 'scheme' ? { project: ticket.project_id } : {}), name: name.value, value: value.value } });
       dialog.close();
       saved(r.name);
-    } catch (ex) {
-      err.textContent = ex.message;
+    } catch (/** @type {unknown} */ ex) {
+      err.textContent = /** @type {Error} */ (ex).message;
       err.hidden = false;
       save.disabled = false;
     }
@@ -1108,6 +1166,7 @@ function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
   name.focus();
 }
 
+/** @param {Blob} file @returns {Promise<Blob>} */
 async function prepareImage(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
@@ -1118,19 +1177,22 @@ async function prepareImage(file) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d')).drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
   return encodeCanvas(canvas);
 }
 
 /** A marked picture as a message carries it ({ mediaType, data }), shrunk as a pasted one is (#946, choices pages). */
+/** @param {Blob} blob */
 export async function sendableImage(blob) {
   const sendable = await prepareImage(blob);
   return { mediaType: sendable.type, data: await blobBase64(sendable) };
 }
 
 /** A canvas as a sendable image: PNG keeps screenshots sharp; JPEG when that is still too big. */
+/** @param {HTMLCanvasElement} canvas */
 async function encodeCanvas(canvas) {
+  /** @param {string} type @param {number} [quality] @returns {Promise<Blob | null>} */
   const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
   let blob = await encode('image/png');
   if (!blob || blob.size > MAX_IMAGE_BYTES) blob = await encode('image/jpeg', 0.85);
@@ -1138,6 +1200,7 @@ async function encodeCanvas(canvas) {
   return blob;
 }
 
+/** @param {string} text */
 export function alertNote(text) {
   document.getElementById('log')?.append(h('div', { class: 'note error' }, text));
 }
@@ -1152,19 +1215,24 @@ const CODEX_MODELS = [
   ['gpt-6-luna', 'GPT-6 Luna'],
 ];
 const EFFORTS = EFFORT_LEVELS;
+/** @param {string} id */
 export const modelName = (id) => [...MODELS, ...CODEX_MODELS].find(([m]) => m === id)?.[1] ?? id;
 /** Why Codex can't be picked here, briefly, or null. */
 function codexBlocked() {
-  if (!codex) return 'sign in first';
-  if (codex.ready) return null;
-  return /container/.test(codex.why ?? '') ? 'link your Claude first' : 'sign in to Codex first';
+  const cx = /** @type {{ ready?: boolean, why?: string } | null} */ (codex);
+  if (!cx) return 'sign in first';
+  if (cx.ready) return null;
+  return /container/.test(cx.why ?? '') ? 'link your Claude first' : 'sign in to Codex first';
 }
 
 /** Model, effort and (minions only) the Workflow switch for this thread, beside Send; a change applies from its next turn. */
+/** @param {number} chatId */
 function modelPicker(chatId) {
-  const save = (field) => (e) => {
-    const value = field === 'workflow' ? e.target.value === 'on' : e.target.value || null;
-    setTicketField(chatId, field, value, field === 'workflow' ? (value ? 'on' : 'off') : (value ?? 'the default'));
+  /** @param {string} field */
+  const save = (field) => (/** @type {Event} */ e) => {
+    const target = /** @type {HTMLSelectElement} */ (e.target);
+    const value = field === 'workflow' ? target.value === 'on' : target.value || null;
+    setTicketField(chatId, field, value, field === 'workflow' ? (value ? 'on' : 'off') : /** @type {string} */ (value ?? 'the default'));
   };
   const model = h('select', { class: 'picker', id: 'model-picker', 'data-part': 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
   const effort = h('select', { class: 'picker', id: 'effort-picker', 'data-part': 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
@@ -1172,6 +1240,7 @@ function modelPicker(chatId) {
   const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') }, h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
   // Each picker in a row with its name, which only phones show; on desktop the rows are display: contents.
   const because = h('span', { class: 'picker-because', id: 'picker-because' });
+  /** @param {string} name @param {HTMLElement} control @param {string} [id] */
   const row = (name, control, id) => h('span', { class: 'picker-row', id }, h('span', { class: 'picker-label', 'aria-hidden': 'true' }, name), control);
   const pickers = h('span', { class: 'pickers', id: 'pickers' }, row('Model', model), row('Effort', effort), row('Workflow', workflow, 'workflow-row'), row('Plugins', pluginPicker(chatId), 'plugin-row'), because);
   return settingsMenu(pickers);
@@ -1189,6 +1258,7 @@ phone.addEventListener('change', () => {
  * Phones (#365): one settings button beside Send in place of the row of pickers, which it opens as a menu
  * of named rows. Desktop never shows the button, and the pickers stay inline as before (style.css).
  */
+/** @param {HTMLElement} pickers */
 function settingsMenu(pickers) {
   const button = h('button', { type: 'button', class: 'picker settings-button', id: 'settings-picker', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'pickers' }, h('span', { class: 'gear', 'aria-hidden': 'true' }, '⚙'), h('span', { class: 'dot', 'aria-hidden': 'true' }));
   const wrap = h('span', { class: 'settings-picker' }, button, pickers);
@@ -1199,7 +1269,8 @@ function settingsMenu(pickers) {
   };
   // A tap outside closes it. Not focusout: a select that disables itself while it saves, or a checkbox
   // Safari doesn't focus, would drop the focus and shut the menu under the person's thumb.
-  const outside = (e) => !wrap.contains(e.target) && close();
+  /** @param {Event} e */
+  const outside = (e) => !wrap.contains(/** @type {Node | null} */ (e.target)) && close();
   button.addEventListener('click', () => {
     if (wrap.classList.contains('open')) return close();
     wrap.classList.add('open');
@@ -1217,12 +1288,14 @@ function settingsMenu(pickers) {
 }
 
 /** The folder's last part, the name people know a plugin by ("tools/plugins/devtools" → "devtools"). */
-const pluginName = (dir) => dir.replace(/\/+$/, '').split('/').pop();
+/** @param {string} dir */
+const pluginName = (dir) => /** @type {string} */ (dir.replace(/\/+$/, '').split('/').pop());
 
 /**
  * Plugins (#361): which of the scheme's optional plugin folders this minion loads, as a checkbox per
  * folder in a menu over the button. Shown only on a minion in a scheme that has optional folders.
  */
+/** @param {number} chatId */
 function pluginPicker(chatId) {
   const button = h('button', { type: 'button', class: 'picker plugin-button', id: 'plugin-picker', 'aria-haspopup': 'true', 'aria-expanded': 'false', hidden: true });
   const menu = h('div', { class: 'plugin-menu', id: 'plugin-menu', hidden: true });
@@ -1237,7 +1310,7 @@ function pluginPicker(chatId) {
     button.setAttribute('aria-expanded', 'true');
     menu.querySelector('input')?.focus();
   });
-  wrap.addEventListener('focusout', (e) => !wrap.contains(e.relatedTarget) && close());
+  wrap.addEventListener('focusout', (e) => !wrap.contains(/** @type {Node | null} */ (e.relatedTarget)) && close());
   wrap.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !menu.hidden) {
       close();
@@ -1255,13 +1328,15 @@ function pluginPicker(chatId) {
  * Set one of the pickers' fields on the minion: shown at once, sent behind (one chat's changes in click order),
  * and put back if the server refuses. plugin_dirs goes as a list and is kept, as the server gives it, one per line.
  */
+/** @param {number} chatId @param {string} field @param {string | boolean | string[] | null} value @param {string} shown */
 function setTicketField(chatId, field, value, shown) {
-  const t = view.ticket;
+  const t = /** @type {Ticket & Record<string, unknown>} */ (openView().ticket);
   if (view?.id !== chatId || !t) return;
   const was = t[field];
+  /** @param {unknown} v */
   const show = (v) => {
     t[field] = v;
-    if (view?.ticket === t) renderModelPicker();
+    if (view?.ticket === /** @type {unknown} */ (t)) renderModelPicker();
   };
   const mine = Array.isArray(value) ? value.join('\n') : value;
   optimistic({
@@ -1279,8 +1354,8 @@ function setTicketField(chatId, field, value, shown) {
  * Taskmaster pin gives it, the model it came out as on its last turn, else just "Model" / "Effort"). The default shows grey; a choice shows in full ink.
  */
 export function renderModelPicker() {
-  const model = document.getElementById('model-picker');
-  const effort = document.getElementById('effort-picker');
+  const model = /** @type {HTMLSelectElement | null} */ (document.getElementById('model-picker'));
+  const effort = /** @type {HTMLSelectElement | null} */ (document.getElementById('effort-picker'));
   if (!model || !effort || !view?.ticket) return;
   const t = view.ticket;
   // On phones each picker sits beside its name, so a default with nothing to show says "Default".
@@ -1294,11 +1369,11 @@ export function renderModelPicker() {
       { label: 'Claude' },
       ...MODELS.map(([id, name]) => {
         // The scheme's Minion rules can turn Fable off (#1045): greyed, but a minion already on it keeps showing it.
-        const noFable = view.project?.fable_ok === 'off' && /fable/.test(id) && t.model !== id;
+        const noFable = openView().project?.fable_ok === 'off' && /fable/.test(id) && t.model !== id;
         return h('option', { value: id, disabled: noFable, title: noFable ? 'Fable is off in this scheme (Minion rules)' : null }, name);
       }),
     ),
-    h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' }, ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? 'sign in to Citadel to use Codex'}` : null }, name))),
+    h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' }, ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${/** @type {{ why?: string } | null} */ (codex)?.why ?? 'sign in to Citadel to use Codex'}` : null }, name))),
   );
   // A model set outside these lists (say, by an older version) still shows as itself.
   if (t.model && ![...MODELS, ...CODEX_MODELS].some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
@@ -1319,9 +1394,9 @@ export function renderModelPicker() {
   effort.title = t.effort ? `Effort for this minion: ${t.effort}${later}` : `Effort for this minion: the default${t.default_effort ? ` (${t.default_effort})` : t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
   model.setAttribute('aria-label', model.title);
   effort.setAttribute('aria-label', effort.title);
-  const workflow = document.getElementById('workflow-picker');
+  const workflow = /** @type {HTMLSelectElement | null} */ (document.getElementById('workflow-picker'));
   if (!workflow) return;
-  workflow.hidden = document.getElementById('workflow-row').hidden = t.kind === 'coordinator';
+  /** @type {HTMLElement} */ (document.getElementById('workflow-row')).hidden = workflow.hidden = t.kind === 'coordinator';
   workflow.options[0].textContent = onPhone ? 'Off' : 'Workflow off';
   workflow.options[1].textContent = onPhone ? 'On' : 'Workflow on';
   workflow.value = t.workflow ? 'on' : '';
@@ -1333,6 +1408,7 @@ export function renderModelPicker() {
 }
 
 /** The phone settings button: a dot when anything is off its default, and the settings in its label. */
+/** @param {Ticket} t @param {string[]} picked @param {string} later */
 function renderSettingsButton(t, picked, later) {
   const button = document.getElementById('settings-picker');
   if (!button) return;
@@ -1342,6 +1418,7 @@ function renderSettingsButton(t, picked, later) {
   button.setAttribute('aria-label', button.title);
 }
 
+/** @param {Ticket} t @param {string} later */
 function renderPluginPicker(t, later) {
   const wrap = document.getElementById('plugin-picker-wrap');
   const button = document.getElementById('plugin-picker');
@@ -1350,13 +1427,13 @@ function renderPluginPicker(t, later) {
   const offered = t.optional_plugin_dirs ?? [];
   // A pick an admin has since taken off the list no longer loads, so it isn't shown as on.
   const picked = (t.plugin_dirs ? t.plugin_dirs.split('\n') : []).filter((d) => offered.includes(d));
-  wrap.hidden = button.hidden = document.getElementById('plugin-row').hidden = t.kind === 'coordinator' || !offered.length;
+  wrap.hidden = button.hidden = /** @type {HTMLElement} */ (document.getElementById('plugin-row')).hidden = t.kind === 'coordinator' || !offered.length;
   button.textContent = !picked.length ? 'No plugins' : picked.length === 1 ? pluginName(picked[0]) : `${picked.length} plugins`;
   button.classList.toggle('is-default', !picked.length);
   button.title = `${picked.length ? `Extra plugins for this minion: ${picked.map(pluginName).join(', ')}` : 'No extra plugins for this minion'}: each costs tokens and memory on every turn, and a change breaks the prompt cache once${later}`;
   button.setAttribute('aria-label', button.title);
-  const focused = menu.contains(document.activeElement) ? document.activeElement.value : null;
+  const focused = menu.contains(document.activeElement) ? /** @type {HTMLInputElement} */ (document.activeElement).value : null;
   menu.replaceChildren(h('p', { class: 'muted small' }, 'Extra plugins for this minion'), ...offered.map((d) => h('label', { title: d }, h('input', { type: 'checkbox', value: d, checked: picked.includes(d) }), ` ${pluginName(d)}`)));
-  if (focused) menu.querySelector(`input[value="${CSS.escape(focused)}"]`)?.focus();
+  if (focused) /** @type {HTMLElement | null} */ (menu.querySelector(`input[value="${CSS.escape(focused)}"]`))?.focus();
   return t.kind === 'coordinator' ? [] : picked;
 }

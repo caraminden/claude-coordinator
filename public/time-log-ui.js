@@ -2,6 +2,7 @@
 // waiting and lost time over its steps. src/time-log.ts cuts it; time-log.js fits it. The panel's element outlives a
 // redraw of the progress line, so a click, a scroll or focus in it isn't lost to the next event. Explain (#1994): Haiku's
 // reading of each step and wait, kept for everyone (src/time-log-explain.ts), shown in the rows in place of the outcomes.
+/** @import { Ticket } from './types.js' */
 import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, pacificDate, pacificIso, pacificStamp, view } from './base.js';
 import { firstSentence, shortDuration } from './chattext.js';
 import { grow, rowKey, tiles } from './time-log.js';
@@ -26,10 +27,10 @@ const entryOf = (id) => {
 };
 /** What a change of means the log was cut too early. */
 const signature = () => {
-  const t = view.ticket;
+  const t = /** @type {Ticket} */ (view.ticket);
   return [t.status, t.state, t.closed_at, t.wait?.stage, !!t.worker_wait, ...view.progress.tasks.map((s) => `${s.id}${s.status}${s.subject}`)].join('|');
 };
-const isRunning = () => view.ticket.status === 'running' && !view.ticket.worker_wait;
+const isRunning = () => /** @type {Ticket} */ (view.ticket).status === 'running' && !(/** @type {Ticket} */ (view.ticket).worker_wait);
 
 /** Read a minion's log unless the one held is fresh. Hovering or focusing the line reads it, so the click has it. */
 export async function readLog(force = false) {
@@ -58,7 +59,7 @@ let clock = 0;
 
 /** The panel for the chat in view, kept while that chat is. */
 export function timeLogPanel() {
-  const id = view.ticket.id;
+  const id = /** @type {Ticket} */ (view.ticket).id;
   if (panel?.id !== id || panel.ui !== view.ui) {
     const top = h('div', { class: 'tl-top' });
     const list = h('div', { class: 'tl-rows' });

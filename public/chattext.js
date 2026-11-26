@@ -6,15 +6,17 @@ import { taskmasterName } from './base.js';
  * The thread a coordinator tool call created or messaged, from its result ("Created #15 …",
  * "Sent. #12 …"), as { verb, number }; null for other calls and failures.
  */
+/** @param {{ block: { name: string }, result: { content: unknown, is_error?: boolean } | null }} a */
 export function ticketActionRef({ block, result }) {
   if (!result || result.is_error || !block.name.startsWith('mcp__coordinator__')) return null;
-  const text = Array.isArray(result.content) ? result.content.map((c) => c?.text ?? '').join('\n') : String(result.content ?? '');
+  const text = Array.isArray(result.content) ? result.content.map((/** @type {{ text?: string } | null} */ c) => c?.text ?? '').join('\n') : String(result.content ?? '');
   // message_ticket with start_now says how the start went first (src/mcp.ts).
   // A held message (loop guard, or held mail for a cold minion) names the minion on the next line; one held for a sealed minion, first.
   const m = /^(?:Started early, its brief first\. |Not started early: [^\n]*?\. )?(?:(Created|Sent\.|Updated\.) |(?:Held, not delivered|Left as held mail): [^\n]*\n|Held for (?=#))#(\d+)\b/.exec(text);
   return m ? { verb: { Created: 'Created', 'Sent.': 'Messaged', 'Updated.': 'Updated' }[m[1]] ?? 'Held for', number: Number(m[2]) } : null;
 }
 
+/** @param {unknown} text @param {number} [max] */
 export function firstSentence(text, max = 200) {
   // Heading and quote marks only at a line's start, so "#473" and "a > b" keep theirs.
   const flat = String(text ?? '')
@@ -27,6 +29,7 @@ export function firstSentence(text, max = 200) {
 }
 
 /** "45s", "1m 47s", "12m", "1h 5m". */
+/** @param {number} ms */
 export function shortDuration(ms) {
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -37,7 +40,9 @@ export function shortDuration(ms) {
 }
 
 /** Short wording for the notes the server writes often (null hides one); anything else stays as it is. */
+/** @param {string} text */
 export function shortNote(text) {
+  /** @type {RegExpMatchArray | null} */
   let m;
   // Older threads stored a note on every session restore; restores are silent now.
   if (/^Restored this thread's Claude session from the app's database/.test(text)) return null;
@@ -60,6 +65,7 @@ export const COORDINATOR_NAME = 'Coordinator';
 export const APP_AUTHOR = 'Citadel';
 
 /** The colour class a message sent by another agent takes (#693): a Taskmaster's (this scheme's or another's) 'from-tm', a minion's 'from-minion', the app's own (APP_AUTHOR: schedule briefs, wake-ups, chained-minion notices) grey 'from-app'; '' for anyone else, GitHub included. */
+/** @param {string | null | undefined} author */
 export function senderTone(author) {
   author ??= '';
   return /^(Taskmaster|Coordinator)$|^Taskmaster of /.test(author) ? 'from-tm' : /^#\d+ /.test(author) ? 'from-minion' : author === APP_AUTHOR ? 'from-app' : '';
@@ -70,6 +76,7 @@ export function senderTone(author) {
  * the Taskmaster, another scheme's ("Taskmaster of Delve"), a minion ("#12 Title"), the app or
  * GitHub. null for a person.
  */
+/** @param {string | null | undefined} author */
 export function machineAuthor(author) {
   author ??= '';
   if (author === COORDINATOR_NAME || author === 'Taskmaster') return taskmasterName();
@@ -84,6 +91,7 @@ export function machineAuthor(author) {
  * A push note (src/runner.ts notePushes) as its parts, or null for any other note: pull request notes and
  * the "Couldn't push" warning aren't push notes, so they never collapse.
  */
+/** @param {string | null | undefined} text */
 export function pushNote(text) {
   const m = /^Pushed as @(\S+) \((.+)'s GitHub\)$/s.exec(text ?? '');
   return m ? { login: m[1], who: m[2] } : null;
@@ -94,6 +102,7 @@ export function pushNote(text) {
  * `text` is the next note. Returns the run after it and whether the note joined the line (true) or starts one (false).
  * Anything that isn't a push note (a message, the minion's words, another note) ends the run: pass `null` text.
  */
+/** @param {{ text: string, count: number } | null} run @param {string | null} text */
 export function pushRun(run, text) {
   if (pushNote(text) == null) return { run: null, joined: false };
   if (run?.text === text) return { run: { text, count: run.count + 1 }, joined: true };
@@ -101,7 +110,8 @@ export function pushRun(run, text) {
 }
 
 /** The line for a run: the note as stored for one push, "Pushed 13 times as @login (Name's GitHub)" for more. */
+/** @param {{ text: string, count: number }} run */
 export function pushRunParts(run) {
-  const { login, who } = pushNote(run.text);
+  const { login, who } = /** @type {{ login: string, who: string }} */ (pushNote(run.text));
   return run.count === 1 ? [run.text] : ['Pushed ', { count: run.count }, ` times as @${login} (${who}'s GitHub)`];
 }

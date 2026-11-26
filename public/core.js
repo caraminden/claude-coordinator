@@ -1,9 +1,9 @@
-// The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
+/** @import { Account, ChatEvent, ClaudeUsage, CodexState, CodexUsage, CodexWindow, EventsPage, Ticket } from './types.js' */ /** @import { PrRepo, PrTarget } from './threadrefs.js' */ /** @typedef {HTMLFormElement & Record<'login' | 'password', HTMLInputElement>} LoginForm */ // The app shell: markdown and chat scrolling, live updates, usage, routing and sign-in. What every
 // module shares without needing the shell (state, api, h, helpers) is base.js.
 import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
-import { KEPT_EVENTS, reloadQuietly, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { KEPT_EVENTS, openView, reloadQuietly, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { noteTicketChange } from './closedlist.js';
 import { catchingUp, chatHoled, holdEvent, resync, showCatchingUp, stopCatchingUp } from './resync.js';
 import { cutEvent } from './eventcut.js';
@@ -53,21 +53,21 @@ import { mountLoginMap } from './login-map.js';
 /** Every Settings and Orders page's route, built from the one table of pages (settings-pages.js). */
 const PAGE_ROUTE = new RegExp(`^#/p/(\\d+)/(${plainKinds().join('|')})$`);
 export { catchUpEvents } from './resync.js';
-export const app = document.getElementById('app');
-export const crumbs = document.getElementById('crumbs');
-const meEl = document.getElementById('me');
+export const app = /** @type {HTMLElement} */ (document.getElementById('app'));
+export const crumbs = /** @type {HTMLElement} */ (document.getElementById('crumbs'));
+const meEl = /** @type {HTMLElement} */ (document.getElementById('me'));
 
-let stream = null;
+/** @type {EventSource | null} */ let stream = null;
 let heardAt = 0; // when the stream last said anything (the focus gate, #1528)
 // The front end's version: the page's own (index.html fills it in, #1144), so a page the service worker kept from before
 // a ship finds itself stale at the stream's first hello. A page the server didn't fill in takes the first hello's.
-let assetVersion = /^[0-9a-f]+$/.test(document.querySelector('meta[name=citadel-version]')?.content ?? '') ? document.querySelector('meta[name=citadel-version]').content : null;
+let assetVersion = /^[0-9a-f]+$/.test(/** @type {HTMLMetaElement | null} */ (document.querySelector('meta[name=citadel-version]'))?.content ?? '') ? /** @type {HTMLMetaElement} */ (document.querySelector('meta[name=citadel-version]')).content : null;
 
-function unescapeHtml(s) {
-  return s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
+/** @param {string} s */ function unescapeHtml(s) {
+  return s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => /** @type {Record<string, string>} */ ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
 }
 
-/** `[title](path)` in a thread's reply: a card that opens the file full screen beside the chat. */
+/** `[title](path)` in a thread's reply: a card that opens the file full screen beside the chat. @param {number} ticketId @param {string} path @param {string} title */
 function fileCardHtml(ticketId, path, title) {
   const kind = isLocalPath(path) && fileKind(path);
   if (!kind) return null;
@@ -80,7 +80,7 @@ function fileCardHtml(ticketId, path, title) {
   );
 }
 
-/** `![caption](path)` in a thread's reply: the image or video itself (a card for anything else). */
+/** `![caption](path)` in a thread's reply: the image or video itself (a card for anything else). @param {number} ticketId @param {string} path @param {string} caption */
 function filePreviewHtml(ticketId, path, caption) {
   const kind = isLocalPath(path) && fileKind(path);
   if (!kind) return null;
@@ -95,8 +95,8 @@ function filePreviewHtml(ticketId, path, caption) {
 
 // What the server found for each file a thread links, by "<thread> <path>": its details, null when
 // there's no such file, or undefined when it couldn't say (offline, a restart) (#281).
-const linkInfo = new Map();
-function fileLinkInfo(ticketId, path) {
+/** @type {Map<string, Promise<{ fixed?: boolean, abs: string } | null | undefined>>} */ const linkInfo = new Map();
+/** @param {number} ticketId @param {string} path */ function fileLinkInfo(ticketId, path) {
   const key = `${ticketId} ${path}`;
   let info = linkInfo.get(key);
   if (!info) {
@@ -114,16 +114,17 @@ function fileLinkInfo(ticketId, path) {
  * Settle a message's file cards and previews, which can't be clicked until the server has found
  * their file (#281): one with the wrong folders points at the one file of its name the server found
  * instead, and one with no file becomes plain text marked "file not found".
+ * @param {Element} root @param {number} ticketId
  */
 function checkFileLinks(root, ticketId) {
-  for (const el of root.querySelectorAll('[data-file]')) {
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll('[data-file]'))) {
     holdPicSize(el.querySelector('img'));
-    const path = el.dataset.file;
+    const path = /** @type {string} */ (el.dataset.file);
     const card = el.classList.contains('file-card');
-    const title = card ? el.querySelector('.name').innerHTML : (el.querySelector('.caption')?.innerHTML ?? '');
+    const title = card ? /** @type {Element} */ (el.querySelector('.name')).innerHTML : (el.querySelector('.caption')?.innerHTML ?? '');
     fileLinkInfo(ticketId, path).then((info) => {
       const t = document.createElement('template');
-      if (info?.fixed) t.innerHTML = card ? fileCardHtml(ticketId, info.abs, title) : filePreviewHtml(ticketId, info.abs, title);
+      if (info?.fixed) t.innerHTML = (card ? fileCardHtml(ticketId, info.abs, title) : filePreviewHtml(ticketId, info.abs, title)) ?? '';
       else if (info === null) t.innerHTML = `<span class="file-missing" title="${escapeHtml(`Not found: ${path}`)}">${title || escapeHtml(baseName(path))} <span class="mark">(file not found)</span></span>`;
       const fresh = t.content.firstElementChild ?? el;
       fresh.classList.remove('checking');
@@ -133,13 +134,13 @@ function checkFileLinks(root, ticketId) {
   }
 }
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/** @param {string} s */ function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => /** @type {Record<string, string>} */ ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 /**
  * Link "#12" in some HTML to thread 12 of the project on screen, titled with its name when known,
- * "Delve #12" to Delve's, and "PR #186" to the minion owning that PR (see linkPrRefs).
+ * "Delve #12" to Delve's, and "PR #186" to the minion owning that PR (see linkPrRefs). @param {string} html
  */
 function threadRefsHtml(html) {
   if (view?.kind !== 'project') return html;
@@ -147,7 +148,7 @@ function threadRefsHtml(html) {
     html,
     view.projectId,
     (n) => {
-      for (const t of view.tickets.values()) if (t.number === n) return threadLabel(t);
+      for (const t of openView().tickets.values()) if (t.number === n) return threadLabel(t);
       return null;
     },
     view.projects,
@@ -155,7 +156,7 @@ function threadRefsHtml(html) {
   );
 }
 
-/** Plain text as nodes, with its URLs, DOIs and "#12"s linked (see threadRefsHtml and linkUrls). */
+/** Plain text as nodes, with its URLs, DOIs and "#12"s linked (see threadRefsHtml and linkUrls). @param {unknown} text */
 export function threadRefs(text) {
   const span = document.createElement('span');
   span.innerHTML = threadRefsHtml(linkifyHtml(linkUrls(escapeHtml(String(text ?? '')), location, (url) => prUrlRoute(unescapeHtml(url)))));
@@ -165,7 +166,7 @@ export function threadRefs(text) {
 /**
  * Markdown in chat messages: the document renderer below (tables, headings, lists, quotes…), with
  * single line breaks kept as typed. With `ticketId`, links to paths in that thread's folders become
- * file cards and `![…](path)` an inline preview; both open the file full screen beside the chat.
+ * file cards and `![…](path)` an inline preview; both open the file full screen beside the chat. @param {string} src @param {number | null} [ticketId]
  */
 export function markdown(src, ticketId = null) {
   return markdownDoc(src, { ticketId, breaks: true });
@@ -175,10 +176,11 @@ export function markdown(src, ticketId = null) {
  * Fuller Markdown for documents threads write (see renderMarkdown): `imageUrl` maps an image's path to
  * a URL (or null to show the alt text instead), and `linkHref` a link to another file to the route
  * that opens it (or null to leave it inert). A link to "#a-heading" scrolls to that heading.
+ * @param {string} src @param {((path: string) => string | null) | { imageUrl?: (path: string) => string | null, linkHref?: (path: string) => string | null, ticketId?: number | null, breaks?: boolean }} [opts]
  */
 export function markdownDoc(src, opts = {}) {
   const { imageUrl = () => null, linkHref = () => null, ticketId = null, breaks = false } = typeof opts === 'function' ? { imageUrl: opts } : opts;
-  const link = (href, text) => {
+  const link = (/** @type {string} */ href, /** @type {string} */ text) => {
     // In a thread's messages, files in its folders become cards (see fileCardHtml).
     const card = ticketId != null && fileCardHtml(ticketId, href, text);
     if (card) return card;
@@ -191,7 +193,7 @@ export function markdownDoc(src, opts = {}) {
     if (/^#[^/]/.test(href)) return `<a href="${escapeHtml(href)}" class="anchor">${text}</a>`;
     return `<span class="link" title="${escapeHtml(href)}">${text}</span>`;
   };
-  const image = (href, alt) => {
+  const image = (/** @type {string} */ href, /** @type {string} */ alt) => {
     const preview = ticketId != null && filePreviewHtml(ticketId, href, alt);
     if (preview) return preview;
     const url = imageUrl(href);
@@ -206,10 +208,10 @@ export function markdownDoc(src, opts = {}) {
   if (ticketId != null) checkFileLinks(div, ticketId);
   // "#a-heading" would change the app's route, so scroll to the heading instead.
   div.addEventListener('click', (e) => {
-    const a = e.target.closest?.('a.anchor');
+    const a = /** @type {Element} */ (e.target).closest?.('a.anchor');
     if (!a) return;
     e.preventDefault();
-    let id = a.getAttribute('href').slice(1);
+    let id = /** @type {string} */ (a.getAttribute('href')).slice(1);
     try {
       id = decodeURIComponent(id);
     } catch {}
@@ -250,8 +252,9 @@ export function scrollToBottom() {
 document.addEventListener(
   'load',
   (e) => {
-    if (e.target.tagName !== 'IMG' || !e.target.closest('#log')) return;
-    if (e.target.naturalWidth) picSizes.set(e.target.getAttribute('src'), [e.target.naturalWidth, e.target.naturalHeight]);
+    const img = /** @type {HTMLImageElement} */ (e.target);
+    if (img.tagName !== 'IMG' || !img.closest('#log')) return;
+    if (img.naturalWidth) picSizes.set(img.getAttribute('src'), [img.naturalWidth, img.naturalHeight]);
     if (followChat) scrollToBottom();
   },
   true,
@@ -259,8 +262,8 @@ document.addEventListener(
 
 // Chat pictures' sizes once one has loaded this session: drawn again (Load earlier, a chat reopened), it holds its box
 // before it loads, so nothing under it moves (#1531). shortcut: only seen ones; a size from the server would cover a first load.
-const picSizes = new Map(); // src -> [width, height]
-export function holdPicSize(img) {
+/** @type {Map<string | null, [number, number]>} */ const picSizes = new Map(); // src -> [width, height]
+/** @param {HTMLImageElement | null | undefined} img */ export function holdPicSize(img) {
   const size = img && picSizes.get(img.getAttribute('src'));
   if (!size) return;
   img.style.setProperty('--pic-w', `${size[0]}px`);
@@ -276,10 +279,10 @@ function saveScroll() {
   } catch {}
 }
 
-export function restoreScroll(ticketId) {
-  let saved = 'bottom';
+/** @param {number} ticketId */ export function restoreScroll(ticketId) {
+  /** @type {'bottom' | number} */ let saved = 'bottom';
   try {
-    saved = JSON.parse(sessionStorage.getItem(`cc-scroll:${ticketId}`)) ?? 'bottom';
+    saved = JSON.parse(String(sessionStorage.getItem(`cc-scroll:${ticketId}`))) ?? 'bottom';
   } catch {}
   if (saved === 'bottom') scrollToBottom();
   else window.scrollTo(0, saved);
@@ -289,7 +292,7 @@ export function restoreScroll(ticketId) {
  * Open a chat at its first unread message, just under the thread bar (or as near as the bottom allows,
  * when all that's new fits). The thread bar fills in (readout, branch), images load and the catch-up
  * draws in just after opening, so it keeps the message there for a moment, until you scroll yourself:
- * also when it fitted, or that growth would follow the bottom and push it out of sight (#737).
+ * also when it fitted, or that growth would follow the bottom and push it out of sight (#737). @param {Element} el
  */
 export function scrollToUnread(el) {
   const headEl = document.getElementById('ticket-head');
@@ -317,18 +320,18 @@ window.addEventListener('pagehide', saveScroll);
 // ---------- live updates ----------
 
 let streamRetry = 0;
-let streamTimer = null;
+/** @type {number | undefined} */ let streamTimer;
 
 // While the live stream is down (a restart, mostly) the page stays as it is, clicks wait for the next server,
 // and after a moment this chip says why, until the stream is back (#493).
-let reconnectChip = null;
-let reconnectTimer = null;
+/** @type {HTMLElement | null} */ let reconnectChip = null;
+/** @type {number | undefined} */ let reconnectTimer;
 // A deploy's warm handover (#1170) says so as it ends the stream: the next server is up, so no chip for a while.
 let quietUntil = 0;
-export function reconnecting(on) {
+/** @param {boolean} on */ export function reconnecting(on) {
   if (on && (reconnectChip || reconnectTimer || catchingUp())) return;
   clearTimeout(reconnectTimer);
-  reconnectTimer = null;
+  reconnectTimer = undefined;
   if (on) {
     reconnectTimer = setTimeout(
       () => {
@@ -345,7 +348,7 @@ export function reconnecting(on) {
 
 export let keptOpen = false; // the kept chat's answers are on screen: no stream (its events would skip the gap), nothing kept anew
 
-/** Open the app on the kept chat (base.js keptChat) while the live answers come; resolves once it's drawn. */
+/** Open the app on the kept chat (base.js keptChat) while the live answers come; resolves once it's drawn. @param {{ me: Account, answers: Record<string, string> }} kept */
 export function startKept(kept) {
   showCatchingUp();
   keptOpen = true;
@@ -353,7 +356,7 @@ export function startKept(kept) {
   return start(kept.me).finally(() => replayKept(null));
 }
 
-/** The live answer to api/me came: refresh the kept chat in place (a draft survives) and drop the chip. */
+/** The live answer to api/me came: refresh the kept chat in place (a draft survives) and drop the chip. @param {Account} who */
 export async function goLive(who) {
   replayKept(null);
   keptOpen = false;
@@ -396,12 +399,12 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') keepOpenChat();
 });
 
-/** A ping for this desktop app's device (#1186; Electron has no Web Push), shown as sw.js shows one; a click opens its thread. */
+/** A ping for this desktop app's device (#1186; Electron has no Web Push), shown as sw.js shows one; a click opens its thread. @param {{ endpoint: string, msg: { title?: string, body?: string, tag?: string, silent?: boolean, url?: string } }} ping */
 function desktopNotify({ endpoint, msg }) {
   if (!window.citadelDesktop || endpoint !== `desktop:${localStorage.getItem(DESKTOP_PUSH)}`) return;
   const n = new Notification(msg.title || 'Citadel', { body: msg.body || '', tag: msg.tag, renotify: !!msg.tag && !msg.silent, silent: !!msg.silent, icon: 'icon-192.png' });
   n.onclick = () => {
-    window.citadelDesktop.show();
+    window.citadelDesktop?.show();
     const hash = new URL(msg.url || '/c/', location.href).hash;
     if (hash) openHash(hash);
   };
@@ -493,7 +496,7 @@ function connectStream(catchUp = false) {
       });
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
       scheduleSidebar();
-      if (view.id) renderTicketHead();
+      if (openView().id) renderTicketHead();
     }
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'workers') onWorkers(msg);
@@ -522,7 +525,7 @@ function connectStream(catchUp = false) {
 let reloadPending = false; // or the version the server now runs
 let lastInputAt = 0;
 export let sending = 0;
-export function setSending(n) {
+/** @param {number} n */ export function setSending(n) {
   sending = n;
 }
 const QUIET_MS = 5000;
@@ -554,12 +557,12 @@ function unsentWork() {
   if (tabBridgeOpen()) return 'once you close the page you opened with Open';
   if (document.querySelector('.attachments:not([hidden])') || uploadsRunning() || unsentCardWork()) return writing; // card picks too (#1852)
   if (filesUploading()) return 'once your files finish uploading';
-  return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim()) ? writing : null;
+  return [.../** @type {NodeListOf<HTMLTextAreaElement>} */ (app.querySelectorAll('[data-draft]'))].some((el) => el.value.trim()) ? writing : null;
 }
 
 let reloading = false;
 let clicked = false; // ↻ passes its click: a person asked, so a draft doesn't hold it back
-export async function reloadNow(ev) {
+/** @param {Event} [ev] */ export async function reloadNow(ev) {
   clicked ||= ev instanceof Event;
   if (reloading) return; // reloadWhenIdle asks every 2 s while the worker is fetching
   reloading = true;
@@ -582,7 +585,7 @@ export async function reloadNow(ev) {
 /**
  * Before a reload (#1144): the service worker fetches its newest copy and, for a ship, keeps the new front end's files,
  * so the reload opens the new version. A page already reloaded for this version and still stale (the worker couldn't
- * keep the files) drops the kept ones, and loads from the network.
+ * keep the files) drops the kept ones, and loads from the network. @param {string} to
  */
 async function freshShell(to) {
   const reg = await navigator.serviceWorker?.getRegistration();
@@ -593,7 +596,7 @@ async function freshShell(to) {
     sessionStorage.setItem('cc-stale', to);
   } catch {}
   if (again) return Promise.all((await caches.keys()).filter((k) => k.startsWith('shell-')).map((k) => caches.delete(k)));
-  const settled = () =>
+  /** @type {() => Promise<void>} */ const settled = () =>
     new Promise((done) => {
       const w = reg.installing ?? reg.waiting;
       if (!w) return done();
@@ -630,13 +633,13 @@ setInterval(reloadWhenIdle, 2000);
 
 // ---------- account usage ----------
 
-export let usage = null;
-/** The person's Codex (#337): { ready, why, on, usage }, or null when nobody is signed in. */
+/** @type {ClaudeUsage | null} */ export let usage = null;
+/** The person's Codex (#337): { ready, why, on, usage }, or null when nobody is signed in. @type {CodexState | null} */
 export let codex = null;
 let codexHint = '';
 
 // The usage bars link to Settings → Usage (Cara, 2026-11-17). Settings pages take any scheme's id, so the link uses the one last open.
-let usageProject = null;
+/** @type {number | null} */ let usageProject = null;
 const usageHref = () => `#/p/${usageProject ?? view?.projectId ?? ''}/usage`.replace('/p//', '/');
 function syncUsageLinks() {
   const id = location.hash.match(/^#\/p\/(\d+)/)?.[1];
@@ -650,11 +653,11 @@ export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidd
 
 export { combineWindows };
 
-/** Where a person's new minions start and why (#793), from usageOf's account, why and pinned. */
+/** Where a person's new minions start and why (#793), from usageOf's account, why and pinned. @param {ClaudeUsage} u @param {NonNullable<ClaudeUsage['accounts']>} accounts */
 export function pickLine(u, accounts) {
   const a = accounts.find((x) => x.n === u.account);
   if (!a) return 'No Claude account is ready for new minions.';
-  const reset = a.usage?.weekly?.resetsAt > Date.now() ? ` (${new Date(a.usage.weekly.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })})` : '';
+  const reset = (a.usage?.weekly?.resetsAt ?? 0) > Date.now() ? ` (${new Date(/** @type {number} */ (a.usage?.weekly?.resetsAt)).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })})` : '';
   const why = u.why === 'pinned' ? 'you pinned it' : u.pinned ? `account ${u.pinned}, which you pinned, isn't ready` : u.why === 'full' ? 'every account is close to its limit' : `of the accounts with room, its week resets first${reset}`;
   return `New minions start on ${a.label}: ${why}. Running minions stay on their account while warm, until it's nearly out.`;
 }
@@ -663,44 +666,45 @@ export function pickLine(u, accounts) {
 export function renderUsage(next = usage) {
   usage = next;
   syncUsageLinks();
-  const accounts = usage?.accounts?.length > 1 ? usage.accounts : null;
+  const accounts = usage?.accounts && usage.accounts.length > 1 ? usage.accounts : null;
+  /** @type {{ utilization: number, resetsAt: number | null, status?: string | null } | null | undefined} */
   const week = accounts ? combineWindows(accounts, 'weekly') : usage?.weekly;
   const session = accounts ? combineWindows(accounts, 'session') : usage?.session;
-  for (const el of document.querySelectorAll('.usage:not(.codex)')) {
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.usage:not(.codex)'))) {
     el.hidden = !week;
     if (!week) continue;
     const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
-    el.querySelector('.label').textContent = `Week ${pct}%`;
+    /** @type {Element} */ (el.querySelector('.label')).textContent = `Week ${pct}%`;
     el.setAttribute('aria-label', `Usage details: week ${pct}%`);
     el.style.setProperty('--pct', `${pct}%`);
     // Several accounts: out only once every one is (turns move to the next by themselves).
     const out = accounts ? accounts.every((a) => high(a.usage)) : week.status && week.status !== 'allowed';
     el.dataset.level = out || pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
-    const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-    const sess = (w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
+    const when = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    const sess = (/** @type {{ utilization: number, resetsAt: number | null }} */ w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
     el.title = [
       accounts ? `Weekly usage combined across ${accounts.length} Claude accounts: ${pct}%${week.resetsAt ? `, next reset ${when(week.resetsAt)}` : ''}` : `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
       session ? `5-hour window${accounts ? ' (combined)' : ''}: ${sess(session)}` : null,
-      `As of the last turn, ${ago(usage.updatedAt)}`,
+      `As of the last turn, ${ago(/** @type {ClaudeUsage} */ (usage).updatedAt)}`,
       // Several Claude accounts (#779): the bar combines them; the tooltip says where new minions start (#793) and lists each, ▸ on that one.
-      ...(accounts ? ['', pickLine(usage, accounts), ...accounts.map((a) => accountLine(a, a.n === usage.account))] : []),
+      ...(accounts ? ['', pickLine(/** @type {ClaudeUsage} */ (usage), accounts), ...accounts.map((a) => accountLine(a, a.n === usage?.account))] : []),
     ]
       .filter((line) => line != null)
       .join('\n');
   }
-  for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(el);
-  for (const el of document.querySelectorAll('.codex-toggle')) syncToggle(el);
-  for (const el of document.querySelectorAll('.codex-windows')) fillCodexWindows(el);
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.usage:not(.codex)'))) renderCodexSwitch(el);
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.codex-toggle'))) syncToggle(el);
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.codex-windows'))) fillCodexWindows(el);
 }
 
 /** A bar in the Claude bar's look (#342), for Settings' Codex windows; `.codex` keeps it out of the Claude bars' loops. */
 const codexBar = () => h('a', { class: 'usage codex', href: usageHref(), 'aria-label': 'Usage details', hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
-const setBar = (bar, pct, label) => {
-  bar.querySelector('.label').textContent = label;
+const setBar = (/** @type {HTMLElement} */ bar, /** @type {number} */ pct, /** @type {string} */ label) => {
+  /** @type {Element} */ (bar.querySelector('.label')).textContent = label;
   bar.style.setProperty('--pct', `${pct}%`);
   bar.dataset.level = codexLevel(pct);
 };
-const windowText = (w) => `${windowName(w.windowDurationMins)}: ${w.pct}%${w.resetsAt && w.pct ? `, resets ${when(w.resetsAt * 1000)}` : ''}`;
+const windowText = (/** @type {CodexWindow & { pct: number }} */ w) => `${windowName(w.windowDurationMins)}: ${w.pct}%${w.resetsAt && w.pct ? `, resets ${when(w.resetsAt * 1000)}` : ''}`;
 
 /** Settings' Codex card: a bar for each window and when it resets, or "No usage yet". */
 export function codexWindowsBlock() {
@@ -709,7 +713,7 @@ export function codexWindowsBlock() {
   return el;
 }
 
-function fillCodexWindows(el) {
+/** @param {HTMLElement} el */ function fillCodexWindows(el) {
   const ws = codexWindows(codex?.usage);
   if (!ws.length) return el.replaceChildren(h('p', { class: 'muted small' }, 'Codex usage: no usage yet. It fills in after your first Codex turn.'));
   el.replaceChildren(
@@ -723,16 +727,16 @@ function fillCodexWindows(el) {
         return [h('dt', {}, windowName(w.windowDurationMins)), h('dd', {}, bar, w.resetsAt && w.pct ? h('span', { class: 'muted' }, `resets ${when(w.resetsAt * 1000)}`) : '')];
       }),
     ),
-    h('p', { class: 'muted small' }, `Codex usage as of ${ago(codex.usage.updatedAt)}.`),
+    h('p', { class: 'muted small' }, `Codex usage as of ${ago(/** @type {CodexUsage} */ (codex?.usage).updatedAt)}.`),
   );
 }
 
-const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-const live = (w) => w && (!w.resetsAt || w.resetsAt > Date.now());
+const when = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+const live = (/** @type {{ resetsAt: number | null } | null | undefined} */ w) => w && (!w.resetsAt || w.resetsAt > Date.now());
 /** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
-const high = (u) => [u?.session, u?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
+const high = (/** @type {import('./types.js').PlanUsage | null | undefined} */ u) => [u?.session, u?.weekly].some((w) => live(w) && w && (w.status === 'rejected' || w.utilization >= 0.9));
 // With several Claude accounts (#779), only once every one of them is high: turns move to the next by themselves.
-const claudeHigh = () => (usage?.accounts?.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage));
+const claudeHigh = () => (usage?.accounts && usage.accounts.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage));
 
 /** "Enable Codex override" (#337): runs the person's turns on Codex. Settings has one; the left panel shows one past 90%. */
 export function codexToggle() {
@@ -747,48 +751,49 @@ export function codexToggle() {
   return el;
 }
 
-function syncToggle(el) {
-  const box = el.querySelector('input');
+/** @param {HTMLElement} el */ function syncToggle(el) {
+  const box = /** @type {HTMLInputElement} */ (el.querySelector('input'));
   box.checked = !!codex?.on;
   box.disabled = !codex || (!codex.on && !codex.ready);
   const hint = codexHint || (codex && !codex.on && !codex.ready ? `Codex isn't ready: ${codex.why}.` : '');
-  el.querySelector('.hint').textContent = hint;
-  el.querySelector('.hint').hidden = !hint;
+  /** @type {HTMLElement} */ (el.querySelector('.hint')).textContent = hint;
+  /** @type {HTMLElement} */ (el.querySelector('.hint')).hidden = !hint;
 }
 
 /** The Settings card's fresh view of the override (it changes when Codex signs in or out). */
-export function setCodex(next) {
+/** @param {CodexState | null | undefined} next */ export function setCodex(next) {
   codex = next ?? null;
   renderUsage();
   renderModelPicker();
 }
 
 /** Under each usage bar, past 90% or while on: the override, Codex's own usage, and after Claude's reset a word that Claude is back. */
-function renderCodexSwitch(meter) {
-  let sw = meter.nextElementSibling?.classList.contains('codex-switch') ? meter.nextElementSibling : null;
+/** @param {HTMLElement} meter */ function renderCodexSwitch(meter) {
+  /** @type {HTMLElement | null} */ let sw = meter.nextElementSibling?.classList.contains('codex-switch') ? /** @type {HTMLElement} */ (meter.nextElementSibling) : null;
   if (!sw) {
     sw = h('div', { class: 'codex-switch', hidden: true }, codexToggle(), h('span', { class: 'codex-usage' }), h('span', { class: 'claude-back' }, "Claude's back"));
     meter.after(sw);
   }
   sw.hidden = !codex || !(codex.on || claudeHigh());
   if (sw.hidden) return;
-  sw.querySelector('.claude-back').hidden = !codex.on || claudeHigh();
-  const top = codexTop(codex.usage);
-  const cu = sw.querySelector('.codex-usage');
-  cu.hidden = !codex.on || top == null;
+  const cx = /** @type {CodexState} */ (codex);
+  /** @type {HTMLElement} */ (sw.querySelector('.claude-back')).hidden = !cx.on || claudeHigh();
+  const top = codexTop(cx.usage);
+  const cu = /** @type {HTMLElement} */ (sw.querySelector('.codex-usage'));
+  cu.hidden = !cx.on || top == null;
   if (cu.hidden) return;
   cu.textContent = `Codex ${top}%`;
   cu.dataset.level = codexLevel(top);
-  cu.title = [...codexWindows(codex.usage).map(windowText), `As of the last Codex turn, ${ago(codex.usage.updatedAt)}`].join('\n');
+  cu.title = [...codexWindows(cx.usage).map(windowText), `As of the last Codex turn, ${ago(/** @type {CodexUsage} */ (cx.usage).updatedAt)}`].join('\n');
 }
 
-async function flipCodex(box) {
+/** @param {HTMLInputElement} box */ async function flipCodex(box) {
   box.disabled = true;
   codexHint = '';
   try {
     codex = await api('api/me/codex/switch', { method: 'PUT', body: { on: box.checked } });
   } catch (err) {
-    codexHint = err.message;
+    codexHint = /** @type {Error} */ (err).message;
   }
   renderUsage();
   renderModelPicker();
@@ -820,23 +825,23 @@ document.addEventListener('visibilitychange', () => {
 // Threads' histories downloaded this session, each its newest page or more ({ events, more, tasks },
 // as the events route gives it), so reopening one only fetches what is new. Events are append-only,
 // so the cached part never goes stale. Most recently used last.
-const eventCache = new Map();
+/** @type {Map<number | string, EventsPage>} */ const eventCache = new Map();
 const EVENT_CACHE_THREADS = 12;
 
 /**
  * Where a chat's history comes from: a ticket id, or a merged Taskmaster view's URL (Mine and Everyone, #920,
  * thread.js mergedView) that pages several sessions as one. `query` is added to it.
  */
-export const eventsUrl = (src, query = '') => (typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`);
+export const eventsUrl = (/** @type {number | string} */ src, query = '') => (typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`);
 
-function remember(ticketId, page) {
+/** @param {number | string} ticketId @param {EventsPage} page */ function remember(ticketId, page) {
   eventCache.delete(ticketId);
   eventCache.set(ticketId, page);
-  if (eventCache.size > EVENT_CACHE_THREADS) eventCache.delete(eventCache.keys().next().value);
+  if (eventCache.size > EVENT_CACHE_THREADS) eventCache.delete(/** @type {number | string} */ (eventCache.keys().next().value));
 }
 
 /** A thread's newest page of history, from the cache topped up with what came since, or fetched. */
-export async function loadEvents(ticketId) {
+/** @param {number | string} ticketId */ export async function loadEvents(ticketId) {
   // A prefetch already on its way is the head start: wait for it, then fetch only what came after.
   await prefetching.get(ticketId);
   const cached = eventCache.get(ticketId);
@@ -845,7 +850,7 @@ export async function loadEvents(ticketId) {
     const fresh = await api(eventsUrl(ticketId, `after=${page.events.at(-1)?.id ?? 0}`));
     // Another load, or live events, may have added some of these while this one was on its way.
     const last = page.events.at(-1)?.id ?? 0;
-    page.events = page.events.concat(fresh.filter((e) => e.id > last));
+    page.events = page.events.concat(fresh.filter((/** @type {ChatEvent} */ e) => e.id > last));
   }
   remember(ticketId, page);
   return page;
@@ -855,7 +860,7 @@ export async function loadEvents(ticketId) {
  * A thread's history from the cache, to draw at once (#527), or null when it isn't cached (or is still prefetching).
  * What came since is the chat's own catch-up once it is drawn (mountChat): one request, appended, not drawn again (#1531).
  */
-export function cachedEvents(ticketId) {
+/** @param {number | string} ticketId */ export function cachedEvents(ticketId) {
   const page = eventCache.get(ticketId);
   if (!page || prefetching.has(ticketId)) return null;
   remember(ticketId, page);
@@ -863,29 +868,29 @@ export function cachedEvents(ticketId) {
 }
 
 /** Add the page before the oldest loaded event to a thread's history; with `from`, reach back to that event. */
-export function loadEarlier(ticketId, page, from) {
+/** @param {number | string} ticketId @param {EventsPage} page @param {number} [from] */ export function loadEarlier(ticketId, page, from) {
   // One at a time per page (Load earlier and Find can both ask), each going on from where the last got to.
   const load = (earlierLoads.get(page) ?? Promise.resolve())
     .catch(() => {})
     .then(async () => {
       const first = page.events[0].id;
       const older = await api(eventsUrl(ticketId, `before=${first}${from ? `&from=${from}` : ''}`));
-      Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks, plan: older.plan });
+      Object.assign(page, { events: older.events.filter((/** @type {ChatEvent} */ e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks, plan: older.plan });
       remember(ticketId, page);
       return page;
     });
   earlierLoads.set(page, load);
   return load;
 }
-const earlierLoads = new WeakMap(); // page -> its load of earlier events in flight (or done)
+/** @type {WeakMap<EventsPage, Promise<EventsPage>>} */ const earlierLoads = new WeakMap(); // page -> its load of earlier events in flight (or done)
 
 // Prefetching: a thread's newest page starts downloading when you point at (or touch) its row, and
 // the top two rows load quietly once a project page settles, so a first click opens from the cache.
 // A prefetch only fills a free cache slot, never evicting a thread you actually opened.
-const prefetching = new Map(); // ticket id -> its download in flight
+/** @type {Map<number | string, Promise<void>>} */ const prefetching = new Map(); // ticket id -> its download in flight
 const PREFETCH_ROWS = 2;
 
-function prefetchEvents(ticketId) {
+/** @param {number} ticketId */ function prefetchEvents(ticketId) {
   if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId) ?? Promise.resolve(); // always a promise: prefetchTopRows chains on it
   const p = api(eventsUrl(ticketId))
     .then((page) => {
@@ -897,7 +902,7 @@ function prefetchEvents(ticketId) {
   return p;
 }
 
-const rowTicketId = (el) => Number(el?.closest?.('a.thread-row[data-id]')?.dataset.id) || null;
+const rowTicketId = (/** @type {EventTarget | null | undefined} */ el) => Number(/** @type {HTMLElement | null | undefined} */ (/** @type {Element | null | undefined} */ (el)?.closest?.('a.thread-row[data-id]'))?.dataset.id) || null;
 for (const type of ['pointerover', 'touchstart']) {
   document.addEventListener(
     type,
@@ -918,12 +923,12 @@ export function prefetchTopRows() {
       .map(rowTicketId)
       .filter((id) => id && id !== view?.id)
       .slice(0, PREFETCH_ROWS);
-    const next = () => (ids.length ? prefetchEvents(ids.shift()).then(next) : null);
+    /** @type {() => Promise<unknown> | null} */ const next = () => (ids.length ? prefetchEvents(/** @type {number} */ (ids.shift())).then(next) : null);
     await Promise.all([next(), next()]);
   });
 }
 
-export function onTicketUpdate(ticket) {
+/** @param {Ticket} ticket */ export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
   holdAnswered(ticket); // #1409
@@ -957,7 +962,7 @@ export function onTicketUpdate(ticket) {
 }
 
 /** You pinned or unpinned a minion, maybe in another tab (#179); others' pins aren't yours to show. */
-export function onTicketPin({ name, projectId, ticketId, pinned }) {
+/** @param {{ name: string, projectId: number, ticketId: number, pinned: boolean }} pin */ export function onTicketPin({ name, projectId, ticketId, pinned }) {
   if (name !== me || view?.kind !== 'project' || view.projectId !== projectId || !view.pins) return;
   view.pins = view.pins.filter((id) => id !== ticketId);
   if (pinned) view.pins.push(ticketId);
@@ -966,7 +971,7 @@ export function onTicketPin({ name, projectId, ticketId, pinned }) {
 }
 
 /** Someone set or cleared people's note on a minion (#146). */
-function onPersonNote({ projectId, ticketId, note }) {
+/** @param {{ projectId: number, ticketId: number, note: { text: string, by: string, at: number } | null }} change */ function onPersonNote({ projectId, ticketId, note }) {
   if (view?.kind !== 'project' || view.projectId !== projectId || !view.personNotes) return;
   if (note) view.personNotes[ticketId] = note;
   else delete view.personNotes[ticketId];
@@ -974,7 +979,7 @@ function onPersonNote({ projectId, ticketId, note }) {
   if (view.id === ticketId) renderTicketHead();
 }
 
-function onEvent(event) {
+/** @param {ChatEvent} event */ function onEvent(event) {
   if (view?.kind !== 'project' || (view.id !== event.ticket_id && !inMerged(view.merged, event))) return;
   if (event.id <= view.lastEventId) return;
   if (!holdEvent(event)) appendEvent(event);
@@ -984,11 +989,11 @@ function onEvent(event) {
 
 // Bumped on every navigation, so a slow load that another click has overtaken is dropped.
 export let routeSeq = 0;
-let routedHash = null; // the address the newest finished route opened (a "show me where" link waits for it)
+/** @type {string | null} */ let routedHash = null; // the address the newest finished route opened (a "show me where" link waits for it)
 
 // The usage ledger (#1306): one count per page opened; the server drops the numbers. A failure is ignored.
 let lastCounted = '';
-function countPage(hash) {
+/** @param {string} hash */ function countPage(hash) {
   const name = (hash || '#/').replace(/[?].*$/, '').replace(/\d+/g, 'n');
   if (name === lastCounted) return;
   lastCounted = name;
@@ -1084,14 +1089,14 @@ export async function route() {
     else await openStartScheme();
     if (seq === routeSeq) keepOpenChatSoon();
   } catch (err) {
-    if (err.message !== 'Not logged in' && seq === routeSeq) {
+    if (/** @type {Error} */ (err).message !== 'Not logged in' && seq === routeSeq) {
       // A notice with a way out, not a bare red line on a blank page.
       const scheme = hash.match(/^#\/[ps]\/(\d+)/)?.[1];
       app.replaceChildren(
         h(
           'div',
           { class: 'cui-notice route-error', role: 'alert', 'data-tone': 'danger' },
-          h('p', {}, err.message),
+          h('p', {}, /** @type {Error} */ (err).message),
           h(
             'p',
             {},
@@ -1103,7 +1108,7 @@ export async function route() {
               'a',
               {
                 href: location.hash,
-                onclick: (e) => {
+                onclick: (/** @type {Event} */ e) => {
                   e.preventDefault();
                   route();
                 },
@@ -1128,13 +1133,13 @@ export async function route() {
 }
 
 /** A share from the phone's Share sheet (#375): the contraption that takes it, filled in; else home, saying so. */
-async function takeShare(search, seq) {
+/** @param {string} search @param {number} seq */ async function takeShare(search, seq) {
   let mine;
   try {
     mine = await api('api/contraptions/mine');
   } catch (err) {
     // The login is showing, or Citadel didn't answer: the share stays in the address, for after or a reload.
-    if (err.message !== 'Not logged in') toast(`Couldn't open the share: ${err.message}. Reload to try again.`, { tone: 'warn', ms: 8000 });
+    if (/** @type {Error} */ (err).message !== 'Not logged in') toast(`Couldn't open the share: ${/** @type {Error} */ (err).message}. Reload to try again.`, { tone: 'warn', ms: 8000 });
     return;
   }
   if (seq !== routeSeq) return; // you went elsewhere meanwhile
@@ -1154,10 +1159,10 @@ window.addEventListener('hashchange', route);
 // Ctrl/Cmd/Shift/middle-click still open it in a new tab or window.
 document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  const a = e.target.closest?.('a[href]');
+  const a = /** @type {HTMLAnchorElement | null | undefined} */ (/** @type {Element} */ (e.target).closest?.('a[href]'));
   if (!a || a.hasAttribute('download')) return;
   pointPrLink(a);
-  const hash = inAppHash(a.getAttribute('href'), location);
+  const hash = inAppHash(/** @type {string} */ (a.getAttribute('href')), location);
   if (!hash) return;
   e.preventDefault();
   openHash(hash);
@@ -1166,8 +1171,8 @@ document.addEventListener('click', (e) => {
 // A pull request goes to the minion that owns it instead of GitHub: PR links and "PR #186"s are
 // rendered that way once api/prs has loaded. Ones rendered before it are re-pointed when it
 // arrives, and a GitHub link's href is also swapped as the pointer or focus reaches it.
-let prRepos = null;
-let prList = null; // the same, as a list: two schemes may share a repo
+/** @type {Map<string, PrRepo> | undefined} */ let prRepos;
+/** @type {PrRepo[] | undefined} */ let prList; // the same, as a list: two schemes may share a repo
 let prsAt = 0;
 function loadPrs() {
   if (Date.now() - prsAt < 5 * 60_000) return;
@@ -1175,35 +1180,35 @@ function loadPrs() {
   api('api/prs')
     .then((r) => {
       prList = r;
-      prRepos = new Map(r.map((x) => [x.repo, x]));
+      prRepos = new Map(r.map((/** @type {PrRepo} */ x) => /** @type {[string, PrRepo]} */ ([x.repo, x])));
       linkPrRefs();
       schedulePaintRefs();
     })
     .catch(() => {});
 }
 /** Where a GitHub PR link should go instead (see prOwnerRoute); null until api/prs has loaded. */
-const prUrlRoute = (href) => prOwnerRoute(prRepos, href);
+const prUrlRoute = (/** @type {string} */ href) => prOwnerRoute(prRepos, href);
 /** Where "PR #n" said in scheme `projectId` goes (see prNumberRoute); one not known yet looks again, at most every 5 minutes. */
-function prRefRoute(projectId, n) {
+/** @param {number} projectId @param {number} n @returns {PrTarget | null} */ function prRefRoute(projectId, n) {
   const to = prNumberRoute(prList, projectId, n);
   if (!to) loadPrs();
   return to;
 }
 /** Point the PR links, "PR #186"s and "#N"s that are no minion at their owners or GitHub, now that api/prs is known. */
 function linkPrRefs() {
-  for (const a of document.querySelectorAll('a[href^="https://github.com/"]')) pointPrLink(a);
-  for (const span of document.querySelectorAll('span.pr-ref')) {
+  for (const a of /** @type {NodeListOf<HTMLAnchorElement>} */ (document.querySelectorAll('a[href^="https://github.com/"]'))) pointPrLink(a);
+  for (const span of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('span.pr-ref'))) {
     const to = prRefRoute(Number(span.dataset.project), Number(span.dataset.pr));
     if (to?.hash) span.replaceWith(h('a', { class: 'thread-ref', href: to.hash, title: to.title }, ...span.childNodes));
     else if (to?.url) span.replaceWith(h('a', { href: to.url, target: '_blank', rel: 'noopener', title: to.title }, ...span.childNodes));
   }
 }
-function pointPrLink(a) {
+/** @param {HTMLAnchorElement} a */ function pointPrLink(a) {
   if (!a.href.startsWith('https://github.com/') || a.dataset.github != null) return;
   loadPrs();
-  const to = prOwnerRoute(prRepos, a.getAttribute('href'));
+  const to = prOwnerRoute(prRepos, /** @type {string} */ (a.getAttribute('href')));
   if (!to) return;
-  a.dataset.prUrl = a.getAttribute('href');
+  a.dataset.prUrl = /** @type {string} */ (a.getAttribute('href'));
   a.setAttribute('href', to.hash);
   a.removeAttribute('target');
   a.title = to.title;
@@ -1211,7 +1216,7 @@ function pointPrLink(a) {
 watchRefs();
 for (const type of ['pointerover', 'focusin']) {
   document.addEventListener(type, (e) => {
-    const a = e.target.closest?.('a[href^="https://github.com/"]');
+    const a = /** @type {HTMLAnchorElement | null | undefined} */ (/** @type {Element} */ (e.target).closest?.('a[href^="https://github.com/"]'));
     if (a) pointPrLink(a);
   });
 }
@@ -1224,7 +1229,7 @@ setShowLogin(renderLogin);
 export function clearTopbarMeters() {
   const meters = document.querySelector('.topbar .meters');
   if (!meters) return;
-  for (const el of meters.querySelectorAll('.usage, .ci-chip, .status-chip, .releases-chip')) {
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (meters.querySelectorAll('.usage, .ci-chip, .status-chip, .releases-chip'))) {
     if (el.matches('.usage'))
       el.hidden = true; // the markup's own bar stays, hidden, for renderUsage to show again
     else el.remove();
@@ -1240,9 +1245,9 @@ function renderLogin() {
   crumbs.replaceChildren();
   meEl.replaceChildren();
   clearTopbarMeters();
-  app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
+  app.replaceChildren(/** @type {HTMLTemplateElement} */ (document.getElementById('login-tpl')).content.cloneNode(true));
   mountLoginMap(app);
-  const form = document.getElementById('login-form');
+  const form = /** @type {LoginForm} */ (document.getElementById('login-form'));
   // A saved login that is really the site's address (filled in by a phone's password manager) is dropped.
   try {
     const saved = localStorage.getItem('cc-login') || '';
@@ -1251,7 +1256,7 @@ function renderLogin() {
   const desk = desktopLogin(form);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const err = document.getElementById('login-error');
+    const err = /** @type {HTMLElement} */ (document.getElementById('login-error'));
     const body = { login: form.login.value, password: form.password.value };
     const sent = desk.sent(body); // what was sent, so an edit while it's on its way isn't what gets saved
     try {
@@ -1266,7 +1271,7 @@ function renderLogin() {
       start(await api('api/me'));
     } catch (ex) {
       sent.refused(ex);
-      err.textContent = ex.message;
+      err.textContent = /** @type {Error} */ (ex).message;
       err.hidden = false;
     }
   });
@@ -1279,16 +1284,16 @@ function renderLogin() {
  * keeps it, and so does signing in as another login to test the page; Forget, signing in as the saved login unticked, or
  * the server refusing it drops it. A browser or phone sees none of this.
  */
-function desktopLogin(form) {
+/** @param {LoginForm} form */ function desktopLogin(form) {
   const bridge = window.citadelDesktop;
   if (!bridge?.savedLogin) return { sent: () => ({ signedIn: async () => {}, refused: () => {} }) };
-  let saved = null; // the saved login's name, while one is saved
-  let filled = null; // the saved password, while the box still holds it
+  /** @type {string | null} */ let saved = null; // the saved login's name, while one is saved
+  /** @type {string | null} */ let filled = null; // the saved password, while the box still holds it
   const tick = h('input', { type: 'checkbox', name: 'remember' });
   const forget = h('button', { type: 'button', class: 'link', hidden: true }, 'Forget');
   // Shown at once, so the button doesn't jump when the saved one arrives; hidden only if Windows can't encrypt.
   const row = h('div', { class: 'login-remember' }, h('label', {}, tick, ' Remember my password on this PC'), forget);
-  form.querySelector('#login-error').before(row);
+  /** @type {Element} */ (form.querySelector('#login-error')).before(row);
   const drop = async () => {
     if (!(await bridge.forgetLogin().catch(() => false))) {
       toast("Windows couldn't delete the saved password on this PC. Try again.", { tone: 'warn', ms: 8000 });
@@ -1319,7 +1324,7 @@ function desktopLogin(form) {
       // What she's already typing wins over the fill.
       if (!saved || form.password.value || (form.login.value && form.login.value.trim() !== saved)) return;
       form.login.value = saved;
-      form.password.value = filled = r.login.password;
+      form.password.value = filled = /** @type {{ login: string, password: string }} */ (r.login).password;
       tick.checked = true;
     },
     () => {
@@ -1327,7 +1332,7 @@ function desktopLogin(form) {
     },
   );
   return {
-    sent({ login, password }) {
+    /** @param {{ login: string, password: string }} creds */ sent({ login, password }) {
       const remember = !row.hidden && tick.checked;
       const asSaved = saved !== null && login.trim() === saved;
       return {
@@ -1338,8 +1343,8 @@ function desktopLogin(form) {
           } else if (asSaved) await drop();
         },
         /** The saved password turned down (not a lockout or a network failure) is dropped; the form shows as usual. */
-        refused(ex) {
-          if (ex?.status !== 401 || !asSaved || filled === null || password !== filled) return;
+        /** @param {unknown} ex */ refused(ex) {
+          if (/** @type {{ status?: number } | null | undefined} */ (ex)?.status !== 401 || !asSaved || filled === null || password !== filled) return;
           drop().then((ok) => {
             if (ok && form.password.value === password) form.password.value = '';
           });
@@ -1350,22 +1355,22 @@ function desktopLogin(form) {
 }
 
 /** The page an invite or reset link opens: it names who the link is for and sets their password. */
-export function renderInvite(token) {
+/** @param {string} token */ export function renderInvite(token) {
   setView(null);
   crumbs.replaceChildren();
   meEl.replaceChildren();
   clearTopbarMeters();
-  app.replaceChildren(document.getElementById('invite-tpl').content.cloneNode(true));
+  app.replaceChildren(/** @type {HTMLTemplateElement} */ (document.getElementById('invite-tpl')).content.cloneNode(true));
   mountLoginMap(app);
-  const form = document.getElementById('invite-form');
-  const who = document.getElementById('invite-who');
-  const err = document.getElementById('invite-error');
+  const form = /** @type {LoginForm & { again: HTMLInputElement }} */ (document.getElementById('invite-form'));
+  const who = /** @type {HTMLElement} */ (document.getElementById('invite-who'));
+  const err = /** @type {HTMLElement} */ (document.getElementById('invite-error'));
   const path = `api/invite/${encodeURIComponent(token)}`;
   api(path)
     .then((r) => {
       who.replaceChildren('This sets the password for ', h('strong', {}, r.name), ', who signs in as ', h('strong', {}, r.login), '.');
       form.login.value = r.login;
-      form.querySelector('button').disabled = false;
+      /** @type {HTMLButtonElement} */ (form.querySelector('button')).disabled = false;
     })
     .catch((ex) => {
       // A dead link: say so, and the way on is signing in (or asking for a new link), not a form that can't send.
@@ -1389,19 +1394,19 @@ export function renderInvite(token) {
       history.replaceState(null, '', location.pathname);
       start(await api('api/me'));
     } catch (ex) {
-      err.textContent = ex.message;
+      err.textContent = /** @type {Error} */ (ex).message;
       err.hidden = false;
     }
   });
 }
 
-export function start(who) {
+/** @param {Account} who */ export function start(who) {
   setAccount(who);
-  meEl.replaceChildren(me, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
+  meEl.replaceChildren(/** @type {string} */ (me), h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
   connectStream();
   loadPrs();
   // The top bar's CI, Status and Releases chips (#968, #1423), beside its usage meter: the ones phones see.
-  const meters = document.querySelector('.topbar .meters');
+  const meters = /** @type {HTMLElement} */ (document.querySelector('.topbar .meters'));
   if (!meters.querySelector('.status-chip')) meters.append(statusChip());
   if (!meters.querySelector('.ci-chip[data-kind="ci"]')) meters.append(ciChip());
   if (!meters.querySelector('.releases-chip')) meters.append(releasesChip());
@@ -1431,7 +1436,7 @@ export async function logout() {
 }
 
 /** A sign-out that failed: put back what it took down, and say so. */
-async function stillSignedIn(hadPush) {
+/** @param {Awaited<ReturnType<typeof pushOff>> | false} hadPush */ async function stillSignedIn(hadPush) {
   initAppSwitch(me);
   const pushBack = hadPush === false || (!!hadPush && (await pushBackOn(hadPush).catch(() => 'off')) !== 'off');
   toast(`Couldn't sign you out.${pushBack ? '' : ' Notifications on this device are off now.'}`, { tone: 'danger', action: { label: 'Try again', run: logout } });
@@ -1439,7 +1444,7 @@ async function stillSignedIn(hadPush) {
 
 // ---------- jumps ----------
 
-let pendingJump = null; // { hash, target }: a jump for the chat route() is opening
+/** @type {ReturnType<typeof jumpParts>} */ let pendingJump = null; // { hash, target }: a jump for the chat route() is opening
 
 /** The jump waiting for the chat now open at its address, once (mountChat). */
 export function takeJump() {
@@ -1449,7 +1454,7 @@ export function takeJump() {
 }
 
 /** Go to an in-app address; a jump within the chat already open scrolls it in place, with no reload and no history entry. */
-export function openHash(hash) {
+/** @param {string} hash */ export function openHash(hash) {
   const jump = jumpParts(hash);
   if (jump && jump.hash === location.hash && view?.kind === 'project' && view.main === 'chat' && view.ticket && threadHref(view.ticket) === jump.hash) return void jumpToEvent(jump.target);
   if (location.hash !== hash) location.hash = hash;
@@ -1462,18 +1467,18 @@ export function openHash(hash) {
 document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
   const el = e.target instanceof Element ? e.target : null;
-  const marked = el?.closest('.cui-marked');
+  const marked = /** @type {HTMLElement | null | undefined} */ (el?.closest('.cui-marked'));
   // Draw on it takes the picture itself: a file preview's link is the file viewer's route, not the picture.
   const draw = el?.closest('.cui-marks-draw');
-  const img = draw ? marked?.querySelector('img') : el?.closest('.msg a > img, .md a > img, .msg a .cui-marked-pic > img, .md a .cui-marked-pic > img');
+  const img = /** @type {HTMLImageElement | null | undefined} */ (draw ? marked?.querySelector('img') : el?.closest('.msg a > img, .md a > img, .msg a .cui-marked-pic > img, .md a .cui-marked-pic > img'));
   const src = draw ? img?.src : img?.closest('a')?.href;
   if (!src) return;
   e.preventDefault();
-  const own = marked?.querySelector('.cui-marks-toggle > input')?.checked ? parseMarks(marked.dataset.marks) : null;
+  const own = /** @type {HTMLInputElement | null | undefined} */ (marked?.querySelector('.cui-marks-toggle > input'))?.checked ? parseMarks(marked?.dataset.marks) : null;
   // Ready to draw on (#946), as an image waiting to send: Done puts the marked copy in this chat's message box.
-  const chatId = view?.kind === 'project' && view.main === 'chat' && img.closest('#log') ? view.id : null;
+  const chatId = view?.kind === 'project' && view.main === 'chat' && img?.closest('#log') ? view.id : null;
   const lb = lightbox(
-    [{ src, alt: img.alt || 'Picture' }],
+    [{ src, alt: img?.alt || 'Picture' }],
     chatId == null || !drawable(src)
       ? {}
       : {
@@ -1481,7 +1486,7 @@ document.addEventListener('click', (e) => {
             annotator(stage, item.src, {
               ...(own ? { marks: own.marks, size: { w: own.w, h: own.h } } : {}),
               doneLabel: 'Add to message',
-              onDone: async (canvas) => {
+              onDone: async (/** @type {HTMLCanvasElement | null} */ canvas) => {
                 lb.close();
                 if (canvas) attachImage(chatId, await canvasBlob(canvas));
               },
@@ -1493,7 +1498,7 @@ document.addEventListener('click', (e) => {
 /** Minions whose Stop was clicked and that haven't stopped yet: the head and the row's menu say "Stopping…" until the status moves on (a stop takes up to 15 s on the server). */
 export const stoppingIds = new Set();
 /** Stop shows "Stopping…" at once (`redraw` draws it) and the request runs behind it; a refusal (nothing to stop) or an error puts the button back with a toast and a Retry. */
-export function stopChat(t, redraw = () => {}) {
+/** @param {Ticket} t @param {() => void} [redraw] */ export function stopChat(t, redraw = () => {}) {
   return optimistic({
     sets: `stop:${t.id}`,
     apply: () => {

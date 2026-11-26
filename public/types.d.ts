@@ -391,7 +391,7 @@ export interface ProgressTask {
   status: string;
   actions: number;
   estimate?: number | null;
-  startedAt?: number;
+  startedAt?: number | null;
   doneN?: number;
   work?: number;
   workFrom?: number | null;
@@ -423,8 +423,17 @@ export interface ChatAction {
   event: { id: number; ticket: number };
 }
 
+/** One of Claude's words in the open chat, as thread.js hands it to narration.js: its message and body. */
+export interface NarrationText {
+  el: HTMLElement;
+  body?: Node;
+  text: string;
+}
+/** The open chat's narration sorter (narration.js), carrying thread.js's lines. */
+export type NarrationSorter = ReturnType<typeof narrationSorter<NarrationText>>;
+
 /** A line of the running turn's words waiting to fold or stay (narration.js), or a break between stretches. */
-export type Fold = ReturnType<ReturnType<typeof narrationSorter>['text']>[number] | { fate: 'break'; text?: undefined };
+export type Fold = ReturnType<NarrationSorter['text']>[number] | { fate: 'break'; text?: undefined };
 
 /** A message you sent that the server's history doesn't have yet (composer.js send). */
 export interface PendingMessage {
@@ -434,7 +443,7 @@ export interface PendingMessage {
   sendId: string;
   saved: unknown[];
   state: string;
-  retry?: () => unknown;
+  retry?: () => Promise<unknown>;
 }
 
 /** The chat's newest plan card (cards.js planCard): a later one is shown as a revision of it. */
@@ -460,7 +469,7 @@ interface SessionState {
   latestReply: number | null;
   turnNote: string | null;
   turnInitAt: number | undefined;
-  narration: ReturnType<typeof narrationSorter>;
+  narration: NarrationSorter;
   narrationEl: HTMLElement | null;
   pendingRequest: { id: number; author: string; text: string }[];
   turnRequest: { id: number; author: string; text: string }[] | undefined;
@@ -471,9 +480,11 @@ interface SessionState {
  * no-scheme page (sidebar.js openStartScheme) sets only `kind: 'projects'`; the code that reads the rest runs on a
  * scheme's page.
  */
-export type View = Omit<ReturnType<typeof chatView>, keyof SessionState> &
+export type View = Omit<ReturnType<typeof chatView>, keyof SessionState | 'sendingTo'> &
   SessionState & {
     kind: 'project' | 'projects';
+    /** The ticket id while a message is on its way, before the server confirms the turn (thread.js chatView). */
+    sendingTo: number | null;
     home: boolean;
     /** What the main panel shows: 'chat', 'releases', 'home', a settings page… */
     main: string;
@@ -495,11 +506,13 @@ export type View = Omit<ReturnType<typeof chatView>, keyof SessionState> &
     artifactId: number | null;
     machines: unknown[];
     projects: SchemeListed[];
-    file: string | null;
+    /** The shared-folder file open in the main panel. */
+    file: SharedFile | null;
     showClosed: boolean;
     page: EventsPage;
     openedSeenAt: number;
-    sawAt: number;
+    /** When the open chat was last seen, or unset (seen.js). */
+    sawAt?: number;
     /** Settings > Machines (settings-machines.js): a token just made, shown until you leave the page. */
     machineToken: { id: number; name: string; token: string; url: string; runners: boolean } | null;
     machineOpen: Set<number>;
@@ -1349,4 +1362,223 @@ export interface JobSettings {
   end: string;
   until: number | null;
   paused: boolean;
+}
+/** One step of a plan call's `steps` (src/mcp.ts PLAN; progress.js planError checks it). */
+export interface PlanStep {
+  n: number;
+  step?: string;
+  doing?: string;
+  why?: string;
+  outcome?: string;
+  minutes?: number;
+  status?: string;
+  kind?: string;
+}
+
+/** What a tool call's input holds that progress.js and the readouts read (Claude's tool inputs; the plan tools' too). */
+export interface ToolInput {
+  command?: string;
+  description?: string;
+  file_path?: string;
+  notebook_path?: string;
+  pattern?: string;
+  path?: string;
+  url?: string;
+  query?: string;
+  prompt?: string;
+  skill?: string;
+  subagent_type?: string;
+  ticket_id?: number | string;
+  title?: string;
+  text?: string;
+  notice?: string;
+  kind?: string;
+  state?: string;
+  taskId?: string | number;
+  subject?: string;
+  activeForm?: string;
+  status?: string;
+  metadata?: { estimate?: unknown; outcome?: unknown };
+  todos?: { content: string; activeForm?: string; status: string }[];
+  steps?: PlanStep[];
+}
+
+/** A tool call in a Claude message (stream-json `tool_use` block); `work` and `cut` come from eventcut.js's cut-down copy. */
+export interface ToolBlock {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input?: ToolInput;
+  work?: string;
+  /** Input field -> its whole length, for each field a page's copy cut short. */
+  cut?: Record<string, number>;
+}
+
+/** A tool's result in a user message (stream-json `tool_result` block). */
+export interface ResultBlock {
+  type: 'tool_result';
+  tool_use_id: string;
+  content?: unknown;
+  is_error?: boolean;
+  /** The whole length, when a page's copy was cut short. */
+  cut?: number;
+}
+
+/** A block of a Claude message's content as the server stores it (src/claude-events.ts ContentBlock): which fields it has depends on `type`; ToolBlock and ResultBlock are the two a page reads. */
+export interface ChatBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: ToolInput;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+  work?: string;
+  cut?: unknown;
+}
+
+/** The `data` of a `claude` chat event, as progress.js reads it (stream-json). */
+export interface ClaudeEvent {
+  type?: string;
+  subtype?: string;
+  model?: unknown;
+  is_error?: boolean;
+  parent_tool_use_id?: string | null;
+  turn_state?: string | null;
+  message?: { content?: ChatBlock[] | string };
+}
+
+/** One window of a Claude account's plan usage (src/turn-messages.ts UsageWindow). */
+export interface UsageWindow {
+  utilization: number;
+  resetsAt: number | null;
+  status: string | null;
+}
+/** A Claude account's plan usage as a turn last reported it (src/turn-messages.ts Usage). */
+export interface PlanUsage {
+  weekly: UsageWindow | null;
+  session: UsageWindow | null;
+  updatedAt: number;
+}
+/** A person's Claude usage as the stream and api/me give it (src/runner.ts usageOf: Usage, which account new minions use and why, and each account). */
+export interface ClaudeUsage extends PlanUsage {
+  account?: number;
+  why?: string;
+  pinned?: number;
+  accounts?: { n: number; label: string; same?: string; usage: PlanUsage | null }[];
+}
+/** One window of a person's Codex usage (src/codex.ts CodexUsage): resetsAt in seconds. */
+export interface CodexWindow {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+}
+export interface CodexUsage {
+  primary: CodexWindow | null;
+  secondary: CodexWindow | null;
+  updatedAt: number;
+}
+/** A person's Codex override as the stream gives it (src/runner.ts codexView). */
+export interface CodexState {
+  ready: boolean;
+  why: string | null;
+  on: boolean;
+  usage: CodexUsage | null;
+}
+
+/** The desktop app's bridge (desktop/preload.cjs), on `window` only in it. */
+export interface CitadelDesktop {
+  app: string;
+  show(): void;
+  /** A PNG of `rect` (desktop/main.cjs: capturePage().toPNG(), a Buffer over IPC). */
+  capture(rect: object): Promise<Uint8Array<ArrayBuffer>>;
+  inspect(x: number, y: number): void;
+  /** The sign-in page's saved password (desktop/saved-login.cjs). */
+  savedLogin(): Promise<{ canSave: boolean; login: { login: string; password: string } | null }>;
+  saveLogin(login: string, password: string): Promise<boolean>;
+  forgetLogin(): Promise<boolean>;
+}
+declare global {
+  interface Window {
+    citadelDesktop?: CitadelDesktop;
+  }
+  interface Navigator {
+    /** Chromium's Network Information API. */
+    connection?: { saveData?: boolean };
+  }
+  interface NotificationOptions {
+    renotify?: boolean;
+  }
+}
+
+/** A picture or file waiting on a message, as a draft saves it (composer.js createAttachments). */
+export interface SavedItem {
+  mediaType?: string;
+  data?: string;
+  upload?: { name: string; size: number; type: string; label?: string };
+  note?: { text: string; label: string };
+}
+
+/** The chat's message box form with the hooks composer.js hangs on it for thread.js, replies and the paste listener. */
+export type ComposerForm = HTMLFormElement & {
+  pasteAnywhere: (e: ClipboardEvent) => void;
+  sendAndUnpark: () => void;
+  sendText: (text: string) => Promise<unknown>;
+  editBack: (text: string, saved?: SavedItem[]) => () => void;
+  attach: (saved: SavedItem[]) => unknown[];
+};
+
+/** A minion's change on its way in a release (releases.js pendingRelease), which the list adds to the row as `release`. */
+export interface PendingRelease {
+  target: string;
+  targetId?: string;
+  name: string;
+  stage: string;
+  text?: string;
+  since?: number;
+  stuck?: boolean;
+}
+
+/** A minion as a list row (sidebar.js, threadstate.js): the ticket plus its release on its way, once the list has set it. */
+export type ListedTicket = Ticket & { release?: PendingRelease | null };
+
+/** A row's state pill as data (threadstate.js rowState). */
+export interface RowState {
+  rank: number;
+  fam: string;
+  cell: string;
+  label: string;
+  pulse?: boolean;
+  counted?: boolean;
+  server?: boolean;
+  quiet?: boolean;
+  since?: number;
+  mention?: { by: string; at: number };
+}
+
+/** A person's message drawn in the chat (bubbles.js userBubble), with what thread.js hangs on it for its ✎ (markQueued). */
+export interface Bubble extends HTMLElement {
+  /** What the ✎ puts back in the message box while it waits in the queue. */
+  sent?: { text: string; images: string[]; files: NonNullable<SavedItem['upload']>[] };
+}
+
+/** One line of what a minion waits for, in its list row's popover (src/waits-readout.ts WaitRow). */
+export interface WaitRow {
+  /** The delivery's id, or null for a wait still in an old key (no Cancel here). */
+  id: number | null;
+  kind: string;
+  chip: string;
+  what: string;
+  headline: string;
+  line: string;
+  text: string;
+  facts: string[];
+  link: { project: number; number: number } | null;
+  set_by: string;
+  since: number | null;
+  due: number | null;
+  state: 'waiting' | 'held' | 'sending' | 'dropped' | 'failed';
+  reason: string | null;
+  cancellable: boolean;
 }

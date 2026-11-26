@@ -58,7 +58,7 @@ export interface Composer {
  * a numbered list continues; text is 16px on phones; the form pads for the phone's home bar.
  * Link /apps/_citadel/theme.css and ui/base.css for its look.
  */
-export function mountComposer(el: Element, opts: ComposerOptions): Composer;
+export function mountComposer(el: Element | DocumentFragment, opts: ComposerOptions): Composer;
 
 /** Grow (or shrink) a textarea to fit its text, bounded by its CSS min-height and max-height. For your other text boxes. */
 export function fitHeight(textarea: HTMLTextAreaElement): void;

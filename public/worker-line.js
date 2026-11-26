@@ -1,6 +1,7 @@
 // The line for a worker as a drawer, opened from any waiting minion's chip and the Workers tile, and the Urgent mark
 // (#1889; Josh, 2026-11-24: "W1 · A drawer, opened from any waiting minion"; 'make that a button on a minion, mark it as
 // "urgent"'). The server's order and what Urgent means: src/turn-line.ts, src/urgent.ts.
+/** @import { Ticket } from './types.js' */
 import { api, h, me, pacificClock, view } from './base.js';
 import { renderSidebar } from './sidebar.js';
 import { renderTyping } from './thread.js';
@@ -22,7 +23,7 @@ let latest = null;
 
 // ---------- marking one Urgent ----------
 
-const minionObjects = (id) => new Set([view?.tickets?.get(id), view?.ticket?.id === id && view.ticket].filter(Boolean));
+const minionObjects = (id) => new Set(/** @type {Ticket[]} */ ([view?.tickets?.get(id), view?.ticket?.id === id && view.ticket].filter(Boolean)));
 
 /**
  * Mark or unmark `row` ({ ticket, number, title }): it shows at once here, in its header and its row, and the request
@@ -233,6 +234,7 @@ const shown = () => (open?.line ? ops.reduce(applyMove, lineGroups(started())) :
 export const lineMoved = () => open && read();
 
 /** Open the line; the minion it was opened from is outlined in it. */
+/** @param {number | null} [from] */
 export function openLine(from = null) {
   if (open) return;
   const list = h('ol', { class: 'line-rows' });

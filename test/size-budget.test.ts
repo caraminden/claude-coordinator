@@ -18,7 +18,7 @@ export const LIMIT = 1500;
 export const ALLOWED: Record<string, [number, string]> = {
   'public/reviews.js': [1662, 'the Reviewers and critics page (+162: JSDoc types replacing implicit any, #2023)'],
   'public/settings.js': [1609, "a scheme's settings pages (+109: JSDoc types replacing implicit any, #2023)"],
-  'public/core.js': [1514, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
+  'public/core.js': [1519, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued (+5: types replacing any, #2022)'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [
     4872,

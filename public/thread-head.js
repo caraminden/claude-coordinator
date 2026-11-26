@@ -1,7 +1,10 @@
 // A minion's head: its branch and pull request, people's note, pins, and the held-message, unpark and status actions.
+/** @import { Ticket, HeldMailItem } from './types.js' */
+/** @typedef {HTMLElement & { heldData?: Parameters<typeof heldLine>[0], sendText?: (text: string) => unknown, sendAndUnpark?: () => unknown }} Bubble A chat bubble, or the composer, with the fields composer.js and thread.js hang on it. */
+/** @typedef {{ pr?: { state: string, draft?: boolean, url: string, title: string, number: number }, build?: unknown, base: string, merged?: boolean, empty?: boolean, branch: string, ahead: number }} BranchStatus GET api/tickets/:id/branch (src/branch.ts). */
 import { presenceHead } from './presence.js';
 import { gloss } from './help-words.js';
-import { reloadQuietly, ago, api, dismissedWhen, h, icon, isCoordinator, me, threadFullName, threadLabel, threadTitleParts, view } from './base.js';
+import { reloadQuietly, ago, api, dismissedWhen, h, icon, isCoordinator, me, openView, threadFullName, threadLabel, threadTitleParts, view } from './base.js';
 import { stopChat, stoppingIds, catchUpEvents, onTicketPin, threadRefs } from './core.js';
 import { composerPlaceholder, renderModelPicker } from './composer.js';
 import { renderSidebar } from './sidebar.js';
@@ -25,6 +28,7 @@ import { renderTyping, syncHeldBrief, tmBanner, tmViewSwitch } from './thread.js
 
 // ---------- branch and pull request ----------
 
+/** @param {number | null} ticketId */
 export async function refreshBranch(ticketId) {
   try {
     const { status } = await api(`api/tickets/${ticketId}/branch`);
@@ -33,8 +37,9 @@ export async function refreshBranch(ticketId) {
 }
 
 /** "PR #12 · shipped" (linked), or for work shipped without a PR, the branch and whether main has it. */
+/** @param {BranchStatus | undefined} status */
 export function renderBranch(status) {
-  const el = view.branchEl;
+  const el = openView().branchEl;
   const parts = [];
   // Onto main it ships; a minion in a build merges into it (Cara, 2026-11-19, picked "Ship" on #1020's card). status.base is always main's.
   const done = status?.build ? 'merged' : 'shipped';
@@ -43,7 +48,7 @@ export function renderBranch(status) {
     const state = pr.state === 'MERGED' ? done : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
     parts.push(
       // data-github: this chip is the way to the PR on GitHub, so pointPrLink leaves it be (as the merge card's).
-      h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, 'data-github': '', onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
+      h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, 'data-github': '', onclick: (/** @type {Event} */ e) => e.stopPropagation() }, `PR #${pr.number}`),
       h('span', { class: `state ${state === done ? 'merged' : state}` }, state),
     );
     if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `Shipped to ${status.base}` }, '✓ in main'));
@@ -52,7 +57,7 @@ export function renderBranch(status) {
     parts.push(status.merged ? h('span', { class: 'state merged', title: `Shipped to ${status.base}` }, 'shipped') : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} not shipped`));
   }
   // Where its change is on the way to release (#626, take F); releases.js redraws the slot as that moves.
-  const chip = releaseChip(view.ticket);
+  const chip = releaseChip(openView().ticket);
   el.replaceChildren(...parts, h('span', { class: 'rel-chip-slot' }, chip ?? ''));
   el.hidden = !parts.length && !chip;
 }
@@ -60,14 +65,17 @@ export function renderBranch(status) {
 /** Fill the waiting-cards strip over the composer (public/waiting.js): a Taskmaster's cards, a minion's open choices cards. */
 function renderWaiting() {
   const slot = document.getElementById('chat-waiting');
-  if (!slot || !view.ticket) return;
-  const strip = waitingStrip(view.ticket);
+  const ticket = openView().ticket;
+  if (!slot || !ticket) return;
+  const strip = waitingStrip(ticket);
   slot.hidden = !strip;
   slot.replaceChildren(strip ?? '');
 }
 
 /** The chat's context meter (#1193): "84k / 200k", fixed width so a new number moves nothing. */
+/** @param {number} n */
 const kTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+/** @param {Ticket} t */
 function contextMeter(t) {
   const used = t.context_live ?? t.context_tokens;
   const full = used && t.context_window ? used / t.context_window : 0;
@@ -79,6 +87,7 @@ function contextMeter(t) {
 }
 
 /** The running turn's compactions so far and how long they stopped it (#1920), beside the meter; nothing before the first. */
+/** @param {Ticket} t */
 function compactionChip(t) {
   const c = t.compactions;
   if (!c?.n) return '';
@@ -91,24 +100,25 @@ export function renderTicketHead() {
   renderModelPicker();
   const el = document.getElementById('ticket-head');
   if (!el) return;
-  const t = headTicket(view.ticket);
+  const t = headTicket(/** @type {Ticket} */ (openView().ticket));
   const coord = isCoordinator(t);
   // A dismissed minion's message box is tinted and says so (style.css), following reopen and dismiss live.
   const chat = el.closest('.chat');
   chat?.classList.toggle('dismissed', t.status === 'closed');
   chat?.classList.toggle('turn-running', t.status === 'running' && !t.worker_wait);
   // A spend card's buttons are for its own turn only (#723).
-  for (const card of chat?.querySelectorAll('.scard') ?? []) card.classList.toggle('stale', Number(card.dataset.turn) !== t.turnStartedAt);
+  for (const card of /** @type {NodeListOf<HTMLElement> | never[]} */ (chat?.querySelectorAll('.scard') ?? [])) card.classList.toggle('stale', Number(card.dataset.turn) !== t.turnStartedAt);
   // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
   chat?.classList.toggle('role-taskmaster', coord);
   chat?.classList.toggle('role-minion', !coord);
-  const bubbles = [...(chat?.querySelectorAll('.log [data-event]') ?? [])];
+  const bubbles = /** @type {Bubble[]} */ ([...(chat?.querySelectorAll('.log [data-event]') ?? [])]);
   // Another Taskmaster session's messages (Mine, Everyone) are marked with that session's queue, not this one's (#1853).
+  /** @param {Bubble} b */
   const ownerOf = (b) => {
     const id = Number(b.dataset.tm);
     if (!id || id === t.id) return t;
-    const tm = view.taskmasters?.find((x) => x.id === id);
-    return view.merged?.states.get(id)?.ticket ?? tm?.ticket ?? tm ?? t;
+    const tm = openView().taskmasters?.find((x) => x.id === id);
+    return openView().merged?.states.get(id)?.ticket ?? tm?.ticket ?? tm ?? t;
   };
   const lastHeldOf = new Map();
   for (const b of bubbles) if (b.heldData && ownerOf(b).held_ids?.includes(Number(b.dataset.event))) lastHeldOf.set(ownerOf(b).id, b);
@@ -117,22 +127,22 @@ export function renderTicketHead() {
     markQueued(bubble, owner);
     if (bubble.heldData) markHeld(bubble, owner, bubble === lastHeldOf.get(owner.id));
   }
-  const box = chat?.querySelector('.composer textarea');
+  const box = /** @type {HTMLTextAreaElement | null | undefined} */ (chat?.querySelector('.composer textarea'));
   if (box) box.placeholder = composerPlaceholder(t);
-  const form = chat?.querySelector('.composer');
-  const bar = chat?.querySelector('#chat-replies');
+  const form = /** @type {Bubble | null | undefined} */ (chat?.querySelector('.composer'));
+  const bar = /** @type {HTMLElement | null | undefined} */ (chat?.querySelector('#chat-replies'));
   if (bar && form) {
     // Above the composer, sent the way the composer sends (shown at once, "This Minion is thinking…").
-    const chips = replyChips(t, form.sendText);
+    const chips = replyChips(t, /** @type {(text: string) => Promise<unknown>} */ (form.sendText));
     bar.hidden = !chips;
     bar.replaceChildren(chips);
-    const slot = chat.querySelector('#chat-payer');
+    const slot = /** @type {HTMLElement} */ (/** @type {Element} */ (chat).querySelector('#chat-payer'));
     const line = payerLine(t, form.sendText);
     slot.hidden = !line;
     slot.replaceChildren(line ?? '');
     renderWaiting();
     // Parked (#718): messages wait unread until this, which wakes it with them (one chained on start_after starts, its brief first).
-    const unparkSlot = form.querySelector('.unpark-slot');
+    const unparkSlot = /** @type {HTMLElement | null} */ (form.querySelector('.unpark-slot'));
     if (unparkSlot) {
       const parked = (t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running';
       const title = t.parked_for ? "Start it now with its held brief and the messages left for it, without waiting for its leader's work" : 'Wake it now: it reads the messages left for it while sealed';
@@ -143,13 +153,14 @@ export function renderTicketHead() {
           : []),
       );
     }
-    const hint = form.querySelector('.parked-hint');
+    const hint = /** @type {HTMLElement | null} */ (form.querySelector('.parked-hint'));
     if (hint) {
       const text = coord ? null : composerHint(t);
       hint.hidden = !text;
       hint.replaceChildren(text ? h('span', { 'aria-hidden': 'true' }, asleepChat(t) && !text.includes('sealed') ? '🌙 ' : '⏸ ') : '', text ?? '');
     }
   }
+  /** @type {(HTMLElement | string)[]} */
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
   if (t.preview && t.status !== 'closed') {
@@ -201,7 +212,7 @@ export function renderTicketHead() {
   const working = !!workingBy(t);
   const stateLabel = h(
     'span',
-    { class: 'muted head-state', title: t.status === 'closed' && t.closed_at ? `Dismissed ${dismissedWhen(t.closed_at).full}` : state },
+    { class: 'muted head-state', title: t.status === 'closed' && t.closed_at ? `Dismissed ${/** @type {{ full: string }} */ (dismissedWhen(t.closed_at)).full}` : state },
     h('span', { class: 'state-text' }, state),
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '',
   );
@@ -221,10 +232,10 @@ export function renderTicketHead() {
   // Phones (#492): two rows. Title, ⋯ and ×; then the state or the progress line beside the one button
   // that matters now. Everything else waits behind ⋯.
   // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
-  const had = el.contains(document.activeElement) ? document.activeElement : null;
-  const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(a.className)) : null;
+  const had = /** @type {HTMLElement | null} */ (el.contains(document.activeElement) ? document.activeElement : null);
+  const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(/** @type {HTMLElement} */ (a).className)) : null;
   // A search in progress keeps the menu open: its box is in there.
-  const menuOpen = phone && (menuFor === t.id || !!view.findEl?.querySelector('.chat-find')?.value);
+  const menuOpen = phone && (menuFor === t.id || !!(/** @type {HTMLInputElement | null | undefined} */ (openView().findEl?.querySelector('.chat-find'))?.value));
   const more = h(
     'button',
     {
@@ -255,7 +266,7 @@ export function renderTicketHead() {
     budgetChip(t),
     h('span', { class: 'spacer' }),
     ...actions.filter((a) => a !== main),
-    view.findEl ?? '',
+    openView().findEl ?? '',
     nav,
   );
   patchParts(
@@ -269,35 +280,37 @@ export function renderTicketHead() {
         presenceHead(t),
         contextMeter(t),
         compactionChip(t),
-        coord && view.merged ? tmViewSwitch() : '',
+        coord && openView().merged ? tmViewSwitch() : '',
         phone ? h('span', { class: 'spacer' }) : '',
         phone ? more : '',
         phone ? close : '',
       ),
-      coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
-      coord && view.merged?.mode === 'mine' ? tmBanner() : '',
-      phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
+      coord ? (openView().project ? onboardingStrip(openView().project) : '') : personNoteLine(t),
+      coord && openView().merged?.mode === 'mine' ? tmBanner() : '',
+      phone ? h('div', { class: 'head-line' }, stateLabel, openView().progressEl, main ?? '') : '',
       sub,
-      phone ? '' : view.progressEl,
+      phone ? '' : openView().progressEl,
     ],
-    new Set([view.findEl, view.progressEl, noteEdit?.el]),
+    new Set([openView().findEl, openView().progressEl, noteEdit?.el]),
   );
   stateFit?.disconnect();
-  if (working) stateFit?.observe(el.querySelector('.head-state'));
+  if (working) stateFit?.observe(/** @type {Element} */ (el.querySelector('.head-state')));
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
   syncHeldBrief();
   // While a turn runs, Send steers it (composer.js); said on hover rather than in a line of its own.
-  const send = document.querySelector('.composer button[type=submit]');
+  const send = /** @type {HTMLButtonElement | null} */ (document.querySelector('.composer button[type=submit]'));
   if (send) send.title = t.worker_wait ? 'Claude reads it when its turn starts' : t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
   scheduleProgress();
 }
 
 // The head's kept parts keep their handlers (patchParts), so every part closes over this one copy of its minion, kept current.
+/** @type {Ticket | null} */
 let headCopy = null;
+/** @param {Ticket} t */
 function headTicket(t) {
-  if (headCopy?.id !== t.id) headCopy = {};
-  for (const k of Object.keys(headCopy)) if (!(k in t)) delete headCopy[k];
+  if (headCopy?.id !== t.id) headCopy = /** @type {Ticket} */ ({});
+  for (const k of Object.keys(headCopy)) if (!(k in t)) delete (/** @type {Partial<Ticket>} */ (headCopy)[/** @type {keyof Ticket} */ (k)]);
   return Object.assign(headCopy, t);
 }
 
@@ -307,22 +320,26 @@ function headTicket(t) {
  * title is opened up, a part in it compared on its own; `live` nodes (Find, the readout, a note being written) are
  * the same node each time, so they move rather than compare.
  */
-function patchParts(parent, want, live, rows = true) {
-  want = want.filter((c) => c != null && c !== false).map((c) => (c instanceof Node ? c : document.createTextNode(String(c))));
+/** @typedef {HTMLElement & { sig?: string | null }} Part A node patchParts has compared, with how it was drawn. A text node has no element fields, which read as undefined here, as they always did. */
+/** @param {HTMLElement} parent @param {unknown[]} wanted @param {Set<Node | null | undefined>} live @param {boolean} [rows] */
+function patchParts(parent, wanted, live, rows = true) {
+  const want = /** @type {Part[]} */ (wanted.filter((c) => c != null && c !== false).map((c) => (c instanceof Node ? c : document.createTextNode(String(c)))));
+  /** @param {Part} n */
   const sigOf = (n) => (n.nodeType === 1 ? n.outerHTML : n.nodeValue);
+  /** @type {(string | null | undefined)[]} */
   const sigs = want.map(sigOf);
   want.forEach((c, i) => {
-    let at = parent.childNodes[i];
+    let at = /** @type {Part | undefined} */ (parent.childNodes[i]);
     if (at === c) return;
     const sig = sigs[i];
     // A part gone from before this one: drop it, so this one and the rest line up again.
-    while (at && !live.has(at) && at.sig !== sig && at.nextSibling?.sig === sig && !sigs.includes(at.sig, i + 1)) {
-      const next = at.nextSibling;
+    while (at && !live.has(at) && at.sig !== sig && /** @type {Part | null} */ (at.nextSibling)?.sig === sig && !sigs.includes(at.sig, i + 1)) {
+      const next = /** @type {Part} */ (at.nextSibling);
       at.remove();
       at = next;
     }
     // A row's parts are compared one by one next time, so they remember how they were drawn too.
-    if (rows) for (const k of c.childNodes ?? []) k.sig = sigOf(k);
+    if (rows) for (const k of /** @type {Iterable<Part>} */ (c.childNodes ?? [])) k.sig = sigOf(k);
     if (live.has(c) || !at || live.has(at)) parent.insertBefore(c, at ?? null);
     // Unchanged, unless it holds a live part: drawing it again moved that part into the new copy.
     else if (at.sig === sig && ![...live].some((l) => l && c.contains(l))) return;
@@ -336,23 +353,26 @@ function patchParts(parent, want, live, rows = true) {
     else at.replaceWith(c);
     c.sig = sig;
   });
-  while (parent.childNodes.length > want.length) parent.lastChild.remove();
+  while (parent.childNodes.length > want.length) /** @type {ChildNode} */ (parent.lastChild).remove();
 }
 
 /** The chat whose ⋯ menu is open on a phone: the head redraws often, so it is kept here. */
+/** @type {number | null} */
 let menuFor = null;
 
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */
+/** @param {number} ticketId @param {Ticket} ticket */
 export function adoptTicket(ticketId, ticket) {
   if (view?.id !== ticketId) return;
   // Your message went to your own Taskmaster instead (#919 makes it, splitting the scheme, on a member's first write):
   // open the scheme again, which now opens yours. shortcut: a whole reload, once per person per scheme; fine at that rate.
   if (ticket.id !== ticketId && isCoordinator(ticket)) return void reloadQuietly();
-  view.ticket = ticket;
+  openView().ticket = ticket;
   renderTicketHead();
   catchUpEvents().catch(() => {});
 }
 
+/** @param {Ticket} t */
 function sleepButton(t) {
   return t.asleep
     ? h('button', { type: 'button', class: 'secondary act-wake', title: 'Wake it: its cards and replies count in Needs you again, and keepalives resume', onclick: () => setAsleep(t, false) }, 'Wake')
@@ -360,17 +380,19 @@ function sleepButton(t) {
 }
 
 /** Sleep or wake (#1636): the head, the list and Needs you change at once; a refusal puts them back with a toast and a retry. */
+/** @param {Ticket} t @param {boolean} on */
 export function setAsleep(t, on) {
   const was = t.asleep ?? null;
+  /** @param {Ticket['asleep']} v */
   const show = (v) => {
-    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) x.asleep = v;
+    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && openView().ticket])) if (x) x.asleep = v;
     renderSidebar();
     if (view?.id === t.id) renderTicketHead();
     refreshInbox();
   };
   return optimistic({
     sets: `sleep:${t.id}`,
-    apply: () => show(on ? { at: Date.now(), by: me?.name ?? '' } : null),
+    apply: () => show(on ? { at: Date.now(), by: /** @type {{ name?: string } | null} */ (me)?.name ?? '' } : null),
     send: () => api(`api/tickets/${t.id}/sleep`, { method: 'POST', body: { asleep: on } }),
     undo: () => show(was),
     label: `${on ? 'put' : 'wake'} ${threadLabel(t)}${on ? ' to sleep' : ''}`,
@@ -378,11 +400,13 @@ export function setAsleep(t, on) {
 }
 
 /** Ask for a Taskmaster's fresh session (#406): the button goes at once, and comes back if the server refuses. */
+/** @param {Ticket} t */
 function freshSession(t) {
   if (!confirm('Start the Taskmaster on a fresh session? It saves what lasts to memory and writes a handoff, then its context resets. The chat stays as it is.')) return;
+  /** @param {boolean} on */
   const mark = (on) => {
-    if (view.ticket?.id !== t.id) return;
-    view.ticket.fresh_pending = on;
+    if (openView().ticket?.id !== t.id) return;
+    /** @type {Ticket} */ (openView().ticket).fresh_pending = on;
     renderTicketHead();
   };
   optimistic({
@@ -397,9 +421,10 @@ function freshSession(t) {
 // grown into spare room): once the dots are in, the label is narrower than its text for as long as the room stays short.
 const stateFit =
   typeof ResizeObserver === 'function'
-    ? new ResizeObserver(([{ target: el }]) => {
-        if (!el.classList.contains('squeezed')) el.need = el.firstChild.offsetWidth;
-        el.classList.toggle('squeezed', el.clientWidth < el.need);
+    ? new ResizeObserver(([{ target }]) => {
+        const el = /** @type {HTMLElement & { need?: number }} */ (target);
+        if (!el.classList.contains('squeezed')) el.need = /** @type {HTMLElement} */ (el.firstChild).offsetWidth;
+        el.classList.toggle('squeezed', el.clientWidth < /** @type {number} */ (el.need));
       })
     : null;
 
@@ -407,26 +432,29 @@ const stateFit =
 
 const PERSON_NOTE_MAX = 200; // the server's limit, PERSON_NOTE_MAX in src/db.ts
 // The note being edited, { id, el }: kept across the head's re-renders, which a running turn makes often.
+/** @type {{ id: number, el: HTMLElement } | null} */
 let noteEdit = null;
 
 /** "✎ Note" after the ship status, under the title, while a minion has no note and none is being written. */
+/** @param {Ticket} t */
 function personNoteButton(t) {
-  if (view.personNotes?.[t.id] || noteEdit?.id === t.id) return '';
+  if (openView().personNotes?.[t.id] || noteEdit?.id === t.id) return '';
   return h('button', { type: 'button', class: 'note-btn', 'data-part': 'minion-note', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) }, '✎', h('span', { class: 'wide-only' }, 'Note'));
 }
 
 /** The note under the title, a click away from editing it, or its editor while someone writes it. */
+/** @param {Ticket} t */
 function personNoteLine(t) {
   if (noteEdit?.id === t.id) return noteEdit.el;
-  const note = view.personNotes?.[t.id];
+  const note = openView().personNotes?.[t.id];
   if (!note) return '';
   return h(
     'div',
     {
       class: 'pnote',
       title: 'Only people see this note. Click to edit it.',
-      onclick: (e) => {
-        if (!e.target.closest('a')) editPersonNote(t);
+      onclick: (/** @type {MouseEvent} */ e) => {
+        if (!(/** @type {HTMLElement} */ (e.target).closest('a'))) editPersonNote(t);
       },
     },
     h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'),
@@ -435,31 +463,33 @@ function personNoteLine(t) {
   );
 }
 
+/** @param {Ticket} t */
 function editPersonNote(t) {
   const input = h('input', { type: 'text', maxlength: PERSON_NOTE_MAX, placeholder: 'A note only people see', 'aria-label': 'Note only people see', autocomplete: 'off' });
-  input.value = view.personNotes?.[t.id]?.text ?? '';
+  input.value = openView().personNotes?.[t.id]?.text ?? '';
   const done = () => {
     noteEdit = null;
     renderTicketHead();
   };
   // Shown at once; the server's broadcast replaces it with its own copy, and a refusal puts the old note back.
+  /** @param {{ text: string, by: string, at: number } | undefined} note */
   const show = (note) => {
-    const notes = view.personNotes ?? {}; // none if the person left the scheme meanwhile
+    const notes = openView().personNotes ?? {}; // none if the person left the scheme meanwhile
     if (note) notes[t.id] = note;
     else delete notes[t.id];
     renderSidebar();
-    if (view.id === t.id) renderTicketHead();
+    if (openView().id === t.id) renderTicketHead();
   };
   const save = () => {
-    const was = view.personNotes?.[t.id];
+    const was = openView().personNotes?.[t.id];
     const text = input.value.replace(/\s+/g, ' ').trim(); // as the server stores it
     noteEdit = null;
-    const mine = text ? { text, by: me, at: Date.now() } : undefined;
+    const mine = text ? { text, by: /** @type {string} */ (me), at: Date.now() } : undefined;
     optimistic({
       sets: `note:${t.id}`,
       apply: () => show(mine),
       send: () => api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text } }),
-      undo: () => view.personNotes?.[t.id] === mine && show(was), // unless something else changed it since
+      undo: () => openView().personNotes?.[t.id] === mine && show(was), // unless something else changed it since
       label: `save the note on ${threadLabel(t)}`,
     });
   };
@@ -474,7 +504,7 @@ function editPersonNote(t) {
     'form',
     {
       class: 'pnote editing',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {Event} */ e) => {
         e.preventDefault();
         save();
       },
@@ -492,16 +522,18 @@ function editPersonNote(t) {
 // ---------- your pins (#179) ----------
 
 /** Pin or unpin the minion to the Pinned section atop your own list. */
+/** @param {Ticket} t */
 function pinButton(t) {
-  const pinned = view.pins?.includes(t.id);
+  const pinned = openView().pins?.includes(t.id);
   // The stream says so too, maybe later; a click after this one redraws first, so it unpins again.
-  const show = (on) => onTicketPin({ name: me, projectId: t.project_id, ticketId: t.id, pinned: on });
+  /** @param {boolean} on */
+  const show = (on) => onTicketPin({ name: /** @type {string} */ (me), projectId: t.project_id, ticketId: t.id, pinned: on });
   const toggle = () =>
     optimistic({
       sets: `pin:${t.id}`,
       apply: () => show(!pinned),
       send: () => api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } }),
-      undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless something else changed it since
+      undo: () => !!openView().pins?.includes(t.id) !== pinned && show(pinned), // unless something else changed it since
       label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
     });
   return h(
@@ -513,9 +545,11 @@ function pinButton(t) {
 }
 
 /** "$14 of about $6.50" (#1114): what the minion has cost against what its kind of work usually does; amber once past the ask. */
+/** @param {Ticket} t */
 function budgetChip(t) {
   const b = !isCoordinator(t) && t.budget;
   if (!b) return '';
+  /** @param {number} n */
   const usd = (n) => `$${n >= 10 ? Math.round(n) : n.toFixed(2)}`;
   const running = t.running_cost ?? 0; // the running turn's estimate (#1913), not yet in t.cost
   const cost = (t.cost ?? 0) + running;
@@ -530,10 +564,16 @@ function budgetChip(t) {
 }
 
 /** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */
+/** @param {Ticket} t */
 function shipLine(t) {
-  const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
+  const stage = !isCoordinator(t) && /** @type {Record<string, { fam: string, badge: string }>} */ (SHIP)[String(t.ship?.stage)];
   if (!stage) return '';
-  return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` }, h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch')));
+  return h(
+    'span',
+    { class: `ship f-${stage.fam}`, title: `${/** @type {NonNullable<Ticket['ship']>} */ (t.ship).detail ?? /** @type {NonNullable<Ticket['ship']>} */ (t.ship).text} · ${/** @type {NonNullable<Ticket['ship']>} */ (t.ship).commit}` },
+    h('i', { class: 'ship-dot' }),
+    h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch')),
+  );
 }
 
 /**
@@ -543,6 +583,7 @@ function shipLine(t) {
  * small tag once a turn read it. Queued into a working minion it shows dashed with the "not sent yet" tag instead.
  * The row is one fixed height either way, so nothing moves when it flips.
  */
+/** @param {Bubble} bubble @param {Ticket} ticket @param {boolean} [last] */
 export function markHeld(bubble, ticket, last = true) {
   const line = heldLine(bubble.heldData, Number(bubble.dataset.event), ticket);
   if (!line) return;
@@ -553,7 +594,7 @@ export function markHeld(bubble, ticket, last = true) {
   // The button sits where it shows without opening anything: in the summary of a collapsed bubble or of the group row it's in.
   const host = bubble.parentElement?.closest('details.mcopies') ?? (bubble.matches('details') ? bubble : null);
   const act = host?.querySelector(':scope > summary') ?? row;
-  for (const old of (host ?? bubble).querySelectorAll('.held-act')) if (old.dataset.for === String(bubble.dataset.event)) old.remove();
+  for (const old of /** @type {NodeListOf<HTMLElement>} */ ((host ?? bubble).querySelectorAll('.held-act'))) if (old.dataset.for === String(bubble.dataset.event)) old.remove();
   if (line.waiting) {
     bubble.querySelector('.who .held-tag')?.remove();
     if (!row) bubble.append((row = h('div', { class: 'held-line', role: 'status' })));
@@ -582,6 +623,7 @@ export function markHeld(bubble, ticket, last = true) {
 }
 
 /** Deliver: the row says so at once and the turn starts behind it; a refusal, or none delivered because its Claude can't run a turn, puts it back with a toast and a retry. */
+/** @param {Ticket} t @param {HTMLButtonElement} btn */
 function deliverMail(t, btn) {
   const was = btn.textContent;
   optimistic({
@@ -603,10 +645,12 @@ function deliverMail(t, btn) {
 }
 
 /** Unpark (#718): the row and header drop parked at once; a refusal puts them back with a toast and a retry. */
+/** @param {Ticket} t */
 export function unpark(t) {
   const was = { state: t.state, parked_for: t.parked_for, held_brief: t.held_brief };
+  /** @param {Partial<Ticket>} v */
   const show = (v) => {
-    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) Object.assign(x, v);
+    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && openView().ticket])) if (x) Object.assign(x, v);
     renderSidebar();
     if (view?.id === t.id) renderTicketHead();
   };
@@ -620,10 +664,12 @@ export function unpark(t) {
 }
 
 /** Dismiss (closed) or reopen (idle) a minion: shown at once in its head and the list, put back if the server says no. */
+/** @param {Ticket} t @param {Ticket['status']} status */
 export function setStatus(t, status) {
   const was = t.status;
+  /** @param {Ticket['status']} s */
   const show = (s) => {
-    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) x.status = s;
+    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && openView().ticket])) if (x) x.status = s;
     renderSidebar();
     if (view?.id === t.id) renderTicketHead();
   };

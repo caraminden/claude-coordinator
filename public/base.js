@@ -50,6 +50,11 @@ export let view = null;
 export function setView(next) {
   view = next;
 }
+/** `view` for code that only runs while a page is open: throws, as reading a field of null did, when none is. */
+export function openView() {
+  if (!view) throw new TypeError('no view is open');
+  return view;
+}
 /** Signing in or out: `who` as api/me gives it, or null. @param {Account | null} who */
 export function setAccount(who) {
   account = who;

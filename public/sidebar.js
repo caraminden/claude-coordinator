@@ -1,8 +1,9 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
-import { account, ago, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
-/** @import { MemoryHit, Ticket, View } from './types.js' */
+import { account, ago, openView, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+/** @import { CardLink, ListedTicket as Row, MemoryHit, RowState, SchemeListed, Ticket, View, WaitRow } from './types.js' */
+/** @import { Tips } from './ui/tip.js' */
 import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -27,12 +28,12 @@ import { urgentMark } from './worker-line.js';
 
 export const LAST_SCHEME = 'cc-scheme'; // the scheme this browser last had open
 
-/** Your schemes the shelf lists: not hidden, and yours (#674). Home (#1140) shows for two or more. */
+/** Your schemes the shelf lists: not hidden, and yours (#674). Home (#1140) shows for two or more. @param {SchemeListed[] | null | undefined} projects */
 export const shelfSchemes = (projects) => (projects ?? []).filter((p) => !p.hidden && p.member !== false);
 
 /** The app's front door: Home when you're in two or more schemes (#1140; Josh, 2026-11-19: "Always opens to Home"), else the last scheme (or Citadel, or the first); with none, offer to make one. */
 export async function openStartScheme() {
-  const projects = await api('api/projects');
+  const projects = /** @type {SchemeListed[]} */ (await api('api/projects'));
   if (shelfSchemes(projects).length > 1) return replaceHash('#/home');
   let last = NaN;
   try {
@@ -52,9 +53,9 @@ export async function openStartScheme() {
 
 /** The scheme Home (#1140) loads under it, for the chats it opens: the one on screen, else the last one open, else the start scheme. */
 export async function homeScheme() {
-  const projects = view?.projects?.length ? view.projects : await api('api/projects');
+  const projects = view?.projects?.length ? view.projects : /** @type {SchemeListed[]} */ (await api('api/projects'));
   const shown = shelfSchemes(projects);
-  if (view?.kind === 'project' && shown.some((p) => p.id === view.projectId)) return view.projectId;
+  if (view?.kind === 'project' && shown.some((p) => p.id === openView().projectId)) return openView().projectId;
   let last = NaN;
   try {
     last = Number(localStorage.getItem(LAST_SCHEME));
@@ -155,15 +156,16 @@ function newSchemeForm() {
  * A non-admin's "New repo" goes on their own GitHub, so it waits on their link (#195): enabled and
  * named for their account once linked, otherwise a pointer to where they link it.
  */
+/** @param {HTMLFormElement} form @param {() => unknown} onLinked */
 async function linkedRepo(form, onLinked) {
-  const radio = form.querySelector('input[name=source][value=new]');
-  const label = radio.closest('label');
-  const note = label.querySelector('.source-note');
+  const radio = /** @type {HTMLInputElement} */ (form.querySelector('input[name=source][value=new]'));
+  const label = /** @type {HTMLLabelElement} */ (radio.closest('label'));
+  const note = /** @type {HTMLElement} */ (label.querySelector('.source-note'));
   const gh = await api('api/me/github').catch(() => null);
   const login = gh?.configured && gh.link && !gh.link.failed ? gh.link.login : null;
   if (login) {
     radio.disabled = false;
-    label.querySelector('span').textContent = `New repo (private, on your GitHub, @${login})`;
+    /** @type {HTMLElement} */ (label.querySelector('span')).textContent = `New repo (private, on your GitHub, @${login})`;
     return onLinked();
   }
   const scheme = view?.projectId ?? view?.projects?.[0]?.id;
@@ -177,9 +179,10 @@ export function openNewScheme() {
 }
 
 /** A promoted group's heading: its value's label in the registry, or the value capitalised ("area: balance" → "Balance"). */
+/** @param {string} group */
 function groupHeading(group) {
   const [key, value] = group.split(/:(.*)/).map((x) => x.trim());
-  const label = propFilter.projectId === view.projectId && propFilter.keys?.find((k) => k.key === key)?.values?.find((v) => v.value === value)?.label;
+  const label = propFilter.projectId === openView().projectId && /** @type {{ key: string, values?: { value: string, label?: string }[] }[] | null} */ (propFilter.keys)?.find((k) => k.key === key)?.values?.find((v) => v.value === value)?.label;
   return label || value.charAt(0).toUpperCase() + value.slice(1);
 }
 
@@ -187,13 +190,14 @@ function groupHeading(group) {
  * A build's heading; one with a branch (src/builds.ts) also says how many feeders are merged in and open,
  * and how far it is behind main, and in this server's own scheme links the branch's preview (src/previews.ts).
  */
+/** @param {{ build?: number, current?: boolean }} s */
 function buildHeading(s) {
-  const b = view.builds?.find((x) => x.build === s.build);
+  const b = openView().builds?.find((x) => x.build === s.build);
   return [
     'Build ',
     s.build,
     s.current ? h('span', { class: 'muted' }, ' current') : '',
-    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`, view.buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
+    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`, openView().buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
   ];
 }
 
@@ -220,14 +224,14 @@ export function renderSidebar() {
   if (!el || heldWhilePressed(renderSidebar)) return;
   // Each minion's change on its way in a release (#764): its row says which, and a dismissed one stays under Deploying till it's live.
   /** @type {(Ticket & { release?: ReturnType<typeof pendingRelease> })[]} */
-  const all = [...view.tickets.values()].map((t) => {
+  const all = [...openView().tickets.values()].map((t) => {
     const release = pendingRelease(t);
     return release ? { ...t, release } : t;
   });
-  document.getElementById('coordinator-row')?.replaceChildren(threadRow(view.coordinator, `#/p/${view.projectId}`));
+  document.getElementById('coordinator-row')?.replaceChildren(threadRow(openView().coordinator, `#/p/${openView().projectId}`));
   renderPropFilter();
   // The property filter narrows open and dismissed minions alike; the Taskmaster always shows.
-  const picks = propFilter.projectId === view.projectId ? propFilter.picks : new Map();
+  const picks = propFilter.projectId === openView().projectId ? propFilter.picks : new Map();
   const tickets = picks.size ? all.filter((t) => matchesPicks(t, picks)) : all;
   // Its count depends on which minions you've seen, which changes with the rows.
   renderInbox();
@@ -238,17 +242,17 @@ export function renderSidebar() {
     );
   const open = tickets.filter((t) => t.status !== 'closed' || t.release);
   const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
-  const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project), releaseOrder()).map((s) =>
+  const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(openView().project), releaseOrder()).map((s) =>
     h(
       'section',
       { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
-      h('h3', {}, s.build ? buildHeading(s) : s.key === 'parked' ? gloss('parked', REST.parked) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
+      h('h3', {}, s.build ? buildHeading(s) : s.key === 'parked' ? gloss('parked', REST.parked) : s.key in REST ? REST[/** @type {keyof typeof REST} */ (s.key)] : s.group ? groupHeading(s.group) : TYPES[/** @type {keyof typeof TYPES} */ (s.type)].section),
       s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t)),
     ),
   );
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
-  const pinned = (view.pins ?? []).map((id) => byId.get(id)).filter(Boolean);
+  const pinned = /** @type {Row[]} */ ((openView().pins ?? []).map((id) => byId.get(id)).filter(Boolean));
   const pinnedGroup = pinned.length
     ? h(
         'section',
@@ -267,9 +271,9 @@ export function renderSidebar() {
   // Their rows are built only while the list is open, and a row is reused until its minion or what it shows changes (#1077, #1080):
   // a big scheme has a thousand, and every minion update redraws.
   closedGroup ??= dismissedGroup();
-  closedGroup.open = view.showClosed;
+  closedGroup.open = openView().showClosed;
   // A property filter has to look at every dismissed minion; the rest of the time a page at a time is read as the list scrolls.
-  if (picks.size && view.showClosed && closedState().more && !closedState().failed) loadAllClosed().then(() => renderSidebar());
+  if (picks.size && openView().showClosed && closedState().more && !closedState().failed) loadAllClosed().then(() => renderSidebar());
   closedSummary(picks.size && !closedState().more ? closed.length : closedCount());
   fillClosed(closed);
   // The list stays in the page while the rest is swapped, so a redraw doesn't restyle its rows.
@@ -282,33 +286,42 @@ export function renderSidebar() {
   if (whyTips?.open) whyTips.refresh();
 }
 
+/** @param {HTMLElement} el @param {(Node | string)[]} head @param {(Node | string)[]} tail */
 function finish(el, head, tail) {
   el.replaceChildren(...head, ...tail);
   // An open chip popover follows its chip into the new rows (tip.js); its words follow the minion's news.
   if (whyTips?.open) whyTips.refresh();
 }
 
-let closedGroup = null,
-  closedList = [];
+// Set by dismissedGroup() before anything reads them: renderSidebar makes the group first.
+/** @type {HTMLDetailsElement} */
+let closedGroup;
+/** @type {HTMLElement[]} */
+let closedList = [];
 const closedRows = new Map();
 // The rows' stamps change words with the Pacific day, and their cost shares with the plan's usage (replaced, never changed in place) and the weekly limit (cost.js).
+/** @type {typeof usage} */
 let closedUsage = null,
   closedDay = '',
+  /** @type {string | null} */
   closedShare = null;
 
 // The Dismissed list shows a page of rows at a time (CLOSED_PAGE) and reads another from the server when its foot scrolls into view:
 // a scheme can have thousands, and their rows are most of the page's elements.
 let closedShown = CLOSED_PAGE,
+  /** @type {View['tickets'] | null} */
   closedFor = null,
-  closedFoot = null,
-  closedWatch = null;
+  /** @type {HTMLElement} */
+  closedFoot,
+  /** @type {IntersectionObserver} */
+  closedWatch;
 
 function dismissedGroup() {
   const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed', h('span', { class: 'count' })));
   closedFoot = h('div', { class: 'closed-foot muted small' });
   g.append(closedFoot);
   g.addEventListener('toggle', () => {
-    view.showClosed = g.open;
+    openView().showClosed = g.open;
     if (g.open) {
       renderSidebar();
       growClosed(); // the newest page at once
@@ -324,19 +337,20 @@ function dismissedGroup() {
   return g;
 }
 
+/** @param {number} n */
 function closedSummary(n) {
-  const count = closedGroup.querySelector('summary .count');
+  const count = /** @type {HTMLElement} */ (closedGroup.querySelector('summary .count'));
   if (count.textContent !== String(n)) count.textContent = String(n);
 }
 
 /** The foot asked for more: build another page of rows, reading it from the server first when the page has none left in hand. */
 async function growClosed() {
-  const list = view.tickets,
+  const list = openView().tickets,
     s = closedState(list);
-  if (!view.showClosed || list !== closedFor) return;
+  if (!openView().showClosed || list !== closedFor) return;
   if (closedShown < loadedClosed(list).length) closedShown += CLOSED_PAGE;
   else if (s.more && !s.failed) {
-    if (!(await loadMoreClosed(list)) || view.tickets !== list) return renderClosedFoot();
+    if (!(await loadMoreClosed(list)) || openView().tickets !== list) return renderClosedFoot();
     closedShown += CLOSED_PAGE;
   } else return;
   renderSidebar();
@@ -365,21 +379,23 @@ function renderClosedFoot() {
 }
 
 /** What a dismissed row shows besides its minion: when any of it changes the row is built again. */
+/** @param {Ticket} t */
 function closedKey(t) {
-  const note = view.personNotes?.[t.id];
-  return `${view.id === t.id}|${isSeen(t)}|${ago(t.updated_at)}|${note ? `${note.text}${note.by}` : ''}|${othersIn(t).join()}|${me}`;
+  const note = openView().personNotes?.[t.id];
+  return `${openView().id === t.id}|${isSeen(t)}|${ago(t.updated_at)}|${note ? `${note.text}${note.by}` : ''}|${othersIn(t).join()}|${me}`;
 }
 
 /** Fills the Dismissed list with its rows (none while it is shut), building only the rows that are new or changed. */
+/** @param {Ticket[]} closed */
 function fillClosed(closed) {
   const rows = [];
-  if (view.tickets !== closedFor) {
-    closedFor = view.tickets;
+  if (openView().tickets !== closedFor) {
+    closedFor = openView().tickets;
     closedShown = CLOSED_PAGE;
   }
-  if (view.showClosed) {
+  if (openView().showClosed) {
     // The minion you're on keeps its row built, however far down it sits.
-    const at = closed.findIndex((t) => t.id === view.id);
+    const at = closed.findIndex((t) => t.id === openView().id);
     if (at >= closedShown) closedShown = at + 1;
     closed = closed.slice(0, closedShown);
     const day = todayPacific();
@@ -405,15 +421,16 @@ function fillClosed(closed) {
   // In place: a row already where it belongs isn't touched.
   renderClosedFoot();
   closedWatch.disconnect();
-  if (view.showClosed) closedWatch.observe(closedFoot);
+  if (openView().showClosed) closedWatch.observe(closedFoot);
   if (rows.length === closedList.length && rows.every((r, i) => r === closedList[i]) && closedGroup.childElementCount === rows.length + 2) return;
-  let at = closedGroup.firstElementChild.nextElementSibling;
+  /** @type {Element} */
+  let at = /** @type {Element} */ (/** @type {Element} */ (closedGroup.firstElementChild).nextElementSibling);
   for (const r of rows) {
-    if (r === at) at = at.nextElementSibling;
+    if (r === at) at = /** @type {Element} */ (at.nextElementSibling);
     else closedGroup.insertBefore(r, at);
   }
   while (at !== closedFoot) {
-    const next = at.nextElementSibling;
+    const next = /** @type {Element} */ (at.nextElementSibling);
     at.remove();
     at = next;
   }
@@ -421,22 +438,22 @@ function fillClosed(closed) {
 }
 /** Scroll the minion list (not the page) so the open minion's row is in view, after you navigate to one. */
 export function revealActiveRow() {
-  const box = document.getElementById('threads')?.closest('.sidebar');
+  const box = /** @type {HTMLDetailsElement | null | undefined} */ (document.getElementById('threads')?.closest('.sidebar'));
   if (!box?.open) return;
   let row = box.querySelector('#threads .thread-row.active');
   // A dismissed minion's row isn't built while its list is shut (renderSidebar): open the list for the one you're on.
-  if (!row && !view.showClosed && view.tickets?.get(view.id)?.status === 'closed') {
-    view.showClosed = true;
+  if (!row && !openView().showClosed && openView().tickets?.get(/** @type {number} */ (openView().id))?.status === 'closed') {
+    openView().showClosed = true;
     renderSidebar();
     row = box.querySelector('#threads .thread-row.active');
     // The property filter hides it: the list stays shut.
     if (!row) {
-      view.showClosed = false;
+      openView().showClosed = false;
       renderSidebar();
     }
   }
   if (!row) return;
-  const dismissed = row.closest('details.g-closed');
+  const dismissed = /** @type {HTMLDetailsElement | null} */ (row.closest('details.g-closed'));
   if (dismissed && !dismissed.open) dismissed.open = true;
   const r = row.getBoundingClientRect(),
     b = box.getBoundingClientRect();
@@ -452,6 +469,7 @@ export function revealActiveRow() {
 /** @type {{ projectId: number | null, q: string, meaning: (SearchRun & { hits?: MemoryHit[] }) | null, closed: (SearchRun & { tickets: Ticket[], more: boolean }) | null }} */
 const threadSearch = { projectId: null, q: '', meaning: null, closed: null };
 
+/** @param {number} projectId */
 export function threadSearchBox(projectId) {
   if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', meaning: null, closed: null });
   const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search titles, numbers and properties…', value: threadSearch.q, ...noAutofill('thread-search') });
@@ -481,7 +499,7 @@ function searchClosedSoon() {
   const { projectId, q } = threadSearch;
   if (!q || !closedState().more) return void (threadSearch.closed = null);
   closedSearchTimer = setTimeout(async () => {
-    const list = view.tickets;
+    const list = openView().tickets;
     /** @type {NonNullable<typeof threadSearch.closed>} */
     let run = { q, busy: true, tickets: [], more: false };
     threadSearch.closed = run;
@@ -489,10 +507,10 @@ function searchClosedSoon() {
     try {
       Object.assign(run, await searchClosed(q));
     } catch (err) {
-      run.error = err.message;
+      run.error = /** @type {Error} */ (err).message;
     }
     run.busy = false;
-    if (threadSearch.closed === run && view.tickets === list && threadSearch.projectId === projectId) renderSidebar();
+    if (threadSearch.closed === run && openView().tickets === list && threadSearch.projectId === projectId) renderSidebar();
   }, 250);
 }
 
@@ -507,15 +525,16 @@ async function searchByMeaning() {
   try {
     run.hits = (await api(`api/projects/${projectId}/memory?q=${encodeURIComponent(q)}&limit=10`)).hits;
   } catch (err) {
-    run.error = err.message;
+    run.error = /** @type {Error} */ (err).message;
   }
   run.busy = false;
   if (threadSearch.meaning === run) renderSidebar(); // a newer search, or another scheme, owns the list now
 }
 
 /** One chunk the search found: its minion and date, linked to the message (or the minion), and what was said. */
+/** @param {MemoryHit} hit */
 function meaningHit(hit) {
-  const t = { project_id: threadSearch.projectId, number: hit.number, id: hit.ticket_id, kind: hit.kind };
+  const t = { project_id: /** @type {number} */ (threadSearch.projectId), number: hit.number, id: hit.ticket_id, kind: hit.kind };
   const href = hit.source_kind === 'turn' ? jumpHref(t, hit.source_id) : threadHref(t);
   const day = new Date(hit.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   return h('a', { class: 'meaning-hit', href, title: hit.text }, h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, hit.number), ' ', hit.title], h('span', { class: 'muted' }, ` · ${day}`)), h('span', { class: 'snippet' }, hit.text));
@@ -527,19 +546,26 @@ function meaningSection() {
   const ran = meaning?.q === q ? meaning : null;
   const button = h('button', { type: 'button', class: 'secondary meaning-go', disabled: q.length < 2 || ran?.busy, onclick: searchByMeaning }, ran?.busy ? 'Searching chats…' : ran ? 'Search again' : 'Search chats by meaning ⏎');
   const body =
-    !ran || ran.busy ? h('p', { class: 'muted small' }, 'What people and minions said, closest in meaning first, not just exact words.') : ran.error ? h('p', { class: 'muted small' }, ran.error) : ran.hits.length ? ran.hits.map(meaningHit) : h('p', { class: 'muted small' }, 'Nothing in the chats comes close.');
+    !ran || ran.busy
+      ? h('p', { class: 'muted small' }, 'What people and minions said, closest in meaning first, not just exact words.')
+      : ran.error
+        ? h('p', { class: 'muted small' }, ran.error)
+        : /** @type {MemoryHit[]} */ (ran.hits).length
+          ? /** @type {MemoryHit[]} */ (ran.hits).map(meaningHit)
+          : h('p', { class: 'muted small' }, 'Nothing in the chats comes close.');
   return h('section', { class: 'column meaning', 'aria-busy': ran?.busy ? 'true' : 'false' }, h('h3', {}, 'In chats, by meaning', ran?.hits ? h('span', { class: 'count' }, ran.hits.length) : ''), button, body);
 }
 
 /** Search results: threads whose title, number or properties match, then the chats by meaning. */
+/** @param {HTMLElement} el @param {Row[]} tickets */
 function renderThreadResults(el, tickets) {
   // The Taskmaster's row stays above the search, so results are minions only.
   const found = tickets.filter((t) => threadMatches(t, threadSearch.q));
   // Dismissed minions the page hasn't read, found by the server (searchClosedSoon), after the ones in hand.
   const asked = threadSearch.closed?.q === threadSearch.q ? threadSearch.closed : null;
-  const picks = propFilter.projectId === view.projectId ? propFilter.picks : new Map();
+  const picks = propFilter.projectId === openView().projectId ? propFilter.picks : new Map();
   const have = new Set(found.map((t) => t.id));
-  const results = [...found, ...(asked?.tickets ?? []).filter((t) => !have.has(t.id) && !view.tickets.has(t.id) && matchesPicks(t, picks))].sort((a, b) => b.updated_at - a.updated_at);
+  const results = [...found, ...(asked?.tickets ?? []).filter((t) => !have.has(t.id) && !openView().tickets.has(t.id) && matchesPicks(t, picks))].sort((a, b) => b.updated_at - a.updated_at);
   el.replaceChildren(
     h(
       'section',
@@ -568,7 +594,7 @@ function renderThreadResults(el, tickets) {
                   type: 'button',
                   class: 'secondary small',
                   onclick: () => {
-                    const input = document.querySelector('.thread-search');
+                    const input = /** @type {HTMLInputElement | null} */ (document.querySelector('.thread-search'));
                     if (!input) return;
                     input.value = '';
                     input.dispatchEvent(new Event('input'));
@@ -584,10 +610,11 @@ function renderThreadResults(el, tickets) {
 }
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
+/** @param {Row} t @param {string} [href] */
 export function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
-  const st = coord && !workingBy(t) ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t, usage);
+  const st = coord && !workingBy(t) ? /** @type {RowState} */ ({ fam: '', cell: '', label: statusLabel(t) }) : rowState(t, usage);
   const quiet = st.fam === 'work' || st.fam === 'idle' || st.fam === 'wait';
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
@@ -597,7 +624,7 @@ export function threadRow(t, href = threadHref(t)) {
   const note = (t.worker_wait ? t.note : t.status === 'running' ? activity : t.note || activity) || (st.rank !== 1 ? '' : st.server ? st.label : t.status === 'new' ? 'Starting…' : 'Working…');
   const share = t.host_cost && weekShare(t.host_cost); // the meter is the server login's plan
   // People's own note (#146), on a line of its own so the minion's note keeps its place.
-  const pnote = !coord && view.personNotes?.[t.id];
+  const pnote = !coord && openView().personNotes?.[t.id];
   const details = [
     threadFullName(t),
     [
@@ -617,19 +644,19 @@ export function threadRow(t, href = threadHref(t)) {
   ]
     .filter(Boolean)
     .join('\n');
-  const shipStage = !coord && t.status !== 'closed' && SHIP[t.ship?.stage];
+  const shipStage = /** @type {{ fam: string, badge: string } | undefined} */ (!coord && t.status !== 'closed' && SHIP[/** @type {keyof typeof SHIP} */ (t.ship?.stage)]);
   const wait = !coord && t.status !== 'closed' && t.wait;
   // Landed and on its way (#1019): the row says where its release is ("Windows: desktop waiting for a CI runner · 22m"), not the minion's last note.
   const rel = !coord && !wait && (t.status === 'closed' || t.state === 'pending-deploy') && t.release;
   // A wait says more than the ship badge ("restart · 2 turns" over "deploying"), so the row shows one.
-  const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
+  const ship = shipStage?.badge && !wait ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship?.text} · ${t.ship?.commit}` }, shipStage.badge) : '';
   // The chat head's bar (#573), only while it works or waits on a land, CI or a deploy (threadstate.js rowBar).
-  const barOf = rowBar({ ...t, wait }, st);
+  const barOf = rowBar({ ...t, wait: wait || null }, st);
   const bar = !barOf ? '' : progressTrack(barOf) || waitBar(barOf);
   // A running turn's unanswered spend alert (#723) leads the card badge, in red, and tints the row.
   const spend = !coord && t.spend_alert;
   const card = cardBadge([...(spend ? [{ kind: 'spend alert', what: `! $${spend.usd}`, href: spend.href }] : []), ...(t.open_cards ?? [])], spend, !spend && !cardsYours(t).length);
-  const active = view.id === t.id;
+  const active = openView().id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks a row with something for a person that changed since you last opened it.
   // Asleep (#1636; Cara picked "Stay put, dimmed", 2026-11-22): it keeps its place, dimmed with a moon, no tint and grey chips; Wake is in its chat header.
@@ -640,7 +667,7 @@ export function threadRow(t, href = threadHref(t)) {
   return h(
     'a',
     { class: `thread-row s-${t.status} f-${asleep ? 'idle' : st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
-    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? sleepMark(t) : '', t.urgent ? urgentMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? sleepMark(/** @type {Asleep} */ (t)) : '', t.urgent ? urgentMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     // Messages the loop guard holds for a person (#1067; Josh, 2026-11-19: "a minion badge for the loop guard"): Continue is in its chat.
     t.loop_hold ? h('span', { class: 'loop-badge', title: `The loop guard holds ${t.loop_hold.n === 1 ? 'a message' : `${t.loop_hold.n} messages`} here: open the chat to continue` }, `⏸ ${t.loop_hold.n}`) : '',
@@ -663,18 +690,23 @@ export function threadRow(t, href = threadHref(t)) {
   );
 }
 
+/** @typedef {Row & { asleep: { at: number, by: string } }} Asleep */
 /** An asleep row's moon (#1636): says since when and who; Wake is in the chat header. */
-const sleepMark = (t) => h('span', { class: 'sleep-mark', role: 'img', 'aria-label': 'Asleep', title: `Asleep since ${ago(t.asleep.at)}${t.asleep.by ? `, put to sleep by ${t.asleep.by}` : ''}. Wake it from its chat header` }, '🌙 ');
+const sleepMark = (/** @type {Asleep} */ t) => h('span', { class: 'sleep-mark', role: 'img', 'aria-label': 'Asleep', title: `Asleep since ${ago(t.asleep.at)}${t.asleep.by ? `, put to sleep by ${t.asleep.by}` : ''}. Wake it from its chat header` }, '🌙 ');
 
 /** The rows drawn last, by id, for their chips' popovers; a check's answer per minion while its popover shows it. */
+/** @type {Map<number, { t: Row, st: RowState }>} */
 const drawn = new Map(),
+  /** @type {Map<number, { busy?: boolean, text?: string }>} */
   checks = new Map();
+/** @type {Tips | null} */
 let whyTips = null;
 
 /**
  * The state chip (#906; Cara picked "Popover on the chip only", 2026-11-17): a tap or hover opens why it says what it
  * says (threadstate.js rowWhy). Its empty title keeps the row's own tooltip off it. A quiet turn's dot stops.
  */
+/** @param {Row} t @param {RowState} st */
 function stateChip(t, st) {
   drawn.set(t.id, { t, st });
   whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
@@ -686,9 +718,11 @@ function stateChip(t, st) {
  * for another minion (its work, or a note from it), `⇢ live` for a commit, `⇢ event` only for a kind nobody named. A tap opens the waits with Cancel. Its slot is always drawn (hidden when
  * empty) so a wait coming or going moves nothing; the Taskmaster's own waits are shown in its chat, not here.
  */
+/** @type {{ tips: Tips | null }} */
 const waitTips = { tips: null };
+/** @param {Row} t @param {boolean} coord */
 function waitChip(t, coord) {
-  const rows = coord ? [] : (t.outbox_waits ?? []);
+  const rows = /** @type {WaitRow[]} */ (coord ? [] : (t.outbox_waits ?? []));
   const live = rows.filter((w) => w.state !== 'dropped' && w.state !== 'failed');
   const shown = live[0] ?? rows[0];
   if (!shown) drawnWaits.delete(t.id);
@@ -697,30 +731,32 @@ function waitChip(t, coord) {
   // update) replaces its buttons, and a click pressed on the old one and released on the new one is lost.
   const changed = JSON.stringify(drawnWaits.get(t.id)) !== JSON.stringify(rows);
   drawnWaits.set(t.id, rows);
-  if (changed && waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
+  if (changed && waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips?.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
   return h(
     'span',
     { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` },
     // The minion it names opens from the chip itself (Cara, 2026-11-22: "this should link to the minion it is waiting on"); the click stays off the row and the popover.
-    shown.link ? h('a', { class: 'wait-chip-link', href: `#/p/${shown.link.project}/t/${shown.link.number}`, title: `Waits on #${shown.link.number}`, 'aria-label': `Waits on #${shown.link.number}`, onclick: (e) => e.stopPropagation() }, shown.chip) : shown.chip,
+    shown.link ? h('a', { class: 'wait-chip-link', href: `#/p/${shown.link.project}/t/${shown.link.number}`, title: `Waits on #${shown.link.number}`, 'aria-label': `Waits on #${shown.link.number}`, onclick: (/** @type {Event} */ e) => e.stopPropagation() }, shown.chip) : shown.chip,
     more,
   );
 }
+/** @type {Map<number, WaitRow[]>} */
 export const drawnWaits = new Map();
 /**
  * One line a wait, all of a minion's at once (Cara, 2026-11-21: "cut all the details and have a single line for each"). Each
  * line is a headline Citadel builds from the wait (#1512, her take A), with the waiter's first sentence under it; a click opens
  * its summary in place: the waiter's words, who set it and when, a link to the minion it names, and Cancel.
  */
+/** @param {number} id */
 export function waitBody(id) {
   const rows = drawnWaits.get(id);
   if (!rows) return null;
   const opening = waitOpening.get(id);
   waitOpening.delete(id);
   // Any wait on another minion puts it in a chain (Cara picked "every wait on another minion", #1679): the popover leads there.
-  const t = rows.some((w) => w.link && w.state !== 'dropped' && w.state !== 'failed') && view.tickets?.get(id);
+  const t = (rows.some((w) => w.link && w.state !== 'dropped' && w.state !== 'failed') && openView().tickets?.get(id)) || undefined;
   return h(
     'div',
     { class: 'why wait-lines' },
@@ -746,10 +782,14 @@ export function waitBody(id) {
   );
 }
 /** The open line per minion (by wait id), so a redraw keeps it open; and the one just clicked, which animates once. */
+/** @type {Map<number, string>} */
 const waitOpen = new Map(),
+  /** @type {Map<number, string>} */
   waitOpening = new Map(),
+  /** @type {Set<string>} */
   waitAll = new Set();
-const waitKey = (w) => String(w.id ?? `${w.kind}:${w.what}`);
+const waitKey = (/** @type {WaitRow} */ w) => String(w.id ?? `${w.kind}:${w.what}`);
+/** @param {number} id @param {string} key */
 function toggleWait(id, key) {
   if (waitOpen.get(id) === key) waitOpen.delete(id);
   else {
@@ -757,9 +797,10 @@ function toggleWait(id, key) {
     waitOpening.set(id, key);
   }
   waitTips.tips?.refresh();
-  document.querySelector(`.why-tip:popover-open .wait-line-hd[data-wait-key="${CSS.escape(key)}"]`)?.focus();
+  /** @type {HTMLElement | null} */ (document.querySelector(`.why-tip:popover-open .wait-line-hd[data-wait-key="${CSS.escape(key)}"]`))?.focus();
 }
-const sentences = (t) => t.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/g) ?? [t];
+const sentences = (/** @type {string} */ t) => t.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/g) ?? [t];
+/** @param {number} id @param {WaitRow} w @param {boolean} gone */
 function waitSummary(id, w, gone) {
   const text = w.text ?? w.what ?? '',
     all = sentences(text),
@@ -803,6 +844,7 @@ function waitSummary(id, w, gone) {
     ),
   );
 }
+/** @param {number} id @param {WaitRow} w */
 function cancelWait(id, w) {
   const was = { state: w.state, reason: w.reason, cancellable: w.cancellable };
   const redraw = () => {
@@ -823,6 +865,7 @@ function cancelWait(id, w) {
   }).catch(() => {});
 }
 
+/** @param {number} id */
 function whyBody(id) {
   const row = drawn.get(id);
   if (!row) return null;
@@ -848,6 +891,7 @@ function whyBody(id) {
   );
 }
 
+/** @param {Row} t */
 function stopTurn(t) {
   stopChat(t, () => {
     if (whyTips?.open) whyTips.refresh();
@@ -856,6 +900,7 @@ function stopTurn(t) {
 }
 
 /** The server looks at the turn's process (src/quiet.ts checkProcess): no model call, no message to the minion. */
+/** @param {Row} t */
 async function checkTurn(t) {
   checks.set(t.id, { busy: true });
   whyTips?.refresh();
@@ -863,12 +908,13 @@ async function checkTurn(t) {
     const r = await api(`api/tickets/${t.id}/check`, { method: 'POST', body: {} });
     checks.set(t.id, { text: r.text });
   } catch (e) {
-    checks.set(t.id, { text: `Couldn't check: ${e.message}` });
+    checks.set(t.id, { text: `Couldn't check: ${/** @type {Error} */ (e).message}` });
   }
   if (whyTips?.open?.dataset.tipId === String(t.id)) whyTips.refresh();
 }
 
 /** Whose minion it is (#690): the owner's initial at the row's end, ringed when it's yours; nothing for nobody's or the Taskmaster. */
+/** @param {Row} t @param {boolean} coord */
 function ownerChip(t, coord) {
   const owner = !coord && String(t.properties?.assigned ?? '').trim();
   if (!owner) return '';
@@ -881,8 +927,10 @@ function ownerChip(t, coord) {
  * clicking that indicator specifically would open to the card"): it stays until the cards are answered or settled,
  * read or not, and opens the oldest. `cards` is the row's open_cards (Runner.cardLinks), oldest first.
  */
+/** @param {{ kind: string, what?: string, label?: string, href: string }[]} cards @param {Row['spend_alert'] | false} [spend] @param {boolean} [theirs] */
 function cardBadge(cards, spend = null, theirs = false) {
   if (!cards.length) return '';
+  /** @param {Partial<Pick<MouseEvent, 'button'>> & Pick<KeyboardEvent, 'preventDefault' | 'stopPropagation' | 'ctrlKey' | 'metaKey' | 'shiftKey'>} e */
   const go = (e) => {
     // The row is a link to the chat; this goes to the card in it instead, in a new tab as a link would on ctrl or middle click.
     e.preventDefault();
@@ -899,13 +947,13 @@ function cardBadge(cards, spend = null, theirs = false) {
       tabindex: 0,
       title: cards.length > 1 ? `${cards.length} cards wait: open the oldest, the ${what}` : `Open the ${what}`,
       onclick: go,
-      onauxclick: (e) => {
+      onauxclick: (/** @type {MouseEvent} */ e) => {
         if (e.button === 1) go(e);
       },
-      onkeydown: (e) => {
+      onkeydown: (/** @type {KeyboardEvent} */ e) => {
         if (e.key === 'Enter') go(e);
       },
     },
-    cardChip(cards),
+    cardChip(/** @type {CardLink[]} */ (cards)),
   );
 }

@@ -614,7 +614,7 @@ export class Store {
   /**
    * A machine's roles (Build 7 M1, src/machine-roles.ts rolesFromLegacy): each machine's lend and one list of schemes
    * become its roles and a list per role, so every turn, tool and runner token goes where it went before. Every boot,
-   * for a machine with no role rows (the first boot from schema 121, or one an older release added after a rollback)
+   * for a machine with no role rows (the first boot after Build 7 M1, or one an older release added after a rollback)
    * and one whose old columns no longer say what its roles do (an older release changed them, or made it a CI runner
    * host this release never saw: machine-roles.ts runnerSeen): this release writes those columns from the roles on
    * every change, so a difference is a rollback's, and the old columns win.

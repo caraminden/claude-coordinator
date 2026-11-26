@@ -162,6 +162,30 @@ test('the old write paths go into the roles: the one list, a lend, a runner agen
   s.db.close();
 });
 
+test('the one list saves only its change: one more scheme for Tools leaves CI and GPU jobs their own lists', () => {
+  const s = new Store(join(dir, 'one-list-change.db'));
+  const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((n) => s.createProject(n, null, cara.id));
+  const m = s.createMachine('pc', '', 'Cara');
+  s.setMachineRole(m.id, 'tools', { on: true, projects: [a.id] });
+  s.setMachineRole(m.id, 'gpu', { on: true, projects: [a.id, b.id] });
+  s.setMachineRole(m.id, 'ci', { on: true, projects: [a.id, b.id, c.id] });
+  const lists = () =>
+    Object.fromEntries(
+      s
+        .machineRoles(m.id)
+        .filter((r) => r.on)
+        .map((r) => [r.role, r.projects]),
+    );
+  // A lend card for d (or a page tab from before roles) saves the whole one list plus d.
+  s.setMachineProjects(m.id, [...s.machineProjects(m.id), d.id]);
+  assert.deepEqual(lists(), { tools: [a.id, d.id], gpu: [a.id, b.id, d.id], ci: [a.id, b.id, c.id, d.id] }, 'd added to each role, nothing else spread');
+  // Taken from b: it comes off every role, and the rest stay as they were.
+  s.setMachineProjects(m.id, [a.id, c.id, d.id]);
+  assert.deepEqual(lists(), { tools: [a.id, d.id], gpu: [a.id, d.id], ci: [a.id, c.id, d.id] });
+  s.db.close();
+});
+
 test('PATCH roles: owner and admins only; on with no list is every scheme its owner is in; caps checked', async () => {
   const s = new Store(join(dir, 'patch.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });

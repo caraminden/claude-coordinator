@@ -228,9 +228,16 @@ export const machineQueries = {
     return this.machineProjects(machineId).includes(projectId);
   },
 
-  /** Lend a machine to exactly these schemes: the one list (#438), so every role that's on gets it. */
+  /**
+   * Save the one list (#438: the Machines page from before roles, a lend card): what it adds goes to every role that's
+   * on, what it drops comes off every role. Only the change: a role's own list is otherwise kept, so lending Tools to one
+   * more scheme doesn't hand CI's or GPU jobs' schemes to the rest.
+   */
   setMachineProjects(this: Store, machineId: number, projectIds: number[]) {
-    this.writeMachineRoles(machineId, (roles) => roles.map((r) => (r.on ? { ...r, projects: [...projectIds] } : r)), true);
+    const was = new Set(this.machineProjects(machineId));
+    const want = new Set(projectIds);
+    const added = [...want].filter((id) => !was.has(id));
+    this.writeMachineRoles(machineId, (roles) => roles.map((r) => ({ ...r, projects: [...new Set([...r.projects.filter((id) => want.has(id) || !was.has(id)), ...(r.on ? added : [])])] })), true);
   },
 
   /**

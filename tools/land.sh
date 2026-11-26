@@ -2791,7 +2791,7 @@ train_suspects() {
 # it, the held back in line with no verdict, so a stale or broken file never holds the line up.
 # <rider index>...: the riders that stay on the train; everyone else not held or refused goes back in line.
 pull_say() {
-  local i v o=$state/queue/.order
+  local i v keep=()
   for ((i = 0; i < ${#train_n[@]}; i++)); do
     [[ " ${held_n[*]} " == *" ${train_n[$i]} "* ]] || ! read -r v _ 2>/dev/null <"$train_dir/${train_n[$i]}" || [ "$v" != riding ] || rm -f "$train_dir/${train_n[$i]}"
   done
@@ -2803,9 +2803,8 @@ pull_say() {
         echo "held ${held_n[$i]} ${held_br[$i]} ${held_was[$i]} ${held_files[$i]} ${held_run[$i]} ${held_kind[$i]} ${held_how[$i]} $(base64 -w0 <<<"${held_log[$i]}")"
       done
     } >"$state/pull.tmp$$" && mv -f "$state/pull.tmp$$" "$state/pull"
-    {
-      { grep '^# ' "$o" || true; for i; do echo "${train_n[$i]}"; done; grep -v '^# ' "$o" || true; } 2>/dev/null | awk '!seen[$0]++'
-    } >"$o.tmp$$" && mv -f "$o.tmp$$" "$o"
+    for i; do keep+=("${train_n[$i]}"); done
+    queue_front "$state/queue" "${keep[@]}"
     held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=() # the next front's now
     split_over
   else train_release; fi

@@ -3,7 +3,7 @@
 // by a write the database's worker holds, a kill after a named step, or a command that does its work at a known point.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -253,6 +253,40 @@ test('two ships take a number at once: the second waits for the first to have it
   }
   assert.deepEqual([await a.done, await b.done], [0, 0], a.err() + b.err());
   assert.deepEqual(ended(dir), ['ticket/1-a 0000000001 in', 'ticket/1-a out', 'ticket/2-b 0000000002 in', 'ticket/2-b out']);
+});
+
+// Found by #1778: the retry rewrites .order from what it read, over whatever was written since.
+test('a drag that lands while a ship goes back into line for its retry is kept', { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(root, 'retry-')),
+    q = join(dir, 'queue');
+  mkdirSync(q);
+  // #1 goes back into line for a retry in place; #2 and #3 wait. A person drags #3 ahead of #2 while #1 rewrites the order.
+  for (const n of [2, 3]) writeFileSync(join(q, String(n).padStart(10, '0')), [me, '0', `ticket/${n}-c`, 'waiting', 'order', ''].join('\n'));
+  writeFileSync(join(q, '0000000001'), [me, '0', 'ticket/1-c', 'retrying', 'order', ''].join('\n'));
+  writeFileSync(join(q, '.order'), '# Cara moved #2 to ship next\n0000000002\n0000000003\n');
+  // The drag is the server's own writeOrder, started as the script is about to replace .order; the script goes on once
+  // that write is done, or is waiting for the script's lock.
+  const waits = resolve(import.meta.dirname, '../src/waits.ts');
+  writeFileSync(join(dir, 'drag.mjs'), `import { writeOrder } from '${waits}';\nwriteOrder('${q}', [2, 3].map((seq) => ({ seq, got: 0, orders: true })), [3, 2], 'Josh moved #3 to ship next');\n`);
+  const bin = command(
+    dir,
+    'mv',
+    `case "$*" in *.tmp*/.order) if [ ! -e ${dir}/dragged ]; then : >${dir}/dragged; { PATH=${dir}/server:$PATH ${process.execPath} ${dir}/drag.mjs; echo $? >${dir}/done; } </dev/null >${dir}/drag.log 2>&1 9>&- 8>&- & until [ -e ${dir}/done ] || [ -e ${dir}/waiting ]; do read -rt 0.05 <> <(:) || :; done; fi ;; esac`,
+  );
+  // The server's flock says so when the lock is taken, before it waits for it.
+  command(join(dir, 'held'), 'flock', `"$REAL" -n "$3" true || : >${dir}/waiting`);
+  renameSync(join(dir, 'held', 'bin'), join(dir, 'server'));
+  const p = spawnSync('bash', ['-c', `source ${queueSh}\nqueue_lock ${dir} ticket/1-c`], { env: { PATH: `${bin}:${PATH}`, HOME: dir, QUEUE_KEEP: join(q, '0000000001'), DEPLOY_QUEUE_POLL: '0.1' }, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(p.status, 0, p.stderr);
+  assert.ok(existsSync(join(dir, 'dragged')), 'the drag came between the read of the order and its write');
+  await until('the drag written', () => existsSync(join(dir, 'done')));
+  assert.equal(readFileSync(join(dir, 'done'), 'utf8').trim(), '0', readFileSync(join(dir, 'drag.log'), 'utf8'));
+  assert.deepEqual(
+    readFileSync(join(q, '.order'), 'utf8')
+      .split('\n')
+      .filter((l) => /^000000000[23]$/.test(l)),
+    ['0000000003', '0000000002'],
+  );
 });
 
 // ---- two hand-offs at once, and a restart mid-hand-off

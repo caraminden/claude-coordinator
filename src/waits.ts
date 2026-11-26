@@ -5,7 +5,8 @@
 // a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
 import { readTail } from './wait-tail.ts';
 import { median as statsMedian } from './stats.ts';
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, stat as statFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
@@ -325,7 +326,12 @@ export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: 
     tmp = `${f}.tmp${process.pid}`;
   // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
   writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n${pins.length ? `#pin ${pins.join(' ')}\n` : ''}`);
-  renameSync(tmp, f);
+  // Under the lock deploy-queue.sh's queue_front holds from its read of .order to its write, or it writes over this one.
+  try {
+    execFileSync('flock', ['-w', '2', join(q, '.order.lock'), 'mv', '-f', tmp, f]);
+  } catch (e) {
+    throw new Error("Couldn't write the line's order, so nothing moved: try again", { cause: e });
+  }
   return order;
 }
 

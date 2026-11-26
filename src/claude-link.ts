@@ -321,13 +321,14 @@ export class ClaudeLink {
 
   /**
    * The pick for one of `uid`'s turns (src/account-pick.ts): `warm` names its session (`ticket:<id>`, `app:<id>:<name>`)
-   * when it has one to resume, so a session whose cache is still warm stays on its account.
+   * when it has one to resume, so a session whose cache is still warm stays on its account. `only`: a machine's turn picks
+   * among the accounts signed in there (accountsThere), by the same rules.
    */
-  private pick(uid: number, set: AccountSet, warm?: string, now = Date.now()): Pick | null {
+  private pick(uid: number, set: AccountSet, warm?: string, now = Date.now(), only?: number[]): Pick | null {
     const payer = this.serverLogin(uid) ? null : uid;
     const at = warm ? this.store.getSetting<WarmRecord>(warmKey(uid))?.[warm] : undefined;
     return pickAccount({
-      accounts: set.accounts,
+      accounts: only ? set.accounts.filter((a) => only.includes(a.n)) : set.accounts,
       meter: (n) => this.store.getSetting<Meter>(accountUsageKey(payer, n)) ?? null,
       nextUp: set.inUse,
       pinned: set.pinned,
@@ -340,6 +341,18 @@ export class ClaudeLink {
   accountFor(uid: number, warm?: string): number | null {
     const set = this.accounts(uid);
     return (set && this.pick(uid, set, warm)?.n) ?? (this.serverLogin(uid) ? 1 : null);
+  }
+
+  /**
+   * Which of `uid`'s accounts a machine whose worker holds sign-ins `slots` can run turns on (#2061), and whether one of
+   * them is ready now: linked here, signed in there in the folder of its number, and not to another Claude organization
+   * than the account of that number here (one not read yet on either side counts as the same).
+   */
+  accountsThere(uid: number, slots: { n: number; org: string | null }[]): { linked: number[]; usable: number[]; ready: boolean } {
+    const set = this.accounts(uid);
+    const linked: { n: number; expired?: number; limitedUntil?: number }[] = set?.accounts ?? (this.serverLogin(uid) ? [{ n: 1 }] : []);
+    const usable = linked.filter((a) => slots.some((s) => s.n === a.n && !(s.org && this.orgOf(uid, a.n) && s.org !== this.orgOf(uid, a.n))));
+    return { linked: linked.map((a) => a.n), usable: usable.map((a) => a.n), ready: usable.some((a) => accountReady(a)) };
   }
 
   /** A turn of session `key` (as place() takes it) ended on account `n`: its cache is warm there for the next WARM_MS. */
@@ -596,13 +609,15 @@ export class ClaudeLink {
    * Where a turn for `uid` runs, or null when it can't run (not linked, signed out). `warm` names the session it resumes,
    * if any (pick()): a fresh one, or one with no session yet, goes where new work goes. A Taskmaster's goes in a container apart.
    */
-  place(uid: number | null, warm?: string, taskmaster = false): TurnPlace | null {
+  place(uid: number | null, warm?: string, taskmaster = false, only?: number[]): TurnPlace | null {
     const user = uid ? this.store.getUser(uid) : undefined;
     if (!user) return null;
     const set = this.accounts(user.id);
-    const p = set && this.pick(user.id, set, warm);
-    if (set && p && p.nextUp !== set.inUse) this.withAccounts(user.id, (s) => void (s.inUse = p.nextUp));
+    const p = set && this.pick(user.id, set, warm, undefined, only);
+    // A machine's pick among some of the accounts says nothing of where new work goes here.
+    if (set && p && !only && p.nextUp !== set.inUse) this.withAccounts(user.id, (s) => void (s.inUse = p.nextUp));
     const n = p?.n;
+    if (only && !(n ? only.includes(n) : !set && only.includes(1))) return null;
     if (user.server_login) {
       if (!n || n === 1) return { host: true };
       const configDir = this.configDir(user.id, n)!;

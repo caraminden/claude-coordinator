@@ -47,7 +47,7 @@ export function workerState(m) {
   if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${heldCaps(m)?.disk_gb} GB, so no new turn starts there.` };
   if (!w.image) return { tone: 'info', word: 'Connecting', why: 'It is connected and is checking its image.' };
   if (w.claude_wanted) return { tone: 'warn', word: 'Wrong Claude version', why: `Its Claude is ${w.claude} and this server's is ${w.claude_wanted}. ${w.image.state === 'own' ? "Its image is its owner's own: update it there." : 'It updates itself.'}` };
-  if (w.signed_in === false) return { tone: 'warn', word: 'Needs a Claude sign-in', why: 'No turn starts there until its owner signs in.' };
+  if (w.signed_in === false || (w.accounts?.length && !w.accounts.some((a) => a.there === 'in'))) return { tone: 'warn', word: 'Needs a Claude sign-in', why: 'No turn starts there until its owner signs in with one of their linked Claude accounts.' };
   if (w.test && w.test.done && !w.test.ok) return { tone: 'danger', word: 'Self-test failed', why: `No turn starts there until it passes. ${w.test.why ?? 'The checks below say what is wrong.'}` };
   if (w.signed_in === null) return { tone: 'info', word: 'Connecting', why: 'It is checking its sign-ins.' };
   if (!(m.roles?.find((r) => r.role === 'turns')?.projects ?? m.projects).length) return { tone: 'warn', word: 'Lent to no scheme', why: 'Pick the schemes whose minions may run there on its Minion turns card.' };
@@ -214,25 +214,40 @@ function signIns(m, k) {
   const w = /** @type {MachineWorker} */ (m.worker);
   const win = w.wsl;
   const tag = win ? 'powershell' : 'bash';
-  /** @param {string} name @param {boolean | null} is */
-  const chip = (name, is) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${is ? 'signed in' : is === false ? 'not signed in' : 'checking'}`);
-  /** @type {[string, boolean | null, string, string][]} */
-  const steps = [
-    ['Claude', w.signed_in, 'signin', 'Claude Code opens its own sign-in. Type /exit once it says you are in.'],
-    ['GitHub', w.github, 'signin-github', 'So turns can push and open pull requests as you.'],
-  ];
-  /** @param {[string, boolean | null, string, string]} step */
-  const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', note), shell(tag, workerCommand(win, verb)));
+  /** @param {string} name @param {boolean | null} is @param {string} [word] */
+  const chip = (name, is, word) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${word ?? (is ? 'signed in' : is === false ? 'not signed in' : 'checking')}`);
+  const claudeNote = 'Claude Code opens its own sign-in. Type /exit once it says you are in.';
+  // Linked accounts (#2061): each signs in there into its own folder, and a turn runs only on one signed in there. One account
+  // keeps the single Claude step, unless it is signed in there to another organization: that says which and why.
+  const one = w.accounts?.length === 1 ? w.accounts[0] : null;
+  const several = (w.accounts?.length ?? 0) > 1 || one?.there === 'other';
+  const scheme = location.hash.match(/^#\/p\/(\d+)/)?.[1];
+  const yours = () => (scheme ? h('a', { href: `#/p/${scheme}/account` }, 'Settings → Your account') : 'Settings → Your account');
+  /** @typedef {[string, boolean | null, string, (string | Node)[], string?]} SignStep */
+  /** @type {SignStep[]} */
+  const claude = several
+    ? (w.accounts ?? []).map((a) => [
+        `Claude account ${a.n}`,
+        a.there === 'in',
+        `signin ${a.n}`,
+        a.there === 'other' ? [`This PC is signed in to a different Claude organization than your account ${a.n} in Citadel: sign in again and pick that account's organization.`] : ['Sign in with the account that ', yours(), ` lists as account ${a.n}.`],
+        a.there === 'other' ? 'other organization' : undefined,
+      ])
+    : [['Claude', one ? one.there === 'in' : w.signed_in, 'signin', [claudeNote]]];
+  /** @type {SignStep[]} */
+  const steps = [...claude, ['GitHub', w.github, 'signin-github', ['So turns can push and open pull requests as you.']]];
+  /** @param {SignStep} step */
+  const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', ...note), shell(tag, workerCommand(win, verb)));
   const todo = steps.filter(([, is]) => is === false);
   const done = steps.filter(([, is]) => is !== false);
   return h(
     'section',
     { class: 'worker-part' },
-    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Sign-ins there'), chip('Claude', w.signed_in), chip('GitHub', w.github)),
+    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Sign-ins there'), ...steps.map(([name, is, , , word]) => chip(name, is, word))),
     w.image?.state === 'building' && todo.length ? h('p', { class: 'muted small' }, 'These work once its image is built.') : null,
-    todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`) : null,
+    todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`, several && todo.some(([name]) => name !== 'GitHub') ? ` ${claudeNote}` : '') : null,
     ...todo.map(how),
-    h('p', { class: 'muted small' }, 'You sign in on that PC yourself. Citadel sees only whether a sign-in is there.'),
+    h('p', { class: 'muted small' }, several ? "You sign in on that PC yourself. Citadel sees only whether a sign-in is there, and its organization's id. A turn there runs on one of your accounts signed in there." : 'You sign in on that PC yourself. Citadel sees only whether a sign-in is there.'),
     done.length ? folded(k, 'sign', 'Sign in again', ...done.map(how)) : null,
   );
 }

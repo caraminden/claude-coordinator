@@ -124,12 +124,12 @@ export function turnRefusal(store: Store, ticket: Ticket, author: string, linked
  * Where `person`'s turn runs (src/runner.ts placeFor), or why it can't: sender pays (#213), so the server login's owner
  * runs on the host and everyone else in their own container. No person (a scheme with no owner) runs on the host.
  */
-export function turnPlace(store: Store, link: { place(uid: number, warm?: string, taskmaster?: boolean): TurnPlace | null; linked: ClaudeLinked }, person: number | null, warm?: string, taskmaster = false): TurnPlace | { refused: string } {
+export function turnPlace(store: Store, link: { place(uid: number, warm?: string, taskmaster?: boolean, only?: number[]): TurnPlace | null; linked: ClaudeLinked }, person: number | null, warm?: string, taskmaster = false, only?: number[]): TurnPlace | { refused: string } {
   const user = person ? store.getUser(person) : undefined;
   if (!user) return { host: true };
   // Disabled first (#1270 C3): a linked Claude would place the turn, and a resume, held mail or a queued start would run it.
   if (user.disabled_at) return { refused: claudeRefusal(user, (uid) => link.linked(uid))! };
-  return link.place(user.id, warm, taskmaster) ?? { refused: claudeRefusal(user, (uid) => link.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
+  return link.place(user.id, warm, taskmaster, only) ?? { refused: claudeRefusal(user, (uid) => link.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
 }
 
 /** Whether a person has linked their own Claude (src/claude-link.ts): linked, expired, or not at all. */

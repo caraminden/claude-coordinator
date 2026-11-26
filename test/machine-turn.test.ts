@@ -424,6 +424,9 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   assert.notEqual(first.api, srv.base.replace('localhost', '127.0.0.1'), "its tools call home through the agent's forwarder");
   assert.equal(first.status, 200, "and the call arrives as the turn's own");
   assert.equal(first.config, null, "the sign-in is the machine's own: the server's config folder is not named there");
+  const placedHere = JSON.parse(text(dir, 'machine'));
+  assert.equal(placedHere.account, 1, "the account it runs on goes with it (#2061): account 1, Claude Code's default folder there");
+  assert.equal(placedHere.state.config.there, join(root, '.claude'), 'and its session goes to that folder');
   assert.equal(first.key, null, "and the server's own key never leaves it");
   await until("claude's stream to be written on the machine", () => /heard 1/.test(text(local, 'stream.jsonl')));
   await until('the stream to come home', () => /heard 1/.test(text(dir, 'stream.jsonl')));

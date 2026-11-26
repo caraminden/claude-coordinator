@@ -66,12 +66,22 @@ export interface MachinePoolsDeps {
   hold?: (machineId: number) => string | null;
   /** The balancer's plan for the machine (Build 7 M6), or null. */
   room?: (machineId: number) => { workers: number; why: string | null } | null;
+  /** Which of a person's Claude accounts a worker holding these sign-ins runs turns on, and whether one is ready (ClaudeLink.accountsThere). */
+  accountsThere?: AccountsThere;
   /** `claude --version` here. */
   claude: () => Promise<string | null>;
   /** A machine may take turns it couldn't a moment ago. */
   changed: () => void;
   now: () => number;
 }
+
+/** ClaudeLink.accountsThere: the person's linked accounts, those a worker holding these sign-ins runs turns on, and whether one is ready. */
+export type AccountsThere = (person: number, slots: { n: number; org: string | null }[]) => { linked: number[]; usable: number[]; ready: boolean };
+
+/** Whether its worker could tell its sign-ins: one it couldn't read is not a no. */
+const known = (info: WorkerInfo) => typeof info.signedIn === 'boolean';
+/** The accounts a worker holds a sign-in for; an agent from before #2061 says only whether it has one, which is account 1's. */
+export const slotsOf = (info: WorkerInfo) => info.accounts ?? (info.signedIn ? [{ n: 1, org: null }] : []);
 
 export class MachinePools {
   private d: MachinePoolsDeps;
@@ -143,7 +153,18 @@ export class MachinePools {
     if (person !== m.owner_id) return never(`it runs only ${owner}'s turns, and this one is ${person === null ? 'nobody' : (this.d.store.getUser(person)?.name ?? 'someone else')}'s`);
     const project = this.d.store.getProject(ticket.project_id);
     if (!project || !lendsRole(this.d.store as Store, m, 'turns', project, [m.owner_id])) return never('it is not lent to this scheme');
-    return this.d.info(m.id)?.signedIn === false ? never(`${owner} is not signed in to Claude there`) : null;
+    const info = this.d.info(m.id);
+    if (info?.signedIn === false) return never(`${owner} is not signed in to Claude there`);
+    // The account a turn runs on must be signed in there (#2061): the pick there is among those (accountsAt).
+    const there = info && known(info) && person !== null ? this.d.accountsThere?.(person, slotsOf(info)) : null;
+    if (there && !there.usable.length) return never(`none of ${owner}'s linked Claude accounts is signed in there`);
+    return there && !there.ready ? { why: `${owner}'s Claude accounts signed in there are at their usage limit or need linking again` } : null;
+  }
+
+  /** The accounts a turn of `person`'s on that machine may run on, for the account pick; undefined when it can't say (no worker facts yet). */
+  accountsAt(machineId: number, person: number | null): number[] | undefined {
+    const info = this.d.info(machineId);
+    return info && known(info) && person !== null ? this.d.accountsThere?.(person, slotsOf(info)).usable : undefined;
   }
 
   nameOf(machineId: number): string {

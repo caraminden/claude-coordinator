@@ -144,6 +144,42 @@ test('a limit moves turns to the next ready account, a turn that gets through cl
   assert.equal(link.place(uid)?.account, 1);
 });
 
+// A machine's worker holds its own sign-ins, account n in .claude-n as here (#2061): a turn there runs only on one of those.
+test('a turn on a machine picks among the accounts signed in there, by the same rules, and moves nothing here (#2061)', async () => {
+  const { link, uid } = linkedPerson([acct(1), acct(2)]);
+  const slot = (n: number, org: string | null = null) => ({ n, org });
+  assert.deepEqual(link.accountsThere(uid, [slot(1), slot(2)]), { linked: [1, 2], usable: [1, 2], ready: true });
+  assert.deepEqual(link.accountsThere(uid, [slot(2), slot(3)]), { linked: [1, 2], usable: [2], ready: true }, 'a third account not linked here counts for nothing');
+  assert.equal(link.place(uid)?.account, 1, 'here, account 1 is next up');
+  const there = link.place(uid, undefined, false, [2]);
+  assert.ok(there && !there.host);
+  assert.equal(there.account, 2, 'there, account 2: the one signed in');
+  assert.match(there.env.CLAUDE_CONFIG_DIR, /\/\.claude-2$/);
+  assert.equal(link.accounts(uid)?.inUse, 1, 'where new work goes here is unmoved');
+  assert.equal(link.place(uid, undefined, false, []), null, 'none signed in there: no place');
+
+  // Limit fall-over there: account 1 at its limit, both signed in, the pick moves to 2; only 1 signed in, nothing is ready.
+  link.limited(uid, 1, Date.now() + 3600_000);
+  assert.equal(link.place(uid, undefined, false, [1, 2])?.account, 2);
+  assert.deepEqual(link.accountsThere(uid, [slot(1)]), { linked: [1, 2], usable: [1], ready: false }, 'not ready: the machine refuses it (MachinePools.refuses)');
+
+  // Signed in there to another organization than account 2's here: it doesn't count; the same one, or one not read, does.
+  mkdirSync(join(root, `home-${uid}`, '.claude-2'), { recursive: true });
+  writeFileSync(join(root, `home-${uid}`, '.claude-2', '.claude.json'), JSON.stringify({ oauthAccount: { organizationUuid: 'org-two' } }));
+  await until("account 2's organization to be read", () => link.accountsThere(uid, [slot(2, 'org-other')]).usable.length === 0);
+  assert.deepEqual(link.accountsThere(uid, [slot(2, 'org-two')]).usable, [2]);
+  assert.deepEqual(link.accountsThere(uid, [slot(2)]).usable, [2]);
+});
+
+test('one account: a machine signed in to it runs it as before (#2061)', () => {
+  const { link, uid } = linkedPerson([acct(1)]);
+  assert.deepEqual(link.accountsThere(uid, [{ n: 1, org: null }]), { linked: [1], usable: [1], ready: true });
+  const there = link.place(uid, undefined, false, [1]);
+  assert.ok(there && !there.host);
+  assert.equal(there.account, 1);
+  assert.match(there.env.CLAUDE_CONFIG_DIR, /\/\.claude$/);
+});
+
 test('turns go where the week resets soonest, a warm session stays put, and a pin wins until it is unpinned (#793)', () => {
   const { link, uid } = linkedPerson([acct(1), acct(2)]);
   const H = 3600_000;

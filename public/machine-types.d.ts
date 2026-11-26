@@ -106,6 +106,8 @@ export interface MachineWorker {
   claude: string | null;
   claude_wanted: string | null;
   signed_in: boolean | null;
+  /** Each linked Claude account and whether it is signed in there (#2061): in, out, or to another organization; null when not known. */
+  accounts?: { n: number; there: 'in' | 'out' | 'other' }[] | null;
   github: boolean | null;
   disk_gb: number | null;
   full: boolean;

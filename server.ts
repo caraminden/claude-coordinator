@@ -803,7 +803,16 @@ runner.machines = (project, askers) =>
   });
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 const serverClaude = () => new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0])));
-const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });
+const workers = new WorkerJoin({
+  store,
+  lends: (m) => machines.lendsWorker(m),
+  info: workerInfo,
+  ships: (id) => machines.shipsAtWorker(id),
+  claude: serverClaude,
+  changed: () => broadcast({ type: 'machines', machines: machines.list() }),
+  accountsThere: (person, slots) => claudeLink.accountsThere(person, slots),
+  now: Date.now,
+});
 machines.workers = workers;
 if (!BOOT_CHECK) every('worker rows', 1000, () => workers.tick());
 // A role's Set up and self-test (Build 7 M4).
@@ -845,12 +854,13 @@ runner.pools = new MachinePools({
     const plan = balancer.current(id);
     return plan && { workers: plan.workers, why: plan.why };
   },
+  accountsThere: (person, slots) => claudeLink.accountsThere(person, slots),
   claude: serverClaude,
   changed: () => runner.turnLine.pump(),
   now: Date.now,
 });
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
-runner.placeFor = (person, warm, taskmaster) => turnPlace(store, claudeLink, person, warm, taskmaster);
+runner.placeFor = (person, warm, taskmaster, only) => turnPlace(store, claudeLink, person, warm, taskmaster, only);
 runner.accountFor = (person, warm) => claudeLink.accountFor(person, warm);
 runner.onAuthFailure = (person, account) => claudeLink.expire(person, account);
 // Several Claude accounts per person (#779): which one turns run on, and moving on from one at its limit.

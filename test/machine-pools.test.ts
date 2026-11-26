@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { MachinePools } from '../src/machine-pools.ts';
+import { MachinePools, type MachinePoolsDeps } from '../src/machine-pools.ts';
 import type { WorkerInfo } from '../src/machine-turn.ts';
 import { hostLoad } from '../public/machine-worker.mjs';
 
@@ -26,7 +26,8 @@ function setup() {
   store.setMachineProjects(m.id, [project.id]);
   store.setMachineRole(m.id, 'turns', { on: true, projects: [project.id] }); // its Minion turns role (Build 7 M1): what `lends` stands for
   const s = { online: true, lends: true, ships: false, claude: '2.1.0' as string | null, now: T, info: { claude: '2.1.0 (Claude Code)', max: 4, at: T, load: { cpu: 12, mem: 1, freeGb: 20 }, signedIn: true } as WorkerInfo | null, hold: null as string | null, changed: 0 };
-  const build = () => new MachinePools({ store, online: () => s.online, lends: () => s.lends, info: () => s.info, ships: () => s.ships, hold: () => s.hold, claude: () => Promise.resolve(s.claude && `${s.claude} (Claude Code)`), changed: () => void s.changed++, now: () => s.now });
+  const build = (extra: Partial<MachinePoolsDeps> = {}) =>
+    new MachinePools({ ...extra, store, online: () => s.online, lends: () => s.lends, info: () => s.info, ships: () => s.ships, hold: () => s.hold, claude: () => Promise.resolve(s.claude && `${s.claude} (Claude Code)`), changed: () => void s.changed++, now: () => s.now });
   const pools = build();
   return { store, josh, cara, project, m, s, build, pools, why: () => pools.machines()[0].block?.why ?? null };
 }
@@ -110,6 +111,33 @@ test('a link gone for a moment is coming back, not away: after a restart its syn
   assert.deepEqual([restarted.machines()[0].block?.why, restarted.machines()[0].away], ['reconnecting', null], 'a server that just started has seen no link yet');
   t.s.now += 2 * MIN;
   assert.deepEqual([restarted.machines()[0].block, restarted.machines()[0].away], [{ why: 'away since Nov 25, 2:14 PM PST', since: T }, T], 'and it keeps when the machine was last here');
+});
+
+test("a turn there runs only on its owner's account signed in there: none never, none ready waits (#2061)", () => {
+  const turn = { project_id: t.project.id };
+  const there = { linked: [1, 2], usable: [2], ready: true };
+  const asked: unknown[] = [];
+  const pools = t.build({ accountsThere: (person, slots) => (asked.push([person, slots]), there) });
+  t.s.info!.accounts = [{ n: 2, org: 'org-two' }];
+  assert.equal(pools.refuses(t.m.id, turn, t.josh.id), null);
+  assert.deepEqual(pools.accountsAt(t.m.id, t.josh.id), [2], 'the pick there is among what it holds and he has linked');
+  assert.deepEqual(asked[0], [t.josh.id, [{ n: 2, org: 'org-two' }]]);
+  there.ready = false;
+  assert.deepEqual(pools.refuses(t.m.id, turn, t.josh.id), { why: "Josh's Claude accounts signed in there are at their usage limit or need linking again" }, 'a limit passes: it waits, never a never');
+  there.usable = [];
+  assert.deepEqual(pools.refuses(t.m.id, turn, t.josh.id), { why: "none of Josh's linked Claude accounts is signed in there", never: true });
+  // An agent from before says only whether it holds a sign-in: account 1's.
+  delete t.s.info!.accounts;
+  asked.length = 0;
+  pools.accountsAt(t.m.id, t.josh.id);
+  assert.deepEqual(asked[0], [t.josh.id, [{ n: 1, org: null }]]);
+  assert.equal(pools.accountsAt(t.m.id, null), undefined);
+  t.s.info!.signedIn = null;
+  there.usable = [];
+  assert.equal(pools.refuses(t.m.id, turn, t.josh.id), null, "a worker that couldn't read its sign-ins: not known is not a no");
+  assert.equal(pools.accountsAt(t.m.id, t.josh.id), undefined);
+  t.s.info = null;
+  assert.equal(pools.accountsAt(t.m.id, t.josh.id), undefined, 'no worker facts: nothing to restrict by (and no turn goes there)');
 });
 
 test('each reason a turn can never run there', () => {

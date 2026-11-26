@@ -1,6 +1,6 @@
 #!/bin/bash
 # What a worker machine's owner runs on it (Citadel, Build 7; install-worker.sh puts it here). As root:
-#   citadel-worker signin            sign in to Claude, through Claude Code's own sign-in
+#   citadel-worker signin [2|3]      sign in to Claude (your 2nd or 3rd linked account: its number), through Claude Code's own sign-in
 #   citadel-worker signin-github     sign in to GitHub, through gh's own sign-in
 #   citadel-worker caps [--workers N] [--threads N] [--memory GB] [--disk GB]
 #   citadel-worker page-caps --threads N --memory GB   the worker's own ask, through sudo: its Machines page's threads and memory
@@ -102,8 +102,11 @@ hold_slice() {
 
 case ${1:-} in
   signin)
-    echo 'Follow the sign-in below. When it says you are signed in, type /exit.'
-    inside claude /login ;;
+    # Account n's own folder, as perigee names it (src/claude-link.ts accountDir): 1 is Claude Code's default.
+    n=${2:-1}
+    [[ $n =~ ^[123]$ ]] || die 'usage: citadel-worker signin [2|3]: the number of your linked account, as Settings → Your account lists them.'
+    echo "Follow the sign-in below for your account $n. When it says you are signed in, type /exit."
+    if [[ $n == 1 ]]; then inside claude /login; else inside env CLAUDE_CONFIG_DIR="/home/worker/.claude-$n" claude /login; fi ;;
   signin-github) inside gh auth login --hostname github.com --git-protocol https --web ;;
   caps)
     shift

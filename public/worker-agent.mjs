@@ -311,8 +311,10 @@ export class WorkerAgent {
       const has = (/** @type {string} */ file) => (vol.code ? (/no such volume/i.test(vol.err) ? false : null) : thereIn(vol.out.trim(), file));
       this.github = has('.config/gh/hosts.yml');
       // The worker looks for itself every few minutes; a sign-in just made there shows at once.
-      const claude = has('.claude/.credentials.json');
-      if (claude !== null && this.worker.signedIn.now !== claude) await this.worker.checkSignIn();
+      // Each account's folder (machine-worker.mjs accountDir): a sign-in made or gone in any of them is read again.
+      const slots = ['.claude', '.claude-2', '.claude-3'].map((dir) => has(`${dir}/.credentials.json`));
+      const known = this.worker.signedIn.slots?.map((s) => s.n) ?? null;
+      if (!slots.includes(null) && String(slots.flatMap((is, i) => (is ? [i + 1] : []))) !== String(known)) await this.worker.checkSignIn();
     }
   }
 

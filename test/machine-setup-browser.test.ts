@@ -174,7 +174,7 @@ test('a CI runner host is added from its own button and gets its own install lin
   assert.match(await page.eval<string>(`${row('runner-pc')}.closest('.machine-group, section, div[class*=group]')?.textContent ?? document.querySelector('#machine-list').textContent`), /CI runners[\s\S]*runner-pc/);
 });
 
-test('Who gets it is one list of scheme chips: + scheme adds one at once, × takes it away (#438)', { skip }, async () => {
+test("Who gets it is a list of scheme chips on each role's card: a click adds or takes one at once, and it is saved (#438, Build 7 M3)", { skip }, async () => {
   const other = (await srv.call('/api/projects', { name: 'Other scheme' })).data;
   const { machine } = (await srv.call('/api/machines', { name: 'chip-box' })).data;
   await openMachines();
@@ -182,23 +182,27 @@ test('Who gets it is one list of scheme chips: + scheme adds one at once, × tak
   const row = `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.settings-row-title').textContent === 'chip-box')`;
   await page.eval(`${row}.open = true`);
   await wait("chip-box's body", `!!${row}.querySelector('.machine-body')`);
-  const chips = () => page.eval<string[]>(`[...${row}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`);
-  const saved = async () => (await srv.call('/api/machines')).data.find((m: { id: number; projects: unknown }) => m.id === machine.id).projects;
+  const card = `${row}.querySelector('.role-card[data-role=tools]')`;
+  const chips = () => page.eval<string[]>(`[...${card}.querySelectorAll('.role-schemes .chip[aria-pressed=true]')].map((c) => c.textContent)`);
+  const chip = (name: string) => `[...${card}.querySelectorAll('.role-schemes .chip')].find((c) => c.textContent === ${JSON.stringify(name)})`;
+  const saved = async () => (await srv.call(`/api/machines/${machine.id}/roles`)).data.roles.find((r: { role: string }) => r.role === 'tools').projects;
+  const savedIs = (n: number) => `fetch('api/machines/${machine.id}/roles').then((r) => r.json()).then((d) => d.roles.find((r) => r.role === 'tools').projects.length === ${n})`;
+  // A new machine's Tools and folders is on, lent to no scheme yet: every scheme shows as a chip, none of them on.
+  assert.equal(await page.eval(`${card}.querySelector('.rules-switch').getAttribute('aria-checked')`), 'true');
+  assert.deepEqual(await page.eval<string[]>(`[...${card}.querySelectorAll('.role-schemes .chip')].map((c) => c.textContent)`), ['Other scheme', 'P'], "the schemes in the page's order");
   assert.deepEqual(await chips(), []);
-  assert.match(await page.eval<string>(`${row}.querySelector('.machine-lending').textContent`), /No scheme gets it yet/);
+  assert.deepEqual(await saved(), []);
   assert.equal(await page.eval(`!!${row}.querySelector('input[type=radio]')`), false, 'no "every scheme an admin owns" radio');
-  const add = (id: number) => page.eval(`(() => { const s = ${row}.querySelector('select.add-scheme'); s.value = '${id}'; s.dispatchEvent(new Event('change')); })()`);
   // Two picks in a row both count, before either answer is back.
-  await add(projectId);
-  await add(other.id);
-  await wait('both to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.find((m) => m.id === ${machine.id}).projects.length === 2)`);
+  await page.eval(`${chip('P')}.click(); ${chip('Other scheme')}.click()`);
+  assert.deepEqual(await chips(), ['Other scheme', 'P'], 'at once');
+  await wait('both to be saved', savedIs(2));
   // The first answer's broadcast can show the list without the second pick for a moment; it comes back with its own.
-  await wait('both chips', `${row}.querySelectorAll('.scheme-chip').length === 2`);
-  assert.deepEqual(await chips(), ['P', 'Other scheme']);
-  assert.equal(await page.eval(`${row}.querySelector('select.add-scheme').hidden`), true, 'no scheme left to add');
-  await page.eval(`${row}.querySelector('.scheme-chip button[aria-label="Remove P"]').click()`);
+  await wait('both chips', `${card}.querySelectorAll('.role-schemes .chip[aria-pressed=true]').length === 2`);
+  assert.deepEqual(await chips(), ['Other scheme', 'P']);
+  await page.eval(`${chip('P')}.click()`);
   assert.deepEqual(await chips(), ['Other scheme']);
-  await wait('the removal to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.find((m) => m.id === ${machine.id}).projects.length === 1)`);
+  await wait('the removal to be saved', savedIs(1));
   assert.deepEqual(await saved(), [other.id]);
 });
 
@@ -219,13 +223,17 @@ test("a member who is no admin adds their own PC as a CI runner host and lends i
     assert.equal(await page.eval('[...document.querySelectorAll("button")].some((b) => b.textContent === "Add a CI runner host")'), true);
     await add('mira-pc', '.machine-add.runners');
     await open('mira-pc');
-    const chips = `[...${row('mira-pc')}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`;
-    assert.deepEqual(await page.eval(chips), [], 'lent to nothing until its owner picks');
-    const picks = await page.eval<string[]>(`[...${row('mira-pc')}.querySelectorAll('select.add-scheme option')].map((o) => o.textContent)`);
-    assert.deepEqual(picks, ['+ scheme', "Mira's"], 'only the schemes she is in');
-    await page.eval(`(() => { const s = ${row('mira-pc')}.querySelector('select.add-scheme'); s.value = '${mine.id}'; s.dispatchEvent(new Event('change')); })()`);
-    await wait('the lend', `${row('mira-pc')}.querySelectorAll('.scheme-chip').length === 1`);
-    await wait('the lend to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.length === 1 && l[0].projects.length === 1)`);
+    // A runner host's row is its CI runners card alone (Build 7 M3): on, and lent to nothing until its owner picks.
+    const card = `${row('mira-pc')}.querySelector('.role-card[data-role=ci]')`;
+    assert.deepEqual(await page.eval(`[...${row('mira-pc')}.querySelectorAll('.role-card')].map((c) => c.dataset.role)`), ['ci']);
+    assert.equal(await page.eval(`${card}.querySelector('.rules-switch').getAttribute('aria-checked')`), 'true');
+    const chips = (sel = '') => page.eval<string[]>(`[...${card}.querySelectorAll('.role-schemes .chip${sel}')].map((c) => c.textContent)`);
+    assert.deepEqual(await chips('[aria-pressed=true]'), [], 'lent to nothing until its owner picks');
+    assert.deepEqual(await chips(), ["Mira's"], 'only the schemes she is in');
+    await page.eval(`${card}.querySelector('.role-schemes .chip').click()`);
+    await wait('the lend', `${card}.querySelectorAll('.role-schemes .chip[aria-pressed=true]').length === 1`);
+    await wait('the lend to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.length === 1 && l[0].projects.length === 1 && l[0].roles.find((r) => r.role === 'ci').projects.length === 1)`);
+    assert.deepEqual((await machine('mira-pc')).roles.find((r: { role: string }) => r.role === 'ci').projects, [mine.id]);
     // Another member's machine isn't hers to see or change.
     assert.equal((await machine('mira-pc')).owner_id !== null, true);
     assert.equal((await mira(`/api/machines/${(await machine('runner-pc')).id}`, { projects: [] }, 'PATCH')).status, 404);

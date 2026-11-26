@@ -9,7 +9,6 @@
   "public/skills.js": [3, 0],
   "public/workers.js": [1, 0],
   "src/backup.ts": [0, 3],
-  "src/db/deliveries.ts": [0, 2],
   "test/app-browser.test.ts": [5, 0],
   "test/app-facts.test.ts": [1, 0],
   "test/app-turns-check.test.ts": [0, 1],

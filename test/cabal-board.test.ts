@@ -65,7 +65,7 @@ test('a build cabal: each column comes from facts', async () => {
   store.updateCabalRow(store.cabalRowOf(blocked.id)!.id, { label: 'M1', note: 'Go given.' });
   store.addCabalAsk(lead.id, blocked.id, 'Lend src/machines.ts for one merge', true);
   store.addCabalAsk(lead.id, building.id, 'Which test helper?', false);
-  store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: chained.id, when_kind: 'merged', when_arg: { after: blocked.id }, payload: { message: 'brief', from: 'Cara' }, set_by: 'Cara', dedupe_key: String(chained.id) });
+  store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: chained.id, when_kind: 'merged', when_arg: { after: blocked.id, base: null }, payload: { message: 'brief', from: 'Cara', reason: '' }, set_by: 'Cara', dedupe_key: String(chained.id) });
   sealed.add(chained.id);
   store.updateTicket(building.id, { status: 'running' });
   store.updateTicket(dismissed.id, { status: 'closed' });

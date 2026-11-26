@@ -9,6 +9,7 @@ import type { CabalAsk, CabalLogLine, CabalMemberRow } from './db/cabals.ts';
 import type { Ticket, TicketFields } from './db-rows.ts';
 import { EFFORT_KEY } from './effort-retros.ts';
 import { gitOut } from './git.ts';
+import { deliveriesOf } from './outbox.ts';
 import { pacificClock } from './pacific.ts';
 import { parseShipNote, type Risk } from './ship-risk.ts';
 
@@ -179,8 +180,8 @@ async function stateOf(t: Ticket | undefined, ship: 'shipped' | 'merged' | null,
 
 /** "#N" of the minion it starts after, from its chain (start_after), while it still waits. */
 function afterOf(store: Store, t: Ticket): string | null {
-  const chain = store.listDeliveries({ kind: 'chain', to: t.id, states: ['waiting', 'held', 'sending'] })[0];
-  const leader = chain ? store.getTicket(Number(chain.when_arg?.after)) : undefined;
+  const chain = deliveriesOf(store, 'chain', { to: t.id, states: ['waiting', 'held', 'sending'] })[0];
+  const leader = chain ? store.getTicket(chain.when_arg.after) : undefined;
   return leader?.number != null ? `#${leader.number}` : null;
 }
 

@@ -181,14 +181,15 @@ echo "burn-in: ${#files[@]} file(s), $copies copies of each at once, one file af
 # Each file's last burn-in on this runner (#2138), "<seconds>\t<file>\t<blob>": a file whose last burn-in at the same
 # content took longer than the time left is skipped, not started. Stopped at the limit it gives no verdict, and on Nov 25
 # and 26 that cost 1,680 s over 197 ship runs and 878 s over 29 (Build 7's machine-sync, 67-93 s a run). A stopped file
-# keeps the longest time it was seen to need; a failed one keeps nothing, as its copies stopped early.
+# keeps one second more than the longest time it was given, so the same time left won't start it again; a failed one keeps
+# nothing, as its copies stopped early. A line whose time isn't whole seconds is ignored.
 times=${BURN_IN_TIMES:-}
-need_of() { [ -n "$times" ] && [ -r "$times" ] || { echo 0; return; }; awk -F'\t' -v f="$1" -v b="$2" '$2 == f && $3 == b { s = $1 } END { print s + 0 }' "$times"; }
+need_of() { [ -n "$times" ] && [ -f "$times" ] && [ -r "$times" ] || { echo 0; return; }; awk -F'\t' -v f="$1" -v b="$2" '$2 == f && $3 == b && $1 ~ /^[0-9]+$/ { s = $1 } END { print s + 0 }' "$times" 2>/dev/null || echo 0; }
 keep_time() {
   [ -n "$times" ] || return 0
-  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$times" 2>/dev/null || return 0
+  { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$times"; } 2>/dev/null || return 0
   # shortcut: runners sharing the file may lose a line to this trim, which only costs a file one more burn-in.
-  [ "$(wc -l <"$times")" -le 4000 ] || { tail -n 2000 "$times" >"$times.$$" && mv -f "$times.$$" "$times"; }
+  [ "$(wc -l <"$times" 2>/dev/null || echo 0)" -le 4000 ] || { tail -n 2000 "$times" >"$times.$$" && mv -f "$times.$$" "$times"; }
 }
 # Every file runs, past a red one (#1564): a train with three racy riders hears of all three in one red run, not one a run.
 deadline=$((SECONDS + limit)) skipped=() slow=() nov=() red=()
@@ -206,7 +207,7 @@ for f in "${files[@]}"; do
   burn_one "$f" "$copies" "$left" || rc=$?
   took=$((SECONDS - t0))
   [ "$rc" != 1 ] || red+=("$f")
-  if [ "$rc" = 2 ]; then nov+=("$f") && [ "$took" -ge "$need" ] || took=$need; fi
+  if [ "$rc" = 2 ]; then nov+=("$f") && took=$((took + 1)) && [ "$took" -gt "$need" ] || took=$need; fi
   [ "$rc" = 1 ] || [ -z "$blob" ] || keep_time "$took" "$f" "$blob"
 done
 [ ${#slow[@]} = 0 ] || echo "burn-in: NO VERDICT on ${slow[*]}: not started, as their last burn-in took longer than the time left (the full suite runs them next)"

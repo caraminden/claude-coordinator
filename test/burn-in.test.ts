@@ -161,15 +161,31 @@ test('a file whose last burn-in here took longer than the time left is not start
   assert.equal(lines.length, 3);
 });
 
-test('with no times file kept, every file starts as before, and a time at other content is no reason to skip (#2138)', () => {
+test('with no times file kept, every file starts as before, and a time at other content or not in whole seconds is no reason to skip (#2138)', () => {
   const dir = repo({ 'test/clean.test.ts': CLEAN });
   const times = join(dir, '..', `times-${n}.tsv`);
-  writeFileSync(times, '400\ttest/clean.test.ts\t0000\n');
-  for (const env of [{}, { BURN_IN_TIMES: times }] as Record<string, string>[]) {
+  const blob = spawnSync('git', ['hash-object', 'test/clean.test.ts'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+  writeFileSync(times, `400\ttest/clean.test.ts\t0000\n1e9\ttest/clean.test.ts\t${blob}\n`);
+  // A folder where the file should be: the run goes on as with none, and says nothing of it.
+  const folder = join(dir, '..', `times-dir-${n}`);
+  mkdirSync(folder);
+  for (const env of [{}, { BURN_IN_TIMES: times }, { BURN_IN_TIMES: folder }] as Record<string, string>[]) {
     const r = ship(dir, { ...env, BURN_IN_COPIES: '2' });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 2 of 2 copies at once passed/m);
+    assert.equal(r.stderr, '', 'no error from the times file');
   }
+});
+
+test('a file stopped at the limit keeps a second more than it was given, so the same time left will not start it again (#2138)', () => {
+  const slow = "import { test } from 'node:test';\nimport { setTimeout as sleep } from 'node:timers/promises';\ntest('slow', () => sleep(120_000));\n";
+  const dir = repo({ 'test/slow.test.ts': slow });
+  const times = join(dir, '..', `times-${n}.tsv`);
+  const r = ship(dir, { BURN_IN_TIMES: times, BURN_IN_COPIES: '2', BURN_IN_LIMIT: '15' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const [took, file] = readFileSync(times, 'utf8').trim().split('\t');
+  assert.equal(file, 'test/slow.test.ts');
+  assert.ok(Number(took) > 15, `kept ${took} s, more than the 15 s it was given`);
 });
 
 // The real case (#795, Nov 16): the write queue changed src/db-writer.ts and src/routes/tickets.ts, and

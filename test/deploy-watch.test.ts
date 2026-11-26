@@ -8,7 +8,7 @@ import vm from 'node:vm';
 import { HEALTH_MAX_ROWS, Store, type TurnResult } from '../src/db.ts';
 import { attachEventsIfThere } from '../src/events-db.ts';
 import { HttpError } from '../src/http.ts';
-import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, BOOT_STALL, gitCommits, RATE, subjectTicket } from '../src/deploy-watch.ts';
+import { ClientErrors, countsAsServerFault, DEDUPE_MS, DeployWatch, BOOT_STALL, gitCommits, gitFiles, RATE, subjectTicket } from '../src/deploy-watch.ts';
 import { git } from './git.ts';
 import { fake } from './typed.ts';
 
@@ -28,6 +28,9 @@ function setup() {
   const clock = { now: Date.now() };
   const woken: { id: number; text: string }[] = [];
   const mailed: { id: number; text: string }[] = [];
+  const noted: { id: number; text: string }[] = [];
+  // The files each commit touched, by sha; any other commit touched public/app.js, which the default error names.
+  const touched: Record<string, string[]> = {};
   let head: string | null = null;
   let commits: { sha: string; subject: string }[] = [];
   const watch = () =>
@@ -36,6 +39,8 @@ function setup() {
       commits: async () => commits,
       wake: (id, text) => woken.push({ id, text }),
       mail: (id, text) => mailed.push({ id, text }),
+      note: (id, text) => noted.push({ id, text }),
+      files: async (shas) => shas.flatMap((s) => touched[s] ?? ['public/app.js']),
       scheme: () => scheme,
       head: () => head,
       dbPath: file,
@@ -51,7 +56,7 @@ function setup() {
   const errors = (n: number, at: number, detail = 'TypeError: x is undefined (/app.js:12)') => {
     for (let i = 0; i < n; i++) store.addHealthEvent('client-error', at + i, head, detail);
   };
-  return { file, store, scheme, tm, a, b, clock, woken, mailed, w, watch, deploy, errors };
+  return { file, store, scheme, tm, a, b, clock, woken, mailed, noted, touched, w, watch, deploy, errors };
 }
 
 const sha = (c: string) => c.repeat(40);
@@ -96,7 +101,7 @@ test('a regression wakes each minion that shipped in the deploy once, by Shipped
   assert.match(woken.find((x) => x.id === a.id)!.text, /dddddddd #\d+: A's change/);
   assert.equal(mailed.length, 1);
   assert.equal(mailed[0].id, tm.id);
-  assert.match(mailed[0].text, /Woke #\d+, #\d+\. Commits with no minion: eeeeeeee Bump something\. Nothing was reverted\./);
+  assert.match(mailed[0].text, /Woke #\d+, #\d+\. The readings name files they touched\. Commits with no minion: eeeeeeee Bump something\. Nothing was reverted\./);
 
   errors(50, at + 30 * MIN);
   clock.now = at + 25 * 60 * MIN;
@@ -143,10 +148,11 @@ test('a doubling under the floor, or a rise short of double, is ignored', async 
 });
 
 test('a share of failed turns that doubles past the floor is a regression', async () => {
-  const { file, store, a, clock, woken, w, deploy } = setup();
+  const { file, store, a, clock, woken, touched, w, deploy } = setup();
   deploy(sha('0'));
   clock.now += 60 * MIN;
   const at = clock.now;
+  touched[sha('1')] = ['src/runner.ts'];
   deploy(sha('1'), [{ sha: sha('1'), subject: `#${a.number}: thing` }]);
   const turn = (ended: number, bad: boolean) => {
     const e = store.addEvent(a.id, 'result', { type: 'result', is_error: bad, total_cost_usd: 0 });
@@ -155,7 +161,7 @@ test('a share of failed turns that doubles past the floor is a regression', asyn
   for (let i = 0; i < 10; i++) turn(at - 15 * MIN + i, i === 0); // 1 of 10
   for (let i = 0; i < 10; i++) turn(at + 2 * MIN + i, i < 2); // 2 of 10 ...
   // ... plus a turn that crashed before its result: an error event, dated inside the window.
-  const err = store.addEvent(a.id, 'error', { message: 'claude exited 1' });
+  const err = store.addEvent(a.id, 'error', { message: 'claude exited 1: TypeError at file:///srv/citadel/src/runner.ts:88:5' });
   const db = new DatabaseSync(file);
   attachEventsIfThere(db, file); // the chat log lives in events.db (#1169)
   db.prepare('UPDATE events SET created_at = ? WHERE id = ?').run(at + 3 * MIN, err.id);
@@ -165,6 +171,7 @@ test('a share of failed turns that doubles past the floor is a regression', asyn
   await w.tick();
   assert.equal(woken.length, 1);
   assert.match(woken[0].text, /failed turns went from 10% \(1 of 10\) to 27% \(3 of 11\)/);
+  assert.match(woken[0].text, /name src\/runner\.ts, which your change touched/, 'the failing turn names the changed file, so it wakes at once');
 });
 
 test('pending checks survive a restart, and a missed one runs late on the same windows', async () => {
@@ -237,7 +244,7 @@ test("git attribution: a Shipped note on a build's merge owns the commits merged
   git(dir, 'commit', '-q', '--allow-empty', '-m', `#${a.number}: A's fix`);
   const head = git(dir, 'rev-parse', 'HEAD');
   store.addEvent(b.id, 'note', { text: `Shipped ${merge.slice(0, 8)} "Build 1": live after the restart.` });
-  const w = new DeployWatch({ store, commits: gitCommits(dir), wake() {}, mail() {}, scheme: () => scheme, head: () => head, dbPath: '' });
+  const w = new DeployWatch({ store, commits: gitCommits(dir), files: gitFiles(dir), wake() {}, mail() {}, note() {}, scheme: () => scheme, head: () => head, dbPath: '' });
   const { suspects, unowned } = await w.suspects({ commit: head, prev, at: Date.now(), due: [], len: 0 });
   const by = Object.fromEntries(suspects.map((s) => [s.ticketId, s.commits.map((c) => c.subject)]));
   assert.deepEqual(by[b.id].sort(), ['Build work one', 'Build work two', 'Merge build/1', 'Something on main meanwhile']);
@@ -516,4 +523,93 @@ test('turns that ended "Not logged in" are not failed turns, and turnOutcomes na
   for (let i = 0; i < 3; i++) turn(at + MIN + i, true, 2, 'Not logged in · Please run /login');
   turn(at + 2 * MIN, false, 1);
   assert.deepEqual(store.turnOutcomes(at, at + 20 * MIN), { turns: 1, failed: 0, first: null, loggedOut: [2] });
+});
+
+// #2049: most wakes ended "not mine". A minion is woken only when the readings name a file its commits touched, or the
+// rise holds over a second 20-minute window; otherwise it gets a note (no turn) and the Taskmaster held mail.
+test("a regression naming none of the change's files notes the minion and mails the Taskmaster, waking no one when it passes", async () => {
+  const { a, tm, clock, woken, mailed, noted, touched, w, deploy, errors } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  errors(1, clock.now - 10 * MIN);
+  const at = clock.now;
+  touched[sha('1')] = ['src/other.ts', 'docs/x.md'];
+  deploy(sha('1'), [{ sha: sha('1'), subject: `#${a.number}: A's change` }]);
+  errors(14, at + 5 * MIN);
+  clock.now = at + 20 * MIN;
+  await w.tick();
+  assert.deepEqual(woken, [], 'no file of its change is named: no turn');
+  assert.deepEqual(
+    noted.map((n) => n.id),
+    [a.id],
+  );
+  assert.match(noted[0].text, /front-end errors went from 1 to 14/);
+  assert.match(noted[0].text, /not woken/i);
+  assert.equal(mailed.length, 1);
+  assert.equal(mailed[0].id, tm.id);
+  assert.match(mailed[0].text, new RegExp(`Noted on #${a.number}`));
+  assert.match(mailed[0].text, /Nothing was reverted/);
+
+  // The next 20 minutes are quiet: the rise didn't hold, so still no wake.
+  clock.now = at + 41 * MIN;
+  await w.tick();
+  clock.now = at + 25 * 60 * MIN;
+  await w.tick();
+  assert.deepEqual(woken, []);
+  assert.equal(noted.length, 1);
+});
+
+test('a rise that holds over the next 20 minutes wakes the minions it only noted', async () => {
+  const { a, clock, woken, mailed, noted, touched, w, deploy, errors } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  errors(1, clock.now - 10 * MIN);
+  const at = clock.now;
+  touched[sha('1')] = ['src/other.ts'];
+  deploy(sha('1'), [{ sha: sha('1'), subject: `#${a.number}: A's change` }]);
+  errors(14, at + 5 * MIN);
+  errors(9, at + 25 * MIN);
+  clock.now = at + 20 * MIN;
+  await w.tick();
+  assert.deepEqual([woken.length, noted.length], [0, 1]);
+  clock.now = at + 39 * MIN;
+  await w.tick();
+  assert.equal(woken.length, 0, 'the second window has not ended yet');
+  clock.now = at + 40 * MIN;
+  await w.tick();
+  assert.deepEqual(
+    woken.map((x) => x.id),
+    [a.id],
+  );
+  assert.match(woken[0].text, /held over the next 20 minutes/);
+  assert.match(woken[0].text, /front-end errors went from 1 to 9/);
+  assert.match(mailed.at(-1)!.text, new RegExp(`held.*Woke #${a.number}`));
+  clock.now = at + 25 * 60 * MIN;
+  await w.tick();
+  assert.equal(woken.length, 1, 'once per deploy');
+});
+
+test("a stall whose frames name a file one shipper's commits touched wakes that minion at once and only notes the other", async () => {
+  const { store, a, b, clock, woken, noted, touched, w, deploy } = setup();
+  deploy(sha('0'));
+  clock.now += 60 * MIN;
+  const at = clock.now;
+  touched[sha('a')] = ['src/runner.ts'];
+  touched[sha('b')] = ['src/other.ts'];
+  deploy(sha('b'), [
+    { sha: sha('a'), subject: `#${a.number}: A's change` },
+    { sha: sha('b'), subject: `#${b.number}: B's change` },
+  ]);
+  for (let i = 0; i < 6; i++) store.addHealthEvent('loop-lag', at + MIN + i, sha('b'), 'Event loop stalled 900 ms: at send (file:///srv/citadel/src/runner.ts:412:9) at tick (file:///srv/citadel/server.ts:20:1)');
+  clock.now = at + 20 * MIN;
+  await w.tick();
+  assert.deepEqual(
+    woken.map((x) => x.id),
+    [a.id],
+  );
+  assert.match(woken[0].text, /name src\/runner\.ts, which your change touched/);
+  assert.deepEqual(
+    noted.map((x) => x.id),
+    [b.id],
+  );
 });

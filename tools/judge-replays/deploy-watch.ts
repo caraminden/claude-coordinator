@@ -1,7 +1,7 @@
 // The post-deploy watch (src/deploy-watch.ts) over the real deploys of the window: each release of the Citadel server
 // goes live at its real time, the checks run when they came due, and the alerts it would send now are set beside the
 // "Post-deploy watch:" mails the Taskmaster really got. The watch only ever watches the server it runs in.
-import { DeployWatch, gitCommits } from '../../src/deploy-watch.ts';
+import { DeployWatch, gitCommits, gitFiles } from '../../src/deploy-watch.ts';
 import { replayStore } from './store.ts';
 import type { Act, ReplayCtx, ReplayResult } from './types.ts';
 
@@ -26,12 +26,14 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     now: () => now,
     bootAt: 0,
     commits: gitCommits(ctx.repo),
+    files: gitFiles(ctx.repo),
     wake: () => {},
+    note: () => {},
     mail: (_tm, text) => hits.push({ at: now, key: DEPLOY.exec(text)?.[1] ?? '?', text }),
   });
   if (before) watch.live(before.version);
-  // Every moment something happens: a deploy goes live, or one of its checks comes due (capped at now).
-  const times = [...new Set(inWindow.flatMap((d) => [d.live_at, ...[20, 60, 1440].map((m) => Math.min(d.live_at + m * 60_000, ctx.now))]))].sort((a, b) => a - b);
+  // Every moment something happens: a deploy goes live, or one of its checks or holds (#2049) comes due (capped at now).
+  const times = [...new Set(inWindow.flatMap((d) => [d.live_at, ...[20, 40, 60, 80, 1440, 1460].map((m) => Math.min(d.live_at + m * 60_000, ctx.now))]))].sort((a, b) => a - b);
   const live = new Map(inWindow.map((d) => [d.live_at, d.version]));
   for (const t of times) {
     now = t;

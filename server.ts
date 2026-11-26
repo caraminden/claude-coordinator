@@ -35,7 +35,7 @@ import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
 import { markStop, restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
-import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
+import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits, gitFiles } from './src/deploy-watch.ts';
 import { judge, judged, noteWould } from './src/judges.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
@@ -618,6 +618,8 @@ deployWatch = new DeployWatch({
     () => {},
     judgeNote((id) => store.getTicket(id)?.project_id),
   ),
+  note: (id, text) => runner.emit(id, 'note', { text }),
+  files: gitFiles(import.meta.dirname),
 });
 // The last run was stopped by systemd's watchdog: a health event, with the last stall it recorded before (#1135).
 const watchdogAt = takeMark(DATA_DIR);

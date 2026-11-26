@@ -4,6 +4,13 @@ import type { BoxReading } from '../box-capacity.ts';
 import type { Store } from '../db.ts';
 
 export const healthQueries = {
+  /** The failed turns' error texts in [from, to), at most 50 and 4,000 characters each: the post-deploy watch looks for a changed file's path in them (#2049). */
+  turnErrorTexts(this: Store, from: number, to: number): string[] {
+    const results = this.db.prepare(`SELECT substr(e.data, 1, 4000) AS d FROM turns t JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND e.data LIKE '%"is_error":true%' LIMIT 50`).all(from, to) as { d: string }[];
+    const errors = this.db.prepare("SELECT substr(data, 1, 4000) AS d FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? LIMIT 50").all(from, to) as { d: string }[];
+    return [...results, ...errors].slice(0, 50).map((r) => r.d);
+  },
+
   /** Health readings of these kinds since `since`, oldest first (#1123, the Status page). */
   healthEventsSince(this: Store, kinds: string[], since: number): { kind: string; at: number; commit_sha: string | null; detail: string }[] {
     return this.db.prepare(`SELECT kind, at, commit_sha, detail FROM health_events WHERE kind IN (${kinds.map(() => '?').join(', ')}) AND at >= ? ORDER BY at`).all(...kinds, since) as unknown as { kind: string; at: number; commit_sha: string | null; detail: string }[];

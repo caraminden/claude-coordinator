@@ -3,7 +3,7 @@
 import { h } from './base.js';
 
 /** @import { Wait } from './types.js' */
-/** What a wait's bar and clock read: a Wait, or a turn's { since } alone. @typedef {{ since?: number, usual?: number | null, ended?: number, total?: number, done?: number, stage?: string }} WaitLike */
+/** What a wait's bar and clock read: a Wait, or a turn's { since } alone. @typedef {{ since?: number, usual?: number | null, ended?: number, total?: number, done?: number, stage?: string, late?: boolean }} WaitLike */
 /** A piece of a segmented track (segTrack). @typedef {{ size: number | null, state: string, clock: WaitLike | null, waits: boolean, name?: string, title?: string }} Seg */
 
 /** A landing's stages in order (src/waits.ts TRACK): a wait at one of these shows the track. */
@@ -65,7 +65,7 @@ export function waitBar(w, cls = 'wait-bar', cap = 100) {
   const clock = w.total ? {} : { 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '', ...(cap < 100 ? { 'data-cap': cap } : {}) };
   const fill = h('i');
   fill.style.width = `${waitFill(w, now, cap)}%`; // the page's CSP drops style attributes, not the style property
-  return h('span', { class: `${cls}${!w.total && waitLate(w, now) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, ...clock, 'aria-hidden': 'true' }, fill);
+  return h('span', { class: `${cls}${w.late || (!w.total && waitLate(w, now)) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, ...clock, 'aria-hidden': 'true' }, fill);
 }
 
 /** How wide each piece of a segmented track is: its usual time, the others' average when unknown, never under 8% of the whole. */
@@ -135,7 +135,7 @@ export function progressPieces({ track, since, usual, wait }) {
       segs: track.map(([g, st, from, secs, worked], i) => {
         if (st !== 'i') return piece(st === 'c' ? 'done' : st === 'h' ? 'held' : '', g);
         // Counting time moves on the ticker; time standing still is a fixed share, kept under the cap.
-        const own = !secs ? null : from != null ? { since: from, usual: secs } : worked ? { total: secs * 1000, done: Math.min(worked, secs * 900) } : null;
+        const own = !secs ? null : from != null ? { since: from, usual: secs } : worked ? { total: secs * 1000, done: Math.min(worked, secs * 900), late: worked > secs * 1000 * LATE } : null;
         if (i !== owner) return { ...piece('now', g, own), waits: false };
         return piece('now', g, wClock ?? own ?? (usual ? { since: /** @type {number} */ (since), usual } : null));
       }),

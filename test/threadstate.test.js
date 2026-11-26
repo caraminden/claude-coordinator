@@ -355,7 +355,8 @@ test("progressPieces: the plan's track stays through a wait, the wait filling th
     [5, 'i', null, 300, 60_000],
   ];
   const clocks = (pieces) => pieces.segs.map((s) => s.clock);
-  assert.deepEqual(clocks(progressPieces({ track: own, since: NOW - MIN, usual: 180 })), [{ since: NOW - MIN, usual: 180 }, { since: NOW - 2 * MIN, usual: 240 }, null, { total: 300_000, done: 60_000 }]);
+  assert.deepEqual(clocks(progressPieces({ track: own, since: NOW - MIN, usual: 180 })), [{ since: NOW - MIN, usual: 180 }, { since: NOW - 2 * MIN, usual: 240 }, null, { total: 300_000, done: 60_000, late: false }]);
+  assert.equal(progressPieces({ track: [[5, 'i', null, 300, 480_000]], wait: null }).segs[0].clock.late, true, 'time standing still past its guess is amber too');
   const waiting = progressPieces({ track: own, wait: test });
   assert.equal(waiting.segs[0].clock, test, 'the wait still owns one step');
   assert.deepEqual(waiting.segs[1].clock, { since: NOW - 2 * MIN, usual: 240 }, 'the others keep their own');

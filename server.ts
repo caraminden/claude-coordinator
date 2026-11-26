@@ -326,7 +326,8 @@ await Promise.all([loadAssets(), probeThp()]);
 const eventsMove = await moveEventsOffThread(join(DATA_DIR, 'coordinator.db'));
 if (eventsMove) console.log(eventsMove);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
-// Home's ship notes, read before "ready", move to this Store; warmHome below finds them read.
+// Home's ship notes, read before "ready", move to this Store, and warmHome below is left out.
+const homeWarm = !!warmed;
 if (warmed) {
   homeBuckets.adopt(warmed, store);
   (warmed as Store).db.close();
@@ -497,7 +498,7 @@ if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
   void runner.warmCards();
-  void warmHome(store).catch((err) => console.error("Reading Home's ship notes failed:", err));
+  if (!homeWarm) void warmHome(store).catch((err) => console.error("Reading Home's ship notes failed:", err));
   runner.recover();
 }
 if (runner.units && !BOOT_CHECK) {

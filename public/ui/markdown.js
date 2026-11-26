@@ -103,7 +103,10 @@ function stripComments(src) {
   return out.join('\n');
 }
 
-/** GitHub's id for a heading: lower case, punctuation dropped, spaces to hyphens. */
+/**
+ * GitHub's id for a heading: lower case, punctuation dropped, spaces to hyphens.
+ * @type {typeof import('./markdown.js').slug}
+ */
 export function slug(html) {
   return unescapeHtml(html.replace(/<[^>]*>/g, ''))
     .toLowerCase()
@@ -170,6 +173,7 @@ function linkBare(s, link, held = null) {
 /**
  * Plain text (a record's field, a note) as HTML: everything escaped, its bare http(s) URLs, DOIs and
  * web addresses linked, opening a new tab. DOIs go to https://doi.org/, a web address to https://.
+ * @type {typeof import('./markdown.js').linkify}
  */
 export function linkify(text) {
   return linkBare(escapeHtml(String(text ?? '')), defaultLink);
@@ -178,6 +182,7 @@ export function linkify(text) {
 /**
  * HTML you made (already escaped) with the bare URLs and DOIs in its text linked as linkify's. Tags,
  * links (<a>…</a>) and code (<code>, <pre>) are left as they are.
+ * @type {typeof import('./markdown.js').linkifyHtml}
  */
 export function linkifyHtml(html) {
   return String(html ?? '').replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => (tag ? all : linkBare(text, defaultLink)));
@@ -258,6 +263,7 @@ function markedImage(image, href, alt, title, draw) {
  * - `image(href, alt, title)`: an image's HTML (default: its alt text). A title of marks (ui/marks.js: "marks 1280x900: box …")
  *   is drawn over the image's <img>, with a toggle under it, and the hook gets no title;
  * - `text(html)`: runs over the inline HTML outside code and links, e.g. to link #N.
+ * @type {typeof import('./markdown.js').renderMarkdown}
  */
 export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s, breaks = false, streaming = false, headingBase = 3, drawMarks = false } = {}) {
   image ??= (_href, alt) => `<span class="cui-alt">[image: ${alt}]</span>`;
@@ -454,6 +460,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
  * A reply squeezed into a line or two, for a preview or a button (Mandate's ReplyLine): no links
  * (their labels stay), a list item is a "• " line, every other block is its text on a line of its
  * own, joined with <br>. Bold, italics and code stay. HTML, escaped like renderMarkdown's.
+ * @type {typeof import('./markdown.js').markdownLine}
  */
 export function markdownLine(src, { streaming = false } = {}) {
   if (streaming) src = mendStreaming(src);
@@ -565,6 +572,7 @@ function adoptStyles() {
  * Put `text` on the clipboard; whether it worked. navigator.clipboard needs a secure context (not
  * Citadel's plain-http tailnet address), so without it a hidden textarea is copied the old way. The
  * textarea goes beside `near` (default the body), so it can be selected inside a modal dialog too.
+ * @type {typeof import('./markdown.js').copyText}
  */
 export async function copyText(text, near = document.body) {
   try {
@@ -592,7 +600,10 @@ export async function copyText(text, near = document.body) {
 const copyButton = () => label(Object.assign(document.createElement('button'), { type: 'button', className: 'cui-copy' }), 'Copy code');
 const label = (b, text) => (b.setAttribute('aria-label', text), b);
 const copied = new WeakMap();
-/** What Copy puts on the clipboard: a shell block (#898's tags) ends in exactly one newline so a paste runs without another Enter; other blocks copy as written. */
+/**
+ * What Copy puts on the clipboard: a shell block (#898's tags) ends in exactly one newline so a paste runs without another Enter; other blocks copy as written.
+ * @type {typeof import('./markdown.js').copyPayload}
+ */
 export const copyPayload = (text, shell) => (shell ? text.replace(/\n+$/, '') + '\n' : text);
 async function onCopy(e) {
   const b = e.target.closest?.('.cui-copy');
@@ -612,7 +623,10 @@ async function onCopy(e) {
 }
 const hooked = new WeakSet();
 
-/** A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted. */
+/**
+ * A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted.
+ * @type {typeof import('./markdown.js').markdownElement}
+ */
 export function markdownElement(src, opts) {
   const el = document.createElement('div');
   updateMarkdown(el, src, opts);
@@ -622,6 +636,7 @@ export function markdownElement(src, opts) {
 /**
  * Draw `src` into `el` (made a .cui-md), as a reply streams in. Only what changed is replaced: the
  * blocks that render the same are kept, so a selection or a text search in them survives.
+ * @type {typeof import('./markdown.js').updateMarkdown}
  */
 export function updateMarkdown(el, src, opts) {
   adoptStyles();

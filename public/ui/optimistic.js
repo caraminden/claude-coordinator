@@ -21,11 +21,21 @@
 
 import { toast } from './status.js';
 
+/** @import { OptimisticAction } from './optimistic.js' */
+/** @typedef {{ ok: (value: unknown) => void, no: (err: unknown) => void }} Settle */
+/** @typedef {{ action: OptimisticAction, settle: Settle, err: unknown }} Attempt */
+
+/** @type {Map<string | number, Promise<void>>} */
 const tails = new Map(); // key → a promise that settles when the key's last queued send does
+/** @type {Attempt[] | null} */
 let failed = null; // the attempts the showing failure toast's Retry would run again
+/** @type {Map<string | number | undefined, { action: OptimisticAction, err?: unknown }[]>} */
 const open = new Map(); // sets → its actions not yet gone through or rolled back, oldest first: { action, err? }
 
-/** Call send() now, as a promise even if it throws or returns a plain value. */
+/**
+ * Call send() now, as a promise even if it throws or returns a plain value.
+ * @param {() => unknown} send
+ */
 function start(send) {
   try {
     return Promise.resolve(send());
@@ -34,6 +44,10 @@ function start(send) {
   }
 }
 
+/**
+ * @param {string | number | undefined} key
+ * @param {() => unknown} send
+ */
 function queue(key, send) {
   if (key == null) return start(send);
   const prev = tails.get(key);
@@ -48,8 +62,10 @@ function queue(key, send) {
   return sent;
 }
 
+/** @param {unknown} err */
 const reason = (err) => (err instanceof Error ? err.message : err == null ? '' : String(err));
 
+/** @param {Attempt} attempt */
 function fail(attempt) {
   const all = failed ? [...failed, attempt] : [attempt];
   failed = all;
@@ -81,8 +97,13 @@ function fail(attempt) {
   });
 }
 
+/**
+ * @param {OptimisticAction} action
+ * @param {Settle} settle
+ */
 function run(action, settle) {
   action.apply?.();
+  /** @type {{ action: OptimisticAction, err?: unknown }} */
   const mine = { action };
   let list = [mine]; // without `sets` it stands alone
   if (action.sets != null) {
@@ -90,6 +111,7 @@ function run(action, settle) {
     open.set(action.sets, list);
     list.push(mine);
   }
+  /** @param {number} n */
   const forget = (n) => {
     list.splice(0, n);
     if (!list.length && open.get(action.sets) === list) open.delete(action.sets);
@@ -112,7 +134,10 @@ function run(action, settle) {
   );
 }
 
-/** Roll back one failed action; one undo throwing (its item gone in a redraw) still lets the older ones run. */
+/**
+ * Roll back one failed action; one undo throwing (its item gone in a redraw) still lets the older ones run.
+ * @param {{ action: OptimisticAction, err?: unknown }} failure
+ */
 function undo({ action, err }) {
   try {
     action.undo?.(err);
@@ -125,11 +150,13 @@ function undo({ action, err }) {
  * Show an action's result now and send it behind: apply() at once, then send(); if send fails, undo() and a
  * toast "Couldn't <label>: <error>" with a Retry. Returns a promise of send's value that settles once, Retries
  * included (its rejection is handled here, so an unchained call never logs an unhandled rejection).
+ * @type {typeof import('./optimistic.js').optimistic}
  */
 export function optimistic(action) {
+  /** @type {Settle | undefined} */
   let settle;
   const result = new Promise((ok, no) => (settle = { ok, no }));
   result.catch(() => {});
-  run(action, settle);
+  if (settle) run(action, settle); // always set: a Promise runs its executor at once
   return result;
 }

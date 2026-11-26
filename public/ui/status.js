@@ -20,7 +20,10 @@
 
 const TONES = new Set(['ok', 'warn', 'danger', 'info', 'violet', 'neutral']);
 
-/** Make `el` a status line (div.cui-status, role="status") and return its controls. */
+/**
+ * Make `el` a status line (div.cui-status, role="status") and return its controls.
+ * @type {typeof import('./status.js').statusSlot}
+ */
 export function statusSlot(el) {
   el.classList.add('cui-status');
   if (!el.hasAttribute('role')) el.setAttribute('role', 'status');
@@ -50,6 +53,7 @@ export function statusSlot(el) {
 /**
  * Put `labels` in `el` (a button, usually) as a cui-steady stack, showing `current` (default the first). The
  * element keeps the width of the widest label whichever shows. A label is text, or a Node (a spinner and text).
+ * @type {typeof import('./status.js').steadyLabel}
  */
 export function steadyLabel(el, labels, current) {
   const stack = document.createElement('span');
@@ -84,19 +88,31 @@ const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 const toneAttr = (tone) => (TONES.has(tone) ? ` data-tone="${tone}"` : '');
 
-/** A status line as HTML (a span, so it can sit in a heading): `inner` is statusTextHtml() and the like, or ''. */
+/**
+ * A status line as HTML (a span, so it can sit in a heading): `inner` is statusTextHtml() and the like, or ''.
+ * @type {typeof import('./status.js').statusSlotHtml}
+ */
 export function statusSlotHtml(inner = '', opts = {}) {
   const cls = ['cui-status', opts.fill && 'cui-status-fill', opts.className].filter(Boolean).join(' ');
   return `<span class="${esc(cls)}" role="status"${toneAttr(opts.tone)}>${inner}</span>`;
 }
 
-/** One line of status text as HTML: cut off with an ellipsis, whole in its tip; a tone colours this text alone. */
+/**
+ * One line of status text as HTML: cut off with an ellipsis, whole in its tip; a tone colours this text alone.
+ * @type {typeof import('./status.js').statusTextHtml}
+ */
 export const statusTextHtml = (text, opts = {}) => `<span class="cui-status-text"${toneAttr(opts.tone)} data-tip="${esc(text)}" data-tip-overflow>${esc(text)}</span>`;
 
-/** A spinner and what's running, as HTML for a status line. */
+/**
+ * A spinner and what's running, as HTML for a status line.
+ * @type {typeof import('./status.js').statusWorkingHtml}
+ */
 export const statusWorkingHtml = (text = 'Working…') => `<span class="cui-spin" aria-hidden="true"></span>${statusTextHtml(text)}`;
 
-/** steadyLabel()'s stack as HTML: every label (text) in one cell, showing `current` (default the first). */
+/**
+ * steadyLabel()'s stack as HTML: every label (text) in one cell, showing `current` (default the first).
+ * @type {typeof import('./status.js').steadyLabelHtml}
+ */
 export function steadyLabelHtml(labels, current) {
   const keys = Object.keys(labels);
   const show = current ?? keys[0];
@@ -186,6 +202,7 @@ function hideToast() {
  * called once when this toast goes, however it goes (its time, a tap, its action, a newer toast). `undo`
  * ({ run, live }) is an Undo button that Ctrl-Z (Cmd-Z) also presses, outside text fields, after the toast has
  * gone too, while `live()` (if given) says it still makes sense; either way it runs once. Returns { hide }.
+ * @type {typeof import('./status.js').toast}
  */
 export function toast(text, opts = {}) {
   if (opts.undo && opts.action) throw new Error('toast: one button, so `undo` or `action`, not both');

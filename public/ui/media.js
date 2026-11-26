@@ -159,7 +159,10 @@ function icon(d, fill = '') {
 const speaker = (muted) => icon(muted ? 'M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM11 6l4 4M15 6l-4 4' : 'M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.5a6.5 6.5 0 0 1 0 9');
 const playIcon = (playing) => icon('', playing ? 'M4 3h3v10H4zM9 3h3v10H9z' : 'M5 2.5v11l9-5.5z');
 
-/** A time as m:ss, as the parts write it. */
+/**
+ * A time as m:ss, as the parts write it.
+ * @type {typeof import('./media.js').clock}
+ */
 export function clock(sec) {
   const s = Math.max(0, Math.floor(Number.isFinite(sec) ? sec : 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -175,6 +178,7 @@ const typing = (t) => !!t?.closest?.('textarea, input:not([type=range]), select,
  * A video's controls under it: play, a strip of frames to hover and drag along, a seek bar (arrows step a second,
  * , and . a frame), the time, and Start/End pins when the app passes onStart/onEnd. The video itself stays where the
  * app put it; a click on it plays or pauses. A file that won't play shows why, with Try again.
+ * @type {typeof import('./media.js').scrubber}
  */
 export function scrubber(video, opts = {}) {
   adoptStyles();
@@ -513,6 +517,7 @@ const DIRS = [
  * A panorama in its box: it pans end to end and back (16 s a way), with a mini-map of the window, Pause, a
  * look-around slider, and a direction menu when the app passes onPan. Reduced motion, a swipe or a scroll pause it.
  * A picture that fits its box shows whole, without the bar. The img moves into the part, which takes its place.
+ * @type {typeof import('./media.js').panner}
  */
 export function panner(img, opts = {}) {
   adoptStyles();
@@ -726,6 +731,7 @@ function show(item, stage, opts) {
 /**
  * Pictures and clips one at a time: ‹ › on the edges, a filmstrip with the count, ←/→ and a swipe to step, Space to
  * play the clip or pause the pan. With `into` it draws inside that element; without, it opens in the kit dialog.
+ * @type {typeof import('./media.js').lightbox}
  */
 export function lightbox(items, opts = {}) {
   adoptStyles();

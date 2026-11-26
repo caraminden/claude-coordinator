@@ -65,7 +65,10 @@ const saveDraft = (key, value) => {
   } catch {}
 };
 
-/** Grow (or shrink) a textarea to fit its text; its CSS min-height and max-height bound it. */
+/**
+ * Grow (or shrink) a textarea to fit its text; its CSS min-height and max-height bound it.
+ * @type {typeof import('./composer.js').fitHeight}
+ */
 export function fitHeight(box) {
   // Text only got longer (a key typed): the box can only grow, so one read says whether it must, with no collapse.
   // That keeps typing to one layout a key in a long chat (#1531: 154 layouts for 49 keys before).
@@ -93,6 +96,7 @@ const ITEM = /^( *)(\d{1,9})([.)])(?:[ \t]+(.*)|$)/;
 /**
  * What Enter does at `start`–`end` in `value` when the caret's line is a numbered item:
  * { from, to, text } to replace, or null when Enter should do what it always does.
+ * @type {typeof import('./composer.js').listEnter}
  */
 export function listEnter(value, start, end) {
   if (start !== end) return null;
@@ -111,6 +115,7 @@ export function listEnter(value, start, end) {
 /**
  * Handles the new-line key on a numbered item in `textarea`; true when it did, so the caller doesn't
  * send. That key is Shift+Enter, or plain Enter too when `enterAddsLine` (phones, where Enter doesn't send).
+ * @type {typeof import('./composer.js').continueList}
  */
 export function continueList(textarea, e, enterAddsLine = false) {
   if (e.key !== 'Enter' || !(e.shiftKey || enterAddsLine) || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return false;
@@ -235,6 +240,7 @@ const make = (tag, props, ...children) => {
  * A message box appended to `el`: a form.cui-composer holding a one-line textarea and, beside it, a row
  * with Send. Returns
  * its controls; see composer.d.ts for the options and what each does.
+ * @type {typeof import('./composer.js').mountComposer}
  */
 export function mountComposer(el, opts) {
   adoptStyles();

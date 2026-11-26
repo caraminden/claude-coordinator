@@ -28,6 +28,7 @@ const EDGE = 8;
  * Where a `w` × `h` tip goes for target `t` in a `vw` × `vh` window: below when it fits, else above,
  * else on the roomier side with its height capped to that side (it scrolls). Either way it never covers
  * the target and stays inside the window.
+ * @type {typeof import('./tip.js').placeTip}
  */
 export function placeTip(t, w, h, vw, vh) {
   const below = Math.max(0, vh - EDGE - (t.bottom + GAP));
@@ -101,6 +102,7 @@ let lastClosed = 0;
 /** The data-tip* attributes, which say which thing an element is about: a redraw's copy has the same. */
 const sameThing = (a, b) => a.id === b.id && [...a.attributes, ...b.attributes].every((at) => !at.name.startsWith('data-tip') || a.getAttribute(at.name) === b.getAttribute(at.name));
 
+/** @type {typeof import('./tip.js').mountTips} */
 export function mountTips(root = document.body, o = {}) {
   const selector = o.selector ?? '[data-tip]';
   const acts = o.acts ? `${ACTS}, ${o.acts}` : ACTS;

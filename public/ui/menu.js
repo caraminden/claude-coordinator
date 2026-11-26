@@ -26,6 +26,7 @@ const EDGE = 8;
  * Where a `w` × `h` menu opened at (`x`, `y`) goes in a `vw` × `vh` window: just past the cursor, flipped to the
  * cursor's other side when it would cross the right or bottom edge, and kept inside the window. A menu taller than
  * the window gets `maxHeight` (it scrolls). Pure, for tests.
+ * @type {typeof import('./menu.js').placeMenu}
  */
 export function placeMenu(x, y, w, h, vw, vh) {
   const maxHeight = Math.max(0, vh - 2 * EDGE);
@@ -49,12 +50,18 @@ export function placeMenu(x, y, w, h, vw, vh) {
 
 let open = null; // { el, close }
 
-/** Close the open menu, if any. Focus goes back where it was unless `refocus` is false. */
+/**
+ * Close the open menu, if any. Focus goes back where it was unless `refocus` is false.
+ * @type {typeof import('./menu.js').closeMenu}
+ */
 export function closeMenu(refocus = true) {
   open?.close(refocus);
 }
 
-/** Whether a menu is open now. */
+/**
+ * Whether a menu is open now.
+ * @type {typeof import('./menu.js').menuOpen}
+ */
 export const menuOpen = () => !!open;
 
 const el = (tag, cls, text) => {
@@ -68,6 +75,7 @@ const el = (tag, cls, text) => {
  * Open a menu at (`x`, `y`) in the window. `spec`: { kind, hue?, tone?, name?, items, foot?, label?, returnTo?,
  * onClose? }. An item is { label, run?, icon?, keys?, point?, danger?, disabled?, reason?, from? }, or '-' for a
  * line. Returns the menu element; openMenu() again replaces it.
+ * @type {typeof import('./menu.js').openMenu}
  */
 export function openMenu(spec, x, y) {
   closeMenu(false);
@@ -275,6 +283,7 @@ const EDITABLE = 'input:not([type=button], [type=submit], [type=reset], [type=ch
  * Wire right-click and Shift+F10 / the Menu key under `root` (default the document) to `menuFor(target, event)`,
  * which returns a spec for openMenu() or null for the browser's own menu. Text boxes and Shift+right-click always
  * get the browser's own. Returns a function that unmounts it.
+ * @type {typeof import('./menu.js').mountMenus}
  */
 export function mountMenus({ root = document, menuFor, longPress = false } = {}) {
   let keyed = 0; // when the keyboard last opened one, so the contextmenu that follows the key is swallowed

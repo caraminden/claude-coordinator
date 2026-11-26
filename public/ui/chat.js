@@ -21,13 +21,19 @@ const time = (at) => (typeof at === 'number' ? at : typeof at === 'string' && !N
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const isAgent = (name) => name === 'Agent' || name === 'Task';
 
-/** Who a Grunt is, from its Agent call's input: its description, else its agent type, else "Grunt". */
+/**
+ * Who a Grunt is, from its Agent call's input: its description, else its agent type, else "Grunt".
+ * @type {typeof import('./chat.js').gruntName}
+ */
 export function gruntName(input) {
   const name = [input?.description, input?.subagent_type].find((s) => typeof s === 'string' && s.trim());
   return name ? name.trim() : 'Grunt';
 }
 
-/** Milliseconds as "41s" or "1m 12s". */
+/**
+ * Milliseconds as "41s" or "1m 12s".
+ * @type {typeof import('./chat.js').duration}
+ */
 export function duration(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
@@ -110,7 +116,10 @@ function turnModel(turn, k, last, card) {
   return { ask: turn.ask ?? null, blocks, running };
 }
 
-/** Turns as the chat draws them. Pure: tests and servers run it without a page. */
+/**
+ * Turns as the chat draws them. Pure: tests and servers run it without a page.
+ * @type {typeof import('./chat.js').chatModel}
+ */
 export function chatModel(turns, opts = {}) {
   const items = (turns ?? []).map((t, k) => turnModel(t, k, k === turns.length - 1, opts.card));
   return { items, running: !!items.at(-1)?.running };
@@ -188,7 +197,10 @@ const mdOpts = (hooks, streaming) => {
 
 const askHtml = (text) => (text == null ? '' : `<div class="cui-ask">${esc(text)}</div>`);
 
-/** The chat as HTML (no live parts: cards are empty slots, clocks read at `now`). For a server, a print view or a test. */
+/**
+ * The chat as HTML (no live parts: cards are empty slots, clocks read at `now`). For a server, a print view or a test.
+ * @type {typeof import('./chat.js').renderChat}
+ */
 export function renderChat(turns, opts = {}) {
   const o = { ...opts, now: opts.now ?? Date.now(), open: new Set(opts.open ?? []) };
   return chatModel(turns, opts)
@@ -196,7 +208,10 @@ export function renderChat(turns, opts = {}) {
     .join('');
 }
 
-/** A step's state as its mark: a spinner while running, else ✓, ✕ or – with its state as the label. */
+/**
+ * A step's state as its mark: a spinner while running, else ✓, ✕ or – with its state as the label.
+ * @type {typeof import('./chat.js').stepMark}
+ */
 export function stepMark(state) {
   adoptStyles();
   return fromHtml(markHtml(state));
@@ -282,7 +297,10 @@ function morph(a, b) {
 // Follow new output only within this many pixels of the bottom (Citadel's rule, core.js).
 const BOTTOM_SLACK = 24;
 
-/** Mount a chat in `el`, which scrolls: give it a height (flex: 1; min-height: 0 in a column). */
+/**
+ * Mount a chat in `el`, which scrolls: give it a height (flex: 1; min-height: 0 in a column).
+ * @type {typeof import('./chat.js').mountChat}
+ */
 export function mountChat(el, opts = {}) {
   adoptStyles();
   const div = (cls) => Object.assign(document.createElement('div'), { className: cls });

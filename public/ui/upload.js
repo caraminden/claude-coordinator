@@ -16,7 +16,10 @@ const KEEP = 3 * 24 * 3600 * 1000; // the server gives up an untouched upload af
 const CHUNK = 8 * 1024 * 1024;
 const TRIES = 8; // network drops and 5xx in a row before an upload stops and waits for Resume
 
-/** "1.2 GB", "340 KB", "12 B". */
+/**
+ * "1.2 GB", "340 KB", "12 B".
+ * @type {typeof import('./upload.js').formatBytes}
+ */
 export function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -64,6 +67,7 @@ async function call(method, url, body) {
 /**
  * Upload one file to `endpoint` (a Citadel upload base: '/apps/_citadel/uploads/<app>' in an app). It starts at once
  * and returns a handle whose `done` resolves with the server's answer for the finished file, or null if cancelled.
+ * @type {typeof import('./upload.js').startUpload}
  */
 export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
   const base = endpoint.replace(/\/+$/, '');
@@ -202,6 +206,7 @@ const hidden = (path) => path.split('/').some((p) => p.startsWith('.'));
 /**
  * The files a drop carries, folders walked, each with its path relative to what was dropped. Hidden folders aren't
  * walked; they come back in `skipped`. Call it in the drop handler before any await (the browser empties the list).
+ * @type {typeof import('./upload.js').droppedFiles}
  */
 export async function droppedFiles(dataTransfer) {
   const entries = [...(dataTransfer.items ?? [])].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
@@ -246,6 +251,7 @@ const STATE = { waiting: 'Waiting', sending: '', paused: 'Paused', done: 'Done',
 /**
  * A drop zone with file and folder pickers that uploads what it's given to `endpoint`, one file at a time, each row
  * with its progress, Pause and Resume, and Cancel; a total over them; and a line naming what it left out.
+ * @type {typeof import('./upload.js').mountUpload}
  */
 export function mountUpload(root, { endpoint, folder = '', accept = '', folders = true, label = 'Drop files or folders here', onDone } = {}) {
   const rows = []; // { file, folder, up: the handle once started, held: paused before its turn, node }

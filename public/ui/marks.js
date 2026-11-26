@@ -11,7 +11,10 @@
 
 export const COLOURS = { red: '#e5383b', yellow: '#ffd23f' };
 
-/** A line about 1/200 of the picture's longer edge: 10 px on a 2000 px screenshot, never under 3. */
+/**
+ * A line about 1/200 of the picture's longer edge: 10 px on a 2000 px screenshot, never under 3.
+ * @type {typeof import('./marks.js').lineWidth}
+ */
 export const lineWidth = (w, h) => Math.max(3, Math.round(Math.max(w, h) / 200));
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -40,6 +43,7 @@ const FONT = 'system-ui, sans-serif';
 /**
  * Draws one mark on a canvas: { tool, colour, pts: [{x, y}, …] } in image pixels; arrows and boxes use the first
  * and last point, pins ({ n }) and labels ({ text }) the first.
+ * @type {typeof import('./marks.js').drawMark}
  */
 export function drawMark(g, m, width) {
   g.strokeStyle = g.fillStyle = COLOURS[m.colour] ?? m.colour;
@@ -87,7 +91,10 @@ export function drawMark(g, m, width) {
   }
 }
 
-/** One mark as SVG, in image pixels, the same shapes as drawMark. */
+/**
+ * One mark as SVG, in image pixels, the same shapes as drawMark.
+ * @type {typeof import('./marks.js').markSvg}
+ */
 export function markSvg(m, width) {
   const c = COLOURS[m.colour] ?? COLOURS.red;
   const ink = m.colour === 'yellow' ? '#111' : '#fff';
@@ -120,6 +127,7 @@ export const MAX_LABEL = 40;
 /**
  * The marks in an image title, or null when it isn't one: { w, h, marks } with marks in image pixels. A mark
  * it can't read is a wrong title, so the whole title is refused and the picture shows plain.
+ * @type {typeof import('./marks.js').parseMarks}
  */
 export function parseMarks(title) {
   const m = /^\s*marks\s+(\d{1,5})x(\d{1,5})\s*:(.*)$/s.exec(title ?? '');
@@ -156,13 +164,19 @@ export function parseMarks(title) {
   return marks.length && marks.length <= MAX_MARKS ? { w, h, marks } : null;
 }
 
-/** Marks back as an image title, the inverse of parseMarks (marks in image pixels of a w × h picture). */
+/**
+ * Marks back as an image title, the inverse of parseMarks (marks in image pixels of a w × h picture).
+ * @type {typeof import('./marks.js').marksTitle}
+ */
 export function marksTitle(w, h, marks) {
   const pc = (p) => `${n1((p.x * 100) / w)} ${n1((p.y * 100) / h)}`;
   return `marks ${w}x${h}: ${marks.map((m) => [m.tool, m.colour === 'yellow' ? 'yellow' : '', m.tool === 'pin' ? m.n : '', ...(m.tool === 'pin' || m.tool === 'label' ? [pc(m.pts[0])] : [pc(m.pts[0]), pc(m.pts[m.pts.length - 1])]), m.tool === 'label' ? m.text : ''].filter((s) => s !== '').join(' ')).join('; ')}`;
 }
 
-/** The SVG that lies over a w × h picture, drawn at the picture's own size and scaled with it. */
+/**
+ * The SVG that lies over a w × h picture, drawn at the picture's own size and scaled with it.
+ * @type {typeof import('./marks.js').marksOverlay}
+ */
 export function marksOverlay({ w, h, marks }) {
   const width = lineWidth(w, h);
   return `<svg class="cui-marks" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${marks.map((m) => markSvg(m, width)).join('')}</svg>`;

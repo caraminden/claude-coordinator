@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake } from '../public/runner-agent.mjs';
-import { balance } from '../src/machine-balancer.ts';
+import { balance, runnerShares } from '../src/machine-balancer.ts';
 
 type R = { key: string; repo: string; name: string; busy: boolean; ship: boolean; awake: boolean };
 const runner = (key: string, repo: string, more: Partial<R> = {}): R => ({ key, repo, name: key, busy: false, ship: false, awake: true, ...more });
@@ -195,4 +195,25 @@ ConvertTo-Json -Compress -InputObject @($calls)`,
     // timing-ok: own temp dir
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the server splits a PC's runners between its Windows and Linux agents by the jobs waiting for each one's repos", () => {
+  const agents = [
+    { key: 'windows', repos: new Set(['o/peek']) },
+    { key: 'linux', repos: new Set(['o/citadel', 'o/twi']) },
+  ];
+  const share = (n: number, q: [string, number][]) => Object.fromEntries([...runnerShares(n, agents, new Map(q))].map(([k, v]) => [k, v]));
+  assert.deepEqual(share(4, []), { windows: { runners: 2, queued: {} }, linux: { runners: 2, queued: {} } }, 'nothing waits: an even split');
+  assert.deepEqual(
+    share(4, [
+      ['O/Citadel', 2],
+      ['o/twi', 1],
+      ['o/peek', 1],
+      ['o/elsewhere', 5],
+    ]),
+    { windows: { runners: 1, queued: { 'o/peek': 1 } }, linux: { runners: 3, queued: { 'o/citadel': 2, 'o/twi': 1 } } },
+  );
+  assert.deepEqual(share(1, [['o/peek', 1]]), { windows: { runners: 1, queued: { 'o/peek': 1 } }, linux: { runners: 0, queued: {} } });
+  assert.deepEqual(share(3, []), { windows: { runners: 1, queued: {} }, linux: { runners: 2, queued: {} } }, 'an odd one goes by key when the parts tie');
+  assert.deepEqual(share(0, [['o/peek', 1]]).windows, { runners: 0, queued: { 'o/peek': 1 } });
 });

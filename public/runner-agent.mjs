@@ -843,6 +843,8 @@ async function main() {
       url.searchParams.set('kind', 'runners');
       // Which runners it adds (#510): Citadel sends Linux asks only to a Linux agent.
       url.searchParams.set('os', os);
+      // It applies the balancer's plan (M6b): a Citadel that sees no plans=1 shows its row's Update CI agent line.
+      url.searchParams.set('plans', '1');
       const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' } });
       if (res.status === 401 || res.status === 403) {
         log(`Citadel refused this agent (${res.status}): ${(await res.json().catch(() => ({}))).error ?? ''} Make a new token on the Machines page and install again.`);

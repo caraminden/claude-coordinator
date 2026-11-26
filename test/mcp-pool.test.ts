@@ -31,24 +31,27 @@ function root(): string {
 /** A fake app: records each API call's method, path and token; the machine routes behave like test/machine-mcp.test.ts's. */
 async function fakeApp() {
   const calls: { method: string; path: string; token: string }[] = [];
-  const machine = { gets: 0, posts: [] as { id?: number; method?: string; params?: { name?: string } }[], stream: null as ServerResponse | null, session: '', lent: undefined as string | undefined };
+  const machine = { gets: 0, posts: [] as { id?: number; method?: string; params?: { name?: string } }[], stream: null as ServerResponse | null, session: '', lent: undefined as string | undefined, /** The pooled Windows tools' pick, as the app's headers say it (Build 7 M5). */ picked: [] as [string, string | null][] };
   const srv = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       const token = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
       calls.push({ method: req.method!, path: req.url!, token });
-      if (req.method === 'GET' && req.url!.startsWith('/api/machines/5/session?')) {
+      if (req.method === 'GET' && /^\/api\/machines\/(5|windows)\/session\?/.test(req.url!)) {
         machine.gets++;
         machine.session = String(machine.gets).padStart(24, '0');
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const [picked, from] = req.url!.includes('/windows/') ? (machine.picked.shift() ?? ['win-a', null]) : [null, null];
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', ...(picked ? { 'x-citadel-machine': picked } : {}), ...(from ? { 'x-citadel-moved-from': from } : {}) });
         res.write(`data: ${JSON.stringify({ session: machine.session, lent: machine.lent })}\n\n`);
         machine.stream = res;
         return;
       }
-      const m = req.url!.match(/^\/api\/machines\/5\/session\/([0-9]{24})$/);
+      const m = req.url!.match(/^\/api\/machines\/(?:5|windows)\/session\/([0-9]{24})$/);
       if (req.method === 'POST' && m) {
         const message = JSON.parse(body).message;
+        // A session whose stream ended is gone, as the app answers it.
+        if (m[1] !== machine.session) return res.writeHead(503).end('{}');
         machine.posts.push(message);
         res.writeHead(202).end('{}');
         // The machine's server answers each request at once.
@@ -290,6 +293,33 @@ test("machine tools are lazy: a remembered tool list answers the turn's start, a
   await until('the machine got the notification', () => app.machine.posts.some((m) => m.method === 'notifications/cancelled'));
   process.kill(pool.pid, 0);
   assert.equal((await rpc(pool.port, 'token-b', path, toolCall(4, 'run_task', { task: 'again' }))).result.content[0].text, 'ran run_task');
+});
+
+test('the pooled Windows tools say which PC their first call ran on, and that they moved when the app picked another', async () => {
+  const app = await fakeApp();
+  const r = root();
+  const pool = await started(spec(r, 'v1', undefined, true));
+  await registerTurn(pool, 'token-w', turn(app.base, 33, 1));
+  const path = '/machine/windows/ws?name=windows';
+  // No remembered tool list yet, so the turn's start opens the session.
+  app.machine.picked.push(['win-a', null]);
+  await rpc(pool.port, 'token-w', path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } });
+  const texts = async (id: number) => (await rpc(pool.port, 'token-w', path, toolCall(id, 'run_task', { task: 'build' }))).result.content.map((c: { text: string }) => c.text);
+  assert.deepEqual(await texts(2), ['windows is on win-a.', 'ran run_task']);
+  assert.deepEqual(await texts(3), ['ran run_task'], 'said once per session');
+  assert.ok(app.calls.some((c) => c.path.startsWith('/api/machines/windows/session?server=ws')));
+
+  // win-a goes away: the stream ends, and the next call's session is on the PC the app picked next.
+  app.machine.picked.push(['win-b', 'win-a']);
+  app.machine.session = '';
+  app.machine.stream!.end();
+  // A call that still finds the old link is refused; one after the pool saw the stream end opens the new session.
+  let id = 4;
+  const next = async () => (await rpc(pool.port, 'token-w', path, toolCall(id++, 'run_task', { task: 'build' }))).result?.content.map((c: { text: string }) => c.text);
+  const moved = await until('a call on the new session', next);
+  assert.equal(app.machine.gets, 2);
+  assert.match(moved[0], /^windows moved to win-b: win-a went away\. Its checkout is not this one's/);
+  assert.equal(moved[1], 'ran run_task');
 });
 
 test("a turn that starts after another MCP server is ticked gets the new one's tools, not the remembered ones (2MA6)", async () => {

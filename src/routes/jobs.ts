@@ -4,7 +4,8 @@
 import { join } from 'node:path';
 import type { ContraptionRow, Machine, MachineJob, Project } from '../db.ts';
 import { HttpError, json, ownWrites, readJson, type App, type Ctx, type Route } from '../http.ts';
-import { cleanKind, jobInputs, jobMachinesFor, type Actor, type Choice } from '../machine-jobs.ts';
+import { cleanKind, ENDED, JOB_STATES, jobInputs, jobMachinesFor, kindHash, storedSettings, type Actor, type Choice, type JobKind } from '../machine-jobs.ts';
+import { pickJobMachine } from '../machine-pick.ts';
 import { ensureCoordinator } from './projects.ts';
 import { projectSharedDir } from '../workspace.ts';
 
@@ -24,18 +25,32 @@ const jobId = (ctx: Ctx) => {
   return id;
 };
 
-/** A machine jobs may be queued on from a scheme: lent to it, with its agent's jobs block reported. The owner's go is the gate after that. */
-function jobMachine(app: App, name: unknown, project: Project): Machine {
-  if (typeof name !== 'string' || !name) throw new HttpError(400, "machine is required: the machine's name");
+/**
+ * A machine jobs may be queued on from a scheme: lent to it, with its agent's jobs block reported. The owner's go is the
+ * gate after that. With no machine named, Citadel picks one of those (Build 7 M5, src/machine-pick.ts).
+ */
+function jobMachine(app: App, name: unknown, project: Project, kind: JobKind): Machine {
+  const names = jobMachinesFor(app.store, project.id);
+  if (name === undefined || name === null || name === '') {
+    const open = JOB_STATES.filter((st) => !ENDED.includes(st));
+    const eligible = app.store
+      .listMachines()
+      .filter((m) => names.includes(m.name))
+      .map((m) => ({ id: m.id, name: m.name, online: app.machines.isOnline(m.id), paused: storedSettings(m).paused, allowed: !!app.store.jobKind(m.id, kindHash(kind)), ahead: app.store.machineJobs({ machine: m.id, states: open }).length }));
+    const pick = pickJobMachine(eligible);
+    if (!pick) throw new HttpError(404, `No machine runs GPU jobs for ${project.name}: a machine's GPU jobs role must be lent to it, and its owner's machine-agent.json needs a jobs block`);
+    return app.store.getMachine(pick.id)!;
+  }
+  if (typeof name !== 'string') throw new HttpError(400, "machine must be the machine's name, or left out to let Citadel pick one");
   const m = app.store.listMachines().find((x) => x.name === name.toLowerCase());
-  if (!m || !jobMachinesFor(app.store, project.id).includes(m.name)) throw new HttpError(404, `No machine called ${name} runs jobs for ${project.name}: it must be lent to it, and its owner's machine-agent.json needs a jobs block`);
+  if (!m || !names.includes(m.name)) throw new HttpError(404, `No machine called ${name} runs jobs for ${project.name}: it must be lent to it, and its owner's machine-agent.json needs a jobs block`);
   return m;
 }
 
 /** The fields queue_job and a contraption's POST share. */
 async function queueFrom(app: App, body: Record<string, unknown>, project: Project, roots: string[]) {
-  const machine = jobMachine(app, body.machine, project);
   const kind = cleanKind(body.kind);
+  const machine = jobMachine(app, body.machine, project, kind);
   const when = body.when ?? 'hours';
   if (when !== 'hours' && when !== 'now') throw new HttpError(400, 'when must be "hours" or "now"');
   const limitS = body.limit_min === undefined ? kind.max_limit_s : Math.round(Number(body.limit_min) * 60);

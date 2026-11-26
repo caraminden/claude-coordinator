@@ -8,7 +8,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
-const MACHINE = Number(process.argv[2]);
+// A machine's id, or `windows` for the pooled Windows tools, whose machine the app picks at each connect (Build 7 M5).
+const MACHINE = process.argv[2] ?? '';
 const NAME = process.argv[3] ?? `machine ${MACHINE}`;
 // 'ws' for the machine agent's own workspace tools, else the MCP server it lends.
 const SERVER = process.argv[4] === 'ws' ? 'ws' : 'mcp';

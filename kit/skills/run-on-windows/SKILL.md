@@ -5,12 +5,18 @@ description: Run a test, a command or the app on the shared Windows test box and
 
 # Run on Windows
 
+**Use the pooled tools first: `mcp__windows__…`.** They are the same workspace tools on any
+Windows machine whose Windows screen role is lent to your scheme. Citadel picks one (a free
+screen first) and keeps you on it while it stays online, so your checkout stays warm. The first
+call says which PC it's on. If that PC goes away, the next call says it moved: run `workspaces`
+and `git_sync` again there. A machine's own `mcp__<name>-ws__…` is for work that needs that one PC.
+
 The test box is a Windows 11 VM whose screen is always signed in and unlocked. It runs at 125%
 with rounded corners and draws on the CPU (WARP) unless a job asks for the GPU. Its machine is
-`citadel-test-box`, and its tools are `mcp__citadel-test-box-ws__…`. If your turn doesn't have
-them, the box is offline, isn't lent to your scheme or has Workspace tools off: say so (the
+`citadel-test-box`, and its own tools are `mcp__citadel-test-box-ws__…`. If your turn has
+neither set, no Windows machine is online and lent to your scheme with its tools on: say so (the
 Taskmaster's machines tool shows which) and use CI. Setup and costs:
-Citadel's `tools/win-test-box/README.md`.
+Citadel's `tools/win-test-box/README.md`. The loop below is the same through either set.
 
 ## The loop
 

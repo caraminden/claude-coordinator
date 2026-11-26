@@ -9,6 +9,7 @@ import { imageSize } from './image-size.ts';
 import { AGENT_NAME } from './auth.ts';
 import { onboardingOpen, type Machine, type PersonalLayer, type Project, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
+import { POOLED_WINDOWS } from './machine-pick.ts';
 import { lines } from './approvals.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -424,7 +425,7 @@ function approvalNote(project: Project): string[] {
 }
 
 /** A connected machine and the servers this turn gets from it; without servers, the MCP server it lends. `lent` names that MCP server, where its agent says. */
-export type TurnMachine = Machine & { servers?: MachineServer[]; lent?: string | null };
+export type TurnMachine = Machine & { servers?: MachineServer[]; lent?: string | null /** Its Windows screen role is lent: the pooled mcp__windows__ tools may use it (Build 7 M5). */; screen?: true };
 
 /** The MCP servers a turn gets from a machine: its own under its name, its workspace tools as <name>-ws. */
 export function machineServers(m: TurnMachine): { name: string; server: MachineServer }[] {
@@ -433,26 +434,25 @@ export function machineServers(m: TurnMachine): { name: string; server: MachineS
 
 /** Machines whose owners let jobs run on them (#857): queue_job's one line. */
 function jobsLine(names: string[]): string {
-  return `GPU jobs: ${names.join(', ')} run container jobs (an image pinned by digest) with queue_job; its owner gives each new recipe a go on a card in your chat, and jobs run in its job hours unless you ask for now with a reason. You are woken when one ends; results land in the shared folder's jobs/<id>/. job_status reads it, stop_job stops it.`;
+  return `GPU jobs: ${names.join(', ')} run container jobs (an image pinned by digest) with queue_job (leave machine out and Citadel picks one); its owner gives each new recipe a go on a card in your chat, and jobs run in its job hours unless you ask for now with a reason. You are woken when one ends; results land in the shared folder's jobs/<id>/. job_status reads it, stop_job stops it.`;
 }
 
 /** Which people's computers lend this turn their MCP tools. */
 function machineTools(machines: TurnMachine[]): string[] {
   if (!machines.length) return [];
-  const names = machines
-    .map(
-      (m) =>
-        `${m.name} (${machineServers(m)
-          .map((s) => `mcp__${s.name}`)
-          .join(', ')})`,
-    )
-    .join(', ');
-  const ws = machines.some((m) => m.servers?.includes('ws'));
+  const names = machines.map((m) => `${m.name} (${[...machineServers(m).map((s) => `mcp__${s.name}`), ...(m.screen ? [`through mcp__${POOLED_WINDOWS}`] : [])].join(', ')})`).join(', ');
+  const screen = machines.some((m) => m.screen);
+  const ws = screen || machines.some((m) => m.servers?.includes('ws'));
   return [
     `Connected machines: ${names}. Their MCP tools run on people's own computers, not on this server: files and builds there are separate from your working directory, so sync code there (for example with git) before building, and expect a tool to fail if that computer goes offline mid-turn.`,
     ...(ws
       ? [
-          `A machine's workspace tools (mcp__<name>${WS_SUFFIX}) check out a pushed branch in a folder its owner chose and run only the tasks the owner listed there: call its workspaces tool first. Minions share each workspace, one job at a time, so check what is checked out before you switch it and say what you left it on. fetch_file copies a file from there into your files folder on this server.`,
+          `A machine's workspace tools (mcp__<name>${WS_SUFFIX}${screen ? `, and mcp__${POOLED_WINDOWS}` : ''}) check out a pushed branch in a folder its owner chose and run only the tasks the owner listed there: call its workspaces tool first. Minions share each workspace, one job at a time, so check what is checked out before you switch it and say what you left it on. fetch_file copies a file from there into your files folder on this server.`,
+        ]
+      : []),
+    ...(screen
+      ? [
+          `For Windows, use mcp__${POOLED_WINDOWS} first: the same workspace tools on any Windows machine lent to this scheme. Citadel picks one and keeps you on it while it stays online, so your checkout stays warm; if it goes away, the next call moves to another and says so, and you check out again there. Use a machine's own mcp__<name>${WS_SUFFIX} only when the work needs that one PC.`,
         ]
       : []),
     ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`),

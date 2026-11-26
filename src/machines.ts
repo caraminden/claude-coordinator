@@ -31,11 +31,12 @@ import { cleanReport, type MachineReport, storedReport } from './machine-join.ts
 import { mergeOf, merges } from './machine-merge.ts';
 import { pausedRoles, setPaused } from './machine-pause.ts';
 import { legacyFromRoles, ROLE_NAMES } from './machine-roles.ts';
+import { POOLED_WINDOWS, WindowsPool } from './machine-pick.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
 /** Names the app's own MCP servers already use. */
-export const RESERVED_NAMES = new Set(['thread', 'coordinator']);
+export const RESERVED_NAMES = new Set(['thread', 'coordinator', POOLED_WINDOWS]);
 /** A machine's workspace tools are the MCP server <name>-ws, so no machine may be named that way. */
 export const WS_SUFFIX = '-ws';
 
@@ -566,6 +567,15 @@ export class MachineRelay {
   workers: WorkerJoin | null = null;
   /** Roles' Set up and self-tests (Build 7 M4, src/role-setup.ts); absent in a test that builds none. */
   roleSetups: RoleSetups | null = null;
+
+  /** Which Windows machine each minion's pooled tools use (Build 7 M5), so it stays on one while it can. */
+  readonly windows = new WindowsPool();
+
+  /** Jobs holding or waiting in line for a machine's screen (#1422), from its last beat: 0 when it says nothing. */
+  screenBusy(machineId: number): number {
+    const s = this.agents.get(machineId)?.screen;
+    return s ? (s.holder ? 1 : 0) + s.line.length : 0;
+  }
 
   isOnline(machineId: number): boolean {
     return this.agents.has(machineId);

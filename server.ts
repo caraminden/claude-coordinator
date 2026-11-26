@@ -771,7 +771,13 @@ const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: r
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
-runner.machines = (project, askers) => machines.online().filter((m) => lendsRole(store, m, 'tools', project, askers));
+// A machine whose Windows screen role is lent comes too, for the pooled mcp__windows__ tools (Build 7 M5): its named tools only with its Tools role.
+runner.machines = (project, askers) =>
+  machines.online().flatMap((m) => {
+    const tools = lendsRole(store, m, 'tools', project, askers);
+    const screen = m.servers.includes('ws') && lendsRole(store, m, 'screen', project, askers);
+    return tools || screen ? [{ ...m, servers: tools ? m.servers : [], ...(screen ? { screen: true as const } : {}) }] : [];
+  });
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 const serverClaude = () => new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0])));
 const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });

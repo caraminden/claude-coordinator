@@ -109,8 +109,10 @@ test('an interrupted turn resumes after a restart, with the messages queued behi
   const after = server();
   after.recover();
   assert.equal(store.getTicket(id)!.status, 'idle');
-  await until('after.isRunning(id)', () => after.isRunning(id));
-  assert.ok(notes(id).includes('Resumed after a server restart'));
+  // The note, not isRunning: a minion counts as running while its resume still checks the last server's folders,
+  // off the thread and before the note (#1808), so the note read as soon as it ran was missing under load (#2058).
+  await until('the resume note', () => notes(id).includes('Resumed after a server restart'));
+  assert.ok(after.isRunning(id));
   await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('also add a test')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('also add a test'));
   const prompt = readFileSync(prompts, 'utf8');
   assert.match(prompt, /\[System\]: The \S+ server restarted while you were working/);

@@ -366,6 +366,20 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+/**
+ * An SVG element, as h() makes an HTML one. Every attribute is set as a string; a null or undefined one is left off.
+ * It adds no listeners: an `on…` function would only become text.
+ * @param {string} tag
+ * @param {Record<string, unknown>} [attrs]
+ * @param {...(Node | string)} kids
+ */
+export function svg(tag, attrs = {}, ...kids) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) el.setAttribute(k, String(v));
+  el.append(...kids);
+  return el;
+}
+
 /** Puts `el`'s looping animation (`ms` per turn) at the page's shared clock, so a redrawn element rejoins its phase instead of restarting (#1532). Set through the CSSOM: the page's CSP blocks a style attribute. */
 /** @template {HTMLElement | SVGElement} E @param {E} el @param {number} ms @returns {E} */
 export const phase = (el, ms) => {

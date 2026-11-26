@@ -1,25 +1,13 @@
 // Minion day strips (#1996, Josh's pick of "Day C" on 2026-11-25), on the Releases page's Status tab: every minion of the
 // picked scheme that went live on a day, one thin strip each from its real start to live, coloured by what it was doing.
 // src/day-strips.ts cuts them from #1991's time log; the part colours are time-log.css's.
-import { api, h, pacificClockBare, pacificDate, pacificIso, pacificStamp, pacificZone } from './base.js';
+import { api, h, pacificClockBare, pacificDate, pacificIso, pacificStamp, pacificZone, svg } from './base.js';
 import { shortDuration } from './chattext.js';
 import { emptyCard } from './look.js';
 import { mountTips } from './ui/tip.js';
 
 /** @import { Strip, StripPartName } from './types.js' */
 /** @typedef {Record<StripPartName, number>} Totals */
-const SVG = 'http://www.w3.org/2000/svg';
-/**
- * @param {string} tag
- * @param {Record<string, string | number | null | undefined>} [attrs]
- * @param {...(Node | string)} kids
- */
-const svg = (tag, attrs = {}, ...kids) => {
-  const el = document.createElementNS(SVG, tag);
-  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, String(v));
-  el.append(...kids);
-  return el;
-};
 /** The parts, in src/day-strips.ts's order, with the words people read. */
 /** @type {[StripPartName, string][]} */
 export const PARTS = [

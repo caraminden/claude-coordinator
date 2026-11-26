@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { landFiles } from './land-files.ts';
 
 const root = join(import.meta.dirname, '..');
 const ROOTS = ['src', 'public', 'tools', 'kit'];
@@ -147,8 +146,8 @@ test('the ship limits fail a file, a new part, the total and long lines past the
 });
 
 test('the ship script and every part parse as bash', () => {
-  for (const f of shipHere ? landFiles() : []) {
-    const r = spawnSync('bash', ['-n', join(root, 'tools', f)], { encoding: 'utf8' });
+  for (const f of shipHere ? Object.keys(shipSizes()) : []) {
+    const r = spawnSync('bash', ['-n', join(root, f)], { encoding: 'utf8' });
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
   }
 });

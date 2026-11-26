@@ -2249,21 +2249,27 @@ train_labels() {
 # A burn-in red's failing cases that one train member added (#2019): "<member> <file>" a line (0: this ship, 1 on: its
 # riders). A burn-in race passes when run alone (train_solo), but a case main and the ships before one don't have can only
 # be that ship's, so it needs no proof. The log names each as "test at <file>:<line>:<col>", then "✖ <case> (<ms>)". A
-# case already on main, or one a ship only edited, is left to the guess.
+# case already on main, one a ship only edited, or one whose file a later ship changes too, is left to the guess.
 burn_new() {
-  local f name i red
+  local f name i j red
   [ -n "$burn_red" ] || return 0
   red=$(burn_lines | sed 's/: failed in .*//')
   while IFS=$'\t' read -r f name; do
     grep -qxF -- "$f" <<<"$red" && ! has_case "$old" "$f" "$name" || continue
     for ((i = 0; i <= ${#train_n[@]}; i++)); do
-      ! has_case "$(train_at "$i")" "$f" "$name" || { echo "$i $f"; break; }
+      has_case "$(train_at "$i")" "$f" "$name" || continue
+      for ((j = i + 1; j <= ${#train_n[@]}; j++)); do
+        git diff --quiet "$(train_at $((j - 1)))" "$(train_at "$j")" -- "$f" || continue 3 # a later ship edits it: a guess
+      done
+      echo "$i $f"
+      break
     done
   done < <(awk 'match($0, /test at [^ ]+:[0-9]+:[0-9]+/) { f = substr($0, RSTART + 8, RLENGTH - 8); sub(/:[0-9]+:[0-9]+$/, "", f); next }
     f != "" { if (i = index($0, "✖ ")) { n = substr($0, i + length("✖ ")); sub(/ \([0-9.]+ms\).*$/, "", n); print f "\t" n } f = "" }' <<<"$failed" | sort -u) | sort -u
 }
 # <commit> <file> <case>: the file there has the case, named in quotes (a name built at run time is never found, so guessed).
-has_case() { git show "$1:$2" 2>/dev/null | grep -qF -e "'$3'" -e "\"$3\"" -e "\`$3\`"; }
+# git grep, with no pipe: under pipefail a `git show | grep -q` fails on a file over 64 KB that has the case.
+has_case() { git grep -qF -e "'$3'" -e "\"$3\"" -e "\`$3\`" "$1" -- "$2" 2>/dev/null; }
 # <file>: the repo paths it imports by a relative path, as the train's top has it.
 train_imports() {
   local p
@@ -2769,7 +2775,8 @@ pull_look() {
 # (that commit is tested and main hasn't moved, so it needs no further run) and the ships behind it go back in line,
 # nobody refused; red, its own first half is next. <state>/split holds the ships the red may be (split_say), so the next
 # front among them tests half of what is left (split_look, train_build), down to one ship tested by itself: only a red
-# there, on main as it then is, refuses it. So two ships red only together ship the first and send back the second, and a
+# there, on main as it then is, refuses it; but a burn-in red on a case one ship adds (burn_new, #2019) ends the split,
+# and that step is judged as a red train of its own (train_suspects). So two ships red only together ship the first and send back the second, and a
 # flake refuses nobody. That found, the rest and the line form a full train again. A no-answer: the train goes back in
 # line, this one falls back on its own, and the split stays.
 # Each step past this one's own commit runs the guard tests first (#1479): red there is the step's answer, with no CI run.

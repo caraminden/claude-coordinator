@@ -126,6 +126,10 @@
   "readThrough": ["boot",1,"db-warmer worker thread only"],
   "(module)": ["boot",3,"db-warmer worker thread only"]
  },
+ "src/db-writer.ts": {
+  "threadId": ["proc",1,"readlink /proc/thread-self at the db-writer worker's start"],
+  "writeOffThread": ["proc",1,"exists /proc/self/task/<tid>, only while a wait on the write worker has seen nothing run for 100 ms"]
+ },
  "src/dismissed-cleanup.ts": {
   "DismissedCleanup.clearBuild": ["owed",1,"sync-disk-polls-and-timers.md: daily 24 h build output sweep (also on minion dismissal)"],
   "DismissedCleanup.sweepWorktrees": ["owed",3,"sync-disk-polls-and-timers.md: daily 24 h build output sweep, per scheme repo"]

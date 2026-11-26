@@ -393,18 +393,18 @@
   "relayFile": ["rare",8,"POST relay file between schemes (projects route)"]
  },
  "src/tripwire-git.ts": {
-  "git": ["owed",1,"sync-disk-requests.md: tripwire ask (POST /api/tickets/:id/approvals card), spawnSync git up to 3 s"],
-  "midMerge": ["rare",1,"tripwire ask on git checkout --ours/--theirs only"],
-  "gitHabitReason": ["owed",1,"sync-disk-requests.md: tripwire ask for git commands (approvals card path)"],
-  "inTheWay": ["rare",1,"tripwire ask on file checkout/restore only"],
+  "git": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "midMerge": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "gitHabitReason": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "inTheWay": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
   "writeSaves": ["boot",1,"hook child process only; server passes throwaway saves"]
  },
  "src/tripwire.ts": {
-  "hasDeployScript": ["rare",1,"tripwire ask message on blocked deploy writes only"],
-  "envBelow": ["rare",6,"tripwire ask on grep-for-.env commands only"],
-  "globRoot": ["rare",5,"tripwire ask on globbed .env searches only"],
-  "realPath": ["owed",2,"sync-disk-requests.md: tripwire ask path resolution on every approvals card"],
-  "segmentReason": ["owed",2,"sync-disk-requests.md: tripwire ask on every approvals card (Bash segments)"],
+  "hasDeployScript": ["boot",1,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "envBelow": ["boot",6,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "globRoot": ["boot",5,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "realPath": ["boot",2,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
+  "segmentReason": ["boot",2,"the tripwire worker (src/tripwire-judge.ts, an approval card's ask) and the hook process only, never the server's thread: test/off-thread-fs.test.ts #2151"],
   "(module)": ["boot",1,"hook child process CLI branch (stdin read)"]
  },
  "src/turn-launch.ts": {

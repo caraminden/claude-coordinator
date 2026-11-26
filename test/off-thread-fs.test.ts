@@ -32,6 +32,8 @@ import { KitSync, templateBlobs, type KitSyncState } from '../src/kit-sync.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { Waits } from '../src/waits.ts';
 import { Runner } from '../src/runner.ts';
+import { judge, type Judged, type JudgedCall } from '../src/tripwire-judge.ts';
+import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
 import { FakeClock } from './fake-clock.ts';
 import { fake } from './typed.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
@@ -867,4 +869,32 @@ test("a side ask's poll, its answer and its thread's end make no synchronous fil
   );
   assert.deepEqual(signals, ['SIGKILL']);
   await until('both run folders to go', () => !fs.existsSync(join(dir, 'run-1')) && !fs.existsSync(join(dir, 'run-2')));
+});
+
+test("an approval card's tripwire verdict resolves paths and runs git off the server's thread, failing closed (#2151)", async () => {
+  const home = mkdtempSync(join(root, 'judge-'));
+  const data = join(home, '.local/share/claude-coordinator');
+  const worktree = join(data, 'projects/2/tickets/9');
+  mkdirSync(worktree, { recursive: true });
+  const git = (...args: string[]) => childProcess.execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: worktree });
+  git('init', '-q');
+  writeFileSync(join(worktree, 'a.txt'), 'one\n');
+  git('add', '.');
+  git('commit', '-qm', 'one');
+  writeFileSync(join(worktree, 'a.txt'), 'two\n'); // uncommitted: a reset over it asks git first
+  const cfg: TripwireConfig = { home, data, checkout: join(home, 'claude-coordinator'), project: 2, claudeConfig: join(home, '.claude'), deployScript: false, ask: true, env: { TMPDIR: join(data, 'projects/2/tmp/9'), PATH: process.env.PATH } };
+  const description = 'Delete the DB copies Cara approved in #54';
+  // A live-data path (resolved on the disk, segment by segment) and a git command over uncommitted edits (git status).
+  const calls: JudgedCall[] = [`rm ${data}/coordinator.db.bak-x`, 'git reset --hard'].map((command) => ({ tool_name: 'Bash', tool_input: { command, description }, cwd: worktree }));
+  for (const call of calls) {
+    const inline = tripwire(call, cfg, []);
+    assert.ok(inline, `the tripwire stops ${JSON.stringify(call.tool_input)}`);
+    let judged: Judged = { failed: 'not run' };
+    assert.deepEqual(await syncCallsUnder(home, async () => void (judged = await judge(call, cfg))), []);
+    assert.deepEqual(judged, { verdict: inline }, 'the same verdict as the hook gives');
+  }
+  // Fails closed: a config the worker can't be given, or one that takes too long, gives no verdict.
+  const broken = await judge(calls[0], Object.assign({ ...cfg }, { clone: () => '' }));
+  assert.ok('failed' in broken, JSON.stringify(broken));
+  assert.deepEqual(await judge(calls[1], cfg, 0), { failed: 'no verdict in 0 s' });
 });

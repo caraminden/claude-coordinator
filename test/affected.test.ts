@@ -14,7 +14,31 @@ const lines = (p: string[], m = map) => affected(m, p, tracked, repo);
 
 // Tests that read the repo (a snapshot, a budget, a lint over many files) instead of one module: a change anywhere can
 // break them. shortcut: a hand-kept list, so a new repo-wide test must be added here; upgrade to detecting by what it reads.
-const REPO_WIDE = ['access-matrix', 'prompt-budget', 'schema-compat', 'pipeline-files', 'db-setup', 'host-check', 'ui-contract', 'hand-built-parts', 'relative-urls', 'theme', 'sw', 'ps1-lint', 'raw-log-read', 'one-until', 'skill-evals', 'format'].map((n) => `test/${n}.test.ts`);
+const REPO_WIDE = [
+  'access-matrix',
+  'prompt-budget',
+  'schema-compat',
+  'pipeline-files',
+  'db-setup',
+  'host-check',
+  'ui-contract',
+  'hand-built-parts',
+  'relative-urls',
+  'theme',
+  'sw',
+  'ps1-lint',
+  'raw-log-read',
+  'one-until',
+  'skill-evals',
+  'format',
+  'one-pacific',
+  'one-home',
+  'worker-tla',
+  'frontend-syntax',
+  'css-has-cost',
+  'help-words',
+  'unit-thp',
+].map((n) => `test/${n}.test.ts`);
 
 test('globs: * stays in a folder, ** crosses them, **/ may be no folder', () => {
   assert.ok(globRe('public/**').test('public/ui/chat.js'));
@@ -83,6 +107,13 @@ test('the route test runs for the paths that can move the route table, and not o
   const picked = (path: string) => lines([path]).run.map((r) => r.test);
   for (const path of ['server.ts', 'src/http.ts', 'src/auth.ts', 'src/apps.ts', 'src/contraptions.ts', 'src/access.ts', 'src/routes/x.ts', 'src/db/people.ts', 'test/helpers.ts', 'test/access-matrix.snapshot.json', 'test/access-matrix.test.ts']) assert.ok(picked(path).includes('test/access-matrix.test.ts'), path);
   assert.ok(!picked('test/ports.test.ts').includes('test/access-matrix.test.ts'));
+});
+
+// Effort retro "Push failure gaps" (#2065): the slow source-tree guards ride the map, so each path that can break one picks it.
+test('the slow source-tree guards are picked by every path they scan', () => {
+  const picked = (path: string) => lines([path]).run.map((r) => r.test);
+  for (const path of ['server.ts', 'src/runner.ts', 'src/routes/x.ts', 'public/progress.js']) assert.ok(picked(path).includes('test/worker-tla.test.ts'), path);
+  for (const path of ['public/core.js', 'public/ui/chat.js']) assert.ok(picked(path).includes('test/frontend-syntax.test.ts'), path);
 });
 
 test('the command prints which rule picked each test', () => {

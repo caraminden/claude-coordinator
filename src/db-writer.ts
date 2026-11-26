@@ -100,6 +100,7 @@ export const WRITES = [
   'schedules.ran',
   'schedules.heldNote',
   'memory.deleteTicket',
+  'saveTimeLogExplain',
 ];
 
 /**

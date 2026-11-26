@@ -663,6 +663,13 @@ CREATE TABLE IF NOT EXISTS health_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS health_events_kind ON health_events(kind, at);
+-- Explain on a minion's time log (#1994, src/time-log-explain.ts): Haiku's reading of each step and wait, one row a minion,
+-- kept for everyone who can open its chat. data is the Explain JSON (its v says which version wrote it).
+CREATE TABLE IF NOT EXISTS time_log_explains (
+  ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+  data TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
 -- Pauses over 2 s people's pages noticed (#1752, src/db/slow-moments.ts): where the time went. The newest SLOW_KEEP kept.
 CREATE TABLE IF NOT EXISTS slow_moments (
   id INTEGER PRIMARY KEY,

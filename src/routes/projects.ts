@@ -162,7 +162,10 @@ function sameSchemeTarget(app: App, from: Ticket, scheme: unknown, person: unkno
   return { own, person: asked, who: { uid: asked?.id, admin: !!asked?.admin }, project: own, to };
 }
 
-/** The project's coordinator ticket, created the first time someone opens the project. */
+/**
+ * The project's coordinator ticket, created the first time someone opens the project. That first answer carries its
+ * folder itself (#1903): setTicketDir is the write worker's, and a read back while it is queued finds the row without one.
+ */
 export async function ensureCoordinator(app: App, project: Project): Promise<Ticket> {
   const { store } = app;
   const existing = store.getCoordinator(project.id);
@@ -174,6 +177,7 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
     const row = { project_id: project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: COORDINATOR_PERMISSION_MODE, created_by: AGENT_NAME } as const;
     const t = await afterAllWrites(() => store.createTicket(row));
     store.setTicketDir(t.id, cwd, null);
+    return { ...t, cwd };
   } catch (e) {
     // Lost a race with a concurrent request; the unique index kept a single coordinator. A queue still busy is a 503.
     if (e instanceof HttpError) throw e;

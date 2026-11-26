@@ -11,6 +11,7 @@ import { cpus, loadavg as realLoadavg } from 'node:os';
 export const FIXED = process.env.CITADEL_HOST_SIGNALS === 'fixed';
 
 export const PSI_FILES = { cpu: '/proc/pressure/cpu', memory: '/proc/pressure/memory', io: '/proc/pressure/io' } as const;
+export const LOADAVG = '/proc/loadavg';
 export const MEMINFO = '/proc/meminfo';
 export const PROC_STAT = '/proc/stat';
 /** This process's cgroup line ("0::/user.slice/..."). */
@@ -23,6 +24,7 @@ const FIXED_FILES: Record<string, string> = {
   [PSI_FILES.cpu]: PSI,
   [PSI_FILES.memory]: PSI,
   [PSI_FILES.io]: PSI,
+  [LOADAVG]: '0.00 0.00 0.00 1/100 1\n',
   [MEMINFO]: 'MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n',
   [PROC_STAT]: 'cpu  0 0 0 0 0 0 0 0 0 0\nprocesses 0\n',
 };
@@ -47,6 +49,8 @@ export const hostDir = async (path: string): Promise<string[]> => {
 
 /** The 1, 5 and 15 minute load averages. */
 export const loadavg = (): number[] => (FIXED ? [0, 0, 0] : realLoadavg());
+/** The processes runnable at this instant, which the load averages catch up with over a minute (#2009). */
+export const runnable = (): number => Number(hostTextSync(LOADAVG).split(' ')[3].split('/')[0]);
 /** The box's cores, for load. Not `availableParallelism()`: inside the service's CPUQuota that reads the cgroup cap (8 of perigee's 16), while load counts the whole box (#1539). */
 export const cores = (): number => (FIXED ? FIXED_CORES : Math.max(1, cpus().length));
 

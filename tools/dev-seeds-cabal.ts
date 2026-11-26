@@ -64,6 +64,7 @@ function scene(c: SeedCtx, kind: Scene): string {
     store.setCabalRed(lead.id, 'Full run red on test/off-thread-fs.test.ts at 64d33ede8. T6 made it but has closed, so the fixer is on it.');
   }
   if (kind !== 'formed') store.addCabalLog(lead.id, `#${lead.number} ${lead.title}`, 'Josh, 21:20: "Lend it for one merge": M1 gets src/machines.ts for its merge.');
+  if (kind === 'mid') store.addEvent(lead.id, 'fresh', { why: '152k tokens of context at the end of a turn', summary: 'Card on M1’s lend waits on Josh. Next: merge M1.', shift: true });
   return kind === 'formed' ? `#/p/${project.id}/cabal/${lead.number}` : `#/p/${project.id}/t/${lead.number}`;
 }
 

@@ -65,9 +65,9 @@
 .cabal-tag { align-self: flex-start; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
 .cabal-title { overflow-wrap: anywhere; }
 .cabal-title .num { color: var(--muted); font-size: 0.8rem; }
-/* The meter is the board's (project.css); here its segments are taller to point at, painted in a 6px band. */
-.cabal-card .cabal-meter { order: 0; margin: 0; height: 12px; border-radius: 0; }
-.cabal-card .cabal-meter i { border: 0 solid transparent; border-width: 3px 0; background-clip: padding-box; }
+/* The meter is the board's (project.css), a little taller so a segment is easier to point at. */
+.sidebar .cabal-card .cabal-meter { order: 0; flex: none; margin: 0; height: 8px; }
+.sidebar .cabal-card .cabal-meter i:is([data-s="roster"], [data-s="sealed"], [data-s="closed"]) { background: color-mix(in srgb, var(--muted) 35%, var(--panel)); }
 .cabal-foot { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); font-size: 0.75rem; color: var(--muted); }
 .cabal-asks { color: var(--error); }
 .cabal-build { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 0.75rem; color: var(--muted); }

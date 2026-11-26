@@ -245,6 +245,19 @@ export class HomeBucketCache {
   }
 }
 
+/** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
+export const homeBuckets = new HomeBucketCache();
+
+/**
+ * Home's ship notes read as the server starts (#2101), so the first Home open doesn't wait on them: after a deploy that
+ * read is cold (events.db isn't kept warm) and took 14-32 s on the live box. Logs how long it took.
+ */
+export async function warmHome(store: Store): Promise<void> {
+  const start = performance.now();
+  await homeBuckets.ready(store);
+  console.log(`Home's ship notes read: ${homeBuckets.get(store, Date.now()).notes.length} in ${Math.round(performance.now() - start)} ms`);
+}
+
 /** The last HOME_DAYS Pacific days up to `now`'s, oldest first. */
 export function homeDays(now: number): string[] {
   // Calendar steps back from today's Pacific date, so a 23- or 25-hour day can't skip or repeat one.

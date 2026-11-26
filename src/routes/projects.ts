@@ -15,7 +15,7 @@ import { AGENT_NAME, type Session } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type TicketFields, type User } from '../db.ts';
 import { setClaimQueue } from '../armed-handoff.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
-import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
+import { homeBuckets, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { readScope } from '../read-scope.ts';
 import { isShipping, isWorking } from '../../public/schemecounts.js';
 import { pickFor, pickReason, tierLabel } from '../../public/model-table.js';
@@ -63,8 +63,6 @@ import { cabalLead, putOnCabal } from './cabals.ts';
 import { afterAllWrites, buildNumber, HttpError, isRecord, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
-/** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
-const homeBuckets = new HomeBucketCache();
 /** Each scheme's chains, kept 5 s: every chat open asks for them (#1679). */
 const chainCache = new Map<number, { at: number; chains: ChainView[] }>();
 

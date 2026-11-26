@@ -141,6 +141,7 @@ import { FrozenShips } from './src/frozen-ships.ts';
 import { AppShots, killRun, runAlive, startRun } from './src/app-shots.ts';
 import { ErrorDigest, RESTART_WINDOW_MS } from './src/contraption-errors.ts';
 import { ensureCoordinatorFor } from './src/routes/projects.ts';
+import { warmHome } from './src/inbox.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { MinionIndexer } from './src/minion-index.ts';
@@ -485,6 +486,7 @@ if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);
   void runner.warmCards();
+  void warmHome(store).catch((err) => console.error("Reading Home's ship notes failed:", err));
   runner.recover();
 }
 if (runner.units && !BOOT_CHECK) {

@@ -184,8 +184,9 @@ function signIns(m, k) {
   const chip = (name, is, word) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${word ?? (is ? 'signed in' : is === false ? 'not signed in' : 'checking')}`);
   const claudeNote = 'Claude Code opens its own sign-in. Type /exit once it says you are in.';
   // Linked accounts (#2061): each signs in there into its own folder, and a turn runs only on one signed in there. One account
-  // signed in as it should keeps the single chip; any other state says which account and why.
-  const several = !!w.accounts?.length && (w.accounts.length > 1 || w.accounts.some((a) => a.there !== 'in'));
+  // keeps the single Claude step, unless it is signed in there to another organization: that says which and why.
+  const one = w.accounts?.length === 1 ? w.accounts[0] : null;
+  const several = (w.accounts?.length ?? 0) > 1 || one?.there === 'other';
   const scheme = location.hash.match(/^#\/p\/(\d+)/)?.[1];
   const yours = () => (scheme ? h('a', { href: `#/p/${scheme}/account` }, 'Settings → Your account') : 'Settings → Your account');
   const claude = several
@@ -196,7 +197,7 @@ function signIns(m, k) {
         a.there === 'other' ? [`This PC is signed in to a different Claude organization than your account ${a.n} in Citadel: sign in again and pick that account's organization.`] : ['Sign in with the account that ', yours(), ` lists as account ${a.n}.`],
         a.there === 'other' ? 'other organization' : undefined,
       ])
-    : [['Claude', w.signed_in, 'signin', [claudeNote]]];
+    : [['Claude', one ? one.there === 'in' : w.signed_in, 'signin', [claudeNote]]];
   const steps = [...claude, ['GitHub', w.github, 'signin-github', ['So turns can push and open pull requests as you.']]];
   const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', ...note), shell(tag, workerCommand(win, verb)));
   const todo = steps.filter(([, is]) => is === false);

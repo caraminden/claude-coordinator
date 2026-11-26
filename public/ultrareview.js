@@ -1,27 +1,28 @@
 // Ultra review (#432): a person runs `claude ultrareview` on their own Claude login, on this minion's
 // branch or on an area of the scheme's repo, and the findings land in this chat. It spends a free run or
 // usage credits, so the dialog says so and the server only takes it from a person who confirmed.
+/** @import { Ticket, UltraBatchRow, UltraCheck, UltraRefused, UltraStarted } from './types.js' */
 import { api, h } from './base.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { toneChip } from './look.js';
 /** An area's fieldset in the form, which reads its own ask. @typedef {HTMLFieldSetElement & { read: () => { name: string, paths: string[], question: string } }} AreaBox */
-/** A review's result as its card shows it. @typedef {{ pr?: { url: string, number: number }, ok: boolean, text: string, file?: string, code?: number | null }} UltraResult */
+/** A review's result as its card shows it. @typedef {{ id?: string, pr?: { url: string, number: number }, ok: boolean, text: string, file?: string, code?: number | null }} UltraResult */
 /** A review's chat card, which its result settles. @typedef {HTMLDivElement & { settle: (r: UltraResult) => void }} UltraCard */
 
 const COST = "It uses one of your 3 free ultra reviews, or about $5-25 in usage credits once those are gone. Citadel can't see how many free runs you have left, and a run counts as soon as it starts, even if it fails.";
 
 /** The header's button: every open chat can review an area; a minion with a branch can also review that. */
-export function ultraButton(t) {
+export function ultraButton(/** @type {Ticket} */ t) {
   if (t.status === 'closed') return '';
   return h('button', { type: 'button', class: 'secondary act-ultra', title: 'Run an ultra review on your own Claude account: this branch, or an area of the repo', onclick: () => openUltra(t) }, 'Ultra', h('span', { class: 'wide-only' }, ' review'));
 }
 
-const fmt = (n) => n.toLocaleString('en-US');
+const fmt = (/** @type {number} */ n) => n.toLocaleString('en-US');
 
-function openUltra(t) {
+function openUltra(/** @type {Ticket} */ t) {
   const hasBranch = t.kind !== 'coordinator' && !!t.branch;
-  const radio = (value, label, extra = {}) => h('label', { class: 'ur-mode' }, h('input', { type: 'radio', name: 'mode', value, ...extra }), label);
+  const radio = (/** @type {string} */ value, /** @type {string | HTMLElement} */ label, /** @type {Record<string, boolean>} */ extra = {}) => h('label', { class: 'ur-mode' }, h('input', { type: 'radio', name: 'mode', value, ...extra }), label);
   const branchOpt = radio('branch', hasBranch ? h('span', {}, "This minion's branch ", h('code', {}, t.branch)) : "This minion's branch (none)", { checked: hasBranch, disabled: !hasBranch });
   const areaOpt = radio('area', 'An area of the repo', { checked: !hasBranch });
   const batchOpt = radio('batch', 'Several areas: a draft pull request for each, started one by one');
@@ -37,8 +38,10 @@ function openUltra(t) {
 
   const mode = () => /** @type {RadioNodeList} */ (form.elements.namedItem('mode')).value;
   const pathList = () => paths.value.split(/[\s,]+/).filter(Boolean);
+  /** @type {Pick<UltraCheck, 'mode' | 'paths'> | null} */
   let checked = null;
-  let timer = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
   let seq = 0;
   // The size check reads git only, never the CLI: it's free, so it runs as the choice changes.
   const check = async () => {
@@ -55,6 +58,7 @@ function openUltra(t) {
     const q = new URLSearchParams({ mode: mode() });
     if (mode() === 'area') for (const p of pathList()) q.append('path', p);
     try {
+      /** @type {UltraCheck} */
       const r = await api(`api/tickets/${t.id}/ultrareview?${q}`);
       if (n !== seq) return;
       const over = r.size.files > r.limits.files || r.size.lines > r.limits.lines;
@@ -71,10 +75,10 @@ function openUltra(t) {
     } catch (ex) {
       if (n !== seq) return;
       size.textContent = '';
-      showErr(ex.message);
+      showErr(/** @type {Error} */ (ex).message);
     }
   };
-  const showErr = (text) => {
+  const showErr = (/** @type {string} */ text) => {
     err.textContent = text;
     err.hidden = false;
   };
@@ -98,7 +102,7 @@ function openUltra(t) {
       await api(`api/tickets/${t.id}/ultrareview`, { method: 'POST', body: { mode: checked.mode, paths: checked.paths, confirm: true } });
       dialog.close();
     } catch (ex) {
-      showErr(ex.message);
+      showErr(/** @type {Error} */ (ex).message);
       btn.disabled = false;
       btn.textContent = 'Start ultra review';
     }
@@ -115,16 +119,19 @@ function openUltra(t) {
   });
 }
 
+/** @type {Record<string, string[]>} */
 const STATE = { prepping: ['info', 'Prepping'], ready: ['ok', 'Ready'], running: ['violet', 'Running'], failed: ['danger', 'Failed'] };
 
 /**
  * The batch form (#1399): areas to prep, each into its own draft pull request on the person's own GitHub login, and
  * the prepped ones, each with its own Start. Nothing runs until Start, which bills the person who presses it.
  */
-function batchPanel(t, dialogOf) {
+function batchPanel(/** @type {Ticket} */ t, /** @type {() => HTMLDialogElement | undefined} */ dialogOf) {
+  /** @type {UltraBatchRow[]} */
   let rows = [];
   let github = true;
-  let poll = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let poll;
   let sending = false; // Prep's POST is out: the poll's redraw must not re-enable the button (WP7, #1858)
   let changed = 0; // bumped by every send, Start and Discard: a read begun before one is out of date when it answers
   const list = h('div', { class: 'ur-rows' });
@@ -146,7 +153,7 @@ function batchPanel(t, dialogOf) {
     h('div', { class: 'row ur-batch-actions' }, add, h('span', { class: 'spacer' }), prep),
   );
 
-  function addArea(focus = false, a = {}) {
+  function addArea(focus = false, /** @type {{ name?: string, paths?: string, question?: string }} */ a = {}) {
     const name = h('input', { name: 'area-name', placeholder: 'Name, e.g. Database', autocomplete: 'off', value: a.name || '', 'aria-label': 'Area name' });
     const ps = h('textarea', { name: 'area-paths', rows: 2, placeholder: 'src/db.ts src/db', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Paths in the area' });
     ps.value = a.paths || '';
@@ -194,7 +201,7 @@ function batchPanel(t, dialogOf) {
     if (rows.some((r) => r.state === 'prepping' || r.state === 'running')) poll = setTimeout(() => dialogOf()?.open && load(), 3000);
   };
 
-  const rowEl = (r) => {
+  const rowEl = (/** @type {UltraBatchRow} */ r) => {
     const [tone, word] = STATE[r.state] || ['neutral', r.state];
     const start = h('button', { type: 'button', disabled: r.state !== 'ready', onclick: () => startRow(r) }, r.state === 'ready' && r.error ? 'Retry' : 'Start');
     const drop = h('button', { type: 'button', class: 'secondary', disabled: r.state === 'running', onclick: () => discard(r) }, 'Discard');
@@ -219,13 +226,13 @@ function batchPanel(t, dialogOf) {
     );
   };
 
-  const setRow = (id, patch) => {
+  const setRow = (/** @type {string} */ id, /** @type {Partial<UltraBatchRow> | null} */ patch) => {
     changed++;
     rows = patch ? rows.map((x) => (x.id === id ? { ...x, ...patch } : x)) : rows.filter((x) => x.id !== id);
     draw();
   };
 
-  function startRow(r) {
+  function startRow(/** @type {UltraBatchRow} */ r) {
     optimistic({
       key: `ur:${r.id}`,
       label: `start the ultra review of ${r.name}`,
@@ -238,7 +245,7 @@ function batchPanel(t, dialogOf) {
     });
   }
 
-  function discard(r) {
+  function discard(/** @type {UltraBatchRow} */ r) {
     optimistic({
       key: `ur:${r.id}`,
       label: `discard the ultra review of ${r.name}`,
@@ -254,7 +261,7 @@ function batchPanel(t, dialogOf) {
   async function send() {
     const boxes = /** @type {AreaBox[]} */ ([...areas.children]);
     const asks = boxes.map((b) => b.read());
-    const filled = asks.map((a, i) => [a, boxes[i]]).filter(([a]) => a.paths.length);
+    const filled = asks.map((a, i) => /** @type {const} */ ([a, boxes[i]])).filter(([a]) => a.paths.length);
     refused.hidden = true;
     if (!filled.length) return showRefused([{ name: '', error: 'Name the files or folders for at least one area.' }]);
     sending = true;
@@ -262,15 +269,16 @@ function batchPanel(t, dialogOf) {
     prep.disabled = true;
     prep.textContent = 'Prepping…';
     try {
+      /** @type {{ rows: UltraBatchRow[], refused: UltraRefused[] }} */
       const r = await api(`api/tickets/${t.id}/ultrareview/batch`, { method: 'POST', body: { areas: filled.map(([a]) => a) } });
       rows = r.rows;
       // Areas that went through leave the form; refused ones stay to be split or fixed.
-      const kept = new Set(r.refused.map((x) => filled[x.index]?.[1]));
+      const kept = new Set(r.refused.map((x) => filled[/** @type {number} */ (x.index)]?.[1]));
       for (const [, b] of filled) if (!kept.has(b)) b.remove();
       if (!areas.children.length) addArea();
       if (r.refused.length) showRefused(r.refused);
     } catch (ex) {
-      showRefused([{ name: '', error: ex.message }]);
+      showRefused([{ name: '', error: /** @type {Error} */ (ex).message }]);
     } finally {
       sending = false;
       prep.textContent = 'Prep draft PRs';
@@ -278,7 +286,7 @@ function batchPanel(t, dialogOf) {
     }
   }
 
-  const showRefused = (xs) => {
+  const showRefused = (/** @type {UltraRefused[]} */ xs) => {
     refused.replaceChildren(...xs.map((x) => h('div', {}, x.name ? h('strong', {}, `${x.name}: `) : '', x.error)));
     refused.hidden = false;
   };
@@ -286,6 +294,7 @@ function batchPanel(t, dialogOf) {
   async function load() {
     const began = changed;
     try {
+      /** @type {{ rows: UltraBatchRow[], github: boolean }} */
       const r = await api(`api/tickets/${t.id}/ultrareview/batch`);
       if (began !== changed) return rows;
       rows = r.rows;
@@ -300,18 +309,18 @@ function batchPanel(t, dialogOf) {
   return { el, load };
 }
 
-const what = (d) =>
+const what = (/** @type {UltraStarted} */ d) =>
   d.mode === 'branch'
     ? h('span', {}, 'branch ', h('code', {}, d.branch), ' against ', h('code', {}, d.base))
     : h(
         'span',
         {},
         'area ',
-        d.paths.flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)]),
+        /** @type {string[]} */ (d.paths).flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)]),
       );
 
 /** The chat's card for a review: busy until its result settles it with the findings, or why it failed. */
-export function ultraCard(data) {
+export function ultraCard(/** @type {UltraStarted} */ data) {
   const status = h('div', { class: 'ur-status muted', role: 'status' }, 'Running on ', data.by, "'s Claude account: 5-15 minutes, up to 45", h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')));
   const card = /** @type {UltraCard} */ (
     h(
@@ -338,10 +347,10 @@ export function ultraCard(data) {
   return card;
 }
 
-const prLine = (pr) => h('div', { class: 'ur-pr muted' }, 'Via draft pull request ', h('a', { href: pr.url, target: '_blank', rel: 'noopener' }, `#${pr.number}`), ', closed once the findings are in');
+const prLine = (/** @type {{ url: string, number: number }} */ pr) => h('div', { class: 'ur-pr muted' }, 'Via draft pull request ', h('a', { href: pr.url, target: '_blank', rel: 'noopener' }, `#${pr.number}`), ', closed once the findings are in');
 
 /** A result whose card isn't in the log (it was paged out): shown on its own. */
-export function ultraResult(r) {
+export function ultraResult(/** @type {UltraResult & { id: string }} */ r) {
   const card = ultraCard({ id: r.id, by: 'Someone', mode: 'area', paths: [], size: { files: 0, lines: 0 } });
   /** @type {Element} */ (card.querySelector('.qtitle')).textContent = 'Ultra review finished';
   card.settle(r);

@@ -1,9 +1,20 @@
 // The ribbon's arithmetic (#1991): the stretches of a time log (src/time-log.ts) as tiles that fit, and a log grown to now. No DOM.
+/** @import { TimeKind, TimeLog, TimeRow, TimeSeg } from './types.js' */
 
-/** A log `ms` after it was cut: its last stretch is still going on, unless the minion is dismissed. */
+/**
+ * A log `ms` after it was cut: its last stretch is still going on, unless the minion is dismissed.
+ * @param {TimeLog} log
+ * @param {number} ms
+ * @returns {TimeLog}
+ */
 export function grow(log, ms) {
   const last = log.segs.at(-1);
   if (log.closed || !last || ms <= 0) return log;
+  /**
+   * @template {{ work: number, wait: number, lost: number }} R
+   * @param {R} r
+   * @returns {R}
+   */
   const plus = (r) => (last.kind === 'gone' ? r : { ...r, [last.kind]: r[last.kind] + ms });
   return {
     ...log,
@@ -18,16 +29,21 @@ export function grow(log, ms) {
  * At most about `max` tiles for the stretches, in order. One that isn't work and is longer than everything else together
  * is squeezed, so the work beside it can be read; stretches too short to see join their neighbours, and the tile takes
  * the kind most of it is. Lost time always keeps a tile of its own.
+ * @param {TimeSeg[]} segs
+ * @param {number} max
  */
 export function tiles(segs, max) {
-  const long = (s) => s.end - s.start;
+  const long = (/** @type {TimeSeg} */ s) => s.end - s.start;
   const whole = segs.reduce((n, s) => n + long(s), 0);
   const longest = segs.reduce((n, s) => (s.kind === 'work' ? n : Math.max(n, long(s))), 0);
   const rest = whole - longest;
   const cap = longest > rest ? Math.max(rest * 0.6, 120_000) : Infinity;
-  const size = (s) => (s.kind === 'work' ? long(s) : Math.min(long(s), cap));
+  const size = (/** @type {TimeSeg} */ s) => (s.kind === 'work' ? long(s) : Math.min(long(s), cap));
   const least = segs.reduce((n, s) => n + size(s), 0) / Math.max(1, max);
+  /** @typedef {{ segs: TimeSeg[], size: number, alone: boolean }} Group */
+  /** @type {Group[]} */
   const out = [];
+  /** @type {Group | null} */
   let group = null;
   for (const s of segs) {
     const alone = s.kind === 'lost' || (s.kind !== 'work' && long(s) > cap);
@@ -36,13 +52,13 @@ export function tiles(segs, max) {
     group.size += size(s);
   }
   return out.map(({ segs: of, size: flex, alone }) => {
-    const ms = { work: 0, wait: 0, lost: 0, gone: 0 };
+    const ms = /** @type {Record<TimeKind, number>} */ ({ work: 0, wait: 0, lost: 0, gone: 0 });
     for (const s of of) ms[s.kind] += long(s);
-    const kind = Object.keys(ms).reduce((a, b) => (ms[b] > ms[a] ? b : a));
+    const kind = /** @type {TimeKind[]} */ (Object.keys(ms)).reduce((a, b) => (ms[b] > ms[a] ? b : a));
     const main = of.filter((s) => s.kind === kind).reduce((a, b) => (long(b) > long(a) ? b : a));
-    return { start: of[0].start, end: of.at(-1).end, kind, ms, main, flex, guess: !!main.guess, squeezed: alone && kind !== 'lost' };
+    return { start: of[0].start, end: /** @type {TimeSeg} */ (of.at(-1)).end, kind, ms, main, flex, guess: !!main.guess, squeezed: alone && kind !== 'lost' };
   });
 }
 
 /** What a row is known by from one cut to the next; null for a step with no time yet. */
-export const rowKey = (r) => (r?.start == null ? null : `${r.type}:${r.start}`);
+export const rowKey = (/** @type {Pick<TimeRow, 'type' | 'start'> | null | undefined} */ r) => (r?.start == null ? null : `${r.type}:${r.start}`);

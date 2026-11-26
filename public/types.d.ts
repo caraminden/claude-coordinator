@@ -1191,6 +1191,210 @@ export interface WorkersTile {
   waits: { count: number; median: number | null; woken: number; cold: number };
 }
 
+// Round 4b: work-flow.js and flowmath.js (GET /api/projects/:id/flow: src/work-flow.ts FlowView)
+export type FlowKind = 'feature' | 'bug' | 'chore' | 'research' | 'other';
+export type FlowPath = 'shipped' | 'untold' | 'refused' | 'other' | 'never';
+export type FlowEnd = 'live' | 'late' | 'main' | 'build' | 'nothing' | 'why' | 'norepo' | 'answer' | 'open';
+export interface FlowMinion {
+  id: number;
+  number: number;
+  title: string;
+  kind: FlowKind;
+  path: FlowPath;
+  end: FlowEnd;
+  why: string | null;
+  cost: number;
+  refused: number;
+  said: string;
+}
+export interface FlowView {
+  from: number;
+  to: number;
+  minions: FlowMinion[];
+  unread: number;
+  repo: boolean;
+  git: boolean;
+  early: boolean;
+  releases: boolean;
+}
+
+// Round 4b: day-strips.js (GET /api/projects/:id/day-strips: src/day-strips.ts)
+export type StripPartName = 'work' | 'person' | 'line' | 'ci' | 'deploy' | 'other' | 'none';
+export interface Strip {
+  id: number;
+  number: number | null;
+  title: string;
+  type: string | null;
+  start: number;
+  live: number;
+  parts: { start: number; end: number; part: StripPartName }[];
+  totals: Record<StripPartName, number>;
+}
+export interface DayStrips {
+  day: string;
+  from: number;
+  to: number;
+  strips: Strip[];
+}
+
+// Round 4b: box-capacity.js (GET /api/box-capacity: src/box-capacity.ts boxCapacity)
+export interface BoxRow {
+  count: number;
+  typical: number | null;
+  high: number | null;
+  stalls: number;
+  stallOf: number;
+}
+/** One reading: when, turns running, load, memory used (%), memory stall (%). */
+export type BoxReadingRow = [at: number, turns: number, load: number, used: number, stall: number | null];
+export interface BoxCapacity {
+  cores: number;
+  enough: number;
+  stallPct: number;
+  stallShare: number;
+  readings: BoxReadingRow[];
+  near: BoxRow[];
+  bands: (BoxRow & { from: number; to: number | null })[];
+  comfortable: { turns: number | null; past: number | null };
+  waiting: { until: number; count: number };
+}
+
+// Round 4b: worker-line.js and worker-linemath.js (GET /api/line: src/routes/urgent.ts line)
+/** A row of the line as any of its lists sends it, or as a press adds it: `ticket` is null for a minion in a scheme the person can't see. */
+export interface LineRow {
+  ticket: number | null;
+  project?: number;
+  number?: number;
+  title?: string;
+  person?: string | null;
+  since?: number;
+  waiting?: boolean;
+  working?: boolean;
+  urgent?: boolean;
+  forced?: boolean;
+  held?: string | null;
+  first?: boolean;
+  warm?: boolean;
+  fresh?: boolean;
+  quick?: boolean;
+  after?: boolean;
+  kind?: 'person' | 'taskmaster' | 'server';
+  by?: string | null;
+  reason?: string;
+  at?: number;
+  user?: number;
+}
+export interface LaneRow {
+  ticket: number | null;
+  project?: number;
+  number?: number;
+  title?: string;
+  person: string | null;
+  since: number;
+  moved: boolean;
+}
+export interface LineData {
+  forced: LineRow[];
+  urgent: LineRow[];
+  lane?: LaneRow[];
+  line: LineRow[];
+}
+/** The Urgent group and everyone else, as worker-linemath.js lineGroups makes them. */
+export interface LineGroups {
+  urgent: LineRow[];
+  rest: LineRow[];
+}
+
+// Round 4b: time-log.js (GET api/tickets/:id/time-log: src/time-log.ts TimeLog)
+export type TimeKind = 'work' | 'wait' | 'lost' | 'gone';
+export type TimeSub = 'person' | 'ship' | 'deploy' | 'hold' | 'sealed' | 'limit' | 'job' | 'wake' | 'start' | 'stopped' | 'outside' | 'unknown' | 'kill' | 'restart' | 'cut' | 'overload' | 'finished' | 'dismissed';
+export interface TimeSeg {
+  start: number;
+  end: number;
+  kind: TimeKind;
+  sub?: TimeSub;
+  title?: string;
+  event?: number;
+  guess?: true;
+  row?: number;
+}
+export interface TimeRow {
+  type: 'step' | 'line' | 'wait';
+  title: string;
+  kind: TimeKind;
+  sub?: TimeSub;
+  status?: string;
+  outcome?: string;
+  continued?: true;
+  more?: true;
+  start: number | null;
+  end: number | null;
+  work: number;
+  wait: number;
+  lost: number;
+  guess?: true;
+  event?: number;
+}
+export interface TimeLog {
+  start: number;
+  end: number;
+  running: boolean;
+  closed: boolean;
+  segs: TimeSeg[];
+  rows: TimeRow[];
+  totals: { work: number; wait: number; lost: number; guess: number };
+}
+
+// Ultra review (public/ultrareview.js; src/ultrareview.ts, src/routes/tickets.ts).
+export interface UltraSize {
+  files: number;
+  lines: number;
+}
+/** GET api/tickets/:id/ultrareview: how big a review would be, before it is confirmed. */
+export interface UltraCheck {
+  mode: 'branch' | 'area';
+  base: string;
+  branch?: string;
+  paths?: string[];
+  size: UltraSize;
+  limits: UltraSize;
+  linked: boolean;
+  running: boolean;
+}
+/** A prepped review's row, without the repo and person the server keeps. */
+export interface UltraBatchRow {
+  id: string;
+  ticketId: number;
+  by: string;
+  name: string;
+  paths: string[];
+  question?: string;
+  base: string;
+  size: UltraSize;
+  state: 'prepping' | 'ready' | 'running' | 'failed';
+  error?: string;
+  pr?: { number?: number; url?: string };
+  at: number;
+}
+/** An area the batch form refused, by its place in what was sent. */
+export interface UltraRefused {
+  index?: number;
+  name: string;
+  error: string;
+}
+/** A review's chat card (the `ultrareview` event). */
+export interface UltraStarted {
+  id: string;
+  by: string;
+  mode: 'branch' | 'area';
+  base?: string;
+  branch?: string;
+  paths?: string[];
+  size: UltraSize;
+  pr?: { number: number; url: string };
+  question?: string;
+}
+
 // Round 4: ci.js (GET api/ci: src/routes/machines.ts, src/ci-health.ts snapshot, src/ci-view.ts CiView, src/ci-problems.ts Problem)
 /** Whose change a run or job tests: a minion's chat (`href`), or what the run is. */
 export interface CiWho {

@@ -27,9 +27,14 @@ the last one in line waited for every run ahead of it.
   can't be rebuilt without the pulled ones goes back in line, blamed for nothing. No ship named: the split below.
   - A ship pulled on a guess runs the failing test alone on main, here, before it is blamed. Red alone (twice, and green
     on main): back to its minion with that. Green alone while another ship pulled for the same test was red alone: it
-    waits for the next train. None of them red alone: they wait off the train, and all go back once the train without
-    them passes the test. If that train is red on the test again, the guess was wrong: back in line, blamed for nothing
-    (a pick: "if none fails alone, all of them go back" read as once the train shows it was one of them).
+    waits for the next train. None of them red alone: they wait off the train until the train without them has a
+    verdict. If that train is red on the test again, the guess was wrong: back in line, blamed for nothing.
+    Amended by #2098 (Josh, 2026-11-26, "Have we not analyzed the guessing at all?"; picked "First, before the split"):
+    the train passing without them is no proof either, so nobody is refused on a guess. Of the first 10 refused that
+    way, 6 were innocent, 3 on tests with long flake records. A held ship goes back in line once that train passes:
+    when its tests are known flakes (the known-flake rule's sightings), it rides trains as before; otherwise it ships
+    alone, riding no train and taking no riders, so its own CI run is the proof and a guess can't pull it off train
+    after train. This covers the pipeline review's LB5 too (a burn-in red, or a green by the known-flake excuse).
   - The test's runs on the train's prefixes (the pin) name a ship but don't prove it: the named ship runs alone on main too.
     Red alone: it goes back, and the other ships its test named stay on the train. Not red alone: a guess like any other,
     and the refusal says which runs it had (alone, on the train's prefixes, or none because it sits on another rider).

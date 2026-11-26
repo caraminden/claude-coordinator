@@ -158,7 +158,8 @@ test('a rider refused for a skipped test hears so, for its wake to say skipped, 
   const done = await l.go();
   assert.equal(done[3].status, 1, done[3].stderr);
   assert.match(done[3].stderr, /It was pulled off the train on that guess/);
-  assert.match(done[3].stderr, /^land: a test was skipped in CI \(https:\/\/ci\/\d+\): the format check$/m);
+  // Pulled on a guess, it ships alone (#2098), and its own run's red says the skip as a refused ship's does.
+  assert.match(done[3].stderr, /^land: a test was skipped in CI \(https:\/\/ci\/\d+\): the format check\. A skipped test is a real failure/m);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
@@ -171,7 +172,7 @@ test("a file CI didn't rerun because a real failure already made the run red nam
   assert.match(done[3].stderr, /in test\/real\.test\.ts, which ticket\/4-x changed.*pulled off the train on that guess/);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
-  assert.equal(l.runs(), 3, "ship 1's, the red train's and the smaller train's");
+  assert.equal(l.runs(), 4, "ship 1's, the red train's, the smaller train's and #4's own (#2098)");
   l.done();
 });
 

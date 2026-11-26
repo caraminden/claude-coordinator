@@ -258,14 +258,18 @@ export async function fireLive(app: App): Promise<number> {
  * CI health's wake for a finished run the minion dispatched (#678), first offered here (#2089): a flake-proof run while a
  * hand-off is armed on its proof. Green on the armed commit ships it; any other end on that commit drops it and wakes the
  * minion with the run; a run on another commit is a chat note, since it proves nothing about what is armed (held mail would
- * count as someone writing, and rule the armed ship out). True when it
+ * count as someone writing, and rule the armed ship out). Any other run while armed is held mail. True when it
  * took the run, so CI health's own wake isn't sent.
  */
 export function fireProof(app: App, ticketId: number, run: Pick<Run, 'path' | 'name' | 'head_sha' | 'conclusion'>, text: string): boolean {
-  if (workflowFile(run as Run) !== PROOF_WORKFLOW) return false;
-  app.store.setSetting(proofKey(ticketId), { head: run.head_sha, conclusion: run.conclusion });
   const armed = app.store.getSetting<Armed>(armedKey(ticketId));
-  if (armed?.when !== 'proof') return false;
+  // Any other wake while armed, or a second green on a commit whose green already started the ship, is held mail: a turn
+  // now would rule the armed ship out (a person reads it in the chat, the minion on its next turn).
+  const held = () => (app.runner.leaveMail(ticketId, APP_NAME, text), true);
+  if (workflowFile(run as Run) !== PROOF_WORKFLOW) return armed ? held() : false;
+  const seen = app.store.getSetting<{ head: string; conclusion: string }>(proofKey(ticketId));
+  app.store.setSetting(proofKey(ticketId), { head: run.head_sha, conclusion: run.conclusion });
+  if (armed?.when !== 'proof') return armed || (seen?.head === run.head_sha && seen.conclusion === 'success' && run.conclusion === 'success') ? held() : false;
   const short = armed.head.slice(0, 7);
   if (run.head_sha !== armed.head) {
     app.runner.emit(ticketId, 'note', { text: `${text}\n\n(It ran on \`${String(run.head_sha).slice(0, 7)}\`, not \`${short}\`, the commit your armed hand-off waits on, so it changes nothing there.)` });

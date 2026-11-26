@@ -348,6 +348,7 @@ test('a proof already green on its commit before the hand-off ships at once; one
   assert.equal(red.status, 409, JSON.stringify(red.data));
   assert.match(String(red.data.error), /ended failure/);
   await proofRun(m, head(m), 'success');
+  await until('the green is told and its turn is over', () => m.texts().some((x) => x.startsWith('flake-proof run success')) && m.state().status === 'idle');
   const r = await m.handOff({ when: 'proof' });
   assert.equal(r.status, 202, JSON.stringify(r.data));
   assert.equal(r.data.armed, undefined);
@@ -379,4 +380,26 @@ test('when: {live: <commit>} on a commit the server already runs ships at once',
   assert.equal(r.status, 202, JSON.stringify(r.data));
   assert.equal(r.data.armed, undefined);
   await until('it ships', () => m.state().status === 'closed');
+});
+
+test('a finished CI run while armed on something else is held mail, not a wake: the live trigger still ships it', async () => {
+  const leader = store.createTicket({ project_id: projectId, title: 'Leader', permission_mode: 'default', created_by: 'Cara' });
+  const m = await minion('src/a.ts');
+  const turns = ownTurns(m);
+  await armedFor(m, { live: `#${leader.number}` }, `armed: ships when #${leader.number} is live`);
+  await proofRun(m, head(m), 'success');
+  await srv.call('/api/test/dispatched-run', { ticket: m.id, text: 'tests run failure', run: { id: Date.now(), path: '.github/workflows/tests.yml', head_sha: head(m), conclusion: 'failure', status: 'completed' } });
+  await srv.call(`/api/tickets/${leader.id}/status`, { status: 'closed' });
+  await until('it ships and closes', () => m.state().status === 'closed');
+  assert.equal(ownTurns(m), turns, 'no turn');
+});
+
+test('a second green proof on the same commit while the first ship starts is held mail, and the ship goes on', async () => {
+  const m = await minion('src/a.ts');
+  const turns = ownTurns(m);
+  await armedFor(m, 'proof', PROOF_NOTE);
+  await Promise.all([proofRun(m, head(m), 'success'), proofRun(m, head(m), 'success')]);
+  await until('it ships and closes', () => m.state().status === 'closed');
+  assert.ok(!m.texts().some((x) => x.includes("didn't ship by itself")));
+  assert.equal(ownTurns(m), turns, 'no turn');
 });

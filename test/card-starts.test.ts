@@ -10,6 +10,8 @@ import { json } from './typed.ts';
 // `start` makes the minion when a person picks it plainly, with no Taskmaster turn, as that person's, child of the card's owner.
 
 type Ev = { id: number; kind: string; data: string };
+/** The answer message to card `id`, among a chat's events (other messages may come after it). */
+const answerTo = (events: Ev[], id: string) => events.find((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === id)?.data ?? '';
 type Row = { id: number; number: number; title: string; parent: number | null; person_id: number | null; model: string; effort: string; project_id: number };
 
 test("a plain pick of a start option starts that minion as the picker's; a typed note or a used handoff starts nothing", async () => {
@@ -76,14 +78,14 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
       assert.equal(twice.status, 202);
       assert.equal((db.prepare("SELECT count(*) AS n FROM tickets WHERE title = 'Do a'").get() as { n: number }).n, 1, 'no second minion from one handoff');
       const woke = (await s.call(`/api/tickets/${owner.id}/events?after=0`)).data as Ev[];
-      assert.match(woke.filter((e) => e.kind === 'user_message').at(-1)!.data, /Not started: Do a: .*already started from/);
+      assert.match(answerTo(woke, again.data.id), /Not started: Do a: .*already started from/);
 
       // A typed note with the pick: nothing starts, the owner is woken as before.
       const noted = await card([opt('c', {}, true), none]);
       await s.call(`/api/tickets/${owner.id}/answer`, { questionId: noted.data.id, answers: [{ selected: ['Start c'], other: 'but only the first half' }] });
       assert.equal(made('Do c'), undefined, 'a note may change the brief: nothing started');
       const last = (await s.call(`/api/tickets/${owner.id}/events?after=0`)).data as Ev[];
-      assert.match(last.filter((e) => e.kind === 'user_message').at(-1)!.data, /started nothing by itself/);
+      assert.match(answerTo(last, noted.data.id), /started nothing by itself/);
     } finally {
       db.close();
     }

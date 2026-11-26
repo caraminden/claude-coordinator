@@ -260,8 +260,9 @@ test("every front-end script is in the front end's check, with the page's global
   const scripts = execFileSync('git', ['ls-files', '--', 'public'], { cwd: ROOT, encoding: 'utf8' })
     .split('\n')
     .filter((f) => /\.(?:[cm]?jsx?|tsx|[cm]ts|ts)$/.test(f) && !f.endsWith('.d.ts'));
-  // The two agents are Node programs people download, not pages.
-  const pages = scripts.filter((f) => !['public/machine-agent.mjs', 'public/runner-agent.mjs'].includes(f));
+  // The agents are Node programs people download, not pages: the two agents, and the worker's (Build 7) that run beside them on a person's PC.
+  const agents = ['public/machine-agent.mjs', 'public/runner-agent.mjs', 'public/machine-sync.mjs', 'public/machine-worker.mjs', 'public/role-setup-agent.mjs', 'public/worker-agent.mjs'];
+  const pages = scripts.filter((f) => !agents.includes(f));
   const ours = (files: Iterable<string>) => [...files].filter((f) => !f.startsWith('node_modules/'));
   const page = ours(await tscFiles(ROOT, ['tsconfig.public.json']));
   const worker = ours(await tscFiles(ROOT, ['tsconfig.sw.json']));

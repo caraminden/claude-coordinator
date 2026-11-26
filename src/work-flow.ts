@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from './db.ts';
 import type { FlowRow } from './db/flow.ts';
-import { pacificDay } from './pacific.ts';
+import { pacificDay, pacificDayStart } from './pacific.ts';
 import { turnEnv } from './turn-launch.ts';
 
 export type Kind = 'feature' | 'bug' | 'chore' | 'research' | 'other';
@@ -72,18 +72,13 @@ export interface FlowView {
 const DAY_MS = 86_400_000;
 /** The most days one range covers. */
 export const MAX_DAYS = 400;
-/** The moment a Pacific day ('2026-11-25') starts; null when it is no day. */
-export function dayStart(day: string): number | null {
-  if (!/^\d{4}-\d\d-\d\d$/.test(day)) return null;
-  return ['-07:00', '-08:00'].map((z) => Date.parse(`${day}T00:00:00${z}`)).find((t) => Number.isFinite(t) && pacificDay(t) === day && pacificDay(t - 1) !== day) ?? null;
-}
-const RECORDED = dayStart(REFUSALS_FROM) ?? 0;
+const RECORDED = pacificDayStart(REFUSALS_FROM) ?? 0;
 /** The range a page asked for, both days in it: the last two weeks by default; null when it isn't one. */
 export function rangeOf(from: string | null, to: string | null, now = Date.now()): { from: number; to: number } | null {
-  const last = dayStart(to ?? pacificDay(now));
+  const last = pacificDayStart(to ?? pacificDay(now));
   if (last === null) return null;
-  const end = dayStart(pacificDay(last + 1.5 * DAY_MS))!; // a day is 23 to 25 hours long
-  const start = dayStart(from ?? pacificDay(last + DAY_MS / 2 - 13 * DAY_MS));
+  const end = pacificDayStart(pacificDay(last + 1.5 * DAY_MS))!; // a day is 23 to 25 hours long
+  const start = pacificDayStart(from ?? pacificDay(last + DAY_MS / 2 - 13 * DAY_MS));
   return start === null || start >= end || end - start > (MAX_DAYS + 1) * DAY_MS ? null : { from: start, to: end };
 }
 

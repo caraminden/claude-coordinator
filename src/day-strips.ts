@@ -4,7 +4,7 @@
 // the strip's parts and lays the ship's own stages (releases.changes) over the time the log calls waiting.
 import type { Store } from './db.ts';
 import type { Ticket } from './db-rows.ts';
-import { pacificDay } from './pacific.ts';
+import { pacificDay, pacificDayStart } from './pacific.ts';
 import { timeLog, type TimeSeg } from './time-log.ts';
 
 /** A strip's parts, in the order they are drawn and summed. */
@@ -36,24 +36,6 @@ export interface DayStrips {
 const SHIPPED = /^(Shipped and live|Shipped), so the server dismissed|^The deploy is live\b/;
 /** A ship's stages (src/waits.ts TRACK) as the strip's parts. */
 const STAGE_PART: Record<string, Part> = { line: 'line', rebase: 'line', test: 'ci', build: 'ci', deploy: 'deploy', restart: 'deploy' };
-
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** The first ms of Pacific day `day` ("2026-11-25"); null for a string that isn't a day. */
-export function dayStartMs(day: string): number | null {
-  if (!DAY_RE.test(day)) return null;
-  const [y, m, d] = day.split('-').map(Number);
-  // Pacific midnight is 07:00 or 08:00 UTC; a zone a test fixes may be anything, so look across the whole UTC day.
-  for (let h = -14; h <= 14; h++) {
-    const t = Date.UTC(y, m - 1, d, h);
-    if (pacificDay(t) === day && pacificDay(t - 1) !== day) return t;
-  }
-  // A zone whose midnight isn't on the hour: step back from noon a minute at a time.
-  let t = Date.UTC(y, m - 1, d, 12);
-  if (pacificDay(t) !== day) return null;
-  while (pacificDay(t - 60_000) === day) t -= 60_000;
-  return t;
-}
 
 /** The day after `day`, as a day. */
 const nextDay = (day: string) => {
@@ -143,8 +125,8 @@ function wentLive(store: Store, projectId: number, from: number, to: number): Ma
 
 /** Pacific day `day`'s first ms and the next day's; null for a string that isn't a day, or a day with no next one (9999-12-31). */
 export function dayBounds(day: string): { from: number; to: number } | null {
-  const from = dayStartMs(day);
-  const to = from == null ? null : dayStartMs(nextDay(day));
+  const from = pacificDayStart(day);
+  const to = from == null ? null : pacificDayStart(nextDay(day));
   return from == null || to == null ? null : { from, to };
 }
 

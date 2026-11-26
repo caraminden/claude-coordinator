@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { addReview, agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
-import { sameChange } from '../src/ship-handoff.ts';
+import { brokenTest, sameChange } from '../src/ship-handoff.ts';
 import { git } from './git.ts';
 import { spawnSync } from 'node:child_process';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
@@ -313,6 +313,7 @@ test('only a passed-alone refusal goes back by itself: failed again alone, burn-
     'own test': '✖ test/e.test.ts › it breaks\nland: tests failed on the rebased branch in CI (https://github.com/o/r/actions/runs/2), so main is untouched\n',
     'broken test': `land: broken test, not a flake: test/b.test.ts red in 6 of the last 10 runs\n${ALONE}`,
     'kept twice': `land: only flakes failed again (test/b.test.ts), but it has kept its place 2 times already, so it is refused this time\n${ALONE}`,
+    'leak guard': `The tests left 2 process(es) running after they ended\n${ALONE}`,
   };
   for (const [kind, out] of Object.entries(kinds)) {
     let asked = 0;
@@ -925,6 +926,22 @@ test('the server puts a passed-alone refusal back in line with no turn, and wake
   }
 });
 
+test("brokenTest asks known-flakes.ts about every passed-alone file, the fresh run's too (#2030, #1487)", async () => {
+  const shared = join(root, 'broken', 'shared');
+  // 3 reds of 11 runs in the last hours: broken (test/known-flakes.test.ts's fixture), each line in its own day's file.
+  const log = (ago: number, rest: string) => {
+    const t = new Date(Date.now() - ago * 60_000).toISOString();
+    mkdirSync(join(shared, 'retro-log', t.slice(0, 10)), { recursive: true });
+    writeFileSync(join(shared, 'retro-log', t.slice(0, 10), 'land.md'), `- ${t.slice(11, 19)}Z · ${rest}\n`, { flag: 'a' });
+  };
+  for (let i = 0; i < 10; i++) log(i + 1, `timing · ticket/${100 + i}-r · line 0 · rebase 1 · ci-queue 8 · ci-run 107 · fallback - · deploy 7 · live 42 · landed`);
+  for (let i = 0; i < 3; i++) log(i + 1, `flake · test/x.test.ts · load 3 · ticket/${10 + i}-o · in CI`);
+  const env = { PATH: process.env.PATH!, COORDINATOR_SHARED_DIR: shared, LAND_FLAKE_DB: join(root, 'broken', 'none.db'), COORDINATOR_TICKET: '1' };
+  assert.equal(await brokenTest(['test/a.test.ts', 'test/x.test.ts'], 'ticket/1-me', env), 'test/x.test.ts');
+  assert.equal(await brokenTest(['test/a.test.ts'], 'ticket/1-me', env), '', 'a flake that is not broken');
+  assert.equal(await brokenTest(['test/a.test.ts'], 'ticket/1-me', env, join(root, 'no-such.ts')), null, 'no answer is no go');
+});
+
 test('sameChange: the same commit or a rebase of it is no move; a commit added or edited is (#2030)', () => {
   const cwd = join(root, 'same-change');
   mkdirSync(cwd, { recursive: true });
@@ -947,6 +964,11 @@ test('sameChange: the same commit or a rebase of it is no move; a commit added o
     git(cwd, 'rebase', '-q', 'main');
     assert.notEqual(git(cwd, 'rev-parse', 'HEAD').trim(), head);
     assert.equal(await sameChange(cwd, head), true, "land.sh's rebase of it");
+    const rebased = git(cwd, 'rev-parse', 'HEAD').trim();
+    writeFileSync(join(cwd, 'b.txt'), 'mine \n');
+    git(cwd, 'commit', '-q', '--amend', '-am', 'mine');
+    assert.equal(await sameChange(cwd, head), false, 'a whitespace edit is a move too');
+    git(cwd, 'reset', '-q', '--hard', rebased);
     writeFileSync(join(cwd, 'b.txt'), 'mine, fixed\n');
     git(cwd, 'commit', '-qam', 'fix');
     assert.equal(await sameChange(cwd, head), false, 'a commit added');

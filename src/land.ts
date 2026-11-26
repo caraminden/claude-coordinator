@@ -496,10 +496,10 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
 /**
  * Whether a refused hand-off goes back in line with no turn (#2030, Josh, 2026-11-25, "Yes, re-queue it"): a red of load
  * alone (the passed-alone kind), once a hand-off, and not past what already says it isn't load: a broken test (#1487) or
- * land.sh's own keeps in place used up (flake_keep).
+ * land.sh's own keeps in place used up (flake_keep), or the leak guard's red beside them. requeueShip asks about broken tests too.
  */
 export function loadOnly(output: string, cls: { kind: string } | null, h: Handoff): boolean {
-  return cls?.kind === 'passed-alone' && !h.requeued && !/^land: broken test, not a flake: /m.test(output) && !/has kept its place \d+ times already/.test(output);
+  return cls?.kind === 'passed-alone' && !h.requeued && !/^land: broken test, not a flake: /m.test(output) && !/has kept its place \d+ times already/.test(output) && !/The tests left \d+ process\(es\) running/.test(output); // the leak guard's red is no load (flake_free)
 }
 
 /** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
@@ -695,7 +695,7 @@ export interface HandoffDeps {
   /** A clean land, wherever it went (main or a build): queue the minion's lines (#1119). Its errors are caught. */
   learned?(id: number, h: Handoff): void;
   /** Put a refused hand-off back in line with no turn (#2030): null once it is, else why not, said in the wake. */
-  requeue?(id: number, h: Handoff & { args: string[] }): Promise<string | null>;
+  requeue?(id: number, h: Handoff & { args: string[] }, output: string): Promise<string | null>;
   /** A ship on main with a live probe (#1741, LiveProbes.shipped): true when it failed and woke the minion. */
   probe?(id: number, probe: Probe, commit: string | null, when: 'live' | 'later' | 'nowhere'): Promise<boolean>;
 }
@@ -819,7 +819,7 @@ export class LandHandoffs {
         console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
       }
       // Not in once(): the new hand-off starts in a fresh folder, and a step marked done would carry over into it.
-      const notAgain = r.kind === 'failed' && loadOnly(run.output, cls, h) && this.d.requeue && !('told' in done) ? await this.d.requeue(id, h) : '';
+      const notAgain = r.kind === 'failed' && loadOnly(run.output, cls, h) && this.d.requeue && !('told' in done) ? await this.d.requeue(id, h, run.output) : '';
       if (notAgain === null) {
         runner.emit(id, 'note', { text: `Shipping was refused on load alone (the failed test files passed when rerun alone), so the server put this ship back in line by itself, once, with no turn. It wakes you only if it is refused again.` });
         return true;

@@ -1846,7 +1846,7 @@ const landHandoffs = new LandHandoffs({
   runner,
   from: APP_NAME,
   probe: (id, probe, commit, when) => liveProbes.shipped(id, probe, commit, when),
-  requeue: (id, h) => requeueShip(app, id, h), // app is set by the time a land ends
+  requeue: (id, h, output) => requeueShip(app, id, h, output), // app is set by the time a land ends
   flakes: (id, output) => {
     const t = store.getTicket(id);
     if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output);

@@ -183,14 +183,35 @@ export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Re
 
 /**
  * Whether the branch at `cwd` holds the same change as `head`, its commit at the hand-off: the same commit, or land.sh's
- * rebase of it (each commit's patch the same, by git cherry, both ways). A commit added, dropped or edited is a move.
+ * rebase of it: the same lines added and removed, whitespace and all, from where each left main. Any edit is a move.
  */
 export async function sameChange(cwd: string, head: string): Promise<boolean> {
   const now = await gitOut(['rev-parse', 'HEAD'], cwd);
   if (!now) return false;
   if (now === head) return true;
-  const sides = await Promise.all([gitOut(['cherry', head, 'HEAD', 'main'], cwd), gitOut(['cherry', 'HEAD', head, 'main'], cwd)]);
-  return sides.every((out) => out !== null && out.split('\n').every((l) => !l || l.startsWith('- ')));
+  const lines = async (tip: string) => {
+    const base = await gitOut(['merge-base', 'main', tip], cwd);
+    const diff = base && (await gitOut(['diff', '--no-color', '--no-ext-diff', '--no-renames', '-U0', base, tip], cwd, { trim: false }));
+    return typeof diff === 'string' ? diff.replace(/^(index |@@ ).*\n/gm, '') : null;
+  };
+  const [was, is] = await Promise.all([lines(head), lines(now)]);
+  return was !== null && was === is;
+}
+
+/** The test files a refusal's output says failed in the full run and passed alone, every run's. */
+const aloneFiles = (output: string) => [...new Set([...output.matchAll(/run-tests: (\S+\.test\.ts): failed in the full run, passed alone/g)].map((m) => m[1]))];
+
+/**
+ * The broken test among `files` (#1487: red in too many of the last hours' runs), by land.sh's own tools/known-flakes.ts;
+ * land.sh asks it only of a first CI red's files, never of the fresh run's. '' when none is; null when it can't tell.
+ */
+export function brokenTest(files: string[], branch: string, env: Record<string, string>, script = join(import.meta.dirname, '..', 'tools', 'known-flakes.ts')): Promise<string | null> {
+  return new Promise((done) =>
+    execFile(process.execPath, ['--no-warnings', script, branch, ...files], { env, timeout: 30_000 }, (err, out) => {
+      const broken = /^broken test, not a flake: (\S+)/m.exec(out ?? '');
+      done(broken ? broken[1] : out ? '' : err ? null : '');
+    }),
+  );
 }
 
 /**
@@ -198,7 +219,7 @@ export async function sameChange(cwd: string, head: string): Promise<boolean> {
  * "Yes, re-queue it"). At the end of the line, like any hand-off: land.sh's own keeps in place (flake_keep) are used up by
  * now, and the time behind the others is time for the load to pass. Null once it is in line; else why not, for the wake.
  */
-export async function requeueShip(app: App, ticketId: number, h: Handoff & { args: string[] }): Promise<string | null> {
+export async function requeueShip(app: App, ticketId: number, h: Handoff & { args: string[] }, output: string): Promise<string | null> {
   const t = app.store.getTicket(ticketId);
   if (!t || t.kind !== 'ticket' || !t.cwd) return 'it has no worktree';
   const why = () => {
@@ -217,10 +238,18 @@ export async function requeueShip(app: App, ticketId: number, h: Handoff & { arg
   if (dirty !== '') return 'your worktree has uncommitted changes or a rebase in progress';
   const lane = await laneRefusal(app, t);
   if (lane) return lane;
+  const env = landEnv(app, t, h);
+  const broken = await brokenTest(aloneFiles(output), t.branch ?? '', { ...env, LAND_FLAKE_DB: join(app.dataDir, 'coordinator.db') });
+  if (broken === null) return "it couldn't tell whether the failed files are broken tests (tools/known-flakes.ts gave no answer)";
+  if (broken) return `${broken} is a broken test, not a flake: red in too many of the last hours' runs`;
   const late = why();
   if (late) return late;
   const { args, ...rest } = h;
-  if (!startHandoff(app, t, { cwd: t.cwd, env: landEnv(app, t, h), args, h: { ...rest, requeued: true } }, { kind: 'server' }, true)) return 'a ship of yours already ran';
+  try {
+    if (!startHandoff(app, t, { cwd: t.cwd, env, args, h: { ...rest, requeued: true } }, { kind: 'server' }, true)) return 'a ship of yours already ran';
+  } catch (err) {
+    return `starting it again failed (${thrown(err).message})`;
+  }
   return null;
 }
 

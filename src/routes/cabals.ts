@@ -4,7 +4,7 @@
 import { type Board, boardText, readBoard, timelineText } from '../cabal-board.ts';
 import type { Store } from '../db.ts';
 import { cabalBoardFor } from '../access.ts';
-import { APPROVED_FIELDS, cabalChanged, memberJoined, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
+import { APPROVED_FIELDS, cabalChanged, memberJoined, retroCheck, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
 import { schemeTarget } from './projects.ts';
 import { EFFORTS, MODELS } from '../db.ts';
 import type { CabalRowFields } from '../db/cabals.ts';
@@ -76,6 +76,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
     if (was != null) {
       runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
       cabalChanged(app, was);
+      retroCheck(app, was);
     }
     return;
   }
@@ -236,6 +237,7 @@ export const cabalRoutes: Route[] = [
           store.updateCabalRow(row.id, fields);
         }
         changed(app, ticket, ticket.id);
+        if (body.remove === true) retroCheck(app, ticket.id);
         return json(res, 200, { row: row.id, removed: body.remove === true });
       }
       if (action === 'log') {

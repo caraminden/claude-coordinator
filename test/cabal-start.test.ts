@@ -223,4 +223,13 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   await until('#3 idle', async () => (await s.call(`/api/tickets/${three.id}`)).data.ticket.status !== 'running');
   assert.equal((await s.call(`/api/tickets/${three.id}/status`, { status: 'closed' })).status, 200);
   await until('asked again', async () => (await asked()) === 2);
+  // A planned piece dropped after the last member went: removing its row asks too.
+  const four = await make('Sweep four');
+  assert.equal((await board(chief.id, { action: 'row', label: 'M4', title: 'M4', minion: four.number })).status, 200);
+  const planned = await board(chief.id, { action: 'row', label: 'P', title: 'Dropped piece' });
+  await until('#4 idle', async () => (await s.call(`/api/tickets/${four.id}`)).data.ticket.status !== 'running');
+  assert.equal((await s.call(`/api/tickets/${four.id}/status`, { status: 'closed' })).status, 200);
+  assert.equal(await asked(), 2, 'the planned piece still holds it');
+  assert.equal((await board(chief.id, { action: 'row', row: planned.data.row, remove: true })).status, 200);
+  await until('asked once the piece is dropped', async () => (await asked()) === 3);
 });

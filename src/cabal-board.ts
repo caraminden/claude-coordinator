@@ -8,6 +8,7 @@ import type { Store } from './db.ts';
 import type { CabalAsk, CabalLogLine, CabalMemberRow } from './db/cabals.ts';
 import type { Ticket, TicketFields } from './db-rows.ts';
 import { EFFORT_KEY } from './effort-retros.ts';
+import { budgetKey, type BudgetState } from './minion-budget.ts';
 import { gitOut } from './git.ts';
 import { deliveriesOf } from './outbox.ts';
 import { pacificClock } from './pacific.ts';
@@ -250,7 +251,9 @@ export function timelineText(store: Store, seen: Board): string {
     }
     // The words are from the member's chat; a chat that doesn't open for the reader gives only when and which.
     const ships = store.shipNotes(t.id).map((x) => `${when(x.at)} ${m.open ? x.text.slice(0, 160) : x.text.startsWith('Merged') ? 'merged' : 'shipped'}`);
-    const cells = [who, `started ${when(t.created_at)}`, ...ships, t.closed_at != null ? `dismissed ${when(t.closed_at)}` : 'open', `spent ${money(m.spend)}${row?.cost != null ? ` of ~${money(row.cost)} expected` : ', no expected cost'}`];
+    // The row's expected cost, else what its start set (a member put on the board without a planned row).
+    const expected = row?.cost ?? store.getSetting<BudgetState>(budgetKey(t.id))?.estimate;
+    const cells = [who, `started ${when(t.created_at)}`, ...ships, t.closed_at != null ? `dismissed ${when(t.closed_at)}` : 'open', `spent ${money(m.spend)}${expected != null ? ` of ~${money(expected)} expected` : ', no expected cost'}`];
     out.push(`- ${cells.join(' | ')}`);
   }
   const asks = store.cabalAsks(lead.id, false);

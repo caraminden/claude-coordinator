@@ -280,11 +280,16 @@ export const retroKey = (leadId: number) => `cabal-retro:${leadId}`;
  * never needed doesn't hold it.
  */
 export function retroWake(app: App, ticketId: number): void {
+  const leadId = app.store.cabalRowOf(ticketId)?.lead_id;
+  if (leadId != null) retroCheck(app, leadId);
+}
+
+/** The same check after a row is removed or a minion taken off the board: what's left may all be dismissed. */
+export function retroCheck(app: App, leadId: number): void {
   const { store } = app;
-  const leadId = store.cabalRowOf(ticketId)?.lead_id;
-  const lead = leadId != null ? store.getTicket(leadId) : undefined;
+  const lead = store.getTicket(leadId);
   if (!lead || lead.status === 'closed' || lead.build != null) return;
-  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || r.role !== 'fixer');
+  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || r.role.trim().toLowerCase() !== 'fixer');
   if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
   const asked = store.getSetting<number[]>(retroKey(lead.id)) ?? [];
   if (rows.every((r) => asked.includes(r.ticket_id!))) return;

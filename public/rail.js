@@ -705,7 +705,7 @@ function drawRail(items) {
 }
 
 const appLinks = () => /** @type {HTMLAnchorElement[]} */ ([.../** @type {HTMLElement} */ (nav).querySelectorAll('a[data-app]:not([data-app=""])')]);
-/** @type {string[] | null} */
+/** @type {(string | undefined)[] | null} */
 let dragged = null; // the app names of a drop not yet saved
 let drops = 0; // counts drops: each saves the whole list, so an older one's Retry has nothing to add
 
@@ -729,7 +729,7 @@ function reorderApps(from, to) {
     if (!nav) return;
     const end = nav.querySelector('button.install');
     for (const a of inOrder(appLinks(), (/** @type {HTMLAnchorElement} */ a) => a.dataset.app, order)) nav.insertBefore(a, end);
-    drawn = entries(inOrder(JSON.parse(drawn), (/** @type {{ name: string | null }} */ i) => i.name ?? '', ['', ...order]));
+    drawn = entries(inOrder(JSON.parse(drawn), (/** @type {RailItem} */ i) => i.name ?? '', ['', ...order]));
   };
   optimistic({
     sets: 'order:apps',

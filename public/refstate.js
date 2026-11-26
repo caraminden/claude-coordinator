@@ -50,6 +50,14 @@ export function schedulePaintRefs() {
 /** Paint links as chats draw them, and again whenever `schedulePaintRefs` is asked (core.js, on each ticket update). */
 export function watchRefs() {
   new MutationObserver((muts) => {
-    if (muts.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && /** @type {Element} */ (n.matches?.(TARGET) || /** @type {Element} */ (n).querySelector?.(TARGET))))) schedulePaintRefs();
+    if (
+      muts.some((m) =>
+        [...m.addedNodes].some((n) => {
+          const el = /** @type {Element} */ (n);
+          return n.nodeType === 1 && (el.matches?.(TARGET) || el.querySelector?.(TARGET));
+        }),
+      )
+    )
+      schedulePaintRefs();
   }).observe(document.body, { childList: true, subtree: true });
 }

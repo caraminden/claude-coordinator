@@ -186,7 +186,8 @@ export function refreshWelcome() {
 /** @param {Ticket | null | undefined} ticket */
 export function chatWelcome(ticket) {
   if (ticket?.kind !== 'coordinator' || !account?.welcome) return null;
-  const schemes = /** @type {NonNullable<typeof view>} */ (view.projects ?? []).filter((p) => p.member !== false && !p.hidden).map((p) => p.name);
+  const open = /** @type {NonNullable<typeof view>} */ (view);
+  const schemes = (open.projects ?? []).filter((p) => p.member !== false && !p.hidden).map((p) => p.name);
   const el = welcomePanel(ticket.project_id, schemes);
   if (el) queueMicrotask(refreshWelcome);
   return el;

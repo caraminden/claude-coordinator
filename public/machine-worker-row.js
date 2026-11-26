@@ -36,9 +36,9 @@ export function workerState(m) {
   if (w.signed_in === false) return { tone: 'warn', word: 'Needs a Claude sign-in', why: 'No turn starts there until its owner signs in.' };
   if (w.test && w.test.done && !w.test.ok) return { tone: 'danger', word: 'Self-test failed', why: `No turn starts there until it passes. ${w.test.why ?? 'The checks below say what is wrong.'}` };
   if (w.signed_in === null) return { tone: 'info', word: 'Connecting', why: 'It is checking its sign-ins.' };
-  if (!m.projects.length) return { tone: 'warn', word: 'Lent to no scheme', why: 'Pick the schemes whose minions may run there under "Who gets it".' };
+  if (!(m.roles?.find((r) => r.role === 'turns')?.projects ?? m.projects).length) return { tone: 'warn', word: 'Lent to no scheme', why: 'Pick the schemes whose minions may run there on its Minion turns card.' };
   if (!w.passed) return { tone: 'info', word: 'Not tested yet', why: mine(m) ? 'No turn starts there until its self-test passes: run it below.' : 'No turn starts there until its owner runs its self-test.' };
-  return { tone: 'ok', word: 'Ready', why: `Its owner's minions run there, up to ${w.caps?.workers ?? '?'} at once.` };
+  return { tone: 'ok', word: 'Ready', why: `Its owner's minions run there, up to ${heldCaps(m)?.workers ?? '?'} at once.` };
 }
 
 /** The worker is all that computer runs: no agent of Citadel's was ever connected from it. */
@@ -347,8 +347,17 @@ function hostPrograms(m, k) {
   );
 }
 
-/** The Minion turns part of an opened row. */
-export function workerSection(m, redraw) {
+/** Its caps as the worker holds them: that PC's own, lowered by any its owner set on the Machines page (Build 7 M3). */
+export function heldCaps(m) {
+  const own = m.worker?.caps ?? null;
+  const page = m.roles?.find((r) => r.role === 'turns')?.caps ?? {};
+  const keys = ['workers', 'threads', 'memory_gb', 'disk_gb'];
+  if (!own && !keys.some((k) => page[k] != null)) return null;
+  return Object.fromEntries(keys.map((k) => [k, Math.min(own?.[k] ?? Infinity, page[k] ?? Infinity)]).map(([k, v]) => [k, v === Infinity ? null : v]));
+}
+
+/** The Minion turns part of an opened row; inside its role card (`bare`), without its own switch and border. */
+export function workerSection(m, redraw, { bare = false } = {}) {
   const w = m.worker;
   const k = keptFor(m.id);
   const st = workerState(m);
@@ -363,23 +372,23 @@ export function workerSection(m, redraw) {
       h('span', { class: 'muted small' }, m.owner_id === null && !w.on ? 'A machine runs only its owner\'s minions, and this one is shared. To use that PC, add it again with "Mine" ticked and switch it on in that row.' : st.why),
     ),
   );
-  if (!w.on) return h('div', { class: 'worker', 'data-tone': 'neutral' }, head);
+  if (!w.on) return bare ? h('div', { class: 'worker worker-bare' }) : h('div', { class: 'worker', 'data-tone': 'neutral' }, head);
   const owner = mine(m);
-  const caps = w.caps;
+  const caps = heldCaps(m);
   return h(
     'div',
-    { class: 'worker', 'data-tone': st.tone },
-    head,
-    w.here && caps
+    { class: `worker${bare ? ' worker-bare' : ''}`, 'data-tone': st.tone },
+    bare ? h('span', { class: 'muted small' }, st.why) : head,
+    w.here && caps && w.caps
       ? statTiles([caps.workers, 'minions at once', 'running'], [caps.threads, 'CPU threads', 'running'], [`${caps.memory_gb} GB`, 'memory', 'running'], [`${w.disk_gb === null ? caps.disk_gb : Math.round(w.disk_gb)} GB`, w.disk_gb === null ? 'disk' : `disk of ${caps.disk_gb}`, w.full ? 'waiting' : 'running'])
       : null,
-    owner ? null : h('p', { class: 'muted small' }, 'Its owner sets it up, signs in and changes its caps on that PC.'),
+    owner ? null : h('p', { class: 'muted small' }, 'Its owner sets it up, signs in and sets its caps.'),
     owner && !w.host ? h('section', { class: 'worker-part' }, h('div', { class: 'worker-part-head' }, h('h4', {}, 'Run once on that PC')), installBlock(m, k, redraw)) : null,
     owner && w.here ? signIns(m, k) : null,
     w.host ? hostFolders(m, k) : null,
     w.host && w.wsl ? hostPrograms(m, k) : null,
     w.host ? selfTest(m, redraw) : null,
-    owner && w.host ? folded(k, 'caps', 'Change its caps', capsBlock(m, k)) : null,
+    owner && w.host ? folded(k, 'caps', bare ? "Change that PC's own caps (the most the page can give it)" : 'Change its caps', capsBlock(m, k)) : null,
     // Closed until asked for: its command shows the token, and fetches it only then.
     owner && w.host ? again(m, k, redraw) : null,
   );

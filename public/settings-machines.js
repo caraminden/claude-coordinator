@@ -4,7 +4,9 @@ import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunne
 import { machineJobsSection } from './jobs.js';
 import { openConnectPanel, reportLine } from './machine-connect.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
-import { forgetWorkerLink, workerReason, workerSection, workerWord } from './machine-worker-row.js';
+import { pauseButton, roleCards } from './machine-role-cards.js';
+import { forgetWorkerLink, workerReason, workerWord } from './machine-worker-row.js';
+import { emptyCard } from './look.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -57,7 +59,7 @@ function machineAddForm(runners, label) {
     { class: `machine-add${runners ? ' runners' : ''}` },
     h('label', {}, 'Name', name),
     alwaysOn ? h('label', { class: 'check', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on (untick for a laptop)')) : '',
-    mine ? h('label', { class: 'check', title: "Off: a shared machine, lent to schemes under Who gets it. On: only turns you ask for get it, in schemes you are in, and your contraptions' turns." }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
+    mine ? h('label', { class: 'check', title: "Off: a shared machine, its roles lent to the schemes ticked on each. On: only turns you ask for get it, in schemes you are in, and your contraptions' turns." }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
     h('button', { type: 'submit' }, label),
     status,
     // The steps sit in the form they are about (#492), not in a paragraph under the list.
@@ -122,8 +124,8 @@ export function machinesPage(main = {}) {
         'div',
         { class: 'meta' },
         account?.admin
-          ? settingsHelp('Computers that lend their MCP tools to minions while they are connected, in the schemes listed under Who gets it.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.')
-          : settingsHelp('Your computers, lending their MCP tools to the minion turns you ask for, in the schemes you list under Who gets it.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'),
+          ? settingsHelp("Computers that lend their roles (tools and folders, CI runners, minion turns, GPU jobs) to the schemes ticked on each role's card.", 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.')
+          : settingsHelp('Your computers: switch each of their roles on or off, and tick the schemes that get it. Only your own minion turns use them.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'),
       ),
     ),
     // Connect a computer (Build 7 M2) is the way in; Add by name stays for a shared machine and the GPU jobs distro's line.
@@ -293,7 +295,7 @@ function renderMachineList() {
   const group = (title, list) => (list.length ? [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...list.map(machineLine))] : []);
   // A field someone is typing in keeps its place over a redraw.
   const at = el.contains(document.activeElement) && document.activeElement.id ? document.activeElement : null;
-  el.replaceChildren(...group(`${scheme}'s minions get`, ours), ...group(ours.length ? 'Other machines' : 'Machines', others), ...group('CI runners', runners), view.machines.length ? '' : h('p', { class: 'muted small' }, 'No machines yet.'));
+  el.replaceChildren(...group(`${scheme}'s minions get`, ours), ...group(ours.length ? 'Other machines' : 'Machines', others), ...group('CI runners', runners), view.machines.length ? '' : emptyMachines());
   const back = at && document.getElementById(at.id);
   if (!back || back === document.activeElement) return;
   // What was typed, half-typed included, and whether it is refused, stay as the person left them.
@@ -301,6 +303,16 @@ function renderMachineList() {
   if (at.hasAttribute('aria-invalid')) back.setAttribute('aria-invalid', at.getAttribute('aria-invalid'));
   back.focus({ preventScroll: true });
   if (at.selectionStart != null) back.setSelectionRange(at.selectionStart, at.selectionEnd);
+}
+
+/** No machines yet (Build 7 M3): what would fill the page, and the button that starts it. */
+function emptyMachines() {
+  return h(
+    'div',
+    { class: 'machine-empty' },
+    emptyCard("You haven't connected a computer", 'Connect one and Citadel offers the roles it can do: tools and folders, CI runners, minion turns, GPU jobs.', { mark: '+', hue: 'accent' }),
+    h('button', { type: 'button', onclick: () => connectComputer() }, 'Connect a computer'),
+  );
 }
 
 /** Make a new token for a machine and show its install line. */
@@ -345,8 +357,6 @@ function checkMachine(m, button) {
       }
     });
 }
-
-const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
 
 /** The button on a machine's line that fixes what its status says, if one does (#437). */
 function fixButton(m, open) {
@@ -441,17 +451,6 @@ function workspaceDetail(w) {
 }
 
 /**
- * One switch for the machine's GPU jobs (#1175, Josh's pick): shown once a lent folder has the GPU task, and while off.
- * next(off) is the lend to save.
- */
-function gpuSwitch(lend, lent, next, save) {
-  if (!lend?.gpu_off && !lent.some((w) => w.tasks?.some((t) => t.name === 'run-gpu'))) return '';
-  const box = h('input', { type: 'checkbox', checked: !lend?.gpu_off });
-  box.onchange = () => save(next(!box.checked));
-  return h('div', { class: 'machine-found' }, h('div', { class: 'muted small' }, 'GPU jobs'), h('label', { class: 'row small' }, box, h('span', {}, h('code', {}, 'run-gpu'), h('span', { class: 'muted' }, lend?.gpu_off ? ' · off: refused until ticked again' : ' · untick to refuse them and stop one running'))));
-}
-
-/**
  * What a machine lends (#439). One whose agent reports what it found gets a tick per MCP server (one at a time)
  * and per folder; a tick saves at once and reaches the agent, with no new token. One set up before that lends
  * what its own command line says, shown as it is.
@@ -471,12 +470,6 @@ function machineLends(m) {
       m.servers.includes('ws') ? h('label', { class: 'row small', title: 'Lets minions check out pushed branches and run the listed tasks in every folder below' }, all, h('span', {}, 'All its folders')) : '',
       ...workspaces.map((w) => h('div', { class: 'machine-found' }, h('strong', { class: 'small' }, w.name), workspaceDetail(w))),
       m.servers.length ? '' : h('p', { class: 'muted small' }, 'Nothing: it runs no MCP server and lists no folder.'),
-      gpuSwitch(
-        m.lend,
-        m.workspace_tools ? workspaces : [],
-        (off) => ({ server: null, workspaces: [], before_ticks: true, ...(m.lend?.worker ? { worker: true } : {}), ...(off ? { gpu_off: true } : {}) }),
-        (next) => patchMachine(m, { lend: next }, `switch GPU jobs for ${m.name}`, renderMachineList),
-      ),
       h('p', { class: 'muted small' }, 'Set up before ticks: it lends what its own command line says. ', h('button', { type: 'button', class: 'link', onclick: () => newMachineToken(m) }, 'Reinstall to manage from here'), '.'),
       ...problems,
       checked,
@@ -495,7 +488,6 @@ function machineLends(m) {
   const servers = [...found, ...(lend.server && !found.some((f) => f.name === lend.server) ? [{ name: lend.server, gone: true }] : [])];
   const folders = [...workspaces, ...lend.workspaces.filter((n) => !workspaces.some((w) => w.name === n)).map((name) => ({ name, gone: true }))];
   const gone = online ? 'not found there now' : 'ticked';
-  const { gpu_off: _, ...gpuOn } = lend;
   return h(
     'div',
     { class: 'machine-lends' },
@@ -522,12 +514,6 @@ function machineLends(m) {
           ),
         )
       : '',
-    gpuSwitch(
-      lend,
-      workspaces.filter((w) => lend.workspaces.includes(w.name)),
-      (off) => (off ? { ...gpuOn, gpu_off: true } : gpuOn),
-      save,
-    ),
     online
       ? servers.length || folders.length
         ? ''
@@ -580,22 +566,23 @@ function machineBody(m) {
     h(
       'div',
       { class: 'machine-kv' },
-      m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : kv('Lends', machineLends(m)),
-      m.runners ? kv('Runs CI for', m.owner_id === null && !m.scoped ? 'Every scheme an admin owns' : machineLending(m)) : kv('Who gets it', m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`), machineLending(m)),
+      m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : [],
+      // A CI runner host from before #438 with no list serves every scheme an admin owns; ticking a scheme ends that.
+      m.runners && m.owner_id === null && !m.scoped ? kv('Runs CI for', 'Every scheme an admin owns') : [],
+      // Its roles (Build 7 M3, Josh: "A · A card per role, schemes inside"): the Tools ticks and Minion turns live in their cards.
+      h('div', { class: 'machine-wide' }, m.owner_id === null || m.runners ? '' : h('div', { class: 'small muted role-cards-note' }, `Only turns ${m.created_by} asks for (and their contraptions) use it, in the schemes ticked on each role.`), roleCards(m, renderMachineList, { tools: () => machineLends(m) })),
       kv(
         'Computer',
         m.report ? h('div', { class: 'small' }, reportLine(m.report)) : '',
         h('span', {}, [m.host ?? m.worker?.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : m.worker?.host ? 'runs only minion turns' : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on')),
       ),
-      // Not while it drains: its Minion turns switch would turn it back on.
-      m.worker && !removing(m) ? h('div', { class: 'machine-wide' }, workerSection(m, renderMachineList)) : [],
       m.screen ? kv('Screen', machineScreen(m.screen)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : [],
     ),
     m.jobs ? machineJobsSection(m) : '',
-    h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, remove),
+    h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, removing(m) ? null : pauseButton(m, renderMachineList), remove),
   );
 }
 
@@ -671,36 +658,4 @@ function patchMachine(m, fields, label, shown) {
     undo: () => Object.entries(fields).every(([k, v]) => now()[k] === v) && set(was, false), // unless a later change replaced them
     label,
   });
-}
-
-/** Which schemes' minions get a machine (#438): its one list, as chips with a remove button each, and "+ scheme". */
-function machineLending(m) {
-  const now = () => (view.machines?.find((x) => x.id === m.id) ?? m).projects ?? [];
-  const save = (projects) => patchMachine(m, { projects }, `change which schemes get ${m.name}`, renderMachineList);
-  const chips = now().map((id) =>
-    h(
-      'span',
-      { class: 'chip scheme-chip' },
-      h('span', {}, schemeName(id)),
-      h(
-        'button',
-        {
-          type: 'button',
-          title: m.runners ? `Stop ${m.name} taking new runners for ${schemeName(id)}. Remove its runners first: ones already there keep running` : `Take ${m.name} from ${schemeName(id)}: its minions lose it now, mid-turn too`,
-          'aria-label': `Remove ${schemeName(id)}`,
-          onclick: () => save(now().filter((x) => x !== id)),
-        },
-        '×',
-      ),
-    ),
-  );
-  const rest = (view.projects ?? []).filter((p) => !now().includes(p.id));
-  const add = h(
-    'select',
-    { class: 'add-scheme', 'aria-label': `Lend ${m.name} to a scheme`, hidden: !rest.length },
-    h('option', { value: '' }, '+ scheme'),
-    rest.map((p) => h('option', { value: p.id }, p.name)),
-  );
-  add.onchange = () => add.value && save([...now(), Number(add.value)]);
-  return h('div', { class: 'machine-lending', 'data-id': m.id }, chips, chips.length ? '' : h('span', { class: 'muted small' }, 'No scheme gets it yet.'), add);
 }

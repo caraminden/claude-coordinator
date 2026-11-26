@@ -55,6 +55,18 @@ export function agentConfig(raw) {
 }
 
 /**
+ * The caps the Machines page sent (Build 7 M3): whole numbers from 0, each a ceiling under config.json's; anything else is left out.
+ * @param {unknown} raw @returns {Partial<Record<'workers' | 'threads' | 'memory_gb' | 'disk_gb', number>>}
+ */
+export function pageCaps(raw) {
+  const c = /** @type {Record<string, unknown>} */ (raw && typeof raw === 'object' ? raw : {});
+  /** @type {Partial<Record<'workers' | 'threads' | 'memory_gb' | 'disk_gb', number>>} */
+  const out = {};
+  for (const k of /** @type {const} */ (['workers', 'threads', 'memory_gb', 'disk_gb'])) if (Number.isInteger(c[k]) && /** @type {number} */ (c[k]) >= 0) out[k] = /** @type {number} */ (c[k]);
+  return out;
+}
+
+/**
  * The owner's host folders (T8, "Chosen folders + programs"): { <name>: { path, write? } } in config.json, which only
  * `citadel-worker folder` (as root) changes. A bad one is left out with a problem saying why; read-only unless write is true.
  * @param {unknown} raw @returns {{ folders: { name: string, path: string, write: boolean }[], problems: string[] }}
@@ -116,6 +128,8 @@ export class WorkerAgent {
     this.installed = o.installed ?? 0;
     /** Another program spoke for this machine a moment ago: it ends its turns first. */
     this.wait = true;
+    /** The caps its owner set on the Machines page (Build 7 M3), from each sync's reply: it holds the lower of these and config.json's. */
+    this.page = {};
     // WSL2 says so in its kernel's name; the app then shows PowerShell commands.
     this.wsl = /microsoft/i.test(safeRead('/proc/sys/kernel/osrelease'));
     // No image yet: its claude is unknown, so the app places nothing here until it is.
@@ -182,13 +196,24 @@ export class WorkerAgent {
     return body;
   }
 
+  /** The caps it holds now: config.json's, lowered by any the owner set on the Machines page. */
+  held() {
+    const c = this.cfg.caps;
+    /** @param {'workers' | 'threads' | 'memory_gb' | 'disk_gb'} k */
+    const low = (k) => Math.min(c[k], this.page[k] ?? Infinity);
+    return { workers: low('workers'), threads: low('threads'), memory_gb: low('memory_gb'), disk_gb: low('disk_gb') };
+  }
+
   full() {
-    return this.disk !== null && this.disk >= this.cfg.caps.disk_gb;
+    return this.disk !== null && this.disk >= this.held().disk_gb;
   }
 
   /** The owner's most workers, or none while there is no image, it has only just taken this machine over or the disk cap is reached: turns that run go on. */
   fit() {
-    this.worker.cfg.max = this.wait || this.full() || !(this.image?.state === 'own' || this.image?.state === 'ready') ? 0 : this.cfg.caps.workers;
+    this.worker.cfg.max = this.wait || this.full() || !(this.image?.state === 'own' || this.image?.state === 'ready') ? 0 : this.held().workers;
+    // Threads and memory below what the PC's own slice holds go on its containers too (machine-worker.mjs containerArgs).
+    const held = this.held();
+    this.worker.cfg.limits = held.threads < this.cfg.caps.threads || held.memory_gb < this.cfg.caps.memory_gb ? { threads: held.threads, memory_gb: held.memory_gb } : null;
   }
 
   /** Tell the app how this worker stands, and do what it answers. */
@@ -213,6 +238,7 @@ export class WorkerAgent {
       return this.exit(REPLACED);
     }
     this.wait = reply.wait === true;
+    this.page = pageCaps(reply.caps);
     this.fit();
     // Newer code at the app: the service starts this again, on it. Turns run on in the container, but a restart can wait for them.
     this.code ??= reply.agent;
@@ -239,7 +265,7 @@ export class WorkerAgent {
       const kb = Number(du.out.trim().split('\n').pop()?.split('\t')[0]);
       this.disk = Number.isFinite(kb) && kb > 0 ? Math.round(kb / 104858) / 10 : this.disk;
       this.fit();
-      if (this.full()) this.quiet(`Disk cap reached (${this.disk} of ${this.cfg.caps.disk_gb} GB): no turn starts here.`);
+      if (this.full()) this.quiet(`Disk cap reached (${this.disk} of ${this.held().disk_gb} GB): no turn starts here.`);
     }
     if (now - this.at.signIn >= SIGN_IN_MS) {
       this.at.signIn = now;

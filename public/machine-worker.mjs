@@ -47,6 +47,8 @@ export function workerConfig(raw) {
     root: c.root,
     image: c.image,
     max: Math.max(1, Math.floor(Number(c.max)) || 1),
+    /** Threads and memory its owner set on the Machines page under the PC's own, put on its containers (worker-agent.mjs fit). @type {{ threads: number, memory_gb: number } | null} */
+    limits: null,
     node: typeof c.node === 'string' ? c.node : null,
     claude: typeof c.claude === 'string' ? c.claude : null,
     container: typeof c.container === 'string' ? c.container : 'citadel-worker',
@@ -75,8 +77,10 @@ export function boxOf(cfg, launch) {
  */
 export function containerArgs(cfg, launch, extraMounts = [], name = cfg.container) {
   const binds = [...launch.roots.map((r) => ({ src: join(cfg.root, 'fs', r), dst: r, ro: false })), ...extraMounts];
-  const spec = JSON.stringify([cfg.image, launch.home, binds]);
-  const args = ['--rm', '--replace', '--name', name, '--init', '--userns=keep-id', '--network=host', '--pids-limit=32768', '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
+  // The owner's page caps under the PC's own (worker-agent.mjs fit): part of the spec, so an idle container takes new ones.
+  const limits = cfg.limits ? ['--cpus', String(Math.max(1, cfg.limits.threads)), '--memory', `${Math.max(2, cfg.limits.memory_gb)}g`] : [];
+  const spec = JSON.stringify([cfg.image, launch.home, binds, ...(limits.length ? [limits] : [])]);
+  const args = ['--rm', '--replace', '--name', name, '--init', '--userns=keep-id', '--network=host', '--pids-limit=32768', ...limits, '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
   args.push('-e', `HOME=${launch.home}`, '-v', `${cfg.container}-home:${launch.home}:U`);
   for (const m of binds) args.push('--mount', `type=bind,src=${m.src},dst=${m.dst}${m.ro ? ',ro' : ''}`);
   args.push(cfg.image, 'sleep', 'infinity');

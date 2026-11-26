@@ -16,7 +16,8 @@ import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
-import { cleanCaps, isRole, ROLE_NAMES, ROLES, type RoleRow } from '../machine-roles.ts';
+import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow } from '../machine-roles.ts';
+import { pausedRoles, setPaused, unpause } from '../machine-pause.ts';
 import { HttpError, json, publicOrigin, ownWrites, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { uploadsDir } from './files.ts';
 import { ensureCoordinatorFor } from './projects.ts';
@@ -151,6 +152,7 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
     .filter((p) => app.store.canSee(who, p.id))
     .map((p) => p.id);
   const roles = app.store.setMachineRole(machine.id, role, { ...(typeof body.on === 'boolean' ? { on: body.on } : {}), ...(projects ? { projects } : {}), ...(caps ? { caps } : {}), everyScheme });
+  if (body.on === true) unpause(app.store, machine.id, role);
   await ownWrites(); // what follows re-reads the grants (#1244)
   app.machines.rolesChanged(machine.id);
   if (role === 'turns') app.runner.turnLine.pump();
@@ -159,6 +161,39 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   if (role === 'tools') app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return { roles: rolesView(roles), machine: app.machines.view(app.store.getMachine(machine.id)!) };
+}
+
+/**
+ * Pause all on a machine's row (spec section 7, "drains, one click back"): each role that's on goes off through
+ * patchRoles, as its own switch would, and the setting keeps which, for the click back. Resume switches those on again;
+ * one that can't come back (Minion turns by someone other than its owner) stays off and its words come back.
+ */
+export async function pauseMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: Record<string, unknown>) {
+  if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
+  if (typeof body.pause !== 'boolean') throw new HttpError(400, 'pause must be true or false');
+  const errors: string[] = [];
+  if (body.pause) {
+    const on: Role[] = app.store
+      .machineRoles(machine.id)
+      .filter((r) => r.on)
+      .map((r) => r.role);
+    if (!on.length) throw new HttpError(409, `Nothing is switched on on ${machine.name}`);
+    // Kept first, so a role that is switched off by now is one the click back brings back.
+    setPaused(app.store, machine.id, [...(pausedRoles(app.store, machine.id) ?? []), ...on]);
+    for (const role of on) await patchRoles(app, session, machine, { role, on: false });
+  } else {
+    for (const role of pausedRoles(app.store, machine.id) ?? []) {
+      try {
+        await patchRoles(app, session, machine, { role, on: true });
+      } catch (err) {
+        errors.push(`${ROLE_NAMES[role]}: ${(err as Error).message}`);
+      }
+    }
+    setPaused(app.store, machine.id, []);
+  }
+  await ownWrites();
+  app.broadcast({ type: 'machines', machines: app.machines.list() });
+  return { machine: app.machines.view(app.store.getMachine(machine.id)!), errors };
 }
 
 /** A file a workspace session's fetch_file sends: saved in that minion's shared files, under machine-files/<machine>/. */
@@ -216,6 +251,7 @@ export async function dropMachine(app: App, machine: Machine) {
   // Before its rows go: the agent is told to stop, and each job's minion hears (2MA9).
   app.jobs.drop(machine.id, `${machine.name} was removed from Citadel`, () => true);
   app.store.deleteMachine(machine.id);
+  setPaused(app.store, machine.id, []); // ids are reused: a new PC must not inherit its Resume
   app.machineCopies?.forget(machine.id);
   app.runner.turnLine.forget(machine.id);
   app.ciLoad.forget(machine.id);
@@ -778,6 +814,13 @@ export const machineRoutes: Route[] = [
     path: '/api/machines/:machine/roles',
     ...people,
     handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await patchRoles(app, session, machine, await readJson(req)))),
+  },
+  {
+    // Pause all (Build 7 M3): { pause: true } switches every role that's on off, draining; { pause: false } puts them back.
+    method: 'POST',
+    path: '/api/machines/:machine/pause',
+    ...people,
+    handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await pauseMachine(app, session, machine, await readJson(req)))),
   },
   {
     // Its worker's self-test (Build 7 T5); its lines come over the machines broadcast.

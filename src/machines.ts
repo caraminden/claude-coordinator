@@ -27,6 +27,8 @@ import { asData } from './quote.ts';
 import type { WorkerJoin } from './worker-join.ts';
 import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
+import { ROLE_NAMES } from './machine-roles.ts';
+import { pausedRoles } from './machine-pause.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -504,6 +506,10 @@ export class MachineRelay {
       reported: !!agent?.report,
       /** An agent from before reports nothing (Build 7 M2): its row offers Update, with the command. */
       update: !!agent && !agent.runners && agent.report === null,
+      /** Its roles for the row's cards (Build 7 M3): each switched on or off, with its schemes and caps (the Tools ticks are lend's). */
+      roles: this.store.machineRoles(machine.id).map(({ caps: { ticks: _, ...caps }, ...r }) => ({ ...r, name: ROLE_NAMES[r.role], caps })),
+      /** The roles Pause all switched off, to come back on one click; null when it isn't paused. */
+      paused: pausedRoles(this.store, machine.id),
     };
   }
 

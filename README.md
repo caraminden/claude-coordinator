@@ -210,6 +210,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `public/machine-sync.mjs` | The same, the part both sides share and the program a machine runs: worktree snapshots as git commits, packs, and folders by file list |
 | `public/machine-worker.mjs` | The agent's worker: starts placed turns in a container on that computer, syncs their folders, forwards their tools' calls home; `--self-test` checks the container |
 | `public/worker-agent.mjs` | A worker's own program on its owner's PC (Build 7): keeps its image current, holds the owner's caps, says which sign-ins are there, runs the self-test |
+| `public/machine-role-cards.js`, `src/machine-pause.ts` | A machine's roles on its row of the Machines page: a card per role (switch, state, scheme chips, Minion turns' caps), and Pause all with its one click back |
 | `public/machine-remove.js` | Removing a machine on the Machines page: the Removing… row and the command that takes a worker off its PC |
 | `src/worker-join.ts`, `public/machine-worker-row.js` | Joining a machine as a worker: the server's side of that program and its self-test, and Minion turns on the machine's row of the Machines page |
 | `src/host-reach.ts` | What a minion marked for a machine reaches on its owner's turn there (Build 7 T8): who gets it, the `run_on_host` starts sent to that PC's agent, and the chat's line on what it wrote to the owner's folders |

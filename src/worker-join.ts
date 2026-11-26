@@ -88,7 +88,7 @@ function cleanImage(input: unknown): ImageState | null {
 }
 
 export interface WorkerJoinDeps {
-  store: Pick<Store, 'getSetting' | 'setSetting' | 'listMachines'>;
+  store: Pick<Store, 'getSetting' | 'setSetting' | 'listMachines'> & Partial<Pick<Store, 'machineRoles'>>;
   lends: (m: Machine) => boolean;
   info: (machineId: number) => WorkerInfo | null;
   /** A ship's tests run on that computer: nothing that can wait starts there (ships go first). */
@@ -251,7 +251,13 @@ export class WorkerJoin {
     this.keep(machine.id, { installed, host: facts.host, wsl: facts.wsl, caps: facts.caps, seen: now - seen > 5 * 60_000 ? now : seen });
     this.heardTest(machine.id, body.test);
     const test = this.tests.get(machine.id);
-    return { ...(await this.wanted()), on: this.d.lends(machine), test: test ? test.id : null, ships: this.d.ships(machine.id), wait: now - facts.since < HERE_MS };
+    return { ...(await this.wanted()), on: this.d.lends(machine), test: test ? test.id : null, ships: this.d.ships(machine.id), wait: now - facts.since < HERE_MS, caps: this.pageCaps(machine.id) };
+  }
+
+  /** The caps its owner set on the Machines page for Minion turns (Build 7 M3); the worker holds the lower of these and its own. */
+  pageCaps(machineId: number) {
+    const { ticks: _, runners: __, ...caps } = (this.d.store.machineRoles?.(machineId) ?? []).find((r) => r.role === 'turns')?.caps ?? {};
+    return caps;
   }
 
   /** Start a self-test; its worker takes it at its next word. */

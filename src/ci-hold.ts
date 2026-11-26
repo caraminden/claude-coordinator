@@ -818,7 +818,7 @@ export class CiHold {
       });
     }
     for (const j of this.d.waiting?.() ?? []) {
-      if (j.reported || now - j.since < REPORT_MS) continue;
+      if (j.reported || now - j.since < REPORT_MS || this.d.closed(j.ticket)) continue;
       add(j.repo, { since: j.since, ticket: j.ticket, name: `${NAMES.heavy} (${j.what})`, why: j.why, mark: () => this.d.told?.(j.id) });
     }
     if (!due.size) return;

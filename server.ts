@@ -794,7 +794,7 @@ const longJobs = new LongJobs({
   scheme: (id) => {
     const t = store.getTicket(id);
     const p = t && store.getProject(t.project_id);
-    return p ? { projectId: p.id, slug: repoSlug(p.repo_url) } : null;
+    return p ? { projectId: p.id, slug: repoSlug(p.repo_url), closed: t.status === 'closed' } : null;
   },
   hours: (slug) => {
     const lower = slug.toLowerCase();

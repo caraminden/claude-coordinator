@@ -1296,3 +1296,12 @@ test("a second main run held drops the first: one comes back, the newest, with t
   assert.equal(b.status, 'queued', 'its 4 hours count from the first');
   assert.ok(!w.posts.includes(`rerun ${a.id}`));
 });
+
+test('a held job whose minion closed is not in the 2-hour note', async () => {
+  const w = world();
+  w.waiting.push({ id: 'h1', repo: OWN, ticket: 7, what: 'burn-in', since: w.now, why: 'a ship is in line', reported: false });
+  w.closed.add(7);
+  await w.tick();
+  await w.tick(REPORT_MS);
+  assert.equal(w.reports.length, 0);
+});

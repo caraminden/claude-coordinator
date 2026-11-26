@@ -284,3 +284,35 @@ test('a running job the hold stopped is not ended by its cancelled run, and wake
   assert.equal(readLongJobs(s.dir)[0].state, 'done');
   assert.match(s.wakes[0][1], /^Heavy job/);
 });
+
+// #2059: nobody reads a dismissed minion's job. One not started yet is dropped; a run already on CI is left alone.
+test('a queued or held job whose minion closed is dropped, not started, and the minion is not woken', async () => {
+  const s = setup([1, 2, 3], { now: NIGHT, project: (t) => t });
+  quiet(s, { held_at: NIGHT, held_why: 'a ship is in line' });
+  s.deps.scheme = (t) => ({ projectId: t, slug: `own/repo${t}`, closed: t !== 3 });
+  await new LongJobs(s.deps).pump();
+  const byTicket = new Map(readLongJobs(s.dir).map((j) => [j.ticket, j]));
+  for (const t of [1, 2]) {
+    assert.equal(byTicket.get(t)!.state, 'lost');
+    assert.equal(byTicket.get(t)!.why, 'its minion closed');
+  }
+  assert.equal(byTicket.get(3)!.state, 'dispatched', 'an open one (pending-deploy included) still starts');
+  assert.equal(s.dispatches().length, 1);
+  assert.equal(s.wakes.length, 0, 'a wake would reopen it');
+  assert.ok(
+    s.calls.some((c) => c.includes('DELETE') && c.some((a) => a.endsWith('j1-1700000000-abc'))),
+    'its snapshot ref goes',
+  );
+  await new LongJobs(s.deps).pump();
+  assert.equal(s.wakes.length, 0, 'nor on a later pass');
+});
+
+test('a run already on CI when its minion closed is left to finish', async () => {
+  const s = setup([1], { now: NIGHT });
+  quiet(s, { state: 'running', run_id: 100, url: 'https://github.com/run/100', dispatched_at: NIGHT });
+  s.deps.scheme = () => ({ projectId: 1, slug: 'own/repo1', closed: true });
+  s.run.status = 'in_progress';
+  await new LongJobs(s.deps).pump();
+  assert.equal(readLongJobs(s.dir)[0].state, 'running');
+  assert.ok(!s.calls.some((c) => c.includes('POST')), 'nothing cancels it');
+});

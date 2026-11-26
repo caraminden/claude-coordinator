@@ -11,7 +11,9 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
 
 ## The eight parts
 
-1. **Goal**, one line: what changes, for whom.
+1. **Goal**, one line: what changes, for whom. Two asks that can each ship and be used alone get two
+   minions, or a chain of two, above all when only one waits on a person's card: a read-only Flow tab
+   and a saved closing word whose word list a person picks were one brief, and should have been two.
 2. **Their words**: the person's own words that asked for it, in quotation marks, with who and the
    date: `Josh, 2026-11-19: "Go on A1"`. Quote the ask itself, not your summary of it, and each
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.

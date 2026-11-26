@@ -429,3 +429,14 @@ export async function cabalTaskmaster(app: App, lead: Ticket, body: Record<strin
   const later = action === 'seal' && lead.build != null ? ` Once Build ${lead.build} is live, ask again with action unseal; relay_when_live to ${there} on your build's ship can queue that note now.` : '';
   return { asked: there, held: r2.held, text: `${r2.held ? `The loop guard held your ask to ${there}'s ${AGENT_NAME}: finish your turn.` : `Asked ${there}'s ${AGENT_NAME} to ${action} its #${t.number}; it acts in its own scheme.`}${later}` };
 }
+
+/** Another scheme's Taskmaster started the member a lead asked for: logged, and held mail to the lead (the start was theirs, so no wake). */
+export function memberJoined(app: App, lead: Ticket, ticketId: number, rowId: number, by: string): void {
+  const { store } = app;
+  const t = store.getTicket(ticketId);
+  const r = store.cabalRow(rowId);
+  const scheme = t ? schemeName(app, t.project_id) : '';
+  const row = r ? rowName(r) : `row ${rowId}`;
+  store.addCabalLog(lead.id, by, `Started ${scheme} #${t?.number} for ${row}`);
+  app.runner.leaveMail(lead.id, APP_NAME, `${by} started ${scheme} #${t?.number} "${t?.title}" for your row ${row}: it is on your board.`);
+}

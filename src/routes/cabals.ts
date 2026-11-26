@@ -4,8 +4,7 @@
 import { type Board, boardText, readBoard } from '../cabal-board.ts';
 import type { Store } from '../db.ts';
 import { cabalBoardFor } from '../access.ts';
-import { APP_NAME } from '../appname.ts';
-import { APPROVED_FIELDS, cabalChanged, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
+import { APPROVED_FIELDS, cabalChanged, memberJoined, cabalStart, cabalTaskmaster, handoffPath, memberAction, postForming, rowScheme } from '../cabal-start.ts';
 import { schemeTarget } from './projects.ts';
 import { EFFORTS, MODELS } from '../db.ts';
 import type { CabalRowFields } from '../db/cabals.ts';
@@ -85,14 +84,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
   const there = lead.project_id !== t.project_id ? store.getProject(lead.project_id)?.name : undefined;
   const row = store.joinCabal(t.id, lead.id, lead.project_id, t.title, Date.now(), there ? crossRow(store, lead, t.project_id, t.title).id : rowId, t.project_id);
   runner.emit(t.id, 'note', { text: `${by} put this minion on ${there ? `${there} ` : ''}#${lead.number}'s cabal board.` });
-  if (there) {
-    // The lead hears its ask was done; the start is the other scheme's, so it is held mail, not a wake.
-    const t2 = store.getTicket(t.id);
-    const scheme = store.getProject(t.project_id)?.name ?? '';
-    const r = store.cabalRow(row);
-    store.addCabalLog(lead.id, by, `Started ${scheme} #${t2?.number} for ${r?.label || r?.title || `row ${row}`}`);
-    runner.leaveMail(lead.id, APP_NAME, `${by} started ${scheme} #${t2?.number} "${t.title}" for your row ${r?.label || row}: it is on your board.`);
-  }
+  if (there) memberJoined(app, lead, t.id, row, by);
   for (const l of new Set([was, lead.id])) if (l != null) cabalChanged(app, l);
 }
 

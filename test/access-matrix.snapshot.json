@@ -3032,6 +3032,16 @@
   "m1": "403 Only a cabal's lead starts its members, and you lead none",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/cabal/taskmaster": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "member": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "outsider": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "tmA": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "tmB": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "m1": "403 message_taskmaster is a cabal lead's, for its own roster rows in other schemes, and you lead no cabal: anything for another scheme goes to your Taskmaster with message_coordinator",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/check": {
   "anon": "401 Not logged in",
   "person": "409 No turn is running.",
@@ -3979,6 +3989,16 @@
   "outsider": "403 Only a cabal's lead starts its members",
   "tmA": "403 Only a cabal's lead starts its members",
   "tmB": "403 Only a cabal's lead starts its members",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cabal/taskmaster": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "member": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "outsider": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "tmA": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
+  "tmB": "403 Only a cabal's lead asks another scheme's Taskmaster about its members",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

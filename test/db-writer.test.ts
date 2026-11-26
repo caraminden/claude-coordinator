@@ -9,7 +9,8 @@ import { ASYNC_WRITES, READ_WAIT_MS, SLOW_DRAIN_MS, VALUE_WRITES, WRITES, writeO
 import { Store } from '../src/db.ts';
 import { json, ownWrites, writes } from '../src/http.ts';
 import { attachEventsIfThere } from '../src/events-db.ts';
-import { atWholeStep } from '../src/reader.ts';
+import { atWholeStep, wholeSteps } from '../src/reader.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { until } from './wait.ts';
 
 // #795: with WAL and synchronous=NORMAL, the first write after a checkpoint fsyncs the WAL's new header on the
@@ -95,6 +96,28 @@ test('a reader pinned at a whole step keeps the main, state and chat files as th
   assert.deepEqual([reader.getTicket(t.id)!.title, reader.listEvents(t.id).length, states()], ['a minion', before, 0]);
   reader.db.exec('ROLLBACK');
   assert.deepEqual([reader.getTicket(t.id)!.title, reader.listEvents(t.id).length, states()], ['later', before + 1, 1]);
+});
+
+// #2086: the live server's readers each got stuck here for 30 minutes (Nov 25): the transaction was made with no
+// holder, the step that opened in that instant made the request wait for it to end, and nothing ever ended it.
+test('a step opened in the instant a reader pins its transaction holds up neither that request nor the ones after', async () => {
+  const { store, w } = open();
+  const t = ticket(store);
+  await stepsClosed(w);
+  const reader = new Store(store.path, { reader: true });
+  let raced = false;
+  const inWholeStep = wholeSteps(reader.db, w.shared, (db, shared, ms) => {
+    const at = atWholeStep(db, shared, ms);
+    // The server's thread writes right after the pin's own check: a new step is open before the request takes its place.
+    if (at !== null && !raced) (raced = true), store.updateTicket(t.id, { title: 'later' });
+    return at;
+  });
+  const within = <T>(p: Promise<T>) => Promise.race([p, sleep(2000).then(() => 'never answered' as const)]);
+  // Pinned before the write, at a whole step: it answers from there.
+  assert.equal(await within(inWholeStep(async () => reader.getTicket(t.id)!.title)), 'a minion');
+  assert.ok(raced);
+  await stepsClosed(w);
+  assert.equal(await within(inWholeStep(async () => reader.getTicket(t.id)!.title)), 'later');
 });
 
 test("a step the server's thread opened holds readers off until its last write has run, then they see all of it", async () => {

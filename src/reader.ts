@@ -162,6 +162,64 @@ export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms =
   }
 }
 
+/**
+ * Runs a request's read in a read transaction at a whole step (atWholeStep). The requests running at once share one;
+ * one that needs a newer step (main opened one since) waits for them to finish. Null: the main thread answers.
+ * `pin` is atWholeStep, a test's own to open a step at a moment it picks.
+ */
+export function wholeSteps(db: DatabaseSync, shared: BigInt64Array | null, pin = atWholeStep) {
+  let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
+  return async <T>(run: () => Promise<T>): Promise<T | null> => {
+    const start = Date.now();
+    for (let wait = READ_WAIT_MS; !tx || tx.at < stepsOpened(shared); wait = 0) {
+      // The front thread answered it long since (four times READER_ANSWER_MS): a writer far behind must not pile these up here.
+      if (Date.now() - start > 5 * READER_ANSWER_MS) return null;
+      if (tx) {
+        await tx.done;
+        continue;
+      }
+      const at = pin(db, shared, wait);
+      if (at === null) {
+        // No write worker: the main thread answers.
+        if (!writerUp(shared)) return null;
+        await sleep(20);
+        continue;
+      }
+      let end!: () => void;
+      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
+      // Pinned after this request came, so new enough for it whatever opened since. Checked again against the steps
+      // opened, one that opened in this instant sent it to wait for a transaction nobody holds, which never ends, and
+      // every later request on this thread behind it (#2086: every page read a 503 for 30 minutes, Nov 25).
+      break;
+    }
+    const mine = tx;
+    mine.refs++;
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      if (--mine.refs === 0) {
+        if (tx === mine) tx = null;
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* already ended */
+        }
+        mine.end();
+      }
+    };
+    // A slow one (a memory search waits on its embedding) lets go after a while, so it doesn't keep everyone else at an
+    // old step: its answer, null here, goes to the main thread's.
+    const free = freeFor(READER_ANSWER_MS);
+    try {
+      return await Promise.race([run(), free.done]);
+    } finally {
+      free.stop();
+      release();
+    }
+  };
+}
+
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 
 /** Just enough of a ServerResponse for json() and send(): the answer is collected and posted back whole. */
@@ -312,54 +370,7 @@ if (workerData?.reader) {
   // A history page or one event reads only the minion's row, which the route loads through view(): the row as it is
   // stands in, so these answer before main's first snapshot, as they did in slice 1.
   const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;
-  // The requests running at once share one read transaction at a whole step; one that needs a newer step (main opened
-  // one since) waits for them to finish.
-  let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
-  const inWholeStep = async <T>(run: () => Promise<T>): Promise<T | null> => {
-    const start = Date.now();
-    for (let wait = READ_WAIT_MS; !tx || tx.at < stepsOpened(data.shared); wait = 0) {
-      // The front thread answered it long since (four times READER_ANSWER_MS): a writer far behind must not pile these up here.
-      if (Date.now() - start > 5 * READER_ANSWER_MS) return null;
-      if (tx) {
-        await tx.done;
-        continue;
-      }
-      const at = atWholeStep(store.db, data.shared, wait);
-      if (at === null) {
-        // No write worker: the main thread answers.
-        if (!writerUp(data.shared)) return null;
-        await sleep(20);
-        continue;
-      }
-      let end!: () => void;
-      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
-    }
-    const mine = tx;
-    mine.refs++;
-    let held = true;
-    const release = () => {
-      if (!held) return;
-      held = false;
-      if (--mine.refs === 0) {
-        if (tx === mine) tx = null;
-        try {
-          store.db.exec('ROLLBACK');
-        } catch {
-          /* already ended */
-        }
-        mine.end();
-      }
-    };
-    // A slow one (a memory search waits on its embedding) lets go after a while, so it doesn't keep everyone else at an
-    // old step: its answer, null here, goes to the main thread's.
-    const free = freeFor(READER_ANSWER_MS);
-    try {
-      return await Promise.race([run(), free.done]);
-    } finally {
-      free.stop();
-      release();
-    }
-  };
+  const inWholeStep = wholeSteps(store.db, data.shared);
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
     if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;

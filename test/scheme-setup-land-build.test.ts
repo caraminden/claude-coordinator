@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, queueSetup, rebasedCalls, rebasedHook, until } from './scheme-setup-land-fixture.ts';
+import { landText } from './land-files.ts';
 
 // Three worktrees off main: two feeders (f1.txt, f2.txt) and the build minion's (f3.txt), and build/1 made at main
 // the way a build minion makes it. CHECK_FILE_CMD logs each test file a feeder's check ran to $RAN.
@@ -332,10 +333,10 @@ test("claims (#1159): a feeder that writes another feeder's claimed file is refu
 });
 
 test("claims (#1159): the template and Citadel's land.sh carry the same claims_check, so the rules tested on Citadel's hold here", () => {
-  const fn = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf8').match(/^claims_check\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
-  const kit = fn('kit/skills/scheme-setup/templates/land.sh');
+  const fn = (text: string) => text.match(/^claims_check\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
+  const kit = fn(readFileSync(join(import.meta.dirname, '..', 'kit/skills/scheme-setup/templates/land.sh'), 'utf8'));
   assert.ok(kit);
-  assert.equal(kit, fn('tools/land.sh'));
+  assert.equal(kit, fn(landText()));
 });
 
 test("land_rebased runs in a feeder's --into, and its commit goes into the build; --into --full and --build never call it", () => {

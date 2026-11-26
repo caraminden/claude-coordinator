@@ -157,8 +157,11 @@ const runners: any[] = [];
 // stopping threw ENOENT after the tests, or put a file back mid-delete and the folder stayed.
 after(async () => {
   for (const r of runners) r.close();
-  await until('every podman child gone', () => runners.every((r) => r.children.size === 0));
-  rmSync(root, { recursive: true, force: true });
+  try {
+    await until('every podman child gone', () => runners.every((r) => r.children.size === 0));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 function runner(b: object | null = block(), log: (line: string) => void = () => {}, over: object = {}) {
   const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1, log, ...over });

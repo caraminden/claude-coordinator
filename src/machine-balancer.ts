@@ -210,25 +210,84 @@ export class MachineBalancer {
   }
 }
 
-/** One CI runner agent's part of a plan (M6b): how many of its runners to keep awake, and the jobs waiting for its repos. */
+/** One CI runner agent's part of a plan (M6b): how many of its runners to keep awake, and the repos it wakes one for first. */
 export interface RunnerShare {
   runners: number;
+  /** Repo -> how many runners it wants up first: the jobs waiting for it, plus one on a later machine for a repo only it has. */
   queued: Record<string, number>;
 }
 
+/** A PC with CI runner agents, as the runners' order sees it. */
+export interface RunnerPc {
+  id: number;
+  owner: number;
+  priority: number | null;
+  /** Its plan's runners. */
+  runners: number;
+  /** The repos its runner agents have runners for. */
+  repos: ReadonlySet<string>;
+}
+
 /**
- * The plan's runners split among one PC's CI runner agents (a Windows one and a Linux one in WSL can share a PC, M2b),
- * each by the CI jobs waiting for its repos, plus one, so an agent whose runners all sleep (and so leave its samples)
- * still gets its part back; the remainder to the largest fraction, then the most waiting, then by key. Each hears every
- * repo's waiting jobs and wakes its own runners for them first.
+ * Runners awake follow the owner's order (Josh, 2026-11-25: "put work on machine 1 before using machine 2"; the spec's
+ * decisions log: runners awake follow it in M6b). A PC whose owner has an earlier machine with room for CI keeps up only
+ * what those can't take: a runner for each job still waiting for its repos (a job waits only when no idle runner took
+ * it), and one for each repo only it has. A machine with no order stands after every one with an order; machines of
+ * the same order keep their whole plan. Busy runners stay up whatever this says.
  */
-export function runnerShares(runners: number, agents: { key: string; repos: ReadonlySet<string> }[], queued: ReadonlyMap<string, number>): Map<string, RunnerShare> {
-  const all = Object.fromEntries([...queued].filter(([, n]) => n > 0).map(([repo, n]) => [repo.toLowerCase(), n]));
-  const weights = agents.map((a) => 1 + Object.entries(all).reduce((s, [repo, n]) => s + (a.repos.has(repo) ? n : 0), 0));
+export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string, number>): Map<number, RunnerShare> {
+  const waiting = Object.fromEntries([...queued].filter(([, n]) => n > 0).map(([repo, n]) => [repo.toLowerCase(), n]));
+  const key = (pc: RunnerPc) => pc.priority ?? Infinity;
+  return new Map(
+    pcs.map((pc) => {
+      const before = pcs.filter((o) => o.owner === pc.owner && key(o) < key(pc) && o.runners > 0);
+      if (!before.length) return [pc.id, { runners: pc.runners, queued: waiting }];
+      const covered = new Set(before.flatMap((o) => [...o.repos]));
+      const wanted: Record<string, number> = {};
+      for (const repo of pc.repos) {
+        const n = (waiting[repo] ?? 0) + (covered.has(repo) ? 0 : 1);
+        if (n) wanted[repo] = n;
+      }
+      return [
+        pc.id,
+        {
+          runners: Math.min(
+            pc.runners,
+            Object.values(wanted).reduce((a, n) => a + n, 0),
+          ),
+          queued: wanted,
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * A PC's runners split among its CI runner agents (a Windows one and a Linux one in WSL can share a PC, M2b), each by
+ * the runners wanted for its repos, plus one, so an agent whose runners all sleep (and so leave its samples) still gets
+ * its part back; the remainder to the largest fraction, then the most wanted, then by key. No agent gets more than it
+ * can wake (`cap`, from its samples; null: it doesn't say): the rest goes to the others. Each hears every repo wanted
+ * and wakes its own runners for them first.
+ */
+export function runnerShares(runners: number, agents: { key: string; repos: ReadonlySet<string>; cap?: number | null }[], queued: Readonly<Record<string, number>>): Map<string, RunnerShare> {
+  const weights = agents.map((a) => 1 + Object.entries(queued).reduce((s, [repo, n]) => s + (a.repos.has(repo) ? n : 0), 0));
   const total = weights.reduce((s, w) => s + w, 0);
   const exact = weights.map((w) => (runners * w) / total);
   const parts = exact.map(Math.floor);
   const order = agents.map((_, i) => i).sort((i, j) => exact[j] - parts[j] - (exact[i] - parts[i]) || weights[j] - weights[i] || agents[i].key.localeCompare(agents[j].key));
-  for (let left = runners - parts.reduce((s, n) => s + n, 0), k = 0; left > 0 && order.length; left--, k++) parts[order[k % order.length]]++;
-  return new Map(agents.map((a, i) => [a.key, { runners: parts[i], queued: all }]));
+  const room = (i: number) => (agents[i].cap ?? Infinity) - parts[i];
+  let left = runners - parts.reduce((s, n) => s + n, 0);
+  for (const [i, a] of agents.entries())
+    if (a.cap != null && parts[i] > a.cap) {
+      left += parts[i] - a.cap;
+      parts[i] = a.cap;
+    }
+  for (let k = 0; left > 0 && order.some((i) => room(i) > 0); k++) {
+    const i = order[k % order.length];
+    if (room(i) > 0) {
+      parts[i]++;
+      left--;
+    }
+  }
+  return new Map(agents.map((a, i) => [a.key, { runners: parts[i], queued }]));
 }

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake } from '../public/runner-agent.mjs';
 import { Store } from '../src/db.ts';
-import { balance, runnerShares } from '../src/machine-balancer.ts';
+import { balance, runnerOrder, runnerShares } from '../src/machine-balancer.ts';
 import { MachineRelay } from '../src/machines.ts';
 
 type R = { key: string; repo: string; name: string; busy: boolean; ship: boolean; awake: boolean };
@@ -78,10 +78,12 @@ function linux() {
       }
       calls.push(`${args[0]} ${args[1]}`);
       up.set(args[1], args[0] === 'start');
+      onCall();
       return { code: 0, output: '' };
     },
   });
-  return { wake, dir, calls, up, tick: (ms: number) => (clock += ms), work: (d: string[]) => (working = d) };
+  let onCall = () => {};
+  return { wake, dir, calls, up, tick: (ms: number) => (clock += ms), work: (d: string[]) => (working = d), after: (f: () => void) => (onCall = f) };
 }
 
 test('Linux: the plan stops idle units past its count and starts them again when it grows or stops coming', async () => {
@@ -130,6 +132,20 @@ test('Linux: a busy or ship runner is never stopped, and a unit someone else sto
   }
 });
 
+test('Linux: a runner GitHub hands a job while the ones before it stop is looked at again, and kept up', async () => {
+  const { wake, dir, calls, work, after } = linux();
+  try {
+    // The first stop takes a while; meanwhile twi takes a job.
+    after(() => work(['twi']));
+    await wake.update({ runners: 0, queued: {} });
+    assert.ok(!calls.includes('stop citadel-runner-o-twi.service'), calls.join(', '));
+    assert.ok(calls.includes('stop citadel-runner-o-twi-2.service'));
+  } finally {
+    // timing-ok: own temp dir
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Windows: the runners to sleep go to asleep.json for keep-runners.ps1, with the plan's expiry; no plan names none", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   try {
@@ -164,7 +180,7 @@ const skip = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0']).error ? 'no
 test('keep-runners.ps1 stops the idle services asleep.json names, wakes the ones it stopped once they leave it, and leaves the rest', { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   try {
-    const run = (asleep: object, services: string) => {
+    const run = (asleep: object, services: string, extra = '') => {
       writeFileSync(join(dir, 'asleep.json'), JSON.stringify(asleep));
       const file = join(dir, 'run.ps1');
       writeFileSync(
@@ -179,6 +195,9 @@ $sleptFile = '${join(dir, 'slept.json')}'
 $calls = New-Object System.Collections.Generic.List[string]
 function Stop-Service([string]$Name) { $calls.Add("stop $Name") }
 function Start-Service([string]$Name) { $calls.Add("start $Name") }
+$working = @()
+function Test-RunnerWorking($dir) { $working -contains $dir }
+${extra}
 $svc = { param($n, $state) [pscustomobject]@{ Name = "actions.runner.o-$n.pc"; State = $state; PathName = "\`"C:\\actions-runner-$n\\bin\\RunnerService.exe\`"" } }
 Set-Asleep @(${services}) @{ 'c:\\actions-runner-busy' = $true } | Out-Null
 ConvertTo-Json -Compress -InputObject @($calls)`,
@@ -195,6 +214,13 @@ ConvertTo-Json -Compress -InputObject @($calls)`,
     assert.deepEqual(run({ until: Date.now() - 1, dirs: ['C:\\actions-runner-a'] }, all('Stopped', 'Running')), ['start actions.runner.o-a.pc'], 'an expired plan wakes it');
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'slept.json'), 'utf8')), []);
     assert.deepEqual(run({ until: 0, dirs: [] }, all('Running', 'Running')), [], 'other, stopped by someone, stays stopped');
+    // Windows PowerShell 5.1 (what runs it) pipes a JSON array on as one object: two asleep still wake as two.
+    const like51 = 'function ConvertFrom-Json { process { , (Microsoft.PowerShell.Utility\\ConvertFrom-Json -InputObject $_ -NoEnumerate) } }';
+    const ab = { until: later, dirs: ['C:\\actions-runner-a', 'C:\\actions-runner-b'] };
+    assert.deepEqual(run(ab, all('Running', 'Running'), like51).sort(), ['stop actions.runner.o-a.pc', 'stop actions.runner.o-b.pc']);
+    assert.deepEqual(run({ until: 0, dirs: [] }, all('Stopped', 'Stopped'), like51).sort(), ['start actions.runner.o-a.pc', 'start actions.runner.o-b.pc']);
+    // One that took a job since the sweep looked is asked again right before its stop, and left up.
+    assert.deepEqual(run(ab, all('Running', 'Running'), "$working = @('c:\\actions-runner-b')"), ['stop actions.runner.o-a.pc']);
   } finally {
     // timing-ok: own temp dir
     rmSync(dir, { recursive: true, force: true });
@@ -202,11 +228,15 @@ ConvertTo-Json -Compress -InputObject @($calls)`,
 });
 
 test("the server splits a PC's runners between its Windows and Linux agents by the jobs waiting for each one's repos", () => {
-  const agents = [
+  const agents: { key: string; repos: Set<string>; cap?: number | null }[] = [
     { key: 'windows', repos: new Set(['o/peek']) },
     { key: 'linux', repos: new Set(['o/citadel', 'o/twi']) },
   ];
-  const share = (n: number, q: [string, number][]) => Object.fromEntries([...runnerShares(n, agents, new Map(q))].map(([k, v]) => [k, v.runners]));
+  const split = (n: number, q: [string, number][], list: typeof agents = agents) => {
+    const part = runnerOrder([{ id: 1, owner: 1, priority: null, runners: n, repos: new Set(list.flatMap((a) => [...a.repos])) }], new Map(q)).get(1)!;
+    return runnerShares(part.runners, list, part.queued);
+  };
+  const share = (n: number, q: [string, number][], list: typeof agents = agents) => Object.fromEntries([...split(n, q, list)].map(([k, v]) => [k, v.runners]));
   assert.deepEqual(share(4, []), { windows: 2, linux: 2 }, 'nothing waits: an even split');
   // Weights 1+1 and 1+3: 4 runners split 1.33 and 2.67.
   assert.deepEqual(
@@ -222,17 +252,39 @@ test("the server splits a PC's runners between its Windows and Linux agents by t
   assert.deepEqual(share(1, [['o/peek', 1]]), { windows: 1, linux: 0 });
   assert.deepEqual(share(3, []), { windows: 1, linux: 2 }, 'an odd one goes by key when the parts tie');
   assert.deepEqual(
-    runnerShares(
-      2,
-      agents,
-      new Map([
-        ['O/Peek', 1],
-        ['o/none', 0],
-      ]),
-    ).get('linux'),
+    split(2, [
+      ['O/Peek', 1],
+      ['o/none', 0],
+    ]).get('linux'),
     { runners: 1, queued: { 'o/peek': 1 } },
     'each hears every repo waiting',
   );
+  // An agent that says how many runners it can wake gets no more; the rest go to the other.
+  const capped = [
+    { key: 'windows', repos: new Set(['o/peek']), cap: 1 },
+    { key: 'linux', repos: new Set(['o/citadel', 'o/twi']), cap: 5 },
+  ];
+  assert.deepEqual(share(6, [], capped), { windows: 1, linux: 5 }, 'one Windows runner and five in WSL: all six up, none asleep for the even split');
+  assert.deepEqual(share(9, [], capped), { windows: 1, linux: 5 }, 'more than both have: each keeps all of its own');
+  assert.deepEqual(share(2, [], [capped[0], { ...capped[1], cap: null }]), { windows: 1, linux: 1 }, "an older agent that doesn't say is not capped");
+});
+
+test("runners awake follow the owner's order: a later machine keeps up only what the earlier ones can't take", () => {
+  const pc = (id: number, priority: number | null, runners: number, repos: string[], owner = 1) => ({ id, owner, priority, runners, repos: new Set(repos) });
+  const plan = (pcs: ReturnType<typeof pc>[], q: [string, number][] = []) => Object.fromEntries([...runnerOrder(pcs, new Map(q))].map(([id, s]) => [id, [s.runners, s.queued]]));
+  const desk = pc(1, 1, 4, ['o/citadel', 'o/twi']);
+  // Machine 2 has room for 4, but machine 1 has room: only a runner for o/peek, which machine 1 has none for.
+  assert.deepEqual(plan([desk, pc(2, 2, 4, ['o/citadel', 'o/peek'])]), { 1: [4, {}], 2: [1, { 'o/peek': 1 }] });
+  // Jobs waiting: machine 1 had no idle runner for them, so machine 2 wakes one for each, up to its plan.
+  assert.deepEqual(plan([desk, pc(2, 2, 4, ['o/citadel', 'o/peek'])], [['O/Citadel', 2]]), { 1: [4, { 'o/citadel': 2 }], 2: [3, { 'o/citadel': 2, 'o/peek': 1 }] });
+  assert.deepEqual(plan([desk, pc(2, 2, 2, ['o/citadel', 'o/peek'])], [['o/citadel', 5]])[2], [2, { 'o/citadel': 5, 'o/peek': 1 }]);
+  // Machine 1 has no room: machine 2 keeps its whole plan.
+  assert.deepEqual(plan([{ ...desk, runners: 0 }, pc(2, 2, 4, ['o/citadel'])])[2], [4, {}]);
+  // No order stands after every one with an order; same order, or none at all, keeps the whole plan; another owner's is their own.
+  assert.deepEqual(plan([desk, pc(2, null, 4, ['o/citadel'])])[2], [0, {}]);
+  assert.deepEqual(plan([desk, pc(2, 1, 4, ['o/citadel'])])[2], [4, {}]);
+  assert.deepEqual(plan([pc(1, null, 4, ['o/citadel']), pc(2, null, 4, ['o/citadel'])])[2], [4, {}]);
+  assert.deepEqual(plan([desk, pc(2, 2, 4, ['o/citadel'], 7)])[2], [4, {}]);
 });
 
 test('the relay sends each runner agent its part, and a row whose runner agent is from before offers its update line', () => {

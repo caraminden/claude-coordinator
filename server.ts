@@ -56,7 +56,7 @@ import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
-import { MachineBalancer, runnerShares } from './src/machine-balancer.ts';
+import { MachineBalancer, runnerOrder, runnerShares } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs } from './src/long-jobs.ts';
@@ -731,16 +731,21 @@ if (!BOOT_CHECK) every('machine balancer', MachineBalancer.TICK_MS, () => balanc
 // hearing it wakes its runners. The repos each agent has runners for are kept since boot: a runner asleep leaves its samples.
 const planRepos = new Map<string, Set<string>>();
 const sendRunnerPlans = () => {
-  for (const m of new Map([...machines.runnerMachines('windows'), ...machines.runnerMachines('linux')].map((m) => [m.id, m])).values()) {
+  const pcs = [...new Map([...machines.runnerMachines('windows'), ...machines.runnerMachines('linux')].map((m) => [m.id, m])).values()].flatMap((m) => {
     const plan = balancer.current(m.id);
-    if (!plan) continue;
+    if (!plan || m.owner_id === null) return [];
     const agents = machines.runnersOn(m.id).map(({ os }) => {
       const repos = planRepos.get(`${m.id}:${os}`) ?? new Set<string>();
       planRepos.set(`${m.id}:${os}`, repos);
       for (const r of ciLoad.reposOf(m.id, os)) repos.add(r);
-      return { key: os, repos };
+      return { key: os, repos, cap: ciLoad.wakeableOf(m.id, os) };
     });
-    for (const [os, share] of runnerShares(plan.runners, agents, ciQueued)) machines.sendRunnerPlan(m.id, os as 'windows' | 'linux', share);
+    return [{ id: m.id, owner: m.owner_id, priority: m.priority ?? null, runners: plan.runners, repos: new Set(agents.flatMap((a) => [...a.repos])), agents }];
+  });
+  const order = runnerOrder(pcs, ciQueued);
+  for (const pc of pcs) {
+    const part = order.get(pc.id)!;
+    for (const [os, share] of runnerShares(part.runners, pc.agents, part.queued)) machines.sendRunnerPlan(pc.id, os as 'windows' | 'linux', share);
   }
 };
 if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);

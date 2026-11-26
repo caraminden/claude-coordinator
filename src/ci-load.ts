@@ -70,6 +70,8 @@ export interface Sample {
   /** With Hyper-V on: the PC's true CPU %, and each guest's virtual processors' percentages added up. */
   hv: { total: number; vms: Record<string, number> } | null;
   runners: RunnerUse[];
+  /** Build 7 M6b: the repo of each runner its agent may keep up, asleep ones included (one a runner); absent from older agents. */
+  wakeable?: string[];
   /** When the PC came back from a restart with no clean shutdown, as ms. */
   restarts: number[];
 }
@@ -117,6 +119,7 @@ export function cleanSample(raw: unknown, now: number): Sample {
     hv,
     runners: body.runners.map((r: Record<string, unknown>) => ({ name: text(r?.name, 100), repo: text(r?.repo, 200).toLowerCase(), dir: text(r?.dir, 300), cpu: num(r?.cpu, "a runner's cpu", 100), mem: num(r?.mem, "a runner's mem", 1e15) })),
     restarts,
+    ...(Array.isArray(body.wakeable) ? { wakeable: body.wakeable.slice(0, 64).map((r: unknown) => text(r, 200).toLowerCase()) } : {}),
   };
 }
 
@@ -463,7 +466,13 @@ export class CiLoad {
 
   /** The repos (owner/name, lowercase) a machine's runner agent for `os` has runners up for, by its newest sample (Build 7 M6b). */
   reposOf(machineId: number, os: 'windows' | 'linux'): string[] {
-    return [...new Set((this.latest.get(`${machineId}:${os}`)?.runners ?? []).map((r) => r.repo).filter(Boolean))];
+    const s = this.latest.get(`${machineId}:${os}`);
+    return [...new Set([...(s?.runners ?? []).map((r) => r.repo), ...(s?.wakeable ?? [])].filter(Boolean))];
+  }
+
+  /** How many runners that agent may keep up (M6b), asleep ones included; null when its agent doesn't say. */
+  wakeableOf(machineId: number, os: 'windows' | 'linux'): number | null {
+    return this.latest.get(`${machineId}:${os}`)?.wakeable?.length ?? null;
   }
 
   /** A deleted machine's samples go with it (its rows cascade). */

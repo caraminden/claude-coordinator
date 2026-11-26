@@ -291,11 +291,20 @@ function Read-Asleep {
   } catch { return @() }
 }
 
-# The runner folders this script put to sleep (slept.json), lowercase.
+# The runner folders this script put to sleep (slept.json), lowercase. Assigned first: Windows PowerShell 5.1 pipes a
+# JSON array on as one object, which [string] would join into one bogus folder.
 function Read-Slept {
   try {
-    return @(@(Get-Content -LiteralPath $sleptFile -Raw -ErrorAction Stop | ConvertFrom-Json) | ForEach-Object { ([string]$_).ToLowerInvariant() } | Where-Object { $_ })
+    $list = Get-Content -LiteralPath $sleptFile -Raw -ErrorAction Stop | ConvertFrom-Json
+    return @(foreach ($d in @($list)) { if ($d) { ([string]$d).ToLowerInvariant() } })
   } catch { return @() }
+}
+
+# Whether a runner folder's Runner.Worker runs a job right now: asked again right before each stop, since GitHub may
+# have handed it one since the sweep looked.
+function Test-RunnerWorking($dir) {
+  $re = '^' + [regex]::Escape([string]$dir) + '\\bin(\.[\d.]+)?\\runner\.worker\.exe$'
+  return [bool](@(Get-CimInstance Win32_Process -Filter "Name = 'Runner.Worker.exe'" -ErrorAction SilentlyContinue) | Where-Object { [string]$_.ExecutablePath -match $re })
 }
 
 # A runner service's folder from its PathName ("C:\actions-runner-x\bin\RunnerService.exe"), lowercase; '' if it isn't one.
@@ -315,7 +324,7 @@ function Set-Asleep($services, $busy) {
     $dir = Get-ServiceDir $s
     if (-not $dir) { continue }
     if ($asleep -contains $dir) {
-      if ($s.State -ne 'Running' -or $busy.ContainsKey($dir)) { continue }
+      if ($s.State -ne 'Running' -or $busy.ContainsKey($dir) -or (Test-RunnerWorking $dir)) { continue }
       try {
         Stop-Service -Name $s.Name -ErrorAction Stop
         if (-not $slept.Contains($dir)) { $slept.Add($dir) }

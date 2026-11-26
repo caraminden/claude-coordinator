@@ -568,7 +568,8 @@ const SLEPT_FILE = 'slept.json';
  */
 export class RunnerWake {
   constructor({ os = defaultOs(), dir = '.', run = runCommand, units = '/etc/systemd/system', procs = linuxProcs, windowsProcs = () => /** @type {{ path?: string }[]} */ ([]), identity = runnerIdentity, roots = windowsRoots, now = Date.now, log = () => {} } = {}) {
-    Object.assign(this, { os, dir, run, units, procs, windowsProcs, identity, roots, now, log, plan: null, until: 0, ships: [], said: '', queue: Promise.resolve() });
+    // wakeable: the repo of each runner it may keep up (awake, or put to sleep by it), one a runner, for its load samples.
+    Object.assign(this, { os, dir, run, units, procs, windowsProcs, identity, roots, now, log, plan: null, until: 0, ships: [], said: '', wakeable: null, queue: Promise.resolve() });
   }
 
   /** A plan is held: the squeeze stays off. */
@@ -634,20 +635,24 @@ export class RunnerWake {
     const states = output.trim().split('\n');
     // is-active exits 3 when any unit is down; its lines still say which.
     if (code !== 0 && states.length !== units.length) return this.log(`Couldn't read the runner units' state: ${states.at(-1)}`);
-    const working = new Set(
-      this.procs()
-        .map((p) => /^(.*)\/bin(?:\.[\d.]+)?\/Runner\.Worker$/.exec(p.path)?.[1])
-        .filter(Boolean),
-    );
-    const list = units.map((u, i) => ({ ...u, key: u.unit, awake: states[i] === 'active', busy: working.has(u.dir), ship: this.onShip(u) }));
+    const working = () =>
+      new Set(
+        this.procs()
+          .map((p) => /^(.*)\/bin(?:\.[\d.]+)?\/Runner\.Worker$/.exec(p.path)?.[1])
+          .filter(Boolean),
+      );
+    const busy = working();
+    const list = units.map((u, i) => ({ ...u, key: u.unit, awake: states[i] === 'active', busy: busy.has(u.dir), ship: this.onShip(u) }));
     // One someone else stopped is theirs: left down and out of the count.
     const ours = list.filter((r) => r.awake || slept.has(r.key));
+    this.wakeable = ours.map((r) => r.repo.toLowerCase());
     const keep = this.plan ? pickAwake(ours, this.plan) : new Set(ours.map((r) => r.key));
     for (const r of ours) {
       const want = keep.has(r.key);
       if (want === r.awake) continue;
       // The plan moved since the runner took a job: it finishes, and sleeps at the next look.
-      if (!want && (r.busy || r.ship)) continue;
+      // Looked at again right before the stop: GitHub may have handed it a job while the ones before it stopped.
+      if (!want && (r.busy || r.ship || working().has(r.dir))) continue;
       const { code: c, output: out } = await this.run({ command: 'systemctl', args: [want ? 'start' : 'stop', r.unit] }, process.env, 60_000);
       if (c !== 0) {
         this.log(`Couldn't ${want ? 'wake' : 'put to sleep'} ${r.unit}: ${out.split('\n').at(-1)}`);
@@ -679,6 +684,7 @@ export class RunnerWake {
     });
     for (const r of list) r.ship = this.onShip(r);
     const ours = list.filter((r) => r.awake || slept.has(r.key));
+    this.wakeable = ours.map((r) => r.repo.toLowerCase());
     const keep = this.plan ? pickAwake(ours, this.plan) : new Set(ours.map((r) => r.key));
     const asleep = this.plan ? ours.filter((r) => !keep.has(r.key)).map((r) => r.dir) : [];
     const file = join(this.dir, 'asleep.json');
@@ -765,11 +771,15 @@ async function main() {
   // Load samples (#534) go out on their own clock, whatever the stream to Citadel is doing; a failure is said once
   // until one gets through, and never touches a job.
   const sampler = new Sampler({ os, dir: jobs.dir });
+  // Runners awake (M6b): while Citadel's plan is held the squeeze is off, and the plan's runners stay up.
+  const wake = new RunnerWake({ os, dir: jobs.dir, log, windowsProcs: () => sampler.lastProcs });
   let sampleError = '';
   const sample = async () => {
     try {
       const body = await sampler.take();
       if (body) {
+        // Every runner it may wake, asleep ones included, so Citadel gives it no more than it can keep up.
+        if (wake.wakeable) body.wakeable = wake.wakeable;
         const res = await fetch(new URL('/api/machines/runner-load', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!res.ok) throw new Error(`Citadel answered ${res.status}`);
       }
@@ -788,8 +798,6 @@ async function main() {
   const squeeze = os === 'linux' ? new LinuxSqueeze({ log, percent: caps.squeeze }) : null;
   squeeze?.next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
   if (squeeze) setInterval(() => squeeze.tick().catch((err) => log(`Couldn't lift the ship squeeze: ${err.message}`)), 10_000).unref();
-  // Runners awake (M6b): while Citadel's plan is held the squeeze is off, and the plan's runners stay up.
-  const wake = new RunnerWake({ os, dir: jobs.dir, log, windowsProcs: () => sampler.lastProcs });
   let lastShips = [];
   let squeezed = true;
   let shipError = '';

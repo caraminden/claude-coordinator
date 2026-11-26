@@ -281,6 +281,9 @@ function renderMachineList() {
   el.replaceChildren(...group(`${scheme}'s minions get`, ours), ...group(ours.length ? 'Other machines' : 'Machines', others), ...group('CI runners', runners), view.machines.length ? '' : h('p', { class: 'muted small' }, 'No machines yet.'));
   const back = at && document.getElementById(at.id);
   if (!back || back === document.activeElement) return;
+  // What was typed, half-typed included, and whether it is refused, stay as the person left them.
+  if (typeof at.value === 'string' && 'value' in back) back.value = at.value;
+  if (at.hasAttribute('aria-invalid')) back.setAttribute('aria-invalid', at.getAttribute('aria-invalid'));
   back.focus({ preventScroll: true });
   if (at.selectionStart != null) back.setSelectionRange(at.selectionStart, at.selectionEnd);
 }

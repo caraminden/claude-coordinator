@@ -75,11 +75,11 @@ test('switched on, the row shows the command at once, and it follows the caps as
   assert.equal(await page.eval(`!!${worker('.worker-command pre.cui-shell[data-tone=powershell]')}`), true, 'the block says where it runs');
 });
 
-test('a redraw while a cap is being typed keeps the cursor there', { skip }, async () => {
-  await page.eval(`(() => { const i = document.getElementById('worker-cap-${id}-disk_gb'); i.focus(); i.setSelectionRange(1, 1); window.was = i; })()`);
+test('a redraw while a cap is being typed keeps the cursor there, and what was half-typed', { skip }, async () => {
+  await page.eval(`(() => { const i = document.getElementById('worker-cap-${id}-disk_gb'); i.focus(); i.value = '6x'; i.dispatchEvent(new Event('input')); i.setSelectionRange(1, 1); window.was = i; })()`);
   await srv.call(`/api/machines/${id}`, { always_on: false }, 'PATCH');
   await wait('a redraw', `!document.contains(window.was)`);
-  assert.deepEqual(await page.eval('[document.activeElement.id, document.activeElement.selectionStart]'), [`worker-cap-${id}-disk_gb`, 1]);
+  assert.deepEqual(await page.eval('[document.activeElement.id, document.activeElement.selectionStart, document.activeElement.value, document.activeElement.getAttribute("aria-invalid")]'), [`worker-cap-${id}-disk_gb`, 1, '6x', 'true']);
 });
 
 test('connected, it asks for the sign-ins that are missing and shows the ones that are there', { skip }, async () => {

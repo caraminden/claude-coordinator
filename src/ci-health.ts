@@ -297,7 +297,7 @@ export interface CiHealthDeps {
   /** Dismiss a fix minion whose re-run went green, the way a live deploy does. */
   dismiss?: (ticketId: number, text: string) => void;
   /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing: a dispatched run that passed, which also runs at low effort (#951). No message, no wakes. */
-  wake?: (ticketId: number, text: string, fyi?: boolean) => void;
+  wake?: (ticketId: number, text: string, fyi?: boolean, run?: Run) => void;
   /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
   /** `people`: the admins its alert rings, whose own Taskmasters in the scheme hear of it (taskmastersFor). */
   tell?: (project: Project, text: string, wake?: boolean, people?: number[]) => boolean | number;
@@ -867,7 +867,7 @@ export class CiHealth {
       told.add(r.id);
       save(); // before sending, so a restart can't send it twice
       try {
-        this.deps.wake(minion.id, text, r.conclusion === 'success');
+        this.deps.wake(minion.id, text, r.conclusion === 'success', r);
       } catch (err) {
         console.error(`Waking #${minion.number} for run ${r.id} failed:`, err);
       }

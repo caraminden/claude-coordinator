@@ -312,6 +312,8 @@ export class LiveWaiters {
   deliver: (r: Relay) => void = () => {};
   /** Relays just delivered together (one minion, same text and commit): the sender's Taskmaster hears of them in one note. */
   sent: (rs: Relay[]) => void = () => {};
+  /** Each check's last step: ship the hand-offs armed on something going live (#2089, src/armed-handoff.ts fireLive; set by the server). */
+  armed: () => Promise<number> = async () => 0;
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
   /** The commit deploy.sh stands by: `head`, or last-good while `head` can still be rolled back (prove). Null: not known yet, so nothing is live. */
@@ -1016,7 +1018,14 @@ export class LiveWaiters {
       }
     }
     await this.checkRelays();
-    return met + woken.length + (await this.checkChains());
+    const started = await this.checkChains();
+    return met + woken.length + started + (await this.armed());
+  }
+
+  /** Where an armed hand-off's wait stands (#2089): its commit live, or minion `after`'s work as a start_after chain on it sees it. */
+  liveState(ticket: number, on: { commit: string } | { after: number; base: string | null; since: number }): Promise<'go' | 'wait' | 'unshipped'> {
+    if ('commit' in on) return this.live({ ticket, commit: on.commit, reason: '', since: null }).then((y) => (y ? 'go' : 'wait'));
+    return this.chainState({ ticket, after: on.after, when: 'live', message: '', from: '', base: on.base, since: on.since });
   }
 
   /**

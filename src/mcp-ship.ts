@@ -257,6 +257,7 @@ export const HAND_OFF_LAND = () => ({
       stay_open: { type: 'boolean', description: 'Only for more pieces of your brief. Not to delete handoffs (they move on close) or tell a minion (relay_when_live, first)' },
       waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing"); woken once live, do them' },
       probe: { type: 'object', description: 'Live check, for 600+ line ships (self-review)' },
+      when: { description: 'Hand off now, ship later with no turn: "proof" once the flake-proof run on this commit is green; {"live": "#N" or a commit} once that is live' },
       ...LAND_PROPS,
       ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
     },
@@ -351,7 +352,7 @@ export async function runShipTool(name: string, args: Record<string, unknown>): 
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe', 'when'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       if (args.outage === true) body.outage = true;
       const r = await call<{ armed?: string }>('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);

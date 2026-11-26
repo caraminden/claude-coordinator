@@ -7,7 +7,7 @@ import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { thrown } from './src/thrown.ts';
-import { fireArmed } from './src/armed-handoff.ts';
+import { fireArmed, fireLive, fireProof } from './src/armed-handoff.ts';
 import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { basename, extname, join } from 'node:path';
@@ -90,7 +90,7 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
+import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, readJson, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes } from './src/routes/machines.ts';
@@ -1673,6 +1673,11 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // CI health (#368): runners offline, jobs that never started, or no verdict on main for hours, in every scheme, make
 // one Mandate alert for every admin (#540), cleared when it's all over (green that skipped jobs, a quiet item from
 // its scheme); no turn runs.
+/** A finished run a minion dispatched (#678): a hand-off armed on its flake proof takes it first (#2089, set once `app` is); else it wakes the minion. */
+let armedProof: ((ticketId: number, run: Run, text: string) => boolean) | null = null;
+const dispatchedRun = (ticketId: number, text: string, fyi?: boolean, run?: Run) => {
+  if (!run || !armedProof?.(ticketId, run, text)) runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {});
+};
 const ciHealth = new CiHealth(store, {
   outbox,
   longs: () => longJobs.list(),
@@ -1687,7 +1692,7 @@ const ciHealth = new CiHealth(store, {
       );
   },
   mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
-  wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
+  wake: (ticketId, text, fyi, run) => dispatchedRun(ticketId, text, fyi, run),
   home: () => store.getProject(alertScheme(0)),
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   // The CI-red judge's one act (#1503): log-only turns every Taskmaster wake and mail from CI health into a retro-log line.
@@ -2461,6 +2466,9 @@ const app: App = {
 };
 // A claim that passes to a minion with an armed hand-off ships it with no turn (#2046).
 runner.armed = (id, claim, fallback) => fireArmed(app, id, claim, fallback);
+// And one armed on its flake proof, or on something going live (#2089).
+armedProof = (id, run, text) => fireProof(app, id, run, text);
+waiters.armed = () => fireLive(app);
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {
   every(
@@ -2588,6 +2596,12 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
       }
       // test/front.test.ts: the client addresses this thread sees, which a client must not be able to set.
       if (SETTLED_ROUTE && req.url?.startsWith('/api/test/peer')) return json(res, 200, connection(req));
+      // test/armed-handoff.test.ts: a finished run a minion dispatched, as CI health hands it on.
+      if (SETTLED_ROUTE && req.url?.startsWith('/api/test/dispatched-run')) {
+        const b = await readJson(req);
+        dispatchedRun(Number(b.ticket), String(b.text), !!b.fyi, b.run);
+        return json(res, 200, {});
+      }
       // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
       if (apps.onAppHost(req)) {
         const path = (req.url ?? '/').split('?')[0];

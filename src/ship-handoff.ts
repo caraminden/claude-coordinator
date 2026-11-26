@@ -240,9 +240,9 @@ export async function requeueShip(app: App, ticketId: number, h: Handoff & { arg
   // A land.sh cut off mid-way (#2051) can leave a rebase stopped with a clean tree, or main already moved.
   if (!(await gitOut(['symbolic-ref', '-q', 'HEAD'], t.cwd))) return 'your worktree is not on its branch (a rebase may be in progress)';
   const target = h.args[0] === '--into' ? h.args[1] : ((await defaultBranch(t.cwd)) ?? 'main');
-  const ahead = await gitOut(['rev-list', '--count', `${target}..HEAD`], t.cwd);
-  if (ahead === '0') return `your commits are already on ${target}, so check what is left to do`;
-  if (!ahead) return `it couldn't tell whether your commits are already on ${target}`;
+  const left = await gitOut(['cherry', target, 'HEAD'], t.cwd); // '+' a commit not there; a ship train's copy of one is '-'
+  if (left === null) return `it couldn't tell whether your commits are already on ${target}`;
+  if (!/^\+/m.test(left)) return `your commits are already on ${target}, so check what is left to do`;
   const lane = (await laneRefusal(app, t)) ?? (h.args.length ? null : await besideRefusal(app, t));
   if (lane) return lane;
   const env = landEnv(app, t, h);

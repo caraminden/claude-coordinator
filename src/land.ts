@@ -843,7 +843,7 @@ export class LandHandoffs {
       runner.broadcastTicket(id);
       const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const kept = notAgain ? ` It wasn't put back in line by itself: ${notAgain}.` : '';
-      await once('told', () => runner.send(id, from, `${cls ? `${cls.line}${kept}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
+      await once('told', () => runner.send(id, from, `${cls || kept ? `${`${cls?.line ?? ''}${kept}`.trim()}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`, [], { quick: false }));
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).

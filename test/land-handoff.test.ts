@@ -376,6 +376,12 @@ test('a refusal the box caused goes back in line once with no turn, and the next
   }
 });
 
+test('a cut-off run the server cannot put back says why, though it has no Kind line (#2051)', async () => {
+  const s = setup('box-why', { requeue: async () => 'your commits are already on main, so check what is left to do' });
+  await ended(s, BOX['cut off by a restart']);
+  assert.match(s.sent[0], /^It wasn't put back in line by itself: your commits are already on main/);
+});
+
 test("a box refusal that deploy's refusing note, a skipped test or the ship's own cause is part of wakes the minion (#2051)", async () => {
   const kinds = {
     'refusing deploy, cut off': `land: deploy has been refusing since Nov 25 10:00 PST (boot): running its boot check on abc1234 before a CI run is spent on it\n${NO_CODE}`,
@@ -1012,6 +1018,18 @@ test('a re-queue never ships commits already on main, nor from a worktree off it
   assert.equal(await again(), 'your commits are already on main, so check what is left to do');
   git(cwd, 'checkout', '-q', '--detach');
   assert.match((await again())!, /not on its branch/);
+  // A ship train puts a copy of a rider's commit on main.
+  git(cwd, 'checkout', '-q', 'ticket/1-x');
+  writeFileSync(join(cwd, 'b.txt'), 'mine\n');
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'b');
+  git(cwd, 'checkout', '-q', 'main');
+  writeFileSync(join(cwd, 'c.txt'), 'theirs\n');
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'c');
+  git(cwd, 'cherry-pick', 'ticket/1-x');
+  git(cwd, 'checkout', '-q', 'ticket/1-x');
+  assert.equal(await again(), 'your commits are already on main, so check what is left to do');
   // A scheme on the kit's land.sh can ship to master.
   git(cwd, 'checkout', '-q', 'ticket/1-x');
   git(cwd, 'branch', '-m', 'main', 'master');

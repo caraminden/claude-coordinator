@@ -167,3 +167,12 @@ test('host_check says so when its answer is cut off, as by a restart mid-replay 
     /cut off/,
   );
 });
+
+test('a replay killed by a signal says so under what it had printed, as when a restart stops both (#2100)', async () => {
+  const killed = join(root, 'killed');
+  mkdirSync(join(killed, 'tools/judge-replays'), { recursive: true });
+  writeFileSync(join(killed, 'tools/judge-replay.ts'), "process.stdout.write('replay begins\\n', () => process.kill(process.pid, 'SIGTERM'));\n");
+  writeFileSync(join(killed, 'tools/judge-replays/flake-counter.ts'), '');
+  const out = await hostCheck({ ...opts, worktree: { cwd: killed, env: worktree.env } }, { what: 'judge_replay', judge: 'flake-counter' });
+  assert.match(out, /^replay begins\n\(cut off by SIGTERM.*run it again\)$/);
+});

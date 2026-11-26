@@ -31,8 +31,8 @@ const run = (bin: string, args: string[], input: string | null = null, timeout =
   new Promise<string>((ok) => {
     const child = execFile(bin, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, ...where }, (err, out, errText) => {
       const text = `${out}${errText ? `${out ? '\n' : ''}${errText}` : ''}`.trimEnd();
-      // 124: coreutils timeout stopped it (judge_replay).
-      const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : bin === 'timeout' && err?.code === 124 ? `(stopped after ${args[2]} s)` : err && !text ? String(err.message) : '';
+      // 124: coreutils timeout stopped it (judge_replay). A signal from anyone else (a restart) must not read as a whole report.
+      const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : bin === 'timeout' && err?.code === 124 ? `(stopped after ${args[2]} s)` : err?.signal ? `(cut off by ${err.signal}, as by a restart of the server: run it again)` : err && !text ? String(err.message) : '';
       const all = [text, why].filter(Boolean).join('\n') || '(no output)';
       ok(all.length > MAX_OUTPUT ? `… (earlier output cut)\n${all.slice(-MAX_OUTPUT)}` : all);
     });

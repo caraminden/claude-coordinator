@@ -68,6 +68,23 @@ export function armForLane(app: App, ticket: Ticket, args: Record<string, unknow
 }
 
 /**
+ * A person or Taskmaster sets a claim's queue (the page, the queue tool). One taken out of the pipeline lane's queue with
+ * a hand-off armed for it would wait for a lane that never comes: it is disarmed and woken to say so.
+ */
+export function setClaimQueue(app: App, projectId: number, name: string, queue: number[], by: string) {
+  const { store } = app;
+  const before = name === LANE ? store.claims.waiting(projectId, LANE) : [];
+  store.claims.setQueue(projectId, name, queue, by);
+  for (const id of before) {
+    const t = store.getTicket(id);
+    if (!t || queue.includes(id) || holdsLane(store.claims, t) || !store.getSetting(armedKey(id))) continue;
+    store.deleteSetting(armedKey(id));
+    if (t.note === ARMED_NOTE) store.updateTicket(id, { state: null, note: null }, { kind: 'server' });
+    app.runner.send(id, APP_NAME, `${by} took you out of the pipeline lane's queue, so your armed hand-off won't ship by itself. Ask the Taskmaster (message_coordinator) when you may ship: handing off again puts you at the end of the queue.`);
+  }
+}
+
+/**
  * hand_off_land's lane (#2046): a plain ship to main that changes a pipeline file, from a minion that doesn't hold the
  * lane, is armed instead of started (a free lane is taken). Null: ship now. Else what to tell the minion. An outage fix
  * and a rolled-back deploy's fix jump the line, as the lane's rule says; a merge into a build isn't a ship to main (a

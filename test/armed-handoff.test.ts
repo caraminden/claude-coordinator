@@ -181,31 +181,14 @@ test('what needs no lane ships at once: a change outside the pipeline, and an ou
   await until('both ship', () => plain.state().status === 'closed' && outage.state().status === 'closed');
 });
 
-test("another claim given to a minion with an armed hand-off doesn't fire it or wake it", async () => {
+test('one taken out of the queue while armed is disarmed and woken, not stranded', async () => {
   laneHeld();
   const m = await minion();
   await armed(m);
-  const turns = fake.turnsRun();
-  const r = await srv.call(`/api/projects/${projectId}/claims`, { name: 'other-claim', minion: m.number });
-  assert.ok(r.status < 300, JSON.stringify(r.data));
-  assert.ok(store.getSetting(armedKey(m.id)), 'still armed');
-  assert.ok(!m.texts().some((x) => x.startsWith('You hold the other-claim claim now')), 'no wake');
-  assert.equal(fake.turnsRun(), turns);
-});
-
-test('a Taskmaster giving the lane straight to an armed minion ships it', async () => {
-  laneHeld();
-  const m = await minion();
-  await armed(m);
-  // Taken out of the line, and the lane freed: then given to it by name.
   assert.equal((await srv.call(`/api/projects/${projectId}/claims/${LANE}/queue`, { queue: [] }, 'PUT')).status, 200);
-  store.claims.release(projectId, LANE);
-  assert.equal(store.claims.get(projectId, LANE), undefined);
-  const r = await srv.call(`/api/projects/${projectId}/claims`, { name: LANE, minion: m.number });
-  assert.ok(r.status < 300, JSON.stringify(r.data));
-  await until('it ships', () => m.state().status === 'closed' || m.texts().some((x) => x.includes("didn't ship by itself")));
-  assert.equal(m.state().status, 'closed', String(m.texts().at(-1)));
-  assert.ok(m.texts().includes('The pipeline lane is yours, so Citadel started your armed hand-off with no turn.'));
+  await until('the wake', () => m.texts().some((x) => x.includes("took you out of the pipeline lane's queue, so your armed hand-off won't ship by itself")));
+  assert.equal(store.getSetting(armedKey(m.id)) ?? null, null);
+  assert.notEqual(m.state().note, ARMED_NOTE);
 });
 
 test('a dismissed minion leaves no armed hand-off', async () => {

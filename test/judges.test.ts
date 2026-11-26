@@ -24,7 +24,7 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
 // biome-ignore format: one line per entry is what the merge rule reads
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 47 },
-  'src/armed-handoff.ts': { why: "tells the lane's keeper, as held mail, that a minion joined the pipeline lane's queue (#2046); the armed ship itself goes through Ship It's guards", calls: 1 },
+  'src/armed-handoff.ts': { why: "tells the lane's keeper, as held mail, that a minion joined the pipeline lane's queue, and wakes one taken out of it (#2046); the armed ship itself goes through Ship It's guards", calls: 2 },
   'src/apk-deploy.ts': { why: 'wiring moved out of server.ts (#1838): tells the Taskmaster who published an Android build; judges nothing', calls: 1 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits (and asks whether that test is alive); judges nothing", calls: 3 },

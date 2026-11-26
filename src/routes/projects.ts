@@ -13,8 +13,7 @@ import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME, type Session } from '../auth.ts';
 import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type TicketFields, type User } from '../db.ts';
-import { armedKey } from '../db-keys.ts';
-import { SHIP_LANE } from '../ship-lane.ts';
+import { setClaimQueue } from '../armed-handoff.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { readScope } from '../read-scope.ts';
@@ -1939,7 +1938,7 @@ export const projectRoutes: Route[] = [
       const held = app.store.claims.get(project.id, name);
       // Only a queue (#1334): edit the line of a claim someone else holds, or start a free one with the first in line, who is told.
       if (queue && body.minion == null && held && held.holder !== holder?.id) {
-        app.store.claims.setQueue(project.id, name, queue, session.name);
+        setClaimQueue(app, project.id, name, queue, session.name);
         app.broadcast({ type: 'claims', projectId: project.id });
         return json(res, 200, { claim: claimView(app, held) });
       }
@@ -1951,10 +1950,8 @@ export const projectRoutes: Route[] = [
         const v = claimView(app, taken.held);
         throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${taken.held.note ? ` (${taken.held.note})` : ''}. Release it first if it should move, or add to its queue.`);
       }
-      if (queue) app.store.claims.setQueue(project.id, name, queue, session.name);
+      if (queue) setClaimQueue(app, project.id, name, queue, session.name);
       if (first) app.runner.claimPassed(project.id, [{ to: taken.claim }], `${session.name} started its queue with you`, session.name);
-      // Given straight to a minion whose hand-off is armed for it (#2046): it ships now, as when the claim passes to it.
-      else if (!held && name === SHIP_LANE && app.store.getSetting(armedKey(holder.id))) app.runner.claimPassed(project.id, [{ to: taken.claim }], `${session.name} gave it to you`, session.name);
       else app.broadcast({ type: 'claims', projectId: project.id });
       const view = claimView(app, taken.claim);
       if (app.store.isSplit(project.id)) app.store.noteDigest(project.id, caller?.id ?? holder.id, `${session.name} claimed ${name} for ${view.holder_name}${note ? ` (${note})` : ''}`);
@@ -1971,7 +1968,7 @@ export const projectRoutes: Route[] = [
       const queue = queueOf(app, project.id, (await readJson(req)).queue);
       const held = app.store.claims.get(project.id, name);
       if (!held) throw new HttpError(404, `Nobody holds ${name}, so it has no queue`);
-      app.store.claims.setQueue(project.id, name, queue, session.name);
+      setClaimQueue(app, project.id, name, queue, session.name);
       app.broadcast({ type: 'claims', projectId: project.id });
       return json(res, 200, { claim: claimView(app, held) });
     },

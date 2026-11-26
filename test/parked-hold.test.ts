@@ -177,17 +177,12 @@ test('a start_after minion holds messages, and its start delivers them after its
 });
 
 test("through the server: Unpark, the Taskmaster's unpark option, and update_ticket state null", async () => {
-  const { base, cookie, stop } = await bootServer({ root: join(root, 'server') });
+  const { call: asMe, as, stop } = await bootServer({ root: join(root, 'server') });
   try {
     const auth = new Auth(PASSWORD, SECRET);
-    const call = async (path: string, body?: unknown, method?: string, as?: number) => {
-      const res = await fetch(base + path, {
-        method: method ?? (body === undefined ? 'GET' : 'POST'),
-        headers: { ...(as ? { Authorization: `Bearer ${auth.agentToken(as)}` } : { Cookie: cookie }), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      return { status: res.status, data: await res.json() };
-    };
+    // bootServer's client, which asks a read again on the front's "try again" 503 as the page does (#2012): this
+    // test's own fetch didn't, and failed on it in a crowd (#2013).
+    const call = (path: string, body?: unknown, method?: string, agent?: number) => (agent ? as({ token: auth.agentToken(agent) }) : asMe)(path, body, method);
     const said = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
     const view = async (id: number) => (await call(`/api/tickets/${id}`)).data.ticket;
     const settled = async (id: number) => {

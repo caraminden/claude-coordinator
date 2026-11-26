@@ -25,6 +25,9 @@ test('a parse error names itself, so it is never read as infra', () => {
 test('a failing test whose own output says SyntaxError is not a parse error (#1961)', () => {
   const out = [
     "land: smoke:   Reloading on SIGHUP failed (re-pinning turn files or public/); still serving the old commit, so deploy.sh restarts: SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+    // a land test quoting other refusals in its own output
+    'land: smoke:   a .ts file does not parse',
+    'land: smoke:   land: x failed its burn-in in CI',
     ...['deploy', 'a', 'b'].map((f) => `land: smoke: ✖ test/${f}.test.ts:3 › it`),
     'land: tests failed (exit 1)',
   ].join('\n');

@@ -2717,6 +2717,13 @@ if (config.front) {
       setting: (key, value) => {
         if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value);
       },
+      health: (kind, text) => {
+        try {
+          void store.addHealthEvent(kind, Date.now(), null, text);
+        } catch {
+          /* the health log is best effort */
+        }
+      },
     },
   );
   if (STATICS) throughFront.statics(STATICS);

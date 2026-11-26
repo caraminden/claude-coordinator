@@ -39,7 +39,7 @@ export type ReaderData = {
   memorySchemes: number[] | null;
   /** DATA_DIR, where the Status page reads backups from. */
   dataDir: string;
-  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang`, `=stall-<ms>` or `=slow` in a query ends, hangs, stalls or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
+  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang`, `=wedge`, `=stall-<ms>` or `=slow` in a query ends, hangs, stops answering (the thread alive), stalls or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
   testHooks?: boolean;
   /** A test server's (CITADEL_READER_BOOT_WAIT): a path this thread waits for while it starts, so a test can stop the server while a reader still is (#1625). */
   bootWait?: string;
@@ -371,12 +371,16 @@ if (workerData?.reader) {
   // stands in, so these answer before main's first snapshot, as they did in slice 1.
   const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;
   const inWholeStep = wholeSteps(store.db, data.shared);
+  let wedged = false; // a test's: no request is answered from here on
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
     if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;
     if (data.testHooks && /[?&]citadel-test-reader=main\b/.test(m.url)) return parentPort!.postMessage({ id: m.id, answer: null });
     if (data.testHooks && /[?&]citadel-test-reader=exit\b/.test(m.url)) process.exit(1);
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    // Alive, and this request never answered (#2086).
+    if (data.testHooks && /[?&]citadel-test-reader=wedge\b/.test(m.url)) (wedged = true), console.log('Reader test hook: wedged');
+    if (wedged) return;
     // A disk that answers nothing for that many ms.
     const stall = data.testHooks && /[?&]citadel-test-reader=stall-(\d+)/.exec(m.url);
     if (stall) console.log('Reader test hook: stalled');

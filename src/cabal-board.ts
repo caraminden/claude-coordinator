@@ -233,7 +233,8 @@ const waited = (ms: number) => (ms < 3_600_000 ? `${Math.round(ms / 60_000)} min
 /**
  * What the lead writes its cabal's retro from (#2096): each member's start, ships or merges, dismissal and spend against
  * its row's expected cost, every ask with how long it waited, and the whole log (starts, reds). `seen` is the board as
- * the reader may see it: rows it hid stay hidden here.
+ * the reader may see it, and this shows no more: a reader outside the lead's scheme gets its own schemes' rows and asks
+ * and no log, and a ship note's words (from the member's chat) only where that chat opens.
  */
 export function timelineText(store: Store, seen: Board): string {
   const lead = store.getTicket(seen.lead.id)!;
@@ -247,21 +248,25 @@ export function timelineText(store: Store, seen: Board): string {
       out.push(`- ${who}`);
       continue;
     }
-    const ships = store.shipNotes(t.id).map((s) => `${when(s.at)} ${s.text.slice(0, 160)}`);
+    // The words are from the member's chat; a chat that doesn't open for the reader gives only when and which.
+    const ships = store.shipNotes(t.id).map((x) => `${when(x.at)} ${m.open ? x.text.slice(0, 160) : x.text.startsWith('Merged') ? 'merged' : 'shipped'}`);
     const cells = [who, `started ${when(t.created_at)}`, ...ships, t.closed_at != null ? `dismissed ${when(t.closed_at)}` : 'open', `spent ${money(m.spend)}${row?.cost != null ? ` of ~${money(row.cost)} expected` : ', no expected cost'}`];
     out.push(`- ${cells.join(' | ')}`);
   }
   const asks = store.cabalAsks(lead.id, false);
-  const shown = new Set(seen.members.filter((m) => m.open).map((m) => m.number));
-  out.push(asks.length ? `Asks (${asks.length}):` : 'No asks.');
-  for (const a of asks) {
+  const visible = new Set(seen.members.map((m) => rows.get(m.row)?.ticket_id));
+  const mine = asks.filter((a) => seen.lead.open || visible.has(a.ticket_id));
+  out.push(mine.length ? `Asks (${mine.length}):` : 'No asks.');
+  for (const a of mine) {
     const t = store.getTicket(a.ticket_id);
-    if (t && t.project_id !== seen.lead.project_id && !shown.has(t.number)) continue;
+    const scheme = t && t.project_id !== seen.lead.project_id ? `${store.getProject(t.project_id)?.name} ` : '';
     const answer = a.answered_at != null ? `answered after ${waited(a.answered_at - a.opened_at)}: ${(a.answer ?? '').slice(0, 160)}` : 'never answered';
-    out.push(`- ${when(a.opened_at)} #${t?.number ?? '?'}${a.blocking ? ' BLOCKING' : ''}: ${a.text.slice(0, 200)} | ${answer}`);
+    out.push(`- ${when(a.opened_at)} ${scheme}#${t?.number ?? '?'}${a.blocking ? ' BLOCKING' : ''}: ${a.text.slice(0, 200)} | ${answer}`);
   }
-  const log = store.cabalLog(lead.id, 1000);
-  out.push(log.length ? 'Log:' : 'Log: empty.', ...log.map((l) => `- ${when(l.at)} ${l.by}: ${l.text}`));
+  if (seen.lead.open) {
+    const log = store.cabalLog(lead.id, 1000);
+    out.push(log.length ? 'Log:' : 'Log: empty.', ...log.map((l) => `- ${when(l.at)} ${l.by}: ${l.text}`));
+  }
   return out.join('\n');
 }
 

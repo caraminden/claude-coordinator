@@ -275,17 +275,23 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
 export const retroKey = (leadId: number) => `cabal-retro:${leadId}`;
 
 /**
- * A goal cabal's last member was dismissed: its lead is woken once to write the cabal's retro (#2096). A build cabal's
- * lead is woken by its own ship instead. A fixer never needed doesn't hold it.
+ * A goal cabal's last member was dismissed: its lead is woken to write the cabal's retro (#2096), once, and again only
+ * if members it started after that are all dismissed too. A build cabal's lead is woken by its own ship instead. A fixer
+ * never needed doesn't hold it.
  */
 export function retroWake(app: App, ticketId: number): void {
   const { store } = app;
   const leadId = store.cabalRowOf(ticketId)?.lead_id;
   const lead = leadId != null ? store.getTicket(leadId) : undefined;
-  if (!lead || lead.status === 'closed' || lead.build != null || store.getSetting(retroKey(lead.id)) != null) return;
+  if (!lead || lead.status === 'closed' || lead.build != null) return;
   const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || r.role !== 'fixer');
   if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
-  store.setSetting(retroKey(lead.id), Date.now());
+  const asked = store.getSetting<number[]>(retroKey(lead.id)) ?? [];
+  if (rows.every((r) => asked.includes(r.ticket_id!))) return;
+  store.setSetting(
+    retroKey(lead.id),
+    rows.map((r) => r.ticket_id),
+  );
   store.addCabalLog(lead.id, 'Citadel', 'Every member is dismissed: the retro is next');
   app.runner.send(lead.id, APP_NAME, `Every member of ${name(app, lead)}'s cabal has been dismissed. Write the cabal's retro now and then close: the citadel:cabal skill, "Closing". If you are about to start more members, do that first and write it once they are done too.`);
 }

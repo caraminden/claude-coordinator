@@ -216,4 +216,11 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   assert.match(text, /May I take x\.ts\? \| never answered/);
   assert.match(text, /Red: full run red[\s\S]*Red cleared/);
   assert.equal(await asked(), 1);
+  // A member added after that: once it is dismissed too, the lead is asked again.
+  const three = await make('Sweep three');
+  const added = await board(chief.id, { action: 'row', label: 'M3', title: 'M3', minion: three.number });
+  assert.equal(added.status, 200, JSON.stringify(added.data));
+  await until('#3 idle', async () => (await s.call(`/api/tickets/${three.id}`)).data.ticket.status !== 'running');
+  assert.equal((await s.call(`/api/tickets/${three.id}/status`, { status: 'closed' })).status, 200);
+  await until('asked again', async () => (await asked()) === 2);
 });

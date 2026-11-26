@@ -19,7 +19,7 @@ Create either file when it is first needed.
   ready, and that reply carries the top three findings, even when it is meant to be short:
   they are part of the result.
 - Someone asks how the work went.
-- A major build is ready for its go card (the build minion's step 5). The retro is committed to the build
+- A major build whose build minion leads no cabal is ready for its go card (its step 5). The retro is committed to the build
   branch, in the retro folder CLAUDE.md's Project facts name; there is no milestone PR.
 - A cabal's lead, once its build is live or its last member is dismissed (`citadel:cabal`, "Closing"): the one
   retro for that cabal, written from the board's timeline.

@@ -1,6 +1,6 @@
 // The check on a new minion's brief (#1108, citadel:briefing): it warns, never refuses, when the brief
 // an agent wrote has no quoted words from a person, no "Done when", no "Already shipped on this" or no "Leave alone".
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFile, realpath, stat } from 'node:fs/promises';
 
 /** A person's words in quotes: three or more words between "…" or “…”, or a `>` quote line. */
 const QUOTE = /"[^"\n]*\S\s+\S+\s+\S[^"\n]*"|“[^”\n]*\S\s+\S+\s+\S[^”\n]*”|^\s*>\s*\S/m;
@@ -9,23 +9,21 @@ const SHIPPED = /\balready[\s-]*shipped\b/i;
 const LEAVE_ALONE = /\bleave[\s-]*alone\b/i;
 
 /** The handoffs and specs a brief names by full path inside `shared` (the scheme's shared folder), read so a pointer brief is judged by its file. */
-export function namedFiles(text: string, shared: string): string {
+export async function namedFiles(text: string, shared: string): Promise<string> {
   const escaped = shared.replace(/\/+$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const paths = new Set([...text.matchAll(new RegExp(`${escaped}/[^\\s\`'"()<>\\[\\]]+\\.md`, 'g'))].map(([p]) => p));
-  return [...paths]
-    .slice(0, 5)
-    .map((p) => {
-      // Only a plain file of at most 200 kB that really sits in the shared folder (no link out, no FIFO to hang on); a missing or unreadable one adds nothing.
-      try {
-        const real = realpathSync(p);
-        if (!real.startsWith(`${realpathSync(shared)}/`)) return '';
-        const st = statSync(real);
-        return st.isFile() && st.size <= 200_000 ? readFileSync(real, 'utf8') : '';
-      } catch {
-        return '';
-      }
-    })
-    .join('\n');
+  const read = [...paths].slice(0, 5).map(async (p) => {
+    // Only a plain file of at most 200 kB that really sits in the shared folder (no link out, no FIFO to hang on); a missing or unreadable one adds nothing.
+    try {
+      const real = await realpath(p);
+      if (!real.startsWith(`${await realpath(shared)}/`)) return '';
+      const st = await stat(real);
+      return st.isFile() && st.size <= 200_000 ? await readFile(real, 'utf8') : '';
+    } catch {
+      return '';
+    }
+  });
+  return (await Promise.all(read)).join('\n');
 }
 
 /** What the brief (with the files it names) is missing, as one warning line, or null when it has both parts. */

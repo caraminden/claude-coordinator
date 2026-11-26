@@ -82,8 +82,8 @@ export function syncCalls(text: string): string[] {
 }
 
 /** The most `rare` and `owed` calls there may be. Lower them when you move calls off the thread; never raise them. */
-const RARE_MOST = 256;
-const OWED_MOST = 253;
+const RARE_MOST = 255;
+const OWED_MOST = 218;
 
 type Class = 'boot' | 'proc' | 'rare' | 'owed';
 /** file → function → [class, calls, why (owed: the handoff or reason; others: what triggers it)]. */

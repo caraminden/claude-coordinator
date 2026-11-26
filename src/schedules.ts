@@ -715,7 +715,7 @@ export interface ScheduledRunDeps {
   /** The schedule templates; the kit's by default. */
   templates?: () => Map<string, ScheduleTemplate>;
   /** The memory folder the memory curator (#1111) tidies in a scheme, and its note count; none skips its run. */
-  memoryTarget?: (projectId: number) => { dir: string; notes: number } | null;
+  memoryTarget?: (projectId: number) => Promise<{ dir: string; notes: number } | null>;
   /** Holds a run's brief while the box is starved (#1302, src/held-starts.ts); without it the brief is sent at once. */
   held?: Pick<HeldStarts, 'start'>;
 }
@@ -796,7 +796,7 @@ export class ScheduledRuns {
     // The memory curator (#1111) skips, as free, a scheme with no notes or with last week's tidy still waiting on a member.
     if (s.template === 'memory-curator') {
       const open = store.memoryProposals.open(s.project_id);
-      memoryDir = this.d.memoryTarget?.(s.project_id);
+      memoryDir = await this.d.memoryTarget?.(s.project_id);
       const why = open ? `a tidy${open.ticket_id === null ? '' : ` from #${store.getTicket(open.ticket_id)?.number}`} still waits on a member` : !memoryDir?.notes ? 'no memory notes to tidy' : null;
       if (why) {
         const skip = `Skipped ${pacific(now)}: ${why}`;

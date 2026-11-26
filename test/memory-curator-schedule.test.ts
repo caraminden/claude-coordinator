@@ -50,7 +50,7 @@ test('a run is skipped free with no notes or an open tidy, and otherwise its bri
     broadcast: () => {},
     by: 'Citadel',
     dataDir: '/data',
-    memoryTarget: () => target,
+    memoryTarget: async () => target,
   });
   const s = store.schedules.create({ project_id: p.id, name: 'Memory curator', cron: '* * * * *', brief: '', type: 'chore', template: 'memory-curator', created_by: 'Cara' });
   const due = () => store.db.prepare('UPDATE schedules SET next_run_at = ? WHERE id = ?').run(Date.now() - 1000, s.id);

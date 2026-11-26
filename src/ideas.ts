@@ -6,10 +6,10 @@
 // Orders → Ideas or with the ideas tool, and a hand edit is never undone by the scan. Later rows older than two weeks
 // sit on top of the page, and the Taskmaster gets a weekly held note of them. Keyed on the scheme everywhere.
 import type { DatabaseSync } from 'node:sqlite';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { pacificDay } from './pacific.ts';
-import { drain, pace } from './breathe.ts';
+import { breather, drain, pace } from './breathe.ts';
 
 export const STATUSES = ['proposed', 'picked', 'later', 'skipped', 'started', 'built', 'declined'] as const;
 export type IdeaStatus = (typeof STATUSES)[number];
@@ -151,25 +151,25 @@ export function handoffIn(text: string, sharedDir: string): string | null {
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Every handoff in a shared folder, relative: handoffs/ (any depth) and *handoff*.md at its root. */
-export function handoffFiles(sharedDir: string): string[] {
+export async function handoffFiles(sharedDir: string): Promise<string[]> {
   const out: string[] = [];
-  const walk = (dir: string, depth: number) => {
+  const walk = async (dir: string, depth: number) => {
     let names: import('node:fs').Dirent[];
     try {
-      names = readdirSync(dir, { withFileTypes: true });
+      names = await readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const d of names) {
       if (d.name.startsWith('.')) continue;
       const p = join(dir, d.name);
-      if (d.isDirectory() && depth < 4) walk(p, depth + 1);
+      if (d.isDirectory() && depth < 4) await walk(p, depth + 1);
       else if (d.isFile() && d.name.endsWith('.md')) out.push(relative(sharedDir, p).split(sep).join('/'));
     }
   };
-  walk(join(sharedDir, 'handoffs'), 0);
+  await walk(join(sharedDir, 'handoffs'), 0);
   try {
-    for (const n of readdirSync(sharedDir)) if (n.endsWith('.md') && /handoff/i.test(n)) out.push(n);
+    for (const n of await readdir(sharedDir)) if (n.endsWith('.md') && /handoff/i.test(n)) out.push(n);
   } catch {
     /* no shared folder yet */
   }
@@ -246,10 +246,11 @@ export class Ideas {
   }
 
   /** Link a minion to the row its handoff made (made now if the scan hasn't seen the file yet). The newest start wins, never over a hand link or a built row. */
-  linkHandoff(projectId: number, sharedDir: string, rel: string, ticket: { id: number; number: number | null }): Idea | null {
+  async linkHandoff(projectId: number, sharedDir: string, rel: string, ticket: { id: number; number: number | null }): Promise<Idea | null> {
     if (rel.split('/').includes('..')) return null; // a brief path must stay inside the shared folder
-    let row = this.byHandoff(projectId, rel) ?? this.fromHandoff(projectId, sharedDir, rel) ?? this.fromChat(projectId, sharedDir, rel, ticket.id);
+    let row = this.byHandoff(projectId, rel) ?? (await this.fromHandoff(projectId, sharedDir, rel)) ?? this.fromChat(projectId, sharedDir, rel, ticket.id);
     if (!row) return null;
+    row = this.get(row.id)!; // read again: another link may have written it while the file was read
     if (row.link_manual || row.ticket_id === ticket.id || (row.ticket_id && row.ticket_id > ticket.id) || row.status === 'built') return row;
     row = this.upsert(projectId, row.page, row.card, { ticket_id: ticket.id, number: ticket.number });
     this.restatus(projectId);
@@ -257,11 +258,11 @@ export class Ideas {
   }
 
   /** The row a handoff file makes or joins: its page's card when it names one that has no other handoff, else its own. */
-  fromHandoff(projectId: number, sharedDir: string, rel: string): Idea | null {
+  async fromHandoff(projectId: number, sharedDir: string, rel: string): Promise<Idea | null> {
     const abs = join(sharedDir, rel);
     let mtime: number;
     try {
-      mtime = statSync(abs).mtimeMs;
+      mtime = (await stat(abs)).mtimeMs;
     } catch {
       return this.byHandoff(projectId, rel) ?? null;
     }
@@ -269,7 +270,7 @@ export class Ideas {
     if (!h || h.mtime !== mtime) {
       let text = '';
       try {
-        text = readFileSync(abs, 'utf8').slice(0, 20_000);
+        text = (await readFile(abs, 'utf8')).slice(0, 20_000);
       } catch {
         return null;
       }
@@ -326,14 +327,14 @@ export class Ideas {
   }
 
   /** A page's picks: one row per item of a later-style collection (picked, noted or, from mockkit's list, unpicked). */
-  readPage(projectId: number, file: string, source: number | null, items: PageItem[] = [], sendText = ''): void {
+  async readPage(projectId: number, file: string, source: number | null, items: PageItem[] = [], sendText = ''): Promise<void> {
     let colls: string[] = [];
     try {
-      const mtime = statSync(file).mtimeMs;
+      const mtime = (await stat(file)).mtimeMs;
       const hit = this.pages.get(file);
       if (hit?.mtime === mtime) colls = hit.colls;
       else {
-        colls = laterCollections(readFileSync(file, 'utf8'));
+        colls = laterCollections(await readFile(file, 'utf8'));
         this.pages.set(file, { mtime, colls });
       }
     } catch {
@@ -469,7 +470,7 @@ export class Ideas {
   }
 
   /** The minions started since the last scan whose first message or Start button names a handoff. */
-  linkStarts(projectId: number, sharedDir: string): void {
+  async linkStarts(projectId: number, sharedDir: string): Promise<void> {
     const key = `ideas_scanned:${projectId}`;
     const mark = Number((this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? 0);
     const tickets = this.db.prepare("SELECT id, number FROM tickets WHERE project_id = ? AND kind = 'ticket' AND id > ? ORDER BY id").all(projectId, mark) as { id: number; number: number | null }[];
@@ -483,12 +484,12 @@ export class Ideas {
         /* not JSON */
       }
       const rel = handoffIn(text, sharedDir);
-      if (rel) this.linkHandoff(projectId, sharedDir, rel, t);
+      if (rel) await this.linkHandoff(projectId, sharedDir, rel, t);
     }
     for (const b of this.db.prepare('SELECT path, ticket_id FROM brief_starts WHERE project_id = ? AND ticket_id IS NOT NULL').all(projectId) as { path: string; ticket_id: number }[]) {
       const rel = b.path.startsWith(sharedDir + sep) ? relative(sharedDir, b.path).split(sep).join('/') : null;
       const t = this.db.prepare('SELECT id, number FROM tickets WHERE id = ?').get(b.ticket_id) as { id: number; number: number | null } | undefined;
-      if (rel && t && this.byHandoff(projectId, rel)?.ticket_id !== t.id) this.linkHandoff(projectId, sharedDir, rel, t);
+      if (rel && t && this.byHandoff(projectId, rel)?.ticket_id !== t.id) await this.linkHandoff(projectId, sharedDir, rel, t);
     }
     if (tickets.length) this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(tickets.at(-1)!.id));
   }
@@ -498,35 +499,32 @@ export class Ideas {
    * yields to the event loop between pages, files, Send chunks and minions (#1414), so call it through now() or soon().
    */
   async sync(projectId: number, sharedDir: string): Promise<void> {
-    await pace(this.syncSteps(projectId, sharedDir));
-  }
-
-  private *syncSteps(projectId: number, sharedDir: string): Generator<void, void> {
+    const breathe = breather(20);
     const files = (this.db.prepare("SELECT DISTINCT file FROM artifact_data WHERE project_id = ? AND key LIKE 'db/%'").all(projectId) as { file: string }[]).map((r) => r.file);
     for (const file of files) {
-      yield;
+      await breathe();
       const src = this.db.prepare(`SELECT t.number FROM artifacts a JOIN tickets t ON t.id = a.ticket_id WHERE a.project_id = ? AND a.path = ? AND t.kind = 'ticket' ORDER BY a.created_at LIMIT 1`).get(projectId, file) as { number: number | null } | undefined;
       // Titles the page's Sends named: read from the chats it was sent to, once per page while a row lacks one.
       const untitled = this.db.prepare("SELECT 1 FROM ideas WHERE project_id = ? AND page = ? AND title = '' LIMIT 1").get(projectId, file);
       const fresh = !this.db.prepare('SELECT 1 FROM ideas WHERE project_id = ? AND page = ? LIMIT 1').get(projectId, file);
       const key = `${projectId}\0${file}`;
       if ((!untitled && !fresh) || this.searched.has(key)) {
-        this.readPage(projectId, file, src?.number ?? null);
+        await this.readPage(projectId, file, src?.number ?? null);
         continue;
       }
       this.searched.add(key);
-      yield* this.sendSteps(projectId);
+      await pace(this.sendSteps(projectId));
       const sends = this.sendsOf(projectId, file);
-      this.readPage(projectId, file, src?.number ?? sends.source, [], sends.text);
+      await this.readPage(projectId, file, src?.number ?? sends.source, [], sends.text);
       // A row no Send named keeps its card id as its title, so this chat search runs once per page, not every pass.
       this.db.prepare("UPDATE ideas SET title = card WHERE project_id = ? AND page = ? AND title = ''").run(projectId, file);
     }
-    for (const rel of handoffFiles(sharedDir)) {
-      yield;
-      this.fromHandoff(projectId, sharedDir, rel);
+    for (const rel of await handoffFiles(sharedDir)) {
+      await breathe();
+      await this.fromHandoff(projectId, sharedDir, rel);
     }
-    this.linkStarts(projectId, sharedDir);
-    const shipped = yield* this.shipSteps(projectId);
+    await this.linkStarts(projectId, sharedDir);
+    const shipped = await pace(this.shipSteps(projectId));
     this.warm.add(projectId);
     this.restatusWith(projectId, shipped);
   }

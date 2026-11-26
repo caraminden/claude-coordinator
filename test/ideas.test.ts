@@ -93,7 +93,7 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   writeFileSync(join(shared, 'handoffs', 'handoff-ledger.md'), `# Handoff: one ledger (G3)\n\nFrom #12's ideas page, card G3: \`${page}\`.\n`);
   writeFileSync(join(shared, 'handoffs', 'loose.md'), '# Handoff: something with no page\n\nFrom #40.\n');
 
-  store.ideas.readPage(p.id, page, 12, [], 'Picks on "Ideas":\n- G3 One ledger: Build it. "one view of everything"\n- F7 Pick bars: Later');
+  await store.ideas.readPage(p.id, page, 12, [], 'Picks on "Ideas":\n- G3 One ledger: Build it. "one view of everything"\n- F7 Pick bars: Later');
   await store.ideas.sync(p.id, shared);
   let rows = store.ideas.list(p.id);
   assert.equal(rows.length, 3, 'two picks with Later options and one loose handoff; the takes bar makes none');
@@ -134,7 +134,7 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   assert.equal(rows.find((r) => r.id === g3.id)!.ticket_id, null);
   assert.equal(rows.find((r) => r.id === g3.id)!.status, 'picked');
   store.ideas.edit(g3.id, 'Josh', { ticket: 'auto' });
-  store.ideas.linkHandoff(p.id, shared, 'handoffs/handoff-ledger.md', t);
+  await store.ideas.linkHandoff(p.id, shared, 'handoffs/handoff-ledger.md', t);
   assert.equal(store.ideas.get(g3.id)!.status, 'built');
 });
 
@@ -148,7 +148,7 @@ test("a minion merged into a build is built once the build's own minion ships", 
   const owner = store.createTicket({ project_id: p.id, title: 'build 3', permission_mode: 'default', created_by: 'Josh' });
   store.updateTicket(feeder.id, { build: 3 });
   store.setSetting(`build-owner:${p.id}:3`, owner.id);
-  store.ideas.linkHandoff(p.id, shared, 'handoffs/feeder.md', feeder);
+  await store.ideas.linkHandoff(p.id, shared, 'handoffs/feeder.md', feeder);
   store.addEvent(feeder.id, 'note', { text: 'Merged into build/3 …' });
   store.ideas.restatus(p.id);
   assert.equal(store.ideas.byHandoff(p.id, 'handoffs/feeder.md')!.status, 'started');
@@ -164,7 +164,7 @@ test('a handoff deleted after its minion started still joins its card, from the 
   const shared = join(root, 'gone-shared');
   mkdirSync(join(shared, 'handoffs'), { recursive: true });
   const page = join(shared, 'mockups', 'ideas.html');
-  store.ideas.readPage(p.id, page, 12, [], 'Picks on "Ideas":\n- B4 Third-fix flag: Go\n- B5 Other: Later');
+  await store.ideas.readPage(p.id, page, 12, [], 'Picks on "Ideas":\n- B4 Third-fix flag: Go\n- B5 Other: Later');
   store.ideas.upsert(p.id, page, 'B4', { pick: 'go', decided_by: 'Josh', decided_at: 1 });
   const abs = join(shared, 'handoffs', 'handoff-third-fix-flag.md');
   const t = store.createTicket({ project_id: p.id, title: 'Third-fix flag on repeat bug briefs', permission_mode: 'default', created_by: 'Josh' });
@@ -219,13 +219,13 @@ test("a handoff naming its card and source minion, but not the page's path, join
   const shared = join(root, 'src-shared');
   mkdirSync(join(shared, 'handoffs'), { recursive: true });
   const page = join(shared, 'mockups', 'platform.html');
-  store.ideas.readPage(p.id, page, 1093, [], 'Picks on "Platform":\n- A1 Nightly backups: Build it');
+  await store.ideas.readPage(p.id, page, 1093, [], 'Picks on "Platform":\n- A1 Nightly backups: Build it');
   store.ideas.upsert(p.id, page, 'A1', { pick: 'go', decided_by: 'Josh', decided_at: 1, source_number: 1093 });
   writeFileSync(join(shared, 'handoffs', 'apps-nightly-backups.md'), "# Apps write nightly backups\n\nFrom #1093's platform ideas, idea A1. Josh picked Build it.\n");
   await store.ideas.sync(p.id, shared);
   assert.equal(store.ideas.find(p.id, page, 'A1')!.handoff, 'handoffs/apps-nightly-backups.md');
   const t = store.createTicket({ project_id: p.id, title: 'x', permission_mode: 'default', created_by: 'Josh' });
-  assert.equal(store.ideas.linkHandoff(p.id, shared, '../outside/handoff.md', t), null);
+  assert.equal(await store.ideas.linkHandoff(p.id, shared, '../outside/handoff.md', t), null);
 });
 
 // Loop-lag stalls (#1215): a scan of every message or minion's events per page or per pass froze the server for 30 s.

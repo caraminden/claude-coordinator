@@ -1,7 +1,7 @@
 // The app shell the service worker keeps on the device (#1144): public/sw.js caches Citadel's own static files under
 // the version the server runs, so the installed app opens with no network. The server fills the worker in per request,
 // so a ship (a new version) is a new worker, and the off switch below is one too.
-import { existsSync } from 'node:fs';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -20,8 +20,11 @@ export function shellFiles(names: Iterable<string>): string[] {
   return [...names].filter((n) => !/\.(mjs|ps1|ts|webmanifest)$/.test(n) && n !== 'sw.js' && n !== 'index.html').sort();
 }
 
-export function shellOff(dataDir: string): boolean {
-  return existsSync(join(dataDir, SHELL_OFF_FILE));
+export function shellOff(dataDir: string): Promise<boolean> {
+  return access(join(dataDir, SHELL_OFF_FILE)).then(
+    () => true,
+    () => false,
+  );
 }
 
 /** public/sw.js with its shell filled in: the version, the URLs to keep and each one's content hash (the server sends the

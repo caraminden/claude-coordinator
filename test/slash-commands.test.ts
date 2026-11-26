@@ -28,11 +28,11 @@ test("describe takes a SKILL.md's description up to its first sentence, quoted o
   assert.ok(describe(`---\ndescription: ${'a'.repeat(300)}\n---\n`).length <= 140);
 });
 
-test("a turn's init event is kept without terminal and internal commands, and lists each with its line", () => {
+test("a turn's init event is kept without terminal and internal commands, and lists each with its line", async () => {
   const project = store.createProject('P', null);
   const t = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   const other = store.createTicket({ project_id: project.id, title: 'N', permission_mode: 'default', created_by: 'Cara' });
-  assert.deepEqual(chatCommands(store, t), { loaded: false, commands: [] });
+  assert.deepEqual(await chatCommands(store, t), { loaded: false, commands: [] });
   const kit = join(root, 'kit');
   const cwd = join(root, 'repo');
   mkdirSync(join(kit, 'skills', 'grilling'), { recursive: true });
@@ -50,7 +50,7 @@ test("a turn's init event is kept without terminal and internal commands, and li
       { name: 'builtin-thing', path: 'builtin' },
     ],
   });
-  assert.deepEqual(chatCommands(store, t), {
+  assert.deepEqual(await chatCommands(store, t), {
     loaded: true,
     commands: [
       { name: 'citadel:grilling', description: 'Grill the user about a plan.' },
@@ -61,7 +61,7 @@ test("a turn's init event is kept without terminal and internal commands, and li
     ],
   });
   // A chat with no turn of its own yet takes the scheme's newest list.
-  assert.equal(chatCommands(store, other).commands.length, 5);
+  assert.equal((await chatCommands(store, other)).commands.length, 5);
   assert.deepEqual(store.getSetting<{ plugins: unknown[] }>(commandsKey(t.id))!.plugins, [{ name: 'citadel', path: kit }]);
 });
 

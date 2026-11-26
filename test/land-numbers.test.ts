@@ -270,3 +270,34 @@ test('a budget one side lowered is not summed: the ship is refused before the li
   assert.match(res.stderr, /prompt-budget\.test\.ts/);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
+
+// README's Layout rows (#2104): two ships that each add a row to the real table both ship, by the kit core's rows rule
+// (MERGES in land.local.sh); two that change one row differently are still refused.
+const README = readFileSync(join(import.meta.dirname, '..', 'README.md'), 'utf8');
+const ROW = README.split('\n').find((l) => l.startsWith('| `server.ts` |'))!;
+const withRows = (...rows: string[]) => README.replace(`${ROW}\n`, `${ROW}\n${rows.map((r) => `${r}\n`).join('')}`);
+
+test("two branches that each add a row to README's Layout table both ship, main's row first (#2104)", () => {
+  const r = start();
+  write(r.source, { 'README.md': README }, 'the README');
+  git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  write(r.source, { 'README.md': withRows('| `src/b.ts` | B (#2) |'), 'src/b.ts': 'export {};\n' }, '#2: a row');
+  write(r.wt, { 'README.md': withRows('| `src/a.ts` | A (#1) |'), 'src/a.ts': 'export {};\n' }, '#1: a row');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(show(r, 'main', 'README.md') + '\n', withRows('| `src/b.ts` | B (#2) |', '| `src/a.ts` | A (#1) |'));
+});
+
+test('a README Layout row two branches changed differently is refused before the line, main untouched (#2104)', () => {
+  const r = start();
+  write(r.source, { 'README.md': README }, 'the README');
+  git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  write(r.source, { 'README.md': README.replace(ROW, `${ROW.slice(0, -2)} (theirs, #2) |`) }, '#2: the row');
+  write(r.wt, { 'README.md': README.replace(ROW, `${ROW.slice(0, -2)} (mine, #1) |`) }, '#1: the row');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /smoke: it conflicts with main/);
+  assert.match(res.stderr, /README\.md/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});

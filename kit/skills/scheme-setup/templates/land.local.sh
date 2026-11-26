@@ -91,7 +91,8 @@
 # stopping on, a line "<path> <rule> [<regex>]" each. Rules: append <regex> (lines both add to a list whose opening
 # line matches), sum <regex> (lines matching <regex> both changed: numbers both raised become main's plus this
 # branch's raise, notes both added keep both), count <regex> (as sum, and a number either side lowered adds up too: a
-# list of sizes), main (main's copy: a file land_rebased makes again), hook (land_merge
+# list of sizes), rows <regex> (markdown table rows both add under a heading that matches: a Layout table), main
+# (main's copy: a file land_rebased makes again), hook (land_merge
 # below). Anything a rule isn't sure of stops the rebase, as a clash in any other file does. The header of
 # tools/land.sh says the rest.
 # MERGES='
@@ -99,6 +100,7 @@
 # src/db.ts append ^const\ MIGRATIONS
 # test/size-budget.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \[[0-9]+,
 # test/prompt-baseline.json main
+# README.md rows ^##\ Layout$
 # '
 
 # The land lock and the line's folder ('' is <.git>/land.lock and <.git>/land-queue in the main checkout). Set both to

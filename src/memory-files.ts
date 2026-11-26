@@ -3,7 +3,7 @@
 // read, edit and delete them here. Not src/memory.ts, which is search by meaning over chats.
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { lstat, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { projectSlug } from './sessions.ts';
 import { pacificDay } from './pacific.ts';
@@ -121,17 +121,17 @@ export interface FolderView {
 }
 
 /** A folder's notes, in the index's order first, then the rest by newest. An unreadable or missing folder is "not reachable". */
-export function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, now = Date.now()): FolderView {
-  if (!existsSync(f.dir)) return { label: f.label, reachable: false, bytes: 0, notes: [], index: '' };
+export async function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, now = Date.now()): Promise<FolderView> {
+  if (!(await lstat(f.dir).catch(() => null))) return { label: f.label, reachable: false, bytes: 0, notes: [], index: '' };
   let names: string[];
   try {
-    names = readdirSync(f.dir);
+    names = await readdir(f.dir);
   } catch {
     return { label: f.label, reachable: false, bytes: 0, notes: [], index: '' };
   }
   let index = '';
   try {
-    if (plain(join(f.dir, 'MEMORY.md'))) index = readFileSync(join(f.dir, 'MEMORY.md'), 'utf8');
+    if ((await lstat(join(f.dir, 'MEMORY.md'))).isFile()) index = await readFile(join(f.dir, 'MEMORY.md'), 'utf8');
   } catch {
     /* an unreadable index doesn't hide the notes */
   }
@@ -142,9 +142,9 @@ export function readFolder(f: MemoryFolder, isClosed: (n: number) => boolean, no
     let st;
     let text;
     try {
-      if (!plain(path)) continue;
-      st = lstatSync(path);
-      text = readFileSync(path, 'utf8');
+      st = await lstat(path);
+      if (!st.isFile()) continue; // as plain(): never through a symlink
+      text = await readFile(path, 'utf8');
     } catch {
       continue;
     }
@@ -183,29 +183,67 @@ export function writeAtomic(path: string, text: string) {
   }
 }
 
+/** writeAtomic off the server's thread, for the paths people and uploads hit; a tidy's apply keeps the sync one, which must not await. */
+export async function writeAtomicOff(path: string, text: string) {
+  const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
+  const file = await open(tmp, 'wx', 0o600);
+  try {
+    await file.writeFile(text);
+    await file.close();
+    await rename(tmp, path);
+  } catch (err) {
+    await file.close().catch(() => {});
+    await rm(tmp, { force: true });
+    throw err;
+  }
+}
+
+// The note edits that await take turns per folder (#2136), or two would read the same text and one write would be lost.
+const writing = new Map<string, Promise<unknown>>();
+export function inFolder<T>(dir: string, job: () => T | Promise<T>): Promise<T> {
+  const run = (writing.get(dir) ?? Promise.resolve()).then(job);
+  const settled = run.then(
+    () => {},
+    () => {},
+  );
+  writing.set(dir, settled);
+  void settled.then(() => writing.get(dir) === settled && writing.delete(dir));
+  return run;
+}
+/** A synchronous writer (a tidy's apply or Put back) can't wait its turn, so it refuses while one is under way. */
+export const noteWriteOn = (dir: string) => writing.has(dir);
+
+const lstatOr = (path: string) => lstat(path).catch(() => null);
+const plainOff = async (path: string) => (await lstatOr(path))?.isFile() ?? false;
+
 /** Replace one note's text (it must exist: this edits, never adds). */
-export function saveNote(dir: string, file: string, text: string, was?: string) {
-  if (!plain(join(dir, file))) throw new Error('No such note');
+export const saveNote = (dir: string, file: string, text: string, was?: string) => inFolder(dir, () => replaceNote(dir, file, text, was));
+
+async function replaceNote(dir: string, file: string, text: string, was?: string) {
+  if (!(await plainOff(join(dir, file)))) throw new Error('No such note');
   // `was` is the text the page showed: a note written since (a session's update) isn't overwritten unseen (2ME4). Without it, the save is unchecked.
-  if (was !== undefined && readFileSync(join(dir, file), 'utf8') !== was) throw Object.assign(new Error('This note changed since you opened it (a session may have updated it). Reload the page to see the new text, then make your edit again.'), { status: 409 });
-  writeAtomic(join(dir, file), text);
+  if (was !== undefined && (await readFile(join(dir, file), 'utf8')) !== was) throw Object.assign(new Error('This note changed since you opened it (a session may have updated it). Reload the page to see the new text, then make your edit again.'), { status: 409 });
+  await writeAtomicOff(join(dir, file), text);
 }
 
 /** Add a note's line to MEMORY.md (made if missing), as `- [name](file) — description`. False when the index already links it. */
-export function indexNote(dir: string, file: string): boolean {
+export const indexNote = (dir: string, file: string): Promise<boolean> => inFolder(dir, () => addToIndex(dir, file));
+
+async function addToIndex(dir: string, file: string): Promise<boolean> {
   const path = join(dir, file);
-  if (!plain(path)) throw new Error('No such note');
+  if (!(await plainOff(path))) throw new Error('No such note');
   const indexPath = join(dir, 'MEMORY.md');
-  if (existsSync(indexPath) && !plain(indexPath)) throw new Error('MEMORY.md is not a plain file');
-  const index = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : '';
+  const had = await lstatOr(indexPath);
+  if (had && !had.isFile()) throw new Error('MEMORY.md is not a plain file');
+  const index = had ? await readFile(indexPath, 'utf8') : '';
   if (index.includes(`](${file})`)) return false;
-  const fm = frontmatter(readFileSync(path, 'utf8'));
+  const fm = frontmatter(await readFile(path, 'utf8'));
   const name = (fm.name || file.replace(/\.md$/, '')).replace(/[[\]\n]/g, ' ');
   const line = `- [${name}](${file})${fm.description ? ` — ${fm.description.replace(/\n/g, ' ')}` : ''}`;
   const next = `${index}${index && !index.endsWith('\n') ? '\n' : ''}${line}\n`;
   // Claude Code loads only MEMORY.md's first 200 lines / 25 KB; a line past that would look listed but never load.
   if (next.split('\n').length - 1 > 200 || Buffer.byteLength(next) > 25 * 1024) throw Object.assign(new Error('MEMORY.md is full: tidy it before adding more'), { status: 409 });
-  writeAtomic(indexPath, next);
+  await writeAtomicOff(indexPath, next);
   return true;
 }
 

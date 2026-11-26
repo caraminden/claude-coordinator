@@ -367,15 +367,19 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 /**
- * An SVG element, as h() makes an HTML one. Every attribute is set as a string; a null or undefined one is left off.
- * It adds no listeners: an `on…` function would only become text.
+ * An SVG element, as h() makes an HTML one: an `on…` entry is a listener, any other is set as a string; a null
+ * or undefined one is left off.
  * @param {string} tag
  * @param {Record<string, unknown>} [attrs]
  * @param {...(Node | string)} kids
  */
 export function svg(tag, attrs = {}, ...kids) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) el.setAttribute(k, String(v));
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), /** @type {EventListener} */ (v));
+    else el.setAttribute(k, String(v));
+  }
   el.append(...kids);
   return el;
 }

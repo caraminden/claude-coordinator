@@ -1,12 +1,12 @@
 {
   "any-nudge": {
-    "hash": "f7fc98ca705d1db0",
-    "at": "2026-11-25",
+    "hash": "4a7e64deb9a91dc0",
+    "at": "2026-11-26",
     "days": 3,
-    "inputs": "3988 TypeScript file changes in 836 commits",
-    "hits": 63,
+    "inputs": "4486 TypeScript file changes in 972 commits",
+    "hits": 105,
     "real": 0,
-    "summary": "0 as before, 63 new, 0 gone"
+    "summary": "0 as before, 105 new, 0 gone"
   },
   "app-shots": {
     "hash": "06b527913fbf81dd",

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deleteNote, indexNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags, type MemoryFolder } from '../src/memory-files.ts';
+import { deleteNote, indexNote, memoryDir, noteWriteOn, memoryFolders, noteFile, readFolder, saveNote, staleFlags, type MemoryFolder } from '../src/memory-files.ts';
 import { fake } from './typed.ts';
 
 test("memoryFolders maps a repo path to each login's projects/<slug>/memory, once per distinct dir", () => {
@@ -44,16 +44,16 @@ test('two accounts whose projects folder is one symlinked folder list it once (2
   assert.equal(got[0].dir, memoryDir(join(root, 'one'), repo), "the path and id stay the first login's");
 });
 
-test('a save made from older text is refused once the note changed, and an unchecked one still saves (2ME4)', () => {
+test('a save made from older text is refused once the note changed, and an unchecked one still saves (2ME4)', async () => {
   const dir = setup();
   const opened = readFileSync(join(dir, 'b.md'), 'utf8');
-  saveNote(dir, 'b.md', 'a session wrote this');
-  assert.throws(
+  await saveNote(dir, 'b.md', 'a session wrote this');
+  await assert.rejects(
     () => saveNote(dir, 'b.md', "the page's older edit", opened),
     (e: Error & { status?: number }) => e.status === 409 && /changed since you opened it/.test(e.message),
   );
   assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), 'a session wrote this');
-  saveNote(dir, 'b.md', 'saved from what was shown', 'a session wrote this');
+  await saveNote(dir, 'b.md', 'saved from what was shown', 'a session wrote this');
   assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), 'saved from what was shown');
 });
 
@@ -90,16 +90,16 @@ test('delete takes only its own link from an index line that links two notes (ME
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- A note and [B](b.md) — together\n- [B](b.md) — second\n');
 });
 
-test('edit replaces a note whole and refuses one that is not there', () => {
+test('edit replaces a note whole and refuses one that is not there', async () => {
   const dir = setup();
-  saveNote(dir, 'b.md', 'new');
+  await saveNote(dir, 'b.md', 'new');
   assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), 'new');
-  assert.throws(() => saveNote(dir, 'zzz.md', 'x'), /No such note/);
+  await assert.rejects(() => saveNote(dir, 'zzz.md', 'x'), /No such note/);
 });
 
-test('readFolder lists notes in index order with stale flags; a missing folder is not reachable', () => {
+test('readFolder lists notes in index order with stale flags; a missing folder is not reachable', async () => {
   const dir = setup();
-  const v = readFolder(fake<MemoryFolder>({ label: 'L', dir }), (n) => n === 5, Date.parse('2026-11-19T12:00:00-08:00'));
+  const v = await readFolder(fake<MemoryFolder>({ label: 'L', dir }), (n) => n === 5, Date.parse('2026-11-19T12:00:00-08:00'));
   assert.deepEqual(
     v.notes.map((n) => [n.file, n.name, n.type]),
     [
@@ -108,7 +108,7 @@ test('readFolder lists notes in index order with stale flags; a missing folder i
     ],
   );
   assert.deepEqual(v.notes[0].flags, { closed: [5], datesPast: ['2020-01-01'], datesSoon: [] });
-  assert.equal(readFolder(fake<MemoryFolder>({ label: 'L', dir: join(dir, 'nope') }), () => false).reachable, false);
+  assert.equal((await readFolder(fake<MemoryFolder>({ label: 'L', dir: join(dir, 'nope') }), () => false)).reachable, false);
 });
 
 test('staleFlags: only dates after a recheck-style word, past or within 3 days', () => {
@@ -117,56 +117,56 @@ test('staleFlags: only dates after a recheck-style word, past or within 3 days',
   assert.deepEqual(f, { closed: [], datesPast: [], datesSoon: ['2026-11-21'] });
 });
 
-test('a note that is a symlink is neither listed, edited nor deleted', () => {
+test('a note that is a symlink is neither listed, edited nor deleted', async () => {
   const dir = setup();
   const outside = join(mkdtempSync(join(tmpdir(), 'outside-')), 'secret.md');
   writeFileSync(outside, 'secret');
   symlinkSync(outside, join(dir, 'link.md'));
   assert.equal(
-    readFolder(fake<MemoryFolder>({ label: 'L', dir }), () => false).notes.some((n) => n.file === 'link.md'),
+    (await readFolder(fake<MemoryFolder>({ label: 'L', dir }), () => false)).notes.some((n) => n.file === 'link.md'),
     false,
   );
-  assert.throws(() => saveNote(dir, 'link.md', 'x'), /No such note/);
+  await assert.rejects(() => saveNote(dir, 'link.md', 'x'), /No such note/);
   assert.throws(() => deleteNote(dir, 'link.md'), /No such note/);
   assert.equal(readFileSync(outside, 'utf8'), 'secret');
 });
 
-test('an unreadable index still lists the notes; a past date in prose ("decided on") is not flagged', () => {
+test('an unreadable index still lists the notes; a past date in prose ("decided on") is not flagged', async () => {
   const dir = setup();
   rmSync(join(dir, 'MEMORY.md'));
   mkdirSync(join(dir, 'MEMORY.md'));
-  assert.equal(readFolder(fake<MemoryFolder>({ label: 'L', dir }), () => false).notes.length, 2);
+  assert.equal((await readFolder(fake<MemoryFolder>({ label: 'L', dir }), () => false)).notes.length, 2);
   assert.deepEqual(staleFlags('Cara decided on 2026-11-10; set by Josh 2026-11-12', () => false, Date.parse('2026-11-19T12:00:00-08:00')).datesPast, []);
 });
 
-test('indexNote appends a linked line once, makes MEMORY.md when missing, and readFolder reports inIndex', () => {
+test('indexNote appends a linked line once, makes MEMORY.md when missing, and readFolder reports inIndex', async () => {
   const dir = setup();
   writeFileSync(join(dir, 'c.md'), '---\nname: C [draft]\ndescription: third one\n---\nbody\n');
-  assert.equal(readFolder(fake<MemoryFolder>({ label: 'x', dir, id: 'i', rel: 'r' }), () => false).notes.find((n) => n.file === 'c.md')!.inIndex, false);
-  assert.equal(indexNote(dir, 'c.md'), true);
+  assert.equal((await readFolder(fake<MemoryFolder>({ label: 'x', dir, id: 'i', rel: 'r' }), () => false)).notes.find((n) => n.file === 'c.md')!.inIndex, false);
+  assert.equal(await indexNote(dir, 'c.md'), true);
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A note](a.md) — first\n- [B](b.md) — second\n- [C  draft ](c.md) — third one\n');
-  assert.equal(indexNote(dir, 'c.md'), false, 'a second add leaves the index alone');
+  assert.equal(await indexNote(dir, 'c.md'), false, 'a second add leaves the index alone');
   assert.equal(
-    readFolder(fake<MemoryFolder>({ label: 'x', dir, id: 'i', rel: 'r' }), () => false).notes.every((n) => n.inIndex),
+    (await readFolder(fake<MemoryFolder>({ label: 'x', dir, id: 'i', rel: 'r' }), () => false)).notes.every((n) => n.inIndex),
     true,
   );
   rmSync(join(dir, 'MEMORY.md'));
-  assert.equal(indexNote(dir, 'b.md'), true);
+  assert.equal(await indexNote(dir, 'b.md'), true);
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [B](b.md) — second\n');
-  assert.throws(() => indexNote(dir, 'missing.md'), /No such note/);
+  await assert.rejects(() => indexNote(dir, 'missing.md'), /No such note/);
   // Only the first 200 lines load: a 199-line index takes one more, a 200-line one refuses and stays as it was.
   const lines = (k: number) => Array.from({ length: k }, (_, i) => `- [n${i}](n${i}.md)\n`).join('');
   writeFileSync(join(dir, 'MEMORY.md'), lines(199));
-  assert.equal(indexNote(dir, 'a.md'), true);
+  assert.equal(await indexNote(dir, 'a.md'), true);
   writeFileSync(join(dir, 'MEMORY.md'), lines(200));
-  assert.throws(
+  await assert.rejects(
     () => indexNote(dir, 'a.md'),
     (e: Error & { status: number }) => e.status === 409 && /full/.test(e.message),
   );
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), lines(200));
 });
 
-test('a note counts as listed when MEMORY.md links it by [[name]] or through a note it links (a topic index)', () => {
+test('a note counts as listed when MEMORY.md links it by [[name]] or through a note it links (a topic index)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'memory-hop-'));
   writeFileSync(join(dir, 'topic-index.md'), '---\nname: topic-index\n---\n- [[deep-note]] and [[by-stem]]\n');
   writeFileSync(join(dir, 'deep-note.md'), '---\nname: deep-note\n---\nreached in one hop; see [[two-hops]]\n');
@@ -175,7 +175,22 @@ test('a note counts as listed when MEMORY.md links it by [[name]] or through a n
   writeFileSync(join(dir, 'two-hops.md'), '---\nname: two-hops\n---\nonly deep-note links it: two hops is too far\n');
   writeFileSync(join(dir, 'orphan.md'), '---\nname: orphan\n---\nnothing links it\n');
   writeFileSync(join(dir, 'MEMORY.md'), '- [Topics](topic-index.md) — every note by topic\n- see [[named]]\n');
-  const listed = Object.fromEntries(readFolder(fake<MemoryFolder>({ label: 'x', dir }), () => false).notes.map((n) => [n.file, n.inIndex]));
+  const listed = Object.fromEntries((await readFolder(fake<MemoryFolder>({ label: 'x', dir }), () => false)).notes.map((n) => [n.file, n.inIndex]));
   assert.deepEqual(listed, { 'topic-index.md': true, 'named.md': true, 'deep-note.md': true, 'by-stem.md': true, 'two-hops.md': false, 'orphan.md': false });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('note edits that overlap take turns: no index line is lost and a stale save is refused (#2136)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'memory-overlap-'));
+  for (const n of ['a.md', 'b.md']) writeFileSync(join(dir, n), 'old');
+  await Promise.all([indexNote(dir, 'a.md'), indexNote(dir, 'b.md')]);
+  const index = readFileSync(join(dir, 'MEMORY.md'), 'utf8');
+  assert.ok(index.includes('](a.md)') && index.includes('](b.md)'), index);
+  const first = saveNote(dir, 'a.md', 'one', 'old');
+  assert.equal(noteWriteOn(dir), true);
+  await assert.rejects(() => saveNote(dir, 'a.md', 'two', 'old'), /changed since you opened it/);
+  await first;
+  assert.equal(readFileSync(join(dir, 'a.md'), 'utf8'), 'one');
+  assert.equal(noteWriteOn(dir), false);
   rmSync(dir, { recursive: true, force: true });
 });

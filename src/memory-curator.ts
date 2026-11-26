@@ -347,10 +347,10 @@ export class MemoryProposals {
 }
 
 /** The folder a tidy works on: the scheme's reachable memory folder with the most notes (one per scheme in practice). */
-export function curatorTarget(repoDir: string | null, logins: MemoryLogin[]): { folder: MemoryFolder; notes: number } | null {
+export async function curatorTarget(repoDir: string | null, logins: MemoryLogin[]): Promise<{ folder: MemoryFolder; notes: number } | null> {
+  const views = await Promise.all(memoryFolders(repoDir, logins).map(async (folder) => ({ folder, view: await readFolder(folder, () => false) })));
   return (
-    memoryFolders(repoDir, logins)
-      .map((folder) => ({ folder, view: readFolder(folder, () => false) }))
+    views
       .filter((f) => f.view.reachable)
       .sort((a, b) => b.view.notes.length - a.view.notes.length)
       .map(({ folder, view }) => ({ folder, notes: view.notes.length }))[0] ?? null

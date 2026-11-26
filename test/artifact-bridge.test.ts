@@ -78,20 +78,20 @@ const agent = (id: number, body: object) =>
     body: JSON.stringify(body),
   }).then(async (r) => ({ status: r.status, data: await json<Answer>(r) }));
 
-test('the bridge goes in after the doctype, or first, and what it inlines cannot close its script', () => {
+test('the bridge goes in after the doctype, or first, and what it inlines cannot close its script', async () => {
   const cfg = (entries: { key: string; value: unknown; by: string; at: number }[] = []) => ({ page: 't1-0.x.y/p.html', entries });
-  const html = (s: string) => injectBridge(Buffer.from(s), cfg([{ key: 'k', value: '</script><!-- \u2028', by: 'Cara', at: 1 }])).toString();
-  const withDoctype = html('\uFEFF<!-- made by a tool -->\n<!doctype html><title>x</title>');
+  const html = async (s: string) => (await injectBridge(Buffer.from(s), cfg([{ key: 'k', value: '</script><!-- \u2028', by: 'Cara', at: 1 }]))).toString();
+  const withDoctype = await html('\uFEFF<!-- made by a tool -->\n<!doctype html><title>x</title>');
   assert.match(withDoctype, /^\uFEFF<!-- made by a tool -->\n<!doctype html><script>\(function \(cfg\)/);
   assert.match(withDoctype, /<\/script><title>x<\/title>$/);
-  assert.match(html('<p>no head</p>'), /^<script>\(function \(cfg\)[\s\S]*<\/script><p>no head<\/p>$/);
+  assert.match(await html('<p>no head</p>'), /^<script>\(function \(cfg\)[\s\S]*<\/script><p>no head<\/p>$/);
   // Exactly one </script>: the value's own is escaped, and so are the line separators.
-  const out = html('<p>x</p>');
+  const out = await html('<p>x</p>');
   assert.equal(out.split('</script>').length, 2);
   assert.ok(!out.includes('\u2028') && out.includes('\\u003c/script>') && out.includes('\\u2028'));
 });
 
-test("a page's bare URLs and web addresses become new-tab links; its scripts, styles, links, code and fields stay as written (#440)", () => {
+test("a page's bare URLs and web addresses become new-tab links; its scripts, styles, links, code and fields stay as written (#440)", async () => {
   const ext = (href: string, text = href) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
   assert.equal(linkPageText('<p>Open <b>console.firebase.google.com</b>, then https://x.io/a.</p>'), `<p>Open <b>${ext('https://console.firebase.google.com', 'console.firebase.google.com')}</b>, then ${ext('https://x.io/a')}.</p>`);
   const untouched =
@@ -104,7 +104,7 @@ test("a page's bare URLs and web addresses become new-tab links; its scripts, st
   assert.equal(linkPageText(untouched), untouched);
   // Prose between the skipped parts still links, and the bridge goes in ahead of it all.
   assert.equal(linkPageText('<script>1</script>see x.com<style>p{}</style>'), `<script>1</script>see ${ext('https://x.com', 'x.com')}<style>p{}</style>`);
-  const served = injectBridge(Buffer.from('<!doctype html><p>web.dev</p>'), { page: 't1-0.x.y/p.html', entries: [] }).toString();
+  const served = (await injectBridge(Buffer.from('<!doctype html><p>web.dev</p>'), { page: 't1-0.x.y/p.html', entries: [] })).toString();
   assert.ok(served.startsWith('<!doctype html><script>(function (cfg)') && served.endsWith(`<p>${ext('https://web.dev', 'web.dev')}</p>`));
 });
 

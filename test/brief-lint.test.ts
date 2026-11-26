@@ -35,21 +35,21 @@ test('the already-shipped and leave-alone parts are each named when missing', ()
   assert.doesNotMatch(briefWarning(`${complete}`.replace('Leave alone', 'x'))!, /Already shipped/);
 });
 
-test('a pointer brief is judged with the handoff it names', () => {
+test('a pointer brief is judged with the handoff it names', async () => {
   const shared = join(root, 'shared', 'project');
   mkdirSync(join(shared, 'handoffs'), { recursive: true });
   const file = join(shared, 'handoffs', 'handoff-retry.md');
   writeFileSync(file, complete);
   const pointer = `Start from the handoff \`${file}\`. Ships to main.`;
   assert.match(briefWarning(pointer)!, /quoted words/, 'the message alone has neither');
-  assert.equal(briefWarning(`${pointer}\n${namedFiles(pointer, shared)}`), null);
-  assert.equal(namedFiles(`See ${shared}/handoffs/missing.md and /etc/passwd.md`, shared), '', 'missing files and paths outside the folder add nothing');
-  assert.equal(namedFiles(`${shared}/../../../etc/x.md`, shared), '');
+  assert.equal(briefWarning(`${pointer}\n${await namedFiles(pointer, shared)}`), null);
+  assert.equal(await namedFiles(`See ${shared}/handoffs/missing.md and /etc/passwd.md`, shared), '', 'missing files and paths outside the folder add nothing');
+  assert.equal(await namedFiles(`${shared}/../../../etc/x.md`, shared), '');
   writeFileSync(join(root, 'outside.md'), complete);
   symlinkSync(join(root, 'outside.md'), join(shared, 'handoffs', 'link.md'));
-  assert.equal(namedFiles(`${shared}/handoffs/link.md`, shared), '', 'a link out of the folder adds nothing');
+  assert.equal(await namedFiles(`${shared}/handoffs/link.md`, shared), '', 'a link out of the folder adds nothing');
   writeFileSync(join(shared, 'handoffs', 'huge.md'), `${complete}\n${'x'.repeat(200_001)}`);
-  assert.equal(namedFiles(`${shared}/handoffs/huge.md`, shared), '', 'an oversized file adds nothing');
+  assert.equal(await namedFiles(`${shared}/handoffs/huge.md`, shared), '', 'an oversized file adds nothing');
 });
 
 test('create_ticket from the Taskmaster gets the warning in its notes; a person typing their own ask does not', async () => {

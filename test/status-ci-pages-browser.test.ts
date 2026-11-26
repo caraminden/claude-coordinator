@@ -1,7 +1,8 @@
 // Status and Test health keep reading (#1922, from #1835's front-end review), in a real browser on the real public/ files:
 // WP1 the Ship lines read starts again when the tab shows again, WP12 Test health's failure line has a Try again that
 // reads again, WP14 a timed redraw keeps the keyboard focus and inner scroll. (WP13, the contraptions read, needs a whole
-// status payload for an app to reach the service controls: it is checked in a dev copy instead.)
+// status payload for an app to reach the service controls: it is checked in a dev copy instead.) And a click on a Time to
+// ship column picks its day (#2144).
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, serveApp, skipMessage, waitFor, type App, type Browser } from './browser.ts';
@@ -17,9 +18,10 @@ const PAGE = `<!doctype html><meta charset="utf-8"><div id="root"></div><script 
     return new Response(String(path).includes('ship-lines') ? '{"lines":[]}' : 'null', { headers: { 'content-type': 'application/json' } });
   };
   const { shipLinePanel } = await import('/status.js');
+  const { shipChart } = await import('/status.js');
   const { testHealth } = await import('/ci-health.js');
   const { keepView } = await import('/base.js');
-  Object.assign(window, { shipLinePanel, testHealth, keepView });
+  Object.assign(window, { shipLinePanel, shipChart, testHealth, keepView });
   window.ready = true;
 </script>`;
 
@@ -65,4 +67,21 @@ test('a redraw through keepView keeps the keyboard focus and an inner scroll', {
     return { focus: document.activeElement?.id, top: document.getElementById('s').scrollTop };
   })()`);
   assert.deepEqual(r, { focus: 'b', top: 120 });
+});
+
+test('a click on a Time to ship column picks its day, and a second click clears it', { skip }, async () => {
+  const page = await browser.page(`${app.base}t.html`);
+  await waitFor(page, 'the modules', 'window.ready === true');
+  const picked = await page.eval<(string | null)[]>(`(() => {
+    const days = ['2026-11-24', '2026-11-25', '2026-11-26'];
+    const t = { key: 'app:x', title: 'X', counts: [1, 1, 1], median: [60, 60, 60], p90: [900, 60, 60], ships: [] };
+    const root = document.getElementById('root');
+    const draw = () => root.replaceChildren(window.shipChart(t, days, draw));
+    draw();
+    const on = () => root.querySelector('.st-day.on span')?.textContent ?? null;
+    const click = () => (root.querySelector('rect[data-day="2026-11-25"]').dispatchEvent(new MouseEvent('click', { bubbles: true })), on());
+    const wanted = root.querySelectorAll('.st-day span')[1].textContent;
+    return [wanted, click(), click()];
+  })()`);
+  assert.deepEqual(picked.slice(1), [picked[0], null]);
 });

@@ -1,7 +1,7 @@
 // Host load (#1060): what tools/citadel-heavy already keeps in its folder, read for the CI page: the slots and who
 // holds them, the line behind them, the CPU-pressure gate, and a week of waits per scheme from its history file.
 // Read-only: the slot count stays a file (X2 was left unpicked: raising it put the load near 100 on Nov 10).
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { hostTextSync, PSI_FILES } from './host-signals.ts';
 import { join } from 'node:path';
 import { median, type HeavyJob, type HeavyJobs } from './waits.ts';
@@ -87,10 +87,10 @@ export function parseHistory(text: string, since: number, owners?: AppOwners): S
     .sort((a, b) => b.longestS - a.longestS);
 }
 
-const slotCount = (dir: string): number => {
+const slotCount = async (dir: string): Promise<number> => {
   try {
     // citadel-heavy's rule: the first number, else 2; a 0 is one slot, and 64 is the most.
-    const m = readFileSync(join(dir, 'slots'), 'utf8').replace(/#.*/g, '').match(/\d+/)?.[0];
+    const m = (await readFile(join(dir, 'slots'), 'utf8')).replace(/#.*/g, '').match(/\d+/)?.[0];
     return m === undefined ? 2 : Math.min(Math.max(Number(m), 1), 64);
   } catch {
     return 2;
@@ -119,17 +119,17 @@ export interface HostLoad {
   now: number;
 }
 
-export function hostLoad(dir: string, heavy: HeavyJobs, now = Date.now(), pressureFile?: string, owners?: AppOwners, longs = readLongJobs(dir)): HostLoad {
+export async function hostLoad(dir: string, heavy: HeavyJobs, now = Date.now(), pressureFile?: string, owners?: AppOwners, longs = readLongJobs(dir)): Promise<HostLoad> {
   const { holders, waiters } = heavy;
   const tag = (j: HeavyJob) => ({ ...j, scheme: schemeOfWho(j.who, owners) });
   let history = '';
   try {
-    history = readFileSync(join(dir, 'history'), 'utf8');
+    history = await readFile(join(dir, 'history'), 'utf8');
   } catch {
     /* none yet */
   }
   return {
-    slots: slotCount(dir),
+    slots: await slotCount(dir),
     holders: holders.map(tag),
     waiters: waiters.filter((w) => w.reason !== 'ease').map(tag) /* a nested session claude-pace holds is no heavy job */,
     pressure: readPressure(pressureFile),

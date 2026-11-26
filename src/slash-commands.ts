@@ -2,7 +2,7 @@
 // sends (#937). The names come from Claude Code's own init event (runner.ts saveCommands), so the list is exactly
 // what a turn runs: the kit's skills, the scheme repo's own, picked plugins', Claude Code's built-ins. Citadel's own
 // commands (/btw, /fresh, /help) are the front end's (public/slash-commands.js) and never reach a turn.
-import { readFileSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Store, TicketFields } from './db.ts';
 import { commandsKey, schemeCommandsKey, type LoadedCommands } from './runner.ts';
@@ -58,10 +58,10 @@ export function describe(text: string): string {
 
 // Read once per file version: the menu asks on every chat it opens.
 const cache = new Map<string, { mtime: number; description: string }>();
-function fileDescription(path: string): string | null {
+async function fileDescription(path: string): Promise<string | null> {
   let mtime: number;
   try {
-    mtime = statSync(path).mtimeMs;
+    mtime = (await stat(path)).mtimeMs;
   } catch {
     return null;
   }
@@ -69,7 +69,7 @@ function fileDescription(path: string): string | null {
   if (hit?.mtime === mtime) return hit.description;
   let description = '';
   try {
-    description = describe(readFileSync(path, 'utf8'));
+    description = describe(await readFile(path, 'utf8'));
   } catch {
     // Unreadable: no line.
   }
@@ -94,19 +94,21 @@ export interface CommandInfo {
  * The commands a chat's turns load, each with its line: its own last turn's list, else the scheme's newest (a chat
  * with no turn yet). `loaded` is false when no turn in the scheme has said, so the composer refuses nothing.
  */
-export function chatCommands(store: Store, ticket: TicketFields): { loaded: boolean; commands: CommandInfo[] } {
+export async function chatCommands(store: Store, ticket: TicketFields): Promise<{ loaded: boolean; commands: CommandInfo[] }> {
   const loaded = store.getSetting<LoadedCommands>(commandsKey(ticket.id)) ?? store.getSetting<LoadedCommands>(schemeCommandsKey(ticket.project_id));
   if (!loaded?.names?.length) return { loaded: false, commands: [] };
-  const commands = loaded.names.map((name) => {
-    let description = BUILT_IN[name] ?? '';
-    for (const path of description ? [] : candidates(name, loaded)) {
-      const found = fileDescription(path);
-      if (found !== null) {
-        description = found;
-        break;
+  const commands = await Promise.all(
+    loaded.names.map(async (name) => {
+      let description = BUILT_IN[name] ?? '';
+      for (const path of description ? [] : candidates(name, loaded)) {
+        const found = await fileDescription(path);
+        if (found !== null) {
+          description = found;
+          break;
+        }
       }
-    }
-    return { name, description };
-  });
+      return { name, description };
+    }),
+  );
   return { loaded: true, commands };
 }

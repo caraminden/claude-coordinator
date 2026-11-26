@@ -90,7 +90,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    A repo with TypeScript also gets the type check: copy `templates/typecheck.ts` to `tools/typecheck.ts`, set its
    config block (baseline path, tsconfigs, none counting `any` only; and `SCRIPTS`, the front-end `.js` a tsconfig checks with `checkJs`, whose JSDoc `any` and `@ts-` comments then count too), add `typescript` as a devDependency, run
    `node tools/typecheck.ts --init`, and make `node tools/typecheck.ts` (exit 1 when a file gains a type error, an
-   explicit `any` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
+   explicit `any`, an `as unknown as` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
    `--update` after lowering counts (Cara, 2026-11-24: "don't cheat and use 'any'"; Citadel's is `test/typecheck.test.ts`).
    A repo with TypeScript or JavaScript also gets the formatter (#1792): copy `templates/biome.config.json` to the repo root as `biome.json` (set its
    `includes` to the repo's source folders, keep its `!**/node_modules` and `!**/.venv`, and `!`-exclude generated and vendored files), `templates/fmt` to `tools/fmt` and

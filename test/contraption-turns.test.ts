@@ -1068,6 +1068,9 @@ test("the API is only for a contraption's own server on this machine, with its k
   assert.deepEqual(await (await api(`/api/contraptions/media/auras/glow.png.json?person=${me.id}`)).json(), { model: 'm' });
   assert.equal((await api(`/api/contraptions/media/auras/glow.png?person=${me.id}`, { method: 'DELETE' })).status, 200);
   assert.deepEqual(readdirSync(folder), [], 'the file and its note');
+  writeFileSync(join(folder, 'twice.png'), 'TWICE');
+  const both = await Promise.all([1, 2].map(() => api(`/api/contraptions/media/auras/twice.png?person=${me.id}`, { method: 'DELETE' })));
+  assert.deepEqual(both.map((r) => r.status).sort(), [200, 404], 'the loser of two deletes hears "no such file"');
   assert.equal((await api(`/api/contraptions/media/..%2F..%2Fcoordinator.db?person=${me.id}`)).status, 400);
   assert.equal((await api('/api/contraptions/media?person=999')).status, 403);
   const standing = () => api(`/api/contraptions/openrouter?person=${me.id}`).then((r) => r.json());

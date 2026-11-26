@@ -130,9 +130,9 @@ test('the access token is cached until a minute before it ends, and a dead token
   assert.equal(await fcm.send('t', fcmMessage('a', 't', { title: 'x' })), 'failed');
 });
 
-test('with no key file, Fcm says where it goes', () => {
+test('with no key file, Fcm says where it goes', async () => {
   const fcm = new Fcm(join(root, 'none', 'fcm-service-account.json'), { fetch: (() => assert.fail('no fetch')) as typeof fetch });
-  assert.throws(
+  await assert.rejects(
     () => fcm.account(),
     (e: unknown) => (e as HttpError).status === 503 && (e as HttpError).message.includes(join(root, 'none', 'fcm-service-account.json')),
   );

@@ -9,7 +9,7 @@
 // it, so copying it in needs no restart (replacing one already read does). Its OAuth token comes from a JWT signed
 // with node:crypto and is kept until a minute before it ends.
 import { createPrivateKey, sign } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { access, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ContraptionRow, Store } from './db.ts';
@@ -133,12 +133,18 @@ export class Fcm {
   }
 
   /** The service account, read once it exists; a 503 naming the file when it's missing or isn't one. */
-  account(): ServiceAccount {
+  async account(): Promise<ServiceAccount> {
     if (this.loaded) return this.loaded;
-    if (!existsSync(this.path)) throw new HttpError(503, `Push to phones isn't set up on this Citadel: its Firebase service account key goes at ${this.path} (mode 600)`);
+    if (
+      !(await access(this.path).then(
+        () => true,
+        () => false,
+      ))
+    )
+      throw new HttpError(503, `Push to phones isn't set up on this Citadel: its Firebase service account key goes at ${this.path} (mode 600)`);
     let a: ServiceAccount & { type?: string };
     try {
-      a = JSON.parse(readFileSync(this.path, 'utf8'));
+      a = JSON.parse(await readFile(this.path, 'utf8'));
       const ok = (s: unknown) => typeof s === 'string' && s.length > 0;
       if (a.type !== 'service_account' || !ok(a.project_id) || !ok(a.client_email) || !ok(a.private_key) || !/^https?:\/\//.test(a.token_uri ?? '')) throw new Error();
       createPrivateKey(a.private_key);
@@ -151,9 +157,9 @@ export class Fcm {
   /** An OAuth access token for FCM, cached until a minute before it ends; one sign-in at a time. */
   accessToken(): Promise<string> {
     if (this.access && this.access.until > this.clock()) return Promise.resolve(this.access.token);
-    const a = this.account();
     this.pending ??= (async () => {
       try {
+        const a = await this.account();
         const part = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
         const iat = Math.floor(this.clock() / 1000);
         const unsigned = `${part({ alg: 'RS256', typ: 'JWT' })}.${part({ iss: a.client_email, scope: SCOPE, aud: a.token_uri, iat, exp: iat + 3600 })}`;
@@ -182,7 +188,7 @@ export class Fcm {
   async send(token: string, message: ReturnType<typeof fcmMessage>): Promise<'sent' | 'gone' | 'failed'> {
     const at = await this.accessToken();
     try {
-      const res = await this.fetch(`${this.api}/v1/projects/${encodeURIComponent(this.account().project_id)}/messages:send`, {
+      const res = await this.fetch(`${this.api}/v1/projects/${encodeURIComponent((await this.account()).project_id)}/messages:send`, {
         method: 'POST',
         headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
         body: JSON.stringify(message),
@@ -215,7 +221,7 @@ export interface PushReply {
  */
 export async function pushToPeople(store: Store, enabled: (name: string, uid: number) => boolean, fcm: Fcm, c: ContraptionRow, body: unknown): Promise<PushReply> {
   const { to, send } = parsePush(c.name, body);
-  fcm.account(); // not set up: 503 before anything else
+  await fcm.account(); // not set up: 503 before anything else
   const skipped: string[] = [];
   const uids: number[] = [];
   for (const login of to) {

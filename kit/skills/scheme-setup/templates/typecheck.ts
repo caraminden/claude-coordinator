@@ -3,8 +3,8 @@
  * Type check as a ratchet (from the Citadel kit's scheme-setup templates; Citadel #1789). Copy it to tools/typecheck.ts
  * and set the config block below to this repo. It runs tsc (no emit) and counts, per file, two things:
  *  - errors: tsc's errors in that file;
- *  - escapes: the ways round the checker, an explicit `any` in a type or a `@ts-ignore`, `@ts-expect-error` or
- *    `@ts-nocheck` comment (Cara, 2026-11-24: "make sure citadel and the rest of our typescript schemes don't cheat
+ *  - escapes: the ways round the checker, an explicit `any` in a type, a double cast (`x as unknown as T`, TypeScript
+ *    only) or a `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck` comment (Cara, 2026-11-24: "make sure citadel and the rest of our typescript schemes don't cheat
  *    and use 'any'"). In a JavaScript file of SCRIPTS the `any` is one in a JSDoc type.
  * The baseline file holds each file's counts as of the last lowering. The check fails when a file's count goes above
  * its baseline, or a file not in the baseline has any; a count below it passes, and `--update` lowers the baseline to
@@ -157,6 +157,9 @@ function stripTypes(code: string): string {
 const DIRECTIVE = /^[ \t]*(?:\/\/|\/\*+)[ \t]*@ts-(?:ignore|expect-error|nocheck)\b/gm;
 const TEXT = /\/\*[\s\S]*?\*\/|\/\/.*|'(?:\\(?:\r\n|[\s\S])|[^'\\\n])*'|"(?:\\(?:\r\n|[\s\S])|[^"\\\n])*"/y;
 const WORD = /(?<![\w$])any(?![\w$])/g;
+// Brackets between don't hide it: `(x as unknown) as T`. `as any as` is left out: its `any` already counts.
+// shortcut: `f(x as unknown) as T` counts too; telling a call's bracket apart needs a parser.
+const DOUBLE = /(?<![\w$.])as\s+unknown(?:(?:\s*\))+\s*|\s+)as(?![\w$])/g;
 
 /** Code with comments and string literals blanked to spaces, so positions stay put. Template `${}` holes are kept. */
 function blankText(code: string): string {
@@ -230,7 +233,7 @@ function anysByPattern(code: string): number {
 }
 
 /**
- * How many ways round the checker one TypeScript file takes: each `any` in a type, and each `@ts-ignore`,
+ * How many ways round the checker one TypeScript file takes: each `any` in a type, each `as unknown as`, and each `@ts-ignore`,
  * `@ts-expect-error` or `@ts-nocheck` comment at the start of a line.
  * Types are found by Node's own stripper, which blanks every type in place: an `any` the stripper blanked was a type,
  * one it kept is a value, a property or text in a comment or string. Comments and quoted text inside what it blanked
@@ -255,16 +258,19 @@ export function countEscapes(code: string, file = 'x.ts', byPattern = false): { 
     stripped = stripTypes(code);
   } catch (e) {
     if (!strip) throw e;
-    return { n: directives + anysByPattern(code), by: 'pattern' };
+    return { n: directives + anysByPattern(code) + (blankText(code).match(DOUBLE)?.length ?? 0), by: 'pattern' };
   }
   let anys = 0;
+  let kept = ''; // the types, and of the code around them only space and `)`, for DOUBLE
   // Each stretch the stripper changed is read by itself, so a quote or backtick in the code it kept can't hide a type.
   for (let i = 0; i < code.length; i++) {
     const from = i;
     while (i < code.length && (code[i] !== stripped[i] || /\s/.test(code[i]!))) i++;
-    if (i - from >= 3) anys += blankTypeText(code.slice(from, i)).match(WORD)?.length ?? 0;
+    const types = i - from >= 3 ? blankTypeText(code.slice(from, i)) : code.slice(from, i);
+    anys += types.match(WORD)?.length ?? 0;
+    kept += types + (code[i] === ')' ? ')' : i < code.length ? '_' : '');
   }
-  return { n: directives + anys, by: 'types' };
+  return { n: directives + anys + (kept.match(DOUBLE)?.length ?? 0), by: 'types' };
 }
 
 /**
@@ -398,7 +404,7 @@ export function describe(c: Change): string {
 export function upMessage(up: Change[], errors: TscError[]): string {
   const detail = up.filter((c) => c.kind === 'errors').flatMap((c) => errors.filter((e) => e.file === c.file).map((e) => `  ${e.file}(${e.line},${e.col}) ${e.code} ${e.text.split('\n')[0]}`));
   return [
-    `A file has more type errors or escapes (an explicit \`any\`, or a @ts-ignore / @ts-expect-error / @ts-nocheck) than ${relative(ROOT, BASELINE)} allows:`,
+    `A file has more type errors or escapes (an explicit \`any\`, an \`as unknown as\`, or a @ts-ignore / @ts-expect-error / @ts-nocheck) than ${relative(ROOT, BASELINE)} allows:`,
     ...up.map((c) => `  ${describe(c)}`),
     "Fix them with real types (`unknown` and a narrowing, not `any`); the baseline only goes down. `node tools/typecheck.ts <file>` lists a file's errors.",
     'Moved or split code (its old file went down as much)? `node tools/typecheck.ts --update --moved` re-files the counts when the totals did not rise.',

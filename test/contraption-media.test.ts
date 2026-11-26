@@ -16,7 +16,7 @@ type Rpc = { result: { tools: { name: string }[] }; error: { code: number } };
 const root = mkdtempSync(join(tmpdir(), 'contraption-media-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('the folder hands out only files inside it, and lists them newest first without their notes', () => {
+test('the folder hands out only files inside it, and lists them newest first without their notes', async () => {
   const dir = mediaDir(root, 'peek', 3);
   mkdirSync(join(dir, 'auras'), { recursive: true });
   writeFileSync(join(dir, 'a.png'), 'aa');
@@ -24,31 +24,31 @@ test('the folder hands out only files inside it, and lists them newest first wit
   writeFileSync(join(dir, 'auras', 'b.mp3'), 'bbb');
   utimesSync(join(dir, 'a.png'), 1000, 1000);
   assert.deepEqual(
-    listMedia(dir).map((f) => [f.path, f.bytes]),
+    (await listMedia(dir)).map((f) => [f.path, f.bytes]),
     [
       ['auras/b.mp3', 3],
       ['a.png', 2],
     ],
   );
-  assert.deepEqual(listMedia(join(root, 'nobody')), []);
-  assert.equal(mediaFile(dir, 'auras%2Fb.mp3'), join(dir, 'auras', 'b.mp3'));
-  const status = (path: string) => {
+  assert.deepEqual(await listMedia(join(root, 'nobody')), []);
+  assert.equal(await mediaFile(dir, 'auras%2Fb.mp3'), join(dir, 'auras', 'b.mp3'));
+  const status = async (path: string) => {
     try {
-      mediaFile(dir, path);
+      await mediaFile(dir, path);
       return 200;
     } catch (e) {
       return (e as HttpError).status;
     }
   };
-  assert.equal(status('../3/a.png'), 200, 'back inside is still inside');
-  assert.equal(status('../4/a.png'), 400, "another person's folder");
-  assert.equal(status('..%2F..%2Fpeek'), 400);
-  assert.equal(status('%E0%A4%A'), 400);
-  assert.equal(status('auras'), 404, 'a folder is not a file');
-  assert.equal(status('gone.png'), 404);
+  assert.equal(await status('../3/a.png'), 200, 'back inside is still inside');
+  assert.equal(await status('../4/a.png'), 400, "another person's folder");
+  assert.equal(await status('..%2F..%2Fpeek'), 400);
+  assert.equal(await status('%E0%A4%A'), 400);
+  assert.equal(await status('auras'), 404, 'a folder is not a file');
+  assert.equal(await status('gone.png'), 404);
 });
 
-test('the sweep takes files older than the keep, notes too, and leaves the rest', () => {
+test('the sweep takes files older than the keep, notes too, and leaves the rest', async () => {
   const dir = join(root, 'sweep', 'peek', '3');
   mkdirSync(dir, { recursive: true });
   for (const f of ['old.png', 'old.png.json', 'new.png']) writeFileSync(join(dir, f), 'x');
@@ -58,7 +58,7 @@ test('the sweep takes files older than the keep, notes too, and leaves the rest'
   utimesSync(join(dir, 'old.png.json'), old, old);
   assert.equal(sweepMedia(join(root, 'sweep'), now), 2);
   assert.deepEqual(
-    listMedia(dir).map((f) => f.path),
+    (await listMedia(dir)).map((f) => f.path),
     ['new.png'],
   );
   assert.ok(!existsSync(join(dir, 'old.png.json')));

@@ -635,7 +635,7 @@ export const ticketRoutes: Route[] = [
     path: '/api/tickets/:ticket/commands',
     who: ['person'],
     async handler({ res, app, ticket }) {
-      return json(res, 200, chatCommands(app.store, ticket));
+      return json(res, 200, await chatCommands(app.store, ticket));
     },
   },
   {

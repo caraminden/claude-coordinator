@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { cardHref } from '../card-links.ts';
 import { memoryLogins } from '../decisions-load.ts';
 import { lineDiff } from '../instructions.ts';
-import { memoryFolders, readFolder } from '../memory-files.ts';
+import { memoryFolders, noteWriteOn, readFolder } from '../memory-files.ts';
 import { applyChanges, checkChanges, curatorTarget, countLine, KEEP_MS, mergeBackup, restoreSaved, saveFirst, withDrift, type Change, type Proposal } from '../memory-curator.ts';
 import { HttpError, json, readJson, type App, type Route } from '../http.ts';
 import type { Project } from '../db.ts';
@@ -19,6 +19,8 @@ export function tidyCard(app: App, p: Proposal): { id: number; card: { id?: stri
   const event = app.store.eventsOfKinds(p.ticket_id, ['plan']).find((e) => JSON.parse(e.data)?.memory?.proposal === p.id);
   return event ? { id: event.id, card: JSON.parse(event.data) } : null;
 }
+
+const NOTE_SAVING = 'A memory note is being saved right now. Try again in a moment.';
 
 /** Settle the proposal's card in the run's chat and tell the run, which then closes itself. */
 function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'superseded', by: string, text: string | null) {
@@ -46,6 +48,7 @@ export function decideTidy(app: App, project: Project, p: Proposal, apply: numbe
   if (p.status !== 'open') throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced this one' : `${p.decided_by} already decided this tidy`);
   const folder = folderOf(app, project, p.folder);
   if (!folder && apply.length) throw new HttpError(409, 'The memory folder this tidy was for is gone');
+  if (folder && apply.length && noteWriteOn(folder.dir)) throw new HttpError(409, NOTE_SAVING);
   // The old notes are stored before the first write: a kill between the writes and decide() still leaves Put back its copy (2ME7).
   if (folder && apply.length) app.store.memoryProposals.keepFirst(p.id, mergeBackup(folder.dir, p.changes, saveFirst(folder.dir, p.changes, new Set(apply)), p.backup));
   const done = folder ? applyChanges(folder.dir, p.changes, new Set(apply), (file) => app.store.deleteClaudeState(join(folder.rel, file))) : { changes: p.changes.map((c) => ({ ...c, outcome: c.action === 'flag' ? 'noted' : 'turned down' })), backup: [] };
@@ -100,14 +103,11 @@ export const memoryCuratorRoutes: Route[] = [
     refuse: 'Only the curator run itself can propose a memory tidy in its chat',
     async handler({ req, res, app, ticket }) {
       const project = app.store.getProject(ticket.project_id)!;
-      const t = curatorTarget(project.repo_dir, memoryLogins(app));
+      const t = await curatorTarget(project.repo_dir, memoryLogins(app));
       if (!t) throw new HttpError(404, 'This scheme has no memory folder Citadel can reach, so there is nothing to tidy: say so in one line and close yourself');
       const body = await readJson(req);
       if (Array.isArray(body.changes) && !body.changes.length) throw new HttpError(400, 'Nothing to propose: say so in one line and close yourself with close_self');
-      const changes = checkChanges(
-        readFolder(t.folder, () => false),
-        body.changes,
-      );
+      const changes = checkChanges(await readFolder(t.folder, () => false), body.changes);
       const { proposal, superseded } = app.store.memoryProposals.create({ project_id: project.id, ticket_id: ticket.id, folder: t.folder.id, changes });
       // The run's own earlier proposal is settled but not told: "close yourself" would withdraw the card it just made (2ME2).
       for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', old.ticket_id === ticket.id ? null : `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);
@@ -174,6 +174,7 @@ export const memoryCuratorRoutes: Route[] = [
       if (!p.backup) throw new HttpError(409, p.restored_by ? `${p.restored_by} already put it back` : 'Its old notes are no longer kept (30 days)');
       const folder = folderOf(app, project, p.folder);
       if (!folder) throw new HttpError(409, 'The memory folder this tidy was for is gone');
+      if (noteWriteOn(folder.dir)) throw new HttpError(409, NOTE_SAVING);
       const { restored, failed } = restoreSaved(folder.dir, p.backup, (file) => app.store.deleteClaudeState(join(folder.rel, file)));
       // Its copy stays until every note is back: putting one back twice writes the same text, so a retry is safe.
       if (failed.length) throw new HttpError(409, `Put back ${restored} of ${p.backup.length}; not ${failed.join(', ')}. Fix that and press Put back again.`);

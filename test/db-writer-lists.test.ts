@@ -65,7 +65,6 @@ const STAYS_ON_THREAD: Record<string, string> = {
       'ideas.restatus',
       'ideas.restatusWith',
       'ideas.warmUp',
-      'ideas.syncSteps',
       'ideas.linkStarts',
       'ideas.sync',
       'ideas.laterNote',

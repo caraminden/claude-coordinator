@@ -74,7 +74,7 @@ test('pressure and the whole read from a folder', async () => {
   assert.equal(readPressure(join(root, 'none')), null);
   writeFileSync(join(root, 'slots'), '3 # how many\n');
   writeFileSync(join(root, 'history'), `${line(new Date().toISOString(), 'Citadel #5 (cara)', 40)}\n`);
-  const l = hostLoad(root, await readHeavyA(root), Date.now(), psi);
+  const l = await hostLoad(root, await readHeavyA(root), Date.now(), psi);
   assert.equal(l.slots, 3);
   assert.equal(l.pressure, 63);
   assert.equal(l.week[0].longestS, 40);
@@ -82,7 +82,7 @@ test('pressure and the whole read from a folder', async () => {
   writeFileSync(join(root, 'wait-1-2'), `Delve #4\na nested Claude session\n${Math.floor(Date.now() / 1000)}\nease\n`);
   writeFileSync(join(root, 'wait-3-4'), `Peek #2\nnpm test\n${Math.floor(Date.now() / 1000)}\nmemory\n`);
   assert.deepEqual(
-    hostLoad(root, await readHeavyA(root)).waiters.map((w) => w.who),
+    (await hostLoad(root, await readHeavyA(root))).waiters.map((w) => w.who),
     ['Peek #2'],
     "claude-pace's waits are no heavy job's line (#1748)",
   );
@@ -92,9 +92,9 @@ test('pressure and the whole read from a folder', async () => {
 
 test('slot count follows citadel-heavy: no number is 2, a 0 is 1', async () => {
   writeFileSync(join(root, 'slots'), '# none\n');
-  assert.equal(hostLoad(root, await readHeavyA(root)).slots, 2);
+  assert.equal((await hostLoad(root, await readHeavyA(root))).slots, 2);
   writeFileSync(join(root, 'slots'), '0\n');
-  assert.equal(hostLoad(root, await readHeavyA(root)).slots, 1);
+  assert.equal((await hostLoad(root, await readHeavyA(root))).slots, 1);
 });
 
 test('an app counts under its home scheme only for a viewer who can see that scheme', () => {

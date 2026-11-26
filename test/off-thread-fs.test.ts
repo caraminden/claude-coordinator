@@ -13,7 +13,15 @@ import { Store } from '../src/db.ts';
 import { loadDecisions } from '../src/decisions-load.ts';
 import type { App } from '../src/http.ts';
 import { LongJobs } from '../src/long-jobs.ts';
-import { memoryDir } from '../src/memory-files.ts';
+import { indexNote, memoryDir, readFolder, saveNote } from '../src/memory-files.ts';
+import { injectBridge } from '../src/artifact-data.ts';
+import { namedFiles } from '../src/brief-lint.ts';
+import { listMedia, mediaFile } from '../src/contraption-media.ts';
+import { Fcm } from '../src/fcm.ts';
+import { hostLoad } from '../src/host-load.ts';
+import { SHELL_OFF_FILE, shellOff } from '../src/shell.ts';
+import { chatCommands } from '../src/slash-commands.ts';
+import { commandsKey } from '../src/turn-keys.ts';
 import { LandsInFlight } from '../src/release-readers.ts';
 import { Releases } from '../src/releases.ts';
 import { moveShip } from '../src/ship-line.ts';
@@ -576,4 +584,102 @@ test("kit sync's look at the templates starts no blocking git and makes no synch
   const calls = await syncCallsUnder(kit, () => new KitSync(deps).poll());
   assert.deepEqual(calls, []);
   assert.equal(saved?.round, undefined);
+});
+
+test("an artifact page gets its bridge with no synchronous file call on the server's thread (#2136)", async () => {
+  let out = '';
+  const calls = await syncCallsUnder(join(import.meta.dirname, '..', 'public'), async () => {
+    out = (await injectBridge(Buffer.from('<p>x</p>'), { page: 'p.html', entries: [] })).toString();
+  });
+  assert.deepEqual(calls, []);
+  assert.match(out, /^<script>\(function \(cfg\)/);
+});
+
+test("a new minion's brief, an app's media and the push key are read with no synchronous file call (#2136)", async () => {
+  const dir = mkdtempSync(join(root, 'reads-'));
+  writeFileSync(join(dir, 'brief.md'), 'the brief');
+  writeFileSync(join(dir, 'a.png'), 'xx');
+  writeFileSync(join(dir, 'key.json'), '{}');
+  let named = '',
+    listed = 0;
+  const calls = await syncCallsUnder(dir, async () => {
+    named = await namedFiles(`Read ${dir}/brief.md`, dir);
+    listed = (await listMedia(dir)).length;
+    await mediaFile(dir, 'a.png');
+    await assert.rejects(async () => new Fcm(join(dir, 'key.json')).account(), /not a Firebase service account key/);
+    await assert.rejects(async () => new Fcm(join(dir, 'none.json')).account(), /isn't set up/);
+  });
+  assert.deepEqual(calls, []);
+  assert.deepEqual([named, listed], ['the brief', 2]);
+});
+
+test("the CI page's host load reads the slots and history with no synchronous file call (#2136)", async () => {
+  const dir = mkdtempSync(join(root, 'load-'));
+  writeFileSync(join(dir, 'slots'), '4\n');
+  writeFileSync(join(dir, 'history'), '');
+  let slots = 0;
+  const calls = await syncCallsUnder(dir, async () => {
+    slots = (await hostLoad(dir, { holders: [], waiters: [] }, Date.now(), undefined, undefined, [])).slots;
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(slots, 4);
+});
+
+test("the app shell's off switch is looked up with no synchronous file call (#2136)", async () => {
+  const dir = mkdtempSync(join(root, 'shell-'));
+  writeFileSync(join(dir, SHELL_OFF_FILE), '');
+  let off = false;
+  const calls = await syncCallsUnder(dir, async () => {
+    off = await shellOff(dir);
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(off, true);
+});
+
+test("a chat's slash commands are described with no synchronous file call (#2136)", async () => {
+  const dir = mkdtempSync(join(root, 'commands-'));
+  mkdirSync(join(dir, '.claude', 'skills', 'deploy'), { recursive: true });
+  writeFileSync(join(dir, '.claude', 'skills', 'deploy', 'SKILL.md'), '---\ndescription: Ship it.\n---\n');
+  const store = new Store(join(dir, 'db.sqlite'));
+  const p = store.createProject('P', null);
+  const t = store.createTicket({ project_id: p.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  store.setSetting(commandsKey(t.id), { cwd: dir, names: ['deploy'], plugins: [] });
+  let description = '';
+  const calls = await syncCallsUnder(join(dir, '.claude'), async () => {
+    description = (await chatCommands(store, t)).commands[0].description;
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(description, 'Ship it.');
+});
+
+test('the ideas ledger reads pages and handoffs with no synchronous file call (#2136)', async () => {
+  const dir = mkdtempSync(join(root, 'ideas-'));
+  mkdirSync(join(dir, 'handoffs'));
+  const page = join(dir, 'ideas.html');
+  writeFileSync(page, "<script>mock.picks({ collection: 'ideas', options: ['go', 'later'] });</script>");
+  writeFileSync(join(dir, 'handoffs', 'one.md'), '# Handoff: one\n');
+  writeFileSync(join(dir, 'handoffs', 'two.md'), '# Handoff: two\n');
+  const store = new Store(join(root, 'ideas.sqlite'));
+  const p = store.createProject('P', null);
+  const t = store.createTicket({ project_id: p.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  store.writeArtifactData(p.id, page, [{ key: 'db/ideas/A', value: JSON.stringify({ v: 'later', by: 'Josh' }) }], 'Josh');
+  const calls = await syncCallsUnder(dir, async () => {
+    await store.ideas.linkHandoff(p.id, dir, 'handoffs/one.md', t);
+    await store.ideas.sync(p.id, dir);
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(store.ideas.list(p.id).length, 3);
+});
+
+test('memory notes are listed, saved and indexed, with no synchronous file call (#2136)', async () => {
+  const dir = mkdtempSync(join(root, 'memory-'));
+  writeFileSync(join(dir, 'a.md'), '---\nname: A\n---\nbody');
+  let notes = 0;
+  const calls = await syncCallsUnder(dir, async () => {
+    await saveNote(dir, 'a.md', '---\nname: A\n---\nnew');
+    await indexNote(dir, 'a.md');
+    notes = (await readFolder({ label: 'x', dir, id: 'x', rel: 'x' }, () => false)).notes.length;
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(notes, 1);
 });

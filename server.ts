@@ -103,6 +103,7 @@ import { guardPipes, keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, readJson, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
+import { shellOff } from './src/shell.ts';
 import { agentRoutes, dropRemoved } from './src/routes/machines.ts';
 import { finishMerge } from './src/routes/machine-merge.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
@@ -1240,8 +1241,8 @@ const scheduledRuns = new ScheduledRuns({
   broadcast,
   by: APP_NAME,
   dataDir: DATA_DIR,
-  memoryTarget: (id) => {
-    const t = curatorTarget(store.getProject(id)?.repo_dir ?? null, memoryLogins({ store, claude: claudeLink }));
+  memoryTarget: async (id) => {
+    const t = await curatorTarget(store.getProject(id)?.repo_dir ?? null, memoryLogins({ store, claude: claudeLink }));
     return t && { dir: t.folder.dir, notes: t.notes };
   },
 });
@@ -2515,7 +2516,8 @@ async function staticTable(assets: Map<string, Buffer>, version: string, hashes:
   return { files, darkManifest: await file('manifest.webmanifest', dark), swOff: await file('sw.js', sw(true)), dataDir: DATA_DIR };
 }
 async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
-  const a = STATICS && staticAnswer(STATICS, path === '/' ? 'index.html' : path.replace(/^\//, ''), req.headers);
+  const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
+  const a = STATICS && staticAnswer(STATICS, name, req.headers, name === 'sw.js' && (await shellOff(STATICS.dataDir)));
   if (!a) throw new HttpError(404, 'Not found');
   res.writeHead(a.status, a.headers).end(a.body);
 }

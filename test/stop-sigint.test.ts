@@ -68,6 +68,20 @@ async function started(text: string) {
   return t.id;
 }
 
+/** Stop a started turn, and wait for the stop to act: it asks the turn's folder off the server's thread first (#2134). */
+let stops = 0;
+const insides = runner as unknown as { stopSignals(live: unknown, id: number): void };
+const stopSignals = insides.stopSignals.bind(runner);
+insides.stopSignals = (live, id) => {
+  stopSignals(live, id);
+  stops++;
+};
+async function stop(id: number) {
+  const before = stops;
+  runner.stop(id);
+  await until('the stop to signal the turn', () => stops > before);
+}
+
 async function ended(id: number) {
   await until('the turn to stop', async () => !runner.isRunning(id), 10000);
   return store.getTicket(id)!;
@@ -86,7 +100,7 @@ test('a stopped turn records its result: cost and usage', async () => {
 
 test('a claude that ignores SIGINT still dies by SIGTERM after the grace period', async () => {
   const id = await started('plain');
-  runner.stop(id);
+  await stop(id);
   assert.deepEqual(sent, ['SIGINT']);
   assert.deepEqual(
     clock.pending().map((p) => p.ms),
@@ -105,7 +119,7 @@ test('a claude that ignores SIGINT still dies by SIGTERM after the grace period'
 
 test('a claude that ignores SIGINT and SIGTERM is SIGKILLed', async () => {
   const id = await started('ignore-sigterm');
-  runner.stop(id);
+  await stop(id);
   clock.advance(stopGraceMs);
   assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
   clock.advance(stopKillMs - stopGraceMs);
@@ -116,10 +130,10 @@ test('a claude that ignores SIGINT and SIGTERM is SIGKILLed', async () => {
 
 test('a second Stop does not push the SIGKILL out', async () => {
   const id = await started('ignore-sigterm');
-  runner.stop(id);
+  await stop(id);
   clock.advance(stopGraceMs + 700);
   assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
-  runner.stop(id);
+  await stop(id);
   assert.deepEqual(sent, ['SIGINT', 'SIGTERM'], 'the second Stop sends nothing new');
   assert.deepEqual(clock.pending(), [{ ms: stopKillMs, in: stopKillMs - stopGraceMs - 700 }], "the SIGKILL still comes on the first Stop's schedule");
   clock.advance(stopKillMs - stopGraceMs - 700);

@@ -201,10 +201,8 @@ test('a stop before claude has started signals it as soon as it starts, not at t
   runner.clock = clock;
   try {
     runner.stop(t.id);
-    assert.ok(
-      clock.pending().some((p) => p.ms === runner.stopKillMs),
-      'the SIGKILL retry is armed',
-    );
+    // The stop asks the turn's folder off the server's thread first (#2134).
+    await until('the SIGKILL retry to be armed', () => clock.pending().some((p) => p.ms === runner.stopKillMs));
     await until('the turn to stop', async () => !runner.isRunning(t.id));
     assert.ok(!runner.isRunning(t.id), 'the turn ended without the clock moving');
   } finally {

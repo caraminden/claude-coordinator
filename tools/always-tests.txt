@@ -7,6 +7,7 @@
 # The source-tree scans the map missed (effort retro "Push failure gaps", Nov 25: #1881 waited 105 min in line, then CI
 # refused it on one-pacific), each under 0.3 s: one-pacific, one-home, css-has-cost, help-words, unit-thp.
 # The last five (#1983) reddened ships only after their place in line, 8 for the size list alone on Nov 25: 0.1 to 1 CPU-s each, 20 of 20 green at load 10 to 15.
+# db-handle-timeouts (#2149) reads every test file, 0.4 s: a new raw handle with no timeout was first seen in a ship's CI run.
 # Not one that takes over 5 CPU-seconds (#1544): a slow one goes on tools/affected-map.txt by the paths that can break it
 # (test/access-matrix.test.ts did, and was over half of every minion's test CPU). land.sh's quick check follows the map for it.
 test/prompt-budget.test.ts
@@ -27,6 +28,7 @@ test/size-budget.test.ts
 test/ui-contract.test.ts
 test/config.test.ts
 test/raw-log-read.test.ts
+test/db-handle-timeouts.test.ts
 test/ship-core-parity.test.ts
 # The pinning tests (#2037, Josh 2026-11-25 "Always-run list plus smoke"): each reads source text and goes red for an edit
 # that never touched it, and #1928's narrow pick left them to the train's CI. Together about 2.5 CPU-s. The slow ones that

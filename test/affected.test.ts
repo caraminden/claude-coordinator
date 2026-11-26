@@ -29,6 +29,7 @@ const REPO_WIDE = [
   'sw',
   'ps1-lint',
   'raw-log-read',
+  'db-handle-timeouts',
   'one-until',
   'skill-evals',
   'format',

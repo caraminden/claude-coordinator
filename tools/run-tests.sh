@@ -200,7 +200,13 @@ pipeline_tier() {
   changed=$(git diff --no-renames --name-only "$base" HEAD) || { why="git diff against main failed"; return 1; }
   [ -n "$changed" ] || { why="nothing changed against main"; return 1; }
   mapfile -t entries < <(tr -d '\r' <"$list" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d')
+  # A `# lane-only: <path>` line (#2138): the path is in the pipeline lane but no pipeline test can read it (src/land.ts:
+  # they import nothing outside test/), so changing it alone runs the product tier. 11 of 197 ship runs on Nov 25 ran
+  # the pipeline's tests, about 100 s more, for src/land.ts alone. Every other reader of the list skips the line.
+  local lane_only
+  lane_only=" $(tr -d '\r' <"$list" | sed -n 's/^[[:space:]]*#[[:space:]]*lane-only:[[:space:]]*\([^[:space:]]*\).*/\1/p' | tr '\n' ' ')"
   while IFS= read -r path; do
+    [[ $lane_only != *" $path "* ]] || continue
     for entry in "${entries[@]}"; do
       if [ "$path" = "$list" ] || [ "$path" = "$entry" ] || [[ $entry == */ && $path == "$entry"* ]]; then
         why="$path is a pipeline file"

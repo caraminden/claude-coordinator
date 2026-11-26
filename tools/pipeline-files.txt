@@ -5,6 +5,8 @@
 # covers its folder.
 # A test file goes here only if it imports nothing from outside test/, directly or through its fixtures, and every
 # tools/ file it reads is listed: test/pipeline-files.test.ts (on every land) checks both.
+# A `# lane-only: <path>` line marks a listed path no pipeline test can read (outside test/, tools/ and kit/): it stays in
+# the lane, and changing it alone runs the product tier (#2138). test/pipeline-files.test.ts checks that too.
 tools/land.sh
 tools/land-core.sh
 tools/land.local.sh
@@ -44,6 +46,7 @@ tools/ci-progress.ts
 tools/citadel-node
 tools/citadel-node.cjs
 tools/ci-runner/win-ports.sh
+# lane-only: src/land.ts (run-tests.sh: no pipeline test reads it, so it alone runs the product tier)
 src/land.ts
 .github/workflows/tests.yml
 kit/skills/scheme-setup/templates/

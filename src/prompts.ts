@@ -236,15 +236,21 @@ export type BuildRole = { build: number; branch: string | null; owner: boolean; 
  * that uses the build label without build branches (Delve) sees nothing new; the build minion gets its
  * steps from the start, since making the branch is the first of them.
  */
-export function buildLines(b: BuildRole | null): string[] {
+export function buildLines(b: BuildRole | null, cabal: CabalRole | null = null): string[] {
   if (!b || (!b.owner && !b.branch)) return [];
   const n = b.build;
+  const c = cabal?.build === n ? cabal : null; // a goal cabal's member that also carries a build label is that build's feeder
   const br = `build/${n}`;
+  // A cabal's member (#2095) asks its Overseer on the board; a feeder of a build begun before cabals, its build minion.
+  const lead = c && !c.lead ? c.overseer : 'the build minion';
+  const f = c ? 'member' : 'feeder';
   if (!b.owner) {
     return [
-      `You are a feeder in Build ${n}: your base is \`${br}\`, not main, and the build ships to main once, through its build minion. Wherever the Git, shipping and self-review rules say main, read \`${br}\` (the base check, the diff you review). If your branch isn't based on it yet (you were moved into the build after you started), rebase onto it first. When your work is tested and self-reviewed, merge it in with \`tools/land.sh --into ${br} <the test files you touched>\` (hand_off_land with into and files, which dismisses you once merged): no CI run and no deploy. Never land on main or deploy (no plain \`tools/land.sh\`, no PR to main). The build's \`build-claims.md\` says which files are yours: the merge refuses a file another feeder claimed or merged in first, and, in a file it lists as shared, any change to lines another feeder wrote (add lines there instead). A file nobody claimed is yours once you merge it; for a claimed one, ask the build minion (message_minion) to move the claim. On a conflict, rebase onto \`${br}\` keeping the other feeders' changes, re-test and run it again; when feeders disagree on behaviour, not just lines, ask the build minion through the Taskmaster. A high risk label doesn't hold your merge: the build's go card covers it, so put the label in your note. Once merged in, set the note "merged into Build ${n}" and close_self in that turn: for you that counts as landed. Follow-ups go to the build minion.`,
+      `${c && !c.lead ? `In ${c.name}, a build cabal` : `You are a feeder in Build ${n}`}: your base is \`${br}\`, not main, and the build ships to main once, through ${lead}. Wherever the Git, shipping and self-review rules say main, read \`${br}\` (the base check, the diff you review). If your branch isn't based on it yet (you were moved into the build after you started), rebase onto it first. When your work is tested and self-reviewed, merge it in with \`tools/land.sh --into ${br} <the test files you touched>\` (hand_off_land with into and files, which dismisses you once merged): no CI run and no deploy. Never land on main or deploy (no plain \`tools/land.sh\`, no PR to main). The build's \`build-claims.md\` says which files are yours: the merge refuses a file another ${f} claimed or merged in first, and, in a file it lists as shared, any change to lines another ${f} wrote (add lines there instead). A file nobody claimed is yours once you merge it; for a claimed one, ask ${c && !c.lead ? 'it with a cabal_board ask' : 'the build minion (message_minion)'} to move the claim. On a conflict, rebase onto \`${br}\` keeping the other ${f}s' changes, re-test and run it again; when ${f}s disagree on behaviour, not just lines, ask ${c && !c.lead ? 'it on the board' : 'the build minion through the Taskmaster'}. A high risk label doesn't hold your merge: the build's go card covers it, so put the label in your note. Once merged in, set the note "merged into Build ${n}" and close_self in that turn: for you that counts as landed. Follow-ups go to ${lead}.`,
     ];
   }
+  // Its steps are the citadel:cabal skill's: the prompt keeps only where the build stands.
+  if (c?.lead) return [`Your build is Build ${n}, on \`${br}\`${b.branch ? '' : ", which you make first (the skill's build steps)"}.${b.preview ? ` Its preview, the tip of \`${br}\` on a fresh copy of the live data, is at ${b.preview}: put it on the board's log and the go card.` : ''}`];
   return [
     `You are the build minion of Build ${n}: you own \`${br}\`, the branch its feeders (the scheme's other minions in Build ${n}) start from and merge into with \`tools/land.sh --into ${br}\`, and you land it on main once, as one deploy. In a container, each \`tools/land.sh\` below is the land tool, with into, full or build. Your steps:`,
     `1. ${b.branch ? `\`${br}\` exists.` : `Make \`${br}\` from main first (\`git branch ${br} main\`): it switches the build on, and new feeders start from it.`}${b.preview ? ` Its preview, the tip of \`${br}\` on a fresh copy of the live data, is at ${b.preview} (also on the build's header in the minions list): put that link in the build's list and on the go card.` : ''} Then plan the claims before feeders start: \`build-claims.md\` at the top of \`${br}\`, a line \`build: #<your number>\`, then one line per feeder, \`#N: <the files it writes>\` (paths separated by spaces; a folder ends in /; no path in two claims), and \`shared: <hub files>\` for files several feeders add to, which take only added lines. Commit it on your branch and merge it in with \`tools/land.sh --into ${br}\` (docs only, so no test files). \`--into\` refuses a feeder's merge that writes outside its claim. A feeder that needs another's file asks you: move the claim the same way. In step 5, \`git rm\` it with the retro's commit: \`--build\` refuses while it is on the build.`,
@@ -252,6 +258,26 @@ export function buildLines(b: BuildRole | null): string[] {
     `3. Take main in once a day and right before landing: commit, \`git merge --ff-only ${br}\`, \`tools/citadel-node tools/ship-numbers.ts take main\` (\`git merge main\`, with the build's new SCHEMA_HISTORY lines moved after main's; merge, never rebase: a rebase changes the feeders' commit hashes), resolve, then \`tools/land.sh --into ${br} --full\` (the full suite on CI; if it exits 75, no CI runner took its run: call \`wake_when_runners_back\`, set state sealed and end your turn). On a red, find which merge since the last green run caused it and get that feeder to fix it through the Taskmaster, or fix it yourself.`,
     '4. If no feeder has merged in for 3 days, ask with a card: ship what is there, wait, or drop the build.',
     `5. Once every feeder on the list is merged in: take main in one last time, self-review the whole diff against main with a claude-fable-5-2 reviewer at medium effort, label the build with the highest of its feeders' labels and that review's, run \`citadel:retro\` over the build (feeders' chats, \`process\` retro-log lines, diff; it says whether the claims helped: refusals, moved claims, conflicts they missed), commit it to \`${br}\` in CLAUDE.md's retro folder, and post one go card (ask_question, kind merge) with the retro's top three findings, the list, the label and what wasn't verified, whatever the label. On the go, run \`tools/land.sh --build\` from your worktree with your branch at the build's tip: one CI run, one deploy.`,
+  ];
+}
+
+/**
+ * Where a minion stands in a cabal (#2095): `name` is the cabal's ("Build 8", a Goal's name), `overseer` its lead's
+ * name as the board writes it ("Build 8's Overseer"), `ref` its #N, or "<scheme> #N" in another scheme, `build` its lead's build (a build cabal's). Build lines carry the branch steps; these, the board and the Overseer's rules.
+ */
+export type CabalRole = { lead: boolean; name: string; overseer: string; ref: string; build: number | null };
+
+/** A cabal's lines in its Overseer's and members' prompts; a minion on no board gets none. */
+export function cabalLines(c: CabalRole | null): string[] {
+  if (!c) return [];
+  const build = c.build != null;
+  if (c.lead) {
+    return [
+      `You are ${c.overseer}: you lead its cabal, the minions that work on ${build ? 'its build' : 'it'} under you, from its board (cabal_board). Open the \`citadel:cabal\` skill before anything else, and again after a shift change: it holds your steps. People read you as "${c.overseer}", never "the Overseer" alone. What always holds: people approve the roster on its forming card (cabal_board form), and you start members only from approved rows, with cabal_start (message_taskmaster for a row in another scheme); a red run or a review finding goes to the member who made it while it is open, else to the cabal's fixer, and you fix it yourself only for a merge conflict or about 20 lines; members' asks wait on the board and you answer them together at each wake.${build ? ' A full run waits until no member is still merging into the build.' : ''}`,
+    ];
+  }
+  return [
+    `You are a member of ${c.name}, a cabal led by ${c.overseer} (${c.ref}). On your first turn, read the board with cabal_board before the work: your row, your lane's neighbours and the open asks on your files. At each milestone, set your row's note (cabal_board note, one line such as "built, in review": it wakes nobody). Ask your Overseer on the board (cabal_board ask: a claim, a lend, a question), not by message_minion or the Taskmaster, with blocking true only when you can't go on without the answer.${build ? '' : ' You ship to live yourself, as any minion does.'}`,
   ];
 }
 
@@ -301,6 +327,7 @@ export function promptParts(
   split: TaskmasterRole | null = null,
   jobMachines: string[] = [],
   fableOver = false,
+  cabal: CabalRole | null = null,
 ): { system: PromptSections; turn: PromptSections } {
   const layers = { app: appInstructions(appText), rules: minionRulesLines(project), scheme: projectInstructions(project, !!appText.trim()) };
   if (ticket.kind === 'coordinator') {
@@ -364,7 +391,8 @@ export function promptParts(
       // No title (#704): it changes whenever the minion retitles itself; read_ticket has it.
       minion: [`You are a minion working on #${ticket.number} in scheme "${project.name}".`],
       where: [ticket.branch ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.` : 'Your working directory is a dedicated folder for this minion.'],
-      build: buildLines(build),
+      cabal: cabalLines(cabal),
+      build: buildLines(build, cabal),
       // Done lines (#1115) open a feature minion's first session (#1574): moved out of every minion's system prompt. `type` is
       // its type property, which the runner (and the prompt-eval rig) pass along on the ticket.
       doneLines: ticket.type === 'feature' && !ticket.session_id ? [DONE_LINES] : [],
@@ -465,7 +493,11 @@ function machineTools(machines: TurnMachine[]): string[] {
 
 /** The Taskmaster's test for suggesting a build (specs/build-branches.md, section 4), once the scheme's land.sh can merge into one. */
 export const BUILDS_LINE =
-  'Builds: a big feature can run as a build, a branch `build/<n>` that its minions (feeders) merge into; the build then ships to main once, with one go card. Suggest one with an ask_question card when all three hold: three or more minions build one feature (or two that run for more than a day); half of it live is worse than none (people would meet two versions of one thing, a page moved without its parts, a format only one side reads); and it can\'t just stay dark (an unlinked route or an unused table ships straight to live). Never for bug fixes, the ship pipeline, process and kit docs, refactors, or a batch of independent jobs; when in doubt, no build. On a yes, start its build minion with create_ticket: build the scheme\'s highest build number plus one, build_owner: true, type chore, title "Build <n>: <feature>". It makes the branch first; feeders created in that build start from it. A feeder that closed as "merged into Build <n>" is done: its work waits in the build, not live yet.';
+  'Builds: a big feature can run as a build, a branch `build/<n>` that its cabal\'s members merge into; the build then ships to main once, with one go card. Suggest one with an ask_question card when all three hold: three or more minions build one feature (or two that run for more than a day); half of it live is worse than none (people would meet two versions of one thing, a page moved without its parts, a format only one side reads); and it can\'t just stay dark (an unlinked route or an unused table ships straight to live). Never for bug fixes, the ship pipeline, process and kit docs, refactors, or a batch of independent jobs; when in doubt, no build. On a yes, create only its Overseer, with create_ticket: build the scheme\'s highest build number plus one, build_owner: true, type chore, title "Build <n>: <feature>". A member that closed as "merged into Build <n>" is done: its work waits in the build, not live yet. A build whose build minion leads no board keeps its old steps.';
+
+/** The Taskmaster's cabal line (#2095, specs/foreman-crews-proposal.md): goal cabals, in every scheme whatever its Builds setting. */
+export const CABALS_LINE =
+  'Cabals: a cabal is minions under one Overseer, named by its cabal ("Build 8\'s Overseer", never "the Overseer" alone), which starts them from a roster people approve. Suggest a goal cabal on a card when a person asks, or when a Goal will have 5+ minions sharing files, an order or a synthesis; never for independent jobs, fixes or the pipeline lane. On a yes, create only its Overseer (create_ticket lead: true, with effortName).';
 
 /** What the Citadel scheme's Taskmaster may read in every scheme this turn (#656; runner.ts everySchemeFor), for its prompt. */
 export interface EverySchemeView {
@@ -522,6 +554,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     "Workers: `mark_urgent` puts a minion in the Urgent group, ahead of the line for a worker, until it ships (others wait on it, or it fixes a live break); people's choice stands.",
     ...(role ? [roleLine(role)] : []),
     ...(builds && project.builds !== 'off' && role !== 'person' ? [BUILDS_LINE] : []),
+    CABALS_LINE,
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',
     // #1488 (Cara, 2026-11-20: "I want to be able to just kick off as many minions as I want"; 2026-11-21: seals left under the old lane rule).
     'Start every minion people ask for at once: the box paces turns, so limit heavy work (citadel-heavy), not starts. start_after is for code a minion needs, never for spacing; when a rule on the order of work changes, unseal minions sealed only under the old one.',

@@ -60,7 +60,7 @@ async function as(id: number, path: string, body?: object) {
 }
 const board = (body: object) => as(lead.id, `/api/tickets/${lead.id}/cabal`, body);
 const ask = (body: object) => as(lead.id, `/api/tickets/${lead.id}/cabal/taskmaster`, body);
-const rowOf = (label: string) => db.prepare('SELECT * FROM cabal_rows WHERE lead_id = ? AND label = ?').get(lead.id, label) as unknown as CabalRow;
+const rowOf = (label: string) => db.prepare('SELECT * FROM cabal_rows WHERE lead_id = ? AND label = ?').get(lead.id, label) as CabalRow;
 const events = async (id: number) => (await s.call(`/api/tickets/${id}/events?after=0`)).data as Ev[];
 const taskmasterOf = (project: number) => (db.prepare("SELECT id FROM tickets WHERE project_id = ? AND kind = 'coordinator' ORDER BY id").get(project) as { id: number }).id;
 /** Everything said to a Taskmaster: its chat lines and its held mail. */

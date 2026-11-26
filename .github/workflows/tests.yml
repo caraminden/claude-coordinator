@@ -166,6 +166,8 @@ jobs:
             echo "burn-in: no $base ref from land.sh, so it compares with GitHub's main, which may lack the last ship or two"
             base=$(git merge-base HEAD origin/main)
           fi
+          # Each file's last burn-in on this machine, so one that can't finish in the time left isn't started (#2138).
+          mkdir -p "$HOME/.cache" && export BURN_IN_TIMES=$HOME/.cache/citadel-burn-in-times.tsv
           tools/burn-in.sh --ship "$base"
       # The run land.sh makes on perigee when this can't answer: it always ends (a leaked handle hangs a bare
       # `npm test` here), and labels a file that fails under load. Perigee skips no test, so a skip here means this

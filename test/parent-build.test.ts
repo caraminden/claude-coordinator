@@ -158,6 +158,15 @@ test("a new minion rides its parent's build unless the create sets one", async (
   assert.equal(refused.status, 400);
   assert.match(refused.body.error, /build_owner needs a build/);
   assert.equal(store.listTickets(Delve.id).length, count, 'nothing made');
+  // A cabal's Overseer (#2095): a build's owner and a lead have their board from the start; a feeder has none.
+  assert.ok(store.getCabal(store.getSetting<number>(buildOwnerKey(Delve.id, 12))!), "a build's owner leads its cabal");
+  assert.equal(store.getCabal(t.id), undefined, 'a feeder leads nothing');
+  t = await made({ lead: true, parent: null, properties: { type: 'chore', effortName: 'docs sweep' } });
+  assert.ok(store.getCabal(t.id), 'lead makes a goal cabal');
+  const both = await create({ lead: true, cabal: t.number, parent: null });
+  assert.equal(both.status, 400);
+  assert.match(both.body.error, /Overseer can't be on another cabal/);
+  assert.equal(store.listTickets(Delve.id).length, count + 1, 'nothing made for a lead on a cabal');
 
   // A minion created in a build whose branch exists starts from it; another build, from main.
   const g = (args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();

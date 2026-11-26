@@ -25,6 +25,19 @@ test('the list names files that exist, and some test files', () => {
   assert.ok(gated.length > 0);
 });
 
+// #2138: a `# lane-only:` path stays in the lane but doesn't make run-tests.sh run the pipeline tier, so it must be one
+// no listed test can read: listed, outside test/, tools/ and kit/, and named by no listed test file.
+test('a lane-only path is on the list, outside test/, tools/ and kit/, and no listed test names it', () => {
+  const laneOnly = [...readFileSync(join(repo, 'tools', 'pipeline-files.txt'), 'utf8').matchAll(/^\s*#\s*lane-only:\s*(\S+)/gm)].map((m) => m[1]);
+  for (const p of laneOnly) {
+    assert.ok(entries.includes(p), `${p} is lane-only but not on the list`);
+    assert.ok(!/^(test|tools|kit)\//.test(p), `${p} is lane-only but a pipeline test can read it`);
+    // A quoted path or file name is a read (join(repo, 'src', 'land.ts')); a mention in a message is not.
+    const read = new RegExp(`['"\`](${p}|${p.split('/').at(-1)})['"\`]`.replaceAll('.', '\\.'));
+    for (const t of gated) assert.ok(!read.test(readFileSync(join(repo, t), 'utf8')), `${t} reads lane-only ${p}`);
+  }
+});
+
 test('a listed test file imports nothing from outside test/, and its fixtures and the tools/ files it names are listed', () => {
   const seen = new Set<string>();
   const walk = (file: string, from: string) => {

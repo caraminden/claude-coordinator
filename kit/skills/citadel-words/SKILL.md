@@ -135,16 +135,46 @@ Code: `pending-deploy`, `deploy`
 **Released**:
 A build people install (an APK, a desktop app) that its people can now get. Shipped is not released.
 
-**Major build**:
-A branch where several minions' work collects before it ships together.
+**Build**, **Major build**:
+A branch where a cabal's work collects before it ships together, named by its number ("Build 7").
 Code: `build/<n>`
 _Avoid_: train, epic
 
-**Feeder**:
-A minion whose work goes into a major build rather than straight onto main.
-
 **Merge**:
-Only a feeder's work going into a major build ("merged into Build 3"), or a raw git step. Onto main is ship.
+Only a cabal member's work going into a build ("merged into Build 3"), or a raw git step. Onto main is ship.
+
+### Cabals
+
+**Cabal**:
+A group of minions working toward one aim under one Overseer, from one board. A build cabal has a build; a goal cabal
+has none, and each member ships itself.
+Code: `cabal`, `effortName`, `build`
+_Avoid_: crew, team, feeders
+
+**Overseer**:
+The lead minion of a cabal, one per cabal, always named by it: "Build 7's Overseer", never "the Overseer" alone.
+Code: `lead`, `build_owner`, `citadel:cabal`
+_Avoid_: Foreman, build minion
+
+**Cabal member**:
+A minion on a cabal's roster, started by its Overseer.
+Code: `cabal`
+
+**Cabal board**:
+The shared page of a cabal's state: its roster, each member's state and note, asks, and its Overseer's log.
+Code: `cabal_board`
+
+**Roster**:
+A cabal's planned members, approved together on its forming card.
+Code: cabal rows
+
+**Fixer**:
+The cabal member who takes small fixes across the cabal, started once a fix needs it.
+Code: `role: fixer`
+
+**Shift change**:
+An Overseer starting a fresh session from its board when its context grows.
+Code: `fresh`
 
 **Pipeline lane**:
 The one-at-a-time turn for changes to the ship and deploy pipeline itself.
@@ -229,8 +259,9 @@ A Grunt that judges finished work blind against a scheme's rubric.
 Never in text people read. The Citadel-wide wording check sends some of them back.
 
 **Land** _(retired)_: say ship.
-**Fold** _(retired)_: say ship for main, merge into the build for a feeder, collapsed section for UI.
-**Merge** _(restricted)_: only into a major build or as a raw git step; onto main is ship.
+**Fold** _(retired)_: say ship for main, merge into the build for a cabal member, collapsed section for UI.
+**Merge** _(restricted)_: only into a build or as a raw git step; onto main is ship.
+**Feeder** _(retired)_: say cabal member.
 **Parked** _(retired)_: say sealed; unpark is unseal.
 **Coordinator** _(retired)_: say Taskmaster.
 **Ticket**, **Thread** _(retired)_: say minion.

@@ -9,7 +9,8 @@
 #   tools/burn-in.sh --ship <base>          a ship's CI run (tests.yml): the test files it adds or changes since <base>,
 #                                           then up to BURN_IN_MAPPED (3) tests tools/affected-map.txt maps its changed
 #                                           source files to or that import them (in turns), one file after another, within
-#                                           BURN_IN_LIMIT (150) s
+#                                           BURN_IN_LIMIT (150) s; with BURN_IN_TIMES (a file it keeps), one whose last
+#                                           burn-in at the same content took longer than the time left is not started
 #   tools/burn-in.sh --importers <path>...  the test files that import those paths, nearest first, with why (no run)
 #
 # One file: exits 0 when every copy passed, 1 when one failed or was stopped at the limit (its output is printed, then a
@@ -177,16 +178,39 @@ for ((i = 0; i < ${#imp[@]}; i++)); do echo "burn-in: picked ${imp[i]}: it ${imp
 files=("${direct[@]}" "${mapped[@]}" "${imp[@]}")
 [ ${#files[@]} -gt 0 ] || { echo "burn-in: this change adds or changes no test file, and no test is mapped to it or imports it: nothing to burn in"; exit 0; }
 echo "burn-in: ${#files[@]} file(s), $copies copies of each at once, one file after another, within $limit s: ${direct[*]:+changed: ${direct[*]}}${mapped[*]:+${direct[*]:+; }mapped from the change: ${mapped[*]}}${imp[*]:+${direct[*]}${mapped[*]:+; }importing the change: ${imp[*]}}"
+# Each file's last burn-in on this runner (#2138), "<seconds>\t<file>\t<blob>": a file whose last burn-in at the same
+# content took longer than the time left is skipped, not started. Stopped at the limit it gives no verdict, and on Nov 25
+# and 26 that cost 1,680 s over 197 ship runs and 878 s over 29 (Build 7's machine-sync, 67-93 s a run). A stopped file
+# keeps one second more than the longest time it was given, so the same time left won't start it again; a failed one keeps
+# nothing, as its copies stopped early. A line whose time isn't whole seconds is ignored.
+times=${BURN_IN_TIMES:-}
+need_of() { [ -n "$times" ] && [ -f "$times" ] && [ -r "$times" ] || { echo 0; return; }; awk -F'\t' -v f="$1" -v b="$2" '$2 == f && $3 == b && $1 ~ /^[0-9]+$/ { s = $1 } END { print s + 0 }' "$times" 2>/dev/null || echo 0; }
+keep_time() {
+  [ -n "$times" ] || return 0
+  { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$times"; } 2>/dev/null || return 0
+  # shortcut: runners sharing the file may lose a line to this trim, which only costs a file one more burn-in.
+  [ "$(wc -l <"$times" 2>/dev/null || echo 0)" -le 4000 ] || { tail -n 2000 "$times" >"$times.$$" && mv -f "$times.$$" "$times"; }
+}
 # Every file runs, past a red one (#1564): a train with three racy riders hears of all three in one red run, not one a run.
-deadline=$((SECONDS + limit)) skipped=() nov=() red=()
+deadline=$((SECONDS + limit)) skipped=() slow=() nov=() red=()
 for f in "${files[@]}"; do
   left=$((deadline - SECONDS))
   [ "$left" -ge 15 ] || { skipped+=("$f"); continue; }
-  rc=0
+  blob=$(git hash-object "$f" 2>/dev/null) || blob=
+  need=$(need_of "$f" "$blob")
+  if [ -n "$blob" ] && [ "$need" -gt "$left" ]; then
+    echo "burn-in: $f: not started: its last burn-in here, at this same content, took $need s or more and $left s are left, so it would stop with no verdict"
+    slow+=("$f")
+    continue
+  fi
+  rc=0 t0=$SECONDS
   burn_one "$f" "$copies" "$left" || rc=$?
+  took=$((SECONDS - t0))
   [ "$rc" != 1 ] || red+=("$f")
-  [ "$rc" != 2 ] || nov+=("$f")
+  if [ "$rc" = 2 ]; then nov+=("$f") && took=$((took + 1)) && [ "$took" -gt "$need" ] || took=$need; fi
+  [ "$rc" = 1 ] || [ -z "$blob" ] || keep_time "$took" "$f" "$blob"
 done
+[ ${#slow[@]} = 0 ] || echo "burn-in: NO VERDICT on ${slow[*]}: not started, as their last burn-in took longer than the time left (the full suite runs them next)"
 [ ${#nov[@]} = 0 ] || echo "burn-in: NO VERDICT on ${nov[*]}: stopped at the ${limit} s limit (the full suite runs it next, with its own hang limit)"
 [ ${#skipped[@]} = 0 ] || echo "burn-in: SKIPPED ${skipped[*]}: the ${limit} s limit ran out before they could start"
 echo "burn-in: done in $((limit - (deadline - SECONDS))) s"

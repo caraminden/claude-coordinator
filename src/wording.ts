@@ -1,5 +1,5 @@
 // The wording check: words Citadel says one way, sent back before they reach people (#313). A change going onto
-// main "ships", a feeder going into a major build "merges", and "fold" is retired (Cara, 2026-11-19: picked "Ship"
+// main "ships", a cabal member's work going into a build "merges", and "fold" is retired (Cara, 2026-11-19: picked "Ship"
 // on #1020's card over "land", and, for fold, "Retire it"). Three places use it: the Stop hook (link-check.ts) checks a turn's final reply, and
 // this file's PreToolUse hook (wordingHooks in turn-launch.ts) checks the messages and cards a session sends and the
 // .md and .html files it writes into the scheme's shared folders. Each sentence is sent back once; a rewrite that
@@ -35,11 +35,11 @@ export const RESERVED: Reserved[] = [
     why: 'Citadel no longer says "fold" (Cara, 2026-11-19, "Retire it")',
     // Not "case-fold": that's text, not work.
     match: /(?<!\bcase-)\bfold(?:s|ed|ing)?\b(?:[- ]in\b)?/gi,
-    suggest: '"ship" for a change going onto main, "merge into the build" for a feeder, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
+    suggest: '"ship" for a change going onto main, "merge into the build" for a cabal member, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
   },
   {
     term: 'merge',
-    why: 'A change going onto main "ships" (Cara, 2026-11-19, picked "Ship" on #1020\'s card); "merge" is only for a branch going into a major build, or a raw git step',
+    why: 'A change going onto main "ships" (Cara, 2026-11-19, picked "Ship" on #1020\'s card); "merge" is only for a branch going into a build, or a raw git step',
     // Only the shapes that can't mean a build: "merge it" / "merge #12" / "PR #12 merged" with no "into" after, "merged
     // to main", "ready to merge", "merged PRs", "the merge card". A bare "merged" or "the merge" is left alone: it's
     // as often git's as ours.
@@ -55,9 +55,9 @@ export const RESERVED: Reserved[] = [
       ].join('|'),
       'gi',
     ),
-    allow: /^(?:builds?|feeders?|git)$/i,
+    allow: /^(?:builds?|cabals?|feeders?|git)$/i,
     always: /\bmain\b/i,
-    suggest: '"ship it", "shipped to main", "ready to ship", "shipped PRs" or "the ship card"; "merge into Build <n>" for a feeder',
+    suggest: '"ship it", "shipped to main", "ready to ship", "shipped PRs" or "the ship card"; "merge into Build <n>" for a cabal member',
   },
   {
     term: 'land',

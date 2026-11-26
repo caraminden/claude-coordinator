@@ -55,7 +55,9 @@ import { imageFile, WorkerJoin } from './src/worker-join.ts';
 import { RoleSetups } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
-import { shipsOn, ShipWatch } from './src/ci-ships.ts';
+import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
+import { MachineBalancer } from './src/machine-balancer.ts';
+import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs } from './src/long-jobs.ts';
 import { gruntAtWork } from './src/live-state.ts';
@@ -687,9 +689,48 @@ function settleCard(card: { ticket: number; question: string }, by: string, line
 }
 // Jobs on a person's own machine (#857): the queue of record, its go cards in the asking minion's chat (a
 // contraption's in its home scheme's Taskmaster chat), and results in the scheme's shared folder or the app's DATA_DIR.
+// One balancer per machine (Build 7 M6, src/machine-balancer.ts): each connected machine's threads split across its ships,
+// waiting CI, heavy jobs and minion workers. Perigee is never one of them (Josh, "Machines only for now").
+let ciQueued = new Map<string, number>();
+const ciWaitingAt = (id: number) => {
+  const pcs = ciLoad.runnersByPc();
+  for (let host = workers.host(id); host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) {
+    const n = queuedOn(host, ciQueued, pcs);
+    if (n) return n;
+  }
+  return 0;
+};
+const balancer = new MachineBalancer({
+  machines: () => store.listMachines().flatMap((m) => (m.owner_id !== null ? [m.id] : [])),
+  input: (id) => {
+    const m = store.getMachine(id);
+    const threads = m ? (storedReport(m)?.threads ?? 0) : 0;
+    if (!m || !threads) return null;
+    const caps = (role: 'turns' | 'ci') => store.machineRoles(id).find((r) => r.role === role)?.caps ?? {};
+    const [turns, ci] = [caps('turns'), caps('ci')];
+    return {
+      threads,
+      caps: { workers: turns.workers ?? null, runners: ci.runners ?? null, turnThreads: turns.threads ?? null, ciThreads: ci.threads ?? null },
+      ship: machines.shipsAtWorker(id),
+      ciWaiting: ciWaitingAt(id),
+      running: runner.turnLine.used(id),
+    };
+  },
+  // After the step that moved it, never inside it: a GPU job's pump frees room and asks again.
+  changed: (ids) =>
+    setImmediate(() => {
+      runner.turnLine.pump();
+      for (const id of ids) jobs.pump(id);
+    }),
+  log: (line) => console.log(line),
+  now: Date.now,
+});
+if (!BOOT_CHECK) every('machine balancer', MachineBalancer.TICK_MS, () => balancer.tick());
 const jobs = new MachineJobs({
   store,
   broadcast,
+  room: (id, job) => balancer.ask(id, job),
+  freed: (id, keep) => balancer.release(id, 'gpu:', keep),
   send: (id, msg) => machines.sendJob(id, msg),
   online: (id) => machines.isOnline(id),
   postCard: (job, card) => {
@@ -757,6 +798,10 @@ runner.pools = new MachinePools({
   info: workerInfo,
   ships: (id) => machines.shipsAtWorker(id),
   hold: (id) => workers.hold(id),
+  room: (id) => {
+    const plan = balancer.current(id);
+    return plan && { workers: plan.workers, why: plan.why };
+  },
   claude: serverClaude,
   changed: () => runner.turnLine.pump(),
   now: Date.now,
@@ -2045,6 +2090,9 @@ const shipWatch = new ShipWatch({
   as: asScheme,
   send: (ships) => machines.sendShips((host) => shipsOn(host, ships, ciLoad.runnersByPc())),
   first: () => liveSlug,
+  queued: (byRepo) => {
+    ciQueued = byRepo;
+  },
 });
 if (!BOOT_CHECK) shipWatch.start();
 // Deploys first (#1902, Josh 2026-11-24): while a ship is in Citadel's line, optional work stays off the CI desktop.

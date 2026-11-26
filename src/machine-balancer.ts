@@ -164,9 +164,23 @@ export class MachineBalancer {
     if (had?.running) return 'start';
     jobs.set(job.key, { ...job, since: had?.since ?? this.d.now() });
     const plan = this.plan(machineId);
+    if (plan) this.plans.set(machineId, plan);
     const go = !plan || plan.start.includes(job.key) ? 'start' : plan.late.includes(job.key) ? 'late' : 'wait';
     if (go !== 'wait') jobs.set(job.key, { ...jobs.get(job.key)!, running: true });
     return go;
+  }
+
+  /** Every job there whose key starts with `prefix` ended or stopped waiting, but `keep`. */
+  release(machineId: number, prefix: string, keep: string | null) {
+    const jobs = this.heavy.get(machineId);
+    let gone = false;
+    for (const key of [...(jobs?.keys() ?? [])]) if (key.startsWith(prefix) && key !== keep) gone = jobs!.delete(key) || gone;
+    if (gone) this.d.changed([machineId]);
+  }
+
+  /** The plan as the last step (or a heavy job's ask) left it: what the line reads, many times a second, without asking the store. */
+  current(machineId: number): Plan | null {
+    return this.plans.get(machineId) ?? null;
   }
 
   /** It ended, or stopped waiting: its size is free. */
@@ -179,17 +193,13 @@ export class MachineBalancer {
     return [...(this.heavy.get(machineId)?.values() ?? [])];
   }
 
-  /** A machine was removed. */
-  forget(machineId: number) {
-    this.heavy.delete(machineId);
-    this.plans.delete(machineId);
-  }
-
   /** The 10 s step: each machine's plan again; those whose plan moved are told, and a change of why is logged once. */
   tick() {
     const moved: number[] = [];
     const ids = new Set(this.d.machines());
+    // A removed machine's number may come to another one.
     for (const id of [...this.plans.keys()]) if (!ids.has(id)) this.plans.delete(id);
+    for (const id of [...this.heavy.keys()]) if (!ids.has(id)) this.heavy.delete(id);
     for (const id of ids) {
       const plan = this.plan(id);
       const was = this.plans.get(id);

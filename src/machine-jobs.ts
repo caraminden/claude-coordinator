@@ -5,6 +5,7 @@
 // job.start without a go for that job: its owner's click on its card, or a standing go for the recipe's exact hash,
 // which covers job hours only.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { HEAVY } from './machine-balancer.ts';
 import { createReadStream, createWriteStream, promises as fs } from 'node:fs';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -298,6 +299,10 @@ export interface JobDeps {
   placed?(job: MachineJob, stage: JobStage, view: JobView): void;
   /** Where a job's results go: the scheme's shared folder's jobs/<id>/ for a minion's, the app's DATA_DIR/jobs/<id>/ for a contraption's. */
   resultsDir(job: MachineJob): string | null;
+  /** The machine's balancer (Build 7 M6): may a job of this size start there now ('late': it waited 30 minutes and goes anyway). Left out, it may. */
+  room?(machineId: number, job: { key: string; label: string; size: number }): 'start' | 'late' | 'wait';
+  /** None of the machine's jobs holds or waits for room but `keep`'s (its key, or null). */
+  freed?(machineId: number, keep: string | null): void;
   now?: () => number;
 }
 
@@ -682,12 +687,17 @@ export class MachineJobs {
       }
       return;
     }
-    if (s.paused) return;
-    const next = this.store
-      .machineJobs({ machine: machineId, states: ['queued'] }, 1000)
-      .reverse()
-      .find((j) => j.go !== null && (j.go === 'now' || open));
+    const next = s.paused
+      ? undefined
+      : this.store
+          .machineJobs({ machine: machineId, states: ['queued'] }, 1000)
+          .reverse()
+          .find((j) => j.go !== null && (j.go === 'now' || open));
+    const key = next && `gpu:${next.id}`;
+    this.d.freed?.(machineId, key ?? null);
     if (!next) return;
+    // A heavy job waits for its size to be free (Josh, 2026-11-25, "Its size to be free"); no new turn starts there meanwhile.
+    if (this.d.room?.(machineId, { key: key!, label: `GPU job ${next.id}`, size: HEAVY.gpu }) === 'wait') return;
     this.startJob(next);
   }
 

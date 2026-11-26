@@ -747,11 +747,11 @@ test("Auto's size follows the balancer's target down, then grows back on Auto's 
   const f = fleet([1, 2]);
   const now = Date.now();
   f.one.room = { workers: 0, why: '2 CI jobs waiting' };
-  f.turns.tick({ cpu: 5, mem: 0 }, [], now);
+  f.turns.tick(calm, [], now, ok);
   assert.deepEqual([f.turns.pool(7).size, f.turns.pool(7).why], [0, '2 CI jobs waiting']);
   f.one.room = { workers: 3, why: null };
   for (const id of [1, 2, 3, 4, 5, 6]) f.turns.join(id);
-  f.turns.tick({ cpu: 5, mem: 0 }, [], now + POOL.everyMs);
+  f.turns.tick(calm, [], now + POOL.everyMs, ok);
   assert.ok(f.turns.pool(7).size < 3, `not back at once: ${f.turns.pool(7).size}`);
   f.turns.stop();
 });

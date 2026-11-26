@@ -38,7 +38,15 @@ beforeEach(async () => {
 });
 
 test('a machine that lends workers is a place, with its owner, cap and load', () => {
-  assert.deepEqual(t.pools.machines(), [{ id: t.m.id, name: 'desk', owner: t.josh.id, cap: 4, block: null, away: null, load: { reading: { cpu: 12, mem: 1 }, box: { freeGb: 20, level: 'ok' }, at: T } }]);
+  assert.deepEqual(t.pools.machines(), [{ id: t.m.id, name: 'desk', owner: t.josh.id, cap: 4, block: null, away: null, load: { reading: { cpu: 12, mem: 1 }, box: { freeGb: 20, level: 'ok' }, at: T }, priority: null, room: null }]);
+  // Build 7 M6: its owner's order, from its row, and the balancer's target.
+  t.store.updateMachine(t.m.id, { priority: 2 });
+  const withRoom = new MachinePools({ store: t.store, online: () => true, lends: () => true, info: () => t.s.info, ships: () => false, claude: () => Promise.resolve(null), changed: () => {}, now: () => T, room: () => ({ workers: 1, why: '1 CI job waiting' }) });
+  assert.deepEqual(
+    withRoom.machines().map((m) => [m.priority, m.room]),
+    [[2, { workers: 1, why: '1 CI job waiting' }]],
+  );
+  t.store.updateMachine(t.m.id, { priority: null });
   t.s.lends = false;
   assert.deepEqual(t.pools.machines(), [], 'its switch off: no place at all');
 });

@@ -10,6 +10,7 @@ import { Store } from '../src/db.ts';
 import type { MachineJob } from '../src/db-rows.ts';
 import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, notTaken, pacificClock, STARTING_TIMEOUT_S, type JobKind } from '../src/machine-jobs.ts';
 import { writeOffThread } from '../src/db-writer.ts';
+import { MachineBalancer } from '../src/machine-balancer.ts';
 import { thrown } from '../src/thrown.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, zoneLabel, type Booted } from './helpers.ts';
@@ -783,4 +784,44 @@ test('a failed pause on the machine shows as running with why; a job silent in "
   );
   assert.equal(store.getMachineJob(c.id)!.state, 'starting', 'the next job starts');
   store.db.close();
+});
+
+// Build 7 M6 (Josh, 2026-11-25, "Its size to be free"): a GPU job waits while the machine's turns hold its threads.
+test('a GPU job with its go waits for its size on a busy machine, starts as turns end, and frees it when it ends', () => {
+  const dir = join(root, 'balance');
+  mkdirSync(dir);
+  const store = new Store(join(dir, 'coordinator.db'));
+  try {
+    const owner = store.createUser({ name: 'Owner', login: 'owner' });
+    const who = { uid: owner.id, name: 'Owner', admin: false };
+    const p = store.createProject('B', null, owner.id);
+    const t = store.createTicket({ project_id: p.id, title: 'a minion', permission_mode: 'default', created_by: 'owner' });
+    const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
+    store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
+    let running = 4;
+    const freed: number[][] = [];
+    const none = { workers: null, runners: null, turnThreads: null, ciThreads: null };
+    // 12 threads: four turns of 3 fill it; the GPU job's 4 are free once two end.
+    const b = new MachineBalancer({ machines: () => [id0], input: () => ({ threads: 12, caps: none, ship: false, ciWaiting: 0, running }), changed: (ids) => void freed.push(ids), now: () => Date.now() });
+    const jobs = new MachineJobs({ store, send: () => true, online: () => true, broadcast() {}, postCard: () => null, settleCard() {}, wake() {}, note() {}, resultsDir: (j) => join(dir, 'jobs', String(j.id)), room: (m, job) => b.ask(m, job), freed: (m, keep) => b.release(m, 'gpu:', keep) });
+    const m = () => store.getMachine(id0)!;
+    const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: true, max_limit_s: 3600 };
+    const j = jobs.queue({ machine: m(), projectId: p.id, ticketId: t.id, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'now', reason: 'now' });
+    assert.equal(jobs.decide(j.id, 'now', who).state, 'queued', 'four turns hold the threads');
+    assert.equal(b.plan(id0)!.workers, 2, 'no new turn while it waits: its 4 threads kept');
+    running = 2;
+    jobs.pump(id0);
+    assert.equal(store.getMachineJob(j.id)!.state, 'starting');
+    jobs.report(m(), { id: j.id, state: 'running', run_s: 1 });
+    assert.deepEqual(
+      b.heavyAt(id0).map((h) => [h.key, h.running]),
+      [[`gpu:${j.id}`, true]],
+    );
+    jobs.report(m(), { id: j.id, state: 'done', run_s: 2 });
+    jobs.pump(id0);
+    assert.deepEqual(b.heavyAt(id0), [], 'its size is free again');
+    assert.deepEqual(freed.at(-1), [id0]);
+  } finally {
+    store.db.close();
+  }
 });

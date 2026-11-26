@@ -127,7 +127,7 @@ export function machinesPage(main = {}) {
       ),
     ),
     // Connect a computer (Build 7 M2) is the way in; Add by name stays for a shared machine and the GPU jobs distro's line.
-    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add.toggle, h('button', { type: 'button', class: 'machine-connect-toggle', onclick: () => connectComputer() }, 'Connect a computer')),
+    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'machine-connect-toggle', onclick: () => connectComputer() }, 'Connect a computer'), add.toggle),
     add.form,
     h('div', { id: 'machine-connect' }),
     h('div', { id: 'machine-setup' }),

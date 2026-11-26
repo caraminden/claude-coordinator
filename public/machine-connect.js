@@ -96,7 +96,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
       h(
         'div',
         { class: 'machine-setup machine-connect', role: 'region', 'aria-label': machine ? `Update ${machine.name}` : 'Connect a computer' },
-        h('div', { class: 'row' }, h('strong', {}, machine ? `Update ${machine.name}` : 'Connect a computer'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: done ? 'small' : 'secondary small', onclick: () => close() }, done ? 'Done' : 'Close')),
+        h('div', { class: 'row' }, h('strong', {}, machine ? `Update ${machine.name}` : 'Connect a computer'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'secondary small', onclick: () => close() }, done ? 'Done' : 'Close')),
         done ? connected() : steps(way, command),
       ),
     );
@@ -125,18 +125,21 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
         ),
       ),
     ),
+    machine ? h('p', { class: 'small' }, `This replaces the agent on ${machine.name}: it keeps its name and what it lends.`) : '',
     h('p', { class: 'small' }, way.where),
-    command ? markdownElement(`\`\`\`${way.tag}\n${command}\n\`\`\``) : h('pre', { class: 'muted' }, st.state === 'failed' ? `Couldn't make a code: ${st.failed}` : 'Making a code…'),
+    command ? markdownElement(`\`\`\`${way.tag}\n${command}\n\`\`\``) : h('pre', { class: 'muted' }, st.state === 'failed' ? 'No code yet.' : 'Making a code…'),
     way.note ? h('p', { class: 'small muted' }, way.note) : '',
-    h('p', { class: 'small', role: 'status' }, ...status()),
+    status(),
   ];
+  // Where the code stands, as a toned notice (Citadel's look: a status is never a bare grey sentence).
   const status = () => {
     const again = (label) => h('button', { type: 'button', class: 'secondary small', onclick: make }, label);
-    if (st.state === 'failed') return [again('Try again')];
-    if (st.state === 'making') return [''];
-    if (st.state === 'expired') return ['This code ran out before a computer used it. ', again('New code')];
-    if (st.state === 'joined') return [`It took the code${st.got ? ` as ${st.got.name}` : ''}: waiting for its agent to connect…`];
-    return [`Waiting for the computer. The code works once, until ${when(st.join.expires_at)}; it installs the agent as a service of your own and needs no admin.`];
+    const notice = (tone, ...kids) => h('div', { class: 'cui-notice machine-connect-status', 'data-tone': tone, role: 'status' }, ...kids);
+    if (st.state === 'failed') return notice('danger', h('span', {}, `Couldn't make a code: ${st.failed} `), again('Try again'));
+    if (st.state === 'making') return '';
+    if (st.state === 'expired') return notice('warn', h('span', {}, 'This code ran out before a computer used it. '), again('New code'));
+    if (st.state === 'joined') return notice('info', h('strong', {}, `It took the code${st.got ? ` as ${st.got.name}` : ''}`), ': waiting for its agent to connect…');
+    return [notice('info', h('strong', {}, 'Waiting for the computer…')), h('p', { class: 'small muted' }, `The code works once, until ${when(st.join.expires_at)}. It installs the agent as a service of your own and needs no admin.`)];
   };
   const connected = () => {
     const m = st.got;

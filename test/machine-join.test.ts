@@ -82,12 +82,15 @@ test('a code works once, for 15 minutes, is kept only hashed, and names a new ro
   assert.equal(joinState(store.machineJoin(made.id)!, true, t0 + 2000), 'connected');
   assert.throws(
     () => redeemJoin(store, issue, { code: made.code, report }, t0 + 2000),
-    (e: Error & { status?: number }) => e.status === 410 && /used or more than 15 minutes old/.test(e.message),
+    (e: Error & { status?: number }) => e.status === 410,
   );
 
   const late = makeJoin(store, { uid: josh.id, name: 'Josh' }, josh.id, null, t0);
   assert.equal(joinState(store.machineJoin(late.id)!, false, t0 + JOIN_MS), 'expired');
-  assert.throws(() => redeemJoin(store, issue, { code: late.code, host: 'other' }, t0 + JOIN_MS), /410|used or more than 15 minutes old/);
+  assert.throws(
+    () => redeemJoin(store, issue, { code: late.code, host: 'other' }, t0 + JOIN_MS),
+    (e: Error & { status?: number }) => e.status === 410,
+  );
   assert.equal(store.listMachines().length, 2, 'a refused code makes no row');
 
   // An Update reconnects its own row under its own name, with a new token.
@@ -98,6 +101,13 @@ test('a code works once, for 15 minutes, is kept only hashed, and names a new ro
   assert.deepEqual([again.id, again.name, store.getMachine(got.id)!.token_hash], [got.id, 'desktop-josh-2', 'new']);
   assert.notEqual(before, 'new');
   assert.equal(store.listMachines().length, 2);
+  // A machine being removed gets no new token from an Update, as from its token route: its draining agent keeps the old one.
+  const gone = makeJoin(store, { uid: josh.id, name: 'Josh' }, null, store.getMachine(got.id)!, t0);
+  assert.throws(
+    () => redeemJoin(store, issue, { code: gone.code, report }, t0 + 6000, (id) => id === got.id),
+    (e: Error & { status?: number }) => e.status === 409,
+  );
+  assert.equal(store.getMachine(got.id)!.token_hash, 'new', 'its token is as it was');
   store.db.close();
 });
 

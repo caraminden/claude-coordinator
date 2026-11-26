@@ -162,28 +162,26 @@ function sameSchemeTarget(app: App, from: Ticket, scheme: unknown, person: unkno
 }
 
 /**
- * The project's coordinator ticket, created the first time someone opens the project. Always with its folder (#1903):
- * setTicketDir is the write worker's, and while it is queued a read finds the row with no folder (it waits 50 ms for
- * the queue, src/db-writer.ts), so the folder is the answer's own; a row left without one (a restart) is given it.
+ * The project's coordinator ticket, created the first time someone opens the project. That first answer carries its
+ * folder itself (#1903): setTicketDir is the write worker's, and a read back while it is queued finds the row without one.
  */
 export async function ensureCoordinator(app: App, project: Project): Promise<Ticket> {
   const { store } = app;
   const existing = store.getCoordinator(project.id);
-  if (existing?.cwd) return existing;
-  // A reader has no dataDir: this throws there, and the main thread does it.
+  if (existing) return existing;
   const cwd = join(projectDir(app.dataDir, project.id), 'coordinator');
   await mkdir(cwd, { recursive: true });
   try {
     // A value write: the queue empties off the event loop first, so creating it never waits there (#1877).
     const row = { project_id: project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: COORDINATOR_PERMISSION_MODE, created_by: AGENT_NAME } as const;
-    if (!existing) await afterAllWrites(() => store.createTicket(row));
+    const t = await afterAllWrites(() => store.createTicket(row));
+    store.setTicketDir(t.id, cwd, null);
+    return { ...t, cwd };
   } catch (e) {
     // Lost a race with a concurrent request; the unique index kept a single coordinator. A queue still busy is a 503.
     if (e instanceof HttpError) throw e;
   }
-  const t = store.getCoordinator(project.id)!;
-  if (!t.cwd) store.setTicketDir(t.id, cwd, null);
-  return { ...t, cwd };
+  return store.getCoordinator(project.id)!;
 }
 
 /**

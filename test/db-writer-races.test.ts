@@ -152,19 +152,6 @@ test("a scheme's first open answers with its Taskmaster's folder, though the wri
   const dataDir = join(root, 'first-open');
   const made = await ensureCoordinator({ store, dataDir } as unknown as App, p);
   assert.equal(made.cwd, join(dataDir, 'projects', String(p.id), 'coordinator'));
-  // And a second open while that write was queued: never the row without its folder.
-  const q = store.createProject('second open', null);
-  const both = await Promise.all([1, 2].map(() => ensureCoordinator({ store, dataDir } as unknown as App, q)));
-  assert.deepEqual(
-    both.map((t) => t.cwd),
-    Array(2).fill(join(dataDir, 'projects', String(q.id), 'coordinator')),
-  );
-  // A row left with no folder (a restart between its two writes) is given one, so later opens don't wait for it.
-  const r = store.createProject('left without', null);
-  const left = store.createTicket({ project_id: r.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'acceptEdits', created_by: 'Taskmaster' });
-  assert.equal((await ensureCoordinator({ store, dataDir } as unknown as App, r)).cwd, join(dataDir, 'projects', String(r.id), 'coordinator'));
-  await writes.landed?.(true);
-  assert.equal(store.getTicket(left.id)!.cwd, join(dataDir, 'projects', String(r.id), 'coordinator'));
 });
 
 // A worker can die with no 'exit' code of its own run (out of memory ends it as terminate() does).

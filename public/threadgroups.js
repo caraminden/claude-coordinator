@@ -32,22 +32,31 @@ const wakesItself = (t) => !!t.wakes_on;
 
 /**
  * Each open cabal's minions leave their sections for its card (#2092): the Overseer, its board's members and, with a
- * build, every minion of that build. A Deploying one stays in Deploying. A cabal whose Overseer isn't open has no card.
+ * build, every other minion of that build. A Deploying one stays in Deploying. A cabal whose Overseer isn't open has no
+ * card, nor has one with nothing in `open` (a filter's leavings).
  * @param {Row[]} open
  * @param {CabalCard[]} cabals
+ * @param {Row[]} [every] unfiltered: where an Overseer the filter hides is still open
  */
-export function cabalSplit(open, cabals) {
-  const live = cabals.filter((c) => open.some((t) => t.id === c.lead && t.status !== 'closed'));
-  const taken = new Set();
+export function cabalSplit(open, cabals, every = open) {
+  const live = cabals.filter((c) => every.some((t) => t.id === c.lead && t.status !== 'closed'));
+  const here = open.filter((t) => t.status !== 'closed');
+  /** @type {Map<number, CabalCard>} */
+  const owner = new Map();
+  /** @param {(c: CabalCard, t: Row) => boolean} holds */
+  const claim = (holds) => {
+    for (const c of live) for (const t of here) if (!owner.has(t.id) && holds(c, t)) owner.set(t.id, c);
+  };
+  // Overseers first, then each board's members, then what is left of a build: a goal cabal keeps its member of a carded build.
+  claim((c, t) => t.id === c.lead);
+  claim((c, t) => c.members.some((m) => m.id === t.id) && !live.some((o) => o.lead === t.id));
+  claim((c, t) => c.build != null && t.build === c.build && !live.some((o) => o.lead === t.id));
   const cards = live.map((cabal) => {
-    const ids = new Set([cabal.lead, ...cabal.members.map((m) => m.id)]);
-    // Another cabal's Overseer keeps to its own card.
-    const mine = open.filter((t) => t.status !== 'closed' && !taken.has(t.id) && (ids.has(t.id) || (cabal.build != null && t.build === cabal.build && !live.some((o) => o.lead === t.id))));
-    for (const t of mine) taken.add(t.id);
+    const mine = here.filter((t) => owner.get(t.id) === cabal);
     return { cabal, mine, rows: mine.filter((t) => !isDeploying(t)) };
   });
   const listed = new Set(cards.flatMap((c) => c.rows.map((t) => t.id)));
-  return { cards, rest: open.filter((t) => !listed.has(t.id)) };
+  return { cards: cards.filter((c) => c.mine.length), rest: open.filter((t) => !listed.has(t.id)) };
 }
 
 /**
@@ -55,13 +64,14 @@ export function cabalSplit(open, cabals) {
  * @param {string[]} types
  * @param {string[]} [groups]
  * @param {(t: Row) => number | undefined} [deployOrder]
+ * @param {number[]} [carded] builds shown as a cabal's card, not listed here
  * @returns {{ key: string, build?: number, current?: boolean, group?: string, type?: string, rows: Row[] }[]}
  *
  * [{ key, build?, current?, type?, group?, rows }] for open threads, empty sections left out. `types` are
  * the type values in list order (an unknown or missing type counts as "other"); `groups` the scheme's
  * promoted "key: value"s. `deployOrder` is releases.js's releaseOrder.
  */
-export function threadSections(all, types, groups = [], deployOrder = () => undefined) {
+export function threadSections(all, types, groups = [], deployOrder = () => undefined, carded = []) {
   /** @param {Row} t */ const buildOf = (t) => t.build ?? 0;
   // Deploying reads in the Releases page's order (Cara, 2026-11-18: "Inside of that deploying group, lets order by deploy order"):
   // `deployOrder(t)` is its place there; rows it doesn't list go after, in the list's own order (the sort is stable).
@@ -70,8 +80,10 @@ export function threadSections(all, types, groups = [], deployOrder = () => unde
   const parkedInBuild = all.filter((t) => isParked(t) && buildOf(t));
   const open = all.filter((t) => !isParked(t) && !isDeploying(t));
   const builds = [...new Set([...open, ...parkedInBuild].map(buildOf).filter(Boolean))].sort((a, b) => a - b);
+  // A lower build on a cabal's card is still the current one: none listed here takes its place.
+  const top = builds.length && !carded.some((c) => c < builds[0]) ? 1 : 0;
   // Parked rows follow the active ones in their build.
-  /** @param {number} build @param {number} i */ const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0, rows: [...open, ...parkedInBuild].filter((t) => buildOf(t) === build) });
+  /** @param {number} build @param {number} i */ const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i < top, rows: [...open, ...parkedInBuild].filter((t) => buildOf(t) === build) });
   /** @param {Row} t @param {string} group */ const has = (t, group) => {
     const i = group.indexOf(':');
     return [t.properties?.[group.slice(0, i).trim()]]
@@ -84,7 +96,9 @@ export function threadSections(all, types, groups = [], deployOrder = () => unde
   const promoted = groups.map((group, i) => ({ key: `group-${i}`, group, rows: loose.filter((t) => promotedTo.get(t) === group) }));
   /** @param {Row} t */ const typeOf = (t) => (types.includes(String(t.properties?.type)) ? t.properties.type : 'other');
   const kinds = types.map((type) => ({ key: type, type, rows: loose.filter((t) => !promotedTo.get(t) && typeOf(t) === type) }));
-  return [{ key: 'deploying', rows: deploying }, ...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)), { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }].filter((s) => s.rows.length);
+  return [{ key: 'deploying', rows: deploying }, ...builds.slice(0, top).map(buildSection), ...promoted, ...kinds, ...builds.slice(top).map((b, i) => buildSection(b, i + top)), { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }].filter(
+    (s) => s.rows.length,
+  );
 }
 
 /**

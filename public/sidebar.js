@@ -264,10 +264,10 @@ export function renderSidebar() {
     );
   const open = tickets.filter((t) => t.status !== 'closed' || t.release);
   const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
-  // A cabal is one card holding its minions (#2092). A filter that leaves none of them hides it.
-  const { cards, rest } = cabalSplit(open, openView().cabals ?? []);
-  const shownCards = cards.filter((c) => !picks.size || c.mine.length);
-  const grouped = threadSections(rest, Object.keys(TYPES), listGroupsOf(openView().project), releaseOrder());
+  // A cabal is one card holding its minions (#2092).
+  const { cards, rest } = cabalSplit(open, openView().cabals ?? [], all);
+  const carded = cards.flatMap((c) => c.cabal.build ?? []);
+  const grouped = threadSections(rest, Object.keys(TYPES), listGroupsOf(openView().project), releaseOrder(), carded);
   const sections = grouped.map((s) =>
     h(
       'section',
@@ -277,7 +277,7 @@ export function renderSidebar() {
     ),
   );
   // The cabals sit where the current build does: under Deploying, over everything else.
-  if (shownCards.length) sections.splice(grouped[0]?.key === 'deploying' ? 1 : 0, 0, cabalSection(shownCards));
+  if (cards.length) sections.splice(grouped[0]?.key === 'deploying' ? 1 : 0, 0, cabalSection(cards));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
   const pinned = /** @type {Row[]} */ ((openView().pins ?? []).map((id) => byId.get(id)).filter(Boolean));

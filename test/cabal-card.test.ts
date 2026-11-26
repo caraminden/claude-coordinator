@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cabalSplit } from '../public/threadgroups.js';
+import { cabalSplit, threadSections } from '../public/threadgroups.js';
 import { CabalCards, cabalCards, nextUp } from '../src/cabal-cards.ts';
 import { Store } from '../src/db.ts';
 
@@ -80,4 +80,38 @@ test("a cabal's minions leave their sections for its card; Deploying ones don't,
   );
   const none = cabalSplit(open.slice(1) as never, [cabal] as never);
   assert.deepEqual([none.cards.length, none.rest.length], [0, 4]);
+});
+
+test('a card never moves the next build up, keeps its goal members, and stays when a filter hides its Overseer', () => {
+  const row = (id: number, build: number | null = null) => ({ id, build, status: 'idle', title: `t${id}` });
+  const all = [row(1, 7), row(2, 7), row(3, 8), row(4)];
+  const cabal = (lead: number, build: number | null, members: number[]) => ({ lead, build, members: members.map((id) => ({ id })) });
+  const sevens = cabal(1, 7, []);
+  const goal = cabal(4, null, [2]);
+  const { cards, rest } = cabalSplit(all as never, [sevens, goal] as never);
+  assert.deepEqual(
+    cards.map((c) => c.rows.map((t) => t.id)),
+    [[1], [2, 4]],
+  );
+  const sections = threadSections(rest, ['other'], [], () => undefined, [7]);
+  assert.deepEqual(
+    sections.map((s) => [s.key, s.current]),
+    [['build-8', false]],
+  );
+  // With no card, build 7 is the current build as ever.
+  assert.deepEqual(
+    threadSections(all as never, ['other'])
+      .filter((s) => s.build)
+      .map((s) => [s.key, s.current]),
+    [
+      ['build-7', true],
+      ['build-8', false],
+    ],
+  );
+  const filtered = cabalSplit([all[1]] as never, [sevens] as never, all as never);
+  assert.deepEqual(
+    filtered.cards.map((c) => c.rows.map((t) => t.id)),
+    [[2]],
+  );
+  assert.equal(cabalSplit([all[2]] as never, [sevens] as never, all as never).cards.length, 0);
 });

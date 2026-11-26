@@ -130,8 +130,11 @@ export function overShipLimits(sizes: Record<string, { bytes: number; long: numb
   return bad;
 }
 
+// A copy of this file run in a scratch repo with no ship script (land.test's size refusal) has nothing to measure.
+const shipHere = existsSync(join(root, 'tools/land.sh'));
+
 test('the ship script and its parts are within their byte limits, in total, and in lines past 160 characters', () => {
-  assert.deepEqual(overShipLimits(shipSizes()), [], 'move code into a part, or cut it; raising a limit needs the decision quoted beside it');
+  if (shipHere) assert.deepEqual(overShipLimits(shipSizes()), [], 'move code into a part, or cut it; raising a limit needs the decision quoted beside it');
 });
 
 test('the ship limits fail a file, a new part, the total and long lines past their limits, and pass at them', () => {
@@ -144,7 +147,7 @@ test('the ship limits fail a file, a new part, the total and long lines past the
 });
 
 test('the ship script and every part parse as bash', () => {
-  for (const f of landFiles()) {
+  for (const f of shipHere ? landFiles() : []) {
     const r = spawnSync('bash', ['-n', join(root, 'tools', f)], { encoding: 'utf8' });
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
   }

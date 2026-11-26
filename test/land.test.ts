@@ -1809,7 +1809,7 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
 test('a branch over the file size limit is refused by the smoke check, before the line (#1983)', () => {
   const r = setup();
   const size = `test/${'size-budget'}.test.ts`; // built, not quoted: test/pipeline-files.test.ts reads quoted test names
-  for (const f of ['tools/citadel-test', 'tools/citadel-test-reporter.ts', 'tools/citadel-node', 'tools/citadel-node.cjs', 'tools/mem-room', 'test/leak-guard.ts', 'test/leak-file.ts', 'package.json', size]) cpSync(join(repo, f), join(r.source, f));
+  for (const f of ['tools/citadel-test', 'tools/citadel-test-reporter.ts', 'tools/citadel-node', 'tools/citadel-node.cjs', 'tools/mem-room', 'test/leak-guard.ts', 'test/leak-file.ts', 'test/land-files.ts', 'package.json', size]) cpSync(join(repo, f), join(r.source, f));
   const real = readFileSync(join(repo, size), 'utf8');
   const bare = real.replace(/(export const ALLOWED[^\n]* = \{)\n[^]*?\n\};/, '$1};');
   assert.notEqual(bare, real);

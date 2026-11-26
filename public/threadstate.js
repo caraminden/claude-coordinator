@@ -351,7 +351,7 @@ export function progressWhy(p, stage, now = Date.now()) {
 }
 
 /** A track with one piece, not started: the bar's line while a working minion has no plan yet (#696). */
-/** @type {[null, string][]} */
+/** @type {import('./types/chat.js').TrackStep[]} */
 export const EMPTY_TRACK = [[null, 'p']];
 
 /**
@@ -360,7 +360,7 @@ export const EMPTY_TRACK = [[null, 'p']];
  * an approval, ready, try it), blocked, parked or at the usage limit has none; the card badge flags a card (Cara,
  * 2026-11-11: "if a minion is asking a question it shouldnt have a progress bar right?"). `st` is its rowState.
  * @param {Row} t @param {RowState} st
- * @returns {{ track: [number | null, string][] | null, wait?: Wait, done?: number, total?: number, since?: number, usual?: number } | null}
+ * @returns {{ track: import('./types/chat.js').TrackStep[] | null, wait?: Wait, done?: number, total?: number, since?: number, usual?: number } | null}
  */
 export function rowBar(t, st) {
   if (st.rank === 0 || t.status === 'closed') return null;

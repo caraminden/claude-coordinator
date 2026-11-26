@@ -1094,8 +1094,8 @@ export class Runner {
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
-      // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
-      step_track: total ? planTrack(p!) : null,
+      // The plan's segmented track for the list row (#630): each step's guess and state, and each underway step's own clock (#2156).
+      step_track: total ? planTrack(p!, { running: ticket.status === 'running', ratio }) : null,
       closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turnStartedAt(ticket.id),

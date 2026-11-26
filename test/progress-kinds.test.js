@@ -84,6 +84,57 @@ test('with several steps underway, the track leads with the one the readout name
   ]);
 });
 
+test('each step underway says its own clock, scaled; one with no guess says none (#2156)', () => {
+  const c = chat(
+    [
+      ['a', 'A', 10],
+      ['b', 'B', 4],
+      ['c', 'C'],
+      ['d', 'D', 5],
+    ],
+    { kinds: false },
+  );
+  c.plan([{ n: 1, status: 'doing' }]);
+  c.at(2);
+  c.plan([
+    { n: 2, status: 'doing' },
+    { n: 3, status: 'doing' },
+  ]);
+  c.at(3);
+  const track = planTrack(c.p, { running: true, now: c.now(), ratio: 0.5 });
+  assert.deepEqual(
+    track.filter(([, st]) => st === 'i'),
+    [
+      [null, 'i'],
+      [10, 'i', T0, 300],
+      [4, 'i', T0 + 2 * 60_000, 120],
+    ],
+  );
+  assert.deepEqual(
+    planTrack(c.p).filter(([, st]) => st === 'i'),
+    [
+      [null, 'i'],
+      [10, 'i'],
+      [4, 'i'],
+    ],
+    'no turn running: no clocks',
+  );
+});
+
+test('steps sharing a stage share its clock, their guesses summed (#2156)', () => {
+  const c = chat([
+    ['build', 'Parser', 10],
+    ['build', 'Page', 20],
+    ['ship', 'Ship', 5],
+  ]);
+  c.edit();
+  const track = planTrack(c.p, { running: true, now: c.now() });
+  assert.deepEqual(track.slice(0, 2), [
+    [10, 'i', T0, 1800],
+    [20, 'i', T0, 1800],
+  ]);
+});
+
 test('steps of one kind show as one shared stage, its guesses summed and its time split by them', () => {
   const c = chat([
     ['read', 'Read'],

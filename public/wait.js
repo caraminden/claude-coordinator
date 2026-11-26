@@ -84,7 +84,7 @@ export function segSizes(sizes) {
  * ({ size, state: 'done' | 'now' | 'held' | '', clock, waits, name, title }), as wide as its usual time: one with none known
  * takes the others' average, and none goes under 8% of the whole, so a 1-second rebase still shows. Done pieces are
  * full; the one underway fills by its `clock` (a waitBar: elapsed over usual, or a count) up to `cap`, going amber past
- * LATE, or shows a sliver when nothing is known; hatched, never filled, while it `waits`. `labels` names them under.
+ * LATE, or shows a sliver when nothing is known (several can be underway at once, #2156); hatched, never filled, while it `waits`. `labels` names them under.
  * @param {Seg[]} segs @param {{ cls?: string, cap?: number, labels?: boolean, label?: string }} [opts]
  */
 export function segTrack(segs, { cls = '', cap = 90, labels = false, label = '' } = {}) {
@@ -109,10 +109,10 @@ export const waitShows = (w) => !!w && !!(w.total || w.usual || TRACK.some(([key
 /**
  * The one progress track for the chat readout and the list row (#630; Cara, on her bar during a land: "the progress
  * bars for 630 on the list and chat are out of sync, arent showing the stages"). A plan with a step underway draws
- * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'h' held | 'p' not started]), only the first step
- * underway drawn as under way (any other draws as not started, #2156), filling
- * by the `wait` when there is one (hatched while it waits in a line or queue), else against `since`/`usual`, its
- * scaled guess. A step built and now being tested ('h', #1923) is full, in the running colour. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
+ * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'h' held | 'p' not started, then an 'i' step's
+ * own clock: progress.js planTrack]), every step underway drawn the same way, filling by its own clock (#2156). The
+ * first one is also the `wait`'s when there is one (hatched while it waits in a line or queue), and takes `since`/`usual`
+ * when its entry says no clock. A step built and now being tested ('h', #1923) is full, in the running colour. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
  * @param {Parameters<typeof progressPieces>[0]} src @param {string} [cls]
  */
 export function progressTrack(src, cls = '') {
@@ -121,18 +121,26 @@ export function progressTrack(src, cls = '') {
 }
 
 /** What progressTrack draws: { segs, label } for a segmented track, { bar } for a wait's own bar, or null. */
-/** @param {{ track: [number | null, string][] | null | undefined, since?: number, usual?: number | null, wait?: Wait | null }} src @returns {{ segs: Seg[], label: string, bar?: undefined } | { bar: WaitLike, segs?: undefined, label?: undefined } | null} */
+/** @param {{ track: import('./types/chat.js').TrackStep[] | null | undefined, since?: number, usual?: number | null, wait?: Wait | null }} src @returns {{ segs: Seg[], label: string, bar?: undefined } | { bar: WaitLike, segs?: undefined, label?: undefined } | null} */
 export function progressPieces({ track, since, usual, wait }) {
   const w = waitShows(wait) ? wait : null;
   const wClock = w && (w.total || w.usual) ? w : null;
   /** @param {string} state @param {number | null} size @param {WaitLike | null} [clock] @returns {Seg} */
   const piece = (state, size, clock = null) => ({ size, state, clock, waits: state === 'now' && !!w && waitFam(w) === 'wait' });
   if (track?.length && (track.some(([, st]) => st === 'i') || !w)) {
-    // The first step underway owns the clock and the wait (planTrack puts the one the readout names first): only it draws
-    // as under way, filling by the clock or hatching. Any other step underway draws as not started, so one row never
-    // looks like several steps are moving at once (#2156).
+    // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (planTrack puts the one
+    // the readout names first): only it fills by the wait or hatches. Every other fills by its own clock (#2156).
     const owner = track.findIndex(([, st]) => st === 'i');
-    return { segs: track.map(([g, st], i) => (i === owner ? piece('now', g, wClock ?? (usual ? { since: /** @type {number} */ (since), usual } : null)) : piece(st === 'c' ? 'done' : st === 'h' ? 'held' : '', g))), label: '' };
+    return {
+      segs: track.map(([g, st, from, secs, worked], i) => {
+        if (st !== 'i') return piece(st === 'c' ? 'done' : st === 'h' ? 'held' : '', g);
+        // Counting time moves on the ticker; time standing still is a fixed share, kept under the cap.
+        const own = !secs ? null : from != null ? { since: from, usual: secs } : worked ? { total: secs * 1000, done: Math.min(worked, secs * 900) } : null;
+        if (i !== owner) return { ...piece('now', g, own), waits: false };
+        return piece('now', g, wClock ?? own ?? (usual ? { since: /** @type {number} */ (since), usual } : null));
+      }),
+      label: '',
+    };
   }
   if (!w) return null;
   const { at } = stageOf(w);

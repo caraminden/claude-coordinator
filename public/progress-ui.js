@@ -287,7 +287,7 @@ export function renderProgress() {
   // empty track shows the line before the plan exists (#696).
   // The plan as a track of its steps (#630), the one underway filling against its guess or by the wait; with no step
   // underway, a landing's stages or the wait's bar; after the turn, a wait drops the plan (as the list row's rowBar does).
-  const meter = progressTrack({ track: total && (running || !w) ? planTrack(p) : running && !w ? EMPTY_TRACK : null, since: est?.since, usual: est?.usual, wait: w || null }, 'big') || h('progress', { class: 'meter blank', max: 1, value: 0 });
+  const meter = progressTrack({ track: total && (running || !w) ? planTrack(p, { running: live, ratio: view.ticket.step_ratio }) : running && !w ? EMPTY_TRACK : null, since: est?.since, usual: est?.usual, wait: w || null }, 'big') || h('progress', { class: 'meter blank', max: 1, value: 0 });
   // Which time is which (#630, Cara's pick "1"): the step's against its guess under the bar's left, the whole plan's at its end.
   const stepClock = est && waitClock({ since: est.since, usual: est.usual }, `wait-time${waitLate(est) ? ' late' : ''}`);
   const caption = est

@@ -46,9 +46,9 @@ syncBuiltinESMExports();
 const cache = join(homedir(), '.cache', 'ms-playwright');
 const hasChromium = existsSync(cache) && readdirSync(cache).some((d) => /^chromium_headless_shell-\d+$/.test(d));
 
-// On a busy box the server answers a page read its readers are slow on with a 503 to ask again (#2003): the page, the
-// file viewer's details and the turn poll ask again, as the app does. Here the first ask of each read gets that 503.
-test("a server whose readers ask for a retry passes, the page's, the file details' and the turn poll's", { skip: !hasChromium && 'no headless Chromium (the boot check needs one)', timeout: 200_000 }, async () => {
+// On a busy box the server answers a page read its readers are slow on with a 503 to ask again (#2003): the page and the
+// turn poll ask again, as the app does. Here the first ask of each read gets that 503.
+test("a server whose readers ask for a retry passes, the page's and the turn poll's", { skip: !hasChromium && 'no headless Chromium (the boot check needs one)', timeout: 200_000 }, async () => {
   const dir = join(root, 'retry');
   const checkout = join(dir, 'checkout');
   for (const part of ['server.ts', 'package.json', 'src', 'public', 'kit', 'tools']) cpSync(join(repo, part), join(checkout, part), { recursive: true });

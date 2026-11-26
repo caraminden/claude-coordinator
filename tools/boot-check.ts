@@ -201,7 +201,7 @@ try {
   begin('render in Chromium');
   await pageCheck(`${base}/`, cookie);
   // A GET the server may answer with a retryable 503 while its readers are slow on a busy box (#2003): asked again, as the page does.
-  const get = async (path: string, limit = stepLimit()) => {
+  const get = async (path: string, limit: ReturnType<typeof stepLimit>) => {
     for (;;) {
       const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
       if (r.status !== 503 || limit.over(20_000)) return r;
@@ -211,7 +211,7 @@ try {
   };
   begin("file viewer's details");
   for (const { what, path } of fileChecks) {
-    const r = await get(path);
+    const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
     const body = await r.text();
     const name = (() => {
       try {

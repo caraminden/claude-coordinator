@@ -87,6 +87,7 @@ export const JUDGES: Judge[] = [
           'MAIN_WAIT_MS',
           'MAIN_SETTLE_MS',
           'OTHERS_CAP_MS',
+          'OWN_CAP_MS',
           'SLOT_HOLD_MS',
           'SLOT_WAIT_MS',
           'REPORT_MS',

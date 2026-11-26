@@ -190,7 +190,6 @@ export function awayNote(a: AwayEnd): string {
 /** A resume owed for a turn that ended away: its chat line and its prompt. */
 export const awayResume = (a: AwayEnd | undefined, otherwise: { note: string; prompt: string }) => (a ? { note: `Carried on from ${a.name}'s last checkpoint`, prompt: awayPrompt(a) } : otherwise);
 
-/** A running turn's working line while its machine is away. */
 /** A running minion's "Machine away" status line, from the turn's folder: memory only, as Runner.view runs on every status change (test/off-thread-fs.test.ts). */
 export function awayLine(dir: string): string | null {
   const a = awayAt(dir);

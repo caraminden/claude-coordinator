@@ -48,15 +48,17 @@ export function moved(keys, from, to) {
 }
 
 /**
- * Let people drag `list`'s rows into a new order. items() lists the rows that can move, in order (anything else in
+ * Let people drag `list`'s rows into a new order. rowsNow() lists the rows that can move, in order (anything else in
  * the list, a heading or a collapsed Hidden section, stays put); carry(row) gives what moves with a row, like the
- * release lines under a scheme. onDrop(from, to) gets indexes into items(), only when the row changed place, and
+ * release lines under a scheme. onDrop(from, to) gets indexes into rowsNow(), only when the row changed place, and
  * must have redrawn the list in its new order by the time it returns (the keyboard's move refocuses the row there).
  * Once per list element: a redraw that keeps the element keeps it working.
  * @param {HTMLElement} list
- * @param {{ items: () => HTMLElement[], carry?: (row: HTMLElement) => HTMLElement[], onDrop: (from: number, to: number) => void }} options
+ * @param {{ items: () => Element[], carry?: (row: HTMLElement) => HTMLElement[], onDrop: (from: number, to: number) => void }} options
  */
 export function dragReorder(list, { items, carry = () => [], onDrop }) {
+  // The rows are HTML list rows; a caller's querySelectorAll types them only as Element.
+  const rowsNow = () => /** @type {HTMLElement[]} */ (items());
   if (list.hasAttribute('data-reorder')) return;
   list.setAttribute('data-reorder', '');
   addStyles();
@@ -102,7 +104,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
   };
 
   const begin = () => {
-    const rows = items();
+    const rows = rowsNow();
     const from = rows.indexOf(press.row);
     if (from < 0) return stop(); // redrawn under the finger
     press.dragging = true;
@@ -167,7 +169,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
 
   list.addEventListener('pointerdown', (e) => {
     if (press || e.button !== 0 || !e.isPrimary) return;
-    const row = items().find((r) => r.contains(/** @type {Node} */ (e.target)));
+    const row = rowsNow().find((r) => r.contains(/** @type {Node} */ (e.target)));
     if (!row || /** @type {Element} */ (e.target).closest('button, input, select, textarea')) return;
     press = /** @type {Press} */ ({ row, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', dragging: false }); // the rest is filled in as the drag begins
     // A finger or pen picks a row up by holding it; a mouse once it moves, so a slow click still opens it.
@@ -179,13 +181,13 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
   // A keyboard's way: Alt+Up or Alt+Down moves the focused row one place, and focus stays on it.
   list.addEventListener('keydown', (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || press) return;
-    const rows = items();
+    const rows = rowsNow();
     const from = rows.findIndex((r) => r.contains(document.activeElement));
     const to = from + (e.key === 'ArrowUp' ? -1 : 1);
     if (from < 0 || to < 0 || to >= rows.length) return;
     e.preventDefault();
     onDrop(from, to);
-    const row = items()[to];
+    const row = rowsNow()[to];
     /** @type {HTMLElement | null | undefined} */ (row?.matches('a, button, [tabindex]') ? row : row?.querySelector('a, button, [tabindex]'))?.focus();
   });
   // Once a row is up, the finger moves it: no scrolling, and no drawer swipe (drawers.js listens on document).
@@ -200,7 +202,7 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
   );
   // The phone's long-press menu, and the browser's own drag of a link or an image, would steal the press.
   list.addEventListener('contextmenu', (e) => press && e.preventDefault());
-  list.addEventListener('dragstart', (e) => items().some((r) => r.contains(/** @type {Node} */ (e.target))) && e.preventDefault());
+  list.addEventListener('dragstart', (e) => rowsNow().some((r) => r.contains(/** @type {Node} */ (e.target))) && e.preventDefault());
 }
 
 /** The click a drop ends in (the row is a link) doesn't open it. */

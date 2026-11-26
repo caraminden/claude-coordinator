@@ -419,9 +419,10 @@ export const noAutofill = (name, token = 'nope') => ({ autocomplete: token, name
 /**
  * A scheme's favicon (#222), only ever as an <img> (an SVG there can't run scripts); hidden when it has
  * none, so refreshSchemeCounts can swap it in once a merge brings one.
- * @param {Parameters<typeof iconSrc>[0] & { id: number }} p
+ * @param {(Parameters<typeof iconSrc>[0] & { id: number }) | null} scheme Never null at runtime: its callers check first (releases.js iconOf looks the scheme up twice, so tsc can't see it).
  */
-export function schemeIcon(p) {
+export function schemeIcon(scheme) {
+  const p = /** @type {Parameters<typeof iconSrc>[0] & { id: number }} */ (scheme);
   const src = iconSrc(p);
   const img = h('img', {
     class: 'scheme-icon',
@@ -556,10 +557,10 @@ const FULL = new Intl.DateTimeFormat('en-US', { ...PT, weekday: 'short', month: 
 /** @param {number} ms */
 export const pacificIso = (ms) => DAY.format(ms);
 /** `ms` as "Nov 16" (a "YYYY-MM-DD" string is read as noon UTC, so it keeps its own day). */
-/** @param {number | string} ms */
-export const pacificDate = (ms) => (typeof ms === 'string' ? new Date(`${ms}T12:00:00Z`) : new Date(ms)).toLocaleDateString('en-US', { ...PT, month: 'short', day: 'numeric' });
+/** @param {number | string | null} ms */
+export const pacificDate = (ms) => (typeof ms === 'string' ? new Date(`${ms}T12:00:00Z`) : new Date(/** @type {number} */ (ms))).toLocaleDateString('en-US', { ...PT, month: 'short', day: 'numeric' });
 /** `ms` as "Nov 16, 11:00 PM PST". */
-/** @param {number} ms */
+/** @param {number | string} ms */
 export const pacificStamp = (ms) => new Date(ms).toLocaleString('en-US', { ...PT, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 /** `ms` as "11:00 PM PST". */
 /** @param {number} ms */
@@ -630,8 +631,8 @@ export const fileExt = (path) => (baseName(path).includes('.') ? /** @type {stri
 /** A link target that is a path on disk, not a URL, a fragment or a mail address. */
 /** @param {string} href */
 export const isLocalPath = (href) => !/^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(href);
-/** @param {number | string} ticketId @param {string} path */
-export const fileUrl = (ticketId, path) => `api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
+/** @param {number | string | undefined} ticketId @param {string | undefined} path (String() writes undefined as encodeURIComponent always did) */
+export const fileUrl = (ticketId, path) => `api/tickets/${ticketId}/file?path=${encodeURIComponent(String(path))}`;
 /** @param {number | string} ticketId @param {string} path */
 export const fileHref = (ticketId, path) => `#/f/${ticketId}/${encodeURIComponent(path)}`;
 /** A file people attached to a message, by its name in the thread's uploads folder. */

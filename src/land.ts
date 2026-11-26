@@ -483,6 +483,11 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   return null;
 }
 
+/** classifyLandFailure's kind, or `cut-off` for a run that ended with no exit code, whatever it printed first (as the ship trail reads it, #2047). */
+export function refusalKind(output: string): string | null {
+  return output.trimEnd().endsWith(NO_CODE.trim()) ? 'cut-off' : (classifyLandFailure(output)?.kind ?? null);
+}
+
 /** land.sh's phase lines, newest first wins: the note a handed-off land shows in the minions list (#962). */
 const PHASES: [RegExp, string][] = [
   [/^(deploy: |land: (?!build\/)\S+ is now at )/, 'deploying'],
@@ -795,8 +800,8 @@ export class LandHandoffs {
       const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
       try {
-        // No exit code and no kind of red: stopped from outside or cut off by a restart (#2047).
-        await once('failed', () => this.d.failed?.(id, cls?.kind ?? (run.output.includes(NO_CODE) ? 'cut-off' : null)));
+        // Exit 75 is CI giving no verdict: no answer, whatever the output says (#2047).
+        await once('failed', () => this.d.failed?.(id, r.kind === 'no-ci' ? 'no-answer' : refusalKind(run.output)));
       } catch (err: any) {
         console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
       }

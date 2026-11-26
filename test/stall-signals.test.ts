@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { emptyState, failingTests, observe, shipFailed, StallWatch, stallKey, SUGGESTIONS_KEY, type StallState } from '../src/stall-signals.ts';
+import { NO_CODE } from '../src/land.ts';
 import { nextStep, TIERS } from '../public/model-table.js';
 import { editedFiles, testCommand } from '../src/stall-signals.ts';
 
@@ -134,19 +135,26 @@ test('two failed ships fire, naming their kinds', () => {
 });
 
 // #2047 (Josh, 2026-11-25): a refusal the minion couldn't help says nothing about its model.
-test("refusals that are not the model's fault never count: conflict, passed alone, boot-check copy, cut off", () => {
+test("refusals that are not the model's fault never count: conflict, passed alone, boot-check copy, cut off, CI", () => {
   const s = emptyState();
-  for (const kind of ['conflict', 'conflict', 'passed-alone', 'boot-copy', 'cut-off']) assert.deepEqual(shipFailed(s, kind), [], kind);
+  for (const kind of ['conflict', 'conflict', 'passed-alone', 'boot-copy', 'cut-off', 'ci', 'no-answer']) assert.deepEqual(shipFailed(s, kind), [], kind);
   assert.deepEqual(s.ships, []);
   assert.deepEqual(shipFailed(s, 'own-test'), []);
   assert.deepEqual(shipFailed(s, 'conflict'), [], 'one real failure and a conflict are not two');
   assert.match(shipFailed(s, 'own-test')[0].evidence[0], /kinds: own-test, own-test/);
 });
 
-test('a land.sh the minion runs itself that hits a merge conflict does not count either', () => {
+test('a count saved before these kinds stopped counting does not fire on one real failure', () => {
+  const s = { ...emptyState(), ships: ['conflict'] };
+  assert.deepEqual(shipFailed(s, 'own-test'), []);
+  assert.deepEqual(s.ships, ['own-test']);
+});
+
+test('a land.sh the minion runs itself that hits a merge conflict or is cut off does not count either', () => {
   const s = emptyState();
   const out = 'tools/land.sh exited 1 (read its output: main only moved if it says so).\nCONFLICT (content): Merge conflict in src/a.ts';
-  for (let i = 0; i < 2; i++) assert.deepEqual(feed(s, [run('tools/land.sh'), result(out, true)]), []);
+  const cut = `tools/land.sh exited 1 (read its output: main only moved if it says so).\n\n✖ test/a.test.ts › b${NO_CODE}`;
+  for (const o of [out, out, cut, cut]) assert.deepEqual(feed(s, [run('tools/land.sh'), result(o, true)]), []);
   assert.deepEqual(s.ships, []);
 });
 

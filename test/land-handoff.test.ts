@@ -1208,8 +1208,8 @@ test('a land that ended with no exit code is counted as cut off, so the stall si
   s.deps.failed = (_id, kind) => {
     failed.push(kind);
   };
-  // A quoted heredoc: NO_CODE's backticks must reach the log as they are.
-  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `cat <<'END'\nland: rebasing onto main${NO_CODE}\nEND\nexit 1\n`);
+  // A quoted heredoc: NO_CODE's backticks must reach the log as they are. A red printed before the cut still counts as cut off.
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `cat <<'END'\nland: smoke: ✖ test/a.test.ts › b${NO_CODE}\nEND\nexit 1\n`);
   assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
   await until('land.sh ends', () => s.landings.get(1)?.code !== null);
   await s.handoffs.poll();

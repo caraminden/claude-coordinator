@@ -6,6 +6,7 @@
 // events are new. Rules: the shared folder's specs/minion-time-log/minion-time-log.md ("Explain").
 import { setImmediate as yieldNow } from 'node:timers/promises';
 import type { EventRow } from './db-rows.ts';
+import { pacificClock } from './pacific.ts';
 import type { TimeLog, TimeRow } from './time-log.ts';
 
 /** A line of the reading: what happened, and the chat events it rests on. */
@@ -116,7 +117,6 @@ export function explainView(e: Explain, log: TimeLog, since: number | null, now 
 
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; content?: unknown; is_error?: boolean };
 const D = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)} s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)} min` : `${(ms / 3_600_000).toFixed(1)} h`);
-const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' });
 const one = (s: string, n: number) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 const resultText = (c: unknown): string => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (typeof x?.text === 'string' ? x.text : '')).join('\n') : '');
 const READS = new Set(['Read', 'Grep', 'Glob', 'LSP', 'ToolSearch', 'WebFetch', 'WebSearch', 'TaskOutput', 'Skill']);
@@ -259,7 +259,7 @@ export async function explainInput(title: string, log: TimeLog, events: EventRow
       return `[${k}] `;
     };
     const label = `P${partLabels.size + 1}`;
-    const span = `${clock(r.start!)} to ${r.end ? clock(r.end) : 'now'}`;
+    const span = `${pacificClock(r.start!)} to ${r.end ? pacificClock(r.end) : 'now'}`;
     const lens = [r.work >= 1000 && `working ${D(r.work)}`, r.wait >= 1000 && `waiting ${D(r.wait)}`, r.lost >= 1000 && `lost ${D(r.lost)}`].filter(Boolean).join(', ');
     const head =
       r.type === 'step'
@@ -273,7 +273,7 @@ export async function explainInput(title: string, log: TimeLog, events: EventRow
       if (last) out.push(`   ${lab(last.event)}the minion's last words before it: "${one(last.text, 260)}"`);
     }
     const entries = p.entries.length > PART_LINES ? [...p.entries.slice(0, 15), null, ...p.entries.slice(-(PART_LINES - 15))] : p.entries;
-    for (const e of entries) out.push(e ? `   ${lab(e.event)}${clock(e.at)} ${e.text}` : `   … ${p.entries.length - PART_LINES} more actions`);
+    for (const e of entries) out.push(e ? `   ${lab(e.event)}${pacificClock(e.at)} ${e.text}` : `   … ${p.entries.length - PART_LINES} more actions`);
     if (p.reads) out.push(`   (read or searched ${p.reads} times)`);
     if (p.edits.size) out.push(`   ${lab(p.edited)}(edited ${[...p.edits].slice(0, 8).join(', ')}${p.edits.size > 8 ? ` and ${p.edits.size - 8} more` : ''})`);
     if (p.errors) out.push(`   (${p.errors} other tool call(s) returned an error)`);

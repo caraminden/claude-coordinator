@@ -5,7 +5,7 @@
 import { parseSpend } from '../outside-spend.ts';
 import { RISKS, RISK_WORDS } from '../mcp-text.ts';
 import { createHash } from 'node:crypto';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
@@ -499,8 +499,12 @@ export const contraptionRoutes: Route[] = [
   fromContraption('GET', '/api/contraptions/media', async ({ res, app, url }, c) => json(res, 200, { files: await listMedia(mediaDir(app.dataDir, c.name, enabledPerson(app, c, url))) })),
   fromContraption(['GET', 'DELETE'], '/api/contraptions/media/*path', async ({ req, res, app, url, params }, c) => {
     const file = await mediaFile(mediaDir(app.dataDir, c.name, enabledPerson(app, c, url)), params.path);
-    if (req.method === 'GET') return send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MEDIA_TYPE[extname(file).toLowerCase()] ?? 'application/octet-stream', 'Cache-Control': 'no-store' }, await readFile(file));
-    await rm(file);
+    // Another request can delete it between the look and here: still "No such file", not a 500.
+    const gone = (e: NodeJS.ErrnoException) => {
+      throw e.code === 'ENOENT' ? new HttpError(404, 'No such file') : e;
+    };
+    if (req.method === 'GET') return send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MEDIA_TYPE[extname(file).toLowerCase()] ?? 'application/octet-stream', 'Cache-Control': 'no-store' }, await readFile(file).catch(gone));
+    await unlink(file).catch(gone);
     if (!file.endsWith('.json')) await rm(`${file}.json`, { force: true });
     return json(res, 200, { ok: true });
   }),

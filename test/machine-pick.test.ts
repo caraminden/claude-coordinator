@@ -113,3 +113,31 @@ test('two Windows machines: a minion sticks to one and moves when it goes away; 
   assert.match(refused.text, /No Windows machine lent to Other/);
   assert.ok(minion);
 });
+
+test('a GPU job with no machine named goes to a machine whose GPU jobs role is lent to the scheme; another scheme is refused', async () => {
+  const lent = await call('/api/projects', { name: 'Gpu' }, 'POST');
+  const other = await call('/api/projects', { name: 'NoGpu' }, 'POST');
+  const dir = join(root, 'gpu-a');
+  mkdirSync(join(dir, 'jobs'), { recursive: true });
+  writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ jobs: { dir: join(dir, 'jobs'), folders: {}, max_disk_gb: 10, gpu: true } }));
+  const { machine, token } = await call('/api/machines', { name: 'gpu-a' }, 'POST');
+  startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
+  await until('gpu-a online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'gpu-a' && m.online));
+  await call(`/api/machines/${machine.id}/roles`, { role: 'gpu', on: true, projects: [lent.id] }, 'PATCH');
+
+  const kind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], max_limit_h: 1 };
+  const queue = async (project: { id: number }) => {
+    const before = turns().length;
+    const t = await call(`/api/projects/${project.id}/tickets`, { message: 'a job' }, 'POST');
+    const { token } = (await until('a turn', () => turns().length > before && turns())).at(-1);
+    return fetch(`${srv.base}/api/tickets/${t.ticket?.id ?? t.id}/jobs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) });
+  };
+  const queued = await until('the agent reported its jobs block', async () => {
+    const r = await queue(lent);
+    return r.status === 201 ? r.json() : null;
+  });
+  assert.equal(queued.machine, 'gpu-a');
+  const refused = await queue(other);
+  assert.equal(refused.status, 404);
+  assert.match(await refused.text(), /No machine runs GPU jobs for NoGpu/);
+});

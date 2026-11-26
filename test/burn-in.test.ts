@@ -232,7 +232,7 @@ function inFile(body: string, env: Record<string, string>) {
   const peaks = existsSync(join(dir, 'peaks')) ? readFileSync(join(dir, 'peaks'), 'utf8').trim().split('\n').map(Number) : [];
   return { r, peak: Math.max(0, ...peaks), log: existsSync(join(dir, 'log')) ? readFileSync(join(dir, 'log'), 'utf8') : '' };
 }
-const HONOURS = 'Number(process.env.CITADEL_TEST_CONCURRENCY) || true';
+const HONOURS = 'Number(process.env.BURN_IN_INNER) || true';
 
 test('outside CI, 4 copies of a file with an 8-way concurrent describe run at most the slot (4) checks at once (#2073)', () => {
   const { r, peak } = inFile(wide(HONOURS), { ...NO_CI, BURN_IN_COPIES: '4' });
@@ -258,7 +258,7 @@ test('outside CI, a file with a fixed concurrency of 2 runs 2 copies, not 4', ()
 test("outside CI, a file asking concurrency: true that can't be capped is refused before any copy runs", () => {
   const { r, peak, log } = inFile(wide('true'), { ...NO_CI, BURN_IN_COPIES: '4' });
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true.*CITADEL_TEST_CONCURRENCY/m);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true.*BURN_IN_INNER/m);
   assert.equal(log, '', 'nothing queued');
   assert.equal(peak, 0);
 });

@@ -1216,12 +1216,14 @@ export function* batches(files) {
   if (batch.length) yield batch;
 }
 
-if (process.argv[1] && process.argv[2] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/** Run on the machine: one sync, its answer on stdout. A function, not a top-level await: a reader thread loads this module (test/worker-tla.test.ts). @param {string} arg */
+async function main(arg) {
   onMachine = true;
-  const o = JSON.parse(Buffer.from(process.argv[2], 'base64').toString('utf8'));
+  const o = JSON.parse(Buffer.from(arg, 'base64').toString('utf8'));
   try {
     console.log(JSON.stringify({ ok: true, ...(await new Machine({ ...o, prefix: process.env.CITADEL_SYNC_PREFIX }).sync(o)) }));
   } catch (err) {
     console.log(JSON.stringify(err instanceof Gone ? { gone: true } : { error: err.message, offline: err instanceof Offline }));
   }
 }
+if (process.argv[1] && process.argv[2] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) void main(process.argv[2]);

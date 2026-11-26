@@ -222,7 +222,11 @@ function fakePodman(workRoot: string) {
     if (all[0] === 'container') return said('', 1);
     if (all[0] !== 'exec') return said('');
     const detached = all[1] === '-d';
-    const sh = all[all.length - 1].replaceAll('/citadel-self-test', join(workRoot, 'self-test', 'fs', 'citadel-self-test'));
+    // A container has no /mnt/c and no /run/WSL, whatever this PC has: CI's runner is itself a WSL distro.
+    const sh = all[all.length - 1]
+      .replaceAll('/citadel-self-test', join(workRoot, 'self-test', 'fs', 'citadel-self-test'))
+      .replaceAll('/mnt/c', join(workRoot, 'not-in-the-container', 'mnt-c'))
+      .replaceAll('/run/WSL', join(workRoot, 'not-in-the-container', 'run-WSL'));
     if (sh.includes('host-tools.ts')) return said(sh.includes('cd ') && existsSync(join(workRoot, 'self-test/fs/citadel-self-test/scratch/repo/deploy/host-tools.json')) ? 'all there\n' : '', 0);
     if (state.breakSync && sh.includes('git clone')) return said('', 1, 'fatal: no');
     return new Promise((done) => {
@@ -279,6 +283,8 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     }
     const log: string[] = [];
     agent = new WorkerAgent({ config: { root: work, ...CAPS }, appUrl: srv.base, token, Worker: Watched, run: pod.run, log: (...a) => log.push(a.join(' ')), exit: (code) => void (left = code) });
+    // As on a Linux PC, wherever the test runs (CI's runner is a WSL distro, whose own wsl.conf this would read).
+    agent.wsl = false;
     assert.equal(agent.worker.cfg.max, 0, 'it takes no turn before it has an image');
     const going = agent.start();
     await until('its image', async () => (await view()).worker.image?.state === 'ready');

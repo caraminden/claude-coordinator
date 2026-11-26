@@ -44,7 +44,13 @@ export type MachineReport = {
   agent: number;
 };
 
-const text = (v: unknown, n: number) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, n) : '');
+const text = (v: unknown, n: number) =>
+  typeof v === 'string'
+    ? v
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        .trim()
+        .slice(0, n)
+    : '';
 const count = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(Math.round(v * 10) / 10, max) : null);
 const flag = (v: unknown) => (typeof v === 'boolean' ? v : null);
 

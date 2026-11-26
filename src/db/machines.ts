@@ -16,9 +16,7 @@ export const machineQueries = {
 
   /** A join code for Connect a computer (Build 7 M2, src/machine-join.ts), hashed; machineId: the row an Update reconnects. */
   addMachineJoin(this: Store, j: { codeHash: string; askerId: number | null; by: string; ownerId: number | null; machineId: number | null; at: number; expiresAt: number }): number {
-    const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO machine_joins (code_hash, asker_id, created_by, owner_id, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(j.codeHash, j.askerId, j.by, j.ownerId, j.machineId, j.at, j.expiresAt);
+    const { lastInsertRowid } = this.db.prepare('INSERT INTO machine_joins (code_hash, asker_id, created_by, owner_id, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(j.codeHash, j.askerId, j.by, j.ownerId, j.machineId, j.at, j.expiresAt);
     return Number(lastInsertRowid);
   },
 

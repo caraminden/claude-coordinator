@@ -551,7 +551,7 @@ function machineLine(m) {
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
   if (fix) sum.after(h('span', { class: 'machine-fix' }, fix));
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
-  if (m.update && !gone && managesHere(m)) sum.after(h('span', { class: 'machine-fix' }, h('button', { type: 'button', class: 'secondary small', title: "Its agent is from before: the new one says what this PC can do. Opens the command that replaces it", onclick: () => connectComputer(m) }, 'Update')));
+  if (m.update && !gone && managesHere(m)) sum.after(h('span', { class: 'machine-fix' }, h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update')));
   row.classList.add('machine-row', 'machine-line', m.status);
   row.dataset.name = m.name;
   row.addEventListener('toggle', () => {

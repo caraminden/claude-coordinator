@@ -2245,7 +2245,11 @@ function probe(command, args, timeout = 8000) {
   });
 }
 
-const firstLine = (text) => (text ?? '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? null;
+const firstLine = (text) =>
+  (text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find(Boolean) ?? null;
 
 /**
  * What this PC can do (specs/machine-connections.md section 2): platform, WSL and its version, threads, memory, free
@@ -2269,7 +2273,7 @@ export async function machineReport({ platform = process.platform, env = process
   } catch {}
   const [osName, wsl, gpu, screen, admin] = await Promise.all([
     // Windows 11 is still 10.0 to the kernel; its builds start at 22000.
-    os === 'windows' ? `Windows ${Number(release().split('.')[2]) >= 22000 ? '11' : '10'}` : os === 'macos' ? run('sw_vers', ['-productVersion']).then((v) => `macOS ${v ?? release()}`) : /PRETTY_NAME="?([^"\n]+)/.exec(tryRead('/etc/os-release'))?.[1] ?? `Linux ${release()}`,
+    os === 'windows' ? `Windows ${Number(release().split('.')[2]) >= 22000 ? '11' : '10'}` : os === 'macos' ? run('sw_vers', ['-productVersion']).then((v) => `macOS ${v ?? release()}`) : (/PRETTY_NAME="?([^"\n]+)/.exec(tryRead('/etc/os-release'))?.[1] ?? `Linux ${release()}`),
     os === 'windows'
       ? run('wsl.exe', ['--version']).then(async (v) => {
           const version = /WSL[^:\n]*:\s*([\d.]+)/.exec(v ?? '')?.[1] ?? null;
@@ -2281,7 +2285,12 @@ export async function machineReport({ platform = process.platform, env = process
       if (firstLine(v)) return firstLine(v);
       if (os !== 'windows') return null;
       const names = await run('powershell.exe', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name']);
-      return (names ?? '').split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/basic|remote|virtual|hyper-v|parsec/i.test(l)) ?? null;
+      return (
+        (names ?? '')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .find((l) => l && !/basic|remote|virtual|hyper-v|parsec/i.test(l)) ?? null
+      );
     }),
     os === 'windows'
       ? run('tasklist.exe', ['/FI', 'IMAGENAME eq explorer.exe', '/FI', `USERNAME eq ${env.USERNAME ?? ''}`, '/NH']).then((v) => (v === null ? null : /explorer\.exe/i.test(v)))
@@ -2290,11 +2299,7 @@ export async function machineReport({ platform = process.platform, env = process
         : inWsl
           ? false
           : !!(env.DISPLAY || env.WAYLAND_DISPLAY || exists('/tmp/.X11-unix/X0') || (env.XDG_RUNTIME_DIR && exists(join(env.XDG_RUNTIME_DIR, 'wayland-0')))),
-    os === 'windows'
-      ? run('whoami.exe', ['/groups']).then((v) => (v === null ? null : /S-1-5-32-544/.test(v)))
-      : process.getuid?.() === 0
-        ? true
-        : run('id', ['-Gn']).then((v) => (v === null ? null : /\b(sudo|wheel|admin)\b/.test(v))),
+    os === 'windows' ? run('whoami.exe', ['/groups']).then((v) => (v === null ? null : /S-1-5-32-544/.test(v))) : process.getuid?.() === 0 ? true : run('id', ['-Gn']).then((v) => (v === null ? null : /\b(sudo|wheel|admin)\b/.test(v))),
   ]);
   return {
     host: hostname(),
@@ -2512,7 +2517,14 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), report: await machineReport(), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), ...(runner.restored ? { known_jobs: runner.known() } : {}) }),
+      body: JSON.stringify({
+        ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }),
+        report: await machineReport(),
+        ...(host ? host.summary() : {}),
+        problems: [...(host?.summary().problems ?? []), ...runner.leftover()],
+        ...(jobs ? { jobs } : {}),
+        ...(runner.restored ? { known_jobs: runner.known() } : {}),
+      }),
     })
       .then(async (res) => {
         // fetch doesn't throw on a refusal; a silent one hid #301's 404.

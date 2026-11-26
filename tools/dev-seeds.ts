@@ -1218,19 +1218,6 @@ mock.boards('#takes', { boards: [
       return route(c, t, e.id);
     },
   },
-  'machine-order': {
-    about: 'two computers of yours with Minion turns on, ordered 1 and 2: the Order picker on each Minion turns card (Build 7 M6, #2056)',
-    seed(c) {
-      const owner = c.store.listUsers().find((u) => u.name === c.who);
-      const ids = ['desk', 'laptop'].map((name, i) => {
-        const m = c.store.createMachine(`${name}-${hex().slice(0, 4)}`, hex(), c.who, owner?.id ?? null);
-        c.store.setMachineRole(m.id, 'turns', { on: true, projects: [c.project.id] });
-        c.store.updateMachine(m.id, { priority: i + 1 });
-        return m.id;
-      });
-      return `#/p/${c.project.id}/machines/${c.store.getMachine(ids[0])!.name}`;
-    },
-  },
   'gpu-jobs': {
     about: "a minion's GPU jobs on a seeded desktop in every state (needs go, queued outside hours, running, paused resumable and frozen, done, failed), and that desktop on the Machines page (#859)",
     seed(c) {

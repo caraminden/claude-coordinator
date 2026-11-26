@@ -63,22 +63,22 @@
     "summary": "7 as before, 0 new, 3 gone"
   },
   "effort-retros": {
-    "hash": "6d36653f89c818f9",
+    "hash": "c15635bead1aaeee",
     "at": "2026-11-26",
     "days": 3,
-    "inputs": "34 named or chained efforts in 15 schemes, checked hourly over 3 days",
-    "hits": 4,
-    "real": 4,
-    "summary": "4 as before, 0 new, 0 gone"
+    "inputs": "35 named or chained efforts in 15 schemes, checked hourly over 3 days",
+    "hits": 5,
+    "real": 5,
+    "summary": "5 as before, 0 new, 0 gone"
   },
   "flake-counter": {
-    "hash": "7722e626f28f0e55",
-    "at": "2026-11-25",
-    "days": 3,
-    "inputs": "288 passes over 1 schemes: their retro logs, land-recorded flakes and minions",
-    "hits": 22,
-    "real": 23,
-    "summary": "22 as before, 0 new, 0 gone"
+    "hash": "239c587ebe72b8bb",
+    "at": "2026-11-26",
+    "days": 1,
+    "inputs": "96 passes over 15 schemes: their retro logs, land-recorded flakes and minions",
+    "hits": 10,
+    "real": 12,
+    "summary": "10 as before, 0 new, 0 gone"
   },
   "main-rollbacks": {
     "hash": "9cfa20214aab5bfc",

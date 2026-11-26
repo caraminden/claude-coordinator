@@ -10,8 +10,6 @@
   "public/workers.js": [1, 0],
   "src/backup.ts": [0, 3],
   "src/db/deliveries.ts": [0, 2],
-  "src/effort-retros.ts": [2, 2],
-  "src/flake-fixes.ts": [1, 2],
   "src/http.ts": [0, 1],
   "test/app-browser.test.ts": [5, 0],
   "test/app-facts.test.ts": [1, 0],
@@ -138,7 +136,5 @@
   "test/usage-ledger.test.ts": [0, 6],
   "test/usage-limit.test.ts": [0, 11],
   "test/waits.test.ts": [0, 1],
-  "test/wake-when-live-outbox.test.ts": [0, 1],
-  "tools/judge-replays/flake-counter.ts": [1, 0],
-  "tools/judge-replays/store.ts": [1, 0]
+  "test/wake-when-live-outbox.test.ts": [0, 1]
 }

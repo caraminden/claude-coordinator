@@ -137,6 +137,27 @@ test('a removed machine is cut off, and its token no longer works', async () => 
   assert.equal(res.status, 401);
 });
 
+test('a machine being removed takes no new token and no Minion turns switch-on (spec section 4: no new starts)', async () => {
+  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'draining-pc', mine: true } });
+  await srv.settled();
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  try {
+    // What DELETE's 202 leaves while the agent clears its copies (MachineCopies.remove).
+    store.setSetting('machines-removing', [machine.id]);
+    const patch = await srv.call(`/api/machines/${machine.id}`, { worker: true }, 'PATCH');
+    assert.equal(patch.status, 409);
+    assert.match(patch.data.error, /being removed/);
+    assert.equal((await srv.call(`/api/machines/${machine.id}/token`, {}, 'POST')).status, 409);
+    assert.equal((await srv.call(`/api/machines/${machine.id}`, { worker: false }, 'PATCH')).status, 200, 'switching it off still works');
+    store.deleteSetting('machines-removing');
+    assert.equal((await srv.call(`/api/machines/${machine.id}/token`, {}, 'POST')).status, 200, 'not being removed: a new token as ever');
+  } finally {
+    store.deleteSetting('machines-removing');
+    store.db.close();
+  }
+  await call(`/api/machines/${machine.id}?now`, { method: 'DELETE' });
+});
+
 test('threads skip offline machines, and only people manage machines', async () => {
   await call('/api/machines', { method: 'POST', body: { name: 'sleepy' } });
   const before = turns().length;

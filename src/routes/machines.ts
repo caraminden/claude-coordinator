@@ -70,6 +70,8 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   }
   if (body.worker !== undefined && typeof body.worker !== 'boolean') throw new HttpError(400, 'worker must be true or false');
   const worker = body.worker as boolean | undefined;
+  // A machine being removed takes no new starts (spec section 4): its page hides the switch, and the server holds to it too.
+  if (worker && app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it takes no new turns`);
   // A machine runs only its owner's turns, on a sign-in they make there themselves: nobody else offers it, though an admin may switch it off.
   if ((worker ?? lend?.worker) && !app.machines.lendsWorker(machine) && machine.owner_id !== session.uid) {
     throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
@@ -616,6 +618,8 @@ export const machineRoutes: Route[] = [
     path: '/api/machines/:machine/token',
     ...people,
     handler: managed(async ({ req, res, app, machine }) => {
+      // Its agent is still clearing its copies: a new token would cut it off before they are home.
+      if (app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token`);
       // A new token locks out whoever holds the old one, the connected agent included.
       const token = app.machines.issueToken(machine.id);
       app.machines.disconnect(machine.id);

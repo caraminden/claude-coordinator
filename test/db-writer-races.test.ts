@@ -206,6 +206,24 @@ test("once the worker is gone no reader thread answers on its own: the server wr
   assert.equal(atWholeStep(reader.db, w.shared), null);
 });
 
+test('a reader whose pin the worker died during gives it up: what it pinned may hold half an in-place step', async () => {
+  const { store, w } = open();
+  minion(store);
+  await until('the step closes', () => w.shared[3] >= w.shared[4]);
+  const reader = new Store(store.path, { reader: true });
+  const db = Object.create(reader.db, {
+    exec: {
+      value: (sql: string) => {
+        if (sql === 'BEGIN') Atomics.store(w.shared, 1, -1n); // gone between the reader's check and its pin
+        reader.db.exec(sql);
+      },
+    },
+    prepare: { value: (sql: string) => reader.db.prepare(sql) },
+  });
+  assert.equal(atWholeStep(db, w.shared), null);
+  assert.equal(reader.db.isTransaction, false);
+});
+
 /** Run `body` in a process of its own (`store` and `w` are there), which kills itself as a crash would; its database. */
 function crash(name: string, body: string) {
   const dir = join(root, name);

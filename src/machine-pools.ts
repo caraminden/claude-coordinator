@@ -78,9 +78,9 @@ export interface MachinePoolsDeps {
 /** ClaudeLink.accountsThere: the person's linked accounts, those a worker holding these sign-ins runs turns on, and whether one is ready. */
 export type AccountsThere = (person: number, slots: { n: number; org: string | null }[]) => { linked: number[]; usable: number[]; ready: boolean };
 
-/** The accounts a worker holds a sign-in for; an agent from before #2061 says only whether it has one, which is account 1's. */
 /** Whether its worker could tell its sign-ins: one it couldn't read is not a no. */
 const known = (info: WorkerInfo) => typeof info.signedIn === 'boolean';
+/** The accounts a worker holds a sign-in for; an agent from before #2061 says only whether it has one, which is account 1's. */
 export const slotsOf = (info: WorkerInfo) => info.accounts ?? (info.signedIn ? [{ n: 1, org: null }] : []);
 
 export class MachinePools {

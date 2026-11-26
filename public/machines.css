@@ -143,6 +143,7 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .worker-part > *, .worker-install > *, .worker-command, .worker-sign > * { min-width: 0; margin: 0; }
 .worker-part-head { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; align-items: center; min-height: 1.9rem; }
 .worker-part-head h4 { margin: 0 0.2rem 0 0; font-size: 1em; }
+.worker-part-head .cui-chip { min-width: 0; max-width: 100%; }
 .worker-part-head button { margin-left: auto; }
 /* A role's Set up and Test (Build 7 M4, role-setup-card.js): its two buttons sit together, its screenshot a thumbnail. */
 .role-setup .worker-part-head button + button { margin-left: 0; }

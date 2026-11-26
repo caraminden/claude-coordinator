@@ -183,19 +183,22 @@ function signIns(m, k) {
   const tag = win ? 'powershell' : 'bash';
   const chip = (name, is, word) => toneChip(is ? 'ok' : is === false ? 'warn' : 'neutral', `${name}: ${word ?? (is ? 'signed in' : is === false ? 'not signed in' : 'checking')}`);
   const claudeNote = 'Claude Code opens its own sign-in. Type /exit once it says you are in.';
-  // Several linked accounts (#2061): each signs in there into its own folder, and a turn runs only on one signed in there.
-  const several = (w.accounts?.length ?? 0) > 1;
+  // Linked accounts (#2061): each signs in there into its own folder, and a turn runs only on one signed in there. One account
+  // signed in as it should keeps the single chip; any other state says which account and why.
+  const several = !!w.accounts?.length && (w.accounts.length > 1 || w.accounts.some((a) => a.there !== 'in'));
+  const scheme = location.hash.match(/^#\/p\/(\d+)/)?.[1];
+  const yours = () => (scheme ? h('a', { href: `#/p/${scheme}/account` }, 'Settings → Your account') : 'Settings → Your account');
   const claude = several
     ? w.accounts.map((a) => [
         `Claude account ${a.n}`,
         a.there === 'in',
-        a.n === 1 ? 'signin' : `signin ${a.n}`,
-        a.there === 'other' ? `It is signed in there to another Claude organization than your account ${a.n} here: sign in again, picking that account's organization.` : `Sign in with the account Settings → Your account lists as account ${a.n}. ${claudeNote}`,
-        a.there === 'other' ? 'another organization' : undefined,
+        `signin ${a.n}`,
+        a.there === 'other' ? [`This PC is signed in to a different Claude organization than your account ${a.n} in Citadel: sign in again and pick that account's organization.`] : ['Sign in with the account that ', yours(), ` lists as account ${a.n}.`],
+        a.there === 'other' ? 'other organization' : undefined,
       ])
-    : [['Claude', w.signed_in, 'signin', claudeNote]];
-  const steps = [...claude, ['GitHub', w.github, 'signin-github', 'So turns can push and open pull requests as you.']];
-  const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', note), shell(tag, workerCommand(win, verb)));
+    : [['Claude', w.signed_in, 'signin', [claudeNote]]];
+  const steps = [...claude, ['GitHub', w.github, 'signin-github', ['So turns can push and open pull requests as you.']]];
+  const how = ([name, , verb, note]) => h('div', { class: 'worker-sign' }, h('p', { class: 'small' }, h('b', {}, `${name}:`), ' ', ...note), shell(tag, workerCommand(win, verb)));
   const todo = steps.filter(([, is]) => is === false);
   const done = steps.filter(([, is]) => is !== false);
   return h(
@@ -203,7 +206,7 @@ function signIns(m, k) {
     { class: 'worker-part' },
     h('div', { class: 'worker-part-head' }, h('h4', {}, 'Sign-ins there'), ...steps.map(([name, is, , , word]) => chip(name, is, word))),
     w.image?.state === 'building' && todo.length ? h('p', { class: 'muted small' }, 'These work once its image is built.') : null,
-    todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`) : null,
+    todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`, several && todo.some(([name]) => name !== 'GitHub') ? ` ${claudeNote}` : '') : null,
     ...todo.map(how),
     h('p', { class: 'muted small' }, several ? "You sign in on that PC yourself. Citadel sees only whether a sign-in is there, and its organization's id. A turn there runs on one of your accounts signed in there." : 'You sign in on that PC yourself. Citadel sees only whether a sign-in is there.'),
     done.length ? folded(k, 'sign', 'Sign in again', ...done.map(how)) : null,

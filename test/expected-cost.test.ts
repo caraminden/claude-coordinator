@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
+import { CREATE_TICKET } from '../src/mcp-minions.ts';
 import { ASK, askText, type Budget, expectedCost, markOf, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
 import { agentToken, bootServer, mintedAgentToken } from './helpers.ts';
 import { json, type Refused } from './typed.ts';
@@ -40,8 +41,7 @@ test('the marks scale from the larger of the usual cost and the estimate', () =>
 
 test("create_ticket's description names the start card's threshold", () => {
   // A literal there: the MCP server's pinned copy can't import minion-budget.ts, which reaches db.ts.
-  const source = readFileSync(join(import.meta.dirname, '..', 'src', 'mcp-minions.ts'), 'utf8');
-  assert.ok(source.includes(`over $${START_CARD_USD} no turn runs`));
+  assert.ok(CREATE_TICKET.inputSchema.properties.expected_cost.description.includes(`over $${START_CARD_USD} no turn runs`));
 });
 
 test("a Taskmaster brief over $50 waits for a person's start card; under it, or a person's own, starts as today", async () => {

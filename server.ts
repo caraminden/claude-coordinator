@@ -156,7 +156,7 @@ import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } 
 import { lineFor } from './src/ship-stop.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
-import { earlyCi, earlyDroppedWhy, landNews, readTail } from './src/land-news.ts';
+import { earlyCi, earlyDroppedWhy, landNews, readTailA, tailNow } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
@@ -1269,8 +1269,8 @@ const waits = new Waits({
   ciSlug: () => liveSlug,
   // The land gate's alarm (#561), under the scheme whose repo the live checkout is.
   // Not before the live repo is known: a guess of no scheme would clear the alarm, and a restart would ring it again.
-  early: (id) => earlyCi(readTail(landings.log(id))),
-  earlyWhy: (id, next) => earlyDroppedWhy(readTail(landings.log(id)), next),
+  early: (id) => earlyCi(tailNow(landings.log(id))),
+  earlyWhy: async (id, next) => earlyDroppedWhy(await readTailA(landings.log(id)), next),
   landLine: (seen, now) => {
     const live = liveSlug && store.listProjects().find((p) => repoSlug(p.repo_url) === liveSlug);
     if (live) ciHealth.land(live.id, seen, now).catch((err) => console.error(`Land alarm: ${err?.message ?? err}`));
@@ -1289,7 +1289,7 @@ const citadelServer = new CitadelServer({
   usual: waits.usual,
   interruptible: () => runner.interruptible(),
   ciQueued: (id) => ciRuns.view(id)?.stage === 'queued',
-  news: (id, name) => landNews(readTail(landings.log(id)), name),
+  news: (id, name) => landNews(tailNow(landings.log(id)), name),
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });

@@ -471,7 +471,7 @@ export const appRoutes: Route[] = [
     path: '/api/ship-lines',
     who: ['person'],
     handler: async ({ res, app, session }) => {
-      return json(res, 200, { lines: shipLines(app, (id) => app.store.canSee(session, id)), at: Date.now() });
+      return json(res, 200, { lines: await shipLines(app, (id) => app.store.canSee(session, id)), at: Date.now() });
     },
   },
   // "Stop this ship" (#1168; Josh picked it 2026-11-19 from #1093's ideas): any member of the scheme ends the land.sh run

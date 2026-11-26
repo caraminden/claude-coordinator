@@ -12,7 +12,7 @@ import { frozenWords } from './frozen-ships.ts';
 import type { App } from './http.ts';
 import { landQueue } from './release-readers.ts';
 import { CITADEL_TARGET } from './releases.ts';
-import { landPhase, ordinal, procAlive, readQueue, type LandTicket } from './waits.ts';
+import { landPhase, ordinal, procAlive, readQueue, readQueueA, type LandTicket } from './waits.ts';
 
 /** One ship in a line, as the Status page's panel shows it. */
 export interface ShipRow {
@@ -170,22 +170,28 @@ function minionOf(app: Pick<App, 'waits' | 'store'>, projectId: number, label: s
   return id != null && app.store.getTicket(id)?.project_id === projectId ? id : null;
 }
 
-/** Every ship line `visible` lets a person see that has someone in it, read afresh (the panel reads it every 3 s). */
-export function shipLines(app: Pick<App, 'releases' | 'waits' | 'store'>, visible: (projectId: number) => boolean) {
-  return app.store
-    .listProjects()
-    .filter((p) => visible(p.id))
-    .flatMap((p) => {
-      const at = lineFor(app, p.id);
-      const line = at ? readQueue(at.q, at.orderAt) : [];
-      if (!line.length) return [];
-      const rows = shipRows(line, (label) => {
-        const id = minionOf(app, p.id, label);
-        const t = id != null ? app.store.getTicket(id) : undefined;
-        return t ? { name: `#${t.number ?? t.id}`, ticketId: t.id } : { name: label.replace(/ \(.*\)$/, ''), ticketId: null };
-      });
-      return [{ projectId: p.id, scheme: p.name, rows }];
-    });
+/**
+ * Every ship line `visible` lets a person see that has someone in it, read afresh (the panel reads it every 3 s) and off
+ * the server's thread (#2111): a blocking read here waited on the disk once per open Status page, every 3 s.
+ */
+export async function shipLines(app: Pick<App, 'releases' | 'waits' | 'store'>, visible: (projectId: number) => boolean) {
+  const lines = await Promise.all(
+    app.store
+      .listProjects()
+      .filter((p) => visible(p.id))
+      .map(async (p) => {
+        const at = lineFor(app, p.id);
+        const line = at ? await readQueueA(at.q, at.orderAt) : [];
+        if (!line.length) return [];
+        const rows = shipRows(line, (label) => {
+          const id = minionOf(app, p.id, label);
+          const t = id != null ? app.store.getTicket(id) : undefined;
+          return t ? { name: `#${t.number ?? t.id}`, ticketId: t.id } : { name: label.replace(/ \(.*\)$/, ''), ticketId: null };
+        });
+        return [{ projectId: p.id, scheme: p.name, rows }];
+      }),
+  );
+  return lines.flat();
 }
 
 /**

@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { landNews, readTail } from '../src/land-news.ts';
+import { landNews, readTailA } from '../src/land-news.ts';
 
 // src/land-news.ts (#1368): the ship under way's news on Releases, read from its land.sh output. The lines are land.sh's
 // own words, as a real train's log has them (landing 2832, 2026-11-20); "bisect: testing the first K of N ships" is the line
@@ -137,15 +137,15 @@ test('at most six lines, the newest kept; nothing to say, nothing shown', () => 
   assert.deepEqual(landNews('land: rebasing ticket/1-x onto main (abc "y")\nland: guard tests passed', name), []);
 });
 
-test("readTail: the log's end, read again only once it grows; a cut first line is dropped", () => {
+test("readTailA: the log's end, read again only once it grows; a cut first line is dropped", async () => {
   const f = join(root, 'output.log');
-  assert.equal(readTail(f), '', 'no log yet');
+  assert.equal(await readTailA(f), '', 'no log yet');
   writeFileSync(f, 'land: one\n');
-  assert.equal(readTail(f), 'land: one\n');
+  assert.equal(await readTailA(f), 'land: one\n');
   appendFileSync(f, 'land: two\n');
-  assert.equal(readTail(f), 'land: one\nland: two\n');
+  assert.equal(await readTailA(f), 'land: one\nland: two\n');
   writeFileSync(f, `${'x'.repeat(300 * 1024)}\nland: last\n`);
-  assert.equal(readTail(f), 'land: last\n');
+  assert.equal(await readTailA(f), 'land: last\n');
 });
 
 test("a red on main too says it isn't the ship's, with what main needs", () => {

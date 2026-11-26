@@ -729,7 +729,7 @@ export interface WaitDeps {
   /** Whether a minion's ship counted a CI run started early on its train (#1566, land-news's earlyCi). */
   early?: (ticketId: number) => boolean;
   /** Why the ship ahead (its minion) threw away the early run it stacked for `next`, from its landing's log (#1905); null when unknown. */
-  earlyWhy?: (headTicketId: number, next: string) => string | null;
+  earlyWhy?: (headTicketId: number, next: string) => string | null | Promise<string | null>;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
@@ -895,8 +895,13 @@ export class Waits {
       const headId = this.ticketFor(e.head);
       const why = headId != null ? this.d.earlyWhy?.(headId, e.next) : null;
       const ahead = this.name(e.head);
-      const text = !why ? `Early test dropped: ${ahead} ahead of it changed` : /went red/.test(why) ? `Early test dropped: ${ahead} ahead of it failed` : /built again/.test(why) ? `Early test dropped: ${ahead}'s train was built again, so the run no longer matches` : `Early test dropped: ${why}`;
-      this.earlyDropped.set(id, text);
+      const say = (why: string | null | undefined) =>
+        this.earlyDropped.set(id, !why ? `Early test dropped: ${ahead} ahead of it changed` : /went red/.test(why) ? `Early test dropped: ${ahead} ahead of it failed` : /built again/.test(why) ? `Early test dropped: ${ahead}'s train was built again, so the run no longer matches` : `Early test dropped: ${why}`);
+      // The reason is in the head's log, read off the server's thread (#2111): the plain words show until it is in.
+      if (why instanceof Promise) {
+        say(null);
+        void why.then((w) => void (w && this.earlyDropped.has(id) && say(w))).catch(() => {});
+      } else say(why);
     }
     // A dropped note goes once its ship is no longer waiting in the line.
     for (const id of [...this.earlyDropped.keys()]) {

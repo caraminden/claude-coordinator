@@ -144,6 +144,8 @@ export interface MachineRow {
   projects: number[];
   /** A CI runner host's row. */
   runners: boolean;
+  /** Its CI runner agents connected now, beside its agent (Build 7 M2b). */
+  runner_agents?: { os: 'windows' | 'linux'; host: string; since: number }[];
   roles?: MachineRole[];
   /** The roles Pause all switched off; null when it isn't paused. */
   paused: MachineRoleKey[] | null;

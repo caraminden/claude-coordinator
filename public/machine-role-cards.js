@@ -80,7 +80,7 @@ function changeRole(m, role, fields, label, redraw, shown = fields) {
 function cannot(m, r) {
   if (r.on) return null;
   if (removing(m)) return 'It is being removed: nothing new starts there.';
-  if (!m.runners && r.role === 'ci') return 'CI runners come from a CI runner host for now: add one with "Add a CI runner host" below.';
+  if (r.role === 'ci' && m.report?.os === 'macos') return 'CI runners need Windows or Linux.';
   if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this PC runs Linux.';
   if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';
   if (r.role === 'turns' && !(m.owner_id === account?.id)) return 'Only its owner can switch Minion turns on.';
@@ -96,14 +96,20 @@ function standing(m, r) {
     const st = workerState(m);
     return { text: st.word, tone: st.tone };
   }
-  if (/** @type {MachineRoleKey} */ (r.role) !== 'turns' && !m.online && !(r.role === 'ci' && m.runners)) return { text: 'offline', tone: 'neutral' };
+  if (/** @type {MachineRoleKey} */ (r.role) !== 'turns' && !m.online && r.role !== 'ci') return { text: 'offline', tone: 'neutral' };
   if (r.role === 'tools') {
     const lend = m.lend;
     const parts = [lend?.server, lend?.workspaces?.length ? `${lend.workspaces.length} folder${lend.workspaces.length === 1 ? '' : 's'}` : ''].filter(Boolean);
     return parts.length ? { text: `✓ ${parts.join(', ')}`, tone: 'ok' } : { text: 'nothing ticked yet', tone: 'warn' };
   }
   if (r.role === 'screen') return m.screen ? { text: `✓ screen ${m.screen.holder ? 'busy' : 'free'}`, tone: 'ok' } : { text: 'not set up yet', tone: 'info' };
-  if (r.role === 'ci') return m.runners ? (m.online ? { text: '✓ runner host connected', tone: 'ok' } : { text: 'offline', tone: 'neutral' }) : { text: 'not set up yet', tone: 'info' };
+  if (r.role === 'ci') {
+    if (m.runners) return m.online ? { text: '✓ runner host connected', tone: 'ok' } : { text: 'offline', tone: 'neutral' };
+    // One PC's row (Build 7 M2b): its runner agent joins it, so CI stands by that agent, whatever the PC's own agent does.
+    const n = m.runner_agents?.length ?? 0;
+    if (n) return { text: `✓ runner agent${n > 1 ? 's' : ''} connected`, tone: 'ok' };
+    return lastRun(r)?.done && !lastRun(r)?.ok ? { text: 'set up failed', tone: 'danger' } : { text: 'not set up yet', tone: 'info' };
+  }
   if (hasGpu(m)) return { text: '✓ GPU jobs ready', tone: 'ok' };
   // After a Set up that failed, the header says so too, not "not set up yet" over the section's red chip.
   const run = lastRun(r);

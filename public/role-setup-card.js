@@ -4,6 +4,7 @@
 /** @import { MachineRole, MachineRow, SetupRun } from './types.js' */
 import { account, ago, api, h, openView, pacificStamp } from './base.js';
 import { toneChip } from './look.js';
+import { runnerAgentLines } from './machine-merge.js';
 import { adminCommand, lastRun, SETUP_ROLES } from './role-setup.js';
 import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -20,7 +21,34 @@ const ABOUT = {
   screen: 'Turns screenshots on in its machine-agent.json, then takes a screenshot and opens and closes Notepad.',
   turns: 'Installs the worker (a WSL distro of its own on Windows), then runs its self-test.',
   gpu: 'Checks the GPU, podman and NVIDIA’s container toolkit, turns GPU jobs on, then runs nvidia-smi in a container.',
+  ci: 'Shows the one command that installs the CI runner agent (as administrator), waits for it, then tests it. Each scheme ticked here gets its runner by itself when its CI first needs one.',
 };
+
+/** The row's token and address for the runner agent's install, by machine id: asked once a Set up shows it. @type {Map<number, { token?: string, url?: string, failed?: string }>} */
+const installs = new Map();
+
+/** CI's Set up: the runner agent's install lines with this row's token (one per OS this PC runs CI for), until it connects. @param {MachineRow} m @param {() => void} redraw */
+function runnerInstall(m, redraw) {
+  const got = installs.get(m.id);
+  if (!got) {
+    installs.set(m.id, {});
+    api(`api/machines/${m.id}/token`)
+      .then((/** @type {{ token: string, agent_url: string }} */ r) => installs.set(m.id, { token: r.token, url: r.agent_url }))
+      .catch((/** @type {Error} */ err) => installs.set(m.id, { failed: err.message }))
+      .finally(redraw);
+  }
+  if (got?.failed) return h('p', { class: 'cui-notice', 'data-tone': 'danger' }, `Couldn't get the install command: ${got.failed} `, h('button', { type: 'button', class: 'secondary small', onclick: () => (installs.delete(m.id), redraw()) }, 'Try again'));
+  if (!got?.token || !got.url) return h('p', { class: 'muted small' }, 'Getting the install command…');
+  const linux = m.report?.os === 'linux';
+  return h(
+    'div',
+    { class: 'role-setup-admin' },
+    linux ? null : runnerAgentLines(got.url, got.token, ['windows']),
+    linux ? null : h('p', { class: 'small' }, 'For Linux jobs too, its runners run in a WSL distro of their own. Make it once, in a normal PowerShell (the CI runner guide\'s "Linux runners in WSL" has the rest):'),
+    linux ? null : markdownElement('```powershell\nwsl --install Ubuntu-24.04 --name citadel-ci\n```'),
+    runnerAgentLines(got.url, got.token, ['linux']),
+  );
+}
 
 /** Who presses it: its owner, or an admin on a shared machine (the server's rule). @param {MachineRow} m */
 const presses = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
@@ -70,7 +98,7 @@ function adminPart(run) {
   );
 }
 
-/** Set up and Test on a role's card, and its last run; null for a role this release doesn't set up (CI's is #2064's).
+/** Set up and Test on a role's card, and its last run; null for a role this release doesn't set up.
  * @param {MachineRow} m
  * @param {MachineRole} r
  * @param {() => void} redraw
@@ -82,7 +110,8 @@ export function setupPart(m, r, redraw) {
   const going = !!run && !run.done;
   const turnsHere = r.role === 'turns' && !!m.worker?.host;
   // Minion turns' own self-test (T5's) is on the card already once its worker is there: Set up is for a PC without one.
-  const offline = r.role !== 'turns' && !m.online;
+  // CI's runner agent is a program of its own: its Set up installs it with the PC's agent off or absent.
+  const offline = r.role !== 'turns' && r.role !== 'ci' && !m.online;
   const why = going ? 'Running now' : offline ? `${m.name} is offline` : null;
   /** @param {'setup' | 'test'} kind @param {boolean} primary */
   const button = (kind, primary) =>
@@ -101,6 +130,7 @@ export function setupPart(m, r, redraw) {
     // With an administrator command, that block says what to do: the run's own why would only repeat it.
     run?.why && !adminCommand(run.admin) ? h('p', { class: 'cui-notice', 'data-tone': 'danger' }, run.why) : null,
     run ? adminPart(run) : null,
+    r.role === 'ci' && can && run && !run.done && run.worker_install ? runnerInstall(m, redraw) : null,
     showSteps
       ? h(
           'ul',

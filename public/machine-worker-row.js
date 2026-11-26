@@ -284,9 +284,9 @@ function hostFolders(m, k) {
     w.folders === null
       ? h('p', { class: 'muted small' }, 'Shown once that PC is back.')
       : list.length
-        ? h('ul', { class: 'worker-reach' }, ...list.map((f) => h('li', {}, h('code', {}, `/host/${f.name}`), h('span', { class: 'worker-reach-path' }, f.path), toneChip(f.write ? 'warn' : 'neutral', f.write ? 'read-write' : 'read-only'), f.ready ? null : toneChip('error', 'not mounted'))))
+        ? h('ul', { class: 'worker-reach' }, ...list.map((f) => h('li', {}, h('code', {}, `/host/${f.name}`), h('span', { class: 'worker-reach-path' }, f.path), toneChip(f.write ? 'warn' : 'neutral', f.write ? 'read-write' : 'read-only'), f.ready ? null : toneChip('warn', 'not mounted'))))
         : h('p', { class: 'muted small' }, 'None yet.'),
-    ...(w.folder_problems ?? []).map((p) => h('p', { class: 'small worker-reach-problem' }, p)),
+    ...(w.folder_problems ?? []).map((p) => h('p', { class: 'cui-notice', 'data-tone': 'danger' }, p)),
     h('p', { class: 'small worker-reach-warn' }, h('b', {}, "Citadel can't roll these folders back."), ' What a minion changes or deletes there stays changed. Keep a backup of anything in them you care about, and give write access only where you need it.'),
     mine(m)
       ? folded(
@@ -308,7 +308,11 @@ function hostFolders(m, k) {
 }
 
 const PROGRAMS_EXAMPLE = `"programs": {
-  "notepad": { "path": "C:\\\\Windows\\\\notepad.exe", "about": "Notepad", "args": true }
+  "notepad": {
+    "path": "C:\\\\Windows\\\\notepad.exe",
+    "about": "Notepad",
+    "args": true
+  }
 }`;
 
 /** The programs its owner lets marked minions start (run_on_host), from that PC's agent config, and how to change them. */

@@ -149,6 +149,7 @@ import { redFixes, UrgentFixes } from './src/urgent-fixes.ts';
 import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
+import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
 import { Builds } from './src/builds.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
@@ -1045,6 +1046,9 @@ const standingChecks = new StandingChecks({
   procs: async () => (await reaper.owned()).map((x) => ({ pid: x.proc.pid, ticketId: x.ticketId, projectId: x.projectId, command: shownCommand(x.proc.argv) })),
 });
 if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingChecks.run(), 3 * 60_000);
+// Main went back (#2077): each open minion cut from the commits a reset took off its scheme's main is told the rebase that takes them out.
+const mainRollbacks = new MainRollbacks({ store, tell: (id, text) => void runner.send(id, APP_NAME, text, [], { hold: true }, runner.isRunning(id)) });
+if (!BOOT_CHECK && !PREVIEW) every('main roll-backs', ROLLBACK_EVERY_MS, () => mainRollbacks.sweep(), 60_000);
 
 /**
  * A new minion with its properties and its own worktree in the scheme's repo, not started yet: the

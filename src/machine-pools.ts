@@ -28,6 +28,10 @@ export interface MachinePlace {
   /** Away since (0: never here), or null: here, or back in a moment (a restart of this server drops every link for a second or two). */
   away: number | null;
   load: { reading: Pick<PressureReading, 'cpu' | 'mem'>; box: PoolBox; at: number } | null;
+  /** Its owner's order among their machines (1 first); null: none, after every one with an order (Build 7 M6). */
+  priority: number | null;
+  /** The balancer's worker target there and why it is under the cap (src/machine-balancer.ts); null: it has no say yet. */
+  room: { workers: number; why: string | null } | null;
 }
 
 /** What the line asks of the machines. */
@@ -60,6 +64,8 @@ export interface MachinePoolsDeps {
   ships: (machineId: number) => boolean;
   /** Why its worker takes no turns now (src/worker-join.ts), or null. */
   hold?: (machineId: number) => string | null;
+  /** The balancer's plan for the machine (Build 7 M6), or null. */
+  room?: (machineId: number) => { workers: number; why: string | null } | null;
   /** `claude --version` here. */
   claude: () => Promise<string | null>;
   /** A machine may take turns it couldn't a moment ago. */
@@ -88,7 +94,7 @@ export class MachinePools {
     const info = this.d.info(m.id);
     const load = info?.load ? { reading: { cpu: info.load.cpu, mem: info.load.mem }, box: { freeGb: info.load.freeGb, level: 'ok' as const }, at: info.at } : null;
     const away = this.away(m, info);
-    return { id: m.id, name: m.name, owner, cap: info?.max ?? 0, block: this.block(m, info, away), away, load };
+    return { id: m.id, name: m.name, owner, cap: info?.max ?? 0, block: this.block(m, info, away), away, load, priority: m.priority ?? null, room: this.d.room?.(m.id) ?? null };
   }
 
   private away(m: Machine, info: WorkerInfo | null): number | null {

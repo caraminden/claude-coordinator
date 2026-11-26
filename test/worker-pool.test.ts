@@ -345,7 +345,7 @@ test('a most under the size, or a fewest over it, pulls the size in on the next 
 // machines"; Cara the same day: a minion marked as needing one machine.
 const DESK = 7;
 function places(saved: Record<string, unknown> = {}, asks?: (id: number) => LinePlace, not: number[] = []) {
-  const desk: MachinePlace = { id: DESK, name: 'desk', owner: 1, cap: 3, block: null, away: null, load: { reading: { cpu: 10, mem: 0 }, box: ok, at: Date.now() } };
+  const desk: MachinePlace = { id: DESK, name: 'desk', owner: 1, cap: 3, block: null, away: null, load: { reading: { cpu: 10, mem: 0 }, box: ok, at: Date.now() }, priority: null, room: null };
   const marks = new Map<number, number>();
   const never = new Set(not);
   const stuck: { ticket: number; block: Block }[] = [];
@@ -683,4 +683,75 @@ test('pick: with no machine first, after Urgent and Start now, the shares unchan
   assert.deepEqual(order([own(w(1, 7)), w(2, 8), own(w(3, 9)), w(4, 8)]), [2, 4, 1, 3]);
   assert.deepEqual(order([w(2, 8), own({ ...w(1, 7), urgent: 0 })]), [1, 2]);
   assert.deepEqual(order([w(2, 8), own({ ...w(1, 7), forced: true })]), [1, 2]);
+});
+
+// Build 7 M6: one balancer per machine, and the owner's order across their machines. Josh, 2026-11-25: "if there is CI to
+// run, we use less workers", and "users with multiple machines should be able to prio them, like say put work on machine 1
+// before using machine 2"; the Taskmaster's pick the same day: the order beats the warm cache.
+function fleet(priority: [number | null, number | null]) {
+  const at = Date.now();
+  const mk = (id: number, name: string, prio: number | null): MachinePlace => ({ id, name, owner: 1, cap: 3, block: null, away: null, load: { reading: { cpu: 10, mem: 0 }, box: ok, at }, priority: prio, room: null });
+  const [one, two] = [mk(7, 'one', priority[0]), mk(8, 'two', priority[1])];
+  const l = line({}, { machines: () => [one, two], mark: () => null, nameOf: (id) => (id === 7 ? 'one' : 'two'), takes: () => null, stuck: () => {} });
+  l.turns.setSize(0, 'Cara');
+  l.turns.setSize(3, 'Cara', 8);
+  return { ...l, one, two, at: (id: number) => l.turns.placeOf(id) };
+}
+
+test('machine 1 is filled to its budget before machine 2, though 2 has more room', () => {
+  const f = fleet([1, 2]);
+  for (const id of [1, 2, 3, 4, 5]) f.turns.enter(id);
+  assert.deepEqual([1, 2, 3, 4, 5].map(f.at), [7, 7, 8, 8, 8]);
+  f.turns.stop();
+});
+
+test('with no order, the most room goes first, as before', () => {
+  const f = fleet([null, null]);
+  f.turns.enter(1);
+  assert.equal(f.at(1), 8, 'three free beats two');
+  f.turns.stop();
+});
+
+test('equal order: a minion goes back to the machine it last ran on while it has room', async () => {
+  const f = fleet([1, 1]);
+  f.turns.setSize(2, 'Cara', 8);
+  f.turns.enter(1);
+  f.turns.enter(2);
+  assert.deepEqual([f.at(1), f.at(2)], [7, 8], 'equal room: the lower number, then the most room');
+  await f.turns.hold(2, () => {});
+  f.turns.enter(3);
+  assert.equal(f.at(3), 8);
+  await f.turns.hold(1, () => {});
+  f.turns.enter(9);
+  assert.equal(f.at(9), 7);
+  await f.turns.hold(3, () => {});
+  f.turns.enter(2);
+  assert.equal(f.at(2), 8, 'machine two is where it ran, and it has room again');
+  f.turns.stop();
+});
+
+test("the balancer's target holds a machine under its cap, and the tile's row says why", () => {
+  const f = fleet([1, 2]);
+  f.one.room = { workers: 0, why: '2 CI jobs waiting' };
+  f.turns.enter(1);
+  assert.equal(f.at(1), 8, 'CI waits on one: the turn goes to two');
+  assert.equal(f.turns.size(7), 0);
+  const row = f.turns.summary().machines.find((m) => m.id === 7)!;
+  assert.equal(row.balanced, '2 CI jobs waiting');
+  f.one.room = { workers: 2, why: null };
+  assert.equal(f.turns.summary().machines.find((m) => m.id === 7)!.balanced, null);
+  f.turns.stop();
+});
+
+test("Auto's size follows the balancer's target down, then grows back on Auto's own clock", () => {
+  const f = fleet([1, 2]);
+  const now = Date.now();
+  f.one.room = { workers: 0, why: '2 CI jobs waiting' };
+  f.turns.tick({ cpu: 5, mem: 0 }, [], now);
+  assert.deepEqual([f.turns.pool(7).size, f.turns.pool(7).why], [0, '2 CI jobs waiting']);
+  f.one.room = { workers: 3, why: null };
+  for (const id of [1, 2, 3, 4, 5, 6]) f.turns.join(id);
+  f.turns.tick({ cpu: 5, mem: 0 }, [], now + POOL.everyMs);
+  assert.ok(f.turns.pool(7).size < 3, `not back at once: ${f.turns.pool(7).size}`);
+  f.turns.stop();
 });

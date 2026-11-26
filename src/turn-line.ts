@@ -24,6 +24,7 @@ import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
 import { limitsOf, MACHINE_LIMITS, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
 import type { Block, MachineHost, MachinePlace } from './machine-pools.ts';
+import { rank } from './machine-balancer.ts';
 import type { RetryKind } from './turn-outcome.ts';
 import type { WorkerWait } from './worker-wait.ts';
 
@@ -210,6 +211,8 @@ export class TurnLine {
   private heldFull = '';
   /** What each turn marked for a machine waits on there, as pages last heard. */
   private heldThere = '';
+  /** The machine each minion's last turn ran on, so its next goes back while there is room (warm caches, Build 7 M6). shortcut: kept in memory, so a restart forgets it; save it if cold starts after a deploy cost. */
+  private warm = new Map<number, number>();
 
   constructor(host: LineHost) {
     this.host = host;
@@ -408,7 +411,7 @@ export class TurnLine {
   /** On Auto with no word of its load (an agent from before it said it), it holds at its fewest. */
   private sizeOf(m: MachinePlace): number {
     const p = this.pool(m.id);
-    return Math.min(p.fixed?.size ?? (this.loadOf(m) ? p.size : this.limits(m.id).min), m.cap);
+    return Math.min(p.fixed?.size ?? (this.loadOf(m) ? p.size : this.limits(m.id).min), m.cap, m.room?.workers ?? Infinity);
   }
 
   /** The limits Auto steers a place by: the saved changes over the defaults. */
@@ -488,6 +491,8 @@ export class TurnLine {
         max: Math.min(L.max, m.cap),
         waiting: this.entries.filter((e) => this.need(e.ticket) === m.id).length,
         block: m.block?.why ?? null,
+        // Why the balancer holds it under the owner's cap: "2 CI jobs waiting".
+        balanced: m.room && m.room.workers < Math.min(this.pool(m.id).fixed?.size ?? Infinity, m.cap) ? m.room.why : null,
         away: m.away,
         pressed,
       };
@@ -501,6 +506,7 @@ export class TurnLine {
   /** A machine was removed: its number may come to another. */
   forget(place: number) {
     for (const key of [SIZE, LIMITS]) this.host.store.deleteSetting(keyOf(key, place));
+    for (const [ticket, at] of this.warm) if (at === place) this.warm.delete(ticket);
   }
 
   /** A person's number, or null for Auto. */
@@ -544,8 +550,11 @@ export class TurnLine {
       if (p.fixed || m.block || !m.cap || !load) continue;
       const L = this.limits(m.id);
       const capped = { ...L, min: Math.min(L.min, m.cap), max: Math.min(L.max, m.cap) };
-      const size = nextSize({ ...p, used: this.used(m.id), waiting: this.ready(m).length }, load.reading, load.box, capped, now);
-      if (size !== p.size) this.host.store.setSetting(keyOf(SIZE, m.id), { size, at: now, why: starvedBy(load.reading, load.box, L) ? `${starveWhy(load.reading, load.box, L)} there` : size < p.size ? 'its most was lowered' : `${m.name} is calm and turns wait` } satisfies PoolSize);
+      const auto = nextSize({ ...p, used: this.used(m.id), waiting: this.ready(m).length }, load.reading, load.box, capped, now);
+      // The balancer's target pulls Auto's size down with it, so the workers grow back on Auto's clock once CI is quiet.
+      const size = m.room ? Math.min(auto, m.room.workers) : auto;
+      if (size !== p.size)
+        this.host.store.setSetting(keyOf(SIZE, m.id), { size, at: now, why: size < auto ? (m.room?.why ?? 'the balancer') : starvedBy(load.reading, load.box, L) ? `${starveWhy(load.reading, load.box, L)} there` : size < p.size ? 'its most was lowered' : `${m.name} is calm and turns wait` } satisfies PoolSize);
     }
     const held = this.entries.flatMap((e) => {
       const need = this.need(e.ticket);
@@ -626,7 +635,18 @@ export class TurnLine {
   private machineFor(me: LineEntry, via = me.via): number | null {
     const mark = this.host.pools?.mark(me.ticket) ?? null;
     if (mark === 0) return null;
-    return this.machines().find((m) => (!mark || m.id === mark) && !this.host.pools!.takes(m.id, me.ticket, via) && this.isFirst(me, this.ready(m)))?.id ?? null;
+    return this.ranked(me, via).find((m) => this.isFirst(me, this.ready(m)))?.id ?? null;
+  }
+
+  /** The machines a turn may start on now, best first (src/machine-balancer.ts rank): its owner's order, then where it last ran, then the most room. */
+  private ranked(me: LineEntry, via = me.via): MachinePlace[] {
+    const pools = this.host.pools;
+    if (!pools) return [];
+    const open = this.machines().filter((m) => !pools.takes(m.id, me.ticket, via));
+    return rank(
+      open.map((m) => ({ ...m, free: this.sizeOf(m) - this.used(m.id) })),
+      { mark: pools.mark(me.ticket), warm: this.warm.get(me.ticket) ?? null },
+    );
   }
 
   /** Someone with no machine of their own waits for perigee. */
@@ -718,8 +738,9 @@ export class TurnLine {
     const entry = this.best(this.used() < this.size() ? ready : ready.filter(forced), true);
     // Urgent or a long wait puts it first; its own machine is still its place while perigee is needed.
     if (entry) return this.admit(entry, (!forced(entry) && this.needed(ready) && this.machineFor(entry)) || 0);
-    for (const m of this.machines()) {
-      const there = this.best(this.ready(m));
+    // Each machine, its owner's order first, takes the best of the turns that would rather go there than anywhere else.
+    for (const m of rank(this.machines().map((x) => ({ ...x, free: this.sizeOf(x) - this.used(x.id) })))) {
+      const there = this.best(this.ready(m).filter((e) => this.ranked(e)[0]?.id === m.id));
       if (there) return this.admit(there, m.id);
     }
     // The quick lane last: a quick turn whose machine had room went there above.
@@ -758,7 +779,11 @@ export class TurnLine {
     if (held) {
       held.steps++;
       delete held.lent;
-    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined), ...(lane && !place ? { lane: { since: Date.now() } } : {}) });
+    } else {
+      this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined), ...(lane && !place ? { lane: { since: Date.now() } } : {}) });
+      if (place) this.warm.set(ticketId, place);
+      else this.warm.delete(ticketId);
+    }
     this.leave(ticketId);
     return true;
   }

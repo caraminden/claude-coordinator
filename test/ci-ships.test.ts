@@ -1,7 +1,7 @@
 // The ship watcher (#1268): which runners are on a ship run's job now, from GitHub, sent to the runner agents.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ShipWatch, shipsOn, type Ship } from '../src/ci-ships.ts';
+import { queuedOn, ShipWatch, shipsOn, type Ship } from '../src/ci-ships.ts';
 
 /** A fake GitHub: paths to bodies, a 304 for a path asked again with the etag it gave, and every path asked. */
 function github(pages: Record<string, unknown>) {
@@ -176,4 +176,53 @@ test("a Citadel ship on one PC leaves another scheme's ship on a second PC its s
   ];
   assert.deepEqual(shipsOn('desk', ships, pcs), [ships[0]]);
   assert.deepEqual(shipsOn('laptop', ships, pcs), [ships[2]]);
+});
+
+// Build 7 M6: waiting CI shrinks the workers (Josh, 2026-11-25), so the watch counts the jobs queued for self-hosted runners.
+const queuedRuns = (repo: string) => `repos/${repo}/actions/runs?status=queued&per_page=20`;
+
+test('queued jobs for self-hosted runners are counted per repo, and shared among the PCs that serve it', async () => {
+  const repo = 'caraminden/claude-coordinator';
+  const gh = github({
+    [runs(repo)]: { workflow_runs: [] },
+    [queuedRuns(repo)]: { workflow_runs: [{ id: 3 }, { id: 4 }] },
+    [jobs(repo, 3)]: {
+      jobs: [
+        { status: 'queued', labels: ['self-hosted', 'citadel'] },
+        { status: 'queued', labels: ['ubuntu-latest'] },
+      ],
+    },
+    [jobs(repo, 4)]: {
+      jobs: [
+        { status: 'queued', labels: ['self-hosted'] },
+        { status: 'completed', labels: ['self-hosted'] },
+      ],
+    },
+  });
+  const counts: Map<string, number>[] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: (m) => void counts.push(m) });
+  await w.tick(0);
+  assert.deepEqual([...counts[0]], [[repo, 2]]);
+  const pcs = new Map([
+    ['desk', new Set([`${repo}/desk`])],
+    ['laptop', new Set([`${repo}/laptop`, 'caraminden/peek-auras/laptop'])],
+    ['other', new Set(['caraminden/peek-auras/other'])],
+  ]);
+  assert.deepEqual(
+    ['desk', 'LAPTOP', 'other'].map((h) => queuedOn(h, counts[0], pcs)),
+    [1, 1, 0],
+  );
+  assert.equal(queuedOn('desk', new Map([[repo, 3]]), pcs), 2, 'rounded up: an odd one shrinks both');
+});
+
+test("a watch with no queued hook never reads queued runs, and a failed read of them doesn't touch the ships", async () => {
+  const repo = 'caraminden/claude-coordinator';
+  const gh = github({ [runs(repo)]: { workflow_runs: [{ id: 1, head_branch: 'land/1' }] }, [jobs(repo, 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'desk' }] } });
+  const plain = watch(gh, [repo]);
+  await plain.w.tick(0);
+  assert.ok(!gh.asked.some((p) => p.includes('status=queued')));
+  const counts: Map<string, number>[] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: (m) => void counts.push(m) });
+  assert.deepEqual(await w.tick(0), [{ repo, runner: 'desk' }], 'the 404 on queued runs leaves the ship');
+  assert.deepEqual([...counts[0]], []);
 });

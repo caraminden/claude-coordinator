@@ -14,6 +14,8 @@ export const SHIP_POLL_MS = 15_000;
 const RATE_LIMITED_MS = 5 * 60_000;
 /** How long a repo whose reads fail keeps its last ships: the agents' own hold, so a ship that ended unseen lifts. */
 const KEEP_FAILED_MS = 2 * 60_000;
+/** Queued runs read for their jobs each look, the newest first: the rest wait behind them anyway. */
+const QUEUED_RUNS = 5;
 /** A ship run's branch: what every scheme's land.sh pushes (Cara, 2026-11-20: "No, ship branches only"). */
 export const SHIP_BRANCH = /^land\//;
 /** An early next train's run (#1568, tools/land.sh's early_next): low priority beside a ship's, so squeezed while one runs. */
@@ -43,6 +45,17 @@ export function shipsOn(host: string, ships: Ship[], pcs: Pcs): Ship[] {
   return here.some((s) => s.first) ? here.filter((s) => s.first) : here;
 }
 
+/** The CI jobs waiting for the PC `host`'s runners: each repo's queued jobs, shared evenly among the PCs with runners for it (rounded up). */
+export function queuedOn(host: string, byRepo: Map<string, number>, pcs: Pcs): number {
+  let n = 0;
+  for (const [repo, jobs] of byRepo) {
+    if (!jobs) continue;
+    const serving = [...pcs].filter(([, runners]) => [...runners].some((r) => r.startsWith(`${repo.toLowerCase()}/`))).map(([h]) => h);
+    if (serving.includes(host.toLowerCase())) n += Math.ceil(jobs / serving.length);
+  }
+  return n;
+}
+
 export interface ShipWatchDeps {
   /** owner/name, lowercase, of every repo with runners on a runner agent's PC (repeats are fine). */
   repos: () => string[];
@@ -52,6 +65,8 @@ export interface ShipWatchDeps {
   send: (ships: Ship[]) => void;
   /** owner/name, lowercase, of the repo whose ships go first (Citadel's own); null when unknown. */
   first?: () => string | null;
+  /** Each repo's CI jobs queued for self-hosted runners (Build 7 M6: waiting CI shrinks the workers); left out, they aren't read. */
+  queued?: (byRepo: Map<string, number>) => void;
   get?: GhGet;
   log?: (line: string) => void;
 }
@@ -102,6 +117,20 @@ export class ShipWatch {
           this.say(`Ship watch: ${repo}: ${thrown(err).message ?? err}`);
         }
       }
+      if (this.deps.queued) {
+        const queued = new Map<string, number>();
+        for (const repo of repos) {
+          const as = this.deps.as(repo);
+          if (as === null) continue;
+          try {
+            queued.set(repo, await this.waiting(repo, as, used));
+          } catch (err) {
+            if (err instanceof RateLimited) throw err;
+            this.say(`Ship watch: ${repo}'s queued jobs: ${thrown(err).message ?? err}`);
+          }
+        }
+        this.deps.queued(queued);
+      }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
       const first = this.deps.first?.()?.toLowerCase();
       // Citadel's own ships carry first: true, so shipsOn, and a keeper that squeezes harder for them, can tell them from another scheme's.
@@ -115,6 +144,7 @@ export class ShipWatch {
       // An empty list now, so the agents lift at once and one connecting meanwhile isn't handed the old list.
       this.last.clear();
       this.deps.send([]);
+      this.deps.queued?.(new Map());
       this.say('Ship watch: GitHub says to slow down; looking again in 5 minutes (the agents lift any squeeze meanwhile).');
       return null;
     } finally {
@@ -136,6 +166,17 @@ export class ShipWatch {
       for (const j of jobs) if (j?.status === 'in_progress' && typeof j.runner_name === 'string' && j.runner_name && Array.isArray(j.labels) && j.labels.includes('self-hosted')) out.push({ repo, runner: j.runner_name });
     }
     return out;
+  }
+
+  /** Jobs waiting for a self-hosted runner in the repo's queued runs. shortcut: a queued job inside a run already going isn't counted; read in_progress runs' jobs too if workers grow over waiting CI. */
+  private async waiting(repo: string, as: GithubEnv, used: Set<string>): Promise<number> {
+    const runs = ((await this.read(`repos/${repo}/actions/runs?status=queued&per_page=20`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
+    let n = 0;
+    for (const r of runs.filter((r) => Number.isInteger(r?.id)).slice(0, QUEUED_RUNS)) {
+      const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
+      n += jobs.filter((j) => j?.status === 'queued' && Array.isArray(j.labels) && j.labels.includes('self-hosted')).length;
+    }
+    return n;
   }
 
   private async read(path: string, as: GithubEnv, used: Set<string>): Promise<unknown> {

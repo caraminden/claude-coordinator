@@ -40,7 +40,7 @@
 # really failing tests name is pulled at once (train_suspects, #1918; Josh, 2026-11-24: "we bisect out the likely failures
 # and run 1, 2, 4, 6, 7 if they are green they get shipped and we send 5 and 3 back to debug their failures"), and the rest
 # runs again with nobody from the line in the empty seats; a pulled ship is refused only once it failed the test run alone
-# on main. One only guessed goes back in line, to ship alone unless its tests are known flakes (#2098: refuse only on
+# on main. One only guessed goes back in line, to ship alone, its own CI run deciding (#2098: refuse only on
 # proof; the train passing without it proved nothing). A ship that adds the case a burn-in failed needs no
 # such proof (burn_new, #2019). With nobody named, it is split (train_bisect,
 # #1899): its front half is tested and ships as soon as it is green; the next front tests part of what is left, until one

@@ -528,7 +528,7 @@ function machineLine(m) {
     view.machineOpen.add(m.id);
     renderMachineList();
   };
-  const gone = removing(m.id);
+  const gone = removing(m);
   const [workWord, workHue] = gone ? ['Removing…', 'waiting'] : (workerWord(m) ?? []);
   const word = workWord ?? { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
@@ -550,7 +550,7 @@ function machineBody(m) {
   const check = h('button', { type: 'button', class: 'secondary small', disabled: !m.online || m.checking, title: m.online ? "Start its tools and list them, as a minion's turn would" : 'It is offline' }, m.checking ? 'Checking…' : 'Check now');
   check.onclick = () => checkMachine(m, check);
   const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects', onclick: () => newMachineToken(m) }, 'New token');
-  const remove = h('button', { type: 'button', class: 'secondary small', disabled: removing(m.id), onclick: () => removeMachine(m) }, removing(m.id) ? 'Removing…' : 'Remove');
+  const remove = h('button', { type: 'button', class: 'secondary small', disabled: removing(m), onclick: () => removeMachine(m) }, removing(m) ? 'Removing…' : 'Remove');
   const alwaysOn = h('input', { type: 'checkbox', checked: m.always_on });
   alwaysOn.onchange = () => patchMachine(m, { always_on: alwaysOn.checked }, `mark ${m.name} as ${alwaysOn.checked ? '' : 'not '}always on`, renderMachineList);
   const kv = (label, ...value) => [h('span', { class: 'muted' }, label), h('div', {}, ...value)];

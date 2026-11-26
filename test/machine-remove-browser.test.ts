@@ -113,3 +113,15 @@ test('a machine with no worker just goes, with nothing to run', { skip }, async 
   await wait('the row gone', `!${row('tools-only')}`);
   assert.equal(await page.eval(`!!${panel('tools-only')}`), false);
 });
+
+test('a machine added later under a removed one’s id starts clean', { skip }, async () => {
+  await worker('old-pc');
+  await wait('its row', `!!${row('old-pc')}`);
+  await remove('old-pc', null);
+  await go();
+  await wait('the row gone', `!${row('old-pc')}`);
+  await worker('new-pc');
+  await wait('the new row', `!!${row('new-pc')}`);
+  assert.doesNotMatch(await page.eval<string>(`${row('new-pc')}.querySelector('summary').textContent`), /Removing…/);
+  assert.match(await page.eval<string>(`${panel('old-pc')}.textContent`), /old-pc is removed/);
+});

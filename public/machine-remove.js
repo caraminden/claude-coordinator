@@ -8,8 +8,11 @@ import { optimistic } from './ui/optimistic.js';
 const removals = new Map();
 const seen = new Set();
 
+// A removed machine's id goes to the next one added, so an entry is that machine's only with its created time too.
+const same = (r, m) => r?.created === m.created_at;
+
 /** Its row shows Removing… */
-export const removing = (id) => removals.has(id);
+export const removing = (m) => same(removals.get(m.id), m);
 
 /** The command that takes a removed worker off its PC, for the shell that PC's worker ran in; null when it had none. */
 export function uninstallFor(machine, reply) {
@@ -24,7 +27,7 @@ export function sendRemoval(machine, { redraw, drop }) {
   optimistic({
     key: `machine:${machine.id}`,
     apply: () => {
-      removals.set(machine.id, { name: machine.name, command: null });
+      removals.set(machine.id, { name: machine.name, created: machine.created_at, command: null });
       redraw();
     },
     send: () => api(`api/machines/${machine.id}`, { method: 'DELETE' }),
@@ -36,7 +39,7 @@ export function sendRemoval(machine, { redraw, drop }) {
   }).then(
     (reply) => {
       const command = uninstallFor(machine, reply);
-      if (command) removals.set(machine.id, { name: machine.name, command });
+      if (command) removals.set(machine.id, { name: machine.name, created: machine.created_at, command });
       else removals.delete(machine.id);
       // A 202 keeps its row until its agent has cleared the copies there.
       if (reply.removing) redraw();
@@ -51,7 +54,7 @@ const WHERE = { powershell: 'in a normal PowerShell window on that PC (not as ad
 /** The commands to run, above the list. */
 export function renderRemovals(el, redraw) {
   if (!el) return;
-  const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => m.id === id)]);
+  const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, view.machines.some((m) => m.id === id && same(r, m))]);
   // Left alone while nothing changed, so a selection in a command survives the list's redraws.
   const key = JSON.stringify(shown);
   if (el.dataset.key === key) return;
@@ -68,7 +71,8 @@ export function renderRemovals(el, redraw) {
         'div',
         { class: 'machine-setup machine-removal' },
         h('b', {}, there ? `Removing ${name}…` : `${name} is removed`),
-        h('p', { class: 'small' }, there ? `Turns running there finish and its copies are cleared first. Once its line is gone, run this ${WHERE[command.tag]}:` : `To take the worker off it, run this ${WHERE[command.tag]}:`),
+        there ? h('p', { class: 'cui-notice', 'data-tone': 'warn' }, `Don't run this yet. Turns running there finish and its copies are cleared first: wait until ${name} leaves the list below.`) : '',
+        h('p', { class: 'small' }, `${there ? 'Then, to' : 'To'} take the worker off it, run this ${WHERE[command.tag]}:`),
         markdownElement(`\`\`\`${command.tag}\n${command.command}\n\`\`\``),
         there ? '' : h('div', { class: 'row' }, h('span', { class: 'spacer' }), done),
       );

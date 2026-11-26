@@ -44,7 +44,7 @@ export function workerState(m) {
   if (w.twice) return { tone: 'warn', word: 'Two workers', why: "This PC's Citadel agent has a worker block in its config too, and is refused: take that block out. Its minion turns run in citadel-worker." };
   if (w.image?.state === 'failed') return { tone: 'danger', word: 'Image failed', why: `${w.image.text} It tries again in 10 minutes.` };
   if (w.image?.state === 'building') return { tone: 'info', word: 'Building its image', why: w.image.text };
-  if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${w.caps?.disk_gb} GB, so no new turn starts there.` };
+  if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${heldCaps(m)?.disk_gb} GB, so no new turn starts there.` };
   if (!w.image) return { tone: 'info', word: 'Connecting', why: 'It is connected and is checking its image.' };
   if (w.claude_wanted) return { tone: 'warn', word: 'Wrong Claude version', why: `Its Claude is ${w.claude} and this server's is ${w.claude_wanted}. ${w.image.state === 'own' ? "Its image is its owner's own: update it there." : 'It updates itself.'}` };
   if (w.signed_in === false) return { tone: 'warn', word: 'Needs a Claude sign-in', why: 'No turn starts there until its owner signs in.' };
@@ -388,13 +388,14 @@ function hostPrograms(m, k) {
   );
 }
 
-/** Its caps as the worker holds them: that PC's own, lowered by any its owner set on the Machines page (Build 7 M3). @param {MachineRow} m @returns {Record<keyof MachineWorkerCaps, number | null> | null} */
+/** Its caps as the worker holds them: as it says while here (#2085), else those its owner set on the Machines page, and that PC's own where the page leaves one blank (Build 7 M3). @param {MachineRow} m @returns {Record<keyof MachineWorkerCaps, number | null> | null} */
 export function heldCaps(m) {
+  if (m.worker?.held) return m.worker.held;
   const own = /** @type {Record<string, number> | null} */ (m.worker?.caps ?? null);
   const page = /** @type {Record<string, number | undefined>} */ (m.roles?.find((r) => r.role === 'turns')?.caps ?? {});
   const keys = ['workers', 'threads', 'memory_gb', 'disk_gb'];
   if (!own && !keys.some((k) => page[k] != null)) return null;
-  return /** @type {Record<keyof MachineWorkerCaps, number | null>} */ (Object.fromEntries(keys.map((k) => [k, Math.min(own?.[k] ?? Infinity, page[k] ?? Infinity)]).map(([k, v]) => [k, v === Infinity ? null : v])));
+  return /** @type {Record<keyof MachineWorkerCaps, number | null>} */ (Object.fromEntries(keys.map((k) => [k, page[k] ?? own?.[k] ?? null])));
 }
 
 /** The Minion turns part of an opened row; inside its role card (`bare`), without its own switch and border. @param {MachineRow} m @param {Redraw} redraw @param {{ bare?: boolean }} [opts] */
@@ -429,7 +430,7 @@ export function workerSection(m, redraw, { bare = false } = {}) {
     w.host ? hostFolders(m, k) : null,
     w.host && w.wsl ? hostPrograms(m, k) : null,
     w.host ? selfTest(m, redraw) : null,
-    owner && w.host ? folded(k, 'caps', bare ? "Change that PC's own caps (the most the page can give it)" : 'Change its caps', capsBlock(m, k)) : null,
+    owner && w.host ? folded(k, 'caps', bare ? "Change that PC's own caps (used where the page leaves one blank)" : 'Change its caps', capsBlock(m, k)) : null,
     // Closed until asked for: its command shows the token, and fetches it only then.
     owner && w.host ? again(m, k, redraw) : null,
   );

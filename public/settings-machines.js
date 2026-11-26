@@ -605,7 +605,8 @@ function machineBody(m) {
   );
 }
 
-/** An old CI runner agent's update line, per OS: its install again, with the token already on that PC, so nothing else is cut off. */
+/** An old CI runner agent's update line, per OS: its install again, with the token already on that PC, so nothing else is cut off.
+ * @type {Record<'windows' | 'linux', { tag: string, where: string, line: (u: string) => string }>} */
 const CI_AGENT_UPDATE = {
   windows: {
     tag: 'powershell-admin',
@@ -620,7 +621,8 @@ const CI_AGENT_UPDATE = {
   },
 };
 
-/** Why an old CI runner agent wants updating (Build 7 M6b), and the line for each one there. */
+/** Why an old CI runner agent wants updating (Build 7 M6b), and the line for each one there.
+ * @param {{ runner_update: { url?: string | null, os: ('windows' | 'linux')[] } }} m */
 function ciAgentUpdate(m) {
   const u = (m.runner_update.url ?? location.origin).replace(/\/$/, '');
   return h(

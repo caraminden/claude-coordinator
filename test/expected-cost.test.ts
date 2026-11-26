@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { CREATE_TICKET } from '../src/mcp-minions.ts';
-import { ASK, askText, type Budget, expectedCost, markOf, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
+import { ASK, askText, type Budget, expectedCost, markOf, splitCeiling, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
 import { agentToken, bootServer, mintedAgentToken } from './helpers.ts';
 import { json, type Refused } from './typed.ts';
 import { until } from './wait.ts';
@@ -37,6 +37,11 @@ test('the marks scale from the larger of the usual cost and the estimate', () =>
   assert.match(turnLine(big, 1), /its brief expected about \$15 \(a feature on Opus has usually cost about \$5\.00/);
   assert.match(askText(big, 31), /over 2x its brief's expected \$15/);
   assert.doesNotMatch(turnLine(usual, 1), /brief/);
+});
+
+test('"Split first" on a card posted at $30 still asks for $30 or less', () => {
+  assert.equal(splitCeiling(45), 30, "at or under today's threshold: an old card");
+  assert.equal(splitCeiling(60), START_CARD_USD);
 });
 
 test("create_ticket's description names the start card's threshold", () => {

@@ -1,7 +1,7 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { azureSpeech } from '../azure-speech.ts';
-import { CARD_STOP, money, SPLIT, START, START_CARD_USD, startHoldKey } from '../minion-budget.ts';
+import { CARD_STOP, money, SPLIT, splitCeiling, START, startHoldKey } from '../minion-budget.ts';
 import { parseSpend } from '../outside-spend.ts';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -1186,7 +1186,7 @@ export const ticketRoutes: Route[] = [
           await tellTaskmaster(
             app,
             ticket,
-            `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(START_CARD_USD)} or less each, with an "Expected cost" line in each, and start those.`,
+            `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(splitCeiling(data.startCost))} or less each, with an "Expected cost" line in each, and start those.`,
             false,
             true,
             'ask',

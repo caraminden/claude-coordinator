@@ -33,6 +33,9 @@ export const CARD = { times: 10, floor: 50 };
 /** A brief expected to cost more than this waits for a person's start card (the one exception to "stop rate limiting my minions"). */
 export const START_CARD_USD = 50;
 
+/** The size "Split first" asks for, as the card promised: one at or under today's threshold was posted when it was $30. */
+export const splitCeiling = (estimate: number) => (estimate > START_CARD_USD ? START_CARD_USD : 30);
+
 /** The usual cost of a minion's kind of work, and what it rests on; with `estimate`, its brief's estimate is the base instead. */
 export interface Budget {
   usd: number;

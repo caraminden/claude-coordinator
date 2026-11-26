@@ -4,7 +4,7 @@
 /** @import { MachineRole, MachineRow, SetupRun } from './types.js' */
 import { account, ago, api, h, openView, pacificStamp } from './base.js';
 import { toneChip } from './look.js';
-import { runnerAgentLines } from './machine-merge.js';
+import { machineSetupRunnerAgent, machineSetupRunnerAgentLinux } from './machine-setup.js';
 import { adminCommand, lastRun, SETUP_ROLES } from './role-setup.js';
 import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -39,14 +39,17 @@ function runnerInstall(m, redraw) {
   }
   if (got?.failed) return h('p', { class: 'cui-notice', 'data-tone': 'danger' }, `Couldn't get the install command: ${got.failed} `, h('button', { type: 'button', class: 'secondary small', onclick: () => (installs.delete(m.id), redraw()) }, 'Try again'));
   if (!got?.token || !got.url) return h('p', { class: 'muted small' }, 'Getting the install command…');
+  const { token, url } = got;
+  /** @param {string} tag @param {string} line */
+  const block = (tag, line) => markdownElement(`\`\`\`${tag}\n${line}\n\`\`\``);
   const linux = m.report?.os === 'linux';
   return h(
     'div',
     { class: 'role-setup-admin' },
-    linux ? null : runnerAgentLines(got.url, got.token, ['windows']),
-    linux ? null : h('p', { class: 'small' }, 'For Linux jobs too, its runners run in a WSL distro of their own. Make it once, in a normal PowerShell (the CI runner guide\'s "Linux runners in WSL" has the rest):'),
-    linux ? null : markdownElement('```powershell\nwsl --install Ubuntu-24.04 --name citadel-ci\n```'),
-    runnerAgentLines(got.url, got.token, ['linux']),
+    linux ? null : [h('p', { class: 'small' }, 'For Windows jobs: on that PC, open PowerShell as administrator (Run as administrator) and paste this.'), block('powershell-admin', machineSetupRunnerAgent(url, token))],
+    linux ? null : [h('p', { class: 'small' }, 'For Linux jobs too: its runners run in a WSL distro of their own. Make it once, in a normal PowerShell (the CI runner guide\'s "Linux runners in WSL" has the rest):'), block('powershell', 'wsl --install Ubuntu-24.04 --name citadel-ci')],
+    h('p', { class: 'small' }, linux ? 'On that PC, in a root shell (sudo -i), paste this.' : 'Then open a root shell in it (wsl -d citadel-ci -u root) and paste this.'),
+    block(linux ? 'bash' : 'wsl', machineSetupRunnerAgentLinux(url, token)),
   );
 }
 
@@ -130,7 +133,6 @@ export function setupPart(m, r, redraw) {
     // With an administrator command, that block says what to do: the run's own why would only repeat it.
     run?.why && !adminCommand(run.admin) ? h('p', { class: 'cui-notice', 'data-tone': 'danger' }, run.why) : null,
     run ? adminPart(run) : null,
-    r.role === 'ci' && can && run && !run.done && run.worker_install ? runnerInstall(m, redraw) : null,
     showSteps
       ? h(
           'ul',
@@ -138,6 +140,7 @@ export function setupPart(m, r, redraw) {
           run.steps.map((s) => h('li', { 'data-state': s.state }, h('span', { class: 'worker-check-mark', role: 'img', 'aria-label': STATE_WORD[s.state] }, s.state === 'running' ? h('span', { class: 'cui-spin' }) : MARK[s.state]), h('span', { class: 'worker-check-name' }, s.text))),
         )
       : null,
+    r.role === 'ci' && can && run && !run.done && run.worker_install ? runnerInstall(m, redraw) : null,
     run?.ok && run.report ? h('p', { class: 'small' }, run.report) : null,
     run?.shot && r.role === 'screen'
       ? h('a', { href: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, target: '_blank', rel: 'noopener', class: 'role-setup-shot', title: 'Open the screenshot full size' }, h('img', { src: `api/machines/${m.id}/roles/screen/shot?at=${run.shot}`, alt: `The screenshot ${m.name}'s test took`, loading: 'lazy' }))

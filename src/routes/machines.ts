@@ -28,6 +28,7 @@ import { readsDisk, stateCall, syncScript, type StateDeps } from '../machine-syn
 import { askCheckpoint, AWAY_MS, endAway, heardAt, liveOn, machineLink, owned, placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
 import { UNINSTALL } from '../machine-away.ts';
 import { BLOB_BYTES } from '../worker-join.ts';
+import { joinState, makeJoin, redeemJoin } from '../machine-join.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -278,6 +279,19 @@ async function turnCall({ req, res, url, params, app }: Ctx, machine: Machine) {
 
 /** What a machine's agent calls: hold its stream open, pass on a message from its MCP server, its details, a file. */
 export const agentRoutes: Route[] = [
+  // Connect a computer (Build 7 M2): the command's agent swaps its join code for its machine's token. No token yet, so anyone
+  // on the machines' address may try; the code, one use and 15 minutes, is the whole check.
+  {
+    method: 'POST',
+    path: '/api/machines/join',
+    who: 'anyone',
+    async handler({ req, res, app }) {
+      const joined = redeemJoin(app.store, (id) => app.machines.issueToken(id), await readJson(req, 20_000));
+      await ownWrites(); // the panel's next look re-reads the row
+      app.broadcast({ type: 'machines', machines: app.machines.list() });
+      return json(res, 201, joined);
+    },
+  },
   agent('GET', '/api/machines/connect', ({ url, res, app }, machine) => {
     const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
     return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2', os: url.searchParams.get('os') === 'linux' ? 'linux' : 'windows' });
@@ -670,6 +684,45 @@ export const machineRoutes: Route[] = [
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // Shown here, and again only to its owner (GET .../token, #1355).
       return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
+    },
+  },
+  {
+    // Connect a computer (Build 7 M2): a join code for the command the panel shows, one use and 15 minutes. The machine
+    // is the asker's own, as one a person adds is (#306); an admin's too, since it is their PC.
+    method: 'POST',
+    path: '/api/machines/joins',
+    ...people,
+    async handler({ req, res, app, session }) {
+      if (session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to connect a computer');
+      const join = makeJoin(app.store, { uid: session.uid, name: session.name }, session.uid, null);
+      await ownWrites();
+      return json(res, 201, { ...join, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
+    },
+  },
+  {
+    // Update an agent from before (Build 7 M2): a join code for this row, whose new agent reports what the PC can do. Who
+    // may make it a new token may update it.
+    method: 'POST',
+    path: '/api/machines/:machine/join',
+    ...people,
+    handler: managed(async ({ req, res, app, machine, session }) => {
+      if (app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it can't be updated`);
+      const join = makeJoin(app.store, { uid: session.uid ?? null, name: session.name }, machine.owner_id, machine);
+      await ownWrites();
+      return json(res, 201, { ...join, name: machine.name, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
+    }),
+  },
+  {
+    // How a code the asker made is going, for the panel that shows it: waiting, expired, joined, or connected with the row.
+    method: 'GET',
+    path: '/api/machines/joins/:id',
+    ...people,
+    handler({ res, app, session, params }) {
+      const join = app.store.machineJoin(Number(params.id));
+      if (!join || join.asker_id === null || join.asker_id !== session.uid) throw new HttpError(404, 'No such join code');
+      const machine = join.joined_id === null ? undefined : app.store.getMachine(join.joined_id);
+      const view = machine ? app.machines.view(machine) : null;
+      return json(res, 200, { id: join.id, expires_at: join.expires_at, state: joinState(join, !!view?.online && view.reported && (view.connected_at ?? 0) >= join.used_at!), machine: view });
     },
   },
   {

@@ -35,6 +35,12 @@
 .dot.asleep, .dot.checking { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .machines-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0 0.4rem; }
 .machines-bar h3 { margin: 0; font-size: 1em; }
+/* Connect a computer (Build 7 M2): its tagged command, its status, and the name once connected. */
+.machine-connect .cui-md { margin-top: 0.4rem; }
+.machine-connect .cui-md pre { user-select: all; white-space: pre-wrap; word-break: break-all; }
+.machine-connect .cui-notice { margin: 0.5rem 0 0; }
+.machine-connect-name { gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.machine-connect-name input { width: 16rem; max-width: 100%; }
 .machines-main .machine-add[hidden] { display: none; }
 h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }

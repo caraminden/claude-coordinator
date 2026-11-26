@@ -1,5 +1,8 @@
 // Machines (the CI runners and computers people lend to schemes), their load samples and their jobs (#1313: src/db.ts by area).
 import type { Machine, MachineJob, Store } from '../db.ts';
+
+/** A row of machine_joins (src/db-schema.ts). */
+export type MachineJoin = { id: number; code_hash: string; asker_id: number | null; created_by: string; owner_id: number | null; machine_id: number | null; created_at: number; expires_at: number; used_at: number | null; joined_id: number | null };
 import { type Caps, type LegacyLend, legacyFromRoles, parseLegacyLend, ROLES, type Role, type RoleRow, rolesFromLegacy, runnerHost, runnerSeen, type Ticks } from '../machine-roles.ts';
 
 export const machineQueries = {
@@ -9,6 +12,33 @@ export const machineQueries = {
 
   getMachine(this: Store, id: number): Machine | undefined {
     return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
+  },
+
+  /** A join code for Connect a computer (Build 7 M2, src/machine-join.ts), hashed; machineId: the row an Update reconnects. */
+  addMachineJoin(this: Store, j: { codeHash: string; askerId: number | null; by: string; ownerId: number | null; machineId: number | null; at: number; expiresAt: number }): number {
+    const { lastInsertRowid } = this.db
+      .prepare('INSERT INTO machine_joins (code_hash, asker_id, created_by, owner_id, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(j.codeHash, j.askerId, j.by, j.ownerId, j.machineId, j.at, j.expiresAt);
+    return Number(lastInsertRowid);
+  },
+
+  machineJoin(this: Store, id: number): MachineJoin | undefined {
+    return this.db.prepare('SELECT * FROM machine_joins WHERE id = ?').get(id) as unknown as MachineJoin | undefined;
+  },
+
+  /** Use a join code: the one unused, unexpired row with this hash, marked used in the same statement (so a code works once), or null. */
+  takeMachineJoin(this: Store, codeHash: string, now: number): MachineJoin | null {
+    return (this.db.prepare('UPDATE machine_joins SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING *').get(now, codeHash, now) as unknown as MachineJoin | undefined) ?? null;
+  },
+
+  /** The row a used code made or reconnected. */
+  setMachineJoined(this: Store, id: number, machineId: number) {
+    this.db.prepare('UPDATE machine_joins SET joined_id = ? WHERE id = ?').run(machineId, id);
+  },
+
+  /** Codes a day past their end, used or not: the panel that showed one is long closed. */
+  pruneMachineJoins(this: Store, before: number) {
+    this.db.prepare('DELETE FROM machine_joins WHERE expires_at < ?').run(before);
   },
 
   /** A CI runner agent's load sample (#534), as JSON. */
@@ -44,7 +74,7 @@ export const machineQueries = {
     return this.getMachine(Number(lastInsertRowid))!;
   },
 
-  updateMachine(this: Store, id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'token_sealed' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings'>>) {
+  updateMachine(this: Store, id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'token_sealed' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend' | 'jobs' | 'job_settings' | 'report'>>) {
     const { lend, ...rest } = fields;
     const keys = Object.keys(rest) as (keyof typeof rest)[];
     if (keys.length) this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => rest[k] ?? null), id);

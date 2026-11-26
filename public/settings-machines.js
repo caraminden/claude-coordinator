@@ -2,6 +2,7 @@
 import { account, ago, api, h, icon, view } from './base.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { machineJobsSection } from './jobs.js';
+import { openConnectPanel, reportLine } from './machine-connect.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
 import { forgetWorkerLink, workerReason, workerSection, workerWord } from './machine-worker-row.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
@@ -76,7 +77,7 @@ function machineAddForm(runners, label) {
           h('li', {}, h('strong', {}, 'Open its line and tick what to lend.'), ' It reports the MCP servers set up for Claude Code there, and the servers and folders its owner lists in ', h('code', {}, 'machine-agent.json'), '.'),
         ),
   );
-  const toggle = h('button', { type: 'button', class: runners ? 'secondary small' : 'machine-add-toggle', 'aria-expanded': 'false' }, runners ? 'Add a CI runner host' : 'Add a machine');
+  const toggle = h('button', { type: 'button', class: runners ? 'secondary small' : 'machine-add-toggle secondary', 'aria-expanded': 'false' }, runners ? 'Add a CI runner host' : 'Add by name');
   const show = (on) => {
     form.hidden = !on;
     toggle.setAttribute('aria-expanded', String(on));
@@ -125,8 +126,10 @@ export function machinesPage(main = {}) {
           : settingsHelp('Your computers, lending their MCP tools to the minion turns you ask for, in the schemes you list under Who gets it.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'),
       ),
     ),
-    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add.toggle),
+    // Connect a computer (Build 7 M2) is the way in; Add by name stays for a shared machine and the GPU jobs distro's line.
+    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add.toggle, h('button', { type: 'button', class: 'machine-connect-toggle', onclick: () => connectComputer() }, 'Connect a computer')),
     add.form,
+    h('div', { id: 'machine-connect' }),
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-removals' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
@@ -166,9 +169,17 @@ export function machinesPage(main = {}) {
     renderMachineSetup();
     renderMachineList();
     if (focus) document.querySelector(`#machine-list .machine-row[data-name="${focus.name}"]`)?.scrollIntoView({ block: 'start' });
-    if (!view.machines?.length) add.show(true);
+    if (!view.machines?.length) connectComputer();
   });
   return section;
+}
+
+/** Connect a computer's panel (Build 7 M2), for a new computer or, with `m`, an Update of an agent from before. */
+function connectComputer(m = null) {
+  const el = document.getElementById('machine-connect');
+  if (!el) return;
+  openConnectPanel(el, { machine: m });
+  el.scrollIntoView({ block: 'nearest' });
 }
 
 /** A machine just added or given a new token: what its install line needs. */
@@ -539,6 +550,8 @@ function machineLine(m) {
   const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
   if (fix) sum.after(h('span', { class: 'machine-fix' }, fix));
+  // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
+  if (m.update && !gone && managesHere(m)) sum.after(h('span', { class: 'machine-fix' }, h('button', { type: 'button', class: 'secondary small', title: "Its agent is from before: the new one says what this PC can do. Opens the command that replaces it", onclick: () => connectComputer(m) }, 'Update')));
   row.classList.add('machine-row', 'machine-line', m.status);
   row.dataset.name = m.name;
   row.addEventListener('toggle', () => {
@@ -567,6 +580,7 @@ function machineBody(m) {
       m.runners ? kv('Runs CI for', m.owner_id === null && !m.scoped ? 'Every scheme an admin owns' : machineLending(m)) : kv('Who gets it', m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`), machineLending(m)),
       kv(
         'Computer',
+        m.report ? h('div', { class: 'small' }, reportLine(m.report)) : '',
         h('span', {}, [m.host ?? m.worker?.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : m.worker?.host ? 'runs only minion turns' : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on')),
       ),
@@ -580,6 +594,9 @@ function machineBody(m) {
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, remove),
   );
 }
+
+/** Whether the viewer may relink this machine, as the server's managesMachine says: its owner, or an admin. */
+const managesHere = (m) => !!account?.admin || (m.owner_id !== null && m.owner_id === account?.id);
 
 /** Whether the viewer may show this machine's token (#1355): its owner's own, an admin's for a shared one (Cara, 2026-11-20, "Only its owner"). */
 const tokenIsMine = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);

@@ -10,6 +10,14 @@ export function machineSetupPosix(url, name, token) {
   return ['mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&', `curl -fsSLO ${url}/machine-agent.mjs &&`, `node machine-agent.mjs ${url} ${token} --config machine-agent.json --install ${name}`].join('\n');
 }
 
+/**
+ * Connect a computer (Build 7 M2): the same, with a join code in place of the name and token. The agent swaps the code
+ * for its token, names its service after the machine the app made for it, and installs as above.
+ */
+export function machineJoinPosix(url, code) {
+  return ['mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&', `curl -fsSLO ${url}/machine-agent.mjs &&`, `node machine-agent.mjs ${url} --join ${code} --config machine-agent.json --install`].join('\n');
+}
+
 /** Where a background agent logs, as the page shows it. */
 export function agentLog(os, name) {
   return os === 'windows' ? `%USERPROFILE%\\coordinator-agent\\machine-agent-${name}.log` : `~/coordinator-agent/machine-agent-${name}.log`;
@@ -27,6 +35,26 @@ const killAgent = (name) => `Get-CimInstance Win32_Process -Filter "Name='node.e
  * One script block, so a missing Node or failed download stops it before a broken task is registered.
  */
 export function machineSetupWindows(url, name, token) {
+  return windowsScript(url, name, token, psq, []);
+}
+
+// A double-quoted PowerShell string in which only $name and $token expand: the join command's, which learns both as it runs.
+const psJoined = (s) => `"${s.replace(/[`"]/g, '`$&').replace(/\$(?!name\b|token\b)/g, '`$')}"`;
+
+/**
+ * Connect a computer on Windows (Build 7 M2): the agent swaps the join code for the machine's name and token first,
+ * then the same task as machineSetupWindows is registered with them. A used or old code stops it before any task.
+ */
+export function machineJoinWindows(url, code) {
+  return windowsScript(url, '$name', '$token', psJoined, [
+    `$j = & $node "$dir\\machine-agent.mjs" ${url} --join ${code} --config "$dir\\machine-agent.json" --json`,
+    'if ($LASTEXITCODE) { throw "The app did not take the join code: the line above says why. A used or old code needs a new one from Connect a computer." }',
+    '$j = $j | Select-Object -Last 1 | ConvertFrom-Json; $name = $j.name; $token = $j.token',
+  ]);
+}
+
+/** The Windows script: `name` and `token` are literal, or $name and $token that `join` sets as it runs; `say` quotes the lines it prints. */
+function windowsScript(url, name, token, say, join) {
   const task = taskName(name);
   // Disabled as well as stopped, or the 5-minute trigger starts it again; its node goes too, in case
   // stopping its hidden console leaves it running.
@@ -44,6 +72,7 @@ export function machineSetupWindows(url, name, token) {
     '$dir = "$env:USERPROFILE\\coordinator-agent"; New-Item -ItemType Directory -Force $dir | Out-Null',
     `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${url}/machine-agent.mjs`,
     'if ($LASTEXITCODE) { throw "Could not download machine-agent.mjs (curl exit $LASTEXITCODE)." }',
+    ...join,
     `$log = "$dir\\machine-agent-${name}.log"`,
     // conhost --headless gives node a console nobody sees, so there is no window to close (a plain
     // node.exe gets one, in Windows Terminal on Windows 11 too); --log keeps what it prints.
@@ -61,10 +90,10 @@ export function machineSetupWindows(url, name, token) {
     'foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $all = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue); if ($all.Count -lt $skip) { $skip = 0 }; $said = @($all | Select-Object -Skip $skip); if ($said -match "Connected to |rejected|refused") { break } }',
     '$said',
     'if ($said -match "Connected to ") { "It runs in the background now, also after you close this window, and starts again at every logon." } else { "It has not connected yet: the lines above say why (nothing above means it did not start)." }',
-    psq(`Its output: ${help.watch}`),
-    psq(`Stop it: ${help.stop}`),
-    psq(`Start it again: ${help.start}`),
-    psq(`Remove it: ${help.remove}`),
+    say(`Its output: ${help.watch}`),
+    say(`Stop it: ${help.stop}`),
+    say(`Start it again: ${help.start}`),
+    say(`Remove it: ${help.remove}`),
     '}',
   ].join('\n');
 }

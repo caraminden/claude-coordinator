@@ -140,6 +140,11 @@ export const VALUE_WRITES = [
   'updateMachine',
   'setMachineRole',
   'writeMachineRoles',
+  // Join codes (Build 7 M2): a code is used and its row made in one request, and the panel reads how it went at once.
+  'addMachineJoin',
+  'takeMachineJoin',
+  'setMachineJoined',
+  'pruneMachineJoins',
   'updateMachineJob',
   'allowJobKind',
   'savePushSubscription',

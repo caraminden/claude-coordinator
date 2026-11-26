@@ -24,13 +24,18 @@
 // --log <file> copies everything it prints to that file too. --install <machine name>, on macOS or
 // Linux, runs it with the same options in the background instead (a launchd agent or a systemd user
 // unit, logging next to this file), starting at login and again if it stops.
-// The token can come from CC_MACHINE_TOKEN instead. Needs Node 18 or newer; no other installs.
-import { spawn, spawnSync } from 'node:child_process';
+// The token can come from CC_MACHINE_TOKEN instead, or from a join code: --join <code> (Connect a computer, Build 7 M2)
+// swaps it for the token once, keeps that in machine-agent.join.json beside the config, and with --install names the
+// service after the machine. Needs Node 18 or newer; no other installs.
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, watchFile, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { homedir, hostname } from 'node:os';
+import { homedir, hostname, release, totalmem } from 'node:os';
+// availableParallelism and statfsSync came in Node 18.14 and 18.15: a named import of either would stop an older Node 18 loading the agent at all.
+import * as nodeFs from 'node:fs';
+import * as nodeOs from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
@@ -2224,6 +2229,109 @@ async function installService(name, argv) {
   process.exit(ok ? 0 : 1);
 }
 
+// ---------- connect with a join code (Build 7 M2) ----------
+
+/** This agent's version, in its report: a row whose agent reports an older one (or nothing) offers Update. */
+export const AGENT_VERSION = 3;
+
+/** A program's output, or null when it isn't there, fails or takes too long. Windows' wsl.exe writes UTF-16. */
+function probe(command, args, timeout = 8000) {
+  return new Promise((done) => {
+    execFile(command, args, { timeout, windowsHide: true, encoding: 'buffer', maxBuffer: 1_000_000 }, (err, out) => {
+      if (err || !out) return done(null);
+      const utf16 = out.length > 1 && out.subarray(0, 64).filter((b) => b === 0).length > 8;
+      done((utf16 ? out.toString('utf16le') : out.toString('utf8')).replace(/^﻿/, '').trim());
+    });
+  });
+}
+
+const firstLine = (text) => (text ?? '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? null;
+
+/**
+ * What this PC can do (specs/machine-connections.md section 2): platform, WSL and its version, threads, memory, free
+ * disk, GPU, a signed-in screen and whether its person can become an administrator. Sent when it joins and with its
+ * info, so its row and the role cards know what to offer. Each probe that can't tell says null rather than guessing.
+ */
+export async function machineReport({ platform = process.platform, env = process.env, home = homedir(), run = probe, read = (f) => readFileSync(f, 'utf8'), exists = existsSync } = {}) {
+  const os = platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux';
+  const tryRead = (f) => {
+    try {
+      return read(f);
+    } catch {
+      return '';
+    }
+  };
+  const inWsl = os === 'linux' && /microsoft/i.test(tryRead('/proc/version'));
+  let disk = null;
+  try {
+    const fs = nodeFs.statfsSync(home);
+    disk = Math.round(((fs.bavail * fs.bsize) / 1024 ** 3) * 10) / 10;
+  } catch {}
+  const [osName, wsl, gpu, screen, admin] = await Promise.all([
+    // Windows 11 is still 10.0 to the kernel; its builds start at 22000.
+    os === 'windows' ? `Windows ${Number(release().split('.')[2]) >= 22000 ? '11' : '10'}` : os === 'macos' ? run('sw_vers', ['-productVersion']).then((v) => `macOS ${v ?? release()}`) : /PRETTY_NAME="?([^"\n]+)/.exec(tryRead('/etc/os-release'))?.[1] ?? `Linux ${release()}`,
+    os === 'windows'
+      ? run('wsl.exe', ['--version']).then(async (v) => {
+          const version = /WSL[^:\n]*:\s*([\d.]+)/.exec(v ?? '')?.[1] ?? null;
+          // An inbox WSL (Windows 10's) has no --version but lists its distros.
+          return version ? { present: true, version } : { present: (await run('wsl.exe', ['--list', '--quiet'])) !== null, version: null };
+        })
+      : null,
+    run('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']).then(async (v) => {
+      if (firstLine(v)) return firstLine(v);
+      if (os !== 'windows') return null;
+      const names = await run('powershell.exe', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name']);
+      return (names ?? '').split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/basic|remote|virtual|hyper-v|parsec/i.test(l)) ?? null;
+    }),
+    os === 'windows'
+      ? run('tasklist.exe', ['/FI', 'IMAGENAME eq explorer.exe', '/FI', `USERNAME eq ${env.USERNAME ?? ''}`, '/NH']).then((v) => (v === null ? null : /explorer\.exe/i.test(v)))
+      : os === 'macos'
+        ? true
+        : inWsl
+          ? false
+          : !!(env.DISPLAY || env.WAYLAND_DISPLAY || exists('/tmp/.X11-unix/X0') || (env.XDG_RUNTIME_DIR && exists(join(env.XDG_RUNTIME_DIR, 'wayland-0')))),
+    os === 'windows'
+      ? run('whoami.exe', ['/groups']).then((v) => (v === null ? null : /S-1-5-32-544/.test(v)))
+      : process.getuid?.() === 0
+        ? true
+        : run('id', ['-Gn']).then((v) => (v === null ? null : /\b(sudo|wheel|admin)\b/.test(v))),
+  ]);
+  return {
+    host: hostname(),
+    os,
+    os_name: osName,
+    wsl,
+    in_wsl: inWsl,
+    threads: nodeOs.availableParallelism?.() ?? nodeOs.cpus().length,
+    memory_gb: Math.round((totalmem() / 1024 ** 3) * 10) / 10,
+    disk_free_gb: disk,
+    gpu,
+    screen,
+    admin,
+    agent: AGENT_VERSION,
+  };
+}
+
+/**
+ * Swap a join code for this machine's token (POST /api/machines/join), once: what came back is kept in `file` (only
+ * this person can read it), so the same command pasted again, after a failed service install say, uses it rather
+ * than a code that has been used. Returns { name, token }.
+ */
+export async function joinWithCode({ appUrl, code, file, report, post = fetch }) {
+  const codeHash = createHash('sha256').update(code).digest('hex');
+  try {
+    const kept = JSON.parse(readFileSync(file, 'utf8'));
+    if (kept.url === new URL(appUrl).origin && kept.code === codeHash && kept.token && kept.name) return { name: kept.name, token: kept.token };
+  } catch {}
+  const res = await post(new URL('/api/machines/join', appUrl), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, host: hostname(), report }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`The app refused the join code (${res.status}): ${body.error ?? 'no reason given'}`);
+  if (!/^ccm_\d+_[\w-]{43}$/.test(body.token ?? '') || !/^[a-z0-9][a-z0-9-]{0,29}$/.test(body.name ?? '')) throw new Error('The app sent back something that is not a machine token');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ url: new URL(appUrl).origin, code: codeHash, name: body.name, token: body.token }), { mode: 0o600 });
+  return { name: body.name, token: body.token };
+}
+
 // ---------- the agent ----------
 
 async function main() {
@@ -2239,12 +2347,32 @@ async function main() {
   const configArg = option('--config');
   const installName = opts.includes('--install') ? (option('--install') ?? '') : null;
   const logFile = option('--log');
+  // Connect a computer (Build 7 M2): a join code instead of a token, swapped for the token once; --json prints what came
+  // back for the Windows command, which registers the task itself.
+  const joinCode = option('--join');
+  const printJson = opts.includes('--json') && !!opts.splice(opts.indexOf('--json'), 1);
   const [appUrl, argToken] = opts;
-  const token = argToken ?? process.env.CC_MACHINE_TOKEN;
+  let token = argToken ?? process.env.CC_MACHINE_TOKEN;
+  let joinedName = null;
+  if (joinCode && appUrl) {
+    try {
+      const joined = await joinWithCode({ appUrl, code: joinCode, file: join(configArg ? dirname(resolve(configArg)) : process.cwd(), 'machine-agent.join.json'), report: await machineReport() });
+      ({ token, name: joinedName } = joined);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    if (printJson) {
+      console.log(JSON.stringify({ name: joinedName, token }));
+      process.exit(0);
+    }
+    console.log(`Joined: this computer is ${joinedName} on the Machines page.`);
+  }
   if (!appUrl || !token || (!command.length && !claudeMcp && !configArg)) {
     console.error('Usage: node machine-agent.mjs <app url> <token> --config machine-agent.json');
     console.error('   or: node machine-agent.mjs <app url> <token> --claude-mcp <name> [--config machine-agent.json]');
     console.error('   or: node machine-agent.mjs <app url> <token> [--config machine-agent.json] -- <mcp server command> [args...]');
+    console.error('   or: node machine-agent.mjs <app url> --join <code from Connect a computer> --config machine-agent.json [--install]');
     console.error('Add --log <file> to copy its output to a file, or --install <machine name> to run it in the background (macOS, Linux).');
     console.error('Example: node machine-agent.mjs https://example.net ccm_1_… --config machine-agent.json');
     process.exit(2);
@@ -2314,7 +2442,7 @@ async function main() {
   if (installName !== null) {
     const agent = realpathSync(process.argv[1]);
     const args = [appUrl, token, ...(configArg ? ['--config', resolve(configArg)] : []), ...(claudeMcp ? ['--claude-mcp', claudeMcp] : []), ...(command.length ? ['--', ...command] : [])];
-    return installService(installName, [process.execPath, agent, ...args]).catch((err) => {
+    return installService(installName || joinedName, [process.execPath, agent, ...args]).catch((err) => {
       console.error(err.message);
       process.exit(1);
     });
@@ -2384,7 +2512,7 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), ...(runner.restored ? { known_jobs: runner.known() } : {}) }),
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), report: await machineReport(), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), ...(runner.restored ? { known_jobs: runner.known() } : {}) }),
     })
       .then(async (res) => {
         // fetch doesn't throw on a refusal; a silent one hid #301's 404.

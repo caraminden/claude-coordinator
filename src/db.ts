@@ -198,6 +198,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'always_on', 'ALTER TABLE machines ADD COLUMN always_on INTEGER NOT NULL DEFAULT 1'],
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
+  // What its agent says the PC can do (Build 7 M2, src/machine-join.ts MachineReport), as JSON; null before an agent that reports.
+  ['machines', 'report', 'ALTER TABLE machines ADD COLUMN report TEXT'],
   ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
   ['turns', 'prompt_digest', 'ALTER TABLE turns ADD COLUMN prompt_digest TEXT'],
   ['turns', 'keepalive', 'ALTER TABLE turns ADD COLUMN keepalive INTEGER'],
@@ -339,6 +341,7 @@ export const SCHEMA_HISTORY = [
   [119, 'claims.handed, beside, beside_since, beside_handed, beside_landed, claim_queue.ready (#1985)'],
   [120, 'time_log_explains (#1994)'],
   [121, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
+  [122, 'machine_joins, machines.report (Build 7 M2, #2053)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

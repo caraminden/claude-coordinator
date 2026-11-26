@@ -181,6 +181,21 @@ CREATE TABLE IF NOT EXISTS machine_role_projects (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   PRIMARY KEY (machine_id, role, project_id)
 );
+-- A join code (Build 7 M2, src/machine-join.ts): one use, 15 minutes, kept hashed. The command on the Machines page carries it; the
+-- agent swaps it for its machine's ccm_ token. machine_id: the row an Update reconnects (null: a new row, named from the hostname);
+-- joined_id: the row it made or reconnected once used; asker_id: who pressed Connect, the only one who sees how it went.
+CREATE TABLE IF NOT EXISTS machine_joins (
+  id INTEGER PRIMARY KEY,
+  code_hash TEXT NOT NULL UNIQUE,
+  asker_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  created_by TEXT NOT NULL,
+  owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  joined_id INTEGER REFERENCES machines(id) ON DELETE SET NULL
+);
 -- A CI runner agent's load samples (#534), one every 30 seconds as JSON (src/ci-load.ts Sample), kept 14 days.
 CREATE TABLE IF NOT EXISTS runner_load (
   machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,

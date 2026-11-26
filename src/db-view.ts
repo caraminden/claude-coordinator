@@ -14,6 +14,7 @@ export const SECRET: Record<string, string[]> = {
   stored_secrets: ['value'],
   machine_jobs: ['input_token_hash', 'kind_hash'],
   machine_job_kinds: ['hash'],
+  machine_joins: ['code_hash'],
   push_subscriptions: ['endpoint', 'p256dh', 'auth'],
   contraption_push_devices: ['token'],
 };

@@ -26,6 +26,7 @@ import { thrown } from './thrown.ts';
 import { asData } from './quote.ts';
 import type { WorkerJoin } from './worker-join.ts';
 import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
+import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -219,6 +220,8 @@ interface Agent {
   beat?: number;
   /** A test box's screen (#1422), from its beats: who has it and who waits in its line. */
   screen?: ScreenState | null;
+  /** What it says the PC can do (Build 7 M2), from its info; null: it posted info with none, an agent from before that needs an update. Unset before its first info. */
+  report?: MachineReport | null;
 }
 
 export type ScreenUser = { what: string; who: string; since: number | null };
@@ -495,6 +498,12 @@ export class MachineRelay {
       worker,
       /** Being removed while it drains (#2044): what its owner runs once its row goes. The list is MachineCopies' own. */
       removing: this.store.getSetting<number[]>('machines-removing')?.includes(machine.id) ? UNINSTALL : null,
+      /** What its agent last said the PC can do (Build 7 M2), kept while it is offline; null before an agent that reports. */
+      report: storedReport(machine),
+      /** Its agent now has said so since it connected: what turns Connect a computer's panel to Connected. */
+      reported: !!agent?.report,
+      /** An agent from before reports nothing (Build 7 M2): its row offers Update, with the command. */
+      update: !!agent && !agent.runners && agent.report === null,
     };
   }
 
@@ -618,7 +627,7 @@ export class MachineRelay {
   }
 
   /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
-  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; programs?: unknown; config_file?: unknown }): boolean {
+  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; programs?: unknown; config_file?: unknown; report?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     if (!agent) return false;
     // A runner agent offers no MCP server or workspaces, whatever it says.
@@ -628,6 +637,10 @@ export class MachineRelay {
     agent.workspaces = cleanWorkspaces(body.workspaces);
     agent.programs = cleanPrograms(body.programs);
     agent.configFile = typeof body.config_file === 'string' ? body.config_file.slice(0, 500) : null;
+    // What the PC can do (Build 7 M2), kept for its row while it is offline; an agent from before says nothing, so its row offers Update.
+    agent.report = cleanReport(body.report);
+    const report = agent.report && JSON.stringify(agent.report);
+    if (report && report !== machine.report) this.store.updateMachine(machine.id, { report });
     agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])] : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
     // Its owner's jobs block (#857), or none, and the jobs it holds, which the queue reconciles. An agent lists them even

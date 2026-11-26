@@ -463,6 +463,8 @@ export interface Machine {
   always_on: number;
   /** Its last check as JSON (src/machines.ts StoredCheck), kept through restarts (#437); null before its first. */
   last_check: string | null;
+  /** What its agent last said the PC can do (Build 7 M2, src/machine-join.ts MachineReport), as JSON; null before one that reports. */
+  report?: string | null;
   /** What a person ticked for it to lend, as JSON (src/machines.ts Lend) (#439); null until its agent first reports what it found. */
   lend: string | null;
   /** What its agent says jobs may use there (#857, src/machine-jobs.ts JobsOffer) as JSON; null when its agent has no jobs block. */

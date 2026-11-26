@@ -73,6 +73,7 @@ test('a bad map says which line', () => {
   assert.throws(() => parseMap('\nsrc/db.ts:\n'), /map line 2: .* names no test/);
   assert.throws(() => parseMap('@fallback maybe\n'), /map line 1/);
   assert.throws(() => parseMap('@nope x\n'), /unknown directive/);
+  assert.throws(() => parseMap('@pinned\n'), /map line 1: @pinned needs a test/);
 });
 
 test("Citadel's map: its tests exist, its globs match something, and every repo-wide test is mapped or always run", () => {
@@ -268,19 +269,38 @@ test('@imports picks only the test files that import the changed file directly',
 });
 
 // #1928: citadel-test's default pick is the tests you touched and the same-named ones; the wide pick keeps the rest.
-test('--narrow picks only touched and same-name tests, however many import the file; the wide pick still adds them', () => {
+test('--narrow picks only touched, same-name and @pinned tests, however many import the file; the wide pick still adds them', () => {
   const changed = ['src/runner.ts', 'src/db.ts', 'src/inbox.ts', 'test/affected.test.ts', 'NOTES.txt'];
   const narrow = affected(map, changed, tracked, repo, true);
   const wide = affected(map, changed, tracked, repo);
   const only = (a: typeof narrow) => a.run.map((r) => r.test);
   assert.ok(only(wide).length > only(narrow).length + 10, 'a change to runner.ts and db.ts has many dependants');
-  assert.ok(only(narrow).every((t) => narrow.run.find((r) => r.test === t)!.why.every((w) => w === 'touched' || w.startsWith('name '))));
+  assert.ok(only(narrow).every((t) => narrow.run.find((r) => r.test === t)!.why.every((w) => w === 'touched' || w.startsWith('name ') || (w.startsWith('map:') && map.pinned.includes(t)))));
   assert.ok(only(narrow).includes('test/affected.test.ts') && only(narrow).includes('test/inbox.test.ts'));
   assert.ok(only(wide).includes('test/db-setup.test.ts') && !only(narrow).includes('test/db-setup.test.ts'));
   assert.deepEqual([narrow.unmapped, narrow.full], [[], false], 'an unmapped path is not an error in the narrow pick');
   const full = parseMap('@tests test/*.test.ts\n@fallback full\n');
   assert.equal(affected(full, ['NOTES.txt'], tracked, repo, true).full, false);
   assert.equal(affected(full, ['NOTES.txt'], tracked, repo).full, true);
+});
+
+// #2037 (Josh, 2026-11-25, "Run when their code changes"): the pinning tests too slow for every run are @pinned, so the
+// narrow pick takes them from the rules that name them; other rules' tests stay the wide pick's.
+test('--narrow takes a @pinned test from the rules that pick it, and no other rule test', () => {
+  const m = parseMap('@tests test/*.test.ts\n@pinned test/slow.test.ts\nsrc/a.ts: test/slow.test.ts test/other.test.ts\nsrc/b.ts: test/other.test.ts\n');
+  const pick = (p: string, narrow: boolean) => affected(m, [p], [], repo, narrow).run.map((r) => `${r.test} ${r.why.join()}`);
+  assert.deepEqual(pick('src/a.ts', true), ['test/slow.test.ts map:3 src/a.ts']);
+  assert.deepEqual(pick('src/b.ts', true), []);
+  assert.deepEqual(pick('src/a.ts', false), ['test/other.test.ts map:3 src/a.ts', 'test/slow.test.ts map:3 src/a.ts']);
+});
+
+test("Citadel's map: a change to runner.ts or db.ts runs the slow pinning tests in citadel-test's narrow pick (#2037)", () => {
+  for (const t of map.pinned) assert.ok(tracked.includes(t), `@pinned names ${t}, which is not a tracked file`);
+  const narrow = (p: string) => affected(map, [p], tracked, repo, true).run.map((r) => r.test);
+  for (const t of ['test/list-reads.test.ts', 'test/boot-check.test.ts']) assert.ok(narrow('src/runner.ts').includes(t), `src/runner.ts picks ${t}`);
+  for (const t of ['test/list-reads.test.ts', 'test/access-matrix.test.ts']) assert.ok(narrow('src/db.ts').includes(t), `src/db.ts picks ${t}`);
+  assert.ok(narrow('src/http.ts').includes('test/access-matrix.test.ts'));
+  assert.ok(!narrow('src/inbox.ts').some((t) => map.pinned.includes(t)), 'a file no rule ties to them runs none');
 });
 
 test('the command with --narrow says how many more tests the wide pick would run', () => {

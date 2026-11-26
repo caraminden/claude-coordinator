@@ -11,6 +11,9 @@
 # A changed source file also runs every test file that imports it directly (#1809), so a test needs no line here for a module it imports.
 # test/affected.test.ts fails when a test imports a module and its change would not pick that test.
 @imports src/** public/** tools/**
+# Pinning tests too slow for tools/always-tests.txt (#2037, Josh 2026-11-25 "Run when their code changes"): the narrow pick
+# (citadel-test --affected) and land.sh's smoke run these when a rule below picks them, though they skip other rules' tests.
+@pinned test/access-matrix.test.ts test/list-reads.test.ts test/boot-check.test.ts
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts
@@ -44,6 +47,10 @@ src/supervisor-client.ts: test/turn-supervisor.test.ts
 src/turn-run.mjs: test/turn-supervisor.test.ts test/steer.test.ts test/turn-survives.test.ts
 src/turn-wrapper.mjs: test/steer.test.ts test/turn-survives.test.ts test/claude-container.test.ts
 # closed-cleanup and background-jobs broke ships #1449-#1464 and #1364-#1383 (#1622); each runs in about 1 s.
+# list-reads counts the list routes' statements (#1757); the boot check boots the server and calls the turn tools (#1799).
+src/runner.ts: test/list-reads.test.ts test/boot-check.test.ts
+src/db.ts: test/list-reads.test.ts
+src/db/*.ts: test/list-reads.test.ts
 src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
@@ -144,7 +151,7 @@ tools/heavy-ci.ts: test/heavy-ci.test.ts test/long-jobs.test.ts test/citadel-hea
 tools/who-touches: test/who-touches.test.ts
 tools/who-uses: test/who-uses.test.ts
 tools/affected.ts: test/affected.test.ts
-tools/affected-map.txt: test/affected.test.ts
+tools/affected-map.txt: test/affected.test.ts test/land.test.ts
 tools/always-tests.txt: test/citadel-test.test.ts
 src/backup.html: test/backup.test.ts
 src/backup.ts: test/backup.test.ts

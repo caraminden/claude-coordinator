@@ -1,8 +1,8 @@
 // The affected-tests map reader (#1112): which test files a change can break. tools/citadel-test --affected runs it.
 // The map's format is the spec in the shared folder's specs/affected-tests-map.md; tools/affected-map.txt is Citadel's map.
 //   node tools/affected.ts [--root <repo>] [--map <file>] [--base <ref>] [--narrow] [--paths <changed path>...]
-// --narrow (#1928, what citadel-test runs by default): only the tests touched and the @samename ones; no map rule, no
-// @imports, nothing unmapped. The wide pick (no flag) is what CI, land.sh's smoke check and the burn-in read.
+// --narrow (#1928, what citadel-test runs by default): only the tests touched, the @samename ones and the @pinned ones the
+// map's rules pick (#2037); no other rule's test, no @imports, nothing unmapped. The wide pick (no flag) is what CI, land.sh's smoke check and the burn-in read.
 // Prints one line per answer on stdout, tab-separated:
 //   run <test path> <why: "touched", or "map:<line> <source glob>" for each rule that picked it>
 //   unmapped <changed path>        (no rule covers it and it is not a test file)
@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 
 export type Rule = { line: number; glob: string; re: RegExp; tests: string[] };
-export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[]; imports: RegExp[] };
+export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[]; imports: RegExp[]; pinned: string[] };
 
 // A glob over a repo path: `*` and `?` stay inside a folder name, `**` crosses folders, `**/` may be no folder at all.
 export function globRe(glob: string): RegExp {
@@ -38,7 +38,7 @@ export function globRe(glob: string): RegExp {
 }
 
 export function parseMap(text: string): Map {
-  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [], imports: [] };
+  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [], imports: [], pinned: [] };
   const fail = (n: number, why: string): never => {
     throw new Error(`map line ${n}: ${why}`);
   };
@@ -58,6 +58,9 @@ export function parseMap(text: string): Map {
       } else if (name === 'imports') {
         if (!vals.length) fail(n, '@imports needs a glob');
         map.imports.push(...vals.map(globRe));
+      } else if (name === 'pinned') {
+        if (!vals.length) fail(n, '@pinned needs a test');
+        map.pinned.push(...vals);
       } else if (name === 'fallback') {
         if (vals.length !== 1 || !['always', 'full'].includes(vals[0])) fail(n, '@fallback is "always" or "full"');
         map.fallback = vals[0] as 'always' | 'full';
@@ -114,10 +117,10 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
     const isTest = map.tests.some((re) => re.test(p));
     if (isTest && existsSync(join(root, p))) add(p, 'touched');
     let covered = isTest;
-    for (const r of narrow ? [] : map.rules) {
+    for (const r of map.rules) {
       if (!r.re.test(p)) continue;
       if (r.glob !== '**') covered = true;
-      for (const t of r.tests) {
+      for (const t of narrow ? r.tests.filter((t) => map.pinned.includes(t)) : r.tests) {
         const hits = /[*?]/.test(t) ? tracked.filter((f) => globRe(t).test(f)) : [t];
         for (const h of hits) add(h, `map:${r.line} ${r.glob}`);
       }

@@ -526,11 +526,11 @@ smoke() {
   if [ -x tools/citadel-test ] && [ -f tools/always-tests.txt ]; then
     # The always-tests, and in a plain land the test files the branch adds or changes; citadel-test drops repeats.
     mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts'; [ -z "$formatted" ] || ls test/size-budget.test.ts 2>/dev/null)
-    # The route test is off the always list (#1544): the map decides, from what this branch changed. Captured first (grep -q
-    # under pipefail can SIGPIPE the reader), and a map that can't answer runs it, never skips it.
+    # The map's @pinned tests when it picks them for this branch's changes (#1544, #2037; an older map: the route test alone).
     if [ -f tools/affected.ts ]; then
+      local pinned=" $(sed -n 's/^@pinned[[:space:]]//p' tools/affected-map.txt 2>/dev/null | tr '\n' ' ') " && [ -n "${pinned// /}" ] || pinned=" test/access-matrix.test.ts "
       if aff=$("$tools/citadel-node" --no-warnings tools/affected.ts --root . --base "$(git merge-base main HEAD)" 2>/dev/null); then
-        grep -q $'^run\ttest/access-matrix\\.test\\.ts\t' <<<"$aff" && tests+=(test/access-matrix.test.ts)
+        for f in $(awk -F'\t' '$1 == "run" { print $2 }' <<<"$aff"); do case "$pinned" in *" $f "*) [ ! -f "$f" ] || tests+=("$f") ;; esac; done
       else
         say "smoke: the affected map couldn't answer, so the route test runs"; tests+=(test/access-matrix.test.ts)
       fi

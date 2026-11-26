@@ -1706,12 +1706,14 @@ test("the smoke check runs the always-tests and the branch's changed test files,
   assert.match(landLog(r.shared), /· smoke · ticket\/1-x · tests failed \(exit 1\) · \d+s$/m);
 });
 
-test('the smoke check adds the route test only when the affected map picks it for what the branch changed (#1544)', () => {
+test('the smoke check adds the @pinned tests (the route test, list-reads, the boot check) only when the affected map picks them for what the branch changed (#1544, #2037)', () => {
   const route = 'access-matrix';
-  const run = (changed: string) => {
+  const run = (changed: string, edit = (m: string) => m) => {
     const r = smokeSetup();
-    for (const f of ['affected.ts', 'affected-map.txt']) copyFileSync(join(repo, 'tools', f), join(r.source, 'tools', f));
-    writeFileSync(join(r.source, 'test', `${route}.test.ts`), ''); // built, not quoted: a quoted test name reads as an import to test/pipeline-files.test.ts
+    copyFileSync(join(repo, 'tools', 'affected.ts'), join(r.source, 'tools', 'affected.ts'));
+    writeFileSync(join(r.source, 'tools', 'affected-map.txt'), edit(readFileSync(join(repo, 'tools', 'affected-map.txt'), 'utf8')));
+    // built, not quoted: a quoted test name reads as an import to test/pipeline-files.test.ts
+    for (const t of [route, 'list-reads', 'boot-check']) writeFileSync(join(r.source, 'test', `${t}.test.ts`), '');
     git(r.source, 'add', '-A');
     git(r.source, 'commit', '-qm', 'map');
     git(r.wt, 'rebase', '-q', 'main');
@@ -1722,6 +1724,17 @@ test('the smoke check adds the route test only when the affected map picks it fo
   };
   assert.match(run('src/http.ts'), new RegExp(`test/mine\\.test\\.ts test/${route}\\.test\\.ts$`));
   assert.doesNotMatch(run('notes/c.txt'), new RegExp(route));
+  // #2037: the map's other @pinned tests (list-reads, the boot check) join the same way, for the paths that pick them.
+  assert.match(run('src/runner.ts'), /test\/mine\.test\.ts test\/boot-check\.test\.ts test\/list-reads\.test\.ts$/);
+  // A map from before @pinned: the route test alone, as before.
+  assert.match(
+    run('src/http.ts', (m) => m.replace(/^@pinned .*\n/m, '')),
+    new RegExp(`test/${route}\\.test\\.ts$`),
+  );
+  assert.doesNotMatch(
+    run('src/runner.ts', (m) => m.replace(/^@pinned .*\n/m, '')),
+    /list-reads|boot-check/,
+  );
 });
 
 test("a clean smoke check lands as before, its time outside the timing line; tests past the limit don't decide; LAND_SMOKE=0 skips it (#1012)", () => {

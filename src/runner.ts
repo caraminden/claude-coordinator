@@ -252,8 +252,8 @@ export interface LiveTurn {
    */
   streamFd?: number;
   dirFd?: number;
-  /** A poll of it is waiting on the disk: the next tick does nothing, so its lines are handled once and in order (#2134). */
-  polling?: boolean;
+  /** Its poll under way, waiting on the disk: the next tick does nothing, so its lines are handled once and in order (#2134). */
+  polling?: Promise<void>;
   /** No longer followed: a poll that returns now closes what it had open. */
   unfollowed?: boolean;
   /** The folder's mtime at the last look, and whether the next tick looks again (dirChanged). */
@@ -3494,11 +3494,10 @@ export class Runner {
   private poll(ticketId: number) {
     const live = this.turns.get(ticketId);
     if (!live || live.polling) return;
-    live.polling = true;
-    void this.pollOnce(ticketId, live)
+    live.polling = this.pollOnce(ticketId, live)
       .catch((err) => console.error(`Ticket ${ticketId}: following its turn failed:`, err))
       .finally(() => {
-        live.polling = false;
+        live.polling = undefined;
         if (live.unfollowed) this.unfollow(live); // what it had open while the turn stopped being followed
       });
   }

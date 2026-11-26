@@ -517,17 +517,18 @@ test('a write the writer is still holding is never missed: the read waits for it
   const slow = await bootServer({ root, env: { CITADEL_DB_WRITE_DELAY_MS: '300' } });
   try {
     await readerAnswers(slow);
-    // Held 300 ms on the writer: a reader waits for it, never the main thread. Once its queue is more than a reader's
-    // wait behind (many copies of this file at once), get asks again, as the page does.
-    const sent = slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' });
+    // Held 300 ms on the writer: a reader waits for it. A try the main thread answered is not the read under test (the
+    // front passes one on while a change main posted is still on its way to it, #1903): it writes and reads again.
+    const sent: ReturnType<typeof slow.call>[] = [];
     await until('a read that waited for the held write', async () => {
+      sent.push(slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' }));
       const t0 = Date.now();
       const got = await get(slow, PATHS[0], slow.cookie);
-      assert.deepEqual([got.status, got.reader], [200, true]);
+      assert.equal(got.status, 200);
       // timing-ok: a read that waits for nothing takes a few ms; the write is held 300
-      return Date.now() - t0 > 100;
+      return got.reader && Date.now() - t0 > 100;
     });
-    assert.equal((await sent).status, 202);
+    for (const s of sent) assert.equal((await s).status, 202);
     // The response came once its writes ran (#1244): the next read, a reader's again, has the message.
     const next = await until('readers answer again', async () => {
       const got = await get(slow, PATHS[0], slow.cookie);

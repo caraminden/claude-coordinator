@@ -114,7 +114,6 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
           title: s.title,
           message: startBrief(s.handoff),
           properties: { type: s.type },
-          cloud: false, // its brief is a handoff in the shared folder, which a cloud session can't read (#2153)
           model: s.model ?? null,
           effort: s.effort ?? null,
           parent: owner.number,

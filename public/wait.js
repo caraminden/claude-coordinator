@@ -128,7 +128,7 @@ export function progressPieces({ track, since, usual, wait }) {
   /** @param {string} state @param {number | null} size @param {WaitLike | null} [clock] @returns {Seg} */
   const piece = (state, size, clock = null) => ({ size, state, clock, waits: state === 'now' && !!w && waitFam(w) === 'wait' });
   if (track?.length && (track.some(([, st]) => st === 'i') || !w)) {
-    // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (a guess): only it draws
+    // The first step underway owns the clock and the wait (planTrack puts the one the readout names first): only it draws
     // as under way, filling by the clock or hatching. Any other step underway draws as not started, so one row never
     // looks like several steps are moving at once (#2156).
     const owner = track.findIndex(([, st]) => st === 'i');

@@ -876,15 +876,19 @@ function estimateOf(input) {
 /**
  * The plan's segmented track (#630): [estimate, 'c' | 'i' | 'h' | 'p'] per step ('h': built, held open while it's tested, #1923), the done ones first in the order they
  * finished, then the one underway, then the rest in plan order, so a step added late and done early can't sit
- * green after an unfinished one.
+ * green after an unfinished one. With several underway, the one the readout names (stepInfo) leads them: only the first
+ * 'i' draws as under way (#2156).
  */
 /** @param {Prog} p */
 export function planTrack(p) {
   /** @type {Record<string, number>} */
-  const rank = { completed: 0, in_progress: 1 };
+  const rank = { completed: 0, in_progress: 1, pending: 3 };
+  const named = stepInfo(p).current;
   /** @param {ProgressTask} t @returns {'c' | 'i' | 'h' | 'p'} */
   const state = (t) => (t.status === 'completed' ? 'c' : t.status !== 'in_progress' ? 'p' : heldStep(p, t) ? 'h' : 'i');
-  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => /** @type {[number | null, 'c' | 'i' | 'h' | 'p']} */ ([t.estimate ?? null, state(t)]));
+  /** @param {ProgressTask} t */
+  const order = (t) => (state(t) === 'i' && t !== named ? 2 : (rank[t.status] ?? 3));
+  return [...p.tasks].sort((a, b) => order(a) - order(b) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => /** @type {[number | null, 'c' | 'i' | 'h' | 'p']} */ ([t.estimate ?? null, state(t)]));
 }
 
 /** A stage's step it is timed and shown under: the one the minion said it is on, else its first still open (#1923). */

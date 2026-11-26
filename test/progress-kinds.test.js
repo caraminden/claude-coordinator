@@ -69,6 +69,21 @@ test('a failed test then an edit puts the bar back on build, with no tick taken 
   assert.equal(c.bar(), 'cccip', 'fixing what a review found is still the review');
 });
 
+test('with several steps underway, the track leads with the one the readout names (#2156)', () => {
+  const c = chat([
+    ['build', 'Build it', 30],
+    ['build', 'Write docs', 2],
+    ['test', 'Test', 5],
+  ]);
+  c.edit();
+  c.plan([{ n: 2, status: 'doing' }]);
+  assert.equal(stepName(c.p, true), 'Write docs');
+  assert.deepEqual(planTrack(c.p).slice(0, 2), [
+    [2, 'i'],
+    [30, 'i'],
+  ]);
+});
+
 test('steps of one kind show as one shared stage, its guesses summed and its time split by them', () => {
   const c = chat([
     ['read', 'Read'],

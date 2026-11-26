@@ -45,14 +45,15 @@ before(async () => {
   await worker('win-pc');
   await worker('busy-pc');
   ok(await srv.call('/api/machines', { name: 'tools-only', mine: true }));
-  // Last, so the next machine added takes its id. All are made before the page loads, which then knows their workers.
+  // `stays` keeps ids from starting over; old-pc is last, so the next machine added takes its id. All are made before the page loads, which then knows their workers.
+  ok(await srv.call('/api/machines', { name: 'stays', mine: true }));
   oldId = (await worker('old-pc')).id;
   browser = await launch(bin!);
   page = await browser.page('data:text/html,<script>window.ready=true</script>', { width: 1200, height: 900 });
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/machines` });
-  await wait('the machines', `document.querySelectorAll('.machine-row').length === 4`);
+  await wait('the machines', `document.querySelectorAll('.machine-row').length === 5`);
   // DELETE is held until the test lets it go, and answered as `window.answer` says (null: the server's own).
   await page.eval(`(() => {
     window.confirm = () => true;

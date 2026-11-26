@@ -195,6 +195,17 @@ test('chat lines queued when the worker dies are lost whole, and the next line t
   );
 });
 
+// Found by #1778: the gone mark is set only by the worker's own 'exit' handler, which these deaths skip.
+test("once the worker is gone no reader thread answers on its own: the server writes in place, where a step can't be told from the next", async () => {
+  const { store, w } = open();
+  const t = minion(store);
+  await until('the step closes', () => w.shared[3] >= w.shared[4]);
+  await w.stop();
+  const reader = new Store(store.path, { reader: true });
+  store.updateTicket(t.id, { title: 'half a step' });
+  assert.equal(atWholeStep(reader.db, w.shared), null);
+});
+
 /** Run `body` in a process of its own (`store` and `w` are there), which kills itself as a crash would; its database. */
 function crash(name: string, body: string) {
   const dir = join(root, name);

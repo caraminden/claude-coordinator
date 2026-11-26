@@ -56,6 +56,17 @@ test('only a turn flagged as in a cabal is offered cabal_board', async () => {
   assert.match(r.text, /not on a cabal board/);
 });
 
+test("only a lead's turn is offered cabal_start and cabal_member (#2091)", async () => {
+  const names = async (flag: string) => {
+    const env = agentEnv(srv.base, tokens.agentToken(LEAD.id), { id: LEAD.id, project_id: A.id }, 'thread', { TMPDIR: root, COORDINATOR_CABAL: flag });
+    return (await mcpOnce(env, 'tools/list', {}, tmp.track)).tools.map((t: { name: string }) => t.name) as string[];
+  };
+  const member = await names('1');
+  assert.ok(member.includes('cabal_board') && !member.includes('cabal_start') && !member.includes('cabal_member'));
+  const lead = await names('lead');
+  assert.ok(['cabal_board', 'cabal_start', 'cabal_member'].every((n) => lead.includes(n)));
+});
+
 test('a member sets its note and files; a non-blocking ask is held mail to the lead', async () => {
   assert.match((await tool(M1.id, { action: 'note', note: 'built, in review', files: ['test/helpers.ts'] })).text, /Saved/);
   const r = await tool(M1.id, { action: 'ask', text: 'Which helper do you want?' });

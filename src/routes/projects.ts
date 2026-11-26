@@ -254,8 +254,8 @@ function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string |
 }
 
 // A new minion, from a person (`caller` null) or a Taskmaster (`caller` its ticket). `picked` (#2050): a person's pick on
-// minion `caller`'s card: the agent's checks run, but the minion is the picker's (`session`) and runs on their login.
-export async function createMinion(app: App, project: Project, body: Awaited<ReturnType<typeof readJson>>, session: Session, caller: Ticket | null, picked = false): Promise<TicketView & { notes: string[] }> {
+// minion `caller`'s card: the agent's checks run, but the minion is the picker's (`session`) and runs on their login. `cabal` (#2091): cabal_start's row and the dollars its forming card approved (no start card up to them).
+export async function createMinion(app: App, project: Project, body: Awaited<ReturnType<typeof readJson>>, session: Session, caller: Ticket | null, picked = false, cabal?: { row: number; usd: number | null }): Promise<TicketView & { notes: string[] }> {
   if (app.preview) throw new HttpError(403, "A preview can't start minions");
   const { store, runner, waiters } = app;
   // Every new minion gets a git worktree in the scheme's real repo.
@@ -368,7 +368,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   store.addPick(id, model, effort, pickBy, because);
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
   await ownWrites(); // its build owner and the reply read the row back (#1244)
-  if (body.cabal != null) putOnCabal(app, { id, project_id: project.id, title }, body.cabal, session.name);
+  if (body.cabal != null) putOnCabal(app, { id, project_id: project.id, title }, body.cabal, session.name, cabal?.row);
   const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
   if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
   // And it is that turn's asker's ask (#255), so its messages back count as theirs.
@@ -391,7 +391,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   if (estimate) store.setSetting(budgetKey(id), { estimate } satisfies BudgetState);
   // Over $30, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
   // to it is held meanwhile (runner.send), a chained one's brief too.
-  if (caller && estimate && estimate > START_CARD_USD) {
+  if (caller && estimate && estimate > START_CARD_USD && !(cabal?.usd && estimate <= cabal.usd)) {
     const t = store.getTicket(id)!;
     const owner = store.minionOwner(t);
     const to = owner != null ? store.getUser(owner)?.name : undefined;

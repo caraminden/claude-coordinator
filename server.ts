@@ -1,4 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
+import { fillCabal } from './src/cabal-start.ts';
 import './src/host-signals.ts'; // first: a test server's fixed zone (TZ) is set before any module reads the clock (#1485)
 import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
@@ -1023,6 +1024,9 @@ if (!BOOT_CHECK) {
     // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
     waiters.prs.forget?.();
     void waiters.check().catch((err) => console.error('Checking waiters after a dismissal failed:', err));
+    // A cabal member's dismissal frees a place in its cabal's width: its next-up rows start (#2091).
+    const lead = store.cabalRowOf(ticketId)?.lead_id;
+    if (lead != null) void fillCabal(app, lead).catch((err) => console.error(`Starting cabal #${lead}'s next up failed:`, err));
     // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);

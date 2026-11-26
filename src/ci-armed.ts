@@ -39,6 +39,8 @@ export interface Card {
   budget?: true /** A start card (#1674): the brief's expected cost; the server acts on its answer. */;
   startCost?: number /** A ship card's prepared hand-off (#1930): Ship It starts it with no turn. */;
   handoff?: Prepared;
+  /** A cabal's forming card (#2091): the rows its go approves, each with the fields the card showed. */
+  cabalForm?: { lead: number; width: number; rows: { id: number; sig: string }[] };
 }
 export interface Armed {
   sha: string;
@@ -57,7 +59,7 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: TicketFields, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost, handoff } = card;
+  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost, handoff, cabalForm } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
     id,
@@ -69,6 +71,7 @@ export function postCard(app: App, ticket: TicketFields, card: Card): { id: stri
     ...(budget ? { budget } : {}),
     ...(startCost ? { startCost } : {}),
     ...(handoff ? { handoff } : {}),
+    ...(cabalForm ? { cabalForm } : {}),
     ...(to ? { to } : {}),
     ...(mergeable ? { mergeable } : {}),
     ...(notice ? { notice } : {}),

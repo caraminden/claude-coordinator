@@ -2283,6 +2283,12 @@ export async function machineReport({ platform = process.platform, env = process
       : null,
     run('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']).then(async (v) => {
       if (firstLine(v)) return firstLine(v);
+      if (os === 'linux') {
+        // No NVIDIA: the kernel still names the card's maker (a name would need lspci, which many boxes lack).
+        const makers = { '0x1002': 'AMD GPU', '0x8086': 'Intel GPU', '0x10de': 'NVIDIA GPU' };
+        const found = [0, 1, 2, 3].map((n) => makers[tryRead(`/sys/class/drm/card${n}/device/vendor`).trim()]).filter(Boolean);
+        return found.find((g) => g !== 'Intel GPU') ?? found[0] ?? null;
+      }
       if (os !== 'windows') return null;
       const names = await run('powershell.exe', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name']);
       return (

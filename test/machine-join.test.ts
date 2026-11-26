@@ -121,6 +121,10 @@ test('the report reads a Windows PC: its version, WSL (whose tools write UTF-16)
   // Linux inside WSL: no screen of its own.
   const r3 = await machineReport({ platform: 'linux', env: { DISPLAY: ':0' }, home: tmp.dir, run: async () => null, read: (f: string) => (f === '/proc/version' ? 'Linux version 5.15 (microsoft-standard-WSL2)' : 'PRETTY_NAME="Ubuntu 24.04 LTS"\n') });
   assert.deepEqual([r3.os, r3.os_name, r3.in_wsl, r3.wsl, r3.screen, r3.gpu], ['linux', 'Ubuntu 24.04 LTS', true, null, false, null]);
+  // Linux with no nvidia-smi: the card's maker from the kernel, a graphics card before the processor's own.
+  const cards: Record<string, string> = { '/sys/class/drm/card0/device/vendor': '0x8086\n', '/sys/class/drm/card1/device/vendor': '0x1002\n' };
+  const r4 = await machineReport({ platform: 'linux', env: {}, home: tmp.dir, run: async () => null, read: (f: string) => cards[f] ?? '' });
+  assert.equal(r4.gpu, 'AMD GPU');
 });
 
 test('the agent swaps a code once, keeps what came back for the same command pasted again, and refuses a bad answer', async () => {

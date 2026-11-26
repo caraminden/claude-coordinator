@@ -10,6 +10,7 @@ shared: src/turn-launch.ts src/machines.ts public/machine-agent.mjs src/db.ts sr
 #1973: (merged in)
 #2011: public/machine-worker.mjs src/machine-turn.ts test/machine-turn.test.ts src/machine-sync.ts test/machine-sync.test.ts src/sessions.ts src/routes/files.ts public/machine-sync.mjs src/running-turn.ts src/worktree-sweep.ts src/machine-away.ts test/machine-away.test.ts server.ts src/routes/machines.ts src/runner.ts src/machine-pools.ts test/machine-pools.test.ts test/judges.test.ts src/dismissed-cleanup.ts src/minion-queue.ts src/turn-outcome.ts
 #2006: (merged in)
+#2070: src/tripwire.ts src/tripwire-blocks.ts test/tripwire.test.ts src/machine-mcp.ts public/settings-machines.js public/machine-worker-row.js public/machines.css public/worker-agent.mjs src/machine-lend.ts
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
 
@@ -26,3 +27,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - T3 (#1972) merged in on 2026-11-25; src/runner.ts, lent for it, is shared again; src/routes/machines.ts is lent on to #2006 for its merge (it changes #1962's sync route line), then shared. Its line's files and #1962's src/running-turn.ts are T6's (#2011).
 - When T5 (#2006) is in: server.ts and src/routes/machines.ts go to #2011 for its merge (T6 changes lines in both), src/runner.ts too (lines of #1973), src/machine-pools.ts and its test too; then all back to shared.
 - T5 (#2006) merged in on 2026-11-25. Lent to #2011 for its merge, as planned: server.ts, src/routes/machines.ts, src/runner.ts, test/judges.test.ts, src/machine-pools.ts and its test; all but machine-pools are shared again after it.
+- T8 host reach (#2070) started 2026-11-25 from build/7 6f3b3b384. Its new files go on its line (tell #1935 the names). public/machine-agent.mjs stays shared (added lines only). Its `extraMounts` lines in public/machine-worker.mjs are #2011's file: T8 asks #1935, who lends them after T6 merges or arranges them with #2011. The same goes for any line T8 needs in src/machine-turn.ts, src/machine-pools.ts or src/runner.ts (where a marked turn's mount list is built and its per-turn host-folder line is written): ask #1935 first. T5's files on T8's line (settings-machines.js, machine-worker-row.js, machines.css, worker-agent.mjs, machine-lend.ts) are free since T5 merged in.

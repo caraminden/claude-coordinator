@@ -382,6 +382,7 @@ test("a box refusal that deploy's refusing note, a skipped test or the ship's ow
     'refusing deploy, boot copy': 'land: deploy has been refusing since Nov 25 10:00 PST: boot, and abc1234 fails the same check here (its output is above) while main passes it\nland: abc1234 fails the same check here: database is locked\n',
     'second red, skipped test': `land: 1 tests were skipped in CI (x)\n${BOX['second red']}`,
     'second red, a file failed again alone': `run-tests: test/c.test.ts: failed again alone\n${BOX['second red']}`,
+    'second red, a file hung rerun alone': `run-tests: test/c.test.ts: hung when rerun alone (stopped after 120s): a real failure\n${BOX['second red']}`,
     'second red, burn-in': `land: test/d.test.ts failed its burn-in in CI\n${BOX['second red']}`,
     'second red, kept twice': `land: only flakes failed again (test/b.test.ts), but it has kept its place 2 times already, so it is refused this time\n${BOX['second red']}`,
     'out of time, own failure': 'run-tests: the tests ran past 600s and were stopped: a test hung\nland: tests failed on the rebased branch: the suite ran out of time, and test/a.test.ts fails alone here and passes on main (full log: /x.log), so main is untouched\n',
@@ -1011,6 +1012,10 @@ test('a re-queue never ships commits already on main, nor from a worktree off it
   assert.equal(await again(), 'your commits are already on main, so check what is left to do');
   git(cwd, 'checkout', '-q', '--detach');
   assert.match((await again())!, /not on its branch/);
+  // A scheme on the kit's land.sh can ship to master.
+  git(cwd, 'checkout', '-q', 'ticket/1-x');
+  git(cwd, 'branch', '-m', 'main', 'master');
+  assert.equal(await again(), 'your commits are already on master, so check what is left to do');
 });
 
 test("brokenTest asks known-flakes.ts about every passed-alone file, the fresh run's too (#2030, #1487)", async () => {

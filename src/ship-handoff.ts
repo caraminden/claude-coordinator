@@ -17,6 +17,7 @@ import { pacificStamp } from './pacific.ts';
 import { reviewRefusal } from './review-gate.ts';
 import type { ChangeBy } from './db/wait-records.ts';
 import { pipelineChanges, sharedPipelineFiles, SHIP_LANE } from './ship-lane.ts';
+import { defaultBranch } from './release-targets.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
@@ -238,7 +239,7 @@ export async function requeueShip(app: App, ticketId: number, h: Handoff & { arg
   if (dirty !== '') return 'your worktree has uncommitted changes or a rebase in progress';
   // A land.sh cut off mid-way (#2051) can leave a rebase stopped with a clean tree, or main already moved.
   if (!(await gitOut(['symbolic-ref', '-q', 'HEAD'], t.cwd))) return 'your worktree is not on its branch (a rebase may be in progress)';
-  const target = h.args[0] === '--into' ? h.args[1] : 'main';
+  const target = h.args[0] === '--into' ? h.args[1] : ((await defaultBranch(t.cwd)) ?? 'main');
   const ahead = await gitOut(['rev-list', '--count', `${target}..HEAD`], t.cwd);
   if (ahead === '0') return `your commits are already on ${target}, so check what is left to do`;
   if (!ahead) return `it couldn't tell whether your commits are already on ${target}`;

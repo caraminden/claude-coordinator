@@ -511,8 +511,8 @@ export function requeueReason(output: string, cls: { kind: string } | null, h: H
   if (cls?.kind === 'passed-alone') return 'the failed test files passed when rerun alone';
   if (cls?.kind === 'boot-copy') return 'the boot check failed on its copy of the database';
   if (/^land: the suite on perigee ran out of its time limit and no test is known to be/m.test(output)) return 'the test run on perigee ran out of its time limit';
-  // Not a second red the ship's own change is known to have caused: a file that failed again alone, a burn-in, a skip.
-  if (/on the one fresh run after a red whose files all passed alone/.test(output) && !/run-tests: \S+: failed again alone/.test(output) && !['conflict', 'parse', 'burn-in', 'skipped-test'].includes(cls?.kind ?? '')) return 'a second red after one of flakes only';
+  // Not a second red the ship's own change is known to have caused: a file that failed again alone or hung there, a burn-in, a skip.
+  if (/on the one fresh run after a red whose files all passed alone/.test(output) && !/run-tests: \S+: (failed again alone|hung when rerun alone)/.test(output) && !['conflict', 'parse', 'burn-in', 'skipped-test'].includes(cls?.kind ?? '')) return 'a second red after one of flakes only';
   return null;
 }
 

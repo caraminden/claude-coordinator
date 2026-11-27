@@ -121,7 +121,8 @@ coverage is too slow or not available.
      - E, optional shared harnesses;
    - the habits behind the fat, each with a rule.
 2. **Delete the per-Grunt files** once the report is written.
-3. **Post an `ask_question` card** asking which batches to do, with your recommendation marked and the CI wall saving (test-seconds saved divided by files CI runs at once) next to each speed batch. Also ask whether
+3. **Post an `ask_question` card** asking which batches to do, with your recommendation marked and the CI wall saving (test-seconds saved
+   divided by files CI runs at once) next to each speed batch. Also ask whether
    the habit rules go in the kit.
 4. **Write one handoff for each batch picked** (`handoffs/handoff-test-audit-<scheme>-<batch>.md`). Each one
    holds:

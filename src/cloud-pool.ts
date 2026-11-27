@@ -251,6 +251,7 @@ export function cloudPrompt(o: { ticket: number; branch: string; minutes: number
     `1. Write \`.citadel/result.json\`: {"reply": "<markdown for the chat>", "card": null, "files": []}.`,
     `   - "files": report or other files you made, put under \`.citadel/out/\` and listed by that path; people see them.`,
     `   - "card": when you need a person's decision, {"questions": [{"question": "...?", "header": "<24 chars>", "options": [{"label": "...", "description": "...", "recommended": true}, {"label": "...", "description": "..."}], "multiSelect": false}]} (2 to 4 options, exactly one recommended), then stop: the answer comes back as your next message here.`,
+    `   - Never use AskUserQuestion or anything else that waits on a person in this session: nobody sees it there. Put the question in "card" and stop.`,
     `2. Commit them and push: \`git push origin HEAD:refs/heads/${o.branch}\`. Push once for each result.`,
     `3. If the push fails, print the same JSON between a line \`CITADEL-RESULT-BEGIN\` and a line \`CITADEL-RESULT-END\` as your last message.`,
   ].join('\n');

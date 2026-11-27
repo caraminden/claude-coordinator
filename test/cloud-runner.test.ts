@@ -121,7 +121,7 @@ test("a research minion's first turn goes to the cloud though perigee is free; i
   const start = ofMinion(research);
   assert.equal(start.length, 1);
   assert.equal(start[0][1], '--cloud', 'a pty start, not a perigee turn');
-  assert.deepEqual(start[0].slice(3), ['--effort', 'high'], "a start gets the minion's effort too");
+  assert.deepEqual(start[0].slice(3), ['--effort', 'high', '--disallowedTools', 'AskUserQuestion'], "a start gets the minion's effort too");
   assert.match(start[0][2], /\[Cara\]: compare X and Y/);
   const s = runner.cloud.session(research);
   assert.equal(s?.session, 'session_01RUNNERabc');
@@ -133,7 +133,7 @@ test("a research minion's first turn goes to the cloud though perigee is free; i
   await until('the follow-up', () => said(research).includes('the follow-up'));
   await idle(research);
   const next = ofMinion(research).at(-1)!;
-  assert.deepEqual([next[1], next.slice(3)], ['-p', ['--cloud', 'session_01RUNNERabc', '--effort', 'high', '--output-format', 'json']], "with the minion's own effort");
+  assert.deepEqual([next[1], next.slice(3)], ['-p', ['--cloud', 'session_01RUNNERabc', '--effort', 'high', '--disallowedTools', 'AskUserQuestion', '--output-format', 'json']], "with the minion's own effort");
   assert.match(next[2], /\[Cara\]: go with A/);
   assert.equal(ofMinion(research).filter((a) => a[1] !== '-p').length, 1, 'a follow-up is no new session');
   // Each turn is counted its own estimate: a running total would book the second at nothing.

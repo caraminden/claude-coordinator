@@ -137,6 +137,7 @@ test('the first message names the branch, the time and what the session lacks; a
   const next = cloudPrompt({ ticket: 9, branch: 'cloud/t9-a', minutes: 15, first: false, messages: '[Josh]: A' });
   assert.match(next, /^\[Josh\]: A\n/);
   assert.doesNotMatch(next, /minion #9/);
+  for (const p of [first, next]) assert.match(p, /Never use AskUserQuestion[^\n]*stop/, 'a question asked in the session is stranded on claude.ai: it goes in the card');
 });
 
 /** A line over `size` perigee workers and the cloud, which has no cap: the ones it may take (`marked`) go there first, bound ones only there. */

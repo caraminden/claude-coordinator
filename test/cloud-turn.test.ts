@@ -130,7 +130,7 @@ test('a follow-up goes to the same session with -p and reads its next push', asy
   const before = posted.length;
   const evs = await drive({ branch, session: 'session_01FAKEabc123', sha: 'old', text: `The answer: A. Push to ${branch}.` });
   const calls = jsonLines(log);
-  assert.deepEqual(calls.at(-1), ['-p', `The answer: A. Push to ${branch}.`, '--cloud', 'session_01FAKEabc123', '--output-format', 'json']);
+  assert.deepEqual(calls.at(-1), ['-p', `The answer: A. Push to ${branch}.`, '--cloud', 'session_01FAKEabc123', '--disallowedTools', 'AskUserQuestion', '--output-format', 'json']);
   assert.equal(
     evs.some((e) => e.subtype === 'cloud' && e.session !== 'session_01FAKEabc123'),
     false,
@@ -216,10 +216,10 @@ test("a start passes the minion's model and effort, and its result carries the e
   const branch = 'cloud/t7-m';
   const evs = await drive({ branch, text: `Push to ${branch}.`, model: 'opus', effort: 'high', cost: 0.4 });
   const start = jsonLines(log).find((a) => a[0] === '--cloud' && a[1] === `Push to ${branch}.`);
-  assert.deepEqual(start, ['--cloud', `Push to ${branch}.`, '--model', 'opus', '--effort', 'high']);
+  assert.deepEqual(start, ['--cloud', `Push to ${branch}.`, '--model', 'opus', '--effort', 'high', '--disallowedTools', 'AskUserQuestion']);
   assert.deepEqual([(evs.at(-1) as { total_cost_usd: number }).total_cost_usd, (evs.at(-1) as { cloud_cost_usd: number }).cloud_cost_usd], [0, 0.4], "its own estimate, never a session's running total");
   const fevs = await drive({ branch: 'cloud/t7-m2', session: 'session_01FAKEabc123', sha: 'old', text: 'Push to cloud/t7-m2.', model: 'opus', effort: 'high', cost: 0.1 });
-  assert.deepEqual(jsonLines(log).at(-1), ['-p', 'Push to cloud/t7-m2.', '--cloud', 'session_01FAKEabc123', '--model', 'opus', '--effort', 'high', '--output-format', 'json']);
+  assert.deepEqual(jsonLines(log).at(-1), ['-p', 'Push to cloud/t7-m2.', '--cloud', 'session_01FAKEabc123', '--model', 'opus', '--effort', 'high', '--disallowedTools', 'AskUserQuestion', '--output-format', 'json']);
   assert.equal((fevs.at(-1) as { cloud_cost_usd: number }).cloud_cost_usd, 0.1);
 });
 

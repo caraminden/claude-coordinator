@@ -122,15 +122,15 @@ const children = new Set();
  * in the screen or `ms` pass. Its process is stopped either way; returns what `done` found, or null.
  * @template T
  * @param {CloudJob} job @param {string} flag @param {string} value @param {string} cwd @param {number} ms @param {(screen: string) => T | null} done
- * @param {Record<string, string>} [more] `CLOUD_MODEL`, `CLOUD_EFFORT`: a start's model and effort
+ * @param {Record<string, string>} [more] `CLOUD_MODEL`, `CLOUD_EFFORT`: a start's model and effort; `CLOUD_DENY`: tools the session may not use
  * @returns {Promise<{ found: T | null, screen: string, exited: boolean }>}
  */
 async function underPty(job, flag, value, cwd, ms, done, more = {}) {
   const valueFile = join(mkdtempSync(join(tmpdir(), 'cloud-')), 'value');
   writeFileSync(valueFile, value);
   // stty: a wide screen, so the session's link isn't broken across lines. The value goes by file, never through a shell's quoting.
-  const cmd = 'stty cols 200 rows 50 2>/dev/null; exec "$CLOUD_CLAUDE" "$CLOUD_FLAG" "$(cat "$CLOUD_VALUE")" ${CLOUD_MODEL:+--model "$CLOUD_MODEL"} ${CLOUD_EFFORT:+--effort "$CLOUD_EFFORT"}';
-  const child = spawn('script', ['-qfec', cmd, '/dev/null'], { cwd, env: { ...process.env, SHELL: '/bin/sh', CLOUD_CLAUDE: job.claude, CLOUD_FLAG: flag, CLOUD_VALUE: valueFile, TERM: 'xterm-256color', CLOUD_MODEL: '', CLOUD_EFFORT: '', ...more }, stdio: ['pipe', 'pipe', 'ignore'], detached: true });
+  const cmd = 'stty cols 200 rows 50 2>/dev/null; exec "$CLOUD_CLAUDE" "$CLOUD_FLAG" "$(cat "$CLOUD_VALUE")" ${CLOUD_MODEL:+--model "$CLOUD_MODEL"} ${CLOUD_EFFORT:+--effort "$CLOUD_EFFORT"} ${CLOUD_DENY:+--disallowedTools "$CLOUD_DENY"}';
+  const child = spawn('script', ['-qfec', cmd, '/dev/null'], { cwd, env: { ...process.env, SHELL: '/bin/sh', CLOUD_CLAUDE: job.claude, CLOUD_FLAG: flag, CLOUD_VALUE: valueFile, TERM: 'xterm-256color', CLOUD_MODEL: '', CLOUD_EFFORT: '', CLOUD_DENY: '', ...more }, stdio: ['pipe', 'pipe', 'ignore'], detached: true });
   children.add(child);
   let screen = '';
   let lastKey = 0;
@@ -282,7 +282,7 @@ export async function cloudTurn(job) {
   if (reach instanceof Error) return end(`This turn can't reach the repo on GitHub from its checkout, so a cloud session's result could never come back. Nothing was sent to the cloud.\n\n${reach.message}`, true);
   const sized = [...(job.model ? ['--model', job.model] : []), ...(job.effort ? ['--effort', job.effort] : [])];
   if (!session) {
-    const { found, screen, exited } = await underPty(job, '--cloud', job.text, job.cwd, job.startMs, sessionIn, { CLOUD_MODEL: job.model ?? '', CLOUD_EFFORT: job.effort ?? '' });
+    const { found, screen, exited } = await underPty(job, '--cloud', job.text, job.cwd, job.startMs, sessionIn, { CLOUD_MODEL: job.model ?? '', CLOUD_EFFORT: job.effort ?? '', CLOUD_DENY: 'AskUserQuestion' });
     if (!found && exited) return end(`The cloud session didn't start: claude ended before showing its id. Its screen ended:\n\n${plain(screen).trim().slice(-800)}`, true);
     // Still running with no id shown: it may well have started, so its branch is watched rather than the job run again here.
     cost = job.cost ?? 0; // it may have started, so it is counted
@@ -295,7 +295,7 @@ export async function cloudTurn(job) {
   } else {
     const late = await lateResult(job);
     if (late) say(`Its answer to the last message came in after that turn ended:\n\n${await shown(job, late)}`);
-    const out = await run(job.claude, ['-p', job.text, '--cloud', session, ...sized, '--output-format', 'json'], { cwd: job.cwd }).catch((err) => err);
+    const out = await run(job.claude, ['-p', job.text, '--cloud', session, ...sized, '--disallowedTools', 'AskUserQuestion', '--output-format', 'json'], { cwd: job.cwd }).catch((err) => err);
     // No answer in time: it may have the message, so the session is kept and nothing runs twice.
     if (out instanceof Error && /** @type {{ timedOut?: boolean }} */ (out).timedOut) return end(`The cloud session ${session} didn't answer within 120 s; it may have the message. Send it again to retry there.`, true);
     if (out instanceof Error || refused(out)) {

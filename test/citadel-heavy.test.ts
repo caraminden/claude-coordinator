@@ -973,6 +973,23 @@ test('a land.sh judged heavy by its past runs still runs in its own worktree: ne
   assert.ok(!existsSync(e.ciRan), 'it never went to CI');
   assert.deepEqual(e.asked(), [], 'nor to a machine with the Builds role');
   assert.deepEqual([lastLine(dir)[3], lastLine(dir)[9]], ['here', 'light']);
+  // With the judgment switched off too, and as sh's script; --long, CI alone, is refused before anything is pushed.
+  const off = spawnSync(heavy, ['sh', 'tools/land.sh'], { cwd: repo, env: e.env, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(off.stdout, `landed from ${repo}\n`, off.stderr);
+  const long = spawnSync(heavy, ['--long', 'tools/land.sh'], { cwd: repo, env: e.env, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(long.status, 2, long.stderr);
+  assert.match(long.stderr, /run it without --long/);
+  assert.ok(!existsSync(e.ciRan), 'none of them went to CI');
+});
+
+test('a job that only names land.sh in its arguments is judged as any other', () => {
+  const { dir, env } = folder(1);
+  const e = elsewhere(env);
+  writeFileSync(e.ci, '');
+  seed(dir, past('Peek Auras #938 (cara)', 'tar -cf out.tar tools/land.sh', 333, 338).repeat(3));
+  const r = spawnSync(heavy, ['tar', '-cf', 'out.tar', 'tools/land.sh'], { cwd: shipScript(), env: { ...judged(e.env), CITADEL_HEAVY_WHO: 'Peek Auras #938 (cara)' }, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(e.ciRan), 'heavy by its past runs, so CI ran it');
 });
 
 test('a land.sh takes no heavy slot, whatever its past runs say or the caller guesses: its own check takes one if it needs it', async () => {

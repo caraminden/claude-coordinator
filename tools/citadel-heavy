@@ -89,6 +89,9 @@
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
+# Whether the command is a ship script (#2236, the header's light list): land.sh itself, or run by sh or bash. Its first
+# word only, so a job that merely names land.sh (a tar of the repo, a lint) is judged as any other.
+ships() { local c=${1:-}; case ${c##*/} in bash|sh) c=${2:-} ;; esac; [ "${c##*/}" = land.sh ]; }
 # The CPU seconds (user + system, in ticks of 1/100 s) of this shell's waited-for children: $$ is this shell's pid in a subshell too.
 cpu_ticks() { local s f; read -r s </proc/$$/stat 2>/dev/null || { echo 0; return; }; read -ra f <<<"${s##*) }"; echo $((${f[13]:-0} + ${f[14]:-0})); }
 # The clock for the history line's wait and run: microseconds, so a difference is the time that passed. Two reads of
@@ -136,6 +139,7 @@ if [ "${1:-}" = --long ]; then
   [ -z "$here" ] || { say "a long job runs on the scheme's CI only, so --long and --here (or CITADEL_HEAVY_HERE) don't go together"; exit 2; }
   shift
   case ${1:-} in --here|--heavy|--long|--back) say "--long takes the command next, not $1"; exit 2 ;; esac
+  ! ships "$@" || { say "a ship script runs in its own worktree, which CI's snapshot is not: run it without --long"; exit 2; }
   exec "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts" --long "$@"
 fi
 [ $# -gt 0 ] || { usage >&2; exit 2; }
@@ -184,9 +188,7 @@ judge() {
   local claude='(^|[ /])(prompt-eval|skill-trigger-eval|skill-evals|citadel-replay|review-escapes|claude)([ /.]|$)'
   # A ship script (#2236) works on this worktree's branch, the build branches and the scheme's main, so CI's snapshot or
   # another machine can't run it, and a light-only merge needs no slot: its check takes one itself when it needs one.
-  # The command's words only: CITADEL_HEAVY_WHAT may be "land.sh's suite for ...", land.sh's own heavy check.
-  local ship='(^|[ /])land\.sh( |$)'
-  if [[ " $* " =~ $ship ]]; then echo "light it ships from this worktree (its own check takes a slot if it needs one), so it never goes to CI or another machine"; return; fi
+  if ships "$@"; then echo "light it ships from this worktree (its own check takes a slot if it needs one), so it never goes to CI or another machine"; return; fi
   if [[ " $* $what " =~ $claude ]]; then echo "light it runs Claude turns, which wait on Claude, not the CPU"; return; fi
   local h=$dir/history
   [ -f "$h" ] || h=/dev/null # a fifo or a missing file would hang or fail the read
@@ -237,8 +239,8 @@ trim_history() {
   { tail -c "$((max / 2))" "$h" | tail -n +2 >"$cut" && mv -f "$cut" "$h"; } 2>/dev/null || rm -f "$cut" 2>/dev/null
 }
 # A light job runs here and now, at nice 19, and writes its own history line. CITADEL_HEAVY_JUDGE=0 sends every job to the
-# line, as before #1629 (the line's own tests; an off switch).
-if [ -z "$first" ] && [ "${CITADEL_HEAVY_JUDGE:-}" != 0 ]; then
+# line, as before #1629 (the line's own tests; an off switch). A ship script is light whatever the switch or priority say.
+if ships "$@" || { [ -z "$first" ] && [ "${CITADEL_HEAVY_JUDGE:-}" != 0 ]; }; then
   read -r weight why < <(judge "$@")
   if [ "$weight" = light ]; then
     say "runs at once, without a heavy slot: $why"

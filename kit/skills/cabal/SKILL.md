@@ -23,6 +23,9 @@ asks, merges since your last wake, then every other open ask, answered together.
    Build 5 found works: about four lanes that never wait on each other, no two members writing one file, and a member
    per piece a fresh minion can finish (see `citadel:briefing` for a piece's size and model, and its one-slice-first
    rule for a split behind a new gate: `cabal_start` only that slice's row and hold the others, with no `after` on it).
+   A finding that says something is broken becomes a row only once it is **reproduced** (a failing test, or a trace or log
+   read that shows it; `citadel:bug-fixing`, proof before fix). An unreproduced one goes on the roster as a check row, or
+   to a person on a card.
 2. Write a handoff per piece with `citadel:briefing`, in the shared folder's `handoffs/`.
 3. Add one roster row per piece (`cabal_board` row): label (T1, M2), title, lane, what it waits on (`after`), the files
    it expects to touch, handoff path, model, effort and expected cost. A row for a member in another scheme names it

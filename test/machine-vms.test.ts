@@ -2,10 +2,7 @@
 // desktop's card, its owner the desktop's, its tools still named after itself.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MachineRelay, vmsFound } from '../src/machines.ts';
@@ -101,37 +98,6 @@ test("the host's agent finding a Hyper-V VM links its owner's machine of that na
   }
   // A VM list it can't read (no Hyper-V Administrators) links nothing; a VM is never a host.
   assert.equal(vmsFound(store, store.getMachine(box.id)!, ['cara-desktop']), false);
-});
-
-test('the one-off migration puts the test box on the row that reports its desktop, and says before and after', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'machine-vms-'));
-  try {
-    const path = join(dir, 'db.sqlite');
-    const first = new Store(path);
-    const cara = first.createUser({ name: 'Cara', login: 'cara' });
-    const desk = first.createMachine('cara-desktop-ci-runners', 'x', 'Cara', cara.id);
-    first.updateMachine(desk.id, { last_check: JSON.stringify({ at: 1, results: [], runners: true, host: 'DESKTOP-G248IJ8', os: 'linux' }) });
-    const box = first.createMachine('citadel-test-box', 'y', 'Cara', cara.id);
-    first.setSetting('schema_version', 126);
-    first.db.close();
-    const lines: string[] = [];
-    const log = console.log;
-    console.log = (...a: unknown[]) => void lines.push(a.join(' '));
-    let again: Store;
-    try {
-      again = new Store(path);
-    } finally {
-      console.log = log;
-    }
-    assert.equal(again.getMachine(box.id)!.vm_of, desk.id);
-    assert.ok(
-      lines.some((l) => /citadel-test-box \(row \d+, owner \d+\) is now a VM on cara-desktop-ci-runners/.test(l)),
-      lines.join('\n'),
-    );
-    again.db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
-  }
 });
 
 test("a Taskmaster's list names a VM with its computer, and links its host's card", () => {

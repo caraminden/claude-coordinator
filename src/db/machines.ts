@@ -31,29 +31,6 @@ export const machineQueries = {
     return Number(r.changes) > 0;
   },
 
-  /**
-   * The one-off link for the machine saved before VMs were capabilities (Build 10 H4, spec one-kind-of-machine.md section 5):
-   * the Windows test box, the Hyper-V VM on Cara's desktop (tools/win-test-box/README.md), becomes a VM on the row whose
-   * agents report that desktop's hostname. Its tool names don't change (they are its own name). Says what it did.
-   */
-  testBoxOnItsHost(this: Store) {
-    const box = this.listMachines().find((m) => m.name === 'citadel-test-box');
-    if (!box || box.vm_of != null) return;
-    const hostname = (json: string | null | undefined) => {
-      try {
-        const h = json ? (JSON.parse(json) as { host?: unknown }).host : null;
-        return typeof h === 'string' ? h.toLowerCase() : null;
-      } catch {
-        return null;
-      }
-    };
-    const hosts = this.listMachines().filter((m) => m.id !== box.id && m.vm_of == null && [hostname(m.report), hostname(m.last_check)].includes('desktop-g248ij8'));
-    if (hosts.length !== 1) return console.log(`Machine VMs (H4): ${box.name} (row ${box.id}) stays a machine of its own: ${hosts.length ? `${hosts.length} rows report` : 'no row reports'} its desktop's hostname, DESKTOP-G248IJ8.`);
-    const host = hosts[0];
-    this.linkMachineVm(box.id, host.id);
-    console.log(`Machine VMs (H4): ${box.name} (row ${box.id}, owner ${box.owner_id ?? 'none'}) is now a VM on ${host.name} (row ${host.id}, owner ${host.owner_id ?? 'none'}); its roles and schemes are as they were.`);
-  },
-
   /** A join code for Connect a computer (Build 7 M2, src/machine-join.ts), hashed; machineId: the row an Update reconnects. */
   addMachineJoin(this: Store, j: { codeHash: string; askerId: number | null; by: string; ownerId: number | null; machineId: number | null; at: number; expiresAt: number }): number {
     const { lastInsertRowid } = this.db.prepare('INSERT INTO machine_joins (code_hash, asker_id, created_by, owner_id, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(j.codeHash, j.askerId, j.by, j.ownerId, j.machineId, j.at, j.expiresAt);

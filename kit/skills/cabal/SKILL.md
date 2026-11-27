@@ -93,7 +93,8 @@ Your build is `build/<n>`. In a container, each `tools/land.sh` below is the lan
    against main with a claude-fable-5-2 reviewer at medium effort, label the build with the highest of its members'
    labels and that review's, `git rm build-claims.md` and merge that into `build/<n>` (`--build` refuses while it is
    there), and post one go card (ask_question, kind merge) with the roster, the label and what wasn't verified,
-   whatever the label, and the calls you made yourself from the spec and picks, so people can send any back. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
+   whatever the label, and the calls you made yourself from the spec and picks, so people can send any
+   back. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
    one CI run, one deploy. Stay open for the retro (section 7): the land tool takes `stay_open: true` with
    `waiting_on: "the cabal retro"`; after a `land.sh` you ran yourself, call `wake_when_live`.
 

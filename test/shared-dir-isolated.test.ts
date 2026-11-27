@@ -4,11 +4,14 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { dirname } from 'node:path';
 import { test } from 'node:test';
 
 test('a test process never sees the live shared folder: COORDINATOR_SHARED_DIR is unset or a scratch folder under the temp dir', () => {
   const dir = process.env.COORDINATOR_SHARED_DIR;
   if (!dir) return;
-  assert.ok(dir.startsWith(`${tmpdir()}/`), `COORDINATOR_SHARED_DIR is ${dir}, outside ${tmpdir()}: a script a test starts would write its retro-log lines into the live log`);
+  // Each test file gets its own temp folder (f-xxxx) inside the run's temp dir, where the global setup made the scratch folder: a sibling.
+  const root = dirname(tmpdir());
+  assert.ok(dir.startsWith(`${tmpdir()}/`) || dir.startsWith(`${root}/test-shared-`), `COORDINATOR_SHARED_DIR is ${dir}, outside ${tmpdir()}: a script a test starts would write its retro-log lines into the live log`);
   assert.ok(existsSync(dir), 'and the scratch folder exists');
 });

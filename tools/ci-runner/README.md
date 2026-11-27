@@ -27,7 +27,7 @@ scheme X" (Josh, 2026-11-25: "there should be one connection that multiple schem
    minutes, one PC at a time: the owner's order on the Machines page, then the most room), so its jobs spread over them.
    Unticking a scheme takes its runners off that PC. Idle runners cost a service each and nothing else; Citadel posts
    nothing when one goes on or off, only when it fails. Only when no PC lends a scheme CI while its jobs wait
-   do its members get one card naming PCs they could ask. Set the [caps](#your-own-caps) if 75% of the PC is too much.
+   do its members get one card naming PCs they could ask (withdrawn once a PC lends it or serves its repo). Set the [caps](#your-own-caps) if 75% of the PC is too much.
 
 `ci_runners` (below) stays for odd cases: a second runner, a [role](#runner-roles-1934), a list. A **CI runner host**
 row (**Add a CI runner host** on the Machines page, before Build 7) still works, and Citadel never takes its runners

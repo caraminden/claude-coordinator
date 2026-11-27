@@ -39,7 +39,7 @@ export class TurnProgress {
    * turn ended plus the events since, or from all its events when nothing usable is saved (#530: a
    * Taskmaster's 6,000 events took 0.6 s to read cold, on the first scheme open after every restart).
    */
-  progressFor(ticketId: number) {
+  progressFor(ticketId: number, ticket?: Ticket) {
     let p = this.progress.get(ticketId);
     if (!p) {
       const saved = unpackPlan(this.d.store.getSetting(planKey(ticketId)));
@@ -53,10 +53,14 @@ export class TurnProgress {
       // The full replay is paid once: an idle minion would otherwise pay it after every restart.
       if (!usable) {
         this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
-        // Rebuilt by new task-list rules, so the row's stored line, kept until its next event, says what they say (#2201).
-        const t = this.d.store.getTicket(ticketId);
+        // Rebuilt by new task-list rules, so the row's stored line, kept until its next event, says what they say
+        // (#2201), and so does the caller's copy of the row, which view() shows with the rebuilt track.
+        const t = ticket ?? this.d.store.getTicket(ticketId);
         const line = t && p.tasks.length ? progressLine(p, t.status === 'running') : '';
-        if (t && line && line !== t.last_activity) this.d.store.setLastActivity(ticketId, line);
+        if (t && line && line !== t.last_activity) {
+          this.d.store.setLastActivity(ticketId, line);
+          t.last_activity = line;
+        }
       }
     }
     return p;

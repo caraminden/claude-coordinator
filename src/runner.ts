@@ -1194,7 +1194,7 @@ export class Runner {
     ratio ??= closed ? 1 : this.turnProgress.stepRatio(ticket.project_id);
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
-    const p = closed ? null : this.progressFor(ticket.id);
+    const p = closed ? null : this.progressFor(ticket.id, ticket);
     const { total, done } = p ? stepInfo(p) : { total: 0, done: 0 };
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
@@ -3995,8 +3995,8 @@ export class Runner {
     return this.turnProgress.progressOf(ticket);
   }
 
-  private progressFor(ticketId: number) {
-    return this.turnProgress.progressFor(ticketId);
+  private progressFor(ticketId: number, ticket?: Ticket) {
+    return this.turnProgress.progressFor(ticketId, ticket);
   }
 
   backfillStepTimes() {

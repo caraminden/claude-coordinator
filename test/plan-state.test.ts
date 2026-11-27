@@ -155,7 +155,8 @@ test("a plan rebuilt by new task-list rules re-words the row's stored line, so a
   store.updateTicket(t.id, { last_activity: 'Paused at: Reading, building and testing, 5 steps · 0 of 6 done' });
   store.setSetting(planKey(t.id), { ...store.getSetting<Saved>(planKey(t.id))!, rules: 'older' });
   const touched = store.getTicket(t.id)!.updated_at;
-  restart().view(store.getTicket(t.id)!);
+  const shown = restart().view(store.getTicket(t.id)!);
+  assert.equal(shown.last_activity, line, 'the view that rebuilt it shows the new line with the new track');
   assert.equal(store.getTicket(t.id)!.last_activity, line);
   assert.equal(store.getTicket(t.id)!.updated_at, touched, 'not counted as new activity');
 });

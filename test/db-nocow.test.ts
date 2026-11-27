@@ -152,12 +152,13 @@ test('waits, with no marker, for disk space and for other processes to let go', 
 });
 
 test('kills a copy that runs past its budget, and leaves the old file in place', () => {
-  const db = stopped(400);
+  // 1 ms: a node process can't even start in that, on any disk. (50 ms passed on GitHub's fast runners: the copy beat it.)
+  const db = stopped();
   const ino = statSync(db).ino;
   const rows = settings(db);
-  const r = moveToNoCow(db, fakeOps(), { budgetMs: 50 });
+  const r = moveToNoCow(db, fakeOps(), { budgetMs: 1 });
   assert.equal(r.moved, false);
-  assert.match(r.note, /the copy took over 0.05 s/);
+  assert.match(r.note, /the copy took over 0.001 s/);
   assert.equal(statSync(db).ino, ino);
   assert.equal(settings(db), rows);
   assert.deepEqual(

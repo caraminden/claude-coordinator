@@ -27,13 +27,13 @@
     "summary": "0 as before, 219 new, 0 gone"
   },
   "ci-red": {
-    "hash": "6f2496ff21f7baf6",
-    "at": "2026-11-26",
+    "hash": "a1930f0c45b5b2fe",
+    "at": "2026-11-27",
     "days": 3,
     "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",
-    "hits": 6,
-    "real": 9,
-    "summary": "6 as before, 0 new, 3 gone"
+    "hits": 7,
+    "real": 10,
+    "summary": "6 as before, 1 new, 4 gone"
   },
   "compactions": {
     "hash": "e28af654e204f3a9",
@@ -72,13 +72,13 @@
     "summary": "12 as before, 0 new, 0 gone"
   },
   "flake-counter": {
-    "hash": "239c587ebe72b8bb",
-    "at": "2026-11-26",
-    "days": 1,
-    "inputs": "96 passes over 15 schemes: their retro logs, land-recorded flakes and minions",
-    "hits": 10,
-    "real": 12,
-    "summary": "10 as before, 0 new, 0 gone"
+    "hash": "0d25876c91eaf41b",
+    "at": "2026-11-27",
+    "days": 3,
+    "inputs": "288 passes over 15 schemes: their retro logs, land-recorded flakes and minions",
+    "hits": 27,
+    "real": 30,
+    "summary": "27 as before, 0 new, 1 gone"
   },
   "main-rollbacks": {
     "hash": "9cfa20214aab5bfc",

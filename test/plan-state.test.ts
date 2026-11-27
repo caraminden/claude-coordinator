@@ -147,6 +147,20 @@ test('a state saved by other task-list rules, or a broken one, is thrown away an
   }
 });
 
+test("a plan rebuilt by new task-list rules re-words the row's stored line, so an idle minion's row isn't left on the old rules' words (#2201)", () => {
+  const t = newTicket();
+  feed(restart(), t.id, HISTORY.slice(0, HISTORY.indexOf(result) + 1));
+  const line = store.getTicket(t.id)!.last_activity;
+  assert.equal(line, 'Paused at: Build · 1 of 2 done');
+  store.updateTicket(t.id, { last_activity: 'Paused at: Reading, building and testing, 5 steps · 0 of 6 done' });
+  store.setSetting(planKey(t.id), { ...store.getSetting<Saved>(planKey(t.id))!, rules: 'older' });
+  const touched = store.getTicket(t.id)!.updated_at;
+  const shown = restart().view(store.getTicket(t.id)!);
+  assert.equal(shown.last_activity, line, 'the view that rebuilt it shows the new line with the new track');
+  assert.equal(store.getTicket(t.id)!.last_activity, line);
+  assert.equal(store.getTicket(t.id)!.updated_at, touched, 'not counted as new activity');
+});
+
 test('rewriting the stored events, or deleting the minion, drops the saved state', () => {
   const [a, b] = [newTicket(), newTicket()];
   for (const t of [a, b]) feed(restart(), t.id, HISTORY.slice(0, HISTORY.indexOf(result) + 1));
@@ -214,6 +228,7 @@ test("a tagged plan moves from the minion's calls, the same after a restart at a
     assert.deepEqual(plain(got), plain(fullReplay(t.id)), `after event ${i + 1}`);
     bars.push(got.tasks.map((s) => s.status[0]).join(''));
   }
-  assert.deepEqual(bars, ['', 'ipppp', 'ciipp', 'ciiip', 'ciipp', 'ciiip', 'cccci', 'ccccc', 'ccccc']);
+  // Write B no edit could be told apart for stays to do (#2201); the round ends with the ship.
+  assert.deepEqual(bars, ['', 'ipppp', 'cippp', 'cipip', 'cippp', 'cipip', 'cccci', 'ccccc', 'ccccc']);
   assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 5, total: 5 });
 });

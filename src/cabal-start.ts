@@ -86,7 +86,7 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
   const w = width == null ? cabal.width : Number(width);
   if (!Number.isInteger(w) || w < 1 || w > WIDTH_MAX) throw new HttpError(400, `width is how many members may be at work at once, 1 to ${WIDTH_MAX}`);
   const all = store.cabalRows(lead.id);
-  const rows = all.filter((r) => r.ticket_id == null && r.approved_at == null);
+  const rows = all.filter((r) => r.ticket_id == null && r.approved_at == null && !(isFixer(r) && rowScheme(lead, r) === lead.project_id)); // an own-scheme fixer row starts with no card
   if (!rows.length && w === cabal.width) throw new HttpError(409, 'Every row on your roster is approved or started: add a row first, or pass a new width');
   const shared = projectSharedDir(app.dataDir, lead.project_id);
   for (const r of rows) {
@@ -260,7 +260,15 @@ export async function cabalStart(app: App, lead: Ticket, rowRef: unknown, text: 
   if (there && via === 'cabal_start') throw new HttpError(400, `Row ${rowName(r)} is in ${schemeName(app, rowScheme(lead, r))}: its ${AGENT_NAME} starts it. Ask it with message_taskmaster (row ${r.id}, action start)`);
   if (!there && via === 'message_taskmaster') throw new HttpError(400, `Row ${rowName(r)} is in your own scheme: start it with cabal_start`);
   if (r.ticket_id != null) throw new HttpError(409, `Row ${rowName(r)} is started already: ${there ? `${schemeName(app, rowScheme(lead, r))} ` : ''}#${store.getTicket(r.ticket_id)?.number}`);
-  if (r.approved_at == null) throw new HttpError(403, `Row ${rowName(r)} isn't on the approved roster: add it with a card (cabal_board action form) and start it once ${there ? `a ${schemeName(app, rowScheme(lead, r))} member` : 'a person'} says go`);
+  // A fixer row (a red run, a failing test or a bug in the cabal's work) needs no card, as a Taskmaster's fix starts need none (Cara, 2026-11-27); a start card's budget threshold still applies.
+  if (r.approved_at == null && !there && isFixer(r)) {
+    const by = `${overseerOf({ name: name(app, lead) })} #${lead.number}`;
+    store.updateCabalRow(r.id, { approved_by: `${by}${NO_CARD}`, approved_at: Date.now() });
+    r.approved_by = `${by}${NO_CARD}`;
+    r.approved_at = Date.now();
+    store.addCabalLog(lead.id, `#${lead.number}`, `Approved fixer row ${rowName(r)}: no forming card`);
+  }
+  if (r.approved_at == null) throw new HttpError(403, `Row ${rowName(r)} isn't on the approved roster: add it with a card (cabal_board action form; a fixer row needs none) and start it once ${there ? `a ${schemeName(app, rowScheme(lead, r))} member` : 'a person'} says go`);
   const extra = text == null || text === '' ? '' : String(text).slice(0, 4000);
   if (!there) chainOf(app, lead, r); // refused now, not once it is next up
   if ((await atWork(app, lead.id, r.id)) >= cabal.width) {
@@ -306,7 +314,7 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   };
   // The lead's own start, as the Taskmaster's would be: its person's turn runs it.
   const session: Session = { name: by, exp: Number.POSITIVE_INFINITY, agent: lead.id };
-  const made = await createMinion(app, project, body, session, lead, false, { row: r.id, usd: r.cost });
+  const made = await createMinion(app, project, body, session, lead, false, { row: r.id, usd: r.approved_by?.endsWith(NO_CARD) ? null : r.cost }); // a cost no person approved clears no start card);
   store.updateCabalRow(r.id, { next_at: null });
   store.addCabalLog(lead.id, `#${lead.number}`, `Started #${made.number} for ${rowName(r)}`);
   await tellTaskmaster(app, lead, `${by} started #${made.number} ${r.title} from its approved roster (row ${rowName(r)}, approved by ${r.approved_by}).`, false, false, 'fyi', true); // notice: a reply the lead owes another Taskmaster keeps its way back
@@ -314,6 +322,10 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   await ownWrites();
   return { started: made.number!, title: r.title, notes: made.notes };
 }
+
+/** A fixer row: its member fixes a red run, a failing test or a bug in the cabal's work. */
+const NO_CARD = ' (fixer, no card)';
+const isFixer = (r: CabalMemberRow) => r.role.trim().toLowerCase() === 'fixer';
 
 export const retroKey = (leadId: number) => `cabal-retro:${leadId}`;
 
@@ -332,7 +344,7 @@ export function retroCheck(app: App, leadId: number): void {
   const { store } = app;
   const lead = store.getTicket(leadId);
   if (!lead || lead.status === 'closed' || lead.build != null) return;
-  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || r.role.trim().toLowerCase() !== 'fixer');
+  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || !isFixer(r));
   if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
   const asked = store.getSetting<number[]>(retroKey(lead.id)) ?? [];
   if (rows.every((r) => asked.includes(r.ticket_id!))) return;

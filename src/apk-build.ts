@@ -1,17 +1,19 @@
 // An Android APK built and published after each deploy (#837; TWIReader's ask, Cara 2026-11-16: "Work with citadel to make
 // this citadel wide"). Every land on main deploys its scheme's contraptions (#712), so once a Capacitor app's deploy goes
 // live, Citadel checks whether what goes into its APK (android/, capacitor.config.*, the Capacitor webDir) changed since the
-// published one. When it did, it builds a release APK on perigee in a checkout of its own beside the live one, numbers it by
+// published one. When it did, it builds a release APK from a checkout of its own beside the live one (its Gradle step on a
+// machine with the Builds role when one has room, src/apk-machine.ts, else on perigee), numbers it by
 // the commit count (versionCode only goes up while main isn't rewritten), signs it with the app's release key in
 // ~/.config/citadel-android (the citadel:android-app skill), and publishes it and latest.json into the app's DATA_DIR/android/,
 // where its open route serves them to the update banner. An app whose APKs a release workflow signs on CI (Mandate) keeps that
 // path (src/apk-release.ts): this skips it. Nothing here touches the live slot, so a failed build changes nothing that runs.
 import { execResult, runLogged } from './exec.ts';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { access, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { access, copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join, relative } from 'node:path';
 import { constants } from 'node:os';
 import { androidEnvLater } from './claude-link.ts';
+import type { ApkMachine } from './apk-machine.ts';
 import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts';
 import type { ContraptionRow } from './db.ts';
 import { hasKey, keyFiles, makeReleaseKey, type Keytool } from './release-key.ts';
@@ -98,6 +100,8 @@ export interface ApkBuildDeps {
   published: (row: ContraptionRow, code: number, commit: string, by: string) => void;
   /** Tell the app's home Taskmaster something it has to act on. */
   tell: (row: ContraptionRow, text: string) => void;
+  /** Builds the unsigned APK on a lent machine's Builds role first (H3, src/apk-machine.ts); left out, or false, perigee builds it. */
+  elsewhere?: Pick<ApkMachine, 'build'>;
   run?: Runner;
   /** How many processes the OOM killer has killed in Citadel's cgroup so far: a rise over a step that died of SIGKILL is out of memory. */
   oomKills?: () => Promise<number>;
@@ -343,7 +347,7 @@ export class ApkBuilds {
     const env: NodeJS.ProcessEnv = { ...base, PATH: path, ...(await androidEnvLater(this.d.home, path)), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: src, CITADEL_HEAVY_WHO: `${row.title} APK build`, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PRIORITY: '1', CI: '1' };
     if (!env.ANDROID_HOME) return fail(`the Android toolchain isn't installed on perigee (tools/android/install-sdk.sh)`);
     const run = this.d.run ?? runLogged;
-    const deadline = Date.now() + BUILD_MS;
+    let deadline = Date.now() + BUILD_MS;
     const ooms = this.d.oomKills ?? cgroupOomKills;
     const step = async (what: string, argv: string[], cwd: string) => {
       await writeFile(log, `== ${argv.join(' ')}\n`, { flag: 'a' });
@@ -370,7 +374,11 @@ export class ApkBuilds {
       await rm(unsigned, { force: true });
       await step('cap sync android', ['npx', '--no-install', 'cap', 'sync', 'android'], join(src, cap.root));
       // The versionCode goes in through an init script, so the app's build.gradle needs no change and keeps its own number for hand builds.
-      await step('gradlew assembleRelease', ['nice', '-n', '10', this.d.heavy, './gradlew', '--no-daemon', '--init-script', VERSION_INIT, `-Pcitadel.versionCode=${code}`, 'assembleRelease'], join(src, cap.android));
+      const gradlew = (init: string) => ['./gradlew', '--no-daemon', '--init-script', init, `-Pcitadel.versionCode=${code}`, 'assembleRelease'];
+      const built = await this.elsewhere(row, src, cap.android, gradlew, log, dir);
+      // The time a machine took isn't taken from what perigee still does: its own build, or the signing.
+      deadline = Date.now() + BUILD_MS;
+      if (!built) await step('gradlew assembleRelease', ['nice', '-n', '10', this.d.heavy, ...gradlew(VERSION_INIT)], join(src, cap.android));
       if (!existsSync(unsigned)) throw new Error(`no ${unsigned.slice(src.length + 1)} after the build: its release build type must leave signing to Citadel`);
       await rm(signed, { force: true });
       await step('apksigner sign', [apksigner(this.d.home, env.ANDROID_HOME), 'sign', '--ks', key, '--ks-pass', `file:${pass}`, '--out', signed, unsigned], dir);
@@ -395,6 +403,29 @@ export class ApkBuilds {
     this.d.published(row, code, commit, by);
     if (warnings.length) this.d.tell(row, `${row.title}'s Android build ${code} is published, but ${warnings.join(' and ')}. The citadel:android-app skill says none may be true in a release: fix it in the app's AndroidManifest.xml.`);
     return { built: code };
+  }
+
+  /** The Gradle step on a lent machine (H3): true once the unsigned APK is in the checkout. No signing key goes along. */
+  private async elsewhere(row: ContraptionRow, src: string, android: string, gradlew: (init: string) => string[], log: string, dir: string): Promise<boolean> {
+    if (!this.d.elsewhere) return false;
+    // The init script goes with the snapshot: perigee's path to it means nothing there.
+    const init = join(src, '.citadel-apk-version.gradle');
+    await copyFile(VERSION_INIT, init);
+    try {
+      return await this.d.elsewhere.build({
+        row,
+        top: src,
+        dir: android,
+        argv: gradlew(relative(join(src, android), init)),
+        apk: join(android, 'app/build/outputs/apk/release/app-release-unsigned.apk'),
+        manifest: join(android, 'app/build/intermediates/merged_manifests/release'),
+        log,
+        scratch: join(dir, 'machine'),
+        minutes: BUILD_MS / 60_000,
+      });
+    } finally {
+      await rm(init, { force: true });
+    }
   }
 
   /** Remove published APKs older than the newest KEEP_APKS, never the one latest.json names. */

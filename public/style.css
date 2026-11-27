@@ -445,13 +445,13 @@ html.frame-topbar .frame-nav { display: inline-flex; }
 
 /* The segmented track (wait.js segTrack, #630): the release's stages, the chat readout's plan and a working row's plan, one look.
    A piece per segment as wide as its usual time (flex-grow from segTrack); done green, the one underway blue (amber
-   past its usual), a sliver when nothing is known of it, hatched violet while it waits. */
+   past its usual), one passed but kept open faded blue, a sliver when nothing is known of it, hatched violet while it waits. */
 .seg-track { list-style: none; display: flex; gap: 3px; margin: 0; padding: 0; }
 .seg-track > li { flex: 1 1 0; min-width: 4px; display: flex; flex-direction: column; gap: 0.25rem; }
 .seg-track .wait-bar { grid-column: auto; display: block; margin: 0; height: 4px; border-radius: 2px; }
 .seg-track .wait-bar > i { width: 0; }
 .seg-track .done .wait-bar > i { width: 100%; background: var(--done); }
-.seg-track .held .wait-bar > i { width: 100%; }
+.seg-track .held .wait-bar > i { width: 100%; opacity: 0.35; } /* passed but kept open: full, faded, so only the step underway reads as moving (#2201) */
 .seg-track .now .wait-bar > i { width: 8%; } /* waitBar's own width, when it has one, is inline and wins */
 .seg-track .now.waits .wait-bar { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--held) 55%, transparent) 0 3px, color-mix(in srgb, var(--held) 15%, transparent) 3px 6px); }
 .seg-track .now.waits .wait-bar > i { width: 0; }

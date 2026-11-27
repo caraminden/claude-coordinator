@@ -182,8 +182,11 @@ export function minionRulesLines(project: Project): string[] {
   else if (project.grill === 'never')
     lines.push('Grill before code, in this scheme (set in its Minion rules; this replaces the rule "Grill design-shaped features first" in `citadel:grilling`): no feature minion runs `citadel:grilling` rounds before it writes code. Ask a card only where the Citadel-wide card rule says to.');
   if (project.gh_runners === 'ok') lines.push("GitHub's own runners (set in its Minion rules): CI on them (CI_RUNNER=github, or a workflow dispatched there) is fine here and needs no one's go.");
-  else if (project.gh_runners === 'never') lines.push("GitHub's own runners (set in its Minion rules): never use them in this scheme, since they cost Actions minutes (no CI_RUNNER=github, no workflow dispatched there); stay on this scheme's own runners, and if there are none, say so rather than switching.");
-  else if (project.gh_runners === 'ask') lines.push("GitHub's own runners (set in its Minion rules): CI on them (CI_RUNNER=github, or a workflow dispatched there) costs Actions minutes, so ask a person first, with a card.");
+  else if (project.gh_runners === 'never') lines.push("GitHub's own runners (set in its Minion rules): never use them in this scheme (it chose to stay off them; no CI_RUNNER=github, no workflow dispatched there); stay on this scheme's own runners, and if there are none, say so rather than switching.");
+  else if (project.gh_runners === 'ask')
+    lines.push(
+      "GitHub's own runners (set in its Minion rules): CI on GitHub's standard hosted runners (`ubuntu-latest` and the like: CI_RUNNER=github, or a workflow dispatched there) is free and unlimited on a public repo and needs no go; check with `gh repo view --json visibility`. On a private repo it uses the account's Actions minutes, and larger runners (more cores, GPU) are billed on any repo: ask a person first for those, with a card. Room is limited: an account runs only so many hosted jobs at once across all its repos (20 on the Free plan), so a big matrix waits on others. Moving ship CI there is a people's decision about speed and capacity, not cost.",
+    );
   const off = offSkills(project);
   if (off.length) {
     // Cara, 2026-11-19 (Build 4's Q10): with the pre-ship review off, every ship waits for a person's go.
@@ -286,7 +289,7 @@ export function cabalLines(c: CabalRole | null): string[] {
   const build = c.build != null;
   if (c.lead) {
     return [
-      `You are ${c.overseer}: you lead its cabal, the minions that work on ${build ? 'its build' : 'it'} under you, from its board (cabal_board). Open the \`citadel:cabal\` skill before anything else, and again after a shift change: it holds your steps. People read you as "${c.overseer}", never "the Overseer" alone. What always holds: people approve the roster on its forming card (cabal_board form), and you start members only from approved rows, with cabal_start (message_taskmaster for a row in another scheme); a red run or a review finding goes to the member who made it while it is open, else to the cabal's fixer, and you fix it yourself only for a merge conflict or about 20 lines; members' asks wait on the board and you answer them together at each wake.${build ? ' A full run waits until no member is still merging into the build.' : ''}`,
+      `You are ${c.overseer}: you lead its cabal, the minions that work on ${build ? 'its build' : 'it'} under you, from its board (cabal_board). Open the \`citadel:cabal\` skill before anything else, and again after a shift change: it holds your steps. People read you as "${c.overseer}", never "the Overseer" alone. What always holds: people approve the roster on its forming card (cabal_board form), and you start feature members only from approved rows (a fixer row in your scheme needs no card), with cabal_start (message_taskmaster for a row in another scheme); a red run or a review finding goes to the member who made it while it is open, else to the cabal's fixer, and you fix it yourself only for a merge conflict or about 20 lines; members' asks wait on the board and you answer them together at each wake: yourself when the spec or a pick settles them, on a card to the requester when those are silent (the skill's section 2).${build ? ' A full run waits until no member is still merging into the build.' : ''}`,
     ];
   }
   return [

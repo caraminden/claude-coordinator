@@ -88,3 +88,54 @@ merge_into() {
   say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); main and the live checkout are untouched"
   exit 0
 }
+
+# A claims merge in flight (#1684): the build minion's --into of a changed build-claims.md marks itself with
+# <state>/build-<n>.claims.<pid> (its queue_proc identity); a mark whose process is gone counts for nothing.
+# claims_inflight prints the pid of a live one other than this run (a dead one's goes).
+claims_mark() { echo "$state/build-${build#build/}.claims"; }
+
+claims_inflight() {
+  local f
+  for f in "$(claims_mark)".*; do
+    [ -f "$f" ] && [ "${f##*.}" != $$ ] || continue
+    [ "$(queue_proc "${f##*.}")" != "$(cat "$f" 2>/dev/null)" ] || { echo "${f##*.}"; return 0; }
+    rm -f "$f"
+  done
+  return 1
+}
+
+# claims_check, unless a claims merge is in flight: the claims are about to change, so a feeder's hand-off (--check)
+# goes ahead, and its run waits for that merge and is checked against the new plan. Under the build's lock claims_check
+# runs again whatever happened here.
+claims_gate() {
+  local pid t=$SECONDS
+  if pid=$(claims_inflight); then
+    say "claims merge in flight on $build (the build minion's run, pid $pid), waiting for it to end; the claims are checked against the new plan after"
+    [ -z "$check" ] || return 0
+    while pid=$(claims_inflight); do
+      [ $((SECONDS - t)) -lt "${LAND_BUILD_WAIT:-3600}" ] || refuse "waited ${LAND_BUILD_WAIT:-3600} s for the claims merge on $build (pid $pid) to end, so nothing merged: run it again later"
+      sleep "$QUEUE_POLL"
+    done
+    say "the claims merge on $build ended: checking the claims"
+  fi
+  claims_check main
+}
+
+build_tip() {
+  if [ "$mode" = build ]; then
+    # The rebased copy is past the merge of main, so HEAD is no longer at the build's tip: the copy that merged names it.
+    if [ -n "$resumed" ]; then build=${LAND_BUILD:-}; else build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/'); fi
+    if ! [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]]; then
+      # One merge ahead of a build: a --build that stopped after merging main, or a merge by hand; with the commit
+      # that renumbered its ADRs (below) on top of it, if it made one.
+      ahead= tip=HEAD
+      ! grep -qF 'Numbered at ship time by tools/land.sh' <<<"$(git log -1 --format=%b HEAD)" || tip=HEAD^ # not a pipe: #646
+      [ -n "$build" ] || ! git rev-parse -q --verify "$tip^2" >/dev/null || ahead=$(git for-each-ref --points-at "$tip^1" --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
+      [ -z "$ahead" ] || refuse "$branch is one merge ahead of $ahead (a --build that stopped after merging main, or a merge of main by hand): run tools/land.sh --into $ahead --full first, then this again. Nothing landed"
+      refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
+    fi
+    label="$branch · lands $build"
+    ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
+  fi
+  return 0
+}

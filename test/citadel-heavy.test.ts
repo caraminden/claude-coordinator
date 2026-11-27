@@ -162,7 +162,7 @@ test('a priority job skips the load wait, and CITADEL_HEAVY_WHAT names its hold'
   const r = spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHO: 'voice deploy', CITADEL_HEAVY_WHAT: 'build: npm ci; npm run build' }, encoding: 'utf8', timeout: 10_000 });
   assert.equal(r.status, 0, r.stderr);
   const line = readFileSync(join(dir, 'history'), 'utf8').trim().split('\t');
-  assert.deepEqual(line.slice(1, 4), ['voice deploy', 'build: npm ci; npm run build', 'none'], 'admitted at once, on the busy box');
+  assert.deepEqual([...line.slice(1, 4), line[9]], ['voice deploy', 'build: npm ci; npm run build', 'here', 'none'], 'admitted at once, on the busy box');
 });
 
 test("a priority waiter's marker that stopped being freshened doesn't hold the line up", () => {
@@ -362,19 +362,19 @@ const history = (dir: string) =>
     .filter(Boolean)
     .map((l) => l.split('\t'));
 
-test('a job that ran appends one line: start, who, what, on what it waited, wait s, run s, status, pressure', () => {
+test('a job that ran appends one line: start, who, what, where, wait s, run s, status, pressure, CPU s, on what it waited', () => {
   const { dir, env } = folder(2, 7);
   const r = spawnSync(heavy, ['sh', '-c', 'sleep 1; printf "a\tb"; exit 3'], { env: { ...env, CITADEL_HEAVY_WHO: 'TTA #12 (josh)' }, encoding: 'utf8', timeout: 10_000 });
   assert.equal(r.status, 3);
   const lines = history(dir);
   assert.equal(lines.length, 1);
-  const [at, who, what, on, wait, run, status, pressure] = lines[0];
+  const [at, who, what, place, wait, run, status, pressure, , on] = lines[0];
   assert.ok(Math.abs(Date.parse(at) - Date.now()) < 60_000, `${at} is an ISO time of about now`);
   assert.equal(who, 'TTA #12 (josh)');
   assert.equal(what, 'sh -c sleep 1; printf "a b"; exit 3', 'a tab in the command would split its field');
-  assert.deepEqual([on, wait, status, pressure], ['none', '0', '3', '7']);
+  assert.deepEqual([place, on, wait, status, pressure], ['here', 'none', '0', '3', '7']);
   assert.ok(Number(run) >= 1 && Number(run) < 10, `ran ${run} s`);
-  assert.equal(lines[0].length, 9);
+  assert.equal(lines[0].length, 10);
   assert.equal(lines[0][8], '0', 'a sleep spends no CPU seconds');
 });
 
@@ -390,12 +390,12 @@ test('a job that waited on load says load, with its wait and the pressure it sta
   }
   assert.equal(await a.done, 0);
   const [line] = history(dir);
-  assert.equal(line[3], 'load');
+  assert.deepEqual([line[3], line[9]], ['here', 'load']);
   assert.ok(Number(line[4]) >= 1, `waited ${line[4]} s`);
   assert.match(line[7], /^(12|0)$/);
   setPressure(pressureFile, psi(90));
   assert.equal(spawnSync(heavy, ['true'], { env: { ...env, CITADEL_HEAVY_LOAD_WAIT: '1' }, timeout: 10_000 }).status, 0);
-  assert.deepEqual([history(dir)[1][3], history(dir)[1][7]], ['forced', '90']);
+  assert.deepEqual([history(dir)[1][9], history(dir)[1][7]], ['forced', '90']);
 });
 
 test('a history file that cannot be written changes nothing about the run, its output or its status', () => {
@@ -484,7 +484,7 @@ test('a job waiting for memory starts anyway after the bound, and says so', asyn
   assert.equal(await a.done, 0);
   assert.ok(existsSync(join(root, 'mem-forced')));
   assert.match(a.err(), /memory is still short \(waiting for memory: 100 MB free for heavy work, needs 2000 MB\) after 1 s waiting, so this starts anyway/);
-  assert.match(readFileSync(join(dir, 'history'), 'utf8'), /\tforced\t/);
+  assert.equal(lastLine(dir)[9], 'forced');
 });
 
 test('enough memory room starts at once, and a priority job skips the memory wait', async () => {
@@ -550,8 +550,8 @@ test('a job whose past runs were short runs at once while the slot is held, and 
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout, 'quick\n');
     assert.match(r.stderr, /runs at once, without a heavy slot: its last 2 run\(s\) took 1 s/);
-    assert.deepEqual(lastLine(dir).slice(1, 5), ['Tiny #6 (cara)', 'sh -c echo quick', 'light', '0']);
-    assert.equal(lastLine(dir).length, 9, 'with its CPU seconds');
+    assert.deepEqual([...lastLine(dir).slice(1, 5), lastLine(dir)[9]], ['Tiny #6 (cara)', 'sh -c echo quick', 'here', '0', 'light']);
+    assert.equal(lastLine(dir).length, 10, 'with its CPU seconds and what it waited on');
   } finally {
     writeFileSync(go, '');
   }
@@ -570,7 +570,7 @@ test('a Claude-bound job never takes a slot, whatever its past runs say or the c
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout, 'eval -p hi\n');
     assert.match(r.stderr, /without a heavy slot: it runs Claude turns/);
-    assert.equal(lastLine(dir)[3], 'light');
+    assert.deepEqual([lastLine(dir)[3], lastLine(dir)[9]], ['here', 'light']);
   } finally {
     writeFileSync(go, '');
   }
@@ -679,7 +679,7 @@ test('a job with no past runs runs at once and never asks for CI, unless the cal
   assert.equal(await holder.done, 0);
   assert.equal(await guessed!.done, 0);
   assert.ok(existsSync(up));
-  assert.equal(history(dir).filter((l) => l[1] === 'New #1 (cara)')[0][3], 'light');
+  assert.equal(history(dir).filter((l) => l[1] === 'New #1 (cara)')[0][9], 'light');
 });
 
 test("the history line's last column is the command's CPU seconds, its children's included", () => {
@@ -880,6 +880,8 @@ test("with a machine's Builds role free it runs there: its output and status com
   assert.deepEqual(e.asked(), [`--back target/release/app -- sh -c ${touch(here)}`]);
   assert.equal(lastLine(dir)[3], "on:Josh's PC");
   assert.equal(lastLine(dir)[6], '7');
+  // #2109: CPU seconds are unmeasured there, and it waited on nothing.
+  assert.deepEqual(lastLine(dir).slice(8), ['-', 'none']);
 });
 
 test("with no machine free it runs here in perigee's line; --here never asks", () => {
@@ -922,7 +924,7 @@ test("a log-only job CI gives back (no runner took it) goes to the Builds role b
 });
 
 test("waiting in perigee's line with the slot busy and no machine free, it asks again and leaves the line once one has room", async () => {
-  const { env } = folder(1);
+  const { dir, env } = folder(1);
   const e = elsewhere(env);
   const { go, holder } = await holdSlot(env);
   const here = join(root, `ran-here-${n++}`);
@@ -931,9 +933,14 @@ test("waiting in perigee's line with the slot busy and no machine free, it asks 
     waiter = job(e.env, 'Peek #2 (cara)', touch(here));
     await until('it to wait in the line', () => /waiting for one/.test(waiter!.err()));
     await until('it to ask the Builds role again', () => e.asked().some((a) => a.startsWith('--place-only')));
+    // timing-ok: the wait itself is what the history line below measures, in whole seconds.
+    await new Promise((done) => setTimeout(done, 2100));
     writeFileSync(e.room, '');
     assert.equal(await waiter.done, 7, waiter.err());
     assert.match(waiter.err(), /leaves perigee's line/);
+    // #2109: the wait in perigee's line counts on the machine's history line, with what it was for.
+    assert.ok(Number(lastLine(dir)[4]) >= 2, `waited ${lastLine(dir)[4]} s`);
+    assert.notEqual(lastLine(dir)[9], 'none');
     assert.ok(!existsSync(here), 'nothing ran on perigee');
   } finally {
     writeFileSync(go, '');

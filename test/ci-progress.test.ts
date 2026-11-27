@@ -124,7 +124,7 @@ test("stopped once the tests end, it sends the run's last counts on its way out,
 
 test('with no run token, or on a GitHub-hosted runner, it sends nothing and ends at once with no error', async () => {
   for (const extra of [{ ACTIONS_ID_TOKEN_REQUEST_URL: '' }, { ACTIONS_ID_TOKEN_REQUEST_URL: 'http://x/', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 't', RUNNER_ENVIRONMENT: 'github-hosted' }]) {
-    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'tools', 'ci-progress.ts'), join(dir, 'none')], { env: { ...process.env, ACTIONS_ID_TOKEN_REQUEST_TOKEN: '', ...extra }, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'tools', 'ci-progress.ts'), join(dir, 'none')], { env: { ...process.env, RUNNER_ENVIRONMENT: undefined, ACTIONS_ID_TOKEN_REQUEST_TOKEN: '', ...extra }, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (c) => (stderr += c));
     const code = await new Promise((r) => child.once('exit', r));

@@ -49,11 +49,23 @@ function waitsEnded(jobs: ReturnType<App['minionJobs']['stats']>) {
 /** A PC's owner alone sets how much of it minions get (the page Josh picked from: "theirs alone to set"). */
 const mine = (session: Session, owner: number) => session.uid === owner;
 
-function tile(app: Pick<App, 'runner' | 'store' | 'minionJobs'>, session: Session) {
+function tile(app: Pick<App, 'runner' | 'store' | 'minionJobs' | 'heavyNow'>, session: Session) {
   const { people, machines, ...rest } = app.runner.turnLine.summary();
   const places = machines.map(({ owner, ...m }) => ({ ...m, owner: app.store.getUser(owner)?.name ?? null, mine: mine(session, owner), limits: limitRows(app, m.id) }));
   const { min, max } = app.runner.turnLine.limits();
-  return { ...rest, machines: places, min, max, limits: limitRows(app), waits: waitsEnded(app.minionJobs.stats()), people: people.map(({ person, ...p }) => ({ name: app.store.getUser(person)?.name ?? 'Automatic', ...p })) };
+  return {
+    ...rest,
+    heavy: app.heavyNow?.(
+      (id) => app.store.canSee(session, id),
+      (id) => !!session.admin || app.store.getMachine(id)?.owner_id === session.uid,
+    ) ?? { home: [], machines: [] },
+    machines: places,
+    min,
+    max,
+    limits: limitRows(app),
+    waits: waitsEnded(app.minionJobs.stats()),
+    people: people.map(({ person, ...p }) => ({ name: app.store.getUser(person)?.name ?? 'Automatic', ...p })),
+  };
 }
 
 export const workerRoutes: Route[] = [

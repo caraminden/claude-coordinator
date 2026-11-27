@@ -5,10 +5,9 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { BuildPlacer, buildRoom, buildsReady, KIND_SIZE, place } from '../src/heavy-builds.ts';
-import { MachineBalancer } from '../src/machine-balancer.ts';
+import { BuildPlacer, buildRoom, buildsReady, KIND_SIZE, place, SCRIPT } from '../src/heavy-builds.ts';
+import { balance, MachineBalancer } from '../src/machine-balancer.ts';
 import { type AgentJobMessage, type BuildKind, DEFAULT_SETTINGS, type JobKind, MachineJobs } from '../src/machine-jobs.ts';
-import { SCRIPT } from '../src/routes/heavy-builds.ts';
 import { kindOf } from '../tools/heavy-builds.ts';
 import { tempRoot } from './helpers.ts';
 
@@ -238,7 +237,7 @@ test("a running build doesn't take the machine's one GPU job slot", () => {
   );
 });
 
-// The script the build image runs (src/routes/heavy-builds.ts), run under sh here with its /tmp moved into a test folder.
+// The script the build image runs (src/heavy-builds.ts), run under sh here with its /tmp moved into a test folder.
 test("the image's script unpacks the snapshot, runs in the caller's folder and packs the files to bring back from the top", () => {
   const d = tmp.path(`script${n++}`);
   mkdirSync(join(d, 'src', 'sub'), { recursive: true });
@@ -304,14 +303,15 @@ async function client(stub: Stub, args: string[]) {
   });
   const port = await tmp.serve(server);
   const fell = tmp.path(`fell${n++}`);
-  const env = { ...process.env, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '9', CITADEL_HEAVY_BUILD_POLL_MS: '20', CITADEL_HEAVY_AWAY_MS: '100', CITADEL_HEAVY_FALLBACK_FILE: fell, CITADEL_HEAVY_UNATTENDED: undefined };
+  const env = { ...process.env, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '9', CITADEL_HEAVY_BUILD_POLL_MS: '20', CITADEL_HEAVY_AWAY_MS: '100', CITADEL_HEAVY_FALLBACK_FILE: fell, CITADEL_HEAVY_WAITED_FILE: `${fell}-waited`, CITADEL_HEAVY_UNATTENDED: undefined };
   const p = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'tools', 'heavy-builds.ts'), ...args], { cwd: join(top, 'sub'), env });
   let out = '';
   let err = '';
   p.stdout!.on('data', (c) => (out += c));
   p.stderr!.on('data', (c) => (err += c));
   const status = await new Promise<number | null>((ok) => p.on('close', ok));
-  return { status, out, err, seen, top, fell: existsSync(fell) };
+  const waited = existsSync(`${fell}-waited`) ? readFileSync(`${fell}-waited`, 'utf8') : '';
+  return { status, out, err, seen, top, fell: existsSync(fell), waited };
 }
 
 test('a job that ran there: the snapshot leaves out .env and keys, its log and --back files come back from this folder, and done is said', async () => {
@@ -324,6 +324,13 @@ test('a job that ran there: the snapshot leaves out .env and keys, its log and -
   assert.match(c.out, /remote log/);
   assert.equal(c.seen.done, 1);
   assert.ok(!c.fell);
+});
+
+test("a job that waited for room there says so for the history line (#2109); one that started at once doesn't", async () => {
+  const waited = await client({ states: [{ state: 'queued' }, { state: 'done', exit_code: 0 }] }, ['--', 'cargo', 'build']);
+  assert.equal(waited.waited, 'room', waited.err);
+  const atOnce = await client({ states: [{ state: 'done', exit_code: 0 }] }, ['--', 'cargo', 'build']);
+  assert.equal(atOnce.waited, '');
 });
 
 test("a green build whose --back files don't come back fails here, and its results stay on Citadel", async () => {
@@ -358,4 +365,22 @@ test('no answer to its start: it may run there, so it never falls back to perige
   assert.equal(c.status, 1, c.err);
   assert.match(c.err, /may run there/);
   assert.ok(!c.fell);
+});
+
+test("a release APK queued by Citadel (a contraption's build job) goes ahead of the builds already waiting", () => {
+  const w = world({ room: 'wait' });
+  const first = w.build();
+  const kind = JSON.parse(w.store.getMachineJob(first)!.kind) as BuildKind;
+  const c = w.store.createContraption({ name: 'reader', title: 'Reader', icon: null, port: 9, home_scheme: w.p.id, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+  const release = w.jobs.queueBuild({ machine: w.m(), projectId: w.p.id, ticketId: null, contraptionId: c.id, askedBy: 'Reader APK build', kind, inputs: [], limitS: 7200, reason: 'release' }).id;
+  w.state.room = 'start';
+  w.asked.length = 0;
+  w.jobs.pump(w.box);
+  assert.deepEqual(w.asked, [`build:${release}`, `build:${first}`]);
+});
+
+test('a release build is next for the room even when an older build already holds a place in the wait', () => {
+  const job = (key: string, since: number, first?: boolean) => ({ key, label: key, size: 8, since, first });
+  const plan = balance({ threads: 8, caps: { workers: null, runners: null, turnThreads: null, ciThreads: null }, ship: false, ciWaiting: 0, running: 0, heavy: [job('build:1', 1), job('build:2', 2, true)], now: 3 });
+  assert.deepEqual(plan.start, ['build:2']);
 });

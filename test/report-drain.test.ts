@@ -79,7 +79,8 @@ for (const [name, go] of Object.entries(runners)) {
 // The race on its own, without a loaded box. A file's report is already going into a full pipe when its tests end, as when
 // the runner is too busy to read: dd fills the pipe first, the file's report all waits behind that, and the reader starts
 // only once told to.
-const PIPE = '{ dd if=/dev/zero bs=4096 count=512 oflag=nonblock 2>/dev/null; "$@"; echo $? >code; } | { until [ -e go ]; do sleep 0.05; done; tr -d "\\0" >out; }';
+// timeout 1: a newer dd (uutils, on GitHub's hosted image) waits for the reader on a full pipe instead of failing, so the file never started.
+const PIPE = '{ timeout 1 dd if=/dev/zero bs=4096 count=512 oflag=nonblock 2>/dev/null; "$@"; echo $? >code; } | { until [ -e go ]; do sleep 0.05; done; tr -d "\\0" >out; }';
 const fullPipe = (cwd: string, more: Record<string, string | undefined> = {}, flags = ['--test-force-exit']) =>
   scratch.spawn('bash', ['-c', PIPE, 'sh', join(TOOLS, 'citadel-node'), ...flags, join(cwd, 'test', 'a.test.mjs')], { cwd, env: { ...env, NODE_TEST_CONTEXT: 'child-v8', ...more }, stdio: ['ignore', 'ignore', 'pipe'] });
 const small = (name: string) => {
@@ -93,7 +94,7 @@ test('a file whose runner is slow to read stays until its whole report is read',
   const cwd = small('slow');
   const p = fullPipe(cwd);
   const closed = new Promise((r) => p.on('close', r));
-  await until('the file is done', () => existsSync(join(cwd, 'done')));
+  await until('the file is done', () => existsSync(join(cwd, 'done')), 120_000);
   // Long enough for an exit that doesn't wait: other processes start and end.
   for (let i = 0; i < 5; i++) await ran(process.execPath, ['-e', ''], cwd);
   const early = existsSync(join(cwd, 'code'));
@@ -115,7 +116,7 @@ for (const [what, more, flags] of [
     let err = '';
     p.stderr!.on('data', (b) => (err += b));
     const closed = new Promise((r) => p.on('close', r));
-    await until('the file gave up', () => existsSync(join(cwd, 'code')));
+    await until('the file gave up', () => existsSync(join(cwd, 'code')), 120_000);
     writeFileSync(join(cwd, 'go'), '');
     await closed;
     assert.equal(read(cwd, 'code'), '1\n');

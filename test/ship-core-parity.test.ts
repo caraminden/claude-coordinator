@@ -184,7 +184,7 @@ test('what a failed run means in land.sh: 1 only when a step that runs the tests
   const land = landText();
   const cut = (a: string, b: string) => land.slice(land.indexOf(a), land.indexOf(b, land.indexOf(a)));
   const verdict = cut('    failure)\n      # Red only when', '    timed_out) return 1');
-  const consts = [...land.matchAll(/^CI_(?:CLOCK_|PORTS_)?STEP=.*$/gm)].map((m) => m[0]).join('\n');
+  const consts = [...land.matchAll(/^ *CI_(?:CLOCK_|PORTS_)?STEP=.*$/gm)].map((m) => m[0].trim()).join('\n');
   const dir = mkdtempSync(join(root, 'verdict-'));
   // `gh api … --jq <expr>` answers $STEP, what that expression says of the run; `down` answers nothing.
   const gh = `fake() { case "$*" in
@@ -196,7 +196,7 @@ test('what a failed run means in land.sh: 1 only when a step that runs the tests
     const script = `${gh}
 say() { :; }; retro_log() { :; }; ci_said() { :; }; ci_down() { :; }; hub() { fake "$@"; }; state=${dir} CI_POLL=0 ci_slug=o/r ci_id=7 ci_url=u short=s branch=b ci_lost='' burn_red='' CI_BURN_STEP='burn in new and changed tests'
 ${consts}
-${fn(join(repo, 'tools', 'land.sh'), 'ci_fact')}
+${fn(join(repo, 'tools', 'land', 'common.sh'), 'ci_fact')}
 v() { case failure in
 ${verdict}
 esac; }

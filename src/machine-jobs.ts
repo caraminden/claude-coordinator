@@ -303,7 +303,7 @@ export interface JobDeps {
   /** Where a job's results go: the scheme's shared folder's jobs/<id>/ for a minion's, the app's DATA_DIR/jobs/<id>/ for a contraption's. */
   resultsDir(job: MachineJob): string | null;
   /** The machine's balancer (Build 7 M6): may a job of this size start there now ('late': it waited 30 minutes and goes anyway). Left out, it may. */
-  room?(machineId: number, job: { key: string; label: string; size: number }): 'start' | 'late' | 'wait';
+  room?(machineId: number, job: { key: string; label: string; size: number; first?: boolean }): 'start' | 'late' | 'wait';
   /** None of the machine's jobs holds or waits for room but `keep`'s (its key, or null). */
   freed?(machineId: number, keep: string | null): void;
   /** A build job (H2's builds lane) ended or stopped waiting: its key's room is free (the balancer's done()). */
@@ -725,32 +725,34 @@ export class MachineJobs {
   }
 
   /**
-   * The builds lane (H2): build jobs start in the order they came, each once the balancer has its size free there (it
+   * The builds lane (H2): build jobs start in the order they came (release APKs first), each once the balancer has its size free there (it
    * holds no turn back past 30 minutes of waiting, as any heavy job). No job hours, no card: the Builds role's switch
    * is the go, checked again at the start.
    */
   private pumpBuilds(machineId: number) {
-    for (const next of this.store.machineJobs({ machine: machineId, states: ['queued'] }, 200).reverse()) {
+    // Oldest first, but a release APK (a contraption's, H3) goes to the front of the line.
+    const queued = this.store.machineJobs({ machine: machineId, states: ['queued'] }, 200).reverse();
+    for (const next of queued.sort((a, b) => Number(a.contraption_id === null) - Number(b.contraption_id === null))) {
       if (next.go !== 'builds') continue;
       if (this.d.buildsMay && !this.d.buildsMay(next)) {
         this.store.updateMachineJob(next.id, { state: 'refused', ended_at: this.now(), error: "the machine's Builds role is off, not lent to this scheme, or not set up" });
         this.ended(next.id, '');
         continue;
       }
-      if (this.d.room?.(machineId, { key: `build:${next.id}`, label: `${next.kind_name} build ${next.id}`, size: buildThreads(next) }) === 'wait') return;
+      if (this.d.room?.(machineId, { key: `build:${next.id}`, label: `${next.kind_name} build ${next.id}`, size: buildThreads(next), first: next.contraption_id !== null }) === 'wait') return;
       this.startJob(next);
       // Not sent (the agent went): the rest wait for it to come back.
       if (this.store.getMachineJob(next.id)?.state === 'queued') return;
     }
   }
 
-  /** Queue a build job (H2's place() chose this machine): no jobs block, go card or job hours; it starts when there is room. */
-  queueBuild(q: { machine: Machine; projectId: number; ticketId: number; askedBy: string; kind: BuildKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; reason: string }): MachineJob {
+  /** Queue a build job (H2's place() chose this machine; a contraption's is a release APK Citadel builds, H3): no jobs block, go card or job hours; it starts when there is room. */
+  queueBuild(q: { machine: Machine; projectId: number; ticketId: number | null; contraptionId?: number; askedBy: string; kind: BuildKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; reason: string }): MachineJob {
     const job = this.store.addMachineJob({
       machine_id: q.machine.id,
       project_id: q.projectId,
       ticket_id: q.ticketId,
-      contraption_id: null,
+      contraption_id: q.contraptionId ?? null,
       asked_by: q.askedBy,
       kind_name: q.kind.name,
       kind: JSON.stringify(q.kind),

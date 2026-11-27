@@ -18,6 +18,7 @@ import { pacificDay } from '../src/pacific.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { loopKey, type LoopState } from '../src/minion-relay.ts';
 import { queueKey } from '../src/minion-queue.ts';
+import { HELPERS_SWITCH, sweepsKey } from '../src/cloud-flakes.ts';
 import { sleepKey } from '../src/needs.ts';
 import { startCard, startHoldKey, startNote } from '../src/minion-budget.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';
@@ -1548,6 +1549,7 @@ mock.boards('#takes', { boards: [
         ['test/previews.test.ts', 12, 'smoke'],
         ['test/machines.test.ts', 9, 'run-tests'],
         ['test/checkpoint.test.ts', 4, 'in CI'],
+        ['test/front.test.ts', 2, 'cloud'],
       ] as const)
         for (let i = 0; i < n; i++)
           c.store.addFlakeEvents(c.project.id, i === 0 ? seen.id : null, 'a1b2c3d', now - ((i * 20 + 3) * 3_600_000) / 2, [
@@ -1558,6 +1560,22 @@ mock.boards('#takes', { boards: [
               ...(i < 9 && file !== 'test/checkpoint.test.ts' ? { testName: `case ${i % 3}`, message: i % 3 ? 'Error: Timed out waiting for the app to answer' : 'AssertionError: Expected values to be strictly deep-equal', cls: i % 3 ? 'timed out waiting' : 'wrong value' } : {}),
             },
           ]);
+      // #2187: two nights of the cloud sweep, the last with one flaky file (the cloud-only one above) and one stopped.
+      const sweepFile = (file: string, verdict: 'clean' | 'flaky' | 'stopped', failed = 0, seconds = 40) => ({ file, copies: 10, failed, verdict, seconds, detail: verdict === 'flaky' ? `failing tests:\n✖ ${file} › paints once (timed out)` : '' });
+      c.store.setSetting(HELPERS_SWITCH, true); // cloud helpers on, so the tab shows the sweep
+      c.store.setSetting(sweepsKey(c.project.id), [
+        {
+          at: now - 5 * 3_600_000,
+          sha: 'a1b2c3d4e5f6a7b8c9d0',
+          sessions: 1,
+          minutes: 18.4,
+          costUsd: 0.46,
+          minion: onIt.number,
+          error: null,
+          files: [sweepFile('test/apps.test.ts', 'clean', 0, 62), sweepFile('test/front.test.ts', 'flaky', 2, 31), sweepFile('test/previews.test.ts', 'clean', 0, 48), sweepFile('test/machines.test.ts', 'stopped', 0, 1500)],
+        },
+        { at: now - 29 * 3_600_000, sha: '0f9e8d7c6b5a4f3e2d1c', sessions: 1, minutes: 16.2, costUsd: 0.41, minion: null, error: null, files: [sweepFile('test/apps.test.ts', 'clean'), sweepFile('test/previews.test.ts', 'clean')] },
+      ]);
       // #1120: a fix with 30 of its 50 proving runs clean, and a held one that flaked again (reopened).
       c.store.addFlakeFix(c.project.id, 'test/apps.test.ts', onIt.id, now - 26 * 3_600_000, { clean_runs: 30 });
       c.store.addFlakeFix(c.project.id, 'test/machines.test.ts', seen.id, now - 80 * 3_600_000, { reopened: 1 });

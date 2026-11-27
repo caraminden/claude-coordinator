@@ -3,7 +3,7 @@
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { HttpError, json, readJson, sendFile, type App, type Ctx, type Route } from '../http.ts';
-import { HEAVY_KINDS, isHeavyKind, KIND_IMAGE, KIND_SIZE } from '../heavy-builds.ts';
+import { buildRecipe, HEAVY_KINDS, isHeavyKind, KIND_IMAGE, KIND_SIZE } from '../heavy-builds.ts';
 import { ENDED, jobInputs, safeRelPath } from '../machine-jobs.ts';
 import { shippedImages } from '../role-setup.ts';
 import { tmpDirFor } from '../turn-tmp.ts';
@@ -13,27 +13,6 @@ const minion = { who: ['minion'], refuse: 'Only the minion itself places its hea
 /** The agent takes a command of at most 64 arguments; the recipe's own take six. */
 const MAX_ARGS = 58;
 const LIMIT_MIN = { default: 120, max: 12 * 60 };
-/**
- * What the image runs: the snapshot unpacked, the command in the caller's folder, then the files to bring back (paths
- * from the working copy's top) into /tmp/back.tgz, which the agent copies out. Exported for its test.
- */
-export const SCRIPT = [
-  'set -e',
-  'mkdir -p /tmp/work',
-  // The snapshot comes in on stdin (the agent's BuildRunner: nothing is bind-mounted). Root with every capability
-  // dropped can't chown, so the files stay its own.
-  'tar --no-same-owner -xzf - -C /tmp/work',
-  'cd "/tmp/work/$1"',
-  'back=$2',
-  'shift 2',
-  // The crates in the cargo cache volume; cargo itself stays on the image's PATH.
-  '[ ! -d /cache/cargo ] || export CARGO_HOME=/cache/cargo',
-  'set +e',
-  '"$@"',
-  's=$?',
-  `[ -z "$back" ] || printf '%s\\n' "$back" | tar -czf /tmp/back.tgz -C /tmp/work --ignore-failed-read -T - || echo "citadel-heavy: some of the files to bring back could not be packed" >&2`,
-  'exit $s',
-].join('\n');
 
 function placer(app: App): NonNullable<App['buildPlacer']> {
   if (!app.buildPlacer) throw new HttpError(503, 'This server places no heavy jobs', true);
@@ -110,20 +89,7 @@ export const heavyBuildRoutes: Route[] = [
         projectId: ticket.project_id,
         ticketId: ticket.id,
         askedBy: `#${ticket.number} ${ticket.title}`.slice(0, 120),
-        kind: {
-          name: kind,
-          image,
-          command: ['/bin/sh', '-c', SCRIPT, 'citadel-heavy', relPath(body.dir ?? '', 'dir'), backs.join('\n'), ...(argv as string[])],
-          reads: [],
-          gpu: false,
-          network: true,
-          resumable: false,
-          max_limit_s: minutes * 60,
-          threads: size,
-          volume: KIND_IMAGE[kind].volume,
-          at: KIND_IMAGE[kind].at,
-          lane: 'builds',
-        },
+        kind: buildRecipe({ kind, image, size, dir: relPath(body.dir ?? '', 'dir'), backs, argv: argv as string[], minutes }),
         inputs,
         limitS: minutes * 60,
         reason: what,

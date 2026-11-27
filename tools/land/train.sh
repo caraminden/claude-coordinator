@@ -329,3 +329,111 @@ train_release() {
   for n in "${held_n[@]}"; do read -r v _ 2>/dev/null <"$train_dir/$n" && [ "$v" = riding ] && rm -f "$train_dir/$n"; done
   held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()
 }
+
+# The front (pid $1) hands its riders' lines to deploy.sh (DEPLOY_RIDERS): "<api> <token> <ticket> <train commit>".
+# A failed write never stops a landing.
+train_reporter() {
+  [ -n "${COORDINATOR_API:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] && [ -n "${COORDINATOR_TICKET:-}" ] || return 0
+  (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
+}
+
+# Whether this ship would ride the quick train, and why not (#1912; tools/quick-train.ts): one retro line per ship. In a
+# subshell, failures swallowed, 10 s at most, so it never decides a landing. LAND_RISK is the hand-off's label
+# (src/ship-handoff.ts). shortcut: judged on the branch before its rebase.
+quick_train_line() (
+  set +e
+  { [ "$mode" = land ] || [ "$mode" = build ]; } && [ -f "$tools/quick-train.ts" ] || exit 0
+  base=$(under_of) && [ -n "$base" ] || base=$(git merge-base main HEAD)
+  out=$(timeout 10 "$tools/citadel-node" "$tools/quick-train.ts" --main main --base "$base" --risk "${LAND_RISK:-}" --mode "$mode")
+  retro_log "quick train · $label · ${out:-not: could not be judged}"
+) >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null || true
+
+# <a red run's log>: what a refused rider hears of it, its last 40 lines, after the test it skipped, if any (the wake's
+# kind is read from it, #1914).
+train_tail() {
+  local failed=$1 f
+  ! f=$(skipped_tests) || echo "land: $(skipped_said "$f")"
+  tail -n 40 <<<"$failed"
+}
+
+# <ticket> <branch> <tip> <files> <run> <kind> <how> <log>: held off the train until the train without it has a verdict.
+train_hold() {
+  held_n+=("$1") held_br+=("$2") held_was+=("$3") held_files+=("$4") held_run+=("$5") held_kind+=("$6") held_how+=("$7") held_log+=("$8")
+}
+
+# The train's last verdict: what becomes of the ships still held off it. One that ships past main's red or a known flake
+# was red on those files all the same.
+train_end() {
+  local f=''
+  [ ${#held_n[@]} -gt 0 ] || return 0
+  if [ "$rc" = 1 ] || [ -n "${through_by[$tip]:-}${known_by[$tip]:-}" ]; then
+    f=$(train_failing)
+    # A log that doesn't name every failed file proves no file passed: the held go back in line.
+    [ -n "$burn_red" ] || train_labels >/dev/null || { train_release; return 0; }
+  fi
+  # shellcheck disable=SC2086 # file names
+  if [ "$rc" = 0 ] || { [ "$rc" = 1 ] && [ -n "$f" ]; }; then train_settle $f; fi
+  train_release
+}
+
+# <most> <what>: waits until at most that many of train_each's runs are going. The phase moves at each end and every
+# 5 min (the queue stall limit).
+train_wait() {
+  local n t
+  while n=$(jobs -rp | wc -l) && [ "$n" -gt "$1" ]; do
+    queue_phase "running the red tests alone here: $2, $n left at $(date +%H:%M)"
+    t=$SECONDS
+    while [ "$(jobs -rp | wc -l)" = "$n" ] && [ $((SECONDS - t)) -lt 300 ]; do read -rt .3 <> <(:) || true; done
+  done
+}
+
+# <function> <what it looks for>: that function on each file of $real with a scratch worktree, LAND_PIN_JOBS at once; pins[<file>] = its answer.
+train_each() {
+  local k pd wts=()
+  : >"$state/train-pin.log"
+  pd=$(mktemp -d "${TMPDIR:-/tmp}/land-pins.XXXXXX")
+  # The worktrees are added here, one at a time, not in the jobs: git's admin files don't take parallel adds.
+  for ((k = 0; k < ${#real[@]}; k++)); do
+    wts[$k]=$(mktemp -d "${TMPDIR:-/tmp}/land-pin.XXXXXX") && git worktree add -q --detach "${wts[$k]}" "$tip" 2>/dev/null || { rmdir "${wts[$k]}" 2>/dev/null; wts[$k]=''; }
+  done
+  for ((k = 0; k < ${#real[@]}; k++)); do
+    train_wait $((${LAND_PIN_JOBS:-3} - 1)) "$2"
+    (set +e; "$1" "${real[$k]}" "${wts[$k]}") >"$pd/$k" 2>/dev/null &
+  done
+  train_wait 0 "$2"
+  for ((k = 0; k < ${#real[@]}; k++)); do
+    pins[${real[$k]}]=$(cat "$pd/$k" 2>/dev/null)
+    [ -z "${wts[$k]}" ] || git worktree remove --force "${wts[$k]}" >/dev/null 2>&1 || true
+  done
+  rm -rf "${pd:?}"
+}
+
+# <test file> <scratch worktree>: its guessed members (guess) run alone with it on main's tip here: "<m>" fails it (twice,
+# so one load failure blames nobody), "-<m>" doesn't; "main" when it fails on main's tip itself. No word of one with no
+# answer: a run or checkout that gave none, or a ship that doesn't rebase onto main by itself or sits on another ship of
+# the train, since what fails there may be the other's.
+train_solo() {
+  local f=$1 wt=$2 m i c b x r=0
+  [ -n "$wt" ] && [ -n "${guess[$f]:-}" ] || return 0
+  train_alone "$wt" "$old" "$f" || r=$?
+  [ "$r" != 1 ] || echo main
+  [ "$r" = 0 ] || return 0
+  for m in ${guess[$f]}; do
+    c=$own
+    if [ "$m" != 0 ]; then
+      c=${train_was[$((m - 1))]}
+      for x in "$pre" "$own" "${train_was[@]}"; do
+        [ "$x" = "$c" ] || ! sits_on "$c" "$x" || continue 2
+      done
+      b=$(git merge-base "$old" "$c") && git -C "$wt" checkout -q --detach "$c" 2>/dev/null || continue
+      git -C "$wt" "${rr[@]}" rebase -q --onto "$old" "$b" >/dev/null 2>&1 || { git -C "$wt" rebase --abort >/dev/null 2>&1; continue; }
+      c=$(git -C "$wt" rev-parse HEAD)
+    fi
+    for i in 1 2; do
+      r=0
+      train_alone "$wt" "$c" "$f" || r=$?
+      [ "$r" = 1 ] || break
+    done
+    if [ "$r" = 1 ]; then echo "$m"; elif [ "$r" = 0 ]; then echo "-$m"; fi
+  done
+}

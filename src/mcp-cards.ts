@@ -119,7 +119,7 @@ export const PROPOSE_MACHINE_LEND = {
   inputSchema: {
     type: 'object',
     properties: {
-      machine: { type: 'string', description: 'The machine, as list_machines names it, e.g. citadel-test-box' },
+      machine: { type: 'string', description: 'The machine, as list_machines names it, e.g. citadel-test-vm' },
       here: { type: 'boolean', description: "true: put this scheme on the machine's list; false: take it off. Leave out to keep it as it is" },
       tick: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Workspaces (folders) to tick, by the names list_machines shows' },
       untick: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Workspaces to untick: every scheme it is lent to loses them' },

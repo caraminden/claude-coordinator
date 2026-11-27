@@ -137,3 +137,115 @@ guards() {
       refuse "guard tests failed on $short, the branch rebased onto ${build:-main} (output above), so no CI run was spent and $untouched; $branch keeps the rebased work. Run citadel-test on that file, fix it, commit, then run this again" ;;
   esac
 }
+
+# A light ship gets no CI, so its guards are the tests the affected map picks for its paths (#1864): a README line or
+# a rule file can break a test that reads it, and main would go red with nothing between.
+light_guards() {
+  local aff
+  if ! aff=$("$tools/citadel-node" --no-warnings tools/affected.ts --root . --base "$old" 2>/dev/null); then
+    say "the affected map couldn't answer, so no test that reads these paths ran: main's own CI decides"
+    return 0
+  fi
+  mapfile -t guard_set < <(sed -nE $'s/^run\t([^\t]+)\t.*/\\1/p' <<<"$aff")
+  guards
+}
+
+# <worktree> <onto> <branch> <base> <tip>: what a ship at the front gets after its rebase (adr_commit, the prompt baseline,
+# the commit titles), for one rebased onto <onto> in a scratch worktree (#1864). Fails with the reason in skip, the worktree put back clean.
+train_steps() {
+  local n=${3#ticket/} renamed
+  [ -e "$1/node_modules" ] || [ ! -d node_modules ] || ln -s "$PWD/node_modules" "$1/node_modules" # typescript
+  if ! (
+    cd "$1" || exit 1
+    n=${n%%-*}
+    git diff --quiet "$2" HEAD -- docs/adr || adr_commit "$2" "$3" "the ship train" || exit 1
+    if [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$4" "$5" -- test/prompt-baseline.json; then
+      PROMPT_BASELINE=write "$tools/citadel-node" --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 </dev/null || true
+      git add test/prompt-baseline.json && { git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/prompt-baseline.json measured again at ship time"; } || exit 1
+    fi
+    if [ -f tools/typecheck.ts ] && ! git diff --quiet "$4" "$5" -- test/typecheck-baseline.json; then
+      CITADEL_TEST_FILES=0 "$tools/citadel-node" --no-warnings tools/typecheck.ts --update >/dev/null 2>&1 </dev/null ||
+        { git checkout -q -- test/typecheck-baseline.json; exit 1; }
+      git add test/typecheck-baseline.json || exit 1
+      git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/typecheck-baseline.json measured again at ship time" || exit 1
+    fi
+  ); then
+    skip="renumbering its ADRs or measuring its prompt baseline on the train failed"
+  elif [ -x "$tools/commit-titles.sh" ] && ! (cd "$1" && "$tools/commit-titles.sh" "$2") >/dev/null 2>&1; then
+    skip="a commit of it lost its #N: title"
+  else return 0; fi
+  git -C "$1" reset -q --hard >/dev/null 2>&1 || true
+  git -C "$1" clean -fdq >/dev/null 2>&1 || true
+  return 1
+}
+
+train_guards_run() {
+  local t0 lo hi mid i rc out files keep was t v k room ahead
+  while [ ${#train_n[@]} -gt 0 ]; do
+    t0=$SECONDS rc=0
+    guard_at "$tip" || rc=$?
+    [ "$rc" = 1 ] || { [ "$rc" != 0 ] || say "guard tests passed on the ship train's top $short in $((SECONDS - t0)) s"; return 0; }
+    out=$guard_out lo=0 hi=${#train_n[@]}
+    while [ $((hi - lo)) -gt 1 ]; do
+      mid=$(((lo + hi) / 2)) rc=0
+      guard_at "$(train_at "$mid")" || rc=$?
+      if [ "$rc" = 1 ]; then hi=$mid out=$guard_out; elif [ "$rc" = 0 ]; then lo=$mid; else break; fi
+    done
+    [ "$rc" -lt 2 ] || { say "the guard tests failed on the ship train's top ($short) but couldn't decide on a step before it (exit $guard_rc), so they name no ship: CI runs them"; return 0; }
+    if [ "$hi" = 1 ] && [ "$front_guards" = 2 ]; then # this one never passed them (#1864): the first rider isn't the cause unless it does now
+      rc=0
+      guard_at "$own" || rc=$?
+      [ "$rc" != 1 ] || { say "the guard tests failed on the ship train's top ($short), but $branch's own run of them didn't decide and fails now too, so they name no ship: CI runs them"; return 0; }
+      [ "$rc" = 0 ] || { say "the guard tests failed on the ship train's top ($short), but $branch's own run of them didn't decide, then or now (exit $guard_rc), so they name no ship: CI runs them"; return 0; }
+      front_guards=0
+    fi
+    i=$((hi - 1)) guard_out=$out files=$(guard_files) room=''
+    # A size red (#2139): how far over, and the ships on the train before it that used the room, each by its own step.
+    if [[ ,$files, == *,test/size-budget.test.ts,* ]] && [ -f "$tools/size-room.ts" ]; then
+      ahead=(--ahead "$branch=$(git merge-base main "$own")..$own")
+      for ((k = 0; k < i; k++)); do ahead+=(--ahead "${train_br[$k]}=$(train_at "$k")..$(train_at $((k + 1)))"); done
+      ahead+=(--self "${train_br[$i]}=$(train_at "$i")..$(train_at "$hi")")
+      room=$("$tools/citadel-node" --no-warnings "$tools/size-room.ts" "${ahead[@]}" 2>/dev/null | grep ' over its limit ') || : # exit 1: over
+    fi
+    say "the guard tests failed on the ship train's top ($short) in ${files:-the guard tests}, and on the train first with ${train_br[$i]} on it, so it is refused before any CI run and the train is built again without it"
+    [ -z "$room" ] || say "$room"
+    retro_log "guard · ${train_br[$i]} · on $label's train · $files · $((SECONDS - t0))s"
+    train_say "$i" "refused $branch guard-tests guard ${files:-guards}" "$(grep -v '^full output: ' <<<"$out" | tail -n 40)" ${room:+"$room"}
+    train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
+    keep=("${train_n[@]:0:$i}" "${train_n[@]:$hi}") was=("${train_n[@]}")
+    train_tip=() train_br=() train_n=() train_was=()
+    tip=$own short=$(git rev-parse --short "$own")
+    [ -n "$train_left" ] || train_only='' # its early run had the refused rider, so it won't count: the next in line may ride (#1864)
+    train_build "${keep[@]}"
+    for t in "${was[@]}"; do # a rider the train no longer takes: back in line
+      [[ " ${train_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
+    done
+  done
+  return 0 # the loop's last test can read a refused rider's verdict, and land.sh runs under set -e
+}
+
+# A burn-in red's failing cases that one train member added (#2019): "<member> <file>" a line (0: this ship, 1 on: its
+# riders). A case main and the ships before one don't have can only be that ship's. The log names each as
+# "test at <file>:<line>:<col>", then "✖ <case> (<ms>)". A case already on main, one a ship only edited, or one whose
+# file a later ship changes too, is left to the guess. [<riders>]: only the train up to that rider (all by default).
+burn_new() {
+  local f name i j red last=${1:-${#train_n[@]}}
+  [ -n "$burn_red" ] || return 0
+  red=$(burn_lines | sed 's/: failed in .*//')
+  while IFS=$'\t' read -r f name; do
+    grep -qxF -- "$f" <<<"$red" && ! has_case "$old" "$f" "$name" || continue
+    for ((i = 0; i <= last; i++)); do
+      has_case "$(train_at "$i")" "$f" "$name" || continue
+      for ((j = i + 1; j <= last; j++)); do
+        git diff --quiet "$(train_at $((j - 1)))" "$(train_at "$j")" -- "$f" || continue 3 # a later ship edits it: a guess
+      done
+      echo "$i $f"
+      break
+    done
+  done < <(awk 'match($0, /test at [^ ]+:[0-9]+:[0-9]+/) { f = substr($0, RSTART + 8, RLENGTH - 8); sub(/:[0-9]+:[0-9]+$/, "", f); next }
+    f != "" { if (i = index($0, "✖ ")) { n = substr($0, i + length("✖ ")); sub(/ \([0-9.]+ms\).*$/, "", n); print f "\t" n } f = "" }' <<<"$failed" | sort -u) | sort -u
+}
+
+# <commit> <file> <case>: the file there has the case, named in quotes (a name built at run time is never found, so guessed).
+# git grep, with no pipe: under pipefail a `git show | grep -q` fails on a file over 64 KB that has the case.
+has_case() { git grep -qF -e "'$3'" -e "\"$3\"" -e "\`$3\`" "$1" -- "$2" 2>/dev/null; }

@@ -112,7 +112,7 @@ export const waitShows = (w) => !!w && !!(w.total || w.usual || TRACK.some(([key
  * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'h' held | 'p' not started, then an 'i' step's
  * own clock: progress.js planTrack]), every step underway drawn the same way, filling by its own clock (#2156). The
  * first one is also the `wait`'s when there is one (hatched while it waits in a line or queue), and takes `since`/`usual`
- * when its entry says no clock. A step built and now being tested ('h', #1923) is full, in the running colour. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
+ * when its entry says no clock. A step built and now being tested ('h', #1923) is full, in the running colour, faded (#2201). With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
  * @param {Parameters<typeof progressPieces>[0]} src @param {string} [cls]
  */
 export function progressTrack(src, cls = '') {

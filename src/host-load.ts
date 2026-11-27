@@ -87,6 +87,36 @@ export function parseHistory(text: string, since: number, owners?: AppOwners): S
     .sort((a, b) => b.longestS - a.longestS);
 }
 
+export interface PlaceWaits extends Waits {
+  /** 'here' (perigee), 'on:<machine>' or 'ci:<owner>/<repo>'. */
+  place: string;
+  /** How many of its jobs waited on each thing, most first. */
+  on: { why: string; jobs: number }[];
+}
+
+/**
+ * The history's lines since `since` by where each job ran (#2109). Lines written before it have what a perigee job
+ * waited on where the place now is, and nothing of that for a job elsewhere.
+ */
+export function parsePlaces(text: string, since: number): PlaceWaits[] {
+  const by = new Map<string, { w: number[]; on: Map<string, number> }>();
+  for (const line of text.split('\n')) {
+    const f = line.split('\t');
+    const [started, who, , at4, wait] = f;
+    const w = Number(wait);
+    if (!who || !(Date.parse(started ?? '') >= since) || !Number.isFinite(w) || wait === '') continue;
+    const elsewhere = /^(on|ci):/.test(at4!);
+    const place = elsewhere ? at4! : 'here';
+    // An old line for a job elsewhere that did wait never said on what.
+    const why = f[9] ?? (elsewhere ? (w > 0 ? 'unrecorded' : 'none') : at4 === 'here' ? 'none' : at4!);
+    const row = by.get(place) ?? by.set(place, { w: [], on: new Map() }).get(place)!;
+    row.w.push(w);
+    // 'light' ran at once without a slot: it waited on nothing.
+    if (why !== 'none' && why !== 'light') row.on.set(why, (row.on.get(why) ?? 0) + 1);
+  }
+  return [...by].map(([place, r]) => ({ place, ...summary(r.w), on: [...r.on].map(([why, jobs]) => ({ why, jobs })).sort((a, b) => b.jobs - a.jobs) })).sort((a, b) => b.jobs - a.jobs);
+}
+
 const slotCount = async (dir: string): Promise<number> => {
   try {
     // citadel-heavy's rule: the first number, else 2; a 0 is one slot, and 64 is the most.
@@ -114,6 +144,8 @@ export interface HostLoad {
   maxPressure: number;
   loadWaitS: number;
   week: SchemeWaits[];
+  /** The same week by where the jobs ran (#2109). */
+  places: PlaceWaits[];
   /** Long jobs (#1363): queued, running, and ended in the last day. */
   long: (ReturnType<typeof longView>[number] & { scheme: string })[];
   now: number;
@@ -136,6 +168,7 @@ export async function hostLoad(dir: string, heavy: HeavyJobs, now = Date.now(), 
     maxPressure: MAX_PRESSURE,
     loadWaitS: LOAD_WAIT_S,
     week: parseHistory(history, now - WEEK_MS, owners),
+    places: parsePlaces(history, now - WEEK_MS),
     long: longView(longs, now).map((j) => ({ ...j, scheme: schemeOfWho(j.who, owners) })),
     now,
   };

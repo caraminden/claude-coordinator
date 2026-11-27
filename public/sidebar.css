@@ -58,10 +58,19 @@
 .g-build { --gc: hsl(205 65% 45%); }
 .g-cabal { --gc: hsl(265 45% 52%); }
 .g-cabal > h3 { color: var(--gc); }
-/* A cabal's card (#2092, public/cabal-card.js): a button for its summary, its members' rows under it. */
+/* A cabal's card (#2092, public/cabal-card.js): a summary whose name opens the Overseer's chat and whose arrow opens the box, its members' rows under it. */
 .cabal-card { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: var(--space-1) 0; transition: border-color 0.15s; }
 .cabal-card:hover, .cabal-card[data-open] { border-color: var(--gc); }
-.sidebar .cabal-toggle { display: flex; flex-direction: column; gap: var(--space-1); align-items: stretch; width: 100%; margin: 0; padding: var(--space-2); border: 0; background: none; color: inherit; font: inherit; font-weight: normal; text-align: left; cursor: pointer; }
+.sidebar .cabal-sum { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); }
+.cabal-top { display: flex; align-items: flex-start; gap: var(--space-2); }
+.sidebar .cabal-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); color: inherit; text-decoration: none; }
+.sidebar .cabal-name:is(a):hover .cabal-title b { text-decoration: underline; }
+/* The arrow opens and shuts the box; a phone-sized hit area around a small chevron. */
+.sidebar .cabal-toggle { flex: none; display: grid; place-items: center; width: 44px; height: 44px; margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.sidebar .cabal-toggle:hover { color: var(--gc); }
+.cabal-arrow { width: 0.5rem; height: 0.5rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-25%) rotate(45deg); transition: transform 0.15s; }
+.cabal-toggle[aria-expanded="true"] .cabal-arrow { transform: translateY(25%) rotate(-135deg); }
+.cabal-card[data-open] .cabal-sum { background: color-mix(in srgb, var(--gc) 8%, transparent); }
 .cabal-tag { align-self: flex-start; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
 .cabal-title { overflow-wrap: anywhere; }
 .cabal-title .num { color: var(--muted); font-size: 0.8rem; }

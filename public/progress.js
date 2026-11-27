@@ -40,6 +40,9 @@ export function createProgress() {
     model: /** @type {string | null} */ (null), // the running or last turn's model, from its init
     lastAt: /** @type {number | null} */ (null), // the newest event's time, where a turn that ended with no result stopped counting
     at: /** @type {string | null} */ (null), // the tagged step (#1923) the server last saw worked on, by id: its stage is the one underway
+    reached: /** @type {string[]} */ ([]), // the tagged steps work has shown for (#2201): in a stage, those after the furthest of them haven't started
+    front: /** @type {string | null} */ (null), // the step of that stage the newest work is for (#2201): the one underway, the others reached held open
+    grunts: /** @type {Record<string, { step: string, bg: boolean, ran: boolean }>} */ ({}), // Grunts still out, by their Agent call, and the step each was started for (#2201)
     asked: false, // a card went out this turn, so it isn't answered yet
     planned: false, // this turn made a plan call
     prep: false, // the review skill is open and no reviewer has started
@@ -50,8 +53,8 @@ export function createProgress() {
 }
 
 /** Where a tagged plan is (#1923), for a page that starts in the middle of one (history.ts). */
-/** @param {Pick<Prog, 'at' | 'asked' | 'planned' | 'prep' | 'side' | 'closing'>} p */
-export const planPlace = ({ at, asked, planned, prep, side, closing }) => ({ at, asked, planned, prep, side, closing });
+/** @param {Pick<Prog, 'at' | 'reached' | 'front' | 'grunts' | 'asked' | 'planned' | 'prep' | 'side' | 'closing'>} p */
+export const planPlace = ({ at, reached, front, grunts, asked, planned, prep, side, closing }) => ({ at, reached, front, grunts, asked, planned, prep, side, closing });
 
 /** @param {unknown} path */
 const basename = (path) =>
@@ -508,6 +511,8 @@ export function applyEvent(p, kind, data, at = null) {
     if (p.turnOk) p.turnFailed = false;
     p.planMoved = false;
     // A close is the end only once its turn is over: an open card refuses it, and the replay sees no results.
+    // Nothing of the turn's runs on once it is over: its Grunts no longer hold their steps.
+    endGrunts(p, () => true, at);
     if (p.closing && !p.asked) finishPlan(p, at);
     for (const t of p.tasks) settle(t, at);
   }
@@ -521,6 +526,7 @@ export function applyEvent(p, kind, data, at = null) {
     p.asked = false;
     p.planned = false;
     p.closing = false;
+    p.grunts = {};
     if (typeof data.model === 'string') p.model = data.model;
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.
     if (p.tasks.length && allDone(p)) p.tasks = [];
@@ -532,12 +538,16 @@ export function applyEvent(p, kind, data, at = null) {
       if (t.status === 'in_progress' && at != null && (!t.kind || t.id === stepLead(p))) t.workFrom = at;
     }
   } else if (data.type === 'assistant') {
+    const grunt = data.parent_tool_use_id ? p.grunts?.[data.parent_tool_use_id] : undefined;
+    if (grunt) grunt.ran = true;
+    // The minion speaking again after a Grunt it waited for ran is that Grunt back (replays see no tool results).
+    else if (!data.parent_tool_use_id) endGrunts(p, (g) => !g.bg && g.ran, at);
     for (const block of content) {
       if (block.type === 'text' && block.text?.trim()) {
         // What Claude said while a step was underway is the best plain summary of that step; a
         // Grunt's report (a subagent's words) is not.
         const task = stepInfo(p, true).current;
-        if (task && !data.parent_tool_use_id && sharedSteps(p, task).length < 2) task.note = block.text.trim();
+        if (task && !data.parent_tool_use_id && together(p, task).length < 2) task.note = block.text.trim();
         continue;
       }
       if (block.type !== 'tool_use') continue;
@@ -569,6 +579,7 @@ export function applyEvent(p, kind, data, at = null) {
       } else if (isWorkTool(call.name)) {
         const work = workKind(call, !!data.parent_tool_use_id);
         if (work) sawWork(p, work, at);
+        if ((call.name === 'Agent' || call.name === 'Task') && !data.parent_tool_use_id) startGrunt(p, call, at);
         const task = stepInfo(p, true).current;
         if (task) task.actions++;
         p.turnActions++;
@@ -595,6 +606,34 @@ export function applyEvent(p, kind, data, at = null) {
     }
   }
   return actions;
+}
+
+/**
+ * A Grunt the minion started (#2201) holds the step underway as it started, while it is out: so work it carries on
+ * with shows beside the step the minion moves to, and the steps it passed with nothing running are only held open.
+ * @param {Prog} p @param {ToolBlock} call @param {number | null | undefined} at
+ */
+function startGrunt(p, call, at) {
+  const step = stepLead(p);
+  if (!step || onSide(p)) return;
+  p.grunts = { ...p.grunts, [call.id]: { step, bg: !!call.input?.run_in_background, ran: false } };
+  rearrange(p, at);
+}
+
+/** @param {Prog} p @param {(g: { step: string, bg: boolean, ran: boolean }) => boolean} done @param {number | null | undefined} at */
+function endGrunts(p, done, at) {
+  const out = Object.entries(p.grunts ?? {});
+  const left = out.filter(([, g]) => !done(g));
+  if (left.length === out.length) return;
+  p.grunts = Object.fromEntries(left);
+  rearrange(p, at);
+}
+
+/** The tagged steps' statuses again, after what holds them changed. */
+/** @param {Prog} p @param {number | null | undefined} at */
+function rearrange(p, at) {
+  const stages = stagesOf(p);
+  if (stageAt(p, stages) >= 0 && !onSide(p)) arrange(p, stages, at);
 }
 
 /** One TaskUpdate (or a plan step put in its shape) on the step at `idx` (none when -1). @param {Prog} p @param {number} idx @param {ToolInput} input @param {number | null | undefined} at */
@@ -667,7 +706,10 @@ function applyPlan(p, callId, input, at) {
     if (s.status === 'doing') {
       for (const t of p.tasks) if (t !== task && t.own === 'doing') t.own = undefined;
       p.side = task.kind ? null : task.id;
-      if (task.kind) p.at = task.id;
+      if (task.kind) {
+        p.at = p.front = task.id;
+        p.reached = [...new Set([...(p.reached ?? []), task.id])];
+      }
     }
   }
   const stages = stagesOf(p);
@@ -786,15 +828,37 @@ function sawWork(p, work, at) {
   if (to !== cur || stages[to].every((t) => t.own === 'todo' || t.own === 'done')) for (const t of stages[to]) if (t.own === 'todo') t.own = undefined;
   if (!prep || to !== cur) p.prep = prep;
   p.planMoved = true;
-  goTo(p, stages, to, at);
+  goTo(p, stages, to, at, kind);
 }
 
-/** @param {Prog} p @param {ProgressTask[][]} stages @param {number} to @param {number | null | undefined} at */
-function goTo(p, stages, to, at) {
-  p.at = stages[to][0].id;
-  for (const t of stages[to]) if (t.own !== 'todo') t.seen = true;
+/**
+ * Put the plan on stage `to`, and on the step there `kind`'s work is for (#2201). Within a stage, as between stages, an
+ * edit goes back to the last build reached and a test or review to its own; work moves on only to a kind not reached
+ * yet, a test or review never past a build or review it hasn't reached; and a read moves nothing once the stage is
+ * underway, since reading goes on all through one. A stage come back to is on the last step reached there. A late
+ * move, never a wrong one.
+ * @param {Prog} p @param {ProgressTask[][]} stages @param {number} to @param {number | null | undefined} at @param {string} [kind]
+ */
+function goTo(p, stages, to, at, kind) {
+  const st = stages[to];
+  p.at = st[0].id;
+  for (const t of st) if (t.own !== 'todo') t.seen = true;
+  const r = reachedIn(p, st);
+  const here = st.some((t) => t.id === p.front);
+  const moves = !!kind && (kind !== 'read' || !here);
+  const back = moves && kind !== 'read' ? st.slice(0, r + 1).findLast((t) => isOpen(t) && t.kind === kind) : undefined;
+  const next = moves ? st.findIndex((t, i) => i > r && isOpen(t) && t.kind === kind) : -1;
+  const jumps = here && kind !== 'build' && st.slice(r + 1, next).some((t) => isOpen(t) && (t.kind === 'build' || t.kind === 'review'));
+  const front = back ?? (next >= 0 && !jumps ? st[next] : undefined) ?? (here ? undefined : (st.slice(0, r + 1).findLast(isOpen) ?? st.find(isOpen)));
+  if (front) p.front = front.id;
+  const ids = new Set(p.tasks.map((t) => t.id));
+  p.reached = [...new Set([...(p.reached ?? []).filter((id) => ids.has(id)), ...(front ? [front.id] : [])])];
   arrange(p, stages, at);
 }
+
+/** A tagged step the plan still moves: not one the minion ticked or took back itself. */
+/** @param {ProgressTask} t */
+const isOpen = (t) => t.own !== 'done' && t.own !== 'todo';
 
 /** Set the tagged steps' statuses from where the plan is (#1923); a step the minion marked done itself stays done. */
 /** @param {Prog} p @param {ProgressTask[][]} stages @param {number | null | undefined} at */
@@ -821,12 +885,28 @@ function arrange(p, stages, at) {
       const guess = open.reduce((sum, t) => sum + (t.estimate ?? 0), 0);
       if (open.some((t) => t.status !== 'completed')) for (const t of open) t.work = work * (guess ? (t.estimate ?? 0) / guess : 1 / open.length);
       for (const t of open) setStatus(p, t, 'completed', at);
-    } else if (i === cur || (held(i) && lead.seen)) {
-      for (const [n, t] of open.entries()) {
+    } else if (i === cur) {
+      // Only the step its work reached is underway (#2201): those before it are held open, as the server can't say
+      // they're finished, unless a Grunt started for one is still out; those after it haven't started.
+      const front = /** @type {ProgressTask} */ (frontOf(p, st));
+      const r = reachIn(p, st);
+      for (const t of open) {
+        if (st.indexOf(t) > r) {
+          setStatus(p, t, 'pending', at);
+          continue;
+        }
+        // One a Grunt holds keeps its own clock running (#2156); one held open stops it.
+        t.stage = t === front ? front.id : t.id;
+        setStatus(p, t, 'in_progress', at);
+        if (t !== front && !gruntOn(p, t)) settle(t, at);
+      }
+    } else if (held(i) && lead.seen) {
+      // Held open as far as the work reached; past that they haven't started.
+      const r = reachIn(p, st);
+      for (const t of open) {
         t.stage = lead.id;
-        // The minion named one of them: those after it wait.
-        setStatus(p, t, lead.own === 'doing' && n > open.indexOf(lead) ? 'pending' : 'in_progress', at);
-        if (held(i) || t !== lead) settle(t, at);
+        setStatus(p, t, st.indexOf(t) > r ? 'pending' : 'in_progress', at);
+        settle(t, at);
       }
     } else {
       // A review that happened stays ticked when a refused ship sends the work back to build.
@@ -897,7 +977,7 @@ export function planTrack(p, { running = false, now = Date.now(), ratio = 1 } = 
     .map((t) => {
       const g = t.estimate ?? null;
       const st = state(t);
-      const clock = live && st === 'i' ? stepClock(p, t, now, ratio) : null;
+      const clock = live && st === 'i' ? stepClock(t, now, ratio) : null;
       if (!clock) return [g, st];
       if (clock.since != null) return [g, st, clock.since, clock.usual];
       return clock.worked > 0 ? [g, st, null, clock.usual, clock.worked] : [g, st];
@@ -906,22 +986,16 @@ export function planTrack(p, { running = false, now = Date.now(), ratio = 1 } = 
 
 /**
  * One underway step's clock: its guess in seconds, scaled by `ratio` (#571), and its working time, as `since` (moved on
- * past the gaps between turns) while it counts, else `worked` ms. Steps of a stage the server can't tell apart (#1923)
- * share the stage's clock: its lead's time against their summed guesses. Null with no guess or start of its own.
- * @param {Prog} p @param {ProgressTask} t @param {number} now @param {number} ratio
+ * past the gaps between turns) while it counts, else `worked` ms. Null with no guess or start of its own.
+ * @param {ProgressTask} t @param {number} now @param {number} ratio
  */
-function stepClock(p, t, now, ratio) {
-  if (!t.estimate) return null;
-  const lead = t.kind ? p.tasks.find((x) => x.id === t.stage && x.status === 'in_progress') : undefined;
-  const shared = lead ? sharedSteps(p, lead) : [];
-  const grouped = !!lead && shared.length > 1 && shared.includes(t);
-  const head = grouped ? lead : t;
-  if (!head.startedAt) return null;
-  const usual = guessSeconds(grouped ? shared : [t], ratio);
+function stepClock(t, now, ratio) {
+  if (!t.estimate || !t.startedAt) return null;
+  const usual = guessSeconds([t], ratio);
   // A step from before working time was counted (no work yet) falls back to its wall clock.
-  if (head.work == null) return { usual, since: head.startedAt, worked: 0 };
-  if (head.workFrom == null) return { usual, since: null, worked: head.work };
-  return { usual, since: head.workFrom - head.work, worked: head.work + now - head.workFrom };
+  if (t.work == null) return { usual, since: t.startedAt, worked: 0 };
+  if (t.workFrom == null) return { usual, since: null, worked: t.work };
+  return { usual, since: t.workFrom - t.work, worked: t.work + now - t.workFrom };
 }
 
 /** Steps' guesses summed, in whole seconds, so a scaled guess doesn't round up a minute on float noise (20 × 0.3 = 6.000000000000001). */
@@ -932,16 +1006,42 @@ const guessSeconds = (steps, ratio) => Math.round(steps.reduce((sum, t) => sum +
 /** @param {ProgressTask[]} st */
 const leadOf = (st) => st.find((t) => t.own === 'doing') ?? st.find((t) => t.own !== 'done' && t.own !== 'todo');
 
-/** The lead of the stage underway. */
+/**
+ * The step of a stage the newest work is for (#2201): the one the minion said it is on, else the front, else the
+ * first open step from the furthest reached on (the minion ticked those itself), else the stage's first open step.
+ * @param {Prog} p @param {ProgressTask[]} st
+ */
+function frontOf(p, st) {
+  const front = st.find((t) => t.own === 'doing') ?? st.find((t) => t.id === p.front);
+  if (front && isOpen(front)) return front;
+  return st.slice(Math.max(0, reachedIn(p, st))).find(isOpen) ?? st.filter(isOpen).at(-1);
+}
+
+/** Where in a stage the furthest step work showed for is, or -1. */
+/** @param {Prog} p @param {ProgressTask[]} st */
+const reachedIn = (p, st) => st.reduce((r, t, i) => (p.reached?.includes(t.id) ? i : r), -1);
+
+/** Where in a stage the furthest step reached is, the front included (#2201): steps after it haven't started. */
+/** @param {Prog} p @param {ProgressTask[]} st */
+function reachIn(p, st) {
+  const front = frontOf(p, st);
+  return Math.max(reachedIn(p, st), front ? st.indexOf(front) : -1);
+}
+
+/** A Grunt started for this step is still out (#2201), so it's underway beside the step the minion is on. */
+/** @param {Prog} p @param {ProgressTask} t */
+const gruntOn = (p, t) => Object.values(p.grunts ?? {}).some((g) => g.step === t.id);
+
+/** The step underway: the front of its stage. */
 /** @param {Prog} p */
 function stepLead(p) {
   const stages = stagesOf(p);
-  return leadOf(stages[stageAt(p, stages)] ?? [])?.id ?? null;
+  return frontOf(p, stages[stageAt(p, stages)] ?? [])?.id ?? null;
 }
 
 /** A step that is built and now being tested (#1923): not ticked yet, as a failed test brings the bar back to it. */
 /** @param {Prog} p @param {ProgressTask} t */
-export const heldStep = (p, t) => t.status === 'in_progress' && !!t.kind && t.stage !== stepLead(p);
+export const heldStep = (p, t) => t.status === 'in_progress' && !!t.kind && t.stage !== stepLead(p) && !gruntOn(p, t);
 
 /**
  * What the plan's guesses (#551) say while its step runs: the step's start and guessed seconds, for the
@@ -953,17 +1053,15 @@ export const heldStep = (p, t) => t.status === 'in_progress' && !!t.kind && t.st
 /** @param {Prog} p @param {boolean} running @param {number} [now] @param {number} [ratio] */
 export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   const { current } = stepInfo(p, running);
-  const shared = sharedSteps(p, current);
-  const steps = shared.length > 1 ? shared : current ? [current] : [];
-  if (!current?.startedAt || !steps.some((t) => t.estimate)) return null;
+  if (!current?.startedAt || !current.estimate) return null;
   const scale = ratio > 0 ? ratio : 1;
-  const usual = guessSeconds(steps, ratio);
+  const usual = guessSeconds([current], ratio);
   const pending = Math.round(p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0) * 60 * scale);
   // A step from before working time was counted (no work yet) falls back to its wall clock.
   const since = current.work == null ? current.startedAt : (current.workFrom ?? now) - current.work;
   const leftS = Math.max(0, usual - (now - since) / 1000) + pending;
   // The whole plan's working time so far (#630) starts at planSince: the steps done, then this one.
-  const doneMs = p.tasks.filter((t) => t.status === 'completed' || (t.kind && t.status === 'in_progress' && !shared.includes(t))).reduce((s, t) => s + (t.work ?? (t.estimate ?? 0) * 60_000 * scale), 0);
+  const doneMs = p.tasks.filter((t) => t.status === 'completed' || (t.kind && t.status === 'in_progress' && t !== current)).reduce((s, t) => s + (t.work ?? (t.estimate ?? 0) * 60_000 * scale), 0);
   const planSince = since - doneMs;
   return { since, usual, left: Math.ceil(leftS / 60), planSince };
 }
@@ -984,14 +1082,14 @@ export function stepInfo(p, running = false) {
   return { total, done, current, step: current ? currentIdx + 1 : done };
 }
 
-/** The steps of the stage underway: more than one when the server can't tell them apart (#1923). */
+/** The steps underway with the current one: those a Grunt started for is still out on (#2201). */
 /** @param {Prog} p @param {ProgressTask | null} current @returns {ProgressTask[]} */
-const sharedSteps = (p, current) => (current ? p.tasks.filter((t) => t === current || (t.kind && current.kind && t.status === 'in_progress' && t.stage === current.stage && current.own !== 'doing')) : []);
+const together = (p, current) => (current?.kind ? p.tasks.filter((t) => t === current || (t.kind && t.status === 'in_progress' && !heldStep(p, t))) : current ? [current] : []);
 
-/** What the stage underway is called: its step's own words, or the kinds of a shared stage ("Building, 2 steps", #1923). */
+/** What the step underway is called: its own words, or with Grunts out on others the kinds of all of them ("Building and testing, 2 steps", #1923, #2201). */
 /** @param {Prog} p @param {ProgressTask | null} current @param {string} words */
 function stageWords(p, current, words) {
-  const shared = sharedSteps(p, current);
+  const shared = together(p, current);
   if (shared.length < 2) return words;
   const kinds = [...new Set(shared.map((t) => STEP_KINDS[String(t.kind)]))].map((k, i) => (i ? k.toLowerCase() : k));
   return `${kinds.length > 1 ? `${kinds.slice(0, -1).join(', ')} and ${kinds.at(-1)}` : kinds[0]}, ${shared.length} steps`;

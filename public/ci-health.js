@@ -1,7 +1,7 @@
 // The CI page's Test health tab (#1063, Josh 2026-11-19: "Add a button to start a minion to fix up flaky tests"): fast mode's state and
 // its known reds for the scheme, and its flakiest test files of the last 14 days (src/flakes.ts counts them from the events land.sh
 // and fast mode's runs leave). Each file offers "Start a minion to fix it", which shows the brief first and starts a bug minion.
-/** @import { FastModeView, FlakeFile, FlakeFix, LandReds, LandRedCause, TestHealth, ReadFailed } from './types/ci.js' */
+/** @import { FastModeView, FlakeFile, FlakeFix, LandReds, LandRedCause, SweepNight, TestHealth, ReadFailed } from './types/ci.js' */
 import { ago, api, h, pacificStamp } from './base.js';
 import { emptyCard, hueRow, meter, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -131,8 +131,16 @@ function flakeBlock(s, flakes, refresh) {
         lead: `${f.count}×`,
         meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} ${f.fix?.state === 'held' ? 'fixed it' : 'is on it'}`) : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it'),
       },
-      h('strong', { title: f.file }, f.file),
-      h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.before ? ` · ${f.before} before the file's last change` : '', f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
+      h('span', {}, h('strong', { title: f.file }, f.file), f.cloud && f.cloud === f.count ? [' ', toneChip('violet', 'cloud only')] : null),
+      f.cloud && f.cloud === f.count ? h('span', { class: 'ci-detail-line muted' }, 'Seen only by the nightly cloud sweep, on a 4-vCPU VM: it starts no fix minion by itself and refuses no ship.') : null,
+      h(
+        'span',
+        { class: 'ci-detail-line muted' },
+        `last ${when(f.last)}`,
+        f.cloud && f.cloud < f.count ? ` · ${f.cloud} in the cloud sweep` : '',
+        f.before ? ` · ${f.before} before the file's last change` : '',
+        f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s ${f.cloud === f.count ? 'sweep' : 'land'}`)] : ' · fast mode',
+      ),
       ...errorLines(f),
       f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null,
     );
@@ -148,6 +156,73 @@ function flakeBlock(s, flakes, refresh) {
     flakes.length ? showFirst({ key: `health-flakes-${s.id}`, items: flakes.map(item), n: 5, noun: 'files' }) : emptyCard('No flaky test file', 'Only schemes whose land script prints flake lines report them.'),
   );
   return block('Flaky tests', flakes.length ? 'waiting' : 'done', row);
+}
+
+// The nightly cloud sweep (#2187, src/cloud-flakes.ts): each night's files and verdicts beside its sessions, minutes and cost.
+// verdict -> [hue, chip tone, what it means]
+/** @type {Record<string, [string, string, string]>} */
+const VERDICT = {
+  flaky: ['waiting', 'warn', 'some copies failed: a cloud sighting'],
+  red: ['danger', 'danger', 'failed alone on the VM too: a plain red or the VM itself'],
+  skipped: ['held', 'neutral', 'a test skipped on the VM, so it proves nothing'],
+  stopped: ['held', 'neutral', 'over the 25-minute step'],
+  clean: ['done', 'ok', 'every copy passed'],
+};
+/** @param {number} usd */
+const dollars = (usd) => `$${usd.toFixed(2)}`;
+
+/**
+ * @param {{ id: number }} s
+ * @param {SweepNight[]} sweeps
+ */
+function sweepBlock(s, sweeps) {
+  const key = `health-sweep-${s.id}`;
+  const title = 'Nightly cloud sweep';
+  const last = sweeps[0];
+  if (!last) {
+    const [row] = settingsRow(
+      { key, icon: 'spark', hue: 'held', title, summary: [toneChip('neutral', 'No runs'), 'no night swept yet'] },
+      emptyCard('No night swept yet', "A schedule's minion runs tools/cloud-flake.ts sweep: the flakiest files, about 10 copies each, in a cloud session on main's tip.", { mark: '–', hue: 'held' }),
+    );
+    return block(title, 'held', row);
+  }
+  /** @param {SweepNight} n @param {string} v */
+  const count = (n, v) => n.files.filter((f) => f.verdict === v).length;
+  // A night is Clean only when every file it picked came back and passed; a missing or unproven file makes it Incomplete.
+  /** @param {SweepNight} n @returns {[string, string, string]} [hue, chip tone, chip word] */
+  const state = (n) => {
+    const [flaky, red] = [count(n, 'flaky'), count(n, 'red')];
+    if (!n.files.length) return ['danger', 'danger', 'No results'];
+    if (flaky) return ['waiting', 'warn', `${flaky} flaky`];
+    if (red) return ['danger', 'danger', `${red} red`];
+    if (n.error || count(n, 'clean') < n.files.length) return ['held', 'neutral', 'Incomplete'];
+    return ['done', 'ok', 'Clean'];
+  };
+  /** @param {SweepNight} n */
+  const summary = (n) => {
+    const others = ['red', 'stopped', 'skipped'].map((v) => (count(n, v) ? `${count(n, v)} ${v}` : '')).filter(Boolean);
+    const parts = n.files.length ? [`${n.files.length} files, ${count(n, 'flaky')} flaky`, ...others].join(', ') : 'no results';
+    return `${parts} · ${n.sessions} session × ${Math.round(n.minutes)} min${n.sha ? ` · ${n.sha.slice(0, 9)}` : ''}${n.error ? ` · ${n.error.split('\n')[0].slice(0, 140)}` : ''}`;
+  };
+  const flaky = count(last, 'flaky');
+  const order = Object.keys(VERDICT);
+  const files = [...last.files]
+    .sort((a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict))
+    .map((f) => {
+      const [hue, tone, why] = VERDICT[f.verdict] ?? VERDICT.red;
+      return hueRow({ hue }, h('span', {}, h('strong', { title: f.file }, f.file), ' ', toneChip(tone, f.verdict)), h('span', { class: 'ci-detail-line muted', title: f.detail }, `${why} · ${f.failed} of ${f.copies} failed · ${f.seconds}\u00a0s`));
+    });
+  const nights = sweeps.map((n) => hueRow({ hue: state(n)[0], lead: dollars(n.costUsd), meta: n.minion ? h('a', { href: `#/p/${s.id}/t/${n.minion}` }, `#${n.minion}`) : null }, h('strong', {}, when(n.at)), h('span', { class: 'ci-detail-line muted' }, summary(n))));
+  const [hue, tone, word] = state(last);
+  const [row] = settingsRow(
+    { key, icon: 'spark', hue, title, summary: [toneChip(tone, word), `${when(last.at)} · ${dollars(last.costUsd)}`] },
+    statTiles([String(last.files.length), 'files swept', 'running'], [String(flaky), 'flaky in the cloud', flaky ? 'waiting' : 'done'], [`${Math.round(last.minutes)} min`, `in ${last.sessions} session${last.sessions === 1 ? '' : 's'}`, 'held'], [dollars(last.costUsd), 'plan usage (est.)', 'held']),
+    files.length ? showFirst({ key: `${key}-files`, items: files, n: 5, noun: 'files' }) : null,
+    h('h4', { class: 'settings-section' }, 'Last nights'),
+    showFirst({ key: `${key}-nights`, items: nights, n: 5, noun: 'nights' }),
+    h('p', { class: 'look-prose' }, "Runs on the schedule owner's own plan. A flaky file becomes a cloud sighting under Flaky tests; a cloud VM has 4 vCPU, so those never start a fix minion or refuse a ship."),
+  );
+  return block(title, hue, row);
 }
 
 // Land runs' reds by cause (#1607, src/land-reds.ts): the raw red rate, and the part a ship's own change caused.
@@ -219,7 +294,7 @@ function landRedsBlock(s, lr) {
 export function testHealth(s, data, refresh) {
   if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. ", h('button', { type: 'button', class: 'secondary small', onclick: () => refresh() }, 'Try again'))];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
-  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh)];
+  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh), ...(data.sweeps ? [sweepBlock(s, data.sweeps)] : [])];
 }
 
 /**

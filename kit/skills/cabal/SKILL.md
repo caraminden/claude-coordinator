@@ -27,7 +27,7 @@ asks, merges since your last wake, then every other open ask, answered together.
 3. Add one roster row per piece (`cabal_board` row): label (T1, M2), title, lane, what it waits on (`after`), the files
    it expects to touch, handoff path, model, effort and expected cost. A row for a member in another scheme names it
    with `scheme`. Add a **fixer** row (`role: fixer`, a handoff that says "takes small fixes across the cabal, one at a
-   time, from <your cabal>'s Overseer"): it is started only once a fix needs it.
+   time, from <your cabal>'s Overseer"): it is started only once a fix needs it, with no forming card.
 4. Post the **forming card**: `cabal_board` form, with a width (default 4: members at work at once). Link the card in
    your reply. People's go approves the whole roster; end the turn and wait for it.
 5. A build cabal (you were made with `build_owner`, your prompt names the build): make the branch first (section 4,
@@ -40,12 +40,18 @@ asks, merges since your last wake, then every other open ask, answered together.
 - Start each approved row with `cabal_start` (`message_taskmaster` for a row in another scheme: that scheme's
   Taskmaster starts it on its own people's go). Start every row whose `after` is met; past your width it waits as
   next up and starts by itself. Members chained on another's work start when it is in.
-- A piece people didn't approve (a new row, a changed handoff, model or cost) goes on a new forming card. Never start
-  around one.
+- A feature piece people didn't approve (a new row, a changed handoff, model or cost) goes on a new forming card. Never
+  start around one. A fixer row in your own scheme (a red run, a failing test or a bug in the cabal's work) is the exception: add it and
+  start it at once, no card; the start card's budget threshold still applies.
 - Unseal, stop or reseal your own members with `cabal_member`; everything outside the cabal stays the Taskmaster's
   (`message_coordinator`).
 - Asks: a member's non-blocking ask is held mail. Answer them together at your next wake (`cabal_board` answer). A
   blocking one woke you: answer it first. A claim to move is an ask too (section 4).
+  - **Settled** by the build's spec, its decisions log or a person's earlier pick: answer it yourself on the board and
+    quote the source. These stay off people's cards.
+  - **Silent**, or the answer would bend or reverse a person's pick: ask people on a card (`ask_question`, `to` the
+    build's requester, your pick marked). The asking member waits on it and the others carry on. Put the answer in the
+    spec's decisions log, quoted and dated, and on the board.
 - If no member has made progress (a merge, a ship, a note) for 3 days, ask people with a card: carry on, cut the
   roster, or close the cabal.
 
@@ -88,7 +94,8 @@ Your build is `build/<n>`. In a container, each `tools/land.sh` below is the lan
    against main with a claude-fable-5-2 reviewer at medium effort, label the build with the highest of its members'
    labels and that review's, `git rm build-claims.md` and merge that into `build/<n>` (`--build` refuses while it is
    there), and post one go card (ask_question, kind merge) with the roster, the label and what wasn't verified,
-   whatever the label. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
+   whatever the label, and the calls you made yourself from the spec and picks, so people can send any
+   back. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
    one CI run, one deploy. Stay open for the retro (section 7): the land tool takes `stay_open: true` with
    `waiting_on: "the cabal retro"`; after a `land.sh` you ran yourself, call `wake_when_live`.
 

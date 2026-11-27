@@ -1,7 +1,7 @@
 // A cabal as one card in the minions list (#2092; Josh, 2026-11-25, picked "B · One crew card"): the Overseer's tag and
 // title, a meter with a segment a member, the counts, and the open asks in red. A click shows its members under it with
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
-import { h, me } from './base.js';
+import { h, me, threadHref } from './base.js';
 import { money } from './cabal.js';
 import { cardFor, cardsYours } from './threadstate.js';
 /** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
@@ -51,6 +51,7 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
   const fresh = open && opening === c.lead;
   if (fresh) opening = null;
   const lead = rows.find((t) => t.id === c.lead);
+  const leadTicket = tickets.get(c.lead) ?? lead;
   const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {
@@ -62,10 +63,15 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
     'div',
     { class: 'cabal-card', 'data-lead': c.lead, 'data-open': open ? '' : null },
     h(
-      'button',
-      { type: 'button', class: 'cabal-toggle', 'aria-expanded': String(open), onclick: toggle },
-      h('span', { class: 'cabal-tag' }, c.overseer),
-      h('span', { class: 'cabal-title' }, h('b', {}, c.title), ' ', h('span', { class: 'num' }, `#${c.number}`)),
+      'div',
+      { class: 'cabal-sum' },
+      h(
+        'div',
+        { class: 'cabal-top' },
+        // The name opens the Overseer's chat as its row does; only the arrow opens and shuts the box (Cara, 2026-11-27: "Name opens its chat").
+        h(leadTicket ? 'a' : 'span', { class: 'cabal-name', ...(leadTicket ? { href: threadHref(leadTicket), title: `Open ${c.overseer}'s chat` } : {}) }, h('span', { class: 'cabal-tag' }, c.overseer), h('span', { class: 'cabal-title' }, h('b', {}, c.title), ' ', h('span', { class: 'num' }, `#${c.number}`))),
+        h('button', { type: 'button', class: 'cabal-toggle', 'aria-expanded': String(open), 'aria-label': open ? 'Shut the box of members' : 'Open the box of members', title: open ? 'Shut the box of members' : 'Open the box of members', onclick: toggle }, h('span', { class: 'cabal-arrow', 'aria-hidden': 'true' })),
+      ),
       c.members.length
         ? h(
             'span',

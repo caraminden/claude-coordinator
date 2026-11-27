@@ -12,6 +12,7 @@
 // Pure but for BuildPlacer's reads.
 import { HEAVY_SIZES } from './heavy-place.ts';
 import { type MachineBalancer, rank } from './machine-balancer.ts';
+import type { BuildKind } from './machine-jobs.ts';
 
 export const HEAVY_KINDS = ['apk', 'cargo', 'suite', 'other'] as const;
 export type HeavyKind = (typeof HEAVY_KINDS)[number];
@@ -25,6 +26,46 @@ export const KIND_IMAGE: Record<HeavyKind, { image: 'android' | 'node' | 'rust';
   suite: { image: 'node', volume: 'citadel-npm', at: '/cache/npm' },
   other: { image: 'node', volume: 'citadel-npm', at: '/cache/npm' },
 };
+
+/**
+ * What the image runs: the snapshot unpacked, the command in the caller's folder, then the files to bring back (paths
+ * from the working copy's top) into /tmp/back.tgz, which the agent copies out. Exported for its test.
+ */
+export const SCRIPT = [
+  'set -e',
+  'mkdir -p /tmp/work',
+  // The snapshot comes in on stdin (the agent's BuildRunner: nothing is bind-mounted). Root with every capability
+  // dropped can't chown, so the files stay its own.
+  'tar --no-same-owner -xzf - -C /tmp/work',
+  'cd "/tmp/work/$1"',
+  'back=$2',
+  'shift 2',
+  // The crates in the cargo cache volume; cargo itself stays on the image's PATH.
+  '[ ! -d /cache/cargo ] || export CARGO_HOME=/cache/cargo',
+  'set +e',
+  '"$@"',
+  's=$?',
+  `[ -z "$back" ] || printf '%s\\n' "$back" | tar -czf /tmp/back.tgz -C /tmp/work --ignore-failed-read -T - || echo "citadel-heavy: some of the files to bring back could not be packed" >&2`,
+  'exit $s',
+].join('\n');
+
+/** A build job's recipe (src/machine-jobs.ts's BuildKind): `argv` run in `dir` of the unpacked snapshot, `backs` packed after. */
+export function buildRecipe(o: { kind: HeavyKind; image: string; size: number; dir: string; backs: string[]; argv: string[]; minutes: number }): BuildKind {
+  return {
+    name: o.kind,
+    image: o.image,
+    command: ['/bin/sh', '-c', SCRIPT, 'citadel-heavy', o.dir, o.backs.join('\n'), ...o.argv],
+    reads: [],
+    gpu: false,
+    network: true,
+    resumable: false,
+    max_limit_s: o.minutes * 60,
+    threads: o.size,
+    volume: KIND_IMAGE[o.kind].volume,
+    at: KIND_IMAGE[o.kind].at,
+    lane: 'builds',
+  };
+}
 
 export const isHeavyKind = (v: unknown): v is HeavyKind => typeof v === 'string' && (HEAVY_KINDS as readonly string[]).includes(v);
 
@@ -97,7 +138,7 @@ export function buildsReady(setup: Record<string, unknown> | null, shipped: Reco
  * `cap`: place() only read the room, and two jobs placed at once must not both start past it. A build bigger than the
  * cap starts when no other build runs there, so it never waits for ever.
  */
-export function buildRoom(balancer: Pick<MachineBalancer, 'ask' | 'holding'>, machineId: number, job: { key: string; label: string; size: number }, cap: number | null): 'start' | 'late' | 'wait' {
+export function buildRoom(balancer: Pick<MachineBalancer, 'ask' | 'holding'>, machineId: number, job: { key: string; label: string; size: number; first?: boolean }, cap: number | null): 'start' | 'late' | 'wait' {
   const held = cap === null || !job.key.startsWith('build:') ? 0 : balancer.holding(machineId, 'build:');
   if (cap !== null && held > 0 && held + job.size > cap) return 'wait';
   return balancer.ask(machineId, job);

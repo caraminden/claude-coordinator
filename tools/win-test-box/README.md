@@ -75,7 +75,7 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
 5. **Sign Tailscale in**, in the box (3 min). The Tailscale icon by the clock in the box, then **Log in**, then sign in in the browser it opens. It's how the box reaches Citadel.
 
 6. **Lend it to Citadel** (2 min):
-   - On Citadel's **Machines** page, add a machine named `citadel-test-box`, MCP server **None**, no folder.
+   - On Citadel's **Machines** page, add a machine named `citadel-test-vm` (the Hyper-V VM stays `citadel-test-box`), MCP server **None**, no folder.
    - Open its line, add the native-app schemes (Peek Auras) under **Who gets it**, and switch its **Workspace tools** on. A new machine is lent to no scheme until you add one.
    - Copy its **Windows** lines, open PowerShell in the box (not as administrator), and paste them. They should end with "It runs in the background now".
 
@@ -131,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit-admin\tools\win-
 - It asks for the box's password (user `citadel`, from her password manager), copies the driver's files into the box, and asks before the one step with downtime: it shuts the box down cleanly, adds the GPU partition and starts it again (about 3 minutes; a job running then fails and is run again).
 - Running it again later (after a driver update) only copies the files again: no restart. It refuses while a GPU job is running.
 
-**Switch GPU jobs off while she plays** (Josh, 2026-11-19: "There should be a switch I can flip that blocks all GPU jobs until unswitched", then "I meant a switch in the citadel UI"). In Citadel, Machines, open `citadel-test-box`: untick **GPU jobs**. It saves at once; nothing on her PC or the box changes. While it's off a `run-gpu` task is refused before it reaches the box, and one already running is stopped at once. Everything else on the box (CI, `run`, `build`) goes on in software. Tick it again to let GPU jobs run.
+**Switch GPU jobs off while she plays** (Josh, 2026-11-19: "There should be a switch I can flip that blocks all GPU jobs until unswitched", then "I meant a switch in the citadel UI"). In Citadel, Machines, open `citadel-test-vm`: untick **GPU jobs**. It saves at once; nothing on her PC or the box changes. While it's off a `run-gpu` task is refused before it reaches the box, and one already running is stopped at once. Everything else on the box (CI, `run`, `build`) goes on in software. Tick it again to let GPU jobs run.
 
 **Take it off:** in PowerShell as administrator on her PC:
 
@@ -160,7 +160,7 @@ Stop-VM citadel-test-box; Remove-VMGpuPartitionAdapter -VMName citadel-test-box;
 - **A minion's task says "waiting in line for the screen".** A CI desktop job or another minion has it, or others came first. It keeps its place while Citadel or the minion calls `job`, and starts on its own when its turn comes. Citadel follows it, so its minion can end its turn: Citadel messages the minion's chat when the job gets the screen and again when it ends, with its exit code and last lines (#1425). A minion stopped or closed while its job waits takes the job out of the line.
 - **A minion says "The screen is busy".** Only a screenshot says this: it waits 50 s in line, then gives up. Its minion starts its app with `run_task` instead, which keeps a place in line, and takes the screenshot once that job has the screen. A job Citadel follows that is still in line after 12 hours is taken out of the line, and its minion is told nothing ran.
 - **The line looks stuck.** `Get-ChildItem C:\citadel-box\screen-line` in the box lists the waiters, oldest first. A waiter whose process is gone, or whose file wasn't touched for a minute, is dropped by whoever reads the line next, so a stuck line means its first waiter is still alive.
-- **The machine shows offline on Citadel.** In the box: `Get-Content -Tail 20 $env:USERPROFILE\coordinator-agent\machine-agent-citadel-test-box.log`. Usually it's Tailscale signed out.
+- **The machine shows offline on Citadel.** In the box: `Get-ChildItem $env:USERPROFILE\coordinator-agent\machine-agent-*.log | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 20` (the newest log: it takes the name the agent was installed under; no output means the agent never started). Usually it's Tailscale signed out.
 - **Take it all off:** `remove-test-box.ps1` (PowerShell as administrator on her PC) turns the VM off, removes it and deletes its disk. Then remove its runners on each repo's GitHub **Runners** page, and its machine on Citadel's Machines page.
 
 ## The files

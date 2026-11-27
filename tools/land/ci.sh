@@ -368,3 +368,39 @@ gate() {
   if [ "$rc" != 2 ]; then no_verdicts=0; elif [ -n "$cut$ended" ]; then no_verdicts=$((no_verdicts + 1)); fi
   return "$rc"
 }
+
+# flake_only's answer, and nothing when leftover processes were in it too: those are no flake.
+flake_free() {
+  ! grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed" || return 1
+  flake_only
+}
+
+# The run this landing's push started, when no poll has read its id yet (#1894): a stop in the seconds after the push
+# left it running. Only one of the pushed commit on this landing's own scratch branch.
+ci_late() {
+  local run
+  while :; do
+    run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$ci_pushed&per_page=20" --jq "[.workflow_runs[] | select((.path | startswith(\"$CI_WORKFLOW\")) and .head_branch == \"$CI_REF\")][0] // empty | [.id, .status] | @tsv" 2>/dev/null) || run=''
+    if [[ $run =~ ^([0-9]+)$'\t'([a-z_]+) ]] && [ "${BASH_REMATCH[1]}" -gt "${ci_stale:-0}" ]; then ci_id=${BASH_REMATCH[1]} ci_status=${BASH_REMATCH[2]}; return 0; fi
+    [ -n "$ci_pushed_at" ] && [ $((SECONDS - ci_pushed_at)) -lt "$CI_LATE" ] || return 0
+    sleep "$CI_LATE_POLL"
+  done
+}
+
+# The tests CI's suite skipped (#1914): the count, then up to 5 names, a line each; fails when it skipped none. Only
+# CI's own lines count ("<job>\t<step>\t<time> ℹ skipped 1": node's summary, the last one): a test's quoted output is
+# indented, and perigee's suite always skips the Biome tests it has no Biome for, so its log (no prefix) never matches.
+skipped_tests() {
+  local pre=$'^[^\t]+\t[^\t]+\t[^ \t]+' n
+  n=$(sed -nE "s/$pre ℹ skipped ([0-9]+)\$/\\1/p" <<<"$failed" | tail -n 1)
+  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
+  echo "$n"
+  sed -nE "s/$pre +﹣ (.*) \([0-9.]+ms\).*/\\1/p" <<<"$failed" | sort -u | sed -n 1,5p
+}
+
+# skipped_tests' answer in words: "a test was skipped in CI (<run>): <names>".
+skipped_said() {
+  local n=${1%%$'\n'*} names=''
+  [ "$n" = "$1" ] || names=": $(sed '1d' <<<"$1" | paste -sd';' - | sed 's/;/; /g')"
+  if [ "$n" = 1 ]; then echo "a test was skipped in CI ($ci_url)$names"; else echo "$n tests were skipped in CI ($ci_url)$names"; fi
+}

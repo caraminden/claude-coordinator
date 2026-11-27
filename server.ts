@@ -34,6 +34,7 @@ import { citadelSliceDir, MemoryStorms, stormDetail, stormPeople } from './src/m
 import { startContainerRelief, victimText } from './src/container-relief.ts';
 import { readGrowth } from './src/growth-alarm.ts';
 import type { Delivery } from './src/db/deliveries.ts';
+import type { MachineJob } from './src/db-rows.ts';
 import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
@@ -101,6 +102,8 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
+import { heavyNow } from './src/heavy-now.ts';
+import { appOwners } from './src/host-load.ts';
 import type { GhJob } from './src/gh-bodies.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
@@ -188,6 +191,7 @@ import { SHIP_LANE, ShipLane } from './src/ship-lane.ts';
 import { StallWatch, refusalKind } from './src/stall-signals.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
+import { ApkMachine } from './src/apk-machine.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder } from './src/release-targets.ts';
@@ -815,12 +819,14 @@ const jobs = new MachineJobs({
     runner.emit(job.ticket_id!, 'job', { job: job.id, stage, view });
     runner.broadcastTicket(job.ticket_id!);
   },
-  resultsDir: (job) => {
-    if (job.contraption_id === null) return join(projectSharedDir(DATA_DIR, job.project_id), 'jobs', String(job.id));
-    const c = store.listContraptions().find((r) => r.id === job.contraption_id);
-    return c ? join(services.dataDir(c), 'jobs', String(job.id)) : null;
-  },
+  resultsDir: (job) => jobResultsDir(job),
 });
+/** A job's results: the scheme's shared folder's jobs/<id>/ for a minion's, the app's DATA_DIR/jobs/<id>/ for a contraption's. */
+function jobResultsDir(job: MachineJob): string | null {
+  if (job.contraption_id === null) return join(projectSharedDir(DATA_DIR, job.project_id), 'jobs', String(job.id));
+  const c = store.listContraptions().find((r) => r.id === job.contraption_id);
+  return c ? join(services.dataDir(c), 'jobs', String(job.id)) : null;
+}
 machines.jobHooks = { info: (m, known, since, builds) => jobs.reconcile(m, known, since, builds), offline: (id) => jobs.offline(id) };
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
 if (!BOOT_CHECK)
@@ -1490,6 +1496,18 @@ const apkBuilds = new ApkBuilds({
   cacheDir: join(services.opts.home, '.cache/citadel-apk'),
   keyDir: join(services.opts.home, '.config/citadel-android'),
   heavy: join(import.meta.dirname, 'tools/citadel-heavy'),
+  // Its Gradle step goes to a machine's Builds role first (H3); perigee signs and publishes either way.
+  elsewhere: new ApkMachine({
+    store,
+    jobs,
+    placer: buildPlacer,
+    online: (id) => machines.isOnline(id),
+    resultsDir: (id) => {
+      const job = store.getMachineJob(id);
+      return job ? jobResultsDir(job) : null;
+    },
+    image: () => shippedImages().android,
+  }),
   ciRelease: (row) => targetFinder.ciRelease(row),
   published: (row, code, _commit, by) => {
     if (row.home_scheme != null) store.recordApkPublish({ projectId: row.home_scheme, contraption: row.name, versionCode: code, runId: 0, by, uid: null });
@@ -2683,6 +2701,18 @@ const app: App = {
   runnerCap,
   heavy: heavyPlacer,
   buildPlacer,
+  heavyNow: (canSee, owns) =>
+    heavyNow({
+      perigee: heavySnapshot.get(),
+      owners: appOwners(store.listContraptions(), canSee, (id) => store.getProject(id)?.name),
+      canSee,
+      owns,
+      machines: store.listMachines(),
+      jobs: store.machineJobs({ states: ['queued', 'starting', 'running'] }, 200).reverse(),
+      balanced: (id) => balancer.jobsOn(id),
+      waits: (job) => jobs.waits(job),
+      scheme: (id) => store.getProject(id)?.name ?? '',
+    }),
   chunked,
   claude: claudeLink,
   codex: codexLink,

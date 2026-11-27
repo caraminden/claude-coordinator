@@ -3412,6 +3412,36 @@
   "m1": "409 The minion is not mid-turn",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/cloud-helpers/switch": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn hands work to a cloud helper",
+  "member": "403 Only a minion's turn hands work to a cloud helper",
+  "outsider": "403 Only a minion's turn hands work to a cloud helper",
+  "tmA": "403 Only a minion's turn hands work to a cloud helper",
+  "tmB": "403 Only a minion's turn hands work to a cloud helper",
+  "m1": "200",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/cloud-sweep": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn runs the cloud sweep",
+  "member": "403 Only a minion's turn runs the cloud sweep",
+  "outsider": "403 Only a minion's turn runs the cloud sweep",
+  "tmA": "403 Only a minion's turn runs the cloud sweep",
+  "tmB": "403 Only a minion's turn runs the cloud sweep",
+  "m1": "409 Citadel's cloud helpers are off (an admin switch, off by default)",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:minion1/cloud-sweep/picks": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn runs the cloud sweep",
+  "member": "403 Only a minion's turn runs the cloud sweep",
+  "outsider": "403 Only a minion's turn runs the cloud sweep",
+  "tmA": "403 Only a minion's turn runs the cloud sweep",
+  "tmB": "403 Only a minion's turn runs the cloud sweep",
+  "m1": "409 Citadel's cloud helpers are off (an admin switch, off by default)",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/commands": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -4419,6 +4449,36 @@
   "outsider": "403 A minion may only be dismissed by itself",
   "tmA": "403 A minion may only be dismissed by itself",
   "tmB": "403 A minion may only be dismissed by itself",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/cloud-helpers/switch": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn hands work to a cloud helper",
+  "member": "403 Only a minion's turn hands work to a cloud helper",
+  "outsider": "403 Only a minion's turn hands work to a cloud helper",
+  "tmA": "403 Only a minion's turn hands work to a cloud helper",
+  "tmB": "403 Only a minion's turn hands work to a cloud helper",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cloud-sweep": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn runs the cloud sweep",
+  "member": "403 Only a minion's turn runs the cloud sweep",
+  "outsider": "403 Only a minion's turn runs the cloud sweep",
+  "tmA": "403 Only a minion's turn runs the cloud sweep",
+  "tmB": "403 Only a minion's turn runs the cloud sweep",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/cloud-sweep/picks": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn runs the cloud sweep",
+  "member": "403 Only a minion's turn runs the cloud sweep",
+  "outsider": "403 Only a minion's turn runs the cloud sweep",
+  "tmA": "403 Only a minion's turn runs the cloud sweep",
+  "tmB": "403 Only a minion's turn runs the cloud sweep",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

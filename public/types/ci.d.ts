@@ -36,6 +36,20 @@ export interface FlakeFile {
   fix: FlakeFix | null;
   minion: number | null;
   lastMinion: number | null;
+  /** Of `count`, the sightings the nightly cloud sweep made (#2187): all of them makes it cloud-only. */
+  cloud: number;
+}
+
+/** One night of the cloud sweep (src/cloud-flakes.ts SweepNight). */
+export interface SweepNight {
+  at: number;
+  sha: string | null;
+  sessions: number;
+  minutes: number;
+  costUsd: number;
+  files: { file: string; copies: number; failed: number; verdict: 'clean' | 'flaky' | 'red' | 'skipped' | 'stopped'; seconds: number; detail: string }[];
+  minion: number | null;
+  error: string | null;
 }
 
 export type LandRedCause = 'change' | 'flaky' | 'main' | 'unknown';
@@ -56,6 +70,7 @@ export interface TestHealth {
   fast: FastModeView | null;
   flakes: FlakeFile[];
   landReds: LandReds | null;
+  sweeps?: SweepNight[];
   now: number;
   error?: undefined;
 }
@@ -169,6 +184,8 @@ export interface HostLoad {
   maxPressure: number;
   loadWaitS: number;
   week: HostWeek[];
+  /** The week by where each job ran: 'here', 'on:<machine>' or 'ci:<owner>/<repo>' (#2109). */
+  places: { place: string; jobs: number; medianS: number; longestS: number; on: { why: string; jobs: number }[] }[];
   long: HostLongJob[];
   now: number;
   minions?: HostMinion[];

@@ -466,7 +466,8 @@ test('a queued claim passes to the next minion with one chat line when its holde
     [b.number],
   );
   assert.deepEqual([took.data.claim.done, took.data.claim.total, took.data.claim.estimate], [0, 2, null], 'no history: no estimate');
-  // The page reorders the line; a minion can't.
+  // The page reorders the line; a minion can't (asked with its first turn's token, as above: #2199).
+  await mintedAgentToken(join(root, 'data'), b.id);
   assert.equal((await call(`${url}/pipeline-lane/queue`, { method: 'PUT', body: { queue: [c.number, b.number] } })).status, 200);
   assert.equal((await call(`${url}/pipeline-lane/queue`, { method: 'PUT', body: { queue: [] }, as: b.id })).status, 403);
   assert.deepEqual(

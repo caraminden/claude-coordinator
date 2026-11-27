@@ -33,8 +33,10 @@ import { jsonLines } from '../src/json-lines.ts';
 
 const tools = dirname(fileURLToPath(import.meta.url));
 const repo = join(tools, '..');
-/** The longest a batch may run on the VM: the session's 30-minute limit on one command, less a margin. */
-const STEP_S = CLOUD.stepMinutes * 60;
+/** The longest a batch may run on the VM: the 30-minute default on one background command, less a margin. Not CLOUD.stepMinutes'
+ * 2 hours: a foreground command moved to the background at 10 minutes is never given a longer timeout. */
+const STEP_MIN = 25;
+const STEP_S = STEP_MIN * 60;
 
 export interface Plan {
   ref: string;
@@ -47,7 +49,7 @@ export function sessionText(p: Plan, nodeMajor: string): string {
   const cmds = [`git fetch -q --depth=1 origin ${p.ref} && git checkout -q --detach FETCH_HEAD`, `bash tools/cloud-flake-vm.sh setup ${nodeMajor}`, ...p.steps, `bash tools/cloud-flake-vm.sh finish ${p.branch}`];
   return [
     "You are a test runner for Citadel, a web app that runs Claude Code sessions. Run these shell commands from the repo's root, one at a time, in order, and nothing else. Don't read, fix or investigate code or a failure: a failing test run is the result being measured, so go on to the next command.",
-    `Run each in the foreground with a 10-minute timeout; one still running then, wait for in the background (none takes over ${CLOUD.stepMinutes} minutes).`,
+    `Run each in the foreground with a 10-minute timeout; one still running then, wait for in the background (none takes over ${STEP_MIN} minutes).`,
     cmds.map((c, i) => `${i + 1}. \`${c}\``).join('\n'),
     'After the last one, stop. If it printed a CITADEL-RESULT-BEGIN line, repeat everything from that line to CITADEL-RESULT-END as your last message.',
   ].join('\n\n');
@@ -101,7 +103,7 @@ async function session(p: Plan): Promise<Ran> {
     model: 'sonnet',
     effort: 'low',
     cost: CLOUD.costUsd.start,
-    limitMs: (15 + p.steps.length * CLOUD.stepMinutes) * 60_000,
+    limitMs: (15 + p.steps.length * STEP_MIN) * 60_000,
     pollMs: CLOUD.pollMs,
     startMs: CLOUD.startMs,
   };
@@ -199,7 +201,7 @@ export async function proof(files: string[], copies: number, batches: number, se
   if (off) return io.home(files, copies, off) ? 0 : 1;
   const tooBig = files.filter((f) => !fits(seconds, copies));
   const cloud = files.filter((f) => !tooBig.includes(f));
-  let ok = !tooBig.length || io.home(tooBig, copies, `a batch of ${copies} would run over a ${CLOUD.stepMinutes}-minute step`);
+  let ok = !tooBig.length || io.home(tooBig, copies, `a batch of ${copies} would run over a ${STEP_MIN}-minute step`);
   if (!cloud.length) return ok ? 0 : 1;
   if (git('status', '--porcelain', '--untracked-files=no')) console.log('cloud-flake: uncommitted changes stay here: the session runs your last commit');
   const id = Number(process.env.COORDINATOR_TICKET) || 0;

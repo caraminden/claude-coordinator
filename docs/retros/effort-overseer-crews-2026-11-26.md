@@ -18,7 +18,7 @@ The last piece shipped at 14:02 PST Nov 26[^l]. Times are Pacific.
 | | Count |
 |---|---|
 | Minions | 7, all shipped |
-| Cost (turns) | $65.17, against the spec's estimate of about $75. #2090 cost the most, at $17.79[^c] |
+| Cost (turns) | $65.18, against the spec's estimate of about $75. #2090 cost the most, at $17.79[^c] |
 | Turns | 13[^c] |
 | Prompt eval | $38.57 by #2095's own report. I found no row for it in `turns` or `outside_spend`[^e] |
 | Wall time | 15.0 h. 8.5 h of it was #2091's ship card waiting overnight[^q] |
@@ -83,6 +83,14 @@ The last piece shipped at 14:02 PST Nov 26[^l]. Times are Pacific.
   behind it, waiting for it to go live. The fix would be a change to the go rule (a go given at planning time for a
   piece the spec already marks high risk), or starting piece 5 on piece 2's branch. That's for the scheme's members to
   decide, so this retro doesn't propose an edit. If the wait comes up again, a member decides.
+- **Smoke's flake check reads only `.test.ts` names.** Codex found this while reviewing #2166.
+  - `tools/land/prepare.sh` collects the failed files with a `.test.ts`-only pattern.
+  - Suppose a `.test.js` guard (now including `settings-pages`) fails, and in the same run a `.test.ts` file fails and
+    then passes alone. Smoke calls the whole run a flake and lets the ship into the line.
+  - CI still runs every file after the line, so the cost is a later refusal, not a bad ship.
+  - The pattern predates this retro: map-picked `.test.js` files have always had this gap.
+  - The fix belongs in a pipeline-lane, high-risk file, and the kit's template needs the same fix, so it goes to the
+    Taskmaster instead of shipping here.
 - **Codex was skipped in #2094, #2095 and #2096** because the weekly limit was at 80%[^m]. That's a limit doing its job.
 - **A later piece's review found holes in an earlier piece.** #2096's reviewer found cross-scheme visibility leaks in
   the new timeline, which builds on #2094's access work, and #2096 fixed them in `eb460e819`[^m]. The chain order is
@@ -103,7 +111,7 @@ The last piece shipped at 14:02 PST Nov 26[^l]. Times are Pacific.
   minion mid-build[^m].
 - **Pieces 3 and 4 ran beside piece 2 without a clash.** #2092, #2093 and #2091 shipped with one conflict between
   them, and that one was in `README.md`[^l].
-- **The turns came in under the spec's estimate**, at $65.17 in turns against about $75[^c]. That figure leaves
+- **The turns came in under the spec's estimate**, at $65.18 in turns against about $75[^c]. That figure leaves
   out the eval in finding 3.
 
 [^t]: `host_check` db, `SELECT number, created_at FROM tickets WHERE project_id=2 AND number BETWEEN 2090 AND 2096`,
@@ -111,7 +119,7 @@ The last piece shipped at 14:02 PST Nov 26[^l]. Times are Pacific.
 [^c]: `host_check` db, `SELECT t.number, count(u.rowid), round(sum(u.cost_usd),2) FROM tickets t LEFT JOIN turns u ON
     u.ticket_id=t.id WHERE t.project_id=2 AND t.number BETWEEN 2090 AND 2096 GROUP BY t.number`, run 2026-11-26 about
     16:40 PST. Turns 3, 2, 2, 1, 2, 2 and 1 (13 in all). Costs $17.79, $13.07, $6.14, $3.13, $13.03, $7.66 and $4.35
-    (a total of $65.17). The $75 estimate is from the spec's "The pieces" section.
+    (summing the raw rows gives $65.18; the rounded figures sum to $65.17). The $75 estimate is from the spec's "The pieces" section.
 [^e]: #2095's report, read with `read_minion` 2095 last=50: "the 16-case Taskmaster eval alone cost $38.57". Checked
     with `host_check` db, `SELECT * FROM outside_spend` (one row in all, scheme 10's), run 2026-11-26 about 16:45 PST.
 [^l]: `grep -E 'ticket/209[0-6]-' retro-log/2026-11-26/land.md | grep -E 'conflict|guard|smoke|burn|flake|timing'`,

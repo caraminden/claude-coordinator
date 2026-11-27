@@ -94,7 +94,7 @@ console.log(JSON.stringify({ checkout: CHECKOUT, prompt: systemPrompt(project, m
       const dir = join(base, sub);
       for (const d of ['src', 'public']) cpSync(join(root, d), join(dir, d), { recursive: true, filter: (p) => !p.includes('node_modules') });
       writeFileSync(join(dir, 'probe.ts'), probe);
-      const run = spawnSync(process.execPath, ['--no-warnings', 'probe.ts'], { cwd: dir, encoding: 'utf8' });
+      const run = spawnSync(process.execPath, ['--no-warnings', 'probe.ts'], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
       assert.equal(run.status, 0, run.stderr);
       const out = JSON.parse(run.stdout.trim().split('\n').at(-1) as string) as { checkout: string; prompt: string };
       assert.ok(out.prompt.includes(out.checkout), 'the probe prompt names its checkout');

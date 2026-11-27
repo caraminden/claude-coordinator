@@ -55,6 +55,8 @@ export type Run = {
   report: string | null;
   /** When the screen test's screenshot came; null until it does. */
   shot: number | null;
+  /** Builds: the images by digest it pulled, so a ship that changes them takes its green tick away. */
+  images?: Record<string, string>;
 };
 
 type Phase = 'server' | 'agent' | 'worker' | 'test' | 'runner';
@@ -120,6 +122,15 @@ export function buildImages(text: string | Error = SHIPPED_IMAGES): BuildImages 
   return { images, volumes };
 }
 
+/** The images this release pulls, or none while they aren't all published. */
+const shippedImages = (text?: string) => {
+  try {
+    return buildImages(text).images;
+  } catch {
+    return {};
+  }
+};
+
 export const isSetupRole = (v: unknown): v is SetupRole => typeof v === 'string' && SETUP_ROLES.includes(v);
 const clean = (v: unknown, n: number) =>
   typeof v === 'string'
@@ -147,6 +158,7 @@ export class RoleSetups {
       for (const r of d.store.machineRoles(m.id)) {
         const run = r.setup?.run as Run | undefined;
         if (run && typeof run === 'object' && run.done === null) this.save(m.id, { ...run, done: d.now(), ok: false, why: 'Citadel restarted while it ran: press it again.' });
+        else if (run?.role === 'builds' && run.ok && JSON.stringify(run.images ?? {}) !== JSON.stringify(shippedImages(d.buildImages))) this.save(m.id, { ...run, ok: false, why: "Citadel's build images changed since this Set up: press Set up again to pull the new ones." });
       }
     }
   }
@@ -200,7 +212,7 @@ export class RoleSetups {
       }
     }
     const now = this.d.now();
-    const run: Run = { id: randomBytes(6).toString('hex'), role, kind, at: now, by: person.name, done: null, ok: null, why: null, admin: null, worker_install: workerInstall, steps: [], report: null, shot: null };
+    const run: Run = { id: randomBytes(6).toString('hex'), role, kind, at: now, by: person.name, done: null, ok: null, why: null, admin: null, worker_install: workerInstall, steps: [], report: null, shot: null, ...(images ? { images: images.images } : {}) };
     const a: Active = { run, machineId: machine.id, phase, heard: now };
     this.active.set(machine.id, a);
     if (workerInstall && role === 'ci') run.steps.push({ text: 'Run the install commands below on that PC', state: 'running' }, { text: "The runner agent connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });

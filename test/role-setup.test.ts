@@ -329,6 +329,17 @@ test('Builds Set up sends the images by digest, the volumes and its threads cap 
   assert.equal(kept.ok, false);
   assert.deepEqual(kept.steps.at(-1), { text: "The hello-world APK didn't build: Could not resolve com.android.tools.build:gradle:8.13.0", state: 'fail' });
   assert.match(kept.why!, /Could not resolve/);
+  // It passes, then a ship changes an image's digest: at the restart its tick goes, asking for Set up again.
+  const again = t.setups.start(t.machine(), 'builds', 'test', t.josh);
+  assert.deepEqual(again.images, (t.sent[1] as { setup: { builds: { images: unknown } } }).setup.builds.images);
+  t.setups.heard(t.machine(), { id: again.id, done: { ok: true, report: 'Hello-world APK built' } });
+  assert.equal(t.run('builds')!.ok, true);
+  new RoleSetups(t.deps);
+  assert.equal(t.run('builds')!.ok, true, 'the same images keep it');
+  t.deps.buildImages = t.deps.buildImages!.replace(digest('c'), digest('d'));
+  new RoleSetups(t.deps);
+  assert.equal(t.run('builds')!.ok, false);
+  assert.match(t.run('builds')!.why!, /images changed since this Set up: press Set up again/);
 });
 
 test("Builds refuses a Mac, and images that aren't published or aren't pinned by digest", () => {

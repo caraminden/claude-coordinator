@@ -33,7 +33,7 @@ import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
-import { keepNights, nightSightings, readNight, SWEEP, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
+import { CLOUD_SWITCH, keepNights, nightSightings, readNight, SWEEP, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
 import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
 import { runsOnPick } from './workers.ts';
 import { MODEL_REQUIRED, scheduleFields, scheduleTemplate, scheduleView } from './schedule-api.ts';
@@ -1651,6 +1651,15 @@ export const projectRoutes: Route[] = [
 
   // The nightly cloud sweep (#2187, src/cloud-flakes.ts): which files tools/cloud-flake.ts reruns, the flakiest of 14 days counting
   // only sightings off the cloud (its own don't pick themselves), and the night it posts back, on the Test health tab.
+  {
+    method: 'GET',
+    path: '/api/tickets/:ticket/cloud-sweep/switch',
+    who: ['minion'],
+    refuse: "Only a minion's turn runs the cloud sweep",
+    handler({ res, app }) {
+      json(res, 200, { on: app.store.getSetting<boolean>(CLOUD_SWITCH) === true });
+    },
+  },
   {
     method: 'GET',
     path: '/api/tickets/:ticket/cloud-sweep/picks',

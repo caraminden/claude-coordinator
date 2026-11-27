@@ -18,6 +18,12 @@ export { CLOUD_SOURCE };
  * but never under a session's start (CLOUD.costUsd.start, #2147's measure of a session's first 20 minutes, ~$0.40). */
 export const cloudCostUsd = (minutes: number, sessions = 1) => Math.round(Math.max(minutes * 2.5, sessions * CLOUD.costUsd.start * 100)) / 100;
 
+/** The admin switch for every scheme's cloud sessions, default off: #2193's CLOUD_SWITCH in src/cloud-pool.ts, read the same way
+ * (on only when set true). tools/cloud-flake.ts starts sessions itself, not through CloudPool.takes(), so it asks this through
+ * GET /api/tickets/:ticket/cloud-sweep/switch and runs at home while it's off.
+ * shortcut: a copy of #2193's key, import CLOUD_SWITCH once both are on main. */
+export const CLOUD_SWITCH = 'cloud-sessions';
+
 export const SWEEP = {
   /** Files a night reruns, and copies at once of each (one batch, under load, as tools/flake-proof.sh runs it). */
   files: 10,

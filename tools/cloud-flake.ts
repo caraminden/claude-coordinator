@@ -8,7 +8,8 @@
 //       Your flake proof: each file's batches of <copies> at once under load (tools/flake-proof.sh's shape), all in ONE session,
 //       on your branch's committed tip (pushed to a scratch branch for it, deleted after). Exits 0 when every batch was clean.
 //       It runs at home instead (tools/burn-in.sh, a heavy slot, at most 4 copies) when you have no cloud setup (no `claude`,
-//       a repo not on GitHub, CITADEL_CLOUD=0, or a session that won't start: your claude.ai account needs GitHub connected),
+//       a repo not on GitHub, CITADEL_CLOUD=0, the admin's cloud switch off (Settings, every scheme's cloud sessions; off by
+//       default), or a session that won't start: your claude.ai account needs GitHub connected),
 //       for a file whose batch won't fit a 25-minute step (by --seconds: one run alone × copies / 2), and for a file the cloud
 //       stopped at its step limit or skipped a test on (a tool the VM lacks: it proves nothing there).
 //       A clean cloud proof is your own evidence; the fix's held proof is still flake-proof.yml (the Test health tab's count).
@@ -16,7 +17,7 @@
 //       The nightly sweep (a schedule's minion runs it): the scheme's flakiest files of 14 days, one batch each, on main's tip
 //       on GitHub; the night (results, sessions × minutes, its cost) goes to the Test health tab, and each flaky file there
 //       becomes a cloud sighting, marked cloud-only, which never refuses a ship or starts a fix minion. Exits 1 when a
-//       picked file came back with no result (the night says which).
+//       picked file came back with no result (the night says which). While the admin's cloud switch is off it runs nothing.
 //
 // The session runs tools/cloud-flake-vm.sh's steps, each under 25 minutes, and pushes its results to a cloud/ branch, which
 // src/cloud-turn.mjs (the same driver a cloud turn uses) reads back and deletes. Citadel's repo only: the VM script runs node tests.
@@ -144,6 +145,19 @@ function noCloud(): string | null {
   return null;
 }
 
+/**
+ * Why the admin's switch keeps this turn off the cloud (#2193's `cloud-sessions` setting, default off), or null. Asked of the
+ * server in a minion's turn; a person running it by hand outside one is on their own login and skips it. `read` is for tests.
+ */
+export async function switchOff(read = () => api('cloud-sweep/switch')): Promise<string | null> {
+  if (!process.env.COORDINATOR_API || !process.env.COORDINATOR_TICKET) return null;
+  try {
+    return ((await read()) as { on?: unknown }).on === true ? null : "cloud sessions are off for every scheme (the admin's switch)";
+  } catch (err) {
+    return `couldn't read the admin's cloud switch: ${(err as Error).message}`;
+  }
+}
+
 function home(files: string[], copies: number, why: string): boolean {
   let ok = true;
   for (const f of files) {
@@ -170,7 +184,7 @@ export function judge(files: string[], batches: number, ran: SweepFile[]): { aga
 
 async function proof(files: string[], copies: number, batches: number, seconds: number | null): Promise<number> {
   for (const f of files) if (!existsSync(join(repo, f))) throw new Error(`no such file: ${f}`);
-  const off = noCloud();
+  const off = noCloud() ?? (await switchOff());
   if (off) return home(files, copies, off) ? 0 : 1;
   const tooBig = files.filter((f) => !fits(seconds, copies));
   const cloud = files.filter((f) => !tooBig.includes(f));
@@ -220,6 +234,11 @@ async function api(path: string, body?: unknown): Promise<unknown> {
 async function sweep(n: number, copies: number, post: boolean): Promise<number> {
   const off = noCloud();
   if (off) throw new Error(`the sweep runs only in the cloud: ${off}`);
+  const switched = await switchOff();
+  if (switched) {
+    console.log(`cloud-flake: no sweep tonight: ${switched}; nothing ran`);
+    return 0;
+  }
   if (post && !process.env.COORDINATOR_TOKEN) throw new Error("no turn token here to post the night with: run it in a minion's turn, or with --no-post");
   git('fetch', '-q', 'origin', process.env.CLOUD_FLAKE_REF || 'main');
   const onMain = new Set(git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', 'test').split('\n'));

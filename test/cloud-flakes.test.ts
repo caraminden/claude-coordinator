@@ -4,12 +4,12 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { CLOUD_SOURCE, cloudCostUsd, keepNights, nightSightings, readNight, SWEEP, sweepsKey, type SweepNight } from '../src/cloud-flakes.ts';
+import { CLOUD_SOURCE, CLOUD_SWITCH, cloudCostUsd, keepNights, nightSightings, readNight, SWEEP, sweepsKey, type SweepNight } from '../src/cloud-flakes.ts';
 import { Store } from '../src/db.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { projectRoutes } from '../src/routes/projects.ts';
 import { flakeBrief } from '../src/flakes.ts';
-import { batchStep, fits, flag, judge, readBatches, sessionText } from '../tools/cloud-flake.ts';
+import { batchStep, fits, flag, judge, readBatches, sessionText, switchOff } from '../tools/cloud-flake.ts';
 
 // Flake repeat-runs in cloud sessions (#2187): a night's results as a minion posts them, the cloud sightings they make, which
 // the Test health tab shows as cloud-only and the fix-minion count never sees, and the VM script's verdicts.
@@ -145,6 +145,31 @@ test('a minion posts its night; the tab shows it beside the flakes, with its cos
   const bad = Object.assign(new (await import('node:stream')).PassThrough(), { headers: { 'content-type': 'application/json' } });
   bad.end(JSON.stringify({ ...night, files: [row('test/x.test.ts', 'nope')] }));
   assert.equal((await call('POST', '/api/tickets/:ticket/cloud-sweep', { req: bad, ticket: store.getTicket(t.id) })).status, 400);
+});
+
+test("the admin's cloud switch (#2193's, default off) keeps a turn's runs at home until it's set on", async () => {
+  const project = store.createProject('Switch scheme', null);
+  const t = store.createTicket({ project_id: project.id, title: 'x', permission_mode: 'x', created_by: 'T' });
+  const on = async () => (await call('GET', '/api/tickets/:ticket/cloud-sweep/switch', { ticket: store.getTicket(t.id) })).body;
+  assert.deepEqual(await on(), { on: false }, 'unset reads as off');
+  store.setSetting(CLOUD_SWITCH, true);
+  assert.deepEqual(await on(), { on: true });
+  store.setSetting(CLOUD_SWITCH, null);
+  const saved = [process.env.COORDINATOR_API, process.env.COORDINATOR_TICKET];
+  try {
+    delete process.env.COORDINATOR_API;
+    assert.equal(await switchOff(async () => ({ on: false })), null, 'by hand, outside a turn, nothing to ask');
+    Object.assign(process.env, { COORDINATOR_API: 'http://x', COORDINATOR_TICKET: '1' });
+    assert.equal(await switchOff(async () => ({ on: true })), null);
+    assert.match((await switchOff(async () => ({ on: false }))) ?? '', /off for every scheme/);
+    assert.match((await switchOff(async () => Promise.reject(new Error('HTTP 502')))) ?? '', /couldn't read.*502/, 'unread is off');
+  } finally {
+    for (const [k, v] of [
+      ['COORDINATOR_API', saved[0]],
+      ['COORDINATOR_TICKET', saved[1]],
+    ] as const)
+      v === undefined ? delete process.env[k] : (process.env[k] = v);
+  }
 });
 
 test("the tool's session text runs only checked test paths, one batch a step, and a batch that won't fit a step stays home", () => {

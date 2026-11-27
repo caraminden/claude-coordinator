@@ -583,7 +583,12 @@ function machineBody(m) {
       { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : [],
       // Its roles (Build 7 M3, Josh: "A · A card per role, schemes inside"): the Tools ticks and Minion turns live in their cards.
-      h('div', { class: 'machine-wide' }, m.runners || m.roles?.some((/** @type {import('./machine-types.d.ts').MachineRole} */ r) => r.caps?.everyone) ? '' : h('div', { class: 'small muted role-cards-note' }, `Only turns ${m.created_by} asks for (and their contraptions) use it, in the schemes ticked on each role.`), roleCards(m, renderMachineList, { tools: () => machineLends(m) })),
+      h(
+        'div',
+        { class: 'machine-wide' },
+        m.runners || m.roles?.some((/** @type {import('./machine-types.d.ts').MachineRole} */ r) => r.caps?.everyone) ? '' : h('div', { class: 'small muted role-cards-note' }, `Only turns ${m.created_by} asks for (and their contraptions) use it, in the schemes ticked on each role.`),
+        roleCards(m, renderMachineList, { tools: () => machineLends(m) }),
+      ),
       kv(
         'Computer',
         m.report ? h('div', { class: 'small' }, reportLine(m.report)) : '',

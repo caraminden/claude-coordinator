@@ -417,17 +417,7 @@ export function workerSection(m, redraw, { bare = false } = {}) {
   const w = /** @type {MachineWorker} */ (m.worker);
   const k = keptFor(m.id);
   const st = workerState(m);
-  const head = h(
-    'div',
-    { class: 'worker-head' },
-    workerSwitch(m, redraw),
-    h(
-      'div',
-      { class: 'worker-head-text' },
-      h('span', { class: 'worker-head-line' }, h('b', {}, 'Minion turns'), w.on ? toneChip(st.tone, st.word) : null),
-      h('span', { class: 'muted small' }, st.why),
-    ),
-  );
+  const head = h('div', { class: 'worker-head' }, workerSwitch(m, redraw), h('div', { class: 'worker-head-text' }, h('span', { class: 'worker-head-line' }, h('b', {}, 'Minion turns'), w.on ? toneChip(st.tone, st.word) : null), h('span', { class: 'muted small' }, st.why)));
   if (!w.on) return bare ? h('div', { class: 'worker worker-bare' }) : h('div', { class: 'worker', 'data-tone': 'neutral' }, head);
   const owner = mine(m);
   const caps = heldCaps(m);

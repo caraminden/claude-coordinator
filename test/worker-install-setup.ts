@@ -42,7 +42,7 @@ before(async () => {
   stub('apt-get', 'echo "apt-get $*" >> "$LOG"');
   for (const c of ['newuidmap', 'findmnt', 'sudo']) stub(c, 'exit 0');
   stub('visudo', 'echo "visudo $*" >> "$LOG"; exit "${VISUDO:-0}"');
-  stub('getconf', '[ "$1" = _NPROCESSORS_ONLN ] && echo 16');
+  stub('getconf', '[ "$1" = _NPROCESSORS_ONLN ] && echo "${THREADS:-16}"');
   stub('podman', 'echo "podman $*" >> "$LOG"');
   base = `http://127.0.0.1:${await scratch.serve(server)}`;
 });

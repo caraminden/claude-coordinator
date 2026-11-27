@@ -4,7 +4,7 @@
 // in (the server's doing, "Every scheme you're in"); off drains. Only its owner or an admin changes anything, and caps
 // on a person's own machine only its owner. Every click shows at once, with its request behind (ui/optimistic.js).
 import { account, api, h, view } from './base.js';
-import { WORKER_LIMITS } from './machine-setup.js';
+import { WORKER_CAPS, WORKER_LIMITS, workerSize } from './machine-setup.js';
 import { removing } from './machine-remove.js';
 import { heldCaps, workerState } from './machine-worker-row.js';
 import { lastRun } from './role-setup.js';
@@ -264,6 +264,57 @@ function capsEditor(m, r, redraw) {
           ? `Blank uses that PC's own cap; a number here is held there instead, above it too${over ? ". Threads and memory go up to what that PC has; if they don't take, run that PC's install command again" : ''}.`
           : "Blank is that PC's own cap, once it is set up.";
   return h('div', { class: 'role-caps-edit' }, h('b', { class: 'small' }, `${r.name} caps, set here`), h('div', { class: 'worker-caps' }, ...fields), h('p', { class: 'muted small' }, hint), h('div', { class: 'row' }, save, cancel));
+}
+
+/**
+ * "Use this PC's size" (#2250): a worker still on the old fixed starting caps (6 minions, 8 threads, 24 GB), with none set
+ * on the page, gets its PC's own size offered as page caps. One its owner set by hand is left alone. Null: no offer.
+ * @param {MachineRow} m @returns {{ workers: number, threads: number, memory_gb: number } | null}
+ */
+export function sizeOffer(m) {
+  const w = m.worker;
+  const page = roleOf(m, 'turns')?.caps ?? {};
+  if (!w?.here || !w.pc || !w.caps || !setsCaps(m)) return null;
+  if (Object.entries(WORKER_CAPS).some(([k, v]) => w.caps?.[/** @type {keyof typeof WORKER_CAPS} */ (k)] !== v)) return null;
+  if (page.workers != null || page.threads != null || page.memory_gb != null) return null;
+  const { workers, threads, memory_gb } = workerSize(w.pc);
+  return workers > WORKER_CAPS.workers || threads > WORKER_CAPS.threads || memory_gb > WORKER_CAPS.memory_gb ? { workers, threads, memory_gb } : null;
+}
+
+/** The offer's notice and its one button, which sets those page caps at once with the request behind. @param {MachineRow} m @param {Redraw} redraw */
+export function sizeOfferPart(m, redraw) {
+  const size = sizeOffer(m);
+  if (!size) return null;
+  const pc = /** @type {{ threads: number, memory_gb: number }} */ (m.worker?.pc);
+  const use = () => {
+    const was = structuredClone(roleOf(m, 'turns')?.caps ?? {});
+    optimistic({
+      key: `machine-role:${m.id}:turns`,
+      sets: `machine-role:${m.id}:turns:caps`,
+      apply: () => {
+        const t = roleOf(m, 'turns');
+        if (t) t.caps = { ...was, ...size };
+        redraw();
+      },
+      send: () => api(`api/machines/${m.id}/roles`, { method: 'PATCH', body: { role: 'turns', caps: size } }),
+      undo: () => {
+        const t = roleOf(m, 'turns');
+        if (t) t.caps = was;
+        redraw();
+      },
+      label: `use ${m.name}'s size for its minions`,
+    });
+  };
+  return h(
+    'div',
+    { class: 'cui-notice size-offer', 'data-tone': 'info' },
+    h(
+      'span',
+      { class: 'small' },
+      `Still on the old starting caps (${WORKER_CAPS.workers} minions, ${WORKER_CAPS.threads} threads, ${WORKER_CAPS.memory_gb} GB). This PC has ${pc.threads} threads and ${pc.memory_gb} GB: its size is ${size.workers} minions, ${size.threads} threads, ${size.memory_gb} GB, keeping the rest for you and CI.`,
+    ),
+    h('button', { type: 'button', class: 'small', onclick: use }, "Use this PC's size"),
+  );
 }
 
 /** Pause all, or Resume once paused: every role that's on goes off (draining), and one click puts them back. @param {MachineRow} m @param {Redraw} redraw */

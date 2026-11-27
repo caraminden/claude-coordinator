@@ -216,4 +216,9 @@ test("a worker's install line hands over the token without putting it on the scr
   for (const p of ['Url', 'Workers', 'Threads', 'MemoryGB', 'DiskGB']) assert.match(params, new RegExp(`\\]\\$${p}\\b`));
   assert.equal(workerCommand(false, 'signin'), 'sudo citadel-worker signin');
   assert.match(workerCapsCommand(true, caps), /^wsl -d citadel-workers -u root --exec \/usr\/local\/bin\/citadel-worker caps --workers 3 --threads 4 --memory 10 --disk 80$/);
+  // Caps left on auto are left out, so that PC sizes them (#2250).
+  assert.match(machineSetupWorkerLinux('https://a/', 'ccm_tok', {}), /bash "\$f" "\$u"$/);
+  assert.match(machineSetupWorkerLinux('https://a/', 'ccm_tok', { memory_gb: 12 }), /bash "\$f" "\$u" --memory 12$/);
+  assert.match(machineSetupWorkerWindows('https://a/', 'ccm_tok', {}), /-Url \$u; \$env:CC_MACHINE_TOKEN = \$null$/);
+  assert.match(machineSetupWorkerWindows('https://a/', 'ccm_tok', { threads: 6 }), /-Url \$u -Threads 6; /);
 });

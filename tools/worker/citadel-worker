@@ -125,12 +125,22 @@ case ${1:-} in
       given+="$key=$2 "
       shift 2
     done
-    # The file as it is (an image of the owner's own, say) with these over it; the first time, the starting values.
+    # The file as it is (an image of the owner's own, say) with these over it. The first time, a cap not given is sized from
+    # this PC (#2250, public/machine-setup.js workerSize holds the same rule): its threads and memory less a quarter, at
+    # least 2 threads and 4 GB kept for its owner and CI, and a minion per 3 of each. A file already there keeps its caps.
     cfg=$(cat "$etc/config.json" 2>/dev/null || echo '{}')
-    cfg=$(ROOT="$home/worker" GIVEN="$given" CFG="$cfg" node -e '
-      const c = { workers: 6, threads: 8, memory_gb: 24, disk_gb: 60, root: process.env.ROOT, ...JSON.parse(process.env.CFG) };
+    threads_here=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
+    memory_here=$(awk '$1 == "MemTotal:" { print int($2 / 1024 / 1024) }' "$r/proc/meminfo" 2>/dev/null || true)
+    cfg=$(ROOT="$home/worker" GIVEN="$given" CFG="$cfg" T="$threads_here" M="$memory_here" node -e '
+      const c = { root: process.env.ROOT, ...JSON.parse(process.env.CFG) };
       for (const p of process.env.GIVEN.split(" ").filter(Boolean)) c[p.split("=")[0]] = Number(p.split("=")[1]);
-      console.log(JSON.stringify(c, null, 2));')
+      const [T, M] = [Number(process.env.T), Number(process.env.M)];
+      const keep = (n, least) => n - Math.max(least, Math.ceil(n / 4));
+      c.threads ??= T >= 1 ? Math.min(1024, Math.max(1, keep(T, 2))) : 8;
+      c.memory_gb ??= M >= 1 ? Math.min(4096, Math.max(2, keep(M, 4))) : 24;
+      c.workers ??= Math.min(64, Math.max(1, Math.floor(Math.min(c.threads, c.memory_gb) / 3)));
+      c.disk_gb ??= 60;
+      console.log(JSON.stringify({ workers: c.workers, threads: c.threads, memory_gb: c.memory_gb, disk_gb: c.disk_gb, ...c }, null, 2));')
     num() { CFG="$cfg" node -p "JSON.parse(process.env.CFG).$1"; }
     threads=$(num threads)
     memory=$(num memory_gb)

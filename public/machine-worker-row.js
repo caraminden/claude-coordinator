@@ -10,7 +10,7 @@ import { failedLine, loadingLine } from './ui/state.js';
 
 /** @import { MachineCheckLine, MachineRow, MachineWorker, MachineWorkerCaps } from './types.js' */
 /** @typedef {() => void} Redraw */
-/** @typedef {{ link: { agent_url: string, token: string } | null, asking: boolean, error: string | null, os: string | null, caps: MachineWorkerCaps | null, capsOver?: string, open: Set<string>, folder: { name: string, path: string, write: boolean } }} Kept what the page holds for one row */
+/** @typedef {{ link: { agent_url: string, token: string } | null, asking: boolean, error: string | null, os: string | null, caps: MachineWorkerCaps | null, capsOver?: string, typed?: Partial<MachineWorkerCaps>, open: Set<string>, folder: { name: string, path: string, write: boolean } }} Kept what the page holds for one row */
 
 /** What the page holds for a row between redraws, by machine id: its token and address, the picked OS, caps being typed, open blocks. @type {Map<number, Kept>} */
 const kept = new Map();
@@ -122,16 +122,36 @@ const capsFor = (m, k) => {
   return k.caps && k.capsOver === JSON.stringify(own) ? k.caps : (own ?? WORKER_CAPS);
 };
 
-/** Four numbers its owner sets; the command below follows them as they are typed. @param {MachineRow} m @param {Kept} k @param {() => void} follow */
-function capsInputs(m, k, follow) {
-  const set = capsFor(m, k);
+/** The caps typed for an install: each left blank is sized from that PC (#2250). @param {Kept} k @returns {Partial<MachineWorkerCaps>} */
+const typedCaps = (k) => k.typed ?? {};
+
+/** Four numbers its owner sets; the command below follows them as they are typed. `install`: blank means that PC's own size. @param {MachineRow} m @param {Kept} k @param {() => void} follow @param {boolean} [install] */
+function capsInputs(m, k, follow, install = false) {
+  const set = install ? typedCaps(k) : capsFor(m, k);
   /** @param {keyof MachineWorkerCaps} key @param {string} label @param {string} unit */
   const field = (key, label, unit) => {
     const [min, max] = WORKER_LIMITS[key];
-    const input = /** @type {HTMLInputElement} */ (h('input', { type: 'text', inputmode: 'numeric', id: `worker-cap-${m.id}-${key}`, value: String(set[key]), maxlength: String(max).length, title: `${min} to ${max}${unit ? ` ${unit}` : ''}`, 'aria-label': `${label}${unit ? ` (${unit})` : ''}` }));
+    const input = /** @type {HTMLInputElement} */ (
+      h('input', {
+        type: 'text',
+        inputmode: 'numeric',
+        id: `worker-cap-${m.id}-${key}`,
+        value: String(set[key] ?? ''),
+        placeholder: install ? 'auto' : null,
+        maxlength: String(max).length,
+        title: `${min} to ${max}${unit ? ` ${unit}` : ''}${install ? '; blank: sized from that PC' : ''}`,
+        'aria-label': `${label}${unit ? ` (${unit})` : ''}`,
+      })
+    );
     input.oninput = () => {
       const n = /^[1-9]\d*$/.test(input.value.trim()) && Number(input.value) >= min && Number(input.value) <= max ? Number(input.value) : null;
-      input.setAttribute('aria-invalid', String(n === null));
+      const blank = install && !input.value.trim();
+      input.setAttribute('aria-invalid', String(n === null && !blank));
+      if (install && (blank || n !== null)) {
+        const { [key]: _, ...rest } = typedCaps(k);
+        k.typed = blank || n === null ? rest : { ...rest, [key]: n };
+        return follow();
+      }
       // Half-typed, or out of bounds: the command keeps the last number that was neither.
       if (n === null) return;
       k.caps = { ...capsFor(m, k), [key]: n };
@@ -165,8 +185,7 @@ function installBlock(m, k, redraw) {
   const win = windows(m);
   const box = h('div', { class: 'worker-command' });
   const draw = () => {
-    const caps = capsFor(m, k);
-    box.replaceChildren(shell(win ? 'powershell' : 'bash', (win ? machineSetupWorkerWindows : machineSetupWorkerLinux)(/** @type {NonNullable<Kept['link']>} */ (k.link).agent_url, /** @type {NonNullable<Kept['link']>} */ (k.link).token, caps)));
+    box.replaceChildren(shell(win ? 'powershell' : 'bash', (win ? machineSetupWorkerWindows : machineSetupWorkerLinux)(/** @type {NonNullable<Kept['link']>} */ (k.link).agent_url, /** @type {NonNullable<Kept['link']>} */ (k.link).token, typedCaps(k))));
   };
   draw();
   /** @param {string} os @param {string} label */
@@ -175,7 +194,8 @@ function installBlock(m, k, redraw) {
     'div',
     { class: 'worker-install' },
     /** @type {MachineWorker} */ (m.worker).host ? null : h('div', { class: 'row worker-os', role: 'group', 'aria-label': 'That PC runs' }, tab('windows', 'Windows'), tab('linux', 'Linux')),
-    capsInputs(m, k, draw),
+    capsInputs(m, k, draw, true),
+    h('p', { class: 'muted small' }, 'Left on auto, a cap is sized from that PC: about three quarters of its CPU threads and memory (the rest stays free for you and CI), and a minion per 3 threads.'),
     h('p', { class: 'small' }, win ? 'On that PC, open PowerShell as yourself (not as administrator) and run:' : 'On that PC, open a terminal and run (it asks for your password):'),
     box,
     h(

@@ -104,6 +104,8 @@ export interface MachineWorker {
   caps: MachineWorkerCaps | null;
   /** What it holds now, while here (#2085): the page's caps where set, else its own. */
   held: MachineWorkerCaps | null;
+  /** Its PC's threads and memory while here (#2250); absent from an older server. */
+  pc?: { threads: number; memory_gb: number } | null;
   image: { state: 'ready' | 'building' | 'failed' | 'own'; text: string } | null;
   claude: string | null;
   claude_wanted: string | null;

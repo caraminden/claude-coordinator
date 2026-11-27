@@ -151,34 +151,52 @@ export const WORKER_CHECKS = {
   programs: "Windows programs can't start",
 };
 
-/** A worker's caps before its owner sets any (the Build 7 spec's starting values), and what each can be: tools/worker's scripts hold the same. */
+/** The fixed caps every worker started on before #2250 (the Build 7 spec's): one still on all four was never sized to its PC. */
 export const WORKER_CAPS = { workers: 6, threads: 8, memory_gb: 24, disk_gb: 60 };
+/**
+ * A worker's caps sized from its PC (#2250; tools/worker/citadel-worker caps holds the same rule for a first install):
+ * its threads and memory less a quarter, at least 2 threads and 4 GB kept for its owner and CI, and a minion per 3 of each.
+ * @param {{ threads: number, memory_gb: number }} pc @returns {MachineWorkerCaps}
+ */
+export function workerSize(pc) {
+  const keep = (/** @type {number} */ n, /** @type {number} */ least) => n - Math.max(least, Math.ceil(n / 4));
+  const threads = Math.min(1024, Math.max(1, keep(pc.threads, 2)));
+  const memory_gb = Math.min(4096, Math.max(2, keep(pc.memory_gb, 4)));
+  return { workers: Math.min(64, Math.max(1, Math.floor(Math.min(threads, memory_gb) / 3))), threads, memory_gb, disk_gb: WORKER_CAPS.disk_gb };
+}
 export const WORKER_LIMITS = { workers: [1, 64], threads: [1, 1024], memory_gb: [2, 4096], disk_gb: [20, 99999] };
 
 /** The line that makes a Windows PC a minion worker (tools/worker/install-worker.ps1), for its owner's normal PowerShell. * @param {string} url
  * @param {string} token
- * @param {MachineWorkerCaps} caps
+ * @param {Partial<MachineWorkerCaps>} caps the caps its owner typed: one left out is sized from that PC
  */
 export function machineSetupWorkerWindows(url, token, caps) {
   const u = url.replace(/\/$/, '');
-  return `$u = '${u}'; $env:CC_MACHINE_TOKEN = '${token}'; iwr "$u/worker-setup/install-worker.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-worker.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-worker.ps1" -Url $u -Workers ${caps.workers} -Threads ${caps.threads} -MemoryGB ${caps.memory_gb} -DiskGB ${caps.disk_gb}; $env:CC_MACHINE_TOKEN = $null`;
+  return `$u = '${u}'; $env:CC_MACHINE_TOKEN = '${token}'; iwr "$u/worker-setup/install-worker.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-worker.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-worker.ps1" -Url $u${CAP_KEYS.flatMap(([key, , ps]) => (caps[key] ? [` -${ps} ${caps[key]}`] : [])).join('')}; $env:CC_MACHINE_TOKEN = $null`;
 }
 
 /** The same for a Linux PC (tools/worker/install-worker.sh), in a bash terminal. * @param {string} url
  * @param {string} token
- * @param {MachineWorkerCaps} caps
+ * @param {Partial<MachineWorkerCaps>} caps
  */
 export function machineSetupWorkerLinux(url, token, caps) {
   const u = url.replace(/\/$/, '');
-  return `u='${u}'; f=$(mktemp) && curl -fsSL "$u/worker-setup/install-worker.sh" -o "$f" && sudo CC_MACHINE_TOKEN='${token}' bash "$f" "$u" ${capFlags(caps)}`;
+  return `u='${u}'; f=$(mktemp) && curl -fsSL "$u/worker-setup/install-worker.sh" -o "$f" && sudo CC_MACHINE_TOKEN='${token}' bash "$f" "$u"${capFlags(caps)}`;
 }
 
-/** @param {MachineWorkerCaps} caps */
-const capFlags = (caps) => `--workers ${caps.workers} --threads ${caps.threads} --memory ${caps.memory_gb} --disk ${caps.disk_gb}`;
+/** Each cap, its citadel-worker flag and its install-worker.ps1 parameter. @type {[keyof MachineWorkerCaps, string, string][]} */
+const CAP_KEYS = [
+  ['workers', 'workers', 'Workers'],
+  ['threads', 'threads', 'Threads'],
+  ['memory_gb', 'memory', 'MemoryGB'],
+  ['disk_gb', 'disk', 'DiskGB'],
+];
+/** The flags of the caps given, each after a space. @param {Partial<MachineWorkerCaps>} caps */
+const capFlags = (caps) => CAP_KEYS.flatMap(([key, flag]) => (caps[key] ? [` --${flag} ${caps[key]}`] : [])).join('');
 
 /** A `citadel-worker` command on the worker's own PC: its sign-ins and its caps. * @param {boolean | null | undefined} wsl
  * @param {string} rest
  */
 export const workerCommand = (wsl, rest) => (wsl ? `wsl -d citadel-workers -u root --exec /usr/local/bin/citadel-worker ${rest}` : `sudo citadel-worker ${rest}`);
 /** @param {boolean | null | undefined} wsl @param {MachineWorkerCaps} caps */
-export const workerCapsCommand = (wsl, caps) => workerCommand(wsl, `caps ${capFlags(caps)}`);
+export const workerCapsCommand = (wsl, caps) => workerCommand(wsl, `caps${capFlags(caps)}`);

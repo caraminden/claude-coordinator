@@ -261,7 +261,7 @@ export class WorkerAgent {
     const mounted = mountedFolders();
     this.worker.cfg.host = hostMounts(this.cfg.folders, mounted);
     const folders = this.cfg.folders.map((f) => ({ ...f, ready: mounted.has(f.name) }));
-    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, held: this.held(), image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test, folders, folder_problems: this.cfg.problems };
+    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, held: this.held(), pc: this.here, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test, folders, folder_problems: this.cfg.problems };
     const reply = await this.json('/api/machines/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     this.said = null;
     if (!this.code && !reply.replaced) this.log(`Connected to ${this.appUrl} as ${hostname()}`);

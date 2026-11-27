@@ -18,10 +18,11 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)][ValidatePattern('^https?://[A-Za-z0-9.:-]+/?$')][string]$Url,
-  [ValidateRange(1, 64)][int]$Workers = 6,
-  [ValidateRange(1, 1024)][int]$Threads = 8,
-  [ValidateRange(2, 4096)][int]$MemoryGB = 24,
-  [ValidateRange(20, 99999)][int]$DiskGB = 60
+  # Each cap left out is sized from the PC there (#2250: citadel-worker caps); PowerShell checks only a value given.
+  [ValidateRange(1, 64)][int]$Workers = 0,
+  [ValidateRange(1, 1024)][int]$Threads = 0,
+  [ValidateRange(2, 4096)][int]$MemoryGB = 0,
+  [ValidateRange(20, 99999)][int]$DiskGB = 0
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3
@@ -71,7 +72,8 @@ $get = 'command -v curl >/dev/null || { apt-get update -q && apt-get install -y 
 & $wsl -d $distro -u root --exec /bin/sh -c $get
 if ($LASTEXITCODE -ne 0) { Stop-With "The distro could not download $Url/worker-setup/install-worker.sh." }
 # The token goes in on standard input, never on a command line other programs can read.
-$run = 'read -r t; export CC_MACHINE_TOKEN=$(printf %s $t | tr -cd A-Za-z0-9_-); exec bash /root/install-worker.sh ' + "$Url --workers $Workers --threads $Threads --memory $MemoryGB --disk $DiskGB </dev/null"
+$caps = (@(@('--workers', $Workers), @('--threads', $Threads), @('--memory', $MemoryGB), @('--disk', $DiskGB)) | Where-Object { $_[1] -gt 0 } | ForEach-Object { "$($_[0]) $($_[1])" }) -join ' '
+$run = 'read -r t; export CC_MACHINE_TOKEN=$(printf %s $t | tr -cd A-Za-z0-9_-); exec bash /root/install-worker.sh ' + "$Url $caps </dev/null"
 $ended = 10
 foreach ($try in 1, 2) {
   $token | & $wsl -d $distro -u root --exec /bin/sh -c $run

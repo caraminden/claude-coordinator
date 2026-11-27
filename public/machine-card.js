@@ -4,7 +4,7 @@
 // threads split now from live numbers only. Every switch shows at once with its request behind (ui/optimistic.js).
 import { account, h, view } from './base.js';
 import { toneChip } from './look.js';
-import { cannot, capsLine, changeRole, managesRoles, orderLine, roleOf, schemeChips, standing } from './machine-role-cards.js';
+import { cannot, capsLine, changeRole, managesRoles, orderLine, roleOf, schemeChips, sizeOfferPart, standing } from './machine-role-cards.js';
 import { heldCaps, signInPart, workerSection, workerState } from './machine-worker-row.js';
 import { setupPart } from './role-setup-card.js';
 import { lastRun } from './role-setup.js';
@@ -110,6 +110,40 @@ function chips(m, pc) {
   return h('span', { class: 'mcard-specs' }, ...specs.map((x) => h('span', {}, x)), ...[...caps, ...vms].map((x) => h('span', { class: 'cap' }, x)));
 }
 
+/** A pool's why (src/turn-line.ts starveWhy) in plain words: "CPU pressure 50%" is "CPU busy there (50% pressure)". @param {string} why */
+const plainPress = (why) => {
+  const t = why.replace(/ there$/, '');
+  const cpu = t.match(/^CPU pressure (\d+)%/);
+  const mem = t.match(/^memory pressure (\d+)%/);
+  const free = t.match(/^([\d.]+) GB free/);
+  if (cpu) return `CPU busy there (${cpu[1]}% pressure)`;
+  if (mem) return `memory busy there (${mem[1]}% pressure)`;
+  if (free) return `only ${free[1]} GB of memory free there`;
+  return /^memory is tight/.test(t) ? 'memory tight there' : null;
+};
+
+/**
+ * Why a machine's pool runs fewer minions than its caps (#2250), in plain words: "1 now, of its 6: CPU was busy there
+ * (50% pressure); it grows back one at a time while turns wait". Null when it isn't held under them.
+ * @param {WorkerMachine} p
+ */
+export function poolHeld(p) {
+  if (p.size >= p.cap || p.block) return null;
+  const lead = `${p.size} now, of its ${p.cap}`;
+  if (p.pool.fixed) return `${lead}: set to ${p.pool.fixed.size} by ${p.pool.fixed.by} on the Workers tile`;
+  if (p.balanced) return `${lead}: ${p.balanced}`;
+  if (p.max < p.cap && p.size >= p.max) return `${lead}: its most is set to ${p.max} on the Workers tile`;
+  const now = p.pressed && plainPress(p.pressed);
+  if (now) return `${lead}: ${now}, from anything running on that PC, CI included`;
+  const was = p.pool.why ? plainPress(p.pool.why) : null;
+  const past = was
+    ?.replace(/^(CPU|memory) busy/, '$1 was busy')
+    .replace(/^only/, 'had only')
+    .replace(/^memory tight/, 'memory was tight');
+  if (past) return `${lead}: ${past}; it grows back one at a time while turns wait`;
+  return `${lead}: it grows one at a time while turns wait and that PC is calm`;
+}
+
 /** A big switch. @param {{ on: boolean, label: string, disabled?: boolean, title?: string, onclick: () => void }} o */
 const bigSwitch = ({ on, label, disabled = false, title, onclick }) => h('button', { type: 'button', class: 'rules-switch mcard-switch', role: 'switch', 'aria-checked': String(on), 'aria-label': label, disabled, title, onclick });
 
@@ -155,7 +189,7 @@ function meTile(m, live, redraw) {
   else if (!r?.on) big = 'Off';
   else if (!installed) [big, sub] = ['Not set up', 'Set it up once on that PC: the worker, then your Claude sign-in there.'];
   else if (need) [big, sub] = ['Sign in to Claude here', 'The login stays on this PC; only your turns use it.'];
-  else if (st?.word === 'Ready') big = pool ? `My worker pool: ${pool.used} of ${pool.size} busy` : `My worker pool: up to ${caps?.workers ?? '?'} at once`;
+  else if (st?.word === 'Ready') [big, sub] = [pool ? `My worker pool: ${pool.used} of ${pool.size} busy` : `My worker pool: up to ${caps?.workers ?? '?'} at once`, (pool && poolHeld(pool)) || sub];
   else [big, sub] = [st?.word ?? 'Off', st?.why ?? sub];
   // Not set up and off: Set up in the switch's place (spec section 4) switches it on and opens its steps.
   const control =
@@ -169,6 +203,7 @@ function meTile(m, live, redraw) {
     h('div', { class: 'mcard-tile-head' }, h('span', { class: 'mcard-ttl' }, 'For me'), h('span', { class: 'spacer' }), control),
     h('div', { class: 'mcard-big' }, big),
     h('div', { class: 'muted small' }, sub),
+    r?.on && !gone ? sizeOfferPart(m, redraw) : null,
     need && w?.here && !gone ? signInPart(m) : null,
     r?.on && w ? opener(installed ? 'Its worker' : 'Set-up steps', o.me, () => ((o.me = !o.me), redraw())) : null,
   );

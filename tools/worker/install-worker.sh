@@ -4,7 +4,7 @@
 # one sudo paste the Machines page shows); an agent from before shows the whole command. Run it as root; running it
 # again updates what it installed and keeps every sign-in.
 #
-#   bash install-worker.sh <citadel machines url> [--workers 6] [--threads 8] [--memory 24] [--disk 60]
+#   bash install-worker.sh <citadel machines url> [--workers N] [--threads N] [--memory GB] [--disk GB] (each left out: sized from this PC)
 #
 # The machine token comes from CC_MACHINE_TOKEN, or it asks. It:
 #   1. in WSL only, turns systemd-timesyncd off before anything else (one distro's timesyncd skews the clock every distro
@@ -29,7 +29,7 @@ units=$r/etc/systemd/system
 
 url=${1:-}
 url=${url%/}
-[[ $url =~ ^https?://[A-Za-z0-9.:-]+$ ]] || die 'usage: install-worker.sh <citadel machines url> [--workers 6] [--threads 8] [--memory 24] [--disk 60]'
+[[ $url =~ ^https?://[A-Za-z0-9.:-]+$ ]] || die 'usage: install-worker.sh <citadel machines url> [--workers N] [--threads N] [--memory GB] [--disk GB] (each left out: sized from this PC)'
 shift
 caps=("$@")
 [[ $(id -u) == 0 ]] || die 'Run this as root (with sudo).'

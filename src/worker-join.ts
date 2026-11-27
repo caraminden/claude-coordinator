@@ -40,7 +40,9 @@ export type CheckLine = { key: CheckKey; name: string; state: 'waiting' | 'runni
 export type SelfTest = { id: string; at: number; done: number | null; ok: boolean; why: string | null; lines: CheckLine[] };
 export type WorkerCaps = { workers: number; threads: number; memory_gb: number; disk_gb: number };
 type ImageState = { state: 'ready' | 'building' | 'failed' | 'own'; text: string };
-type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; held: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean; folders: HostFolder[]; folder_problems: string[] };
+/** What the worker's PC has (#2250): its threads and whole GB of memory, as that Linux (a WSL distro: its VM) sees them. */
+export type PcSize = { threads: number; memory_gb: number };
+type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; held: WorkerCaps | null; pc: PcSize | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean; folders: HostFolder[]; folder_problems: string[] };
 /** Kept over a restart: how the worker was last set up (its newest install, by when that ran) and what its tests said. */
 type Kept = { installed?: number; host: string; wsl: boolean; caps: WorkerCaps | null; seen: number; test: SelfTest | null; passed: number | null };
 /** A machine's worker as its row shows it. */
@@ -54,6 +56,8 @@ export type WorkerView = {
   caps: WorkerCaps | null;
   /** What it holds now, while here: the page's caps where set, else its own, threads and memory as far as that PC's slice took them (#2085). */
   held: WorkerCaps | null;
+  /** Its PC's threads and memory while here, for the Machines page's "use this PC's size" (#2250); null while away or from an older worker. */
+  pc: PcSize | null;
   image: ImageState | null;
   claude: string | null;
   /** This server's claude when the worker's differs: no turn starts there until they match. */
@@ -83,6 +87,13 @@ export function cleanCaps(input: unknown): WorkerCaps | null {
   const v = (input ?? {}) as Record<string, unknown>;
   const [workers, threads, memory_gb, disk_gb] = [count(v.workers, 64), count(v.threads, 1024), count(v.memory_gb, 4096), count(v.disk_gb, 100_000)];
   return workers === null || threads === null || memory_gb === null || disk_gb === null ? null : { workers, threads, memory_gb, disk_gb };
+}
+
+/** A PC's size as its worker said it, or null when it isn't that. */
+function cleanPc(input: unknown): PcSize | null {
+  const v = (input ?? {}) as Record<string, unknown>;
+  const [threads, memory_gb] = [count(v.threads, 4096), count(v.memory_gb, 65_536)];
+  return threads && memory_gb ? { threads: Math.floor(threads), memory_gb: Math.floor(memory_gb) } : null;
 }
 
 const IMAGE_STATES = ['ready', 'building', 'failed', 'own'] as const;
@@ -198,6 +209,7 @@ export class WorkerJoin {
       wsl: facts?.wsl ?? kept?.wsl ?? false,
       caps: facts?.caps ?? kept?.caps ?? null,
       held: facts?.held ?? null,
+      pc: facts?.pc ?? null,
       image: facts?.image ?? null,
       claude: here ? (info?.claude ?? null) : null,
       claude_wanted: here && home && info?.claude && !sameClaude(home, info.claude) ? home : null,
@@ -251,6 +263,7 @@ export class WorkerJoin {
       wsl: body.wsl === true,
       caps: cleanCaps(body.caps),
       held: cleanCaps(body.held),
+      pc: cleanPc(body.pc),
       image: cleanImage(body.image),
       github: yes(body.github),
       disk_gb: count(body.disk_gb, 100_000),

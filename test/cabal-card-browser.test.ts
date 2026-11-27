@@ -53,15 +53,18 @@ after(async () => {
 test("a redraw of the list leaves a building member's segment mid-pulse, not back at its start", { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the card to draw', `document.querySelector('.cabal-meter i[data-s=running]')`);
-  // Redraw at the pulse's dim half (the shared clock: 1.6 s a turn, dimmest at 0.8 s): a segment that started over is at full strength.
-  const opacity = await page.eval<number>(`(async () => {
+  // Redraw away from the turn's start, then read where the new segment's pulse is against the shared clock (1.6 s a turn) at
+  // the same instant: in step, they agree however late the frame; started over, they differ by where the clock was.
+  const apart = await page.eval<number>(`(async () => {
     const { renderSidebar } = await import('./sidebar.js');
-    while (Math.abs((Date.now() % 1600) - 800) > 150) await new Promise(requestAnimationFrame);
+    while (Math.abs((Date.now() % 1600) - 800) > 300) await new Promise(requestAnimationFrame);
     renderSidebar();
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    return Number(getComputedStyle(document.querySelector('.cabal-meter i[data-s=running]')).opacity);
+    const [pulse] = document.querySelector('.cabal-meter i[data-s=running]').getAnimations();
+    const d = Math.abs(pulse.effect.getComputedTiming().progress * 1600 - (Date.now() % 1600));
+    return Math.min(d, 1600 - d);
   })()`);
-  assert.ok(opacity < 0.75, `the segment is mid-pulse after the redraw (opacity ${opacity})`);
+  assert.ok(apart < 150, `the segment's pulse is in step with the clock after the redraw (${Math.round(apart)} ms apart)`);
 });
 
 test('opening a card that has only its Overseer to show moves nothing', { skip }, async () => {
@@ -73,4 +76,9 @@ test('opening a card that has only its Overseer to show moves nothing', { skip }
   const open = await page.eval<Card>(measure);
   assert.deepEqual([shut.open, open.open, shut.rows, open.rows, shut.preview], [false, true, 1, 1, true]);
   assert.equal(open.height, shut.height, 'the same rows at the same height, open or shut');
+  // The row under the Preview link starts inside the link's box: the link stays on top, so its whole height takes the tap.
+  const hit = `(() => { const a = document.querySelector('.cabal-build a'); const r = a.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.bottom - 2) === a; })()`;
+  assert.equal(await page.eval(hit), true, 'open: the bottom of the Preview link is the link');
+  await page.eval(`document.querySelector('.cabal-toggle').click()`);
+  assert.equal(await page.eval(hit), true, 'shut: the bottom of the Preview link is the link');
 });

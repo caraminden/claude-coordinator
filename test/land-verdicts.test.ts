@@ -9,9 +9,6 @@
 // (FAILS_AT); everything else (git history, imports, test text, tools/known-flakes.ts) is real. The reports are in the
 // shared folder's reports/: incident-2026-11-20-1840-cause.md (1840), incident-2026-11-20-2106-cause.md (2106),
 // incident-2026-11-21-0019-cause.md (0019).
-//
-// New rules run in shadow first (LAND_RULES in land.sh, ADR 0020): each case checks the verdict with the rules as
-// shipped, and the rule's own verdict with it switched live.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -37,11 +34,8 @@ const BENCHED = [
   'train_failing',
   'train_main_red',
   'train_suspects_of',
-  'rule_on',
-  'rule_would',
   'train_guess',
   'train_imports',
-  'train_hub',
   'train_label',
   'train_at',
   'known_flakes',
@@ -72,8 +66,6 @@ function fn(name: string): string {
   const end = lines.findIndex((l, j) => j > i && /^[})]$/.test(l));
   return lines.slice(i, end + 1).join('\n');
 }
-// The rules as shipped: land.sh's own LAND_RULES default.
-const shipped = /^: "\$\{LAND_RULES:=([^}]*)\}"$/m.exec(land)?.[1];
 
 const tools = tmp.path('tools');
 mkdirSync(tools);
@@ -113,7 +105,7 @@ guess() { local hits; mapfile -t hits < <(train_suspects_of "$1"); echo "\${hits
 ${BENCHED.map(fn).join('\n')}
 `;
 
-type Case = { script: string; red?: string; failsAt?: string; rules?: string; shared?: string };
+type Case = { script: string; red?: string; failsAt?: string; shared?: string };
 let n = 0;
 function run(c: Case): { out: string; log: string } {
   const out = tmp.path(`run${++n}`);
@@ -132,7 +124,6 @@ function run(c: Case): { out: string; log: string } {
       NODE_BIN: process.execPath,
       RED: c.red ?? '',
       FAILS_AT: c.failsAt ?? '',
-      LAND_RULES: c.rules ?? shipped ?? '',
       COORDINATOR_SHARED_DIR: c.shared ?? '',
       DEPLOY_DB: join(out, 'none.db'),
     },
@@ -219,44 +210,37 @@ for (const [ci, through] of [
 // C: run 44886957865 (Nov 21 00:53 PST, report 0019): #1385's train with #1415; one-pacific failed again alone, and its
 // message names src/standing-checks.ts:314, the file #1415 added; auto-resume passed alone (load). It was #1415's.
 // Today's guess misses it: one-pacific imports nothing by a relative path, and the walk stops there before it reads the
-// test's text, which names server.ts, which #1415 changed (and #1385 didn't). So no suspects: the bisect. walk fixes it.
-const C = `${log('44886957865')}\n${train('96ad1f03', '3db73c29', 1385, 1415)}\ntrain_chg\nrules_say=1`;
-test('C: a red only on files a rider changed: that rider', () => {
+// test's text, which names server.ts, which #1415 changed (and #1385 didn't). So no suspects: the bisect.
+const C = `${log('44886957865')}\n${train('96ad1f03', '3db73c29', 1385, 1415)}\ntrain_chg`;
+test('C: a red only on files a rider changed: the walk stops, no suspects', () => {
   assert.equal(run({ script: `${C}\ntrain_real` }).out, 'test/one-pacific.test.ts\n');
   const r = run({ script: `${C}\nguess test/one-pacific.test.ts` });
   assert.equal(r.out, '\n', "today's rules name nobody: the walk stops at a test with no relative imports");
-  assert.match(r.log, /retro: would refuse #1415 \(walk\) · test\/one-pacific\.test\.ts/);
-  assert.doesNotMatch(r.log, /\(hub\)/, 'one-pacific imports no hub');
-  assert.equal(run({ script: `${C}\nguess test/one-pacific.test.ts`, rules: 'walk=live' }).out, '1\n');
 });
 
 // D: run 44869832060 (Nov 20 21:13 PST, report 2106): front #1356, riders #1384, #1358, #1394, #1369, #1383, #1382;
 // db-writer failed again alone on 'props.propose', which #1356's O2 removed. db-writer imports src/db.ts (a hub: 210
 // test files), src/db-writer.ts and src/http.ts; #1369 changed all three, #1356 only src/properties.ts, which src/db.ts
 // imports (level 2). The guess held #1369: wrong. Verdict: no suspects from the files, the bisect.
-const D = `${log('44869832060')}\n${train('4730e151', '4730e151', 1356, 1384, 1358, 1394, 1369, 1383, 1382)}\ntrain_chg\nrules_say=1`;
-test('D: a red reached through a hub file names no suspects: the bisect', () => {
+const D = `${log('44869832060')}\n${train('4730e151', '4730e151', 1356, 1384, 1358, 1394, 1369, 1383, 1382)}\ntrain_chg`;
+test('D: a red reached through a hub file: the guess names the wrong ship', () => {
   assert.equal(run({ script: `${D}\ntrain_real` }).out, 'test/db-writer.test.ts\n');
   const r = run({ script: `${D}\nguess test/db-writer.test.ts` });
   assert.equal(r.out, '4\n', "today's rules guess #1369 (member 4), the wrong ship");
-  assert.match(r.log, /retro: would spare #1369 \(hub\): no suspects, so the bisect · test\/db-writer\.test\.ts/);
-  assert.equal(run({ script: `${D}\nguess test/db-writer.test.ts`, rules: 'hub=live' }).out, '\n');
   // It reproduces alone, so before any guess the pin finds the front, #1356 (#1403): from 21:01 every train had it.
   const pin = run({ script: `${D}\ntip=tip1382\nwt=$(mktemp -d)\ngit worktree add -q --detach "$wt" "$tip"\ntrain_pin test/db-writer.test.ts "$wt"`, red: 'test/db-writer.test.ts', failsAt: 'own1356 tip1384 tip1358 tip1394 tip1369 tip1383 tip1382' });
   assert.equal(pin.out, '0\n');
 });
 // D2: run 44869305694 (Nov 20 21:06 PST, report 2106): front #1355, riders #1356, #1384, #1365, #1358, #1394; db-writer
 // real (#1356's), codex-lock a load flake. Today's guess names #1355 and #1365, both innocent: both are
-// pulled (#1918). With hub: no suspects, the bisect.
-test('D2: the same red with two wrong guesses: hub would spare both', () => {
-  const t = `${log('44869305694')}\n${train('4730e151', '4730e151', 1355, 1356, 1384, 1365, 1358, 1394)}\ntrain_chg\nrules_say=1`;
+// pulled (#1918).
+test('D2: the same red with two wrong guesses', () => {
+  const t = `${log('44869305694')}\n${train('4730e151', '4730e151', 1355, 1356, 1384, 1365, 1358, 1394)}\ntrain_chg`;
   assert.equal(run({ script: `${t}\ntrain_real` }).out, 'test/db-writer.test.ts\n', 'codex-lock passed alone');
   // A held round red like this one puts back any held ship with either test (#1403): both count as red.
   assert.equal(run({ script: `${t}\ntrain_failing` }).out, 'test/codex-lock.test.ts\ntest/db-writer.test.ts\n');
   const r = run({ script: `${t}\nguess test/db-writer.test.ts` });
   assert.equal(r.out, '0 3\n');
-  assert.match(r.log, /would spare #1355, #1365 \(hub\): no suspects, so the bisect · test\/db-writer\.test\.ts/);
-  assert.equal(run({ script: `${t}\nguess test/db-writer.test.ts`, rules: 'hub=live' }).out, '\n');
 });
 
 // E: #1366 alone, runs 44882481868 (Nov 21 00:01 PST, citadel-android) and 44888201563 (01:17 PST, auto-resume), report
@@ -343,5 +327,4 @@ test('every function that reads $failed is benched here or says why it decides n
   for (const f of ran) for (const g of BENCHED) if (calls(fn(f), g)) ran.add(g); // a Set's loop visits what it adds
   const idle = names.filter((f) => BENCHED.includes(f) && !ran.has(f));
   assert.deepEqual(idle, [], 'no case calls these: give each a case from a real run');
-  assert.ok(shipped, "land.sh's LAND_RULES default line is gone: the bench reads the shipped modes from it");
 });

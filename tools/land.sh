@@ -951,41 +951,16 @@ train_imports() {
   git show "$tip:$1" 2>/dev/null | grep -oE "(from|import|require)[[:space:]]*\(?[[:space:]]*['\"]\.\.?/[^'\"]+['\"]" |
     sed -E "s/.*['\"](\.[^'\"]+)['\"]$/\1/" | while read -r p; do realpath -ms --relative-to="$PWD" "$PWD/$(dirname "$1")/$p"; done | sort -u
 }
-# Blame rules on trial (#1484, ADR 0020): "<rule>=shadow" only writes what it would have decided, a "would refuse <ship>
-# (<rule>)" or "would spare" line in the day's retro log, and today's rules decide; "<rule>=live" decides. A new rule
-# ships as shadow and goes live by a one-word edit here after a day of those lines. test/land-verdicts.test.ts benches
-# every rule on real reds of Nov 20 to 21. hub: no guess from imports for a test that imports a hub, a file a tenth of
-# the test files name (run 44869832060: db-writer imports src/db.ts, and the guess held #1369 while #1356 did it).
-# walk: the walk goes on past a file that imports nothing by a relative path; today it stops there with no suspects,
-# before the test's own text is read (run 44886957865: one-pacific names server.ts, which #1415 changed).
-: "${LAND_RULES:=hub=shadow walk=shadow}"
-rule_on() { [[ " $2 " == *" $1=live "* ]]; } # <rule> <rules>
 # <test file>: the train members (0: this one, 1 on: its riders) its failure is pinned on, nearest first. Reads chg.
-# Each shadow rule's other answer goes to the retro log when the caller sets rules_say (train_suspects does).
 train_suspects_of() {
-  local live alt r
+  local live
   # set -e as before #1484 ($( ) drops it), so a step that fails still ends the guess with no suspects.
-  live=$(set -e; train_guess "$1" "$LAND_RULES")
-  for r in $LAND_RULES; do
-    [ -n "${rules_say:-}" ] && [ "${r#*=}" = shadow ] || continue
-    alt=$(set -e; train_guess "$1" "$LAND_RULES ${r%=*}=live")
-    [ "$alt" = "$live" ] || rule_would "${r%=*}" "$1" "$live" "$alt"
-  done
+  live=$(set -e; train_guess "$1")
   [ -z "$live" ] || echo "$live"
 }
-# <rule> <test file> <today's members> <the rule's members>: the day's line for a shadow rule that would decide otherwise.
-rule_would() {
-  local m now=" $(echo $3) " then=" $(echo $4) " add='' drop='' instead='no suspects, so the bisect'
-  for m in $4; do [[ $now == *" $m "* ]] || add+="${add:+, }$(train_label "$m")"; done
-  for m in $3; do [[ $then == *" $m "* ]] || drop+="${drop:+, }$(train_label "$m")"; done
-  [ -z "$4" ] || instead="suspects $(for m in $4; do train_label "$m"; done | paste -sd, | sed 's/,/, /g')"
-  [ -z "$add" ] || retro_log "would refuse $add ($1) · $2 · $label · $ci_url"
-  [ -z "$drop" ] || retro_log "would spare $drop ($1): $instead · $2 · $label · $ci_url"
-  say "shadow rule $1, not deciding yet: on $2 it would ${add:+suspect $add}${add:+${drop:+ and }}${drop:+spare $drop}"
-}
-# <test file> <rules>: train_suspects_of's answer with those rules live.
+# <test file>: train_suspects_of's answer.
 train_guess() {
-  local f=$1 text reach lvl m c hits named p
+  local f=$1 text reach lvl m c hits named
   text=$(git show "$tip:$f" 2>/dev/null) || text=''
   # A guard's failure message names the file behind it ("loop-lag.test.ts:22 … 5 sleep hits", #1451): the ship that
   # changed that file is the suspect, before any guess from what the guard reads or imports.
@@ -1009,10 +984,7 @@ train_guess() {
   reach=$f
   for lvl in 0 1 2; do
     [ "$lvl" = 0 ] || reach=$(while read -r c; do [ -z "$c" ] || train_imports "$c"; done <<<"$reach" | sort -u) ||
-      rule_on walk "$2" || return 0 # the last file imports nothing by a relative path: set -e stopped here before #1484
-    if [ "$lvl" = 1 ] && rule_on hub "$2"; then # almost any ship can turn a test that imports a hub red: no guess
-      for p in $reach; do ! train_hub "$p" || return 0; done
-    fi
+      return 0 # the last file imports nothing by a relative path: no suspects (set -e stopped here before #1484)
     hits=$(for ((m = 0; m < ${#chg[@]}; m++)); do
       while read -r c; do
         [ -n "$c" ] || continue
@@ -1021,16 +993,6 @@ train_guess() {
     done)
     [ -z "$hits" ] || { echo "$hits"; return 0; }
   done
-}
-# <repo file>: whether it is a hub, a file outside test/ that a tenth or more of the test files at the train's top name
-# (Nov 21: src/db.ts in 231 of 469, src/runner.ts in 74; test helpers such as test/wait.ts are no hub).
-# shortcut: counts "/<its name>'" so a same-named file elsewhere counts too; parse imports if that ever misleads.
-train_hub() {
-  local n all
-  [[ $1 != test/* ]] || return 1
-  n=$(git grep -lF -e "/${1##*/}'" -e "/${1##*/}\"" "$tip" -- 'test/*.test.ts' 2>/dev/null | wc -l)
-  all=$(git ls-tree -r --name-only "$tip" -- test/ | grep -c '\.test\.ts$') || return 1
-  [ $((n * 10)) -ge "$all" ]
 }
 # Sets chg (the caller's local): each train member's own changed files, 0 being this ship's.
 train_chg() {
@@ -1214,7 +1176,7 @@ sits_on() { git merge-base --is-ancestor "$2" "$1" 2>/dev/null && ! git merge-ba
 # while others are pulled. With nobody named, or every ship on the train and none of them red alone: train_bisect.
 # All of a round's files are judged before anyone is pulled (#1564, Cara 2026-11-21, C "Go").
 train_suspects() {
-  local f i m t v n x line held_line sure_line rest kind real=() hits=() keep=() was=() chg=() open=() rules_say=1
+  local f i m t v n x line held_line sure_line rest kind real=() hits=() keep=() was=() chg=() open=()
   local -A sus=() sure=() next=() pins=() pin=() guess=() how=() added=() new=()
   local new_line
   while :; do

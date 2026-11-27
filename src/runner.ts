@@ -11,13 +11,12 @@ import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketFields, type TicketState, type TurnResult } from './db.ts';
+import { askerKey, type EventRow, type Project, type Store, type Ticket, type TicketFields, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
-import { cardHref } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
@@ -30,6 +29,9 @@ import { Closing } from './closing.ts';
 import { TurnEvents } from './turn-events.ts';
 import { containerFiles, TurnLaunches } from './launch-build.ts';
 import { TurnRefs } from './turn-refs.ts';
+import { TurnProgress } from './turn-progress.ts';
+import { TurnSpend } from './turn-spend.ts';
+import { PlanUsage } from './plan-usage.ts';
 export { schemeRefs } from './turn-refs.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
@@ -48,7 +50,7 @@ import { dropTurnDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
 import { endFiles, STEER_PENDING, steerLater, unsentSteers, unsentSteersAtBoot, type EndFiles, type TurnFiles } from './turn-files.ts';
 import { size } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
-import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
+import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { Holds } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
@@ -72,11 +74,10 @@ import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, newCalls, noteCalls, repliedPrompt, sameCall, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
 import { longestTool, quietAt, type Activity, type ProcCheck } from './quiet.ts';
-import { applyEvent, createProgress, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
-import { packPlan, unpackPlan } from './history.ts';
+import { planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
-import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
+import { budgetCard, budgetFor, budgetKey, startHoldKey, passed, turnLine } from './minion-budget.ts';
+import { type SpendState } from './spend-alert.ts';
 import { clockTime, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
@@ -91,13 +92,11 @@ import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { describeActivity, guessWindow, pushKind, slimEvent } from './stream-events.ts';
-import { usageWindow, type CodexLimits, type CodexWindow, type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type RateLimitInfo, type Usage } from './turn-messages.ts';
+import { type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type Usage } from './turn-messages.ts';
 import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
 import { argInProc, claudePidNow } from './wrapper-alive.ts';
 
-/** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
-const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
 /** Whether `path` is there, asked off the server's thread (#1808). */
 const exists = (path: string) =>
   access(path).then(
@@ -356,8 +355,6 @@ export class Runner {
   private closing = new Map<number, string | null>();
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
   private deployedMidTurn = new Set<number>();
-  private progress = new Map<number, ReturnType<typeof createProgress>>();
-  private stepRatios = new Map<number, { at: number; ratio: number }>();
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
   /** A sealed minion's state and note when a turn answering a message started: put back at its end, while still sealed (#261). */
@@ -508,6 +505,9 @@ export class Runner {
   private turnEvents: TurnEvents;
   private launches: TurnLaunches;
   private refs: TurnRefs;
+  private turnProgress: TurnProgress;
+  private turnSpend: TurnSpend;
+  private planUsage: PlanUsage;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all; `only`: on a machine, its accounts signed in there (#2061). */
   placeFor?: (person: number | null, warm?: string, taskmaster?: boolean, only?: number[]) => TurnPlace | { refused: string };
@@ -633,8 +633,6 @@ export class Runner {
   onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
   /** A running turn passed a spend stage (#723): push it to the usual people and the turn's person. */
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
-  /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
-  private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
   private killWaves: KillWaves;
   /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
   onBudgetWake: (ticketId: number, text: string) => void = () => {};
@@ -886,26 +884,49 @@ export class Runner {
       broadcastTicket: (id) => this.broadcastTicket(id),
       saveTurn: (id, patch) => this.saveTurn(id, patch),
       secretsOfTurn: (id) => this.secretsOfTurn(id),
-      updateUsage: (info, id) => this.updateUsage(info, id),
+      updateUsage: (info, id) => this.planUsage.updateUsage(info, id),
       updateCodexUsage: (l, person) => this.updateCodexUsage(l, person),
       lendWorker: (id) => this.lendWorker(id),
       quietSince: (id, live, now) => this.quietSince(id, live, now),
       checkQuiet: (id, live, now) => this.checkQuiet(id, live, now),
       keepaliveResult: (id, ev) => this.keepaliveRun.keepaliveResult(id, ev),
-      meterSpend: (id, ev) => this.meterSpend(id, ev),
+      meterSpend: (id, ev) => this.turnSpend.meterSpend(id, ev),
       progressFor: (id) => this.progressFor(id),
-      recordSteps: (id, p) => this.recordSteps(id, p),
-      savePlan: (id, p, upTo) => this.savePlan(id, p, upTo),
+      recordSteps: (id, p) => this.turnProgress.recordSteps(id, p),
+      savePlan: (id, p, upTo) => this.turnProgress.savePlan(id, p, upTo),
       carryReply: (id) => this.carryReply(id),
       keepTurn: (id, state, r) => this.keepTurn(id, state, r),
       cloud: () => this.cloud,
-      settleSpend: (id) => this.spends.get(id)?.meter.settle(),
+      settleSpend: (id) => this.turnSpend.spends.get(id)?.meter.settle(),
       setFailNote: (id, fields) => this.setFailNote(id, fields),
       onStatusTrailer: (id, fields) => this.onStatusTrailer(id, fields),
       onStreamEvent: (id, ev) => this.onStreamEvent(id, ev),
       onRawEvent: (id, ev) => this.onRawEvent(id, ev),
       onFilesMayChange: (id, soon) => this.onFilesMayChange(id, soon),
       onTurnError: (id, text, eventId) => this.onTurnError(id, text, eventId),
+    });
+    this.turnProgress = new TurnProgress({ store });
+    this.turnSpend = new TurnSpend({
+      store,
+      turns: this.turns,
+      now: () => this.now(),
+      emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved),
+      saveTurn: (id, patch) => this.saveTurn(id, patch),
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      onSpendAlert: (id, text, eventId, person) => this.onSpendAlert(id, text, eventId, person),
+      onBudgetWake: (id, text) => this.onBudgetWake(id, text),
+      onBudgetCard: (id, question) => this.onBudgetCard(id, question),
+    });
+    this.planUsage = new PlanUsage({
+      store,
+      turns: this.turns,
+      resumes: () => this.resumes,
+      broadcast: (msg) => this.broadcast(msg),
+      codexWhy: (person) => this.codexWhy(person),
+      turnPerson: (t, p, waiting, resuming) => this.turnPerson(t, p, waiting, resuming),
+      limitCleared: (payer) => this.limitCleared(payer),
+      claudeAccounts: (person) => this.claudeAccounts?.(person),
+      onCleared: (person, account) => this.onCleared?.(person, account),
     });
     this.refs = new TurnRefs({
       store,
@@ -1166,7 +1187,7 @@ export class Runner {
    */
   live(ticket: Ticket, ratio?: number) {
     const closed = ticket.status === 'closed';
-    ratio ??= closed ? 1 : this.stepRatio(ticket.project_id);
+    ratio ??= closed ? 1 : this.turnProgress.stepRatio(ticket.project_id);
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
     const p = closed ? null : this.progressFor(ticket.id);
@@ -1238,7 +1259,7 @@ export class Runner {
     const limit = once(LIMIT_RESUMES, () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // What steps took against their guesses (#571), which both bars scale the guesses by.
-    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.stepRatio(ticket.project_id));
+    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.turnProgress.stepRatio(ticket.project_id));
     const live = this.live(ticket, ratio);
     this.onLive(ticket.id, live);
     const { asks, ...shown } = live;
@@ -1290,11 +1311,11 @@ export class Runner {
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
-      budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket, list?.properties) : null,
+      budget: ticket.kind === 'ticket' && !closed ? this.turnSpend.budgetView(ticket, list?.properties) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
-      payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id, user)),
+      payer: once(`payer:${ticket.person_id}`, () => this.planUsage.payerView(ticket.person_id, user)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       context_window: this.store.getSetting<number>(windowKey(ticket.id)) ?? guessWindow(ticket.model || ticket.last_model),
       // When its last turn ended, for the composer's cold-wake hint (#413).
@@ -1377,7 +1398,7 @@ export class Runner {
 
   /** A closed minion's entries in the per-minion caches; each is rebuilt or set again if it is reopened (runner-turn-maps.test.ts says how). */
   forgetMaps(ticketId: number) {
-    this.progress.delete(ticketId);
+    this.turnProgress.progress.delete(ticketId);
     this.mainModels.delete(ticketId);
     this.gateCounted.delete(ticketId);
     this.contextSizes.delete(ticketId);
@@ -3607,7 +3628,7 @@ export class Runner {
     this.clock.clearTimeout(live.stopTimer);
     this.clock.clearTimeout(live.stopGraceTimer);
     this.turns.delete(ticketId);
-    this.spends.delete(ticketId);
+    this.turnSpend.spends.delete(ticketId);
     // Kept for the failure note below, which quotes its stderr.
     const secrets = this.secretsOfTurn(ticketId);
     this.turnSecrets.delete(ticketId);
@@ -3629,7 +3650,7 @@ export class Runner {
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
     // A Codex turn's log joins its thread's, for the way back to Claude (#337); the turn's folder goes below.
-    if (turn?.codex) this.keepCodexLog(ticketId, files.codexLog);
+    if (turn?.codex) this.planUsage.keepCodexLog(ticketId, files.codexLog);
     const code = exit?.code ?? null;
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
     if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
@@ -3909,7 +3930,7 @@ export class Runner {
         this.recordGrunts(ticketId, turn.id, state, r.session_id);
         // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
         const ticket = this.store.getTicket(ticketId);
-        if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
+        if (ticket?.kind === 'ticket') this.turnSpend.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
       })
       .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
   }
@@ -3929,112 +3950,13 @@ export class Runner {
       .catch((e) => console.error(`[grunts] minion ${ticketId}:`, e));
   }
 
-  /**
-   * Count an assistant message (main thread or Grunt) toward the turn's estimated cost, and post the alert card (and push)
-   * when it passes a stage. Saved in the TurnState, so a restart carries on where it was; Codex turns aren't metered.
-   */
-  private meterSpend(ticketId: number, ev: ClaudeEvent) {
-    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-    if (!turn?.startedAt || turn.codex) return;
-    let spend = this.spends.get(ticketId);
-    if (spend?.startedAt !== turn.startedAt) {
-      const ticket = this.store.getTicket(ticketId);
-      // Earlier turns' cost and the budget once a turn: this runs on every assistant message.
-      const budget = ticket?.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
-      this.spends.set(ticketId, (spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend), prior: budget ? this.store.ticketCost(ticketId) : 0, budget }));
-    }
-    const { meter } = spend;
-    if (!meter.add(ev)) return;
-    const stage = meter.crossed(stagesFrom(this.store.getSetting(STAGES_SETTING)));
-    this.saveTurn(ticketId, { spend: meter.state });
-    this.checkBudget(ticketId, spend.budget, spend.prior + meter.usd, true);
-    if (stage === null) return;
-    const text = spendText(meter.usd, Date.now() - turn.startedAt);
-    console.log(`[spend] minion ${ticketId}: passed $${stage}, about $${meter.usd.toFixed(2)}`);
-    const row = this.emit(ticketId, 'spend', { text, usd: Math.round(meter.usd), stage, turn: turn.startedAt });
-    meter.alert = { stage, event: row.id, at: row.created_at };
-    this.saveTurn(ticketId, { spend: meter.state });
-    this.broadcastTicket(ticketId); // the list row's badge and Needs you
-    this.onSpendAlert(ticketId, text, row.id, turn.person ?? null);
-  }
-
-  /**
-   * Tell the minion and its Taskmaster when its spend passes a budget mark (#1114), each mark once per minion. The ask goes
-   * into the running turn (`steer`) when it can take one; otherwise the next turn's budget line carries it. Never stops anything.
-   */
-  private checkBudget(ticketId: number, budget: Budget | null, spent: number, steer: boolean) {
-    if (!budget) return;
-    const state = this.store.getSetting<BudgetState>(budgetKey(ticketId)) ?? {};
-    const marks = passed(budget, spent, state);
-    if (!marks.length) return;
-    const now = this.now();
-    const level = wakeLevel(budget, spent);
-    this.store.setSetting(budgetKey(ticketId), {
-      ...state,
-      ...(marks.includes('ask') ? { asked: now } : {}),
-      ...(marks.includes('wake') ? { woke: state.woke ?? now, wakes: level } : {}),
-      ...(marks.includes('card') ? { carded: now } : {}),
-    });
-    console.log(`[budget] minion ${ticketId}: passed ${marks.join(' and ')} at about $${spent.toFixed(2)} (usual $${budget.usd.toFixed(2)})`);
-    if (marks.includes('ask')) {
-      const row = this.emit(ticketId, 'note', { text: chatNote(budget, spent) });
-      if (steer) this.steerSystem(ticketId, askText(budget, spent), row.id);
-    }
-    // tellTaskmaster posts its own "Sent the Taskmaster" line in the chat.
-    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent, level, !!state.woke));
-    if (marks.includes('card')) this.onBudgetCard(ticketId, budgetCard(budget, spent, this.costReason(ticketId)));
-  }
-
-  /** The minion's own "Costing more:" line since the ask (#1672), from its main thread's replies; null when it never said. */
-  private costReason(ticketId: number): string | null {
-    const ask = this.store.eventsOfKinds(ticketId, ['note']).findLast((e) => JSON.parse(e.data).text?.startsWith('Budget:'));
-    const texts = this.store
-      .eventsOfKinds(ticketId, ['claude'], ask?.id ?? 0)
-      .filter((e) => e.data.includes(REASON))
-      .flatMap((e) => {
-        const d: ClaudeEvent = JSON.parse(e.data);
-        return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text!) : [];
-      });
-    return costReason(texts);
-  }
-
-  /**
-   * Pass a line from Citadel into the running turn, as a steer is, when it can take one. Not kept in `steered`: one the
-   * turn never reads is dropped rather than queued to start a turn of its own.
-   */
-  private steerSystem(ticketId: number, text: string, id: number): boolean {
-    const live = this.turns.get(ticketId);
-    const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
-    if (!live || !turn || turn.result || turn.fresh || turn.keepalive || turn.stopped || turn.light) return false;
-    if (live.ending) return false;
-    steerLater(live, () => promptMessage([{ author: 'System', text, images: [], id }]));
-    return true;
-  }
-
-  /** What the minion page shows of its budget (#1114), or null with too little history. */
-  private budgetView(ticket: Ticket, props?: Record<string, unknown>) {
-    const b = budgetFor(this.store, ticket, Date.now(), props);
-    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE), card: markOf(b, CARD), ...(b.estimate ? { estimate: b.estimate } : {}) };
-  }
-
-  /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */
+  /** Each turn's spend and the minion's budget marks: src/turn-spend.ts. */
   spendAlert(ticket: Ticket) {
-    const spend = this.turns.has(ticket.id) ? openSpend(this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend) : null;
-    return spend && { ...spend, href: cardHref(ticket, spend.event) };
+    return this.turnSpend.spendAlert(ticket);
   }
 
-  /** Keep going (#723): no more spend alerts for the running turn. False when no turn is running. */
   muteSpend(ticketId: number, by: string, startedAt: number): boolean {
-    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-    // An earlier turn's card can't mute this one: it's refused unless it names the running turn's start.
-    if (!this.turns.has(ticketId) || !turn?.startedAt || turn.startedAt !== startedAt) return false;
-    if (turn.spend?.muted) return true;
-    const spend = this.spends.get(ticketId);
-    if (spend?.startedAt === turn.startedAt) spend.meter.muted = by;
-    this.saveTurn(ticketId, { spend: { ...(turn.spend ?? { usd: 0, fired: 0 }), muted: by } });
-    this.emit(ticketId, 'spend_muted', { turn: turn.startedAt, by });
-    this.broadcastTicket(ticketId);
-    return true;
+    return this.turnSpend.muteSpend(ticketId, by, startedAt);
   }
 
   /**
@@ -4064,124 +3986,34 @@ export class Runner {
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();
 
-  /**
-   * A minion's progress as a contraption may see it (#421): the readout's line ("Showing the rune cost… · 1 of 6 done") and step,
-   * built from its task list and tool calls. Never last_activity, which can be the first line of its reply.
-   */
+  /** A minion's task list and its readout: src/turn-progress.ts. */
   progressOf(ticket: Ticket) {
-    const p = this.progressFor(ticket.id);
-    const { total, done, current, step } = stepInfo(p, ticket.status === 'running');
-    return {
-      line: progressLine(p, ticket.status === 'running') || null,
-      step: total ? { n: step, of: total, done, label: current ? current.activeForm || current.subject : null } : null,
-    };
+    return this.turnProgress.progressOf(ticket);
   }
 
-  /**
-   * Task-list state for a ticket, built the first time it is needed: from the state saved when its last
-   * turn ended plus the events since, or from all its events when nothing usable is saved (#530: a
-   * Taskmaster's 6,000 events took 0.6 s to read cold, on the first scheme open after every restart).
-   */
   private progressFor(ticketId: number) {
-    let p = this.progress.get(ticketId);
-    if (!p) {
-      const saved = unpackPlan(this.store.getSetting(planKey(ticketId)));
-      const usable = saved != null;
-      p = saved?.p ?? createProgress();
-      const rows = this.store.planEvents(ticketId, undefined, saved?.upTo ?? 0);
-      for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
-      // Steps finishing from here on are recorded (#571); those before were, live or by backfillStepTimes.
-      p.finished = [];
-      this.progress.set(ticketId, p);
-      // The full replay is paid once: an idle minion would otherwise pay it after every restart.
-      if (!usable) this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
-    }
-    return p;
+    return this.turnProgress.progressFor(ticketId);
   }
 
-  /** Save a ticket's task-list state, which holds every event up to `upTo`. */
-  private savePlan(ticketId: number, p: ReturnType<typeof createProgress>, upTo: number) {
-    this.store.setSetting(planKey(ticketId), packPlan(p, upTo));
+  backfillStepTimes() {
+    return this.turnProgress.backfillStepTimes();
   }
 
-  /** Write the steps a ticket's plan finished since the last call to step_times (#571). */
-  private recordSteps(ticketId: number, p: ReturnType<typeof createProgress>) {
-    if (!p.finished?.length) return;
-    const t = this.store.getTicket(ticketId);
-    try {
-      // The effort it ran at: a low-effort turn's steps (#951) are low, whatever the minion's own.
-      const light = this.store.getSetting<TurnState>(turnKey(ticketId))?.light;
-      this.store.addStepTimes(ticketId, p.finished, light ? 'low' : (t?.last_effort ?? t?.effort ?? null));
-      p.finished.length = 0;
-    } catch (err) {
-      // Kept for the next event's try: the backfill has run, so nothing else would record them.
-      console.error(`Ticket ${ticketId}: could not record its finished steps, will retry:`, err);
-    }
-  }
-
-  /**
-   * The readout's ratio of what steps took to their guesses (#571), per scheme, read at most once a minute:
-   * every minion's view carries it.
-   */
-  private stepRatio(projectId: number): number {
-    const hit = this.stepRatios.get(projectId);
-    if (hit && Date.now() - hit.at < 60_000) return hit.ratio;
-    const ratio = this.store.stepRatio(projectId);
-    this.stepRatios.set(projectId, { at: Date.now(), ratio });
-    return ratio;
-  }
-
-  /**
-   * Fill step_times once from every minion's stored events (#571), so the ratio has data from its first day.
-   * One minion per tick, off the boot's hot path; a restart part way starts over, and rows already there stay.
-   */
-  async backfillStepTimes() {
-    if (this.store.getSetting('step_times_backfilled')) return;
-    for (const project of this.store.listProjects()) {
-      for (const t of this.store.listTickets(project.id)) {
-        const p = { ...createProgress(), finished: [] as FinishedStep[] };
-        // shortcut: effort is the minion's now, not when each step ran; nothing reads it yet, and live rows are right.
-        for (const row of this.store.planEvents(t.id)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
-        this.store.addStepTimes(t.id, p.finished, t.last_effort ?? t.effort ?? null);
-        await new Promise((r) => setImmediate(r));
-      }
-    }
-    this.store.setSetting('step_times_backfilled', true);
-  }
-
+  /** Whose plan a turn runs on, and the usage meters of each person's plan and Codex: src/plan-usage.ts. */
   get usage(): Usage | null {
-    return this.store.getSetting<Usage>('usage');
+    return this.planUsage.usage;
   }
 
-  /** Whose plan a person's turns run on: null for the server login (its owner's turns run on the host), else their own. */
   payerOf(uid: number | null | undefined): number | null {
-    return uid && !this.store.getUser(uid)?.server_login ? uid : null;
+    return this.planUsage.payerOf(uid);
   }
 
-  /** A plan as the minion's chip names it: payerOf's id, and whose it is (the server login's owner for it). */
-  private payerView(uid: number | null, user = (id: number) => this.store.getUser(id)): { id: number | null; name: string } | null {
-    if (!uid) return null;
-    const id = user(uid)?.server_login ? null : uid;
-    const name = user(id ?? this.store.serverLoginOwner() ?? uid)?.name;
-    return name ? { id, name } : null;
-  }
-
-  /** A turn is running with this Claude config folder now (#779: unlinking its account would end it on a 401). */
   turnIn(configDir: string): boolean {
-    return [...this.turns.values()].some((t) => t.configDir === configDir);
+    return this.planUsage.turnIn(configDir);
   }
 
-  /**
-   * A person's own plan usage, for their top-bar meter: the server login's, or their container turns', of the
-   * account in use. With several accounts (#779) it says which, and carries each account's.
-   */
-  usageOf(uid: number | null | undefined): (Usage & { account?: number; why?: string; pinned?: number; accounts?: { n: number; label: string; same?: string; usage: Usage | null }[] }) | null {
-    const payer = this.payerOf(uid);
-    const acc = uid ? this.claudeAccounts?.(uid) : null;
-    const usage = this.store.getSetting<Usage>(accountUsageKey(payer, acc?.inUse ?? 1));
-    if (!acc || acc.accounts.length < 2) return usage;
-    // `account` is where a new or cold turn goes now, and `why` (#793): its week resets soonest, it's pinned, or every account is near full.
-    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, ...(acc.why ? { why: acc.why } : {}), ...(acc.pinned ? { pinned: acc.pinned } : {}), accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
+  usageOf(uid: number | null | undefined) {
+    return this.planUsage.usageOf(uid);
   }
 
   /**
@@ -4193,81 +4025,20 @@ export class Runner {
     return this.codexReady ? this.codexReady(person) : "Codex isn't set up on this server";
   }
 
-  /** What the usage bar shows of a person's Codex: whether they can use it, the switch and its windows. */
-  codexView(uid: number | null | undefined): { ready: boolean; why: string | null; on: boolean; usage: CodexUsage | null } | null {
-    if (!uid) return null;
-    const why = this.codexWhy(uid);
-    return { ready: !why, why, on: !!this.store.getSetting<boolean>(codexSwitchKey(uid)), usage: this.store.getSetting<CodexUsage>(codexUsageKey(uid)) };
+  codexView(uid: number | null | undefined) {
+    return this.planUsage.codexView(uid);
   }
 
-  /**
-   * "Enable Codex override" (#337). Switching on resumes the person's minions waiting out a usage
-   * limit right away (on Codex now); returns why it can't, or null.
-   */
   setCodexSwitch(uid: number, on: boolean): string | null {
-    if (on) {
-      const why = this.codexWhy(uid);
-      if (why) return why;
-      this.store.setSetting(codexSwitchKey(uid), true);
-    } else this.store.deleteSetting(codexSwitchKey(uid));
-    this.broadcast({ type: 'codex', codex: this.codexView(uid), to: uid });
-    if (!on) return null;
-    const mine = (w: LimitResume) => {
-      const t = this.store.getTicket(w.ticket);
-      const p = t && this.store.getProject(t.project_id);
-      return !!p && this.turnPerson(t!, p, [], true) === uid;
-    };
-    // Due now, on Codex, spaced limitGapMs apart like any limit resume.
-    const list = this.resumes.limit.all();
-    if (list.some(mine)) this.resumes.saveLimits(list.map((w) => (mine(w) ? { ...w, at: Date.now(), tries: 0, codex: true as const } : w)));
-    return null;
+    return this.planUsage.setCodexSwitch(uid, on);
   }
 
-  /** Record a Codex turn's usage windows (account/rateLimits) as its person's, for their usage bar. */
   updateCodexUsage(l: unknown, person: number | null) {
-    const w = (x: CodexWindow | null | undefined) => (x && typeof x.usedPercent === 'number' ? { usedPercent: x.usedPercent, windowDurationMins: typeof x.windowDurationMins === 'number' ? x.windowDurationMins : null, resetsAt: typeof x.resetsAt === 'number' ? x.resetsAt : null } : null);
-    if (person === null || !l) return;
-    this.store.setSetting(codexUsageKey(person), { primary: w((l as CodexLimits).primary), secondary: w((l as CodexLimits).secondary), updatedAt: Date.now() });
-    this.broadcast({ type: 'codex', codex: this.codexView(person), to: person });
+    return this.planUsage.updateCodexUsage(l, person);
   }
 
-  /** Add a finished Codex turn's log to its minion's Codex thread. */
-  private keepCodexLog(ticketId: number, log: string | null) {
-    const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
-    if (!t || !log) return;
-    // Past what a hand-over can carry, the oldest turns go: fitLog would cut them to nothing anyway.
-    let all = t.log + log;
-    if (all.length > CODEX_LOG_MAX) all = all.slice(all.indexOf('\n', all.length - CODEX_LOG_MAX) + 1);
-    this.store.setSetting(codexThreadKey(ticketId), { ...t, log: all });
-  }
-
-  /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */
-  private updateUsage(info: unknown, ticketId?: number) {
-    const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
-    this.recordUsage(info, turn?.container && turn.person ? turn.person : null, turn?.person ?? null, turn?.account);
-  }
-
-  /** Record a Claude turn's `rate_limit_info` on `account` of `payer` (null: the server login), a minion's or an app's (#793). */
   recordUsage(info: unknown, payer: number | null, person: number | null, account?: number) {
-    const windows = (info as RateLimitInfo | null | undefined)?.unifiedWindows;
-    if (!windows) return;
-    const key = accountUsageKey(payer, account);
-    const was = this.store.getSetting<Usage>(key);
-    const now = Date.now();
-    // An event may report one window: the other keeps its last reading until it resets, so the account pick still sees a nearly
-    // spent week. Not its status: a stale 'rejected' would hold the next limit's turns until that window's reset.
-    const kept = (w: Usage['weekly'] | undefined) => (w && w.resetsAt && w.resetsAt > now ? { ...w, status: null } : null);
-    const usage: Usage = { weekly: usageWindow(windows.seven_day) ?? kept(was?.weekly), session: usageWindow(windows.five_hour) ?? kept(was?.session), updatedAt: now };
-    if (!usage.weekly && !usage.session) return;
-    this.store.setSetting(key, usage);
-    // The plan's limit lifted (#477): every window that was hit now says otherwise, so what waits on it needn't wait for the reset time.
-    const hit = (['session', 'weekly'] as const).filter((k) => was?.[k]?.status === 'rejected');
-    if (hit.length && hit.every((k) => usage[k]?.status && usage[k]!.status !== 'rejected')) {
-      if (person && account) this.onCleared?.(person, account);
-      this.limitCleared(payer);
-    }
-    // Only the payer's own meter shows it (server.ts, broadcast): the account in use's, whichever account this turn ran on.
-    this.broadcast({ type: 'usage', usage: person ? (this.usageOf(person) ?? usage) : usage, payer });
+    return this.planUsage.recordUsage(info, payer, person, account);
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

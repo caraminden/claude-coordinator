@@ -35,9 +35,15 @@ test("closing a minion frees its entries in the runner's per-minion maps", () =>
     runner.gateCounted.set(id, { ended: 1, day: 'd', gate: 'g' });
   }
   runner.close(t.id, 'done');
-  for (const f of ['progress', 'mainModels', 'gateCounted']) {
-    assert.equal(runner[f].has(t.id), false, `${f} dropped the closed minion`);
-    assert.equal(runner[f].has(other), true, `${f} kept another minion's entry`);
+  // The task lists live in src/turn-progress.ts since #2045.
+  const maps: [string, Map<number, unknown>][] = [
+    ['progress', runner.turnProgress.progress],
+    ['mainModels', runner.mainModels],
+    ['gateCounted', runner.gateCounted],
+  ];
+  for (const [f, map] of maps) {
+    assert.equal(map.has(t.id), false, `${f} dropped the closed minion`);
+    assert.equal(map.has(other), true, `${f} kept another minion's entry`);
   }
 });
 

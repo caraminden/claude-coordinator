@@ -327,9 +327,9 @@ test("a rate-limit event saying the plan works again ends the waits mid-turn, wi
   const before = turnsRun();
   setRelease('ok');
   // Still limited: nothing moves.
-  (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 1, status: 'rejected' } } });
+  (runner as any).planUsage.updateUsage({ unifiedWindows: { five_hour: { utilization: 1, status: 'rejected' } } });
   assert.ok(runner.limitWait(id)!.at > Date.now() + 60_000);
-  (runner as any).updateUsage({ unifiedWindows: { five_hour: { utilization: 0.02, status: 'allowed' } } });
+  (runner as any).planUsage.updateUsage({ unifiedWindows: { five_hour: { utilization: 0.02, status: 'allowed' } } });
   await until('the resume', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.equal(store.getTicket(id)!.state, null);
   store.deleteSetting('usage');

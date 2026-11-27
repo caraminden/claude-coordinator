@@ -408,6 +408,9 @@ test("workspace tools reach minions only once a person switches them on, and fet
     Object.keys(turn.results).filter((n) => n.startsWith('wsbox')),
     ['wsbox'],
   );
+  // Lent to everyone, the owner check (open only while the turn that got it runs, Build 10 H1) can't answer first: the
+  // fake turn may already have ended, and this is about the workspace tools being off.
+  await call(`/api/machines/${machine.id}/roles`, { method: 'PATCH', body: { role: 'tools', everyone: true } });
   const refused = await fetch(`${base}/api/machines/${machine.id}/session?server=ws`, { headers: { Authorization: `Bearer ${turn.token}` } });
   assert.equal(refused.status, 503);
   await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: 'yes' } }), /400/);

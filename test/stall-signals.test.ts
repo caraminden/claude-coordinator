@@ -183,7 +183,7 @@ test('a land.sh the minion runs itself counts as a ship; a clean one does not', 
 });
 
 test('nextStep follows the tiers: Sonnet up to Opus medium, then high, then Fable; Fable off stops at Opus high', () => {
-  const after = '2026-12-01';
+  const after = '2026-12-15';
   assert.deepEqual(nextStep('claude-sonnet-5-5', 'medium', true, after), { model: 'claude-opus-5-5', effort: 'medium' });
   assert.deepEqual(nextStep('claude-sonnet-5-5', 'medium', true, '2026-11-20'), { model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' }, 'the advisor trial comes first while it runs');
   assert.deepEqual(nextStep('claude-opus-5-5', 'medium'), { model: 'claude-opus-5-5', effort: 'high' });

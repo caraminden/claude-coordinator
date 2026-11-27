@@ -33,9 +33,9 @@ export const TIERS = [
     short: 'for known-shape work',
   },
   { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
-  // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
+  // The advisor trial (#817) has its own row (extended to 2026-12-14: Cara, 2026-11-27, picked "Keep to Dec 14" on #2219's card after its readout): it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
   {
-    work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)',
+    work: 'in the advisor trial (#817) until 2026-12-14, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)',
     model: 'claude-sonnet-5-5+opus-advisor',
     effort: 'medium',
   },

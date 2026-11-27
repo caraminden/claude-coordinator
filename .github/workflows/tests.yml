@@ -74,10 +74,6 @@ jobs:
       - &devdeps
         name: devDependencies for the tests
         run: npm ci --ignore-scripts --no-audit --no-fund
-      # sqlite3 and libatomic1, pwsh with PSScriptAnalyzer, the .NET 8 SDK and Chrome's headless shell, each once in the
-      # runner's own home (.github/actions/ci-tools, shared with the shards and ci-cache.yml).
-      - name: the tools the tests need
-        uses: ./.github/actions/ci-tools
       # Turns in tests start their units with systemd-run --user, as on perigee. Without the user's manager they
       # fall back to running inside the server, so the real path would go untested (and since #519 that fallback
       # raises an alert a test counts).
@@ -92,6 +88,10 @@ jobs:
       - name: clear what earlier jobs left running
         continue-on-error: true
         run: node test/ci-leftovers.ts start
+      # sqlite3 and libatomic1, pwsh with PSScriptAnalyzer, the .NET 8 SDK and Chrome's headless shell, each once in the
+      # runner's own home (.github/actions/ci-tools, shared with the shards and ci-cache.yml).
+      - name: the tools the tests need
+        uses: ./.github/actions/ci-tools
       # Two clock keepers skew the WSL clock, which every distro on the PC shares (#542): WSL's own chrony steers it
       # to the Windows clock while a distro's systemd-timesyncd steps it to NTP, and chrony retunes the kernel tick
       # after every step. On 2026-11-11 the clocks ran 7% fast, then 2% slow after a reboot, with the wall clock

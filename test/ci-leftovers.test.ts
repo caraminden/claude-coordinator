@@ -148,16 +148,25 @@ test('what runs from this runner’s checkout is its own, and from another runne
   for (const v of ['', '/']) assert.deepEqual(ownDirs({ RUNNER_TEMP: '/r/_temp', GITHUB_WORKSPACE: v }), [jobTmp('/r/_temp'), '/r/_temp'], 'never the whole disk');
 });
 
-// Every workflow that runs Citadel's tests on the shared runner sweeps at its start and, however the job went, as its last step.
+// Every workflow job that runs Citadel's tests on the shared runner sweeps at its start and, however the job went, as its
+// last step. A job on GitHub's own runners (tests.yml's shards, #2209) starts on a fresh machine, with nothing to sweep.
 test('every job that runs tests on the runners sweeps at its start and end', () => {
   for (const f of ['tests.yml', 'flake-proof.yml', 'citadel-heavy.yml']) {
     const text = readFileSync(join(import.meta.dirname, '../.github/workflows', f), 'utf8');
+    const jobs = text
+      .slice(text.indexOf('\njobs:\n'))
+      .split(/\n(?=  [\w-]+:\n)/)
+      .filter((j) => /^    runs-on: /m.test(j) && !/^    runs-on: ubuntu-latest$/m.test(j));
+    assert.ok(jobs.length > 0, `${f}: a job on the shared runner`);
     // The steps' own commands, so one commented out or turned into text doesn't count.
     const command = (mode: string) => new RegExp(`^        run: (?:if \\[ -f test/ci-leftovers\\.ts \\]; then )?node test/ci-leftovers\\.ts ${mode}(?:; fi(?: #.*)?)?$`, 'm');
-    const start = text.search(command('start'));
-    assert.ok(start > text.indexOf('actions/setup-node') && start < text.indexOf('- name: pwsh and PSScriptAnalyzer'), `${f}: after node, before the work`);
-    const last = text.trimEnd().split('\n      - ').at(-1)!;
-    assert.match(last, /^        if: always\(\)$/m, `${f}: its last step runs however the job went`);
-    assert.match(last, command('end'), `${f}: its last step sweeps`);
+    for (const job of jobs) {
+      const start = job.search(command('start'));
+      const work = job.search(/- name: (?:pwsh and PSScriptAnalyzer|the tools the tests need)/);
+      assert.ok(start > job.indexOf('actions/setup-node') && start < work, `${f}: after node, before the work`);
+      const last = job.trimEnd().split('\n      - ').at(-1)!;
+      assert.match(last, /^        if: always\(\)$/m, `${f}: its last step runs however the job went`);
+      assert.match(last, command('end'), `${f}: its last step sweeps`);
+    }
   }
 });

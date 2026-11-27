@@ -82,6 +82,7 @@ gh_quota() {
 burn_list() { paste -sd, | sed 's/,/, /g'; }
 burn_advice() {
   local p u o r="fix the race (a shared path, a fixed port, a timing assumption), not the wait"
+  set -- "${1-$failed}" # a rider passes its own log
   p=$(sed -n 's/.*burn-in: \(refused: \)\{0,1\}\([^ ]*\): alone: failed.*/\2/p' <<<"$1" | sort -u)
   u=$(sed -n 's/.*burn-in: \(refused: \)\{0,1\}\([^ ]*\): alone: no time left.*/\2/p' <<<"$1" | sort -u)
   o=$(sed -n 's/.*burn-in: \([^ ]*\): failed in [0-9]* of [0-9]* copies.*/\1/p' <<<"$1" | sort -u | grep -vxF -f <(echo "$p") || true)

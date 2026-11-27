@@ -28,6 +28,7 @@ const BENCHED = ['cut_off', 'flake_only', 'skipped_tests', 'burn_lines', 'train_
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
   train_tail: "cuts a red's log for the rider it refuses",
+  burn_advice: 'words a burn-in refusal another check already made (plain red, race, or either; #2141)',
   ci_failed: 'fetches the log and writes its flake and skipped-test lines',
   ci_gate: 'waits for the run and fetches its log',
   gate: 'calls cut_off, flake_only and known_flakes, benched here',

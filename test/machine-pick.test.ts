@@ -70,16 +70,16 @@ before(async () => {
   procs.push(srv.proc);
 });
 
-/** A machine whose agent offers workspace `w`, ticked, with its Windows screen role lent to these schemes. */
+/** A machine whose agent offers workspace `w`, ticked, with its Windows screen role lent to these schemes, to every turn there (a person's own machine opens only to the turns that got it at their start: the old minion's token, after its turn ended, still has to reach the next PC). */
 async function windowsMachine(name: string, schemes: number[]) {
   const dir = join(root, name);
   mkdirSync(join(dir, 'w'), { recursive: true });
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ workspaces: { w: { path: join(dir, 'w'), tasks: { hi: { run: [process.execPath, '-e', 'console.log(1)'] } } } } }));
   const { machine, token } = await call('/api/machines', { name }, 'POST');
-  const started = startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
+  const started = startMachineAgent({ base: srv.base, token, os: { os: 'windows', name: 'Windows 11' }, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
   await until(`${name} to report its workspace`, async () => (await call('/api/machines')).find((m: { name: string; workspaces: unknown[] }) => m.name === name && m.workspaces.length));
   await call(`/api/machines/${machine.id}`, { workspace_tools: true, lend: { server: null, workspaces: ['w'] } }, 'PATCH');
-  await call(`/api/machines/${machine.id}/roles`, { role: 'screen', on: true, projects: schemes }, 'PATCH');
+  await call(`/api/machines/${machine.id}/roles`, { role: 'screen', on: true, projects: schemes, everyone: true }, 'PATCH');
   return { id: machine.id as number, ...started };
 }
 
@@ -153,7 +153,7 @@ test('a GPU job with no machine named goes to a machine whose GPU jobs role is l
   mkdirSync(join(dir, 'jobs'), { recursive: true });
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ jobs: { dir: join(dir, 'jobs'), folders: {}, max_disk_gb: 10, gpu: true } }));
   const { machine, token } = await call('/api/machines', { name: 'gpu-a' }, 'POST');
-  const gpu = startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
+  const gpu = startMachineAgent({ base: srv.base, token, os: { os: 'windows', name: 'Windows 11' }, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
   await until('gpu-a online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'gpu-a' && m.online));
   await call(`/api/machines/${machine.id}/roles`, { role: 'gpu', on: true, projects: [lent.id] }, 'PATCH');
 

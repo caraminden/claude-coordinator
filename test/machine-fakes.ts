@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { jsonLines, REPO } from './helpers.ts';
 
 /**
@@ -81,9 +82,26 @@ process.stdin.resume();
   );
   chmodSync(fakeClaude, 0o755);
 
-  /** `run` is the agent's command line after the token (default: the stand-in MCP server); `env` is added to the process environment. */
-  function startMachineAgent({ base, token, run = ['--', process.execPath, mcpServer], env = {} }: { base: string; token: string; run?: string[]; env?: NodeJS.ProcessEnv }) {
-    const agent = spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...env } });
+  // Preloaded by an agent that claims another kind of PC: its info POST says CC_FAKE_OS (a real agent reports the OS it runs on).
+  const claimOs = join(root, 'claim-os.mjs');
+  writeFileSync(
+    claimOs,
+    `
+const real = globalThis.fetch;
+globalThis.fetch = (url, init) => {
+  if (String(url).endsWith('/api/machines/info') && typeof init?.body === 'string') {
+    const body = JSON.parse(init.body);
+    if (body.report) init = { ...init, body: JSON.stringify({ ...body, report: { ...body.report, os: process.env.CC_FAKE_OS, os_name: process.env.CC_FAKE_OS_NAME } }) };
+  }
+  return real(url, init);
+};
+`,
+  );
+
+  /** `run` is the agent's command line after the token (default: the stand-in MCP server); `env` is added to the process environment; `os` makes it report that OS and its name (a PC it isn't), for a role only that PC can do. */
+  function startMachineAgent({ base, token, run = ['--', process.execPath, mcpServer], env = {}, os }: { base: string; token: string; run?: string[]; env?: NodeJS.ProcessEnv; os?: { os: 'windows' | 'linux' | 'macos'; name: string } }) {
+    const fake = os ? { CC_FAKE_OS: os.os, CC_FAKE_OS_NAME: os.name, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(claimOs)}` } : {};
+    const agent = spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...fake, ...env } });
     procs.push(agent);
     let out = '';
     agent.stdout!.on('data', (d) => (out += d));

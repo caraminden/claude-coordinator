@@ -47,4 +47,4 @@ on perigee, and hit about 1 green ship in 11.
   the cap's clock, and those files gave no verdict anyway.
 - Bigger levers. Cara picked two on #1606's card (2026-11-22): the WSL VM went from 16 to 24 of the desktop's 32
   threads (done by hand the same day), and a minion speeds up the slow land-* test files. Not picked: GitHub's own
-  runners (Actions minutes).
+  runners (Actions minutes). Reversed by ADR 0042 (2026-11-27): free on a public repo, a ship's run is on them now.

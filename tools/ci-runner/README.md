@@ -731,3 +731,9 @@ When a scheme's CI PC is off for a while, set the repo variable `CI_RUNNER` to `
 delete it (`gh variable delete CI_RUNNER --repo <owner>/<repo>`) to come back. Hosted jobs spend
 Actions minutes, and the caraminden account can't run them at all while its payment fails, so ask
 Cara before switching.
+
+Citadel's own repo is the other way round (ADR 0042): a ship's run (`land/**`) runs on GitHub's runners as 20 shards,
+free on this public repo, and land.sh sends it to the desktop by itself when they don't all start within a minute or
+the run fails before any test. Everything else (the nightly, `check/**`, `early/**`, runs by hand) stays on the
+desktop. `gh variable set CI_RUNNER --body desktop --repo caraminden/claude-coordinator` sends ships' runs to the
+desktop too; `gh variable delete CI_RUNNER --repo caraminden/claude-coordinator` brings them back.

@@ -50,6 +50,8 @@ tools/ci-runner/win-ports.sh
 # lane-only: src/land.ts (run-tests.sh: no pipeline test reads it, so it alone runs the product tier)
 src/land.ts
 .github/workflows/tests.yml
+.github/workflows/ci-cache.yml
+.github/actions/ci-tools/action.yml
 kit/skills/scheme-setup/templates/
 test/script-env.ts
 test/git.ts

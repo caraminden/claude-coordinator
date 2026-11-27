@@ -27,6 +27,8 @@ paths:
   - "tools/citadel-node.cjs"
   - "src/land.ts"
   - ".github/workflows/tests.yml"
+  - ".github/workflows/ci-cache.yml"
+  - ".github/actions/ci-tools/action.yml"
   - "kit/skills/scheme-setup/templates/**"
   - "test/script-env.ts"
   - "test/land-fixture.ts"

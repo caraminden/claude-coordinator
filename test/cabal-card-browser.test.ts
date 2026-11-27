@@ -24,7 +24,7 @@ const STUB = pageStub(
   cabals[0].members.forEach((m, i) => { m.id = 200 + i; m.number = 20 + i; });
   function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [lead, other], seen: {}, person_notes: {}, pins: [], cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
+    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
     let m;
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: m[1] === '100' ? coordinator : lead });
@@ -84,4 +84,13 @@ test('opening a card that has only its Overseer to show moves nothing', { skip }
   assert.equal(await page.eval(hit), true, 'open: the bottom of the Preview link is the link');
   await page.eval(`document.querySelector('.cabal-toggle').click()`);
   assert.equal(await page.eval(hit), true, 'shut: the bottom of the Preview link is the link');
+});
+
+// #2240: a cabal formed while the page was away (asleep, or its stream down over a restart) had no card until the list
+// next changed: the reconnect's resync took the builds from the answer and left the cabals.
+test('a resync brings the card of a cabal formed while the stream was down', { skip }, async () => {
+  const page = await browser.page(`${base}?late#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the plain build group to draw', `document.querySelector('.g-build .thread-row') && !document.querySelector('.cabal-card')`);
+  await page.eval(`(async () => { window.formed = true; await (await import('./resync.js')).resync(); })()`);
+  assert.equal(await page.eval(`!!document.querySelector('.cabal-card .thread-row') && !document.querySelector('.g-build')`), true, "the build's section is its cabal's card");
 });

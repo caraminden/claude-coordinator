@@ -86,7 +86,7 @@ export async function resync() {
 /** @param {View} v */
 async function refreshLists(v) {
   const was = { rows: new Map(v.tickets), coordinator: v.coordinator, ticket: v.ticket };
-  const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, chat] = await Promise.all([api(`api/projects/${v.projectId}?tickets=open`), api(`api/projects/${v.projectId}/artifacts`), v.id ? api(`api/tickets/${v.id}`) : null]);
+  const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds, build_previews, cabals }, artifacts, chat] = await Promise.all([api(`api/projects/${v.projectId}?tickets=open`), api(`api/projects/${v.projectId}/artifacts`), v.id ? api(`api/tickets/${v.id}`) : null]);
   if (view !== v) return; // you went to another view meanwhile; its own load is fresh
   cur().coordinator = freshest(cur().coordinator, was.coordinator, coordinator);
   cur().tickets = mergeOpen(tickets, dismissed, was.rows); // the dismissed rows already read stay (closedlist.js)
@@ -95,6 +95,7 @@ async function refreshLists(v) {
   cur().personNotes = person_notes ?? cur().personNotes;
   cur().pins = pins ?? cur().pins;
   cur().builds = builds ?? cur().builds;
+  cur().cabals = cabals ?? cur().cabals; // a cabal formed or closed while the stream was down (#2240)
   cur().buildPreviews = build_previews ?? cur().buildPreviews;
   if (cur().id) markSeen(/** @type {number} */ (cur().id));
   renderSidebar();

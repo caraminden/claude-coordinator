@@ -125,7 +125,11 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     writeFileSync(join(srv.root, 'sample.json'), line);
     writeFileSync(join(ps, 'powershell.exe'), `#!/bin/sh\ncase "$*" in *sample-load.ps1*) cat '${join(srv.root, 'sample.json')}'; exit 0;; *keep-runners.ps1*) echo "holding: $*"; exit 0;; esac\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n`);
     chmodSync(join(ps, 'powershell.exe'), 0o755);
-    const made = await srv.call('/api/machines', { name: 'desk-runners' });
+    // Its owner is a member who is no admin (an admin is in every scheme), with a scheme of their own.
+    const person = (await srv.call('/api/people', { name: 'Mira' })).data;
+    const invited = await fetch(`${srv.base}/api/invite/${person.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
+    const mira = srv.as({ cookie: invited.headers.get('set-cookie')!.split(';')[0] });
+    const made = await mira('/api/machines', { name: 'desk-runners' });
     assert.equal(made.status, 201, JSON.stringify(made.data));
     const tokenFile = join(srv.root, 'machine-token');
     writeFileSync(tokenFile, `${made.data.token}\n`);
@@ -143,10 +147,10 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid} -SqueezePercent 30 -CitadelSqueezePercent 10`), held);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
 
-    const project = (await srv.call('/api/projects', { name: 'Vault' })).data;
-    // A new runner host starts with no scheme (#438): until an admin adds one, it acts for none.
-    assert.equal((await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' })).status, 409);
-    assert.equal((await srv.call(`/api/machines/${made.data.machine.id}`, { projects: [project.id] }, 'PATCH')).status, 200);
+    // A new runner host acts for every scheme its owner is in (Build 10: one kind of machine, spec section 3), and for none they aren't.
+    const other = (await srv.call('/api/projects', { name: 'Vault' })).data;
+    assert.equal((await srv.call(`/api/projects/${other.id}/ci-runners`, { op: 'list' })).status, 409, "a scheme its owner isn't in");
+    const project = (await mira('/api/projects', { name: "Mira's" })).data;
     const started = await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' });
     assert.equal(started.status, 202, JSON.stringify(started.data));
     const { job } = (await srv.call(`/api/projects/${project.id}/ci-runners?wait=20`)).data;

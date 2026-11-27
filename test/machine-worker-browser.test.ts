@@ -1,4 +1,4 @@
-// Minion turns on a machine's row (Build 7 T5, public/machine-worker-row.js) in a real browser against the real server,
+// Minion turns on a computer's card (Build 7 T5, public/machine-worker-row.js; Build 10 H3: the For me tile) in a real browser against the real server,
 // in a scheme of its own, with a worker that says what the real one says (test/worker-join.test.ts runs that one).
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -36,19 +36,17 @@ after(async () => {
 });
 
 const wait = (what: string, expression: string) => waitFor(page, what, expression);
-const row = (name: string) => `document.querySelector('.machine-row[data-name="${name}"]')`;
+const row = (name: string) => `document.querySelector('.mcard[data-name="${name}"]')`;
 const worker = (sel = '', name = 'my-pc') => `${row(name)}?.querySelector('.worker${sel ? ` ${sel}` : ''}')`;
 const textOf = (sel = '') => page.eval<string>(`${worker(sel)}?.textContent ?? ''`);
-/** Its Minion turns card (Build 7 M3: a card per role, the worker's part inside it), and that card's switch. */
-const card = (name = 'my-pc') => `${row(name)}?.querySelector('.role-card[data-role=turns]')`;
-const turnsSwitch = (name = 'my-pc') => `${card(name)}?.querySelector('.rules-switch')`;
-/** The card's text: its state's word is the chip in the card's head, the worker's part below says why. */
-const cardText = () => page.eval<string>(`${card()}?.textContent ?? ''`);
+/** The For me tile (take B): Minion turns' switch, or Set up in its place until the worker is installed. */
+const tile = (name = 'my-pc') => `${row(name)}?.querySelector('.mcard-tile.me')`;
+const turnsSwitch = (name = 'my-pc') => `${tile(name)}?.querySelector('.rules-switch')`;
+/** The tile's text: its state is the big line, and the worker's part below says why. */
+const cardText = () => page.eval<string>(`${row('my-pc')}?.textContent ?? ''`);
 async function open(name: string) {
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/machines` });
-  await wait(`${name}'s line`, `!!${row(name)}`);
-  await page.eval(`(() => { ${row(name)}.open = true; })()`);
-  await wait(`${name}'s switch`, `!!${turnsSwitch(name)}`);
+  await wait(`${name}'s card`, `!!${row(name)}`);
 }
 /** What the worker's program posts, over and over until it says something else. */
 const says = { image: { state: 'ready', text: 'claude 2' }, github: false as boolean, signedIn: false as boolean, test: null as null | { id: string; done: boolean; lines: { key: string; state: string; text: string }[] } };
@@ -62,12 +60,13 @@ async function word() {
   asked = (await post('/api/machines/worker', { boot: 'b', installed: 1, host: 'MY-PC', wsl: true, caps: { workers: 3, threads: 4, memory_gb: 10, disk_gb: 80 }, image: says.image, github: says.github, disk_gb: 12, full: false, test: says.test })).test;
 }
 
-test('switched on, the row shows the command at once, and it follows the caps as they are typed', { skip }, async () => {
-  assert.equal(await page.eval(`${turnsSwitch()}.id`), `role-switch-${id}-turns`);
-  assert.equal(await page.eval(`${turnsSwitch()}.getAttribute('aria-checked')`), 'false');
-  await page.eval(`${turnsSwitch()}.click()`);
+test('switched on, the card shows the command at once, and it follows the caps as they are typed', { skip }, async () => {
+  // Not set up, the tile offers Set up in the switch's place: it switches turns on and opens the steps (spec section 4).
+  assert.equal(await page.eval(`${tile()}.querySelector('.rules-switch')`), null);
+  await page.eval(`[...${tile()}.querySelectorAll('button')].find((b) => b.textContent === 'Set up').click()`);
   // At once: before the server has answered.
   assert.equal(await page.eval(`${turnsSwitch()}.getAttribute('aria-checked')`), 'true');
+  assert.equal(await page.eval(`${turnsSwitch()}.getAttribute('aria-label')`), 'Minion turns on my-pc');
   await wait('the command', `!!${worker('.worker-command pre')}`);
   const command = () => page.eval<string>(`${worker('.worker-command pre')}.textContent`);
   assert.match(await command(), new RegExp(`CC_MACHINE_TOKEN='${token}'.*--workers 6 --threads 8 --memory 24 --disk 60`));
@@ -92,22 +91,13 @@ test('connected, it asks for the sign-ins that are missing and shows the ones th
   await word();
   beat = setInterval(() => void word().catch(() => {}), 1000);
   await wait('the sign-in command', `[...${worker()}.querySelectorAll('.worker-sign pre')].some((p) => p.textContent.trim() === 'wsl -d citadel-workers -u root --exec /usr/local/bin/citadel-worker signin')`);
-  assert.match(await cardText(), /Needs a Claude sign-in[^]*No turn starts there until its owner signs in/);
+  assert.match(await cardText(), /Sign in to Claude here[^]*No turn starts there until its owner signs in/);
   assert.equal(await page.eval(`${worker()}.textContent.includes('ccm_')`), false, 'the token is put away once it is set up');
   says.signedIn = says.github = true;
   await wait('both sign-ins', `/Claude: signed in/.test(${worker()}.textContent) && /GitHub: signed in/.test(${worker()}.textContent)`);
-  // Switched on, it was lent to every scheme its owner is in (M3); untick Delve on its card and it is lent to none.
-  const lent = async () => (ok(await srv.call(`/api/machines/${id}/roles`)).roles as { role: string; projects: number[] }[]).find((r) => r.role === 'turns')!.projects;
-  const chip = `[...${card()}.querySelectorAll('.role-schemes .chip')].find((c) => c.textContent === 'Delve')`;
-  assert.equal(await page.eval(`${chip}.getAttribute('aria-pressed')`), 'true');
-  assert.match(await cardText(), /Not tested yet/);
-  await page.eval(`${chip}.click()`);
-  await wait('lent to no scheme', `/Lent to no scheme/.test(${card()}.textContent)`);
-  await until('the untick saved', async () => (await lent()).length === 0);
-  await page.eval(`${chip}.click()`);
-  await wait('the next step', `/Not tested yet/.test(${card()}.textContent)`);
-  await until('Delve lent again, saved', async () => (await lent()).join() === String(projectId));
-  assert.match(await page.eval<string>(`${row('my-pc')}.querySelector('summary').textContent`), /Setting up.*Minion turns: not tested yet/);
+  // Take B drops the per-scheme chips on Minion turns (they are only its owner's: spec section 2), and with them "Lent to no scheme".
+  assert.match(await cardText(), /No turn starts there until its self-test passes/);
+  assert.match(await page.eval<string>(`${row('my-pc')}.querySelector('.mcard-tile.me .mcard-big').textContent`), /Not tested yet/);
 });
 
 test('the self-test runs from the row, line by line, and the row ends Ready; the caps then change by a command on that PC', { skip }, async () => {

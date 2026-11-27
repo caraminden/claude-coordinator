@@ -53,7 +53,7 @@ before(async () => {
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/machines` });
-  await wait('the machines', `document.querySelectorAll('.machine-row').length === 5`);
+  await wait('the machines', `document.querySelectorAll('.mcard').length === 5`);
   // DELETE is held until the test lets it go, and answered as `window.answer` says (null: the server's own).
   await page.eval(`(() => {
     window.confirm = () => true;
@@ -72,11 +72,11 @@ after(async () => {
 });
 
 const wait = (what: string, expression: string) => waitFor(page, what, expression);
-const row = (name: string) => `document.querySelector('.machine-row[data-name="${name}"]')`;
+const row = (name: string) => `document.querySelector('.mcard[data-name="${name}"]')`;
 const panel = (name: string) => `document.querySelector('.machine-removal[data-name="${name}"]')`;
 const button = (name: string) => `[...${row(name)}.querySelectorAll('.machine-buttons button')].find((b) => /^Remov/.test(b.textContent))`;
 async function remove(name: string, answer: object | null) {
-  await page.eval(`(() => { window.go = null; window.answer = ${JSON.stringify(answer)}; ${row(name)}.open = true; })()`);
+  await page.eval(`(() => { window.go = null; window.answer = ${JSON.stringify(answer)}; ${row(name)}.querySelector('.mcard-details').open = true; })()`);
   await wait('its Remove button', `!!${button(name)}`);
   await page.eval(`${button(name)}.click()`);
 }
@@ -88,11 +88,11 @@ const go = async () => {
 test('a failed remove puts the row back, with a toast that retries', { skip }, async () => {
   await remove('busy-pc', { status: 500, body: { error: 'no luck' } });
   // At once: before the server has answered.
-  assert.match(await page.eval<string>(`${row('busy-pc')}.querySelector('summary').textContent`), /Removing…/);
+  assert.match(await page.eval<string>(`${row('busy-pc')}.querySelector('.mcard-head').textContent`), /Removing…/);
   assert.equal(await page.eval(`${button('busy-pc')}.disabled`), true);
   await go();
   await wait('the toast', `/Couldn't remove busy-pc: no luck[^]*Retry/.test(document.body.textContent)`);
-  assert.doesNotMatch(await page.eval<string>(`${row('busy-pc')}.querySelector('summary').textContent`), /Removing…/);
+  assert.doesNotMatch(await page.eval<string>(`${row('busy-pc')}.querySelector('.mcard-head').textContent`), /Removing…/);
   assert.equal(await page.eval(`!!${panel('busy-pc')}`), false);
 });
 
@@ -101,8 +101,10 @@ test('while it drains (202) the row stays, Removing…, with the command and its
   await go();
   await wait('the command', `!!${panel('busy-pc')}?.querySelector('pre.cui-shell[data-tone=powershell]')`);
   assert.equal(await page.eval(`${panel('busy-pc')}.querySelector('pre').textContent`), reply.powershell);
-  assert.match(await page.eval<string>(`${row('busy-pc')}.querySelector('summary').textContent`), /Removing…/);
-  assert.equal(await page.eval(`!!${row('busy-pc')}.querySelector('.rules-switch')`), false, 'no switch to turn minion turns back on');
+  assert.match(await page.eval<string>(`${row('busy-pc')}.querySelector('.mcard-head').textContent`), /Removing…/);
+  // Take B keeps its two switches on the card; one being removed can be switched off but nothing new switches on, minion turns included.
+  await wait('nothing to switch on', `[...${row('busy-pc')}.querySelectorAll('.mcard-tile .rules-switch')].every((s) => s.disabled || s.getAttribute('aria-checked') === 'true')`);
+  assert.equal(await page.eval(`${row('busy-pc')}.querySelector('.mcard-tile.me .rules-switch').disabled`), true, 'no switch to turn minion turns back on');
   // Its copies are cleared (here: removed now, from outside this page): the row goes and the command stays.
   const listed = ok(await srv.call('/api/machines'));
   const machines: { id: number; name: string }[] = listed.machines ?? listed;
@@ -134,7 +136,7 @@ test('a machine added later under a removed one’s id starts clean', { skip }, 
   await wait('the row gone', `!${row('old-pc')}`);
   assert.equal((await worker('new-pc')).id, oldId, 'the same id again');
   await wait('the new row', `!!${row('new-pc')}`);
-  assert.doesNotMatch(await page.eval<string>(`${row('new-pc')}.querySelector('summary').textContent`), /Removing…/);
+  assert.doesNotMatch(await page.eval<string>(`${row('new-pc')}.querySelector('.mcard-head').textContent`), /Removing…/);
   assert.match(await page.eval<string>(`${panel('old-pc')}.textContent`), /old-pc is removed/);
 });
 
@@ -149,7 +151,7 @@ test('a reload while it drains keeps Removing… and the command, from the serve
     assert.equal((await srv.call(`/api/machines/${pc.id}`, undefined, 'DELETE')).status, 202);
     await page.send('Page.reload', {});
     await wait('the command again', `!!${panel('drain-pc')}?.querySelector('pre.cui-shell[data-tone=powershell]')`);
-    assert.match(await page.eval<string>(`${row('drain-pc')}.querySelector('summary').textContent`), /Removing…/);
+    assert.match(await page.eval<string>(`${row('drain-pc')}.querySelector('.mcard-head').textContent`), /Removing…/);
     assert.match(await page.eval<string>(`${panel('drain-pc')}.textContent`), /Don't run this yet[^]*wsl --unregister citadel-workers/);
   } finally {
     db.close();

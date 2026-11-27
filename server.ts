@@ -102,6 +102,8 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
+import { heavyNow } from './src/heavy-now.ts';
+import { appOwners } from './src/host-load.ts';
 import type { GhJob } from './src/gh-bodies.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
@@ -2702,6 +2704,20 @@ const app: App = {
   runnerCap,
   heavy: heavyPlacer,
   buildPlacer,
+  heavyNow: () =>
+    heavyNow({
+      perigee: heavySnapshot.get(),
+      owners: appOwners(
+        store.listContraptions(),
+        () => true,
+        (id) => store.getProject(id)?.name,
+      ),
+      machines: store.listMachines(),
+      jobs: store.machineJobs({ states: ['queued', 'starting', 'running'] }, 200).reverse(),
+      balanced: (id) => balancer.jobsOn(id),
+      waits: (job) => jobs.waits(job),
+      scheme: (id) => store.getProject(id)?.name ?? '',
+    }),
   chunked,
   claude: claudeLink,
   codex: codexLink,

@@ -169,6 +169,8 @@ export interface HostLoad {
   maxPressure: number;
   loadWaitS: number;
   week: HostWeek[];
+  /** The week by where each job ran: 'here', 'on:<machine>' or 'ci:<owner>/<repo>' (#2109). */
+  places: { place: string; jobs: number; medianS: number; longestS: number; on: { why: string; jobs: number }[] }[];
   long: HostLongJob[];
   now: number;
   minions?: HostMinion[];

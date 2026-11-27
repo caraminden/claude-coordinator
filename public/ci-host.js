@@ -17,6 +17,10 @@ const held = (j, now) => span((now - j.since) / 1000);
 /** @type {Record<string, string>} */
 const WHY = { load: 'free slot, box busy', first: 'a deploy goes first', line: 'in line behind another job' };
 /** @type {Record<string, string>} */
+const WAITED = { line: 'in line', slots: 'all slots busy', load: 'perigee busy', memory: 'memory', first: 'a deploy', forced: 'gave up on the load', room: 'room there', offline: 'machine offline', turn: "the repo's CI turn", runner: 'a CI runner' };
+/** @param {string} place 'here', 'on:<machine>' or 'ci:<owner>/<repo>' */
+const placeName = (place) => (place === 'here' ? 'perigee' : place.startsWith('on:') ? place.slice(3) : `CI, ${place.slice(3)}`);
+/** @type {Record<string, string>} */
 const KIND = { deploy: 'app deploy', apk: 'APK build', app: 'app step', turn: 'minions' };
 /** @type {Set<string>} */
 const opened = new Set(); // schemes whose parts a click opened in the waits table
@@ -66,7 +70,50 @@ export function hostLoadBlock(l) {
       : emptyCard('No heavy jobs this week', 'Builds and test runs that take a slot show here with how long they waited.', { mark: '·', hue: 'muted' }),
   );
 
-  return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'), h('div', { class: 'settings-rows' }, slots, line, holdRow(l), longRow(l), week, minionsRow(l)));
+  // The same week by where each job ran (#2109), from the history's place column.
+  const away = l.places.filter((p) => p.place !== 'here').reduce((a, p) => a + p.jobs, 0);
+  const [places] = settingsRow(
+    { key: 'host-places', icon: 'box', hue: 'accent', title: 'Where jobs ran this week', summary: l.places.length ? `${total.toLocaleString()} jobs · ${away.toLocaleString()} off perigee` : 'No heavy jobs ran this week' },
+    l.places.length
+      ? showFirst({
+          key: 'host-places',
+          items: l.places,
+          n: 5,
+          noun: 'places',
+          wrap: (ps) =>
+            h(
+              'table',
+              { class: 'look-table host-week' },
+              h('thead', {}, h('tr', {}, h('th', {}, 'Place'), h('th', { class: 'num' }, 'Jobs'), h('th', { class: 'num host-median' }, 'Median wait'), h('th', {}, 'Waited on'))),
+              h(
+                'tbody',
+                {},
+                ...ps.map((p) =>
+                  h(
+                    'tr',
+                    {},
+                    h('td', {}, placeName(p.place)),
+                    h('td', { class: 'num' }, p.jobs.toLocaleString()),
+                    h('td', { class: 'num host-median' }, span(p.medianS)),
+                    h(
+                      'td',
+                      {},
+                      p.on.length
+                        ? p.on
+                            .slice(0, 3)
+                            .map((o) => `${WAITED[/** @type {keyof typeof WAITED} */ (o.why)] ?? o.why} ${o.jobs}`)
+                            .join(', ')
+                        : 'nothing',
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        })
+      : emptyCard('No heavy jobs this week', 'Builds and test runs show here by the machine or CI they ran on.', { mark: '·', hue: 'muted' }),
+  );
+
+  return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'), h('div', { class: 'settings-rows' }, slots, line, holdRow(l), longRow(l), week, places, minionsRow(l)));
 }
 
 /** @param {{ schemeId?: number; scheme?: string | number; number?: number }} m */

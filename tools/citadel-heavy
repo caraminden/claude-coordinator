@@ -22,9 +22,11 @@
 # every suite slowed down and timing-sensitive tests went red. When jobs queue on a busy box, wait.
 #
 # History (#596): when a job ends it appends one tab-separated line to $CITADEL_HEAVY_DIR/history: when it
-# started (ISO), who, what, what it waited on last (none, line, slots, load, memory or forced), the wait and the run in
-# seconds, the exit status and the CPU pressure it was admitted at (- without one). It answers how long jobs wait,
-# on what, per scheme and command, which nothing else keeps. One short append per line, so jobs in several
+# started (ISO), who, what, where it ran (here, on:<machine> or ci:<owner>/<repo>; #2109), the wait and the run in
+# seconds, the exit status, the CPU pressure it was admitted at (- without one), its CPU seconds (- unmeasured) and what
+# it waited on last (here: none, line, slots, load, memory, first, forced or light; on a machine: none, room or offline
+# there, or what it waited on in perigee's line first; on CI: none, turn for the repo's CI turn, or runner). It answers
+# how long jobs wait, on what and where, per scheme and command, which nothing else keeps. One short append per line, so jobs in several
 # containers can't interleave; a failed write is ignored. Past about 5 MB the job that notices keeps the newest
 # half, by a rename. Nested calls and runs without a lock folder write nothing.
 #
@@ -238,7 +240,7 @@ if [ -z "$first" ] && [ "${CITADEL_HEAVY_JUDGE:-}" != 0 ]; then
     ! command -v ionice >/dev/null || nicer+=(ionice -c 3)
     "${nicer[@]}" "$@"
     status=$?
-    { mkdir -p "$dir" && printf '%s\t%s\t%s\tlight\t0\t%s\t%s\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$((($(us) - t1) / 1000000))" "$status" "$((($(cpu_ticks) - c0) / 100))" >>"$dir/history"; } 2>/dev/null
+    { mkdir -p "$dir" && printf '%s\t%s\t%s\there\t0\t%s\t%s\t-\t%s\tlight\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$((($(us) - t1) / 1000000))" "$status" "$((($(cpu_ticks) - c0) / 100))" >>"$dir/history"; } 2>/dev/null
     trim_history
     exit "$status"
   fi
@@ -257,16 +259,18 @@ elsewhere=
 if [ -z "$here$first${CITADEL_HEAVY_NO_ELSEWHERE:-}" ] && [ -n "${COORDINATOR_API:-}" ] && [ -f "${builds[1]}" ] && { [ ${#back[@]} -gt 0 ] || [ -z "$hasci" ]; }; then elsewhere=1; fi
 # Runs it there and exits with its status; returns only when nothing took it, for perigee's line.
 run_elsewhere() {
-  local fell ran on t1 all took status m
-  started=$(date +%s) t1=$(us) fell=$(mktemp) ran=$(mktemp) on=$(mktemp)
-  CITADEL_HEAVY_FALLBACK_FILE=$fell CITADEL_HEAVY_RAN_FILE=$ran CITADEL_HEAVY_ON_FILE=$on "${builds[@]}" "${backargs[@]}" -- "$@"
+  local fell ran on t1 all took status m held waited
+  started=$(date +%s) t1=$(us) fell=$(mktemp) ran=$(mktemp) on=$(mktemp) held=$(mktemp)
+  CITADEL_HEAVY_FALLBACK_FILE=$fell CITADEL_HEAVY_RAN_FILE=$ran CITADEL_HEAVY_ON_FILE=$on CITADEL_HEAVY_WAITED_FILE=$held "${builds[@]}" "${backargs[@]}" -- "$@"
   status=$?
   [ -s "$fell" ] && status=fallback
   all=$((($(us) - t1) / 1000000)) took=$(cat "$ran" 2>/dev/null) m=$(head -c 100 "$on" 2>/dev/null | tr -d '\t\n')
   [[ $took =~ ^[0-9]{1,7}$ ]] && [ "$took" -le "$all" ] || took=$all
-  rm -f "$fell" "$ran" "$on"
+  # What held it on the machine, else what it waited on in perigee's line before it left it.
+  waited=$(head -c 20 "$held" 2>/dev/null | tr -d '\t\n')
+  rm -f "$fell" "$ran" "$on" "$held"
   [ "$status" != fallback ] || return 0
-  { mkdir -p "$dir" && printf '%s\t%s\t%s\ton:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "${m:-?}" "$((all - took))" "$took" "$status" >>"$dir/history"; } 2>/dev/null
+  { mkdir -p "$dir" && printf '%s\t%s\t%s\ton:%s\t%s\t%s\t%s\t-\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "${m:-?}" "$((all - took))" "$took" "$status" "${waited:-${reason:-none}}" >>"$dir/history"; } 2>/dev/null
   exit "$status"
 }
 [ -z "$elsewhere" ] || run_elsewhere "$@"
@@ -288,7 +292,7 @@ if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
   started=$(date +%s) t0=$(us)
   # One job per repo on CI at a time: this waits for the repo's turn, then holds fd 5 while its job runs there.
   # shortcut: this wait writes no wait-* file, so Citadel shows the minion as running, not waiting; add one if people ask.
-  key=${slug//\//-} n=${CITADEL_HEAVY_CI_SLOTS:-1} cislot=
+  key=${slug//\//-} n=${CITADEL_HEAVY_CI_SLOTS:-1} cislot= ciwaited=none
   if command -v flock >/dev/null && mkdir -p "$dir" 2>/dev/null; then
     told=-60
     until [ -n "$cislot" ]; do
@@ -298,6 +302,7 @@ if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
         exec 5>&-
       done
       [ -z "$cislot" ] || break
+      ciwaited=turn
       if [ $((SECONDS - told)) -ge 60 ]; then
         say "$slug already has $n heavy job(s) on CI, so this waits here for its turn (it costs perigee nothing): $(cat "$dir/ci-$key-"*.who 2>/dev/null | head -n 3 | tr '\n' ';')"
         told=$SECONDS
@@ -318,7 +323,9 @@ if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
   [ -z "$cislot" ] || { rm -f "$dir/ci-$key-$cislot.who"; exec 5>&-; }
   if [ "$status" != fallback ]; then
     # 75: handed over to Citadel for ships, so it took no time here.
-    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" >>"$dir/history"; } 2>/dev/null
+    # A minute or more before its runner worked it, with the CI turn free, is a wait for a runner.
+    [ "$ciwaited" != none ] || [ $((all - took)) -lt 60 ] || ciwaited=runner
+    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" "$ciwaited" >>"$dir/history"; } 2>/dev/null
     exit "$status"
   fi
   # CI gave it back (no runner took it): a machine with the Builds role still comes before perigee's line.
@@ -617,7 +624,7 @@ history="$dir/history"
 # pressure, mem-room), which passed 1 s on a starved CI runner and read as a wait on nothing (#1426).
 waited=$(((t1 - t0) / 1000000))
 [ "$reason" != none ] || waited=0
-line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$waited	$((($(us) - t1) / 1000000))	$status	${pressure:--}	$((($(cpu_ticks) - c0) / 100))"
+line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	here	$waited	$((($(us) - t1) / 1000000))	$status	${pressure:--}	$((($(cpu_ticks) - c0) / 100))	$reason"
 { printf '%s\n' "$line" >>"$history"; } 2>/dev/null
 trim_history
 exit "$status"

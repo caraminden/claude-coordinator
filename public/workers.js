@@ -145,6 +145,20 @@ export function workersPanel(page) {
     );
   };
   /** One place's row (Josh, 2026-11-25, take S-tile): its workers, why Auto moved, and what keeps new turns off it. */
+  /** A place's heavy jobs, running first: "Peek Auras cargo test, 8 threads" (#2109). @param {import('./types/workers.js').HeavyNowJob[]} jobs */
+  const heavyLines = (jobs) =>
+    jobs.length
+      ? h(
+          'ul',
+          { class: 'st-heavy' },
+          ...jobs.map((j) => {
+            const text = `${[j.scheme, j.what].filter(Boolean).join(' ')}${j.threads ? `, ${plural(j.threads, 'thread')}` : ''}`;
+            return h('li', { class: 'small', title: text }, h('span', { class: 'st-heavy-what' }, text), h('span', { class: 'muted' }, j.waiting ? `waiting: ${j.waiting}` : 'running'));
+          }),
+        )
+      : '';
+  /** @param {number} id */
+  const heavyOn = (id) => w?.heavy.machines.find((m) => m.id === id)?.jobs ?? [];
   /** @param {WorkerPlace} p @param {HTMLElement | string | null} chip @param {(string | false | null | 0)[][]} notes @param {(HTMLElement | string)[] | false | null} controls */
   const placeRow = (p, chip, notes, controls) =>
     h(
@@ -153,6 +167,7 @@ export function workersPanel(page) {
       h('div', { class: 'st-place-head' }, h('b', {}, p.name), chip ?? ''),
       meter(p.size ? p.used / p.size : 0, `${p.used} of ${p.size} ${p.size === 1 ? 'worker' : 'workers'}`),
       ...notes.map((line) => h('div', { class: 'st-sub muted' }, line.filter(Boolean).join(' · '))),
+      heavyLines(p.id ? heavyOn(p.id) : (w?.heavy.home ?? [])),
       controls ? h('div', { class: 'st-place-act' }, ...controls) : '',
     );
   /** @param {WorkerMachine} m */
@@ -185,6 +200,10 @@ export function workersPanel(page) {
     const value = `${w.used} of ${w.size} working${elsewhere ? `, ${elsewhere} on other computers` : ''}${w.forced ? `, ${w.forced} forced` : ''}${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
     const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}` : ''}`;
     const limits = limitsOf(home, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason.");
+    // A computer that runs heavy jobs but lends no workers still says what it runs.
+    const others = w.heavy.machines.filter((m) => !w?.machines.some((x) => x.id === m.id)).map((m) => h('div', { class: 'st-place', 'data-hue': 'running', 'data-heavy': String(m.id) }, h('div', { class: 'st-place-head' }, h('b', {}, m.name)), heavyLines(m.jobs)));
+    // With no computer lending workers there is no perigee row, so its heavy jobs get one of their own.
+    const homeHeavy = !w.machines.length && w.heavy.home.length ? h('div', { class: 'st-place', 'data-hue': 'running', 'data-heavy': '0' }, h('div', { class: 'st-place-head' }, h('b', {}, home.name)), heavyLines(w.heavy.home)) : null;
     // With a computer connected, perigee is one place of several and its controls are in its row.
     const places = w.machines.length
       ? h('div', { class: 'hue-rows st-places' }, placeRow(home, null, [[size], ['Takes turns first. While it is full, or someone with no computer connected waits for it, those with their own use that']], [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits]), ...w.machines.map(machineRow))
@@ -197,6 +216,7 @@ export function workersPanel(page) {
       h('div', { class: 'st-sub muted' }, quickLane(w.lane)),
       h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       places ?? '',
+      homeHeavy || others.length ? h('div', { class: 'hue-rows st-places' }, homeHeavy ?? '', ...others) : '',
       h(
         'div',
         { class: 'st-workers-act' },

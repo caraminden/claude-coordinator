@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { appOwners, hostLoad, jobOfWho, parseHistory, readPressure, schemeOfWho } from '../src/host-load.ts';
+import { appOwners, hostLoad, jobOfWho, parseHistory, parsePlaces, readPressure, schemeOfWho } from '../src/host-load.ts';
 import { readHeavyA } from '../src/waits.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'host-load-'));
@@ -64,6 +64,37 @@ test('history: a week of waits per scheme, median and longest, bad lines and old
   assert.deepEqual(parseHistory(text, now - 7 * 24 * 3600_000), [
     { scheme: 'Citadel', jobs: 3, medianS: 20, longestS: 30 },
     { scheme: 'peek-auras', jobs: 1, medianS: 0, longestS: 0 },
+  ]);
+});
+
+test('history by place (#2109): perigee, each machine and each repo, with what their jobs waited on', () => {
+  const now = Date.parse('2026-11-26T12:00:00-0800');
+  const at = '2026-11-26T11:00:00-0800';
+  const row = (place: string, wait: number, why?: string) => [at, 'Peek #1 (josh)', 'cargo test', place, wait, 10, 0, '-', '-', ...(why ? [why] : [])].join('\t');
+  const text = [
+    row('here', 40, 'slots'),
+    row('here', 0, 'none'),
+    row('here', 0, 'light'),
+    // Written before #2109: what it waited on sat where the place is now.
+    row('line', 20),
+    row("on:Josh's PC", 30, 'room'),
+    row("on:Josh's PC", 10),
+    row('ci:o/r', 5, 'runner'),
+    'garbage',
+  ].join('\n');
+  assert.deepEqual(parsePlaces(text, now - 7 * 24 * 3600_000), [
+    {
+      place: 'here',
+      jobs: 4,
+      medianS: 10,
+      longestS: 40,
+      on: [
+        { why: 'slots', jobs: 1 },
+        { why: 'line', jobs: 1 },
+      ],
+    },
+    { place: "on:Josh's PC", jobs: 2, medianS: 20, longestS: 30, on: [{ why: 'room', jobs: 1 }] },
+    { place: 'ci:o/r', jobs: 1, medianS: 5, longestS: 5, on: [{ why: 'runner', jobs: 1 }] },
   ]);
 });
 

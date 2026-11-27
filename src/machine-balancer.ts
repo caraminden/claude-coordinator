@@ -157,6 +157,11 @@ export class MachineBalancer {
     this.d = d;
   }
 
+  /** The heavy jobs that hold or wait for room there, oldest first (the Workers tile lists them, #2109). */
+  jobsOn(machineId: number): readonly HeavyJob[] {
+    return [...(this.heavy.get(machineId)?.values() ?? [])].sort((a, b) => a.since - b.since);
+  }
+
   /** The machine's plan now; null where the balancer has no say (no report of its threads yet). */
   plan(machineId: number): Plan | null {
     const input = this.d.input(machineId);

@@ -32,8 +32,23 @@ export interface WorkersTile {
   limits: WorkerLimit[];
   /** The waits that gave their worker back (src/routes/workers.ts waitsEnded). */
   waits: { count: number; median: number | null; woken: number; cold: number };
+  /** The heavy jobs each place holds or has waiting (#2109, src/heavy-now.ts). */
+  heavy: HeavyNow;
   /** The machines that lend workers (Build 7 T4), one row each. */
   machines: import('../machine-types.js').WorkerMachine[];
+}
+
+/** A heavy job on a place's row (src/heavy-now.ts HeavyNowJob). */
+export interface HeavyNowJob {
+  scheme: string;
+  what: string;
+  threads: number | null;
+  waiting: string | null;
+}
+
+export interface HeavyNow {
+  home: HeavyNowJob[];
+  machines: { id: number; name: string; jobs: HeavyNowJob[] }[];
 }
 
 // Round 4b: work-flow.js and flowmath.js (GET /api/projects/:id/flow: src/work-flow.ts FlowView)

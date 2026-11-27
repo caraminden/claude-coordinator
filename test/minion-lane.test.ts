@@ -6,7 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
-import { settled } from '../src/settled.ts';
+import { busyNow } from '../src/settled.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
 import { holds, lines, tempRoot, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
@@ -170,6 +170,9 @@ test('a step that runs another step on its idle lane at once keeps the lane busy
   assert.deepEqual(log, ['inner start', 'inner end', 'later']);
   assert.deepEqual(idle, [1], 'the lane says once that it has drained');
 });
+
+/** The restart sweep renames and deletes off the thread (#2137): wait for `dead` to go and every drop it began to end, so a folder it wrongly took is gone too. */
+const swept = (dead: string) => until('the sweep to drop the dead folder and finish its deletes', () => !existsSync(dead) && !busyNow().some((b) => b.endsWith('folder deletes')));
 
 const turnDirs = (r: Runner, id: number) => readdirSync(r.turnsDir).filter((n) => n.startsWith(`${id}-`));
 
@@ -414,7 +417,7 @@ test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, an
   const old = new Date(Date.now() - 5 * 60_000);
   utimesSync(dead, old, old);
   r.recover();
-  assert.deepEqual(await settled(), [], 'the sweep renames and deletes off the thread (#2137): wait for it to finish');
+  await swept(dead);
   assert.ok(existsSync(starting), 'no pid.json yet is no proof it is gone');
   assert.ok(!existsSync(dead));
 });
@@ -433,7 +436,7 @@ test("a restart's sweep removes only turn folders, never a running Codex review'
     utimesSync(d, old, old);
   }
   r.recover();
-  assert.deepEqual(await settled(), [], 'the sweep renames and deletes off the thread (#2137): wait for it to finish');
+  await swept(dead);
   assert.ok(existsSync(review), 'a Codex review may still be running');
   assert.ok(existsSync(ultra));
   assert.ok(existsSync(other));

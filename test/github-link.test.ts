@@ -262,13 +262,14 @@ test('a token GitHub refuses (401) shows as needing linking again; unlink revoke
   assert.equal(link.login(rachel.id), null);
 });
 
-test("a turn gets its person's token and name; unlinked, none and a line saying why; not set up, nothing", () => {
+test("a turn gets its person's token and name; unlinked, none and a line saying why; not set up, nothing", async () => {
   const link = new GithubLink(store, creds, 'cid', 'csecret');
   const dir = join(root, 'turn-env');
   const linked = link.forTurn(josh, dir)!;
   assert.equal(linked.env.GH_TOKEN, 'gho_new');
   assert.equal(linked.env.GH_CONFIG_DIR, join(dir, 'gh'));
-  assert.ok(existsSync(join(dir, 'gh')), 'an empty gh config, so the box login is out of reach');
+  // An empty gh config, so the box login is out of reach (gh reads a missing one as empty too); made off the thread.
+  await until("existsSync(join(dir, 'gh'))", () => existsSync(join(dir, 'gh')));
   assert.equal(linked.env.GIT_AUTHOR_EMAIL, '7+joshdev@users.noreply.github.com');
   assert.equal(linked.env.GIT_COMMITTER_NAME, 'Josh D');
   assert.equal(linked.login, 'joshdev');
@@ -444,7 +445,7 @@ test("a land the server runs for a minion (hand_off_land, the land tool) pushes 
   assert.equal(mid.GIT_TERMINAL_PROMPT, '0');
   // The land outlives the turn, whose folder goes when it ends: its gh config folder can't be in there.
   assert.ok(mid.GH_CONFIG_DIR && !mid.GH_CONFIG_DIR.startsWith(r.turnsDir), mid.GH_CONFIG_DIR);
-  assert.ok(existsSync(mid.GH_CONFIG_DIR));
+  await until('existsSync(mid.GH_CONFIG_DIR)', () => existsSync(mid.GH_CONFIG_DIR));
   await finish(r, t);
   // A land started after the turn ended (a queued hand-off) still runs as that person.
   assert.equal(r.hostEnv(store.getTicket(t.id)!, 'tok').GH_TOKEN, 'gho_new');

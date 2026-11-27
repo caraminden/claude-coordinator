@@ -752,7 +752,7 @@ test("a blind turn runs in a neutral folder with the app's text as the whole sys
   const { PATH: _path, ...env } = run.env; // PATH is the server's; the model sees no environment without a shell
   const named = ['cara', 'Cara', 'Mandate', 'mandate', homedir(), data];
   assert.deepEqual(leaks({ argv: run.argv, cwd: run.cwd, env, system: run.system, settings: run.settings, mcp: run.mcp, prompt: run.prompt }, named), []);
-  assert.match(run.cwd, /^\/tmp\/t-[A-Za-z0-9]{6}\/w$/);
+  assert.match(run.cwd, /^\/tmp\/t-[0-9a-f]{12}\/w$/);
   assert.deepEqual(run.cwdFiles, []);
   assert.equal(argAfter(run.argv, '--system-prompt-file') && !run.argv.includes('--append-system-prompt-file'), true, 'the whole prompt, not an addition');
   assert.match(run.system, /^Word feedback neutrally\./);

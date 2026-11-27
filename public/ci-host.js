@@ -17,7 +17,7 @@ const held = (j, now) => span((now - j.since) / 1000);
 /** @type {Record<string, string>} */
 const WHY = { load: 'free slot, box busy', first: 'a deploy goes first', line: 'in line behind another job' };
 /** @type {Record<string, string>} */
-const WAITED = { line: 'in line', slots: 'all slots busy', load: 'perigee busy', memory: 'memory', first: 'a deploy', forced: 'gave up on the load', room: 'room there', offline: 'the machine coming online', turn: "the repo's CI turn", runner: 'a CI runner', unrecorded: 'not recorded' };
+const WAITED = { line: 'in line', slots: 'all slots busy', load: 'perigee busy', memory: 'memory', first: 'a deploy', forced: 'gave up on the load', room: 'room to free up', offline: 'the machine coming online', turn: "the repo's CI turn", runner: 'a CI runner', unrecorded: 'not recorded' };
 /** @param {string} place 'here', 'on:<machine>' or 'ci:<owner>/<repo>' */
 const placeName = (place) => {
   if (place === 'here') return ['perigee'];
@@ -102,7 +102,7 @@ export function hostLoadBlock(l) {
                     h('td', {}, ...placeName(p.place)),
                     h('td', { class: 'num' }, p.jobs.toLocaleString()),
                     h('td', { class: 'num host-median' }, span(p.medianS)),
-                    h('td', {}, p.on.length ? p.on.slice(0, 3).map((o) => h('div', {}, `${WAITED[/** @type {keyof typeof WAITED} */ (o.why)] ?? o.why} × ${o.jobs}`)) : 'nothing'),
+                    h('td', {}, p.on.length ? p.on.slice(0, 3).map((o) => h('div', {}, `${WAITED[/** @type {keyof typeof WAITED} */ (o.why)] ?? o.why}\u00a0×\u00a0${o.jobs}`)) : 'nothing'),
                   ),
                 ),
               ),

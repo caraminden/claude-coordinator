@@ -442,6 +442,8 @@ interface Hand {
 }
 /** A collected step's exit code, kept so a second check or collect neither waits nor runs it again. */
 const COLLECTED = '.collected.json';
+/** The most one result file may weigh (cloud-turn's MAX_BYTES). */
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
 function collected(out: string, code: number): number {
   writeFileSync(join(out, COLLECTED), JSON.stringify({ code }));
   rmSync(join(out, '.hand.json'), { force: true });
@@ -484,16 +486,52 @@ export async function collect(out: string): Promise<number> {
   line.at('cloud');
   const local = `refs/citadel-cloud/${h.branch}`;
   let result: { reply: string; files: string[]; code?: number } | null = null;
-  try {
+  /** Files it listed that couldn't come home (over the cap or unreadable): their branch stays on origin. */
+  const missing: string[] = [];
+  /** The branch is on origin but fetching or reading it failed. */
+  let unread = false;
+  const read = () => {
     git('fetch', '-q', 'origin', `+refs/heads/${h.branch}:${local}`);
-    result = readResult(git('show', `${local}:${RESULT}`), h.branch);
-    for (const f of result.files) writeFileSync(join(out, f.split('/').at(-1)!), execFileSync('git', ['-C', h.cwd, 'cat-file', 'blob', `${local}:${f}`], { maxBuffer: 6 * 1024 * 1024 }));
+    const got = readResult(git('show', `${local}:${RESULT}`), h.branch);
+    for (const f of got.files) {
+      try {
+        const body = execFileSync('git', ['-C', h.cwd, 'cat-file', 'blob', `${local}:${f}`], { maxBuffer: MAX_FILE_BYTES + 1 });
+        if (body.length > MAX_FILE_BYTES) throw new Error('over the cap');
+        writeFileSync(join(out, f.split('/').at(-1)!), body);
+      } catch {
+        missing.push(f);
+      }
+    }
+    return got;
+  };
+  try {
+    result = read();
   } catch {
     result = null;
+    // Not pushed at all is a session that never delivered; pushed but unreadable is a blip to try again.
+    const pushed = spawnSync('git', ['-C', h.cwd, 'ls-remote', '--exit-code', 'origin', `refs/heads/${h.branch}`], { stdio: 'ignore', timeout: 60_000 }).status === 0;
+    if (pushed) {
+      missing.length = 0;
+      try {
+        result = read();
+      } catch {
+        unread = true;
+      }
+    }
   }
   for (const r of [local, `refs/citadel-cloud/${h.beat}`]) spawnSync('git', ['-C', h.cwd, 'update-ref', '-d', r], { stdio: 'ignore' });
-  // The source branch going is also the Stop: a job still running there ends at its next beat.
-  for (const b of [h.ref, h.beat, h.branch]) spawnSync('git', ['-C', h.cwd, 'push', '-q', 'origin', '--delete', b], { stdio: 'ignore' });
+  // The source branch going is also the Stop: a job still running there ends at its next beat. The result branch stays when something couldn't be read.
+  const keep = unread || missing.length > 0;
+  for (const b of keep ? [h.ref, h.beat] : [h.ref, h.beat, h.branch]) spawnSync('git', ['-C', h.cwd, 'push', '-q', 'origin', '--delete', b], { stdio: 'ignore' });
+  if (unread) {
+    // Its result exists, so running the step again here would waste it: exit non-zero and let the minion collect again (.hand.json stays).
+    const why = `the result is on branch ${h.branch} but couldn't be read (${h.url}); run citadel-cloud collect ${out} again`;
+    io.log(`citadel-cloud: ${why}`);
+    line.set("the cloud result couldn't be read yet; collect again", why);
+    await line.done();
+    return 1;
+  }
+  if (missing.length) io.log(`citadel-cloud: couldn't bring home ${missing.join(', ')}; they stay on branch ${h.branch} on origin`);
   const mins = Math.round((Date.now() - h.began) / 60_000);
   if (!result || !Number.isInteger(result.code)) {
     const why = `the session didn't deliver a result (${h.url})`;
@@ -507,7 +545,7 @@ export async function collect(out: string): Promise<number> {
   remember(h.job.cmd, mins * 60, result.code === 0 ? 0 : 1);
   io.log(result.reply);
   io.log(`citadel-cloud: ${ended(result.code, mins)}. Files: ${out}`);
-  line.set(ended(result.code, mins), `${result.reply}\n\nIts session: ${h.url}.`);
+  line.set(ended(result.code, mins), `${result.reply}\n\nIts session: ${h.url}.${missing.length ? `\nNot brought home (still on branch ${h.branch}): ${missing.join(', ')}.` : ''}`);
   await line.done();
   return collected(out, result.code ?? 1);
 }

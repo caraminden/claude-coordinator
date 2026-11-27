@@ -459,3 +459,27 @@ test('check: a step on its own that goes quiet or passes its limit is due; colle
   assert.equal(await collect(out), 0, 'a second collect repeats the first exit code');
   assert.equal(heavyCalls().length, 1, 'and runs nothing again');
 });
+
+test('collect keeps a finished result: one file over the cap is left on its branch, the rest and the reply still come home, nothing reruns here', async () => {
+  const out = mkdtempSync(join(root, 'hand-'));
+  const branch = 'cloud/t7-big';
+  const beat = 'cloud/t7-big-beat';
+  const wt = mkdtempSync(join(root, 'wt-'));
+  git(work, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+  mkdirSync(join(wt, '.citadel/out'), { recursive: true });
+  writeFileSync(join(wt, '.citadel/out/small.txt'), 'small\n');
+  writeFileSync(join(wt, '.citadel/out/big.bin'), Buffer.alloc(6 * 1024 * 1024 + 1, 1));
+  writeFileSync(join(wt, '.citadel/result.json'), JSON.stringify({ reply: 'all done', code: 0, job: branch, files: ['.citadel/out/small.txt', '.citadel/out/big.bin'] }));
+  git(wt, 'add', '-f', '.citadel');
+  git(wt, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'result');
+  git(wt, 'push', '-q', 'origin', `HEAD:refs/heads/${branch}`);
+  git(work, 'worktree', 'remove', '--force', wt);
+  const hand = { cwd: work, branch, ref: 'cloud/src-t7-big', beat, url: 'https://claude.ai/code/session_b', began: Date.now(), minutes: 60, quietMs: 60_000, job: job('echo here', { out }), event: 9 };
+  writeFileSync(join(out, '.hand.json'), JSON.stringify(hand));
+  assert.equal(await collect(out), 0);
+  assert.deepEqual(heavyCalls(), [], 'a delivered result never reruns at home');
+  assert.equal(readFileSync(join(out, 'small.txt'), 'utf8'), 'small\n');
+  assert.ok(!existsSync(join(out, 'big.bin')));
+  assert.match(cloudBranches(), /cloud\/t7-big/, 'the branch stays while a file is missing');
+  assert.match(lines.at(-1)![0], /done/);
+});

@@ -2,7 +2,7 @@
 // Replays a ticket's stored events to rebuild Claude's task list (TaskCreate/TaskUpdate, or
 // TodoWrite) and to sort every other tool call under the step that was in progress when it ran.
 
-/** @import { ChatAction, ChatBlock, ClaudeEvent, PlanStep, ProgressTask, ResultBlock, ToolBlock, ToolInput } from './types/chat.js' */
+/** @import { ChatAction, ChatBlock, ClaudeEvent, PlanStep, ProgressTask, ResultBlock, ToolBlock, ToolInput, TrackStep } from './types/chat.js' */
 /** @typedef {ReturnType<typeof createProgress> & { doneCount?: number }} Prog */
 /** @typedef {Pick<ChatAction, 'block' | 'result' | 'startedAt' | 'doneAt'>} Act */
 /** @typedef {{ kind: string, text: string, object?: string }} Described */
@@ -876,16 +876,57 @@ function estimateOf(input) {
 /**
  * The plan's segmented track (#630): [estimate, 'c' | 'i' | 'h' | 'p'] per step ('h': built, held open while it's tested, #1923), the done ones first in the order they
  * finished, then the one underway, then the rest in plan order, so a step added late and done early can't sit
- * green after an unfinished one.
+ * green after an unfinished one. With several underway, the one the readout names (stepInfo) leads them.
+ * While the turn runs, every 'i' step with a guess also says its own clock (#2156, stepClock): [estimate, 'i', since,
+ * usual], or [estimate, 'i', null, usual, workedMs] for one whose working time stands still.
+ * @param {Prog} p @param {{ running?: boolean, now?: number, ratio?: number }} [opts]
+ * @returns {TrackStep[]}
  */
-/** @param {Prog} p */
-export function planTrack(p) {
+export function planTrack(p, { running = false, now = Date.now(), ratio = 1 } = {}) {
   /** @type {Record<string, number>} */
-  const rank = { completed: 0, in_progress: 1 };
+  const rank = { completed: 0, in_progress: 1, pending: 3 };
   /** @param {ProgressTask} t @returns {'c' | 'i' | 'h' | 'p'} */
   const state = (t) => (t.status === 'completed' ? 'c' : t.status !== 'in_progress' ? 'p' : heldStep(p, t) ? 'h' : 'i');
-  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => /** @type {[number | null, 'c' | 'i' | 'h' | 'p']} */ ([t.estimate ?? null, state(t)]));
+  const named = stepInfo(p).current;
+  /** @param {ProgressTask} t */
+  const order = (t) => (state(t) === 'i' && t !== named ? 2 : (rank[t.status] ?? 3));
+  // As in planEstimate: a step an earlier turn left underway isn't this turn's until the plan moves (#518).
+  const live = running && p.planMoved;
+  return [...p.tasks]
+    .sort((a, b) => order(a) - order(b) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0))
+    .map((t) => {
+      const g = t.estimate ?? null;
+      const st = state(t);
+      const clock = live && st === 'i' ? stepClock(p, t, now, ratio) : null;
+      if (!clock) return [g, st];
+      if (clock.since != null) return [g, st, clock.since, clock.usual];
+      return clock.worked > 0 ? [g, st, null, clock.usual, clock.worked] : [g, st];
+    });
 }
+
+/**
+ * One underway step's clock: its guess in seconds, scaled by `ratio` (#571), and its working time, as `since` (moved on
+ * past the gaps between turns) while it counts, else `worked` ms. Steps of a stage the server can't tell apart (#1923)
+ * share the stage's clock: its lead's time against their summed guesses. Null with no guess or start of its own.
+ * @param {Prog} p @param {ProgressTask} t @param {number} now @param {number} ratio
+ */
+function stepClock(p, t, now, ratio) {
+  if (!t.estimate) return null;
+  const lead = t.kind ? p.tasks.find((x) => x.id === t.stage && x.status === 'in_progress') : undefined;
+  const shared = lead ? sharedSteps(p, lead) : [];
+  const grouped = !!lead && shared.length > 1 && shared.includes(t);
+  const head = grouped ? lead : t;
+  if (!head.startedAt) return null;
+  const usual = guessSeconds(grouped ? shared : [t], ratio);
+  // A step from before working time was counted (no work yet) falls back to its wall clock.
+  if (head.work == null) return { usual, since: head.startedAt, worked: 0 };
+  if (head.workFrom == null) return { usual, since: null, worked: head.work };
+  return { usual, since: head.workFrom - head.work, worked: head.work + now - head.workFrom };
+}
+
+/** Steps' guesses summed, in whole seconds, so a scaled guess doesn't round up a minute on float noise (20 × 0.3 = 6.000000000000001). */
+/** @param {ProgressTask[]} steps @param {number} ratio */
+const guessSeconds = (steps, ratio) => Math.round(steps.reduce((sum, t) => sum + (t.estimate ?? 0), 0) * 60 * (ratio > 0 ? ratio : 1));
 
 /** A stage's step it is timed and shown under: the one the minion said it is on, else its first still open (#1923). */
 /** @param {ProgressTask[]} st */
@@ -913,11 +954,10 @@ export const heldStep = (p, t) => t.status === 'in_progress' && !!t.kind && t.st
 export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   const { current } = stepInfo(p, running);
   const shared = sharedSteps(p, current);
-  const guess = shared.length > 1 ? shared.reduce((sum, t) => sum + (t.estimate ?? 0), 0) : current?.estimate;
-  if (!guess || !current?.startedAt) return null;
+  const steps = shared.length > 1 ? shared : current ? [current] : [];
+  if (!current?.startedAt || !steps.some((t) => t.estimate)) return null;
   const scale = ratio > 0 ? ratio : 1;
-  // Whole seconds, so a scaled guess doesn't round up a minute on float noise (20 × 0.3 = 6.000000000000001).
-  const usual = Math.round(guess * 60 * scale);
+  const usual = guessSeconds(steps, ratio);
   const pending = Math.round(p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0) * 60 * scale);
   // A step from before working time was counted (no work yet) falls back to its wall clock.
   const since = current.work == null ? current.startedAt : (current.workFrom ?? now) - current.work;

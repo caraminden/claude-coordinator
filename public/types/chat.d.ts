@@ -6,6 +6,9 @@ import type { narrationSorter } from '../narration.js';
 import type { applyEvent, createProgress } from '../progress.js';
 
 /** A step of a chat's plan (progress.js createProgress's `tasks`, built by applyEvent). */
+/** One segment of a plan's track (progress.js planTrack): guess minutes, state, then an underway step's own clock. */
+export type TrackStep = [estimate: number | null, state: 'c' | 'i' | 'h' | 'p', since?: number | null, usual?: number, workedMs?: number];
+
 export interface ProgressTask {
   id: string;
   /** The plan tool's step number. */

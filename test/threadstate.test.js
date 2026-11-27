@@ -344,9 +344,22 @@ test("progressPieces: the plan's track stays through a wait, the wait filling th
     [3, 'i'],
     [4, 'i'],
   ];
-  assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180, wait: test })), ['done', 'now*', 'now'], 'two steps underway: only the first fills from the wait');
+  assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180, wait: test })), ['done', 'now*', 'now'], 'two steps underway: the first fills from the wait');
   assert.deepEqual(states(progressPieces({ track: two, wait: line })), ['done', 'now~', 'now'], 'two steps underway in the line: only the first is hatched');
   assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180 })), ['done', 'now*', 'now'], 'no wait: the one scaled guess is not shared either');
+  // Josh, 2026-11-26: every step underway draws the same way, each filling by its own real clock (#2156).
+  const own = [
+    [3, 'i', NOW - MIN, 180],
+    [4, 'i', NOW - 2 * MIN, 240],
+    [null, 'i'],
+    [5, 'i', null, 300, 60_000],
+  ];
+  const clocks = (pieces) => pieces.segs.map((s) => s.clock);
+  assert.deepEqual(clocks(progressPieces({ track: own, since: NOW - MIN, usual: 180 })), [{ since: NOW - MIN, usual: 180 }, { since: NOW - 2 * MIN, usual: 240 }, null, { total: 300_000, done: 60_000, late: false }]);
+  assert.equal(progressPieces({ track: [[5, 'i', null, 300, 480_000]], wait: null }).segs[0].clock.late, true, 'time standing still past its guess is amber too');
+  const waiting = progressPieces({ track: own, wait: test });
+  assert.equal(waiting.segs[0].clock, test, 'the wait still owns one step');
+  assert.deepEqual(waiting.segs[1].clock, { since: NOW - 2 * MIN, usual: 240 }, 'the others keep their own');
   // Cara's screenshot: a land with no plan step underway read "Test 3/6" over one solid bar.
   const stages = progressPieces({
     track: [

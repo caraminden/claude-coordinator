@@ -18,8 +18,11 @@ const tmp = scratch.dir;
 // remove them a second or so later. A recursive delete that meets another one inside its folder gives up without an
 // error and leaves the folder (#2238: the leak guard then found this one after the teardown), so the reapers go first.
 after(async () => {
-  await until("the stopped files' reapers to remove their temp folders", () => !readdirSync(tmp).some((e) => e.startsWith('f-')));
-  await scratch.teardown();
+  try {
+    await until("the stopped files' reapers to remove their temp folders", () => !readdirSync(tmp).some((e) => e.startsWith('f-')));
+  } finally {
+    await scratch.teardown(); // also when a run is still up and its folder never goes: the teardown stops it
+  }
 });
 
 function file(name: string, body: string): string {

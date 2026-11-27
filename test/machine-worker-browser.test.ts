@@ -116,16 +116,19 @@ test('the self-test runs from the row, line by line, and the row ends Ready; the
   await wait('its first line', `${worker('.worker-checks li[data-state=ok]')}?.textContent.includes('claude 2') && !!${worker('.worker-checks li[data-state=running]')}`);
   says.test = { id: asked!, done: true, lines: keys.map((key) => ({ key, state: 'ok', text: 'fine' })) };
   await wait('all green', `${worker()}.dataset.tone === 'ok' && ${worker()}.querySelectorAll('.worker-checks li[data-state=ok]').length === 8`);
-  assert.match(await cardText(), /Ready[^]*up to 3 at once[^]*Last passed whole/);
+  assert.match(await cardText(), /My worker pool: up to 3 at once[^]*Its owner's minions run there, up to 3 at once[^]*Last passed whole/);
   await page.eval(`[...${worker()}.querySelectorAll('.worker-fold')].find((d) => /caps/.test(d.textContent)).open = true`);
   await wait('the caps', `!!document.getElementById('worker-cap-${id}-threads')`);
   await page.eval(`(() => { const i = document.getElementById('worker-cap-${id}-threads'); i.value = '6'; i.dispatchEvent(new Event('input')); })()`);
   assert.match(await textOf('.worker-fold .worker-command pre'), /citadel-worker caps --workers 3 --threads 6 --memory 10 --disk 80/);
 });
 
-test('a machine that is shared says why its switch is off and what to do', { skip }, async () => {
-  ok(await srv.call('/api/machines', { name: 'shared-pc' }));
-  await open('shared-pc');
-  assert.equal(await page.eval(`${turnsSwitch('shared-pc')}.disabled`), true);
-  assert.match(await page.eval<string>(`${card('shared-pc')}.textContent`), /only its owner's minions.*add that PC again with "Mine" ticked/);
+test("someone else's computer says why its Minion turns can't be switched on here: only its owner's turns run there", { skip }, async () => {
+  // Every machine has an owner now (Build 10 H1), so the old shared PC is another person's: no switch and no Set up for the viewer.
+  const made = (await srv.call('/api/people', { name: 'Mira' })).data;
+  const invited = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
+  ok(await srv.as({ cookie: invited.headers.get('set-cookie')!.split(';')[0] })('/api/machines', { name: 'miras-pc', mine: true }));
+  await open('miras-pc');
+  assert.equal(await page.eval(`${tile('miras-pc')}.querySelector('button').disabled`), true);
+  assert.match(await page.eval<string>(`${tile('miras-pc')}.textContent`), /Can’t run turns here[^]*Only its owner can switch Minion turns on/);
 });

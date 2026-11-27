@@ -24,7 +24,30 @@ const tmp = tempRoot('land-verdicts-');
 after(() => tmp.teardown());
 
 // The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
-const BENCHED = ['cut_off', 'flake_only', 'skipped_tests', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'train_guess', 'train_imports', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone', 'burn_new', 'has_case'];
+const BENCHED = [
+  'cut_off',
+  'flake_only',
+  'flake_one',
+  'each_job',
+  'train_labels_one',
+  'train_failing_one',
+  'skipped_tests',
+  'burn_lines',
+  'train_labels',
+  'train_real',
+  'train_failing',
+  'train_main_red',
+  'train_suspects_of',
+  'train_guess',
+  'train_imports',
+  'train_label',
+  'train_at',
+  'known_flakes',
+  'train_pin',
+  'train_alone',
+  'burn_new',
+  'has_case',
+];
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
   train_tail: "cuts a red's log for the rider it refuses",
@@ -321,4 +344,25 @@ test("G: a sharded run is flakes only when every red shard's failed files passed
   assert.equal(run({ script: script([...real, ...flaky('shard (9)', 'test/b.test.ts')]) }).out, 'red\n', 'a real failure in an earlier shard');
   assert.equal(run({ script: script([...flaky('shard (9)', 'test/b.test.ts'), ...real]) }).out, 'red\n');
   assert.equal(run({ script: script([...flaky('shard (12)', 'test/b.test.ts'), ...flaky('shard (3)', 'test/a.test.ts')]) }).out, 'test/a.test.ts, test/b.test.ts\n');
+});
+
+// G (#2209): the twins of flake_only judge each shard too. The skipped-test count adds up each shard's last summary, and
+// the train's labels and failing files come from every red shard's reruns, not only the last one in gh's log.
+test('G: a sharded run counts skipped tests and names failing files in every red shard', () => {
+  const at = (job: string, line: string) => `${job}\\tthe full suite\\t2026-11-27T08:01:09.3414420Z ${line}`;
+  const head = (job: string) => at(job, 'run-tests: 1 test file(s) failed; rerunning each alone once to tell load from a real failure');
+  const lines = [
+    head('shard (2)'),
+    at('shard (2)', 'run-tests: test/real.test.ts: failed again alone: a real failure'),
+    at('shard (2)', 'ℹ skipped 1'),
+    head('shard (9)'),
+    at('shard (9)', 'run-tests: test/b.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 3.10)'),
+    at('shard (9)', 'ℹ skipped 0'),
+  ];
+  const failed = `failed=$'${lines.join('\\n')}' burn_red=''`;
+  assert.equal(run({ script: `${failed}\nskipped_tests | head -n 1` }).out, '1\n', "shard (2)'s skip, though the last summary says 0");
+  assert.equal(run({ script: `${failed}\ntrain_failing` }).out, 'test/b.test.ts\ntest/real.test.ts\n');
+  const labels = run({ script: `${failed}\ntrain_labels` }).out;
+  assert.match(labels, /failed again alone test\/real\.test\.ts/);
+  assert.match(labels, /failed in the full run, passed alone test\/b\.test\.ts/);
 });

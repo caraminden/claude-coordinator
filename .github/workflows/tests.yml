@@ -268,8 +268,37 @@ jobs:
   # desktop-only: asking Citadel to hold (a ship never asks), the clock check, the numbers (no tailnet from here: ADR
   # 0042 says what that loses), and Windows' ports. The burn-in runs once, on shard 0, which the split gives
   # CITADEL_TEST_SHARD_HEAD seconds less work.
-  shard:
+  # One times file and one main for every shard, so all 20 work out the same split: each restoring the cache itself, one
+  # starting after ci-cache.yml saved new times (or seeing a newer main, which changes the tier) would leave files unrun.
+  times:
     if: ${{ inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      main: ${{ steps.main.outputs.sha }}
+    steps:
+      - name: main's tip
+        id: main
+        run: echo "sha=$(git ls-remote "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" refs/heads/main | cut -f1)" | tee -a "$GITHUB_OUTPUT" | grep -qE '=[0-9a-f]{40}$'
+      # Caches a land/ branch saves only it can read, so ci-cache.yml keeps these on main after each ship's run.
+      - name: the last split's file times
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/citadel-shard-times.tsv
+          key: ci-shard-times-${{ github.run_id }}
+          restore-keys: ci-shard-times-
+      - name: the file for the shards
+        run: |
+          cp ~/.cache/citadel-shard-times.tsv "$RUNNER_TEMP/times-in.tsv" ||
+            { echo "no file times from main's cache: the shards split by name"; touch "$RUNNER_TEMP/times-in.tsv"; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: split-times
+          path: ${{ runner.temp }}/times-in.tsv
+          retention-days: 1
+
+  shard:
+    needs: times
     runs-on: ubuntu-latest
     timeout-minutes: 16 # as a land's desktop job
     strategy:
@@ -283,13 +312,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
-      # Caches a land/ branch saves only it can read, so ci-cache.yml keeps these on main after each ship's run.
-      - name: the last split's file times
-        uses: actions/cache/restore@v4
+      - name: the split's file times
+        uses: actions/download-artifact@v4
         with:
-          path: ~/.cache/citadel-shard-times.tsv
-          key: ci-shard-times-${{ github.run_id }}
-          restore-keys: ci-shard-times-
+          name: split-times
+          path: ${{ runner.temp }}/times-in
+      - name: main as the times job saw it
+        run: git branch -f main "${{ needs.times.outputs.main }}"
       # Ubuntu's AppArmor blocks the user namespaces Chrome's sandbox needs, and its runner user has no systemd manager
       # until it lingers (#2198's probe). These machines are GitHub's and thrown away after the job: root is fine here.
       - name: Chrome's sandbox and a systemd manager for the runner user
@@ -325,7 +354,7 @@ jobs:
           rc=0
           # The split's times in; this shard's own times out, for ci-cache.yml to merge.
           export CITADEL_TEST_TIMES=$RUNNER_TEMP/shard-times.tsv
-          cp ~/.cache/citadel-shard-times.tsv "$CITADEL_TEST_TIMES" 2>/dev/null || echo "no file times from main's cache: every shard splits by name"
+          cp "$RUNNER_TEMP/times-in/times-in.tsv" "$CITADEL_TEST_TIMES"
           : >"$RUNNER_TEMP/tests.log"
           tail -n +1 -f "$RUNNER_TEMP/tests.log" & tailer=$!
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?

@@ -183,9 +183,16 @@ test('a flake proof does not make the desktop busy for an own check or the early
 test("a ship's push runs 20 shards on GitHub's runners, and everything else the desktop job", () => {
   const yml = read('.github/workflows/tests.yml');
   const onGh = "inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')";
+  const times = yml.slice(yml.indexOf('\n  times:\n'), yml.indexOf('\n  shard:\n'));
   const shard = yml.slice(yml.indexOf('\n  shard:\n'));
-  assert.ok(shard.includes(`    if: \${{ ${onGh} }}\n    runs-on: ubuntu-latest\n`), "only a ship's push, or a run asked for there");
-  assert.ok(yml.slice(0, yml.indexOf('\n  shard:\n')).includes(`    if: \${{ !(${onGh}) }}`), 'the desktop job is the rest');
+  assert.ok(times.includes(`    if: \${{ ${onGh} }}\n    runs-on: ubuntu-latest\n`), "only a ship's push, or a run asked for there");
+  assert.ok(yml.slice(0, yml.indexOf('\n  times:\n')).includes(`    if: \${{ !(${onGh}) }}`), 'the desktop job is the rest');
+  // Every shard the same split: one times file and one main, from the times job, not each shard's own look.
+  assert.match(shard, /^ {4}needs: times\n {4}runs-on: ubuntu-latest\n/m);
+  assert.match(times, /git ls-remote "\$GITHUB_SERVER_URL\/\$GITHUB_REPOSITORY" refs\/heads\/main/);
+  assert.match(shard, /name: split-times\n/);
+  assert.match(shard, /git branch -f main "\$\{\{ needs\.times\.outputs\.main \}\}"/);
+  assert.doesNotMatch(shard, /actions\/cache/, 'no shard reads the times cache itself');
   assert.ok(yml.includes(`(${onGh}) && format('citadel-github-{0}', github.run_id)`), "a group per run: shards never cancel a land's desktop run");
   assert.match(shard, /fail-fast: false/);
   assert.equal(

@@ -15,7 +15,29 @@ train_real() {
 
 # Each failed file in $failed with run-tests.sh's label for its rerun alone, "<label> <file>" a line. Fails when the log
 # doesn't label every failed file.
-train_labels() {
+# flake_only's judge of one job's lines (ci.sh).
+flake_one() {
+  local at n files
+  at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
+  [[ $at =~ ^[0-9]+$ ]] || return 1
+  n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
+  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
+  files=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' | sort -u)
+  [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] && echo "$files"
+}
+
+# <function>: runs it on each red job's lines of $failed alone, as $failed (#2209: a run on GitHub is 20 shards, each with its
+# own reruns, and gh's lines are "<job>\t<step>\t<time> …"; a log with no job is one), and fails if it fails on any.
+each_job() {
+  local job rc=0
+  while IFS= read -r job; do
+    if [ -z "$job" ]; then "$@" || rc=1; else failed=$(awk -F '\t' -v j="$job" 'NF > 2 && $1 == j' <<<"$failed") "$@" || rc=1; fi
+  done < <(awk -F '\t' 'NF > 2 { print $1 }' <<<"$failed" | sort -u | grep . || echo)
+  return $rc
+}
+
+train_labels() { each_job train_labels_one; } # each shard's rerun header and labels (#2209)
+train_labels_one() {
   local at n out
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 1
@@ -126,8 +148,11 @@ train_pin() {
 
 # Every file the full run failed in $failed, whatever its rerun showed (a held ship's test not rerun is no pass).
 train_failing() {
-  local at
   [ -z "$burn_red" ] || { burn_lines | sed 's/: failed in .*//' | sort -u; return; }
+  each_job train_failing_one | sort -u
+}
+train_failing_one() {
+  local at
   at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
   [[ $at =~ ^[0-9]+$ ]] || return 0
   tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\|killed (exit [0-9]*) when rerun alone\).*/\1/p' | sort -u

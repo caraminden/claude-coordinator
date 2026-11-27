@@ -29,22 +29,28 @@ all.
   `check/**` and `early/**` (left on the desktop on purpose), runs by hand, and land.sh's fallback.
 - **Split by file time.** `tools/suite-runner.ts` with `CITADEL_TEST_SHARD=<i>/<n>` deals the files longest first onto
   the shard with the least so far (a file with no time counts as the median); shard 0, which also runs the burn-in,
-  starts 60 s heavier. Each shard uploads only its files' times; `ci-cache.yml` (on `workflow_run`, so in main's
+  starts 60 s heavier. A first job, `times`, reads main's tip and the times cache once and hands both to all 20 shards,
+  so they all work out the same split: each reading the cache (or main, which picks the tier) on its own, one shard
+  starting after new times were saved would leave files unrun in a green run. Each shard uploads only its files' times; `ci-cache.yml` (on `workflow_run`, so in main's
   context) merges them with `--merge-times` and keeps them, and the tool downloads, in caches every branch can read (a
   cache saved on a `land/` branch is readable only there).
 - **One verdict, as before.** The run is red when any shard is; land.sh reads the run's conclusion and its failed
   step as it did for the desktop. A red of flakes only (`flake_only`) now judges each shard's log apart: every red shard
-  must have rerun its failed files alone and found them all flakes. Before, it read only the last "rerunning" line in
-  the log, which with 20 jobs would have let one shard's flakes hide another shard's real failure.
+  must have rerun its failed files alone and found them all flakes (`each_job`). Before, it read only the last
+  "rerunning" line in the log, which with 20 jobs would have let one shard's flakes hide another shard's real failure.
+  The train's readers of the same lines (`train_labels`, `train_failing`) and the skipped-test count do the same.
 - **The desktop by itself.** land.sh (`ci_gate`, `ci_to_desk` in `tools/land/ci.sh`) knows a GitHub run by the
   `shard:` job in the tip's tests.yml. It cancels that run and dispatches tests.yml with `where=desktop` on the same
   `land/` ref, then waits on that run exactly as on any desktop run, when:
   - not every shard on `ubuntu-latest` has started within `LAND_CI_GH_START` (60 s) of the push: GitHub is down, or
     its 20 slots are taken (another ship's run, another repo's jobs);
-  - the run ends with no verdict on the tests: red in a step before the suite (setup, the tools), or cancelled, or
-    with no failed step.
-  A red in the full suite, its burn-in or its reruns is a verdict and refuses, as on the desktop. With no desktop
-  runner online either, the fallback is perigee's own suite, as before (`CI FALLBACK`).
+  - GitHub doesn't answer whether they started, three times running;
+  - the run ends with no verdict on the tests: any shard red in a step that isn't the suite, its burn-in or its reruns
+    (setup, the tools: that shard's files never ran), or cancelled, or with no failed step;
+  - the run passes a CI limit (`LAND_CI_TIMEOUT` and its windows), which on the desktop went straight to perigee.
+  A red only in the full suite, its burn-in or its reruns is a verdict and refuses, as on the desktop. Shards slow to
+  start with no desktop runner online keep their GitHub run. Otherwise, with no desktop runner online, the fallback is
+  perigee's own suite, as before (`CI FALLBACK`), but with no `ci-down` note: the next ship asks GitHub again.
 - **An off switch.** The repo variable `CI_RUNNER=desktop` sends ships' pushes back to the desktop job; land.sh sees
   a run with no `ubuntu-latest` job and waits on it as a desktop run. (`CI_RUNNER=github`, the old one-job switch,
   is gone: the shard job replaces it.)
@@ -62,6 +68,14 @@ shards' logs once the run ends, or an artifact Citadel fetches), which nobody ha
 Also left as they are: `src/ci-hold.ts` and deploy-queue.sh's `ci_busy` still count a ship's run as the desktop's,
 so optional desktop work still waits behind a ship that runs on GitHub; and the hold stops a hand-started
 `where=github` run as optional work (it did to the first probe, run 45968345201).
+
+The first ship after this lands finds no times in main's cache, so its shards split by name; `ci-cache.yml` keeps
+times from then on.
+
+Other schemes' ship scripts (the kit's `land.sh` template) are left as they are: Cara's words were about Citadel's own
+ship CI, their repos may be private (hosted runners spend minutes there), and the 20 slots are one account's, shared
+with this repo's ships. A new feature for one ship script needs no port (Cara, 2026-11-22, "Keep both, port by rule");
+another scheme takes it by its own ask.
 
 ## Numbers
 

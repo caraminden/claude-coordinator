@@ -98,6 +98,10 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
 - A set written together (a chain, an idea minion's pieces): each handoff lists every tool, flag or route it calls, with
   the `rg -n` line that finds it on main or the earlier piece, by number, that adds it. The piece that turns the feature
   on has a Done when line that starts it as a person or Taskmaster would, with no hand-set rows.
+- A handoff matches the option it is offered as, before the card is posted: a card start passes the file
+  unread (ADR 0038). When a person's pick narrows or changes it (fewer pieces, another option, a different
+  number), whoever reads the pick (the Taskmaster or the owner) edits the file first, its Goal and Done when
+  included, and checks any claim about a tool against that tool's description. Then the minion starts.
 
 ## Idea minions and process-only changes
 

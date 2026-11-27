@@ -91,7 +91,7 @@ function formingCard(c: SeedCtx): string {
         roster,
         multiSelect: false,
         options: [
-          { label: 'Start the cabal', description: 'The Overseer starts them 4 at a time (the rest wait their turn) and may unseal, stop and reseal its own members; the Taskmaster hears of each start. Anyone not listed needs another card.', recommended: true },
+          { label: 'Start the cabal', description: 'The Overseer starts them 4 at a time (the rest wait their turn) and may unseal, stop and reseal its own members, and each start stands up to its row\u0027s cost; the Taskmaster hears of each start. Anyone not listed needs another card.', recommended: true },
           { label: 'Not yet', description: 'Nothing starts. Say what to change and the Overseer posts a new card.' },
         ],
       },

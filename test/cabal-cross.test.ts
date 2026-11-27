@@ -94,11 +94,19 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   const form = await board({ action: 'form', width: 1 });
   assert.equal(form.status, 200, JSON.stringify(form.data));
   const mine = (await events(lead.id)).filter((e) => e.kind === 'question').at(-1)!;
-  assert.match(JSON.parse(mine.data).questions[0].question, /\[Delve\] D · Delve piece/);
+  const mineQ = JSON.parse(mine.data).questions[0];
+  assert.match(mineQ.question, /^- \[Delve\] Delve piece · ~\$6 · now$/m);
+  assert.equal(mineQ.roster.find((r: { what: string }) => r.what === 'Delve piece').scheme, 'Delve', 'the list draws the other scheme on its row');
   const tmB = taskmasterOf(b.id);
   const theirs = (await events(tmB)).filter((e) => e.kind === 'question').at(-1)!;
   const theirData = JSON.parse(theirs.data);
   assert.equal(theirData.asker, lead.id, 'its answer goes to the lead');
+  assert.deepEqual(
+    theirData.questions[0].roster.map((r: { what: string }) => r.what),
+    ['Delve piece'],
+    'their card draws their rows as a list too',
+  );
+  assert.match(theirData.questions[0].question, /^- Delve piece · ~\$6 · now$/m);
   assert.deepEqual(
     theirData.cabalForm.rows.map((r: { id: number }) => r.id),
     [rowOf('D').id],

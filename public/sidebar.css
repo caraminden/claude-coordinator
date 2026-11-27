@@ -81,8 +81,7 @@
 .cabal-asks { color: var(--error); }
 .cabal-build { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 0.75rem; color: var(--muted); }
 .cabal-build a { display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--space-1); } /* tap target: Preview sits apart from the toggle */
-.cabal-build:has(a) { margin-top: calc(-1 * var(--space-2)); padding-bottom: 0; } /* the tall link brings its own room */
-.cabal-card:not([data-open]) .cabal-build:has(a) { margin-bottom: -7px; } /* open, the members start under the whole link */
+.cabal-build:has(a) { margin-top: calc(-1 * var(--space-2)); margin-bottom: -7px; padding-bottom: 0; } /* the tall link brings its own room; the same open or shut, or a toggle shifts the list by it (#2197) */
 .cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); }
 .cabal-members.opening { animation: cabal-open 0.15s ease-out; } /* the click that opens it only: the list redraws on every tick (#2181) */
 .cabal-planned { margin: 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; }

@@ -283,8 +283,8 @@ async function builds(ctx, say, end) {
       await say(n, `Pulling ${name}`, 'running');
       const pull = await watched((o) => podman(['pull', image], o), say, n, `Pulling ${name}`, 60 * 60_000);
       if (pull.code !== 0) {
-        const why = `${name} didn't pull: ${tail(pull.out) || 'it stopped'}`;
-        return say(n, why, 'fail').then(() => end(false, { why }));
+        // The step names what failed; the card's notice under it carries the output, once.
+        return say(n, `${name} didn't pull`, 'fail').then(() => end(false, { why: `${name} didn't pull: ${tail(pull.out) || 'it stopped'}` }));
       }
     }
     const size = await podman(['image', 'inspect', '--format', '{{.Size}}', image]);
@@ -306,7 +306,7 @@ async function builds(ctx, say, end) {
     }
     made.push(v);
   }
-  if (volumes.length) await say(n++, `Cache volumes ${volumes.join(', ')}${made.length ? ` (made ${made.join(', ')})` : ' (already there)'}`, 'ok');
+  if (volumes.length) await say(n++, `Cache volumes ready: ${volumes.join(', ')}${made.length === volumes.length ? ' (new)' : made.length ? ` (new: ${made.join(', ')})` : ''}`, 'ok');
   const android = images.find(([k]) => k === 'android')[1];
   const threads = Number.isInteger(ctx.ask.caps?.threads) && ctx.ask.caps.threads > 0 ? ['--cpus', String(ctx.ask.caps.threads)] : [];
   const label = 'Building a hello-world APK in citadel-build-android (the first build fetches Gradle’s plugins into citadel-gradle)';
@@ -314,8 +314,7 @@ async function builds(ctx, say, end) {
   const apk = await watched((o) => podman(['run', '--rm', '--security-opt', 'label=disable', ...threads, '-v', 'citadel-gradle:/cache/gradle', android, 'citadel-hello-apk'], o), say, n, 'Building the hello-world APK', 30 * 60_000);
   const bytes = Number(apk.out.match(/^apk (\d+)$/m)?.[1]);
   if (apk.code !== 0 || !bytes) {
-    const why = `The hello-world APK didn't build: ${tail(apk.out) || 'it stopped'}`;
-    return say(n, why, 'fail').then(() => end(false, { why }));
+    return say(n, 'Building the hello-world APK', 'fail').then(() => end(false, { why: `The hello-world APK didn't build: ${tail(apk.out) || 'it stopped'}` }));
   }
   await say(n, `Built a hello-world APK (${Math.max(1, Math.round(bytes / 1000))} KB) in citadel-build-android`, 'ok');
   return end(true, { report: `Hello-world APK built${sizes.length ? `; images ${sizes.join(', ')}` : ''}` });

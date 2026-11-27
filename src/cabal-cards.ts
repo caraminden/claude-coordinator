@@ -1,6 +1,7 @@
 // Each open cabal's card in the minions list (#2092): its board (src/cabal-board.ts) cut down to what the card shows.
 // Read per scheme, cached, polled with the build headers and again on every board write, and broadcast when it
 // changes, so opening a card asks the server nothing. A cabal is open while its lead is.
+import { setTimeout as sleep } from 'node:timers/promises';
 import { type BoardDeps, type BoardMember, overseerOf, readBoard } from './cabal-board.ts';
 import type { Store } from './db.ts';
 
@@ -87,6 +88,17 @@ export class CabalCards {
 
   constructor(d: { store: Store; broadcast: (msg: { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => void; parked: BoardDeps['parked'] }) {
     this.d = d;
+  }
+
+  private first?: Promise<void>;
+
+  /**
+   * The first read of every scheme, started once (a restart begins with no cards, and a page or the readers' snapshot taken
+   * before it lands would show a build's Overseer as a loose row, #2203). Bounded: a slow git read never holds a page back.
+   */
+  warm(ms = 8000): Promise<void> {
+    this.first ??= Promise.race([this.poll(), sleep(ms, undefined, { ref: false }).then(() => {})]);
+    return this.first;
   }
 
   /** The last cards read for a scheme, for its page load. */

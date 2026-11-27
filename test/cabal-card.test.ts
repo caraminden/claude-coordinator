@@ -86,6 +86,13 @@ test("a cabal's minions leave their sections for its card; Deploying ones don't,
   assert.deepEqual([none.cards.length, none.rest.length], [0, 4]);
 });
 
+test('a fresh cache has the open cabals once warmed, so a page loaded right after a restart still draws the card (#2203)', async () => {
+  const cards = new CabalCards({ store, broadcast: () => {}, parked: () => false });
+  assert.equal(cards.get(p.id).length, 0, 'a restart begins with none');
+  await cards.warm();
+  assert.ok(cards.get(p.id).length > 0, 'warmed');
+});
+
 test("an Overseer's card keeps its Overseer's row through its own full run and ship, in every resting state", () => {
   const cabal = { lead: 1, build: 10, members: [{ id: 2 }] };
   const states = {

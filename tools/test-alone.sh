@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One test file run alone, for the ship scripts' questions about a red (#1863): tools/land.sh and
-# tools/own-check.sh. Niced, with the checkout's packages (tools/test-deps.sh), stopped at LAND_PIN_LIMIT s (120).
+# tools/own-check.sh. Niced (LAND_PIN_NICE, 19: on perigee it yields to the server; land.sh's tests set 0, #2229), with the
+# checkout's packages (tools/test-deps.sh), stopped at LAND_PIN_LIMIT s (120).
 #   test-alone.sh run <checkout> <test file>     its output; 0 when it passes or the checkout hasn't got it, 1 when it
 #                                                fails, anything else is no answer: stopped, or it could not run here
 #                                                (its packages, or a module of them, are missing).
@@ -16,7 +17,7 @@ alone() { # <checkout> <test file>
   if ! "$tools/test-deps.sh" "$1" 2>&1; then echo "test-alone: $2 did not run: its packages are missing"; return 2; fi
   out=$(mktemp) || return 2
   began=$SECONDS
-  (cd "$1" && timeout -k 10 "$limit" nice -n 19 "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$2") >"$out" 2>&1 </dev/null || r=$?
+  (cd "$1" && timeout -k 10 "$limit" nice -n "${LAND_PIN_NICE:-19}" "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$2") >"$out" 2>&1 </dev/null || r=$?
   [ "$r" != 137 ] || [ $((SECONDS - began)) -ge "$limit" ] || r=2 # killed from outside before its limit (#1393): not its hang
   cat "$out"
   if [ "$r" = 1 ] && "$tools/test-deps.sh" missing "$out"; then

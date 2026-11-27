@@ -69,8 +69,11 @@ for (const [where, bad, tested, runs, deploys, alone] of [
     // The retro log's verdict (src/land-reds.ts) names the train's leader and the ship found, once.
     assert.deepEqual(retroReds(l.r.dir), [`ticket/2-x ticket/${bad}-x`]);
     for (const n of alone) assert.match(done[n - 1].stderr, new RegExp(`ship train: ticket/${n}-x is one of the \\d ships ticket/2-x's red train is down to, so this tests it alone`));
-    // One fewer when two sections' heads are made in the same second: then they are the same commit.
-    assert.ok(l.runs() === runs || l.runs() === runs - 1, `${l.runs()} CI runs, not ${runs}`);
+    // One fewer when two sections' heads are made in the same second: then they are the same commit. One more for an early
+    // next train (#1568) its push beat the red train's verdict to, dropped with that red: a race land.sh's speed decides,
+    // which GitHub's runners won about one copy in five (#2229).
+    const drops = done.flatMap((d) => d.stderr.match(/^land: early next train: dropped the early CI run on \S+ train \(the train ahead went red\)/gm) ?? []).length;
+    assert.ok(l.runs() === runs + drops || l.runs() === runs + drops - 1, `${l.runs()} CI runs, not ${runs} and ${drops} early run(s) dropped`);
     assert.equal(l.deployed().length, deploys, 'each section goes live by itself');
     // Ship 9 waited behind the first train: it rides the full one that starts over, or the one after it.
     const after = bad === 2 ? 3 : bad + 1;

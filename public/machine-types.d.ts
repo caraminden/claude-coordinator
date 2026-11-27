@@ -180,6 +180,8 @@ export interface MachineRow {
   vm_of?: number | null;
   /** Its VMs (Build 10 H4: a VM is a capability of its computer), each as its own row: they never show as machines of their own. */
   vms?: MachineRow[];
+  /** Its agent is from before and reports nothing: Update replaces it. */
+  update?: boolean;
 }
 
 // The connect, merge, remove, set up and runs-on pages.

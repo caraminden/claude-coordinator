@@ -56,9 +56,10 @@ const when = (at) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minu
  * The panel, drawn into `el`. machine: an Update of that row (an agent from before); none: a new computer.
  * onDone runs when it is closed.
  * @param {HTMLElement} el
- * @param {{ machine?: Pick<MachineRow, 'id' | 'name'> | null, onDone?: () => void }} [opts]
+ * inside: the computer a VM runs on (Build 10 H4), so its Update says to paste it in the VM, not on that computer.
+ * @param {{ machine?: Pick<MachineRow, 'id' | 'name'> | null, inside?: string | null, onDone?: () => void }} [opts]
  */
-export function openConnectPanel(el, { machine = null, onDone = () => {} } = {}) {
+export function openConnectPanel(el, { machine = null, inside = null, onDone = () => {} } = {}) {
   /** @type {{ os: string, join: MachineJoin | null, state: string, got: MachineRow | null, timer: ReturnType<typeof setInterval> | 0, failed: string, closed?: boolean }} */
   const st = { os: guessJoinOs(), join: null, state: 'making', got: null, timer: 0, failed: '' };
   /** @param {{ quiet?: boolean }} [opts] */
@@ -142,6 +143,7 @@ export function openConnectPanel(el, { machine = null, onDone = () => {} } = {})
       ),
     ),
     machine ? h('p', { class: 'small' }, `This replaces the agent on ${machine.name}: it keeps its name and what it lends.`) : '',
+    machine && inside ? h('div', { class: 'cui-notice', 'data-tone': 'warn' }, `${machine.name} is a VM on ${inside}: paste this inside the VM, not on ${inside}, or ${inside}'s agent takes the VM's place.`) : '',
     h('p', { class: 'small' }, way.where),
     command ? markdownElement(`\`\`\`${way.tag}\n${command}\n\`\`\``) : h('pre', { class: 'muted' }, st.state === 'failed' ? 'No code yet.' : 'Making a code…'),
     way.note ? h('p', { class: 'small muted' }, way.note) : '',

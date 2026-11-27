@@ -177,13 +177,17 @@ export function machinesPage(main = {}) {
 let connectPanel = null;
 
 /** Connect a computer's panel (Build 7 M2), for a new computer or, with `m`, an Update of an agent from before. */
-function connectComputer(m = null) {
+/**
+ * @param {import('./types.js').MachineRow | null} [m] the row an Update reconnects
+ * @param {string | null} [inside] the computer it is a VM on
+ */
+function connectComputer(m = null, inside = null) {
   const el = document.getElementById('machine-connect');
   if (!el) return;
   // One panel at a time: the one before stops watching its code, or its next look would draw over this one.
   connectPanel?.close({ quiet: true });
   mergePanel?.close({ quiet: true });
-  connectPanel = openConnectPanel(el, { machine: m });
+  connectPanel = openConnectPanel(el, { machine: m, inside });
   el.scrollIntoView({ block: 'nearest' });
 }
 
@@ -604,15 +608,18 @@ function machineBody(m) {
     ),
     m.jobs ? machineJobsSection(m) : '',
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, removing(m) ? null : pauseButton(m, renderMachineList), remove),
-    ...(m.vms ?? []).map(machineVm),
+    ...(m.vms ?? []).map((/** @type {import('./types.js').MachineRow} */ vm) => machineVm(vm, m)),
   );
 }
 
 /** A VM on this computer (Build 10 H4: "really just a capability of a machine"): what it lends and its screen, inside its host's card.
- * @param {import('./types.js').MachineRow} vm */
-function machineVm(vm) {
+ * @param {import('./types.js').MachineRow} vm
+ * @param {import('./types.js').MachineRow} host */
+function machineVm(vm, host) {
   const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[vm.status];
-  return h('section', { class: 'machine-vm', 'aria-label': `VM: ${vm.name}` }, h('div', { class: 'row machine-vm-head' }, h('strong', {}, `VM: ${vm.name}`), h('span', { class: 'small muted' }, `${word} · ${machineStatusText(vm)}`)), machineBody(vm));
+  // Its agent's Update says to paste it inside the VM: run on the host, the host's agent would take the VM's row.
+  const update = vm.update && managesHere(vm) && h('button', { type: 'button', class: 'secondary small', title: `Its agent is from before. Opens the command to paste inside ${vm.name}, not on ${host.name}`, onclick: () => connectComputer(vm, host.name) }, 'Update');
+  return h('section', { class: 'machine-vm', 'aria-label': `VM: ${vm.name}` }, h('div', { class: 'row machine-vm-head' }, h('strong', {}, `VM: ${vm.name}`), h('span', { class: 'small muted' }, `${word} · ${machineStatusText(vm)}`), update || ''), machineBody(vm));
 }
 
 /** An old CI runner agent's update line, per OS: its install again, with the token already on that PC, so nothing else is cut off.

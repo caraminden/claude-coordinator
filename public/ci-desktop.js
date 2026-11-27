@@ -1,6 +1,6 @@
 // The CI desktop cards on the CI page's Overview, behind its CI desktop load toggle (#534, moved there from Machines by #968, onto Overview by #1019): each PC that hosts CI runners, as src/ci-load.ts sees it: a
 // verdict, what it is doing now, the last 24 hours, and each pool of runners with its queue (public/ci.js reads them).
-/** @import { PcView, PcBrief } from './types/ci.js' */
+/** @import { PcView, PcBrief, CiRunner } from './types/ci.js' */
 import { ago, h } from './base.js';
 
 const GB = 1024 ** 3;
@@ -235,4 +235,20 @@ export function pcWord(pc) {
   if (v === 'none') return ['neutral', 'No samples'];
   const hot = pc.now && Math.max(pc.now.cpu, (1 - pc.now.mem_free / pc.now.mem_total) * 100) >= 70;
   return hot ? ['warn', 'Busy'] : ['ok', 'Fine'];
+}
+
+/**
+ * A PC's word on a scheme's "Runs on" line (#2239: it said "Fine" with 3 of the scheme's 4 runners there offline): the
+ * PC's own trouble first, then the scheme's runners named after it (<PC>, <PC>-2, <PC>-linux) that are offline for real,
+ * not asleep on Citadel's plan, then pcWord.
+ * @param {PcBrief} pc
+ * @param {CiRunner[] | null | undefined} runners
+ * @returns {[string, string]}
+ */
+export function runsOnWord(pc, runners) {
+  const word = pcWord(pc);
+  if (word[0] === 'danger') return word;
+  const host = pc.host.toLowerCase();
+  const off = (runners ?? []).filter((r) => r.status === 'offline' && !r.asleep && r.name.toLowerCase().startsWith(host)).length;
+  return off ? ['danger', `${off} runner${off === 1 ? '' : 's'} offline`] : word;
 }

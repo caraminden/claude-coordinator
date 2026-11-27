@@ -102,7 +102,9 @@ import {
   CI_SENDER,
   BUNDLE_ITEM,
   itemKey,
+  asleepRunners,
 } from './ci-problems.ts';
+import type { Slept } from './ci-load.ts';
 export {
   humanText,
   WAIT_MS,
@@ -299,6 +301,8 @@ export interface CiHealthDeps {
   dismiss?: (ticketId: number, text: string) => void;
   /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing: a dispatched run that passed, which also runs at low effort (#951). No message, no wakes. */
   wake?: (ticketId: number, text: string, fyi?: boolean, run?: Run) => void;
+  /** #2239: the runners each PC's agent keeps asleep on Citadel's plan (src/ci-load.ts asleep); none, and every offline runner reads offline. */
+  asleep?: () => Slept[];
   /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
   /** `people`: the admins its alert rings, whose own Taskmasters in the scheme hear of it (taskmastersFor). */
   tell?: (project: Project, text: string, wake?: boolean, people?: number[]) => boolean | number;
@@ -703,6 +707,7 @@ export class CiHealth {
   /** Every scheme with CI that `canSee` allows, with its last view and its open problems (the land gate's in the live checkout's scheme), for GET /api/ci. */
   snapshot(canSee: (projectId: number) => boolean) {
     const land = this.store.getSetting<LandWatch>(LAND_WATCH);
+    const slept = this.deps.asleep?.() ?? [];
     // A scheme whose repo has no workflows has no view, so isn't listed.
     return this.store.listProjects().flatMap((p) => {
       const view = repoSlug(p.repo_url) && canSee(p.id) ? this.store.getSetting<CiView>(`ci-health:view:${p.id}`) : undefined;
@@ -713,8 +718,16 @@ export class CiHealth {
       const who = (r: { minion?: number | null; branch?: string; event?: string }) => (r.minion ? { href: `#/p/${p.id}/t/${r.minion}`, label: `#${r.minion} ${this.store.getTicketByNumber(p.id, r.minion)?.title ?? ''}`.trim() } : { label: runKind(r, view.branch) });
       const quiet = new Set(lines(p.ci_quiet)),
         watch = new Set(lines(p.ci_watch ?? ''));
+      // #2239: the runners a PC's agent keeps asleep on Citadel's plan read as asleep, not offline.
+      const asleep = view.runners
+        ? asleepRunners(
+            view.runners,
+            slept.filter((x) => x.repo === view.slug.toLowerCase()),
+          )
+        : new Set<string>();
       const shown = {
         ...view,
+        runners: view.runners && view.runners.map((r) => (asleep.has(r.name) ? { ...r, asleep: true as const } : r)),
         waiting: view.waiting.map((j) => ({ ...j, who: who(j) })),
         running: (view.running ?? []).map((j) => ({ ...j, who: who(j) })),
         workflows: view.workflows.map((w) => ({ ...w, quiet: quiet.has(w.file) && !watch.has(w.file), verdict: w.verdict && { ...w.verdict, who: who(w.verdict) } })),

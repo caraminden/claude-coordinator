@@ -1895,6 +1895,8 @@ const ciHealth = new CiHealth(store, {
   longs: () => longJobs.list(),
   retro: (p, since, now) => readRetro(projectSharedDir(DATA_DIR, p.id), since, now),
   shipTimes: (p, times) => ciNumbers.own(p, times),
+  // Read only once requests come in, after ciLoad is set up below.
+  asleep: () => ciLoad.asleep(),
   get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.

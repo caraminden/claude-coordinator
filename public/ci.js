@@ -12,7 +12,7 @@ import { ago, api, h, icon, keepView, view, pacificClockBare, pacificStamp, poll
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, meter, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
-import { pcCard, pcWord, trouble, troubleLine } from './ci-desktop.js';
+import { pcCard, pcWord, runsOnWord, trouble, troubleLine } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
 import { numbersTab, readNumbers } from './ci-numbers.js';
 import { codeTab, readCode } from './code-map.js';
@@ -300,14 +300,15 @@ function runningBlock(s, now, ui) {
   const since = (/** @type {CiRunningJob | undefined} */ j) => (j ? shortSpan(now - Date.parse(j.since)) : null);
   const rows = own.map((r) => {
     const j = running.find((x) => x.runner === r.name);
-    const word = r.status === 'offline' ? 'offline' : j || r.busy || r.job ? 'busy' : 'idle';
+    // Asleep (#2239): its PC's agent stopped it on Citadel's plan, to give the room to minion turns; it wakes when work comes.
+    const word = r.status === 'offline' ? (r.asleep ? 'asleep' : 'offline') : j || r.busy || r.job ? 'busy' : 'idle';
     return {
       word,
       el: hueRow(
-        { hue: { offline: 'danger', busy: 'running', idle: 'done' }[word], lead: word, meta: since(j) },
+        { hue: { offline: 'danger', asleep: 'muted', busy: 'running', idle: 'done' }[word], lead: word, meta: since(j) },
         h('strong', { title: `${r.name}: ${r.labels.join(', ')}` }, r.name),
         ' ',
-        j ? jobCell(j) : h('span', { class: 'muted' }, word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline') : (r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work'))),
+        j ? jobCell(j) : h('span', { class: 'muted' }, word === 'asleep' ? 'stopped to make room for minion turns; wakes when work comes' : word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline') : (r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work'))),
       ),
     };
   });
@@ -332,11 +333,12 @@ function runningBlock(s, now, ui) {
   // The Runners tab's notes (#1019: runners moved onto Overview), for a repo whose runners can't be listed or that has none.
   const note = v.runners === null ? "CI health can't list this repo's runners: it needs a repo admin's linked GitHub." : !own.length ? "No self-hosted runners; jobs run on GitHub's." : v.runs.some(githubShip) ? "Ships don't run here unless GitHub can't take them (see Fallbacks)." : '';
   const busy = count('busy') + theirs.length,
-    off = count('offline');
-  const [tone, word] = off ? ['warn', `${off} offline`] : busy ? ['info', `${busy} busy`] : ['ok', 'Idle'];
+    off = count('offline'),
+    asleep = count('asleep');
+  const [tone, word] = off ? ['warn', `${off} offline`] : busy ? ['info', `${busy} busy`] : asleep ? ['ok', `${asleep} asleep`] : ['ok', 'Idle'];
   const [row] = settingsRow(
     { key: `ci-running-${s.id}`, icon: 'box', hue: busy ? 'running' : 'done', title: 'Runners and what they run', summary: [toneChip(tone, word), head] },
-    statTiles([String(busy), 'busy', 'running'], [String(count('idle')), 'idle', 'done'], off && [String(off), 'offline', 'danger']),
+    statTiles([String(busy), 'busy', 'running'], [String(count('idle')), 'idle', 'done'], asleep && [String(asleep), 'asleep', 'muted'], off && [String(off), 'offline', 'danger']),
     showFirst({ key: `ci-running-${s.id}`, items, n: 6, noun: 'runners' }),
     note ? h('p', { class: 'look-prose' }, note) : null,
   );
@@ -354,7 +356,7 @@ function runsOn(s, pcs, ui) {
   if (!mine.length) return '';
   // #2231: a scheme whose ships run on GitHub's shards uses its PC for the rest and the fallbacks.
   const lead = s.view.runs.some(githubShip) ? "Ships run on GitHub's runners; other runs and fallbacks run on " : 'Runs on ';
-  return h('p', { class: 'ci-runs-on muted' }, lead, ...mine.flatMap((pc, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'link', onclick: () => ui.openPc(pc.host) }, pc.host), ` · ${pcWord(pc)[1]}`]));
+  return h('p', { class: 'ci-runs-on muted' }, lead, ...mine.flatMap((pc, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'link', onclick: () => ui.openPc(pc.host) }, pc.host), ` · ${runsOnWord(pc, s.view.runners)[1]}`]));
 }
 
 /**

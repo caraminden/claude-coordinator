@@ -121,6 +121,28 @@ export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n ==
 /** "Nov 5, 10:31 PST". Always dated: a title that dropped it for today would change at midnight and re-send the alert (#509). */
 export const clock = pacific;
 
+/**
+ * The offline runners that are asleep, not dead (#2239): a PC's agent stops the runners Citadel's plan has no room for
+ * (Build 7 M6b), and GitHub lists them offline. Each `slept` entry (one repo's, from src/ci-load.ts sleptOf) covers up to
+ * `n` of the offline runners named after its PC, as Citadel's scripts name them: <PC>, <PC>-2 on Windows, <PC>-linux,
+ * <PC>-linux-2 in WSL. The rest are offline for real.
+ */
+export function asleepRunners(runners: readonly { name: string; status: string }[], slept: readonly { host: string; os: 'windows' | 'linux'; n: number }[]): Set<string> {
+  const out = new Set<string>();
+  const linux = /-linux(-\d+)?$/i;
+  for (const s of slept) {
+    const host = s.host.toLowerCase();
+    let left = s.n;
+    for (const r of [...runners].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (left <= 0) break;
+      if (r.status !== 'offline' || out.has(r.name) || !r.name.toLowerCase().startsWith(host) || linux.test(r.name) !== (s.os === 'linux')) continue;
+      out.add(r.name);
+      left--;
+    }
+  }
+  return out;
+}
+
 /** Keep `offline` (runner name → first seen offline) in step with the runner list, in place. */
 export function trackOffline(runners: Runner[], offline: Record<string, number>, now: number): void {
   const names = new Set(runners.map((r) => r.name));

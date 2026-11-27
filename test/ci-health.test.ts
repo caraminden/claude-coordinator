@@ -412,6 +412,30 @@ test('the CI page reads each scheme it may see: runners with their job, the queu
   );
 });
 
+test("#2239: runners a PC's agent keeps asleep read asleep on the CI page; the rest of the offline ones stay offline", async () => {
+  const w = world();
+  w.gh.runners = [desk('online', 'DESKTOP-G248IJ8-linux'), desk('offline', 'DESKTOP-G248IJ8-linux-2'), desk('offline', 'DESKTOP-G248IJ8-linux-3'), desk('offline', 'DESKTOP-G248IJ8-2')];
+  await w.health.tick(NOW);
+  const health = new CiHealth(w.store, {
+    ...w.deps,
+    asleep: () => [
+      { host: 'DESKTOP-G248IJ8', os: 'linux', repo: 'caraminden/peek-auras', n: 2 },
+      { host: 'DESKTOP-G248IJ8', os: 'windows', repo: 'caraminden/delve', n: 1 },
+    ],
+  });
+  const peek = health.snapshot(() => true).find((s) => s.id === w.peek.id)!;
+  assert.deepEqual(
+    peek.view.runners!.map((r) => [r.name, r.status, !!r.asleep]),
+    [
+      ['DESKTOP-G248IJ8-linux', 'online', false],
+      ['DESKTOP-G248IJ8-linux-2', 'offline', true],
+      ['DESKTOP-G248IJ8-linux-3', 'offline', true],
+      ['DESKTOP-G248IJ8-2', 'offline', false],
+    ],
+    "another repo's sleep doesn't cover this one's Windows runner",
+  );
+});
+
 test('a quieted workflow whose last run on main failed keeps its verdict on the page, marked quiet, and makes no problem (TWIReader #990)', async () => {
   const w = world();
   w.store.setProjectSettings(w.peek.id, { ci_quiet: 'desktop.yml' });

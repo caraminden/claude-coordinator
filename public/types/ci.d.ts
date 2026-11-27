@@ -330,6 +330,8 @@ export interface CiRunner {
   labels: string[];
   job: string | null;
   offlineSince: number | null;
+  /** Its PC's agent stopped it on Citadel's plan (#2239): asleep, not offline. */
+  asleep?: true;
 }
 
 export interface CiWaitingJob {

@@ -76,6 +76,30 @@ export interface Sample {
   restarts: number[];
 }
 
+/** How many of one repo's runners a PC's agent for `os` has asleep: Citadel's plan stopped their services (Build 7 M6b). */
+export interface Slept {
+  host: string;
+  os: 'windows' | 'linux';
+  repo: string;
+  n: number;
+}
+
+/**
+ * The runners a sample's agent put to sleep, per repo (#2239): every runner it may wake (`wakeable`, asleep ones included,
+ * one repo a runner) less the ones up now. A runner whose service died on its own isn't wakeable, so it isn't counted.
+ */
+export function sleptOf(s: Pick<Sample, 'host' | 'os' | 'runners' | 'wakeable'>): Slept[] {
+  if (!s.wakeable) return [];
+  const up = new Map<string, Set<string>>();
+  for (const r of s.runners) if (r.repo) (up.get(r.repo.toLowerCase()) ?? up.set(r.repo.toLowerCase(), new Set()).get(r.repo.toLowerCase())!).add(r.name);
+  const may = new Map<string, number>();
+  for (const repo of s.wakeable) may.set(repo.toLowerCase(), (may.get(repo.toLowerCase()) ?? 0) + 1);
+  return [...may].flatMap(([repo, n]) => {
+    const left = n - (up.get(repo)?.size ?? 0);
+    return left > 0 ? [{ host: s.host, os: s.os, repo, n: left }] : [];
+  });
+}
+
 const num = (v: unknown, what: string, max: number, min = 0): number => {
   if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) throw new HttpError(400, `${what} must be a number from ${min} to ${max}`);
   return v;
@@ -455,6 +479,11 @@ export class CiLoad {
           .filter(Boolean),
       ),
     ];
+  }
+
+  /** The runners its agents keep asleep on Citadel's plan now, by each sample of the last STALE_MS (#2239: the CI page said "offline"). */
+  asleep(now = Date.now()): Slept[] {
+    return [...this.latest.values()].filter((s) => now - s.at <= STALE_MS).flatMap(sleptOf);
   }
 
   /** The repos (owner/name, lowercase) one machine's runner agent for `os` lists runners for, by its newest sample in the last 10 minutes (#2064). */

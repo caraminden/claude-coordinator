@@ -109,7 +109,7 @@ export interface CiView {
   slug: string;
   branch: string;
   /** Null when its runners can't be listed (no repo admin's linked GitHub). */
-  runners: { name: string; status: string; busy: boolean; labels: string[]; job: string | null; offlineSince: number | null }[] | null;
+  runners: { name: string; status: string; busy: boolean; labels: string[]; job: string | null; offlineSince: number | null; asleep?: true }[] | null;
   waiting: { name: string; labels: string[]; since: string; run: number; branch?: string; event?: string; minion?: number | null }[];
   /** Jobs running now, on which runner, since when and for which minion (Cara, 2026-11-18: "show what is running on the CI"); absent in older views. */
   running?: { name: string; runner: string; since: string; run: number; branch?: string; event?: string; minion?: number | null }[];

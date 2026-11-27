@@ -21,11 +21,6 @@ after(async () => {
   rmSync(root, { recursive: true, force: true }); // timing-ok: own temp dir
 });
 
-// The running turn's 250 ms poll is handoffs/sync-disk-turn-stream.md's: its looks at these files aren't the start or the end.
-const POLL = /^(existsSync|readFileSync|openSync|rmSync) .*\/(exit|pid)\.json$|^openSync .*\/stream\.jsonl$/;
-// Build 7's look for a `machine` file, made only for a turn with no unit and no container (a test's, a machine's): the server's own turns run in units.
-const MACHINE = /^readFileSync .*\/machine$/;
-
 /** Runs `fn` and returns the blocking fs calls under `dir`, and every blocking process start, made before it settled. */
 async function syncCallsUnder(dir: string, fn: () => unknown): Promise<string[]> {
   const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'realpathSync', 'readlinkSync', 'utimesSync', 'chmodSync'] as const;
@@ -51,7 +46,7 @@ async function syncCallsUnder(dir: string, fn: () => unknown): Promise<string[]>
     for (const n of starts) (childProcess as Record<string, unknown>)[n] = realStarts[n];
     syncBuiltinESMExports();
   }
-  return seen.filter((c) => !POLL.test(c) && !MACHINE.test(c));
+  return seen;
 }
 
 /** A server's data folder with a scheme whose repo has a land script, a build branch, an agent file and a plugin folder. */

@@ -173,11 +173,16 @@ test("the card comes down from a chat that isn't the scheme's Taskmaster any mor
   w.pc('cara-desktop', w.cara.id, [w.delve.id]);
   const old = w.store.createTicket({ project_id: w.delve.id, title: 'was the Taskmaster', permission_mode: 'default', created_by: 'Claude' });
   w.store.addEvent(old.id, 'question', { id: 'ci', questions: [noMachineCard(w.store, w.delve, 'linux', [])] });
+  // The scheme was renamed since: the card still carries the old name.
+  w.store.addEvent(old.id, 'question', { id: 'renamed', questions: [noMachineCard(w.store, { ...w.delve, name: 'Old Name' }, 'linux', [])] });
   w.store.addEvent(old.id, 'question', { id: 'mine', questions: [{ header: 'CI runners', question: 'Add a second runner?', options: [] }] });
   await w.auto.pass();
   assert.deepEqual(
     w.settled.map((s) => [s.ticket, s.question]),
-    [[old.id, 'ci']],
+    [
+      [old.id, 'ci'],
+      [old.id, 'renamed'],
+    ],
   );
 });
 

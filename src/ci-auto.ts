@@ -195,7 +195,7 @@ export class CiAuto {
    * An unanswered no-machine card comes down once a PC lends the scheme CI (#2220: one sat 8 hours after the scheme was
    * ticked, and its person answered a stale question). Only a lend: an empty queue read (a restart, a cancelled job)
    * proves nothing, and a runner on a PC not lending is one remove() may be taking off. Found by its words, so cards
-   * posted before this count too, in whichever chat has it (a split moves who the scheme's Taskmaster is).
+   * posted before this count too (not by name: a rename keeps the card), in whichever chat has it (a split moves who the scheme's Taskmaster is).
    */
   private withdraw(project: Project) {
     const { store } = this.d;
@@ -205,7 +205,7 @@ export class CiAuto {
       if (e.kind !== 'question') continue;
       const card = JSON.parse(e.data) as { id: string; questions?: CardQuestion[] };
       const [q, more] = card.questions ?? [];
-      if (more || q?.header !== CARD_HEADER || !q.question.startsWith(waiting(project))) continue;
+      if (more || q?.header !== CARD_HEADER || !q.question.includes(WAITING)) continue;
       this.d.settle({ ticket: e.ticket_id, question: card.id }, `Withdrew the CI runners card: ${pc.name} now lends ${project.name} its CI runners, so there's nothing to answer.`);
       // Unticked again while jobs wait, that's news: ask at once, not after CARD_MS.
       store.deleteSetting(cardKey(project));
@@ -226,8 +226,8 @@ export class CiAuto {
 const CARD_HEADER = 'CI runners';
 /** When the scheme's no-machine card last went up, in settings. */
 const cardKey = (project: Project) => `ci_auto_card:${project.id}`;
-/** How the no-machine card's question begins, up to the runner's kind: how an open one is found again. */
-const waiting = (project: Project) => `${project.name}'s CI jobs are waiting for a `;
+/** What follows the scheme's name in the no-machine card's question: how an open one is found again. */
+const WAITING = "'s CI jobs are waiting for a ";
 
 /** The no-machine card's one question, for the scheme's members (in its Taskmaster's chat): the PCs they could ask to be lent, by whose they are. */
 export function noMachineCard(store: Store, project: Project, os: Os, could: Machine[]): CardQuestion {
@@ -240,8 +240,8 @@ export function noMachineCard(store: Store, project: Project, os: Os, could: Mac
   return {
     header: CARD_HEADER,
     question: could.length
-      ? `${waiting(project)}${kind} runner, and no computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
-      : `${waiting(project)}${kind} runner, and no computer hosts CI runners yet. A member can connect one (Machines, Connect a computer) and switch its CI runners on; ${project.name} then gets a runner by itself. What do you want to do?`,
+      ? `${project.name}${WAITING}${kind} runner, and no computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
+      : `${project.name}${WAITING}${kind} runner, and no computer hosts CI runners yet. A member can connect one (Machines, Connect a computer) and switch its CI runners on; ${project.name} then gets a runner by itself. What do you want to do?`,
     options: [...(asks.length ? asks : [{ label: "I'll connect a computer", description: 'Connect it on the Machines page and switch on its CI runners.' }]), { label: 'Leave the jobs waiting', description: 'Nothing changes; they run once a computer lends CI here.' }],
   };
 }

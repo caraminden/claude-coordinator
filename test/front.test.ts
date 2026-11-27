@@ -206,7 +206,6 @@ const logged = () => readFileSync(LOG, 'utf8');
 const readyAgain = () => logged().split('Reader thread started again').length - 1;
 // A hung reader's other requests go to another after 1 s, the reader replaced after 3 s (2 s and 10 s live).
 const KNOBS = { CITADEL_READER_ANSWER_MS: '1000', CITADEL_READER_STUCK_MS: '3000' };
-// The minion page too: it waits for main's first pass over every minion (src/reader-live.ts).
 /**
  * A reader's answer to `path`. The front thread passes a read on to the main thread while a snapshot change main posted
  * is still on its way to it (caughtUp, src/front.ts; main posts one whenever the Status inputs or a minion's view moved),
@@ -218,6 +217,7 @@ const fromReader = (s: Booted, path: string, cookie = s.cookie) =>
     const got = await get(s, path, cookie);
     return got.reader && got;
   });
+// The minion page too: it waits for main's first pass over every minion (src/reader-live.ts).
 const readerAnswers = (s: Booted) => until('a reader answers', async () => (await get(s, PATHS[0], s.cookie)).reader && (await get(s, `/api/tickets/${M1.id}`, s.cookie)).reader);
 
 test('through the front thread, readers give every caller the same answers and refusals as the main thread', { timeout: 120_000 }, async () => {

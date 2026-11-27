@@ -105,14 +105,15 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
     ['embed', join(app, 'citadel-embed.service')],
     ['godot', join(app, 'perigee-godot.service')],
   ];
-  const [dirs, hostUsers, mine, mgrTotal, citadelTotal, appTotal, godotAgent, host, ...reads] = await Promise.all([
+  const [dirs, hostUsers, mine, mgrTotal, citadelTotal, appTotal, godotBridges, host, ...reads] = await Promise.all([
     hostDir(citadel).catch(() => [] as string[]),
     readStat(join(userSlice, 'cpu.stat')),
     readStat(join(mineSlice, 'cpu.stat')),
     readStat(join(mgr, 'cpu.stat')),
     readStat(join(citadel, 'cpu.stat')),
     readStat(join(app, 'cpu.stat')),
-    readStat(join(app, 'perigee-godot-agent.service', 'cpu.stat')),
+    // godot-ai's bridges: the server starts each in a scope there (src/server-tools.ts, #2179).
+    readStat(join(app, 'app-godot.slice', 'cpu.stat')),
     readHost(o.procStat ?? PROC_STAT),
     ...named.map(([, dir]) => readStat(join(dir, 'cpu.stat'))),
   ]);
@@ -120,7 +121,7 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
   named.forEach(([k], i) => {
     if (reads[i]) s[k] = reads[i]!;
   });
-  if (godotAgent) s.godot = s.godot ? [s.godot[0] + godotAgent[0], s.godot[1] + godotAgent[1]] : godotAgent;
+  if (godotBridges) s.godot = s.godot ? [s.godot[0] + godotBridges[0], s.godot[1] + godotBridges[1]] : godotBridges;
   // Each person's container is its own unit: citadel-claude-<n>.service.
   const boxes = dirs.filter((d) => /^citadel-claude-\d+\.service$/.test(d));
   const boxReads = await Promise.all(boxes.map((d) => readStat(join(citadel, d, 'cpu.stat'))));

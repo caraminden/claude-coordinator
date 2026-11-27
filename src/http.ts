@@ -28,6 +28,7 @@ import type { Builds } from './builds.ts';
 import type { CabalCards } from './cabal-cards.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket, TicketFields } from './db.ts';
 import type { MachineRelay } from './machines.ts';
+import type { ServerToolSessions } from './server-tools.ts';
 import type { MachineJobs } from './machine-jobs.ts';
 import type { KitSync } from './kit-sync.ts';
 import type { GithubLink } from './github-link.ts';
@@ -377,6 +378,8 @@ export interface App {
   /** Desktop apps' update feeds and their launcher (src/desktop-feed.ts, #1148); absent in tests that build no server. */
   desktop?: { feeds: DesktopFeeds; launchers: Launchers };
   machines: MachineRelay;
+  /** Tools the server itself runs for some schemes' minions (src/server-tools.ts, #2179); absent in tests that build no server. */
+  serverTools?: ServerToolSessions;
   /** What worker machines hold of each minion (src/machine-away.ts, Build 7 T6); absent in tests that build no server. */
   machineCopies?: MachineCopies;
   /** Jobs on people's own machines (src/machine-jobs.ts, #857). */

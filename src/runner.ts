@@ -55,6 +55,7 @@ import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { Holds } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, loadImages, lostSessionText, promptMessage, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import type { ServerTool } from './server-tools.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { awayLine, awayResume, nextMark } from './machine-away.ts';
@@ -462,6 +463,8 @@ export class Runner {
   /** Machines online now whose Tools role is lent to this scheme (access.ts lendsRole); a thread's turn gets each one's MCP tools. */
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
+  /** The tools the server runs for a scheme's minions (src/server-tools.ts, #2179). */
+  serverTools: (projectId: number, kind: string) => ServerTool[] = () => [];
   /** The connected machines as places for turns (Build 7 T4), set by server.ts; none yet: a turn marked for one waits. */
   pools: MachinePools | null = null;
   /** The cloud's pool (#2153, src/cloud-pool.ts): marks and sessions. */
@@ -960,6 +963,7 @@ export class Runner {
       openPr: (id) => this.openPr(id),
       memoryScheme: (projectId) => this.memoryScheme(projectId),
       machines: (p, askers) => this.machines(p, askers),
+      serverTools: (p, kind) => this.serverTools(p, kind),
       refsText: (t) => this.refs.refsText(t),
       codexWhy: (person) => this.codexWhy(person),
       codexPlaceFor: (person) => this.codexPlaceFor?.(person),

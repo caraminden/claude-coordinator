@@ -23,6 +23,7 @@ import { SCHEME_REFS_MATCHER, SIDE_GUARD_MATCHER, TRIPWIRE_MATCHER, WORDING_MATC
 import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
 import { POOLED_WINDOWS } from './machine-pick.ts';
+import { serverToolKey, type ServerTool } from './server-tools.ts';
 import { advisedModel } from '../public/model-table.js';
 import { ZONE } from './pacific.ts';
 import { thpProps } from './unit-thp.ts';
@@ -674,6 +675,8 @@ export interface TurnFacts {
   folders: { files: string | null; shared: string | null; memory: string | null; tmp: string | null; tickets: string; data: string; openTickets?: string[] };
   /** The machines lending it their tools. */
   machines: TurnMachine[];
+  /** The tools the server runs for its scheme (src/server-tools.ts, #2179). */
+  serverTools?: ServerTool[];
   model: string | null;
   effort: string | null;
   /** Set when it runs on Codex: the thread it resumes, or null for a new one. */
@@ -821,6 +824,9 @@ export async function launchPlan(facts: TurnFacts): Promise<LaunchPlan> {
   for (const m of machines) {
     for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
   }
+  // Tools the server runs itself (src/server-tools.ts, #2179), through the same proxy as a machine's, keyed tool-<name>.
+  const tools = facts.serverTools ?? [];
+  for (const t of tools) servers[t.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), serverToolKey(t.name), t.name, 'mcp'] };
   // The pooled Windows tools (Build 7 M5): the app picks the machine when the session opens (routes/machines.ts). A machine
   // named `windows` before the name was kept for them keeps its own tools there.
   const windows = machines.some((m) => m.screen) && !servers[POOLED_WINDOWS];
@@ -835,6 +841,7 @@ export async function launchPlan(facts: TurnFacts): Promise<LaunchPlan> {
     const http: Record<string, object> = { [role]: pool('/mcp', role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) };
     if (windows) http[POOLED_WINDOWS] = pool(`/machine/${POOLED_WINDOWS}/ws?name=${POOLED_WINDOWS}`);
     for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}${s.server === 'mcp' && m.lent ? `&lent=${encodeURIComponent(m.lent)}` : ''}`);
+    for (const t of tools) http[t.name] = pool(`/machine/${serverToolKey(t.name)}/mcp?name=${encodeURIComponent(t.name)}`);
     files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: http }) });
     files.push({ name: 'mcp-stdio.json', text: JSON.stringify({ mcpServers: servers }) });
   } else {

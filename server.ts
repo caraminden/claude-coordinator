@@ -51,6 +51,7 @@ import { claudeConfigDir, lastEffortLater } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
+import { SERVER_TOOLS, ServerToolSessions, serverToolsFor } from './src/server-tools.ts';
 import { MachinePools } from './src/machine-pools.ts';
 import { MachineCopies, wireCopies } from './src/machine-away.ts';
 import { awayTick, machineLink, workerInfo } from './src/machine-turn.ts';
@@ -697,6 +698,8 @@ function liveOn(head: string | null, booted = false) {
   })().catch((err) => console.error('Checking waiters after a deploy failed:', err));
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
+// Never in a preview or a test server (CITADEL_SERVER_TOOLS=0): a call would start the real Godot editor.
+const serverTools = config.serverTools && !PREVIEW ? new ServerToolSessions() : undefined;
 machines.tokenKey = machineTokenKey;
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
 /** Take a card out of people's way with a line saying why (a machine job's go, a superseded kit sync); an answered or settled one stays. */
@@ -815,8 +818,11 @@ const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), c
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
 // A machine whose Windows screen role is lent comes too, for the pooled mcp__windows__ tools (Build 7 M5): its named tools only with its Tools role.
+if (serverTools) runner.serverTools = (projectId, kind) => serverToolsFor(projectId, kind);
+// A machine named like a tool the server runs (src/server-tools.ts) is left out: perigee-godot's old row (#2179).
 runner.machines = (project, askers) =>
   machines.online().flatMap((m) => {
+    if (SERVER_TOOLS.some((t) => t.name === m.name)) return [];
     const tools = lendsRole(store, m, 'tools', project, askers);
     const screen = m.servers.includes('ws') && lendsRole(store, m, 'screen', project, askers);
     return tools || screen ? [{ ...m, servers: tools ? m.servers : [], ...(screen ? { screen: true as const } : {}) }] : [];
@@ -2638,6 +2644,7 @@ const app: App = {
   apkBuilds,
   desktop,
   machines,
+  serverTools,
   machineCopies,
   jobs,
   pusher,

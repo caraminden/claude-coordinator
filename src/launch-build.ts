@@ -20,6 +20,7 @@ import { codexThreadKey, isCodexModel, type CodexThread } from './codex.ts';
 import { decideHold, type HoldDecision, type Holds } from './prompt-hold.ts';
 import { cabalName, overseerOf } from './cabal-board.ts';
 import { promptParts, promptText, type PromptSections, type TurnMachine } from './prompts.ts';
+import type { ServerTool } from './server-tools.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { copyPinned, launchPlan, turnPins, turnSettings, wrapperSpec, type EveryScheme } from './turn-launch.ts';
 import { secretEnv } from './secrets.ts';
@@ -76,6 +77,8 @@ export interface TurnLaunchesDeps {
   openPr: (ticketId: number) => boolean;
   memoryScheme: (projectId: number) => boolean;
   machines: (project: Project, askers: number[]) => TurnMachine[];
+  /** The tools the server runs for a scheme's minions (src/server-tools.ts, #2179); none when absent. */
+  serverTools?: (projectId: number, kind: string) => ServerTool[];
   refsText: (ticket: Ticket) => string;
   codexWhy: (person: number | null) => string | null;
   codexPlaceFor: (person: number) => TurnPlace | null | undefined;
@@ -130,6 +133,7 @@ export class TurnLaunches {
     },
   ) {
     const { place, person, asker, machines, model, effort, codex } = f;
+    const serverTools = this.d.serverTools?.(project.id, ticket.kind) ?? [];
     const { files: filesDir, shared: sharedDir, memory: memoryDir } = f.folders;
     // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
     // the tripwire hook must still be there for a turn that outlives it.
@@ -204,6 +208,7 @@ export class TurnLaunches {
         jobMachines,
         ticket.kind === 'coordinator' && fableMeter(this.d.store).over,
         cabal ?? null,
+        serverTools,
       );
       // A warm session keeps the prompt it last ran with (#1276): a changed byte would re-write its whole cached conversation.
       // Codex has no such cache to keep.
@@ -273,6 +278,7 @@ export class TurnLaunches {
         pins,
         place,
         machines,
+        serverTools,
         model,
         effort,
         deploys,

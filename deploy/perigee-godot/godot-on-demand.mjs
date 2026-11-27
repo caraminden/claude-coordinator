@@ -2,10 +2,10 @@
 // perigee-godot's editor only while someone uses it (#505). The Godot editor held a full core for weeks
 // whether anyone called it or not, so it now starts on the first tool call and stops after IDLE unused.
 //
-//   node godot-on-demand.mjs -- <mcp server command> [args...]   the bridge, as the machine agent's command
+//   node godot-on-demand.mjs -- <mcp server command> [args...]   the bridge, one per turn session (src/server-tools.ts)
 //   node godot-on-demand.mjs idle-check                          perigee-godot-idle.timer: stop it if unused
 //
-// The bridge sits between the machine agent and `godot-ai attach`, passing MCP lines through untouched.
+// The bridge sits between Citadel's server (src/server-tools.ts, #2179) and `godot-ai attach`, passing MCP lines through untouched.
 // A tool call and its answer stamp the activity file, and so does a call still waiting on its answer
 // (once a minute), so a session in progress never looks idle. The handshake, listings and pings don't
 // (#615). A request that needs the editor (a tool call or a resource read, nothing else) first starts
@@ -197,7 +197,7 @@ export function lines(stream, onLine, onEnd = () => {}) {
   });
 }
 
-/** The bridge: the machine agent's stdio on one side, the MCP server's on the other. */
+/** The bridge: Citadel's stdio on one side, the MCP server's on the other. */
 export function bridge(command, cfg = settings(), { input = process.stdin, output = process.stdout, log = (l) => console.error(`godot-on-demand: ${l}`), ensure = () => ensureEditor(cfg, log), keepEveryMs = 60_000, stampGapMs = 5_000 } = {}) {
   const child = spawn(command[0], command.slice(1), { stdio: ['pipe', 'pipe', 'inherit'] });
   child.stdin.on('error', () => {});
@@ -272,7 +272,7 @@ function main() {
     process.exit(2);
   }
   const child = bridge(command);
-  // The machine agent ends a session with SIGTERM when stdin's close wasn't enough: pass it on to attach.
+  // Citadel ends a session with SIGTERM when stdin's close wasn't enough: pass it on to attach.
   for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => child.kill(sig));
   child.on('error', (err) => {
     console.error(`godot-on-demand: could not start ${command[0]}: ${err.message}`);

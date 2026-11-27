@@ -15,6 +15,7 @@ import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import { POOLED_WINDOWS } from '../machine-pick.ts';
+import { SERVER_TOOLS, serverToolKey, serverToolsFor, type ServerTool } from '../server-tools.ts';
 import type { Machine, Project, Ticket } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
 import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow } from '../machine-roles.ts';
@@ -583,6 +584,19 @@ async function postTurnSession({ req, res, app, caller, params }: Ctx) {
   return json(res, 202, {});
 }
 
+/** A minion's proxy opens a session to a tool the server runs (src/server-tools.ts, #2179): only in a scheme on its list. */
+function openToolSession({ res, app, caller }: Ctx, tool: ServerTool) {
+  if (!app.serverTools || !serverToolsFor(caller!.project_id, caller!.kind).includes(tool)) throw new HttpError(403, `${tool.name} isn't lent to this scheme`);
+  app.serverTools.open(tool, caller!.id, `#${caller!.number} in ${app.store.getProject(caller!.project_id)?.name ?? 'a scheme'}`, res);
+}
+
+async function postToolSession({ req, res, app, caller, params }: Ctx) {
+  if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
+  const body = await readJson(req, 50_000_000);
+  if (!app.serverTools?.post(params.session, caller!.id, body.message)) throw new HttpError(503, 'That session ended', true);
+  return json(res, 202, {});
+}
+
 export const machineRoutes: Route[] = [
   {
     method: 'POST',
@@ -1021,6 +1035,11 @@ export const machineRoutes: Route[] = [
     ...turns,
     handler: (ctx) => openTurnSession(ctx, true),
   },
+  // Tools the server runs itself, through the same proxies (src/server-tools.ts, #2179).
+  ...SERVER_TOOLS.flatMap((tool): Route[] => [
+    { method: 'GET', path: `/api/machines/${serverToolKey(tool.name)}/session`, ...turns, handler: (ctx) => openToolSession(ctx, tool) },
+    { method: 'POST', path: `/api/machines/${serverToolKey(tool.name)}/session/:session`, ...turns, handler: postToolSession },
+  ]),
   {
     method: 'POST',
     path: '/api/machines/:machineId/session/:session',

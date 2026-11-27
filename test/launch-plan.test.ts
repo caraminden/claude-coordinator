@@ -180,6 +180,20 @@ test('a lent machine is an MCP server of the turn, allowed by name, and never in
   assert.equal(p.args.join(' ').includes('perigee'), false);
 });
 
+test('a tool the server runs (#2179) reaches the turn under its own name, through the machine proxy keyed tool-<name>, and wins over a machine of that name', async () => {
+  const godot = { name: 'perigee-godot', schemes: [project.id], command: () => ['x'], notes: '' };
+  const row = [{ id: 1, name: 'perigee-godot', owner_id: null, servers: ['mcp'] } as TurnFacts['machines'][number]];
+  for (const machines of [[], row]) {
+    const own = await plan({ serverTools: [godot], machines });
+    assert.deepEqual(file(own, 'mcp.json').mcpServers['perigee-godot'], { type: 'stdio', command: join(dir, 'pin', 'bin', 'citadel-node'), args: [join(dir, 'pin', 'machine-mcp.ts'), 'tool-perigee-godot', 'perigee-godot', 'mcp'] });
+    assert.ok(file(own, 'settings.json').permissions.allow.includes('mcp__perigee-godot'), 'its tools are allowed');
+    const pooled = await plan({ serverTools: [godot], machines, pool: true });
+    assert.equal(file(pooled, 'mcp.json').mcpServers['perigee-godot'].url, 'http://127.0.0.1:${CITADEL_POOL_PORT}/machine/tool-perigee-godot/mcp?name=perigee-godot');
+    assert.deepEqual(file(pooled, 'mcp-stdio.json'), file(own, 'mcp.json'));
+  }
+  assert.equal(file(await plan(), 'mcp.json').mcpServers['perigee-godot'], undefined, 'none without it');
+});
+
 test("a pooled turn reaches its place's shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)", async () => {
   const machines = [{ id: 3, name: 'perigee godot', owner_id: null, servers: ['mcp', 'ws'], lent: 'godot-ai' } as TurnFacts['machines'][number]];
   const own = await plan({ machines });

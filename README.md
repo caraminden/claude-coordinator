@@ -205,6 +205,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/turn-supervisor.mjs`, `src/supervisor-client.ts`, `src/turn-run.mjs` | The shared turn supervisor (#1343) that starts host turns' claude, each in a scope of its own; the runner's side of it; and what it and the per-turn wrapper (`src/turn-wrapper.mjs`) both run |
 | `src/mcp-pool.ts`, `src/pool-client.mjs`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
+| `src/server-tools.ts` | Tools the server itself runs for some schemes' minions (#2179), behind the machine proxies under their own names: `SERVER_TOOLS` says which schemes get each (perigee-godot: Delve and Peek Auras) |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
 | `src/cloud-pool.ts`, `src/cloud-turn.mjs` | Cloud sessions as the worker pool's first place for the jobs they may take (#2153): which minions go (research and ideation unless kept home, marked test sweeps; no step over 25 minutes, no cap on sessions; a card start carries its handoff's text), their kept session, and the driver a cloud turn runs in claude's place (pty start, follow-ups, the result read off its `cloud/` branch) |
 | `src/machine-turn.ts` | A minion turn placed on a connected machine (Build 7): its `machine` file, the RunningTurn for it, and the agent's sync that keeps the server's copy of the turn folder in step |
@@ -294,6 +295,7 @@ Configuration comes from the environment; `src/config.ts` reads it once for `ser
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset, and no GitHub App either: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
 | `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` / `GITHUB_APP_SLUG` | (unset: no limited links) | The GitHub App behind the limited way to link GitHub, and its URL name for the install link (below) |
 | `CITADEL_EMBED_URL` / `CITADEL_EMBED_MODEL` | `http://127.0.0.1:21434` / `Qwen3-Embedding-0.6B-Q8_0` | Semantic memory's embedding service, and the model name stored with each vector: a new name embeds everything again |
+| `CITADEL_SERVER_TOOLS` | `1` | `0` turns off the tools the server runs for some schemes (`src/server-tools.ts`); test servers set it |
 | `CITADEL_MEMORY_SCHEMES` | (unset: every scheme) | Comma-separated scheme ids whose chats get indexed for search by meaning |
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |

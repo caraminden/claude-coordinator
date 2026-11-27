@@ -113,6 +113,7 @@ import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime,
 import { shellOff } from './src/shell.ts';
 import { agentRoutes, dropRemoved } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
+import { readRetro } from './src/land-reds.ts';
 import { CodeCounts, countApart } from './src/code-counts.ts';
 import { readApart, WorkFlow } from './src/work-flow.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
@@ -1892,6 +1893,8 @@ const dispatchedRun = (ticketId: number, text: string, fyi?: boolean, run?: Run)
 const ciHealth = new CiHealth(store, {
   outbox,
   longs: () => longJobs.list(),
+  retro: (p, since, now) => readRetro(projectSharedDir(DATA_DIR, p.id), since, now),
+  shipTimes: (p, times) => ciNumbers.own(p, times),
   get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.

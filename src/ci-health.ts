@@ -135,9 +135,10 @@ export {
   CI_SENDER,
   itemKey,
 } from './ci-problems.ts';
-import { branchTips, type CiView, type GhBody, type GhNote, type Job, type Run, type Runner, runKind, runMinion, runningNow, viewRun } from './ci-view.ts';
+import { branchTips, type CiView, fallbackStreak, fallbacksOf, type GhBody, type GhNote, type Job, movedOff, type Run, type Runner, runKind, runMinion, runningNow, type ShipTime, shipTimes, viewRun } from './ci-view.ts';
+import type { RetroLine } from './land-reds.ts';
 export { type CiView, type Job, type Run, type Runner, runKind, runMinion, runningNow, type ViewRun } from './ci-view.ts';
-import { type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
+import { type LandSeen, type LandState, newLandState, landStep, landProblems, ownFallbackProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 import { type GhGet, ghGet, ghPost, RateLimited, rateLimited, GhError } from './gh-api.ts';
 export { type GhAnswer, type GhGet, ghGet, ghPost } from './gh-api.ts';
@@ -309,6 +310,10 @@ export interface CiHealthDeps {
   green?: (project: Project, runs: GreenRun[], branch: string) => void;
   /** The long jobs (citadel-heavy --long) on record: one running inside its deadline is not a hung runner. */
   longs?: () => LongJob[];
+  /** #2231: a scheme's retro-log lines from `since` (its ship script's fallbacks); none, and no fallbacks show or ring. */
+  retro?: (project: Project, since: number, now: number) => Promise<RetroLine[]>;
+  /** #2231: each poll's ship runs' push-to-verdict, for the Numbers tab (CiNumbers.own); none, and they aren't kept. */
+  shipTimes?: (project: Project, times: ShipTime[]) => void;
 }
 
 /**
@@ -642,6 +647,11 @@ export class CiHealth {
     out.push(...(await this.outsideRuns(p, slug, branch, onMain, as, now)));
     const [tickets, tips] = [this.store.listTickets(p.id), await branchTips(p.repo_dir)];
     const minion = (r: Run) => runMinion(r.head_branch, r.head_sha, tickets, tips);
+    // #2231: the ship script's fallbacks off GitHub, a streak of them rings; each ship's push-to-verdict goes to the Numbers tab.
+    const fallbacks = fallbacksOf((await this.deps.retro?.(p, now - WINDOW_MS, now).catch(() => [])) ?? []).map((f) => ({ ...f, minion: runMinion(f.branch, '', tickets, new Map()) }));
+    out.push(...ownFallbackProblems(fallbackStreak(runs, all, fallbacks), now));
+    const times = shipTimes(runs, all, fallbacks);
+    if (times.length) this.deps.shipTimes?.(p, times);
     const shown: CiView['workflows'] = [];
     for (const w of workflows) {
       if (String(w.path ?? '').endsWith(`/${HEAVY_WORKFLOW}`)) continue; // minions' own commands: no verdict on main to show
@@ -682,7 +692,8 @@ export class CiHealth {
         }),
       ...runningNow(all, runs, runners, minion),
       workflows: shown,
-      runs: runs.slice(0, 30).map((r) => viewRun(slug, r, minion)),
+      runs: runs.slice(0, 30).map((r) => ({ ...viewRun(slug, r, minion, all), ...(movedOff(r, fallbacks) && { moved: movedOff(r, fallbacks)?.why }) })),
+      fallbacks,
     });
     return out;
   }

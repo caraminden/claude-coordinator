@@ -79,6 +79,29 @@ export interface ViewRun {
   url: string;
   /** The minion whose change it tests (#1019, runMinion), when one is. */
   minion?: number | null;
+  /** #2231: where its jobs ran (GitHub's runners, or the scheme's own), how long from its push to its last job once done, and its split on GitHub's runners. Absent in older views. */
+  where?: Where | null;
+  secs?: number | null;
+  shards?: Shards | null;
+  /** Why the ship script moved this run off GitHub (#2231): the run after it on its branch took over. */
+  moved?: string;
+}
+export type Where = 'github' | 'own';
+/** A run's matrix on GitHub's runners (a ship's 20 shards, ADR 0043): how many, started, green, red and still waiting for a slot. */
+export interface Shards {
+  n: number;
+  started: number;
+  done: number;
+  red: number;
+  queued: number;
+}
+/** A ship's CI gone somewhere else (#2231), from the ship script's retro log: off GitHub to the scheme's own runners (`ci to desktop`), or to perigee's suite (`ci fallback`). */
+export interface Fallback {
+  at: number;
+  to: 'own' | 'perigee';
+  branch: string;
+  why: string;
+  minion?: number | null;
 }
 /** A scheme's CI as the last poll read it, for the CI page (#968): runners, the queue, each workflow's verdict on main, recent runs. */
 export interface CiView {
@@ -95,8 +118,101 @@ export interface CiView {
   /** `quiet`: in the scheme's ci_quiet and not its ci_watch, so its red rings no one (TWIReader #990); set by snapshot from the settings now. */
   workflows: { name: string; file: string; verdict: ViewRun | null; skipped: string[]; quiet?: boolean }[];
   runs: ViewRun[];
+  /** The last day's ship CI fallbacks, oldest first (#2231); absent in older views and for a scheme whose ship script writes no retro log. */
+  fallbacks?: Fallback[];
 }
-export const viewRun = (slug: string, r: Run, minion: (r: Run) => number | null = () => null): ViewRun => ({ id: r.id, name: r.name, branch: r.head_branch, event: r.event, status: r.status, conclusion: r.conclusion, at: r.created_at, url: r.html_url ?? runUrl(slug, r), minion: minion(r) });
+export const viewRun = (slug: string, r: Run, minion: (r: Run) => number | null = () => null, jobs?: Job[]): ViewRun => ({
+  id: r.id,
+  name: r.name,
+  branch: r.head_branch,
+  event: r.event,
+  status: r.status,
+  conclusion: r.conclusion,
+  at: r.created_at,
+  url: r.html_url ?? runUrl(slug, r),
+  minion: minion(r),
+  ...(jobs && runShape(r, jobs)),
+});
+
+const selfHosted = (j: Job) => j.labels.some((l) => /^self-hosted$/i.test(l));
+const RED_JOB = new Set(['failure', 'timed_out']);
+/**
+ * #2231: where a run's jobs ran, how long from its push to its last job, and its matrix on GitHub's runners. A job GitHub skipped
+ * ran nowhere (a ship's run on GitHub skips the desktop's `test` job; a desktop run skips `times`). Any job on the scheme's own
+ * runners makes it theirs. The shards are the biggest matrix (jobs named `name (…)`) on GitHub's runners, two jobs at least.
+ */
+export function runShape(r: Run, jobs: Job[]): Pick<ViewRun, 'where' | 'secs' | 'shards'> {
+  const ran = jobs.filter((j) => j.run_id === r.id && j.conclusion !== 'skipped');
+  const where: Where | null = ran.some(selfHosted) ? 'own' : ran.length ? 'github' : null;
+  const ends = ran.map((j) => Date.parse(j.completed_at ?? '')).filter(Number.isFinite);
+  const end = ends.length ? Math.max(...ends) : Date.parse(r.updated_at ?? '');
+  const secs = r.status === 'completed' && Number.isFinite(end) ? Math.max(0, Math.round((end - Date.parse(r.created_at)) / 1000)) : null;
+  const groups = Map.groupBy(
+    ran.filter((j) => !selfHosted(j) && / \(.+\)$/.test(j.name)),
+    (j) => j.name.replace(/ \(.+\)$/, ''),
+  );
+  const biggest = [...groups.values()].sort((a, b) => b.length - a.length)[0];
+  const shards =
+    biggest && biggest.length >= 2
+      ? {
+          n: biggest.length,
+          started: biggest.filter((j) => j.status === 'in_progress' || j.status === 'completed').length,
+          done: biggest.filter((j) => j.conclusion === 'success').length,
+          red: biggest.filter((j) => RED_JOB.has(j.conclusion ?? '')).length,
+          queued: biggest.filter((j) => j.status === 'queued' || j.status === 'waiting' || j.status === 'pending').length,
+        }
+      : null;
+  return { where, secs, shards };
+}
+
+/** The ship script's fallback lines (#2231) as the CI page lists them: `ci to desktop · <branch> · <why>` and `ci fallback · <branch> · <why>[ · …]`. */
+export function fallbacksOf(lines: { at: number; kind: string; parts: string[] }[]): Fallback[] {
+  return lines
+    .filter((l) => (l.kind === 'ci to desktop' || l.kind === 'ci fallback') && l.parts[0])
+    .map((l) => ({ at: l.at, to: l.kind === 'ci to desktop' ? ('own' as const) : ('perigee' as const), branch: l.parts[0], why: l.parts[1] ?? '' }))
+    .sort((a, b) => a.at - b.at);
+}
+
+/** A ship run on GitHub that the ship script moved off it (#2231): a `ci to desktop` line for its branch from its push until shortly after it stopped (land.sh cancels it, then writes the line). */
+export const MOVED_TAIL_MS = 3 * 60_000;
+export function movedOff(r: { head_branch: string; created_at: string; updated_at?: string }, fallbacks: Fallback[]): Fallback | undefined {
+  if (!r.head_branch.startsWith('land/')) return undefined;
+  const branch = r.head_branch.slice('land/'.length);
+  const from = Date.parse(r.created_at),
+    to = Date.parse(r.updated_at ?? r.created_at) + MOVED_TAIL_MS;
+  return fallbacks.find((f) => f.to === 'own' && f.branch === branch && f.at >= from && f.at <= to);
+}
+
+/** One push-to-verdict reading (#2231): a ship run with a verdict, from its push (a fallback's: the GitHub run's push) to its last job. */
+export interface ShipTime {
+  runId: number;
+  sha: string;
+  branch: string;
+  workflow: string;
+  at: number;
+  value: number;
+}
+/**
+ * The last day's ship runs' push-to-verdict, for the Numbers tab: each `land/` run that ended green or red, on GitHub or the
+ * scheme's own runners. A run moved off GitHub has no verdict of its own; the run that took it over (the next on its branch,
+ * within FALLBACK_MS) counts from the first run's push. `runs` newest first, as GitHub lists them.
+ */
+const FALLBACK_MS = 15 * 60_000;
+export function shipTimes(runs: Run[], jobs: Job[], fallbacks: Fallback[]): ShipTime[] {
+  const out: ShipTime[] = [];
+  const land = runs.filter((r) => r.head_branch.startsWith('land/')).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  for (const [i, r] of land.entries()) {
+    if (r.status !== 'completed' || !(r.conclusion === 'success' || RED_JOB.has(r.conclusion ?? ''))) continue;
+    if (movedOff(r, fallbacks)) continue;
+    const shape = runShape(r, jobs);
+    if (shape.secs == null || !shape.where) continue;
+    const prev = land.slice(0, i).findLast((x) => x.head_branch === r.head_branch);
+    const from = prev && movedOff(prev, fallbacks) && Date.parse(r.created_at) - Date.parse(prev.created_at) <= FALLBACK_MS ? Date.parse(prev.created_at) : Date.parse(r.created_at);
+    const end = Date.parse(r.created_at) + shape.secs * 1000;
+    out.push({ runId: r.id, sha: r.head_sha, branch: r.head_branch, workflow: `${r.name} on ${shape.where === 'github' ? 'GitHub' : 'own runners'}`, at: end, value: Math.round((end - from) / 1000) });
+  }
+  return out;
+}
 
 /**
  * The minion a run tests (#1019, Cara 2026-11-18: "These lines in CI should link to the minions whose tests they are for"): the one whose
@@ -152,4 +268,15 @@ export async function branchTips(dir: string | null | undefined): Promise<Map<st
     /* no tips: runs on minion branches still link */
   }
   return tips;
+}
+
+/**
+ * #2231: the fallbacks off GitHub since the last ship run on GitHub that reached its own verdict, oldest first: the streak the
+ * CI page rings on (ownFallbackProblems), as the perigee one rings on the land gate's. A ship still running clears nothing.
+ */
+export function fallbackStreak(runs: Run[], jobs: Job[], fallbacks: Fallback[]): Fallback[] {
+  const onGithub = runs.filter((r) => r.head_branch.startsWith('land/') && runShape(r, jobs).where === 'github').sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  let since = -Infinity;
+  for (const r of onGithub) if (r.status === 'completed' && (r.conclusion === 'success' || RED_JOB.has(r.conclusion ?? '')) && !movedOff(r, fallbacks)) since = Date.parse(r.created_at);
+  return fallbacks.filter((f) => f.to === 'own' && f.at > since);
 }

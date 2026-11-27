@@ -1,5 +1,6 @@
 // The land gate's alarm (#561). Pure: read from the land line, no GitHub calls.
 import { clock, held, type Problem } from './ci-problems.ts';
+import type { Fallback } from './ci-view.ts';
 
 // ---------- the land gate (#561) ----------
 // Josh's pick, 2026-11-11 ("Add the live alarm"): the CI gate that tools/land.sh waits on hung for hours on 11-11 and
@@ -148,4 +149,30 @@ export function landProblems(s: LandState, now: number): Problem[] {
     );
   }
   return out;
+}
+
+/**
+ * #2231: a ship's CI moved off GitHub's runners (ADR 0043: its shards didn't start in time, GitHub didn't answer, the run
+ * gave no verdict) on LAND_STREAK ships in a row (`streak`: fallbackStreak's) rings the way the perigee fallback does: its
+ * Taskmaster from the LAND_STREAK-th, people after the wait. The next ship with its own verdict on GitHub clears it.
+ */
+export function ownFallbackProblems(streak: Fallback[], now: number): Problem[] {
+  const n = streak.length;
+  if (n < LAND_STREAK) return [];
+  const last = streak.slice(-3);
+  const named = last.map((f) => `${f.minion ? `#${f.minion}` : f.branch} (${f.why})`);
+  const whys = [...new Set(last.map((f) => f.why))];
+  return [
+    held(
+      {
+        key: 'land:off-github',
+        plain: { what: `the last ${n} ships couldn't run their CI on GitHub and went to the desktop's runners instead`, next: "Open the CI page's Fallbacks row for why; shipping goes back to GitHub by itself once GitHub takes a ship" },
+        title: `CI: ship CI fell back from GitHub to the desktop on ${n} ships in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}`,
+        why: `${whys.join('; ')}, so each ship's CI ran on the desktop instead of GitHub's 20 shards`,
+        fix: "read the Fallbacks row on the CI page: slots taken by another repo's jobs pass by themselves; GitHub down or a setup step red needs a look at tests.yml's shard job",
+      },
+      streak[LAND_STREAK - 1].at,
+      now,
+    ),
+  ];
 }

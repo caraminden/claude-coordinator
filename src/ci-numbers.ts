@@ -10,6 +10,7 @@ import { type Sample, trueCpu } from './ci-load.ts';
 import { medianOrNaN as median } from './stats.ts';
 import type { CiNumber, CiNumberStep, Project, Store } from './db.ts';
 import type { RunClaims } from './ci-store.ts';
+import type { ShipTime } from './ci-view.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { inBuild } from './workspace.ts';
@@ -25,6 +26,8 @@ export const STEP = { held: 3, base: 10, pct: 0.05, noise: 3 };
  */
 export const BUSY_PC = 80;
 const SUITE_TIME = /^suite-time(-pipeline)?$/;
+/** #2231: the series Citadel keeps itself from GitHub's run times: a ship's push to its CI verdict, in seconds. */
+export const PUSH_TO_VERDICT = 'push-to-verdict';
 
 /** Small by rule: numbers, not reports. */
 export const LIMITS = { perUpload: 50, series: 100, bodyBytes: 16_384, keepMs: 400 * DAY };
@@ -88,12 +91,26 @@ export class CiNumbers {
     const names = new Set(this.store.ciNumberNames(project.id));
     const fresh = sent.filter((n) => !names.has(n.name)).length;
     if (names.size + fresh > LIMITS.series) throw new HttpError(413, `${project.name} has ${names.size} series of CI numbers; a scheme keeps at most ${LIMITS.series}, so a new one is refused`);
-    // A ship's land/<branch> run is main's next commit (tools/land.sh pushes the commit it is about to land there), so it is main's line.
-    // A build's ship run is not (#2082): its commit carries the build branch's own tests and may never reach main, so it keeps its own ref.
-    const ref = claims.ref.startsWith('refs/heads/land/') && !this.buildShip(project.id, claims.ref.slice('refs/heads/land/'.length)) ? 'refs/heads/main' : claims.ref;
+    const ref = this.lineOf(project.id, claims.ref);
     this.store.putCiNumbers(sent.map((n) => ({ project_id: project.id, ...n, workflow: claims.workflow, run_id: claims.runId, run_attempt: claims.runAttempt, sha: claims.sha, ref, created_at: at })));
     const steps = sent.flatMap((n) => this.check(project, n.name, ref) ?? []);
     return { stored: sent.length, steps };
+  }
+
+  /** #2231: ship runs' push-to-verdict, read from GitHub's run and job times (no upload: GitHub's runners can't reach the store), kept once per run and flagged by the same rule. */
+  own(project: Project, times: ShipTime[]): void {
+    const have = new Set(this.store.ciNumberRuns(project.id, PUSH_TO_VERDICT, 'refs/heads/main', 500).map((n) => n.run_id));
+    const fresh = times.filter((t) => !have.has(t.runId)).sort((a, b) => a.at - b.at);
+    if (!fresh.length) return;
+    if (!this.store.ciNumberNames(project.id).includes(PUSH_TO_VERDICT) && this.store.ciNumberNames(project.id).length >= LIMITS.series) return;
+    const rows = fresh.map((t) => ({ project_id: project.id, name: PUSH_TO_VERDICT, value: t.value, unit: 's', workflow: t.workflow, run_id: t.runId, run_attempt: 1, sha: t.sha, ref: this.lineOf(project.id, `refs/heads/${t.branch}`), created_at: t.at }));
+    this.store.putCiNumbers(rows);
+    for (const ref of new Set(rows.map((r) => r.ref))) this.check(project, PUSH_TO_VERDICT, ref);
+  }
+
+  /** A ship's land/<branch> run is main's next commit (tools/land.sh pushes the commit it is about to land there), so it is main's line; a build's ship run keeps its own ref (#2082). */
+  private lineOf(projectId: number, ref: string): string {
+    return ref.startsWith('refs/heads/land/') && !this.buildShip(projectId, ref.slice('refs/heads/land/'.length)) ? 'refs/heads/main' : ref;
   }
 
   private buildShip(projectId: number, branch: string): boolean {

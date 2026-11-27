@@ -1645,7 +1645,7 @@ export const projectRoutes: Route[] = [
       const file = url.searchParams.get('file') ?? '';
       const row = app.store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file);
       if (!row) throw new HttpError(404, 'No flake of that file in the last 14 days');
-      json(res, 200, flakeBrief(file, row.count, app.store.flakeDetails(project.id, file), app.store.flakeMessages(project.id, file, Date.now() - FLAKE_WINDOW_MS).messages));
+      json(res, 200, flakeBrief(file, row.count - row.cloud, app.store.flakeDetails(project.id, file), app.store.flakeMessages(project.id, file, Date.now() - FLAKE_WINDOW_MS).messages, row.cloud));
     },
   },
 

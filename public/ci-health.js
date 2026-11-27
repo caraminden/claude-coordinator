@@ -186,9 +186,25 @@ function sweepBlock(s, sweeps) {
     );
     return block(title, 'held', row);
   }
+  /** @param {SweepNight} n @param {string} v */
+  const count = (n, v) => n.files.filter((f) => f.verdict === v).length;
+  // A night is Clean only when every file it picked came back and passed; a missing or unproven file makes it Incomplete.
+  /** @param {SweepNight} n @returns {[string, string, string]} [hue, chip tone, chip word] */
+  const state = (n) => {
+    const [flaky, red] = [count(n, 'flaky'), count(n, 'red')];
+    if (!n.files.length) return ['danger', 'danger', 'No results'];
+    if (flaky) return ['waiting', 'warn', `${flaky} flaky`];
+    if (red) return ['danger', 'danger', `${red} red`];
+    if (n.error || count(n, 'clean') < n.files.length) return ['held', 'neutral', 'Incomplete'];
+    return ['done', 'ok', 'Clean'];
+  };
   /** @param {SweepNight} n */
-  const flakyIn = (n) => n.files.filter((f) => f.verdict === 'flaky').length;
-  const flaky = flakyIn(last);
+  const summary = (n) => {
+    const unproven = n.files.length - count(n, 'clean') - count(n, 'flaky') - count(n, 'red');
+    const parts = n.files.length ? [`${n.files.length} files, ${count(n, 'flaky')} flaky`, count(n, 'red') ? `${count(n, 'red')} red` : '', unproven ? `${unproven} unproven` : ''].filter(Boolean).join(', ') : 'no results';
+    return `${parts} · ${n.sessions} session × ${Math.round(n.minutes)} min${n.sha ? ` · ${n.sha.slice(0, 9)}` : ''}${n.error ? ` · ${n.error.split('\n')[0].slice(0, 140)}` : ''}`;
+  };
+  const flaky = count(last, 'flaky');
   const order = Object.keys(VERDICT);
   const files = [...last.files]
     .sort((a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict))
@@ -196,16 +212,10 @@ function sweepBlock(s, sweeps) {
       const [hue, why] = VERDICT[f.verdict] ?? VERDICT.red;
       return hueRow({ hue }, h('strong', { title: f.file }, f.file), h('span', { class: 'ci-detail-line muted', title: f.detail }, `${f.verdict}: ${why} · ${f.failed} of ${f.copies} failed · ${f.seconds} s`));
     });
-  const nights = sweeps.map((n) =>
-    hueRow(
-      { hue: n.error ? 'danger' : flakyIn(n) ? 'waiting' : 'done', lead: dollars(n.costUsd), meta: n.minion ? h('a', { href: `#/p/${s.id}/t/${n.minion}` }, `#${n.minion}`) : null },
-      h('strong', {}, when(n.at)),
-      h('span', { class: 'ci-detail-line muted' }, n.error ? `no results: ${n.error.split('\n')[0].slice(0, 140)}` : `${n.files.length} files, ${flakyIn(n)} flaky · ${n.sessions} session × ${Math.round(n.minutes)} min${n.sha ? ` · ${n.sha.slice(0, 9)}` : ''}`),
-    ),
-  );
-  const hue = last.error ? 'danger' : flaky ? 'waiting' : 'done';
+  const nights = sweeps.map((n) => hueRow({ hue: state(n)[0], lead: dollars(n.costUsd), meta: n.minion ? h('a', { href: `#/p/${s.id}/t/${n.minion}` }, `#${n.minion}`) : null }, h('strong', {}, when(n.at)), h('span', { class: 'ci-detail-line muted' }, summary(n))));
+  const [hue, tone, word] = state(last);
   const [row] = settingsRow(
-    { key, icon: 'spark', hue, title, summary: [last.error ? toneChip('danger', 'No results') : flaky ? toneChip('warn', `${flaky} flaky`) : toneChip('ok', 'Clean'), `${when(last.at)} · ${dollars(last.costUsd)}`] },
+    { key, icon: 'spark', hue, title, summary: [toneChip(tone, word), `${when(last.at)} · ${dollars(last.costUsd)}`] },
     statTiles([String(last.files.length), 'files swept', 'running'], [String(flaky), 'flaky in the cloud', flaky ? 'waiting' : 'done'], [`${Math.round(last.minutes)} min`, `in ${last.sessions} session${last.sessions === 1 ? '' : 's'}`, 'held'], [dollars(last.costUsd), 'plan usage (est.)', 'held']),
     files.length ? showFirst({ key: `${key}-files`, items: files, n: 5, noun: 'files' }) : null,
     h('h4', { class: 'settings-section' }, 'Last nights'),

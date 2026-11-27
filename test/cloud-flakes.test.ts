@@ -8,7 +8,8 @@ import { CLOUD_SOURCE, cloudCostUsd, keepNights, nightSightings, readNight, SWEE
 import { Store } from '../src/db.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { projectRoutes } from '../src/routes/projects.ts';
-import { batchStep, fits, readBatches, sessionText } from '../tools/cloud-flake.ts';
+import { flakeBrief } from '../src/flakes.ts';
+import { batchStep, fits, flag, judge, readBatches, sessionText } from '../tools/cloud-flake.ts';
 
 // Flake repeat-runs in cloud sessions (#2187): a night's results as a minion posts them, the cloud sightings they make, which
 // the Test health tab shows as cloud-only and the fix-minion count never sees, and the VM script's verdicts.
@@ -75,6 +76,38 @@ test('cloud sightings show on Test health, cloud-only where they are all there i
   assert.deepEqual(started, [`Flaky test: ${both}`], 'four cloud sightings start nothing; three in CI start one');
 });
 
+test("a cloud sighting never hides a land's, names no land's minion, and is counted apart in a fix brief", () => {
+  const project = store.createProject('Nearby scheme', null);
+  const now = Date.now();
+  const file = 'test/near.test.ts';
+  const land = store.createTicket({ project_id: project.id, title: 'a land', permission_mode: 'x', created_by: 'T' });
+  const sweep = store.createTicket({ project_id: project.id, title: 'the sweep', permission_mode: 'x', created_by: 'T' });
+  store.addFlakeEvents(project.id, sweep.id, 'abc', now, [{ file, source: CLOUD_SOURCE, detail: '' }]);
+  assert.equal(store.hasFlakeNear(project.id, file, now + 60_000, 30 * 60_000), false, "a retro-log land line a minute after the sweep's row is still a sighting");
+  assert.equal(store.flakeCounts(project.id, 0)[0].ticketId, sweep.id, 'cloud-only: the sweep is all there is to name');
+  store.addFlakeEvents(project.id, land.id, 'abc', now - 3_600_000, [{ file, source: 'in CI', detail: '' }]);
+  assert.equal(store.hasFlakeNear(project.id, file, now - 3_600_000 + 60_000, 30 * 60_000), true);
+  const [row] = store.flakeCounts(project.id, 0);
+  assert.equal(row.ticketId, land.id, "the newest land's minion, though the sweep's row is newer");
+  const brief = flakeBrief(file, row.count - row.cloud, [], [], row.cloud).message;
+  assert.match(brief, /passed alone 1 time in the last 14 days \(the Test health tab on the CI page counts these\), and the nightly cloud sweep saw it fail 1 time among 10 copies/);
+  assert.doesNotMatch(flakeBrief(file, 3, []).message, /cloud sweep saw/);
+});
+
+test("a proof's failure seen in the cloud stands; only a file the cloud proved nothing about runs again at home", () => {
+  const b = (file: string, verdict: SweepNight['files'][number]['verdict']) => ({ ...row(file, verdict), verdict });
+  assert.deepEqual(judge(['test/a.test.ts'], 1, [b('test/a.test.ts', 'clean')]), { again: [], clean: true });
+  assert.deepEqual(judge(['test/a.test.ts'], 1, [b('test/a.test.ts', 'skipped')]), { again: ['test/a.test.ts'], clean: true });
+  assert.deepEqual(judge(['test/a.test.ts'], 2, [b('test/a.test.ts', 'clean')]), { again: ['test/a.test.ts'], clean: true }, 'a batch missing');
+  assert.deepEqual(judge(['test/a.test.ts'], 2, [b('test/a.test.ts', 'flaky'), b('test/a.test.ts', 'skipped')]), { again: [], clean: false }, 'one flaky batch beside a skipped one');
+  assert.deepEqual(judge(['test/a.test.ts'], 2, [b('test/a.test.ts', 'flaky')]), { again: [], clean: false }, 'a flaky batch and a missing one');
+  assert.deepEqual(judge(['test/a.test.ts', 'test/b.test.ts'], 1, [b('test/a.test.ts', 'red'), b('test/b.test.ts', 'stopped')]), { again: ['test/b.test.ts'], clean: false });
+  assert.equal(flag(['--copies', '3'], '--copies', 10), 3);
+  assert.throws(() => flag(['--copies', '0.5'], '--copies', 10), /positive whole number/);
+  assert.throws(() => flag(['--files', '0'], '--files', 10), /positive whole number/);
+  assert.equal(flag(['--seconds', '2.5'], '--seconds', null, false), 2.5);
+});
+
 async function call(method: string, path: string, ctx: Record<string, unknown>) {
   const route = projectRoutes.find((r) => r.method === method && r.path === path)!;
   let body = '';
@@ -95,7 +128,7 @@ async function call(method: string, path: string, ctx: Record<string, unknown>) 
 }
 
 test('a minion posts its night; the tab shows it beside the flakes, with its cost', async () => {
-  const project = store.createProject('Third scheme', null);
+  const project = store.createProject('Near scheme', null);
   const t = store.createTicket({ project_id: project.id, title: 'Nightly cloud flake sweep', permission_mode: 'x', created_by: 'T' });
   const night = { sha: 'b'.repeat(40), sessions: 1, minutes: 30, files: [row('test/x.test.ts', 'flaky', 1), row('test/y.test.ts', 'clean')] };
   const req = Object.assign(new (await import('node:stream')).PassThrough(), { headers: { 'content-type': 'application/json' } });
@@ -146,6 +179,7 @@ test('the VM script gives each batch its verdict, then commits and pushes its re
   *red*) echo "burn-in: $1: failed in $2 of $2 copies at once"; echo "burn-in: $1: alone: failed too, so it is no race"; exit 1 ;;
   *skip*) echo "flake-proof: $1 skipped a test on this runner (the lines with ﹣ above), so it proves nothing"; exit 1 ;;
   *slow*) sleep 30 ;;
+  *timedout*) echo "burn-in: $1: $2 of $2 copies at once were stopped at 600 s (copies 1 2), none failed"; exit 1 ;;
 esac
 `,
   );
@@ -153,7 +187,7 @@ esac
   git(work, 'commit', '-qm', 'base');
   git(work, 'remote', 'add', 'origin', origin);
   const env = { ...process.env, CLOUD_FLAKE_STEP: '1', HOME: dir };
-  for (const f of ['clean', 'flaky', 'race', 'red', 'skip', 'slow']) {
+  for (const f of ['clean', 'flaky', 'race', 'red', 'skip', 'slow', 'timedout']) {
     const r = spawnSync('bash', ['tools/cloud-flake-vm.sh', 'run', `test/${f}.test.ts`, '10'], { cwd: work, env, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
   }
@@ -169,6 +203,7 @@ esac
       ['test/red.test.ts', 'red', 10],
       ['test/skip.test.ts', 'skipped', 0],
       ['test/slow.test.ts', 'stopped', 0],
+      ['test/timedout.test.ts', 'stopped', 0],
     ],
   );
   assert.match(pushed[1].detail, /failing tests:\nboom/);

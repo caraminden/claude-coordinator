@@ -261,7 +261,7 @@ export class FlakeFixes {
         id = fix.id;
       }
       try {
-        const count = store.flakeCounts(project.id, now - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file)?.count ?? sights.length;
+        const count = store.flakeCounts(project.id, now - FLAKE_WINDOW_MS, 1000, true).find((f) => f.file === file)?.count ?? sights.length;
         const m = await this.d.start(project, { ...flakeBrief(file, count, store.flakeDetails(project.id, file)), ...intermittentTier() });
         store.updateFlakeFix(id, { ticket_id: m.id });
         started++;

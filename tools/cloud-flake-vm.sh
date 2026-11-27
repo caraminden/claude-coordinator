@@ -63,6 +63,7 @@ case ${1:-} in
     if [ "$rc" = 0 ]; then verdict=clean failed=0
     elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then verdict=stopped
     elif grep -q 'skipped a test on this runner' "$log"; then verdict=skipped
+    elif [ -z "$failed" ] && grep -q 'were stopped at .*none failed' "$log"; then verdict=stopped
     elif grep -q 'alone: failed too' "$log"; then verdict=red
     elif [ -n "$failed" ] && [ "$failed" -lt "$copies" ] || grep -q 'alone: passed' "$log"; then verdict=flaky
     else verdict=red

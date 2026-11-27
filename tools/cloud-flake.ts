@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Flaky tests' repeat runs in a Claude Code cloud session (#2187, src/cloud-flakes.ts), off perigee's CPU. Run it from a
 // minion's turn: the session starts on that turn's own login (sender pays) and draws on that person's plan, about $0.50 for
-// each 20 minutes it runs. It takes minutes, so start it with `citadel-job`, which wakes you with its output.
+// each 20 minutes it runs. It takes minutes: run it as a background command in your turn and wait with `citadel-wait pid`.
+// Not under `citadel-job`, which leaves out your Claude login and your turn's token: there it refuses.
 //
-//   citadel-job tools/cloud-flake.ts proof <test file>... [--copies 10] [--batches 1] [--seconds <one run alone, s>]
+//   tools/cloud-flake.ts proof <test file>... [--copies 10] [--batches 1] [--seconds <one run alone, s>]
 //       Your flake proof: each file's batches of <copies> at once under load (tools/flake-proof.sh's shape), all in ONE session,
 //       on your branch's committed tip (pushed to a scratch branch for it, deleted after). Exits 0 when every batch was clean.
 //       It runs at home instead (tools/burn-in.sh, a heavy slot, at most 4 copies) when you have no cloud setup (no `claude`,
@@ -11,10 +12,11 @@
 //       for a file whose batch won't fit a 25-minute step (by --seconds: one run alone × copies / 2), and for a file the cloud
 //       stopped at its step limit or skipped a test on (a tool the VM lacks: it proves nothing there).
 //       A clean cloud proof is your own evidence; the fix's held proof is still flake-proof.yml (the Test health tab's count).
-//   citadel-job tools/cloud-flake.ts sweep [--files 10] [--copies 10] [--no-post]
+//   tools/cloud-flake.ts sweep [--files 10] [--copies 10] [--no-post]
 //       The nightly sweep (a schedule's minion runs it): the scheme's flakiest files of 14 days, one batch each, on main's tip
 //       on GitHub; the night (results, sessions × minutes, its cost) goes to the Test health tab, and each flaky file there
-//       becomes a cloud sighting, marked cloud-only, which never refuses a ship or starts a fix minion.
+//       becomes a cloud sighting, marked cloud-only, which never refuses a ship or starts a fix minion. Exits 1 when a
+//       picked file came back with no result (the night says which).
 //
 // The session runs tools/cloud-flake-vm.sh's steps, each under 25 minutes, and pushes its results to a cloud/ branch, which
 // src/cloud-turn.mjs (the same driver a cloud turn uses) reads back and deletes. Citadel's repo only: the VM script runs node tests.
@@ -136,6 +138,7 @@ const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encodi
 /** Why this turn can't use the cloud at all, or null. */
 function noCloud(): string | null {
   if (process.env.CITADEL_CLOUD === '0') return 'CITADEL_CLOUD=0';
+  if (process.env.CITADEL_JOB) throw new Error("run it as a background command in your turn, not under citadel-job, which leaves out your Claude login (a session there would run on someone else's) and your turn's token");
   if (spawnSync('sh', ['-c', 'command -v claude'], { stdio: 'ignore' }).status !== 0) return 'no claude CLI here';
   if (!githubRepo(git('remote', 'get-url', 'origin'))) return "this repo's origin isn't on GitHub, where a session clones it";
   return null;
@@ -153,6 +156,17 @@ function home(files: string[], copies: number, why: string): boolean {
 
 const line = (b: SweepFile) => `cloud-flake: ${b.file}: ${b.verdict}, ${b.failed} of ${b.copies} copies failed, ${b.seconds} s${b.verdict !== 'clean' && b.detail ? `\n${b.detail}` : ''}`;
 const costLine = (minutes: number) => `cloud-flake: 1 session × ${minutes.toFixed(1)} min ≈ $${cloudCostUsd(minutes).toFixed(2)} of your plan's usage (an estimate: a session's start at least, else about $0.50 per 20 minutes)`;
+
+/**
+ * A proof's cloud batches judged: `again`, the files to run at home because the cloud proved nothing about them (a batch
+ * stopped, skipped or missing, and none failed), and `clean`, whether every other batch passed. A failure seen stands.
+ */
+export function judge(files: string[], batches: number, ran: SweepFile[]): { again: string[]; clean: boolean } {
+  const of = (f: string) => ran.filter((b) => b.file === f);
+  const unproven = (b: SweepFile) => b.verdict === 'stopped' || b.verdict === 'skipped';
+  const again = files.filter((f) => of(f).every((b) => b.verdict === 'clean' || unproven(b)) && (of(f).length < batches || of(f).some(unproven)));
+  return { again, clean: ran.every((b) => b.verdict === 'clean' || (unproven(b) && again.includes(b.file))) };
+}
 
 async function proof(files: string[], copies: number, batches: number, seconds: number | null): Promise<number> {
   for (const f of files) if (!existsSync(join(repo, f))) throw new Error(`no such file: ${f}`);
@@ -175,8 +189,8 @@ async function proof(files: string[], copies: number, batches: number, seconds: 
     }
     for (const b of ran.batches) console.log(line(b));
     console.log(costLine(ran.minutes));
-    const again = cloud.filter((f) => ran.batches!.filter((b) => b.file === f).length < batches || ran.batches!.some((b) => b.file === f && (b.verdict === 'stopped' || b.verdict === 'skipped')));
-    ok = ran.batches.every((b) => b.verdict === 'clean' || again.includes(b.file)) && ok;
+    const { again, clean } = judge(cloud, batches, ran.batches);
+    ok = clean && ok;
     if (again.length) ok = home(again, copies, 'the cloud stopped it, skipped a test or ran fewer batches') && ok;
     console.log(`cloud-flake: ${ok ? 'every batch clean' : 'not clean'}`);
     return ok ? 0 : 1;
@@ -206,6 +220,7 @@ async function api(path: string, body?: unknown): Promise<unknown> {
 async function sweep(n: number, copies: number, post: boolean): Promise<number> {
   const off = noCloud();
   if (off) throw new Error(`the sweep runs only in the cloud: ${off}`);
+  if (post && !process.env.COORDINATOR_TOKEN) throw new Error("no turn token here to post the night with: run it in a minion's turn, or with --no-post");
   git('fetch', '-q', 'origin', process.env.CLOUD_FLAKE_REF || 'main');
   const onMain = new Set(git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', 'test').split('\n'));
   // CLOUD_FLAKE_PICKS (comma-separated): sweep these instead of the scheme's flakiest, for a try of the sweep itself.
@@ -221,21 +236,25 @@ async function sweep(n: number, copies: number, post: boolean): Promise<number> 
   const ran = await session({ ref, branch: cloudBranch(id, Date.now()), steps: picks.map((f) => batchStep(f, copies)) });
   for (const b of ran.batches ?? []) console.log(line(b));
   console.log(costLine(ran.minutes));
-  const night = { sha: ran.sha, sessions: ran.started ? 1 : 0, minutes: ran.started ? ran.minutes : 0, files: ran.batches ?? [], error: ran.batches ? null : ran.error };
+  const missing = ran.batches ? picks.filter((f) => !ran.batches!.some((b) => b.file === f)) : [];
+  const error = ran.batches ? (missing.length ? `${missing.length} of ${picks.length} files came back with no result: ${missing.join(', ')}` : null) : ran.error;
+  if (missing.length) console.log(`cloud-flake: ${error}`);
+  const night = { sha: ran.sha, sessions: ran.started ? 1 : 0, minutes: ran.started ? ran.minutes : 0, files: ran.batches ?? [], error };
   if (!post) {
     console.log(`cloud-flake: not posted (--no-post): ${JSON.stringify(night)}`);
-    return ran.batches ? 0 : 1;
+    return error ? 1 : 0;
   }
   const saved = (await api('cloud-sweep', night)) as { sightings: number };
-  console.log(`cloud-flake: the night is on the Test health tab; ${saved.sightings} cloud sighting(s) recorded${ran.batches ? '' : `; no results: ${ran.error}`}`);
-  return ran.batches ? 0 : 1;
+  console.log(`cloud-flake: the night is on the Test health tab; ${saved.sightings} cloud sighting(s) recorded${error ? `; ${error}` : ''}`);
+  return error ? 1 : 0;
 }
 
-function flag(args: string[], name: string, fallback: number | null): number | null {
+/** A count flag (`whole`, the default) or a measure; either must be positive. */
+export function flag(args: string[], name: string, fallback: number | null, whole = true): number | null {
   const at = args.indexOf(name);
   if (at < 0) return fallback;
   const v = Number(args.splice(at, 2)[1]);
-  if (!Number.isFinite(v) || v <= 0) throw new Error(`${name} takes a positive number`);
+  if (!(whole ? Number.isInteger(v) : Number.isFinite(v)) || v <= 0) throw new Error(`${name} takes a positive ${whole ? 'whole ' : ''}number`);
   return v;
 }
 
@@ -245,7 +264,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (mode === 'proof') {
       const copies = flag(args, '--copies', SWEEP.copies)!;
       const batches = flag(args, '--batches', 1)!;
-      const seconds = flag(args, '--seconds', null);
+      const seconds = flag(args, '--seconds', null, false);
       if (!args.length) throw new Error('proof needs a test file');
       return proof(args, Math.min(copies, 20), Math.min(batches, 10), seconds);
     }
@@ -253,7 +272,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(
       readFileSync(fileURLToPath(import.meta.url), 'utf8')
         .split('\n')
-        .slice(1, 21)
+        .slice(1, 23)
         .join('\n')
         .replace(/^\/\/ ?/gm, ''),
     );

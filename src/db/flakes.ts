@@ -24,18 +24,18 @@ export const flakeQueries = {
     if (flakes.length) this.db.prepare('DELETE FROM flake_events WHERE at < ?').run(at - FLAKE_KEEP_MS);
   },
 
-  /** A scheme's flakiest test files since `since`: how often (`cloud` of them in a cloud session, #2187), when last, and the minion whose land saw the last one. `land`: count only sightings made off the cloud. */
+  /** A scheme's flakiest test files since `since`: how often (`cloud` of them in a cloud session, #2187), when last, and the minion whose land saw the last one (a cloud sweep's only when nothing else saw it). `land`: count only sightings made off the cloud. */
   flakeCounts(this: Store, projectId: number, since: number, limit = 10, land = false): { file: string; count: number; cloud: number; last: number; ticketId: number | null }[] {
     return this.db
       .prepare(`SELECT file, COUNT(*) AS count, SUM(source = '${CLOUD_SOURCE}') AS cloud, MAX(at) AS last,
-        (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
+        (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.source = '${CLOUD_SOURCE}', e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
       FROM flake_events e WHERE project_id = ? AND at >= ? ${land ? NOT_CLOUD : ''} GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`)
       .all(projectId, since, limit) as { file: string; count: number; cloud: number; last: number; ticketId: number | null }[];
   },
 
-  /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. */
+  /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. A cloud sweep's row (#2187) is no land's, so it never hides one. */
   hasFlakeNear(this: Store, projectId: number, file: string, at: number, tolMs: number): boolean {
-    return !!this.db.prepare('SELECT 1 FROM flake_events WHERE project_id = ? AND file = ? AND at BETWEEN ? AND ? LIMIT 1').get(projectId, file, at - tolMs, at + tolMs);
+    return !!this.db.prepare(`SELECT 1 FROM flake_events WHERE project_id = ? AND file = ? AND at BETWEEN ? AND ? ${NOT_CLOUD} LIMIT 1`).get(projectId, file, at - tolMs, at + tolMs);
   },
 
   /** Sighting times of `file` since `since`, oldest first; `land`: only those made off the cloud (a fix minion's count, #2187). */

@@ -26,7 +26,7 @@ function setup() {
   const m = s.createMachine('josh-pc', '', 'Josh', josh.id);
   const app = {
     store: s,
-    machines: { rolesChanged: () => {}, endSessionsWhere: () => {}, list: () => [], view: () => ({}), disconnect: () => {} },
+    machines: { rolesChanged: () => {}, endSessionsWhere: () => {}, list: () => [], view: () => ({}), disconnect: () => {}, gpuFound: () => false },
     runner: { turnLine: { pump: () => {}, forget: () => {} } },
     ciLoad: { forget: () => {} },
     jobs: { drop: () => {} },

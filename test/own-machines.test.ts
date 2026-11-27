@@ -63,12 +63,22 @@ test("an admin's own machine follows them, in the schemes on its list; a role it
   assert.equal(lendsRole(store, sharedBox, 'tools', shared, [josh.id]), false);
 });
 
-test("a removed owner's machine goes to the heir, lent to no scheme, and only owners and admins manage machines", () => {
+test("a removed owner's machine goes to the heir, lent to no scheme with every role off, and only owners and admins manage machines", () => {
   const gone = store.createUser({ name: 'Gone', login: 'gone' });
   const box = store.createMachine('gone-box', '', 'Gone', gone.id);
   store.addMember(shared.id, gone.id);
   store.setMachineProjects(box.id, [shared.id]);
+  store.setMachineRole(box.id, 'ci', { on: true, projects: [shared.id] });
+  store.setMachineRole(box.id, 'turns', { on: true, projects: [shared.id] });
   store.deleteUser(gone.id, cara.id);
+  assert.deepEqual(
+    store
+      .machineRoles(box.id)
+      .filter((r) => r.on)
+      .map((r) => r.role),
+    [],
+    "the heir switches on what the gone person's PC serves",
+  );
   const after = store.getMachine(box.id)!;
   assert.equal(after.owner_id, cara.id, 'every machine has an owner: the heir, as with their schemes');
   assert.deepEqual(store.machineProjects(box.id), []);

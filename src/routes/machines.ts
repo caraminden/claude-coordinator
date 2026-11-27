@@ -562,13 +562,16 @@ function openTurnSession({ res, url, app, caller, params }: Ctx, pooled: boolean
   // TurnState.owned), which its owner asked for: never mid-turn, never for someone else's; unless its owner lent this
   // role to everyone in its schemes (lendsToEveryone), when the scheme check below decides.
   // The owner check too: a removed machine's id can come back as someone else's.
-  if (machine && !lendsToEveryone(app.store, machine, pooled ? 'screen' : 'tools') && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
+  const role = pooled ? 'screen' : 'tools';
+  const everyone = !!machine && lendsToEveryone(app.store, machine, role);
+  if (machine && !everyone && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
     throw new HttpError(403, "That machine is someone else's, or this turn started without it");
   }
   // A machine opens only for a minion in a scheme its Tools role is lent to (#438, M1), as at its turn's start
   // (src/runner.ts): a scheme taken off the list, or Tools switched off, mid-turn can't open it again.
-  // Its Windows screen role for the pooled tools.
-  if (machine && (!project || caller!.kind === 'coordinator' || !app.store.roleGrants(machine.id, pooled ? 'screen' : 'tools', project.id))) {
+  // Its Windows screen role for the pooled tools. Lent to everyone: also while its owner is still in the scheme and not
+  // disabled (lendsRole), as at a turn's start.
+  if (machine && (!project || caller!.kind === 'coordinator' || !(everyone ? lendsRole(app.store, machine, role, project) : app.store.roleGrants(machine.id, role, project.id)))) {
     throw new HttpError(403, "That machine isn't lent to this scheme");
   }
   const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;

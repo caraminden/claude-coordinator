@@ -127,6 +127,8 @@ test('every write keeps the old columns as a rollback reads them, and an older r
   let row = s.getMachine(box.id)!;
   assert.deepEqual(parseLegacyLend(row.lend), { server: null, workspaces: ['vexavault'], worker: true });
   assert.deepEqual(old.list(s, box.id), [1, 3, 4], "the old list: every role that's on's schemes");
+  // Its owner lent Tools to everyone (Build 10 H1), which the old columns don't hold.
+  s.setMachineRole(box.id, 'tools', { caps: { everyone: true } });
   // An older release (a rollback) switches GPU jobs off and takes scheme 4 off the one list.
   s.db.prepare('UPDATE machines SET lend = ? WHERE id = ?').run(JSON.stringify({ server: null, workspaces: ['vexavault'], gpu_off: true }), box.id);
   s.db.prepare('DELETE FROM machine_projects WHERE machine_id = ? AND project_id = 4').run(box.id);
@@ -134,6 +136,7 @@ test('every write keeps the old columns as a rollback reads them, and an older r
   const again = new Store(join(dir, 'rollback.db'));
   row = again.getMachine(box.id)!;
   assert.deepEqual(Object.fromEntries(again.machineRoles(box.id).map((r) => [r.role, r.on ? r.projects : 'off'])), { tools: [1, 3], screen: 'off', ci: 'off', turns: 'off', gpu: 'off', builds: 'off' }, 'its roles are migrated again from what the older release left');
+  assert.equal(again.machineRoles(box.id).find((r) => r.role === 'tools')?.caps.everyone, true, 'still lent to everyone');
   // An older release makes it a CI runner host (a runner agent connecting during a rollback): the next boot gives it CI.
   again.db.prepare('UPDATE machines SET last_check = ? WHERE id = ?').run(JSON.stringify({ at: 2, results: [], runners: true }), box.id);
   again.db.close();

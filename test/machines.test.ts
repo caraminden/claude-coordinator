@@ -457,6 +457,16 @@ test('a machine reaches only the minions of the schemes on its list, and taking 
   const refused = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inB.token}` } });
   assert.equal(refused.status, 403);
   await refused.body!.cancel();
+  // Lent to everyone, it still opens only while its owner is in the scheme and not disabled (Build 10 H1).
+  const db = new Store(join(root, 'data', 'coordinator.db'));
+  const gone = db.createUser({ name: 'Gone', login: 'gone-vault' });
+  db.updateUser(gone.id, { disabled_at: Date.now() });
+  db.db.prepare('UPDATE machines SET owner_id = ? WHERE id = ?').run(gone.id, machine.id);
+  const ownerGone = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inA.token}` } });
+  assert.equal(ownerGone.status, 403, 'its owner is disabled');
+  await ownerGone.body!.cancel();
+  db.db.prepare('UPDATE machines SET owner_id = ? WHERE id = ?').run((await call('/api/me')).id, machine.id);
+  db.db.close();
   const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inA.token}` } });
   assert.equal(opened.status, 200);
   const stream = opened.body!.getReader();

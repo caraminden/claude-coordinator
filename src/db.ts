@@ -639,7 +639,8 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       for (const m of stale) {
-        const roles = this.writeMachineRoles(m.id, () => rolesFromLegacy(m, list(m.id)));
+        // The old columns don't hold a role lent to everyone (Build 10 H1, caps.everyone): it stays as it was.
+        const roles = this.writeMachineRoles(m.id, (was) => rolesFromLegacy(m, list(m.id)).map((r) => (was.find((w) => w.role === r.role)?.caps.everyone ? { ...r, caps: { ...r.caps, everyone: true as const } } : r)));
         const on = roles.filter((r) => r.on).map((r) => `${ROLE_NAMES[r.role]} (${r.projects.join(', ') || 'no scheme'})`);
         console.log(`Machine roles (M1): ${m.name}${has.has(m.id) ? ', changed by an older release,' : ''} now lends ${on.join('; ') || 'nothing'}.`);
       }

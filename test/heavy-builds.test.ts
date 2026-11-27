@@ -5,10 +5,9 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { BuildPlacer, buildRoom, buildsReady, KIND_SIZE, place } from '../src/heavy-builds.ts';
+import { BuildPlacer, buildRoom, buildsReady, KIND_SIZE, place, SCRIPT } from '../src/heavy-builds.ts';
 import { MachineBalancer } from '../src/machine-balancer.ts';
 import { type AgentJobMessage, type BuildKind, DEFAULT_SETTINGS, type JobKind, MachineJobs } from '../src/machine-jobs.ts';
-import { SCRIPT } from '../src/routes/heavy-builds.ts';
 import { kindOf } from '../tools/heavy-builds.ts';
 import { tempRoot } from './helpers.ts';
 
@@ -238,7 +237,7 @@ test("a running build doesn't take the machine's one GPU job slot", () => {
   );
 });
 
-// The script the build image runs (src/routes/heavy-builds.ts), run under sh here with its /tmp moved into a test folder.
+// The script the build image runs (src/heavy-builds.ts), run under sh here with its /tmp moved into a test folder.
 test("the image's script unpacks the snapshot, runs in the caller's folder and packs the files to bring back from the top", () => {
   const d = tmp.path(`script${n++}`);
   mkdirSync(join(d, 'src', 'sub'), { recursive: true });
@@ -358,4 +357,16 @@ test('no answer to its start: it may run there, so it never falls back to perige
   assert.equal(c.status, 1, c.err);
   assert.match(c.err, /may run there/);
   assert.ok(!c.fell);
+});
+
+test("a release APK queued by Citadel (a contraption's build job) goes ahead of the builds already waiting", () => {
+  const w = world({ room: 'wait' });
+  const first = w.build();
+  const kind = JSON.parse(w.store.getMachineJob(first)!.kind) as BuildKind;
+  const c = w.store.createContraption({ name: 'reader', title: 'Reader', icon: null, port: 9, home_scheme: w.p.id, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+  const release = w.jobs.queueBuild({ machine: w.m(), projectId: w.p.id, ticketId: null, contraptionId: c.id, askedBy: 'Reader APK build', kind, inputs: [], limitS: 7200, reason: 'release' }).id;
+  w.state.room = 'start';
+  w.asked.length = 0;
+  w.jobs.pump(w.box);
+  assert.deepEqual(w.asked, [`build:${release}`, `build:${first}`]);
 });

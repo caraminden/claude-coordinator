@@ -726,12 +726,14 @@ export class MachineJobs {
   }
 
   /**
-   * The builds lane (H2): build jobs start in the order they came, each once the balancer has its size free there (it
+   * The builds lane (H2): build jobs start in the order they came (release APKs first), each once the balancer has its size free there (it
    * holds no turn back past 30 minutes of waiting, as any heavy job). No job hours, no card: the Builds role's switch
    * is the go, checked again at the start.
    */
   private pumpBuilds(machineId: number) {
-    for (const next of this.store.machineJobs({ machine: machineId, states: ['queued'] }, 200).reverse()) {
+    // Oldest first, but a release APK (a contraption's, H3) goes to the front of the line.
+    const queued = this.store.machineJobs({ machine: machineId, states: ['queued'] }, 200).reverse();
+    for (const next of queued.sort((a, b) => Number(a.contraption_id === null) - Number(b.contraption_id === null))) {
       if (next.go !== 'builds') continue;
       if (this.d.buildsMay && !this.d.buildsMay(next)) {
         this.store.updateMachineJob(next.id, { state: 'refused', ended_at: this.now(), error: "the machine's Builds role is off, not lent to this scheme, or not set up" });
@@ -745,13 +747,13 @@ export class MachineJobs {
     }
   }
 
-  /** Queue a build job (H2's place() chose this machine): no jobs block, go card or job hours; it starts when there is room. */
-  queueBuild(q: { machine: Machine; projectId: number; ticketId: number; askedBy: string; kind: BuildKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; reason: string }): MachineJob {
+  /** Queue a build job (H2's place() chose this machine; a contraption's is a release APK Citadel builds, H3): no jobs block, go card or job hours; it starts when there is room. */
+  queueBuild(q: { machine: Machine; projectId: number; ticketId: number | null; contraptionId?: number; askedBy: string; kind: BuildKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; reason: string }): MachineJob {
     const job = this.store.addMachineJob({
       machine_id: q.machine.id,
       project_id: q.projectId,
       ticket_id: q.ticketId,
-      contraption_id: null,
+      contraption_id: q.contraptionId ?? null,
       asked_by: q.askedBy,
       kind_name: q.kind.name,
       kind: JSON.stringify(q.kind),

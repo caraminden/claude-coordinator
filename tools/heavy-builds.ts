@@ -7,7 +7,7 @@
 // --place-only exits 0 when a machine could take it now, 1 when none can. Like heavy-ci.ts beside it, a turn runs this
 // file alone (src/turn-launch.ts): it imports only from heavy-ci.ts.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { FALLBACK, SECRETS } from './heavy-ci.ts';
@@ -63,14 +63,70 @@ type Job = { id: number; state: string; exit_code: number | null; error: string 
 
 const place = (kind: string) => call<{ spots: Spot[] }>('POST', '', { do: 'place', kind }).then((r) => r.spots);
 
-/** The working copy as it is (tracked and untracked files, .gitignore kept, no .env or key files), as heavy-ci.ts snapshots it. */
-function snapshot(top: string, into: string): string {
+/** Never packed, even where .gitignore doesn't cover them: SECRETS' file names, and Android's own places for keys and local paths. */
+const KEPT_HOME = new RegExp(`^(?:${[...SECRETS.map((g) => g.replace('**/', '')), 'local.properties', 'keystore.properties', '*.pass'].map((g) => g.replace(/\./g, '\\.').replace(/\*/g, '.*')).join('|')})$`);
+
+/**
+ * What a Capacitor Android build needs that .gitignore leaves out (H3): `cap sync`'s output in the Gradle project
+ * (the web assets, the Cordova plugins) and the node_modules packages capacitor.settings.gradle names. `dir` is the
+ * Gradle project, from `top`; the files are named from `top`. Gradle's own output (a build/ beside a build.gradle)
+ * and key files stay. None for a project that isn't Capacitor's.
+ */
+export function capacitorExtras(top: string, dir: string): string[] {
+  const project = resolve(top, dir);
+  let settings: string;
+  try {
+    settings = readFileSync(join(project, 'capacitor.settings.gradle'), 'utf8');
+  } catch {
+    return [];
+  }
+  const gradleHere = (at: string) => existsSync(join(at, 'build.gradle')) || existsSync(join(at, 'build.gradle.kts'));
+  const outputs = (at: string, name: string) => name === '.gradle' || name === '.cxx' || (name === 'build' && gradleHere(at));
+  const out = new Set<string>();
+  const ignored = execFileSync('git', ['-C', top, 'ls-files', '-z', '-oi', '--exclude-standard', '--', dir || '.'], { encoding: 'utf8', maxBuffer: 256 << 20 });
+  for (const f of ignored.split('\0').filter(Boolean)) {
+    const parts = f.split('/');
+    if (!parts.some((p, i) => p === 'node_modules' || outputs(join(top, ...parts.slice(0, i)), p)) && !KEPT_HOME.test(parts.at(-1)!)) out.add(f);
+  }
+  const walk = (at: string) => {
+    for (const e of readdirSync(at, { withFileTypes: true })) {
+      const path = join(at, e.name);
+      if (e.name === 'node_modules' || outputs(at, e.name) || KEPT_HOME.test(e.name)) continue;
+      if (e.isDirectory()) walk(path);
+      else out.add(relative(top, path));
+    }
+  };
+  for (const [, pkg] of settings.matchAll(/new File\(\s*['"]([^'"]*node_modules\/(?:@[^/'"]+\/)?[^/'"]+)/g)) {
+    const at = resolve(project, pkg);
+    if (!relative(top, at).startsWith('..') && existsSync(at)) walk(at);
+  }
+  return [...out];
+}
+
+/**
+ * The working copy as it is (tracked and untracked files, .gitignore kept, no .env or key files), as heavy-ci.ts
+ * snapshots it, plus `extras` (capacitorExtras), whose links are followed: a linked node_modules goes as its files.
+ */
+export function snapshot(top: string, into: string, extras: string[] = []): string {
   const file = join(into, 'snapshot.tgz');
-  const list = execFileSync('git', ['-C', top, 'ls-files', '-z', '-co', '--exclude-standard', '--', ':/', ...SECRETS.map((g) => `:(top,exclude,glob)${g}`)], { maxBuffer: 256 << 20 });
+  const listed = execFileSync('git', ['-C', top, 'ls-files', '-z', '-co', '--exclude-standard', '--', ':/', ...SECRETS.map((g) => `:(top,exclude,glob)${g}`)], { encoding: 'utf8', maxBuffer: 256 << 20 });
+  // A link on the way to an extra file (node_modules itself, where .gitignore names only the folder) isn't packed as a link.
+  const parents = new Set(extras.flatMap((f) => f.split('/').map((_, i, p) => p.slice(0, i).join('/'))));
+  const list = listed.split('\0').filter((f) => f && !parents.has(f));
+  const plain = extras.length ? join(into, 'snapshot.tar') : file;
   // A file deleted since it was added is in the list but not on disk: left out, not an error. --no-recursion: a
   // checked-out submodule is listed as its folder, and its own .env and keys must not ride along inside it.
-  const r = spawnSync('tar', ['-C', top, '--null', '--no-recursion', '--ignore-failed-read', '-czf', file, '-T', '-'], { input: list, stdio: ['pipe', 'ignore', 'pipe'] });
-  if (r.status !== 0 && r.status !== 1) throw new Error(`tar couldn't pack the working copy: ${String(r.stderr).trim().slice(-300)}`);
+  const tar = (args: string[], names: string[]) => {
+    const r = spawnSync('tar', ['-C', top, '--null', '--no-recursion', '--ignore-failed-read', ...args, '-T', '-'], { input: names.map((n) => `${n}\0`).join(''), stdio: ['pipe', 'ignore', 'pipe'] });
+    if (r.status !== 0 && r.status !== 1) throw new Error(`tar couldn't pack the working copy: ${String(r.stderr).trim().slice(-300)}`);
+  };
+  tar([extras.length ? '-cf' : '-czf', plain], list);
+  if (extras.length) {
+    tar(['--dereference', '-rf', plain], extras);
+    const z = spawnSync('gzip', ['-f', plain], { stdio: ['ignore', 'ignore', 'pipe'] });
+    if (z.status !== 0) throw new Error(`gzip couldn't pack the working copy: ${String(z.stderr).trim().slice(-300)}`);
+    renameSync(`${plain}.gz`, file);
+  }
   if (statSync(file).size > INPUT_MAX) throw new Error('the working copy packs to over 2 GB');
   return file;
 }
@@ -85,8 +141,8 @@ function fallback(why: string): number {
 async function runOnce(kind: string, argv: string[], back: string[], top: string, scratch: string): Promise<number | 'away'> {
   const spots = await place(kind);
   if (!spots.length) return fallback('no machine with the Builds role has room for it now');
-  const snap = snapshot(top, scratch);
   const dir = execFileSync('git', ['rev-parse', '--show-prefix'], { encoding: 'utf8' }).trim().replace(/\/$/, '');
+  const snap = snapshot(top, scratch, kind === 'apk' ? capacitorExtras(top, dir) : []);
   let started: { job: number; machine: string } | null = null;
   for (const s of spots) {
     try {

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { CLOUD, CLOUD_PLACE } from '../src/cloud-pool.ts';
+import { CLOUD, CLOUD_PLACE, CLOUD_SWITCH } from '../src/cloud-pool.ts';
 import { Runner } from '../src/runner.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -78,6 +78,7 @@ chmodSync(fake, 0o755);
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 store.setProjectUpstream(project.id, 'https://github.com/caraminden/claude-coordinator', null); // a cloud session clones from GitHub
+store.setSetting(CLOUD_SWITCH, true); // the admin switch: off by default (#2193), its own test below
 const cara = store.createUser({ name: 'Cara', login: 'cara' });
 const josh = store.createUser({ name: 'Josh', login: 'josh' });
 store.addMember(project.id, cara.id);
@@ -192,4 +193,23 @@ test("a first turn with a picture stays home: a cloud session can't see it", asy
   assert.equal(ofMinion(pic)[0].includes('--cloud'), false);
   writeFileSync(join(root, `end-${pic}`), '');
   await idle(pic);
+});
+
+test('with the admin switch off, a research minion runs at perigee; a session already running keeps its follow-ups', async (t) => {
+  store.setSetting(CLOUD_SWITCH, false);
+  t.after(() => store.setSetting(CLOUD_SWITCH, true));
+  const research = minion('research');
+  runner.cloud.made(research, { go: true }, 'Cara');
+  say(research, 'compare X and Y');
+  await until('its turn', () => ofMinion(research).length > 0);
+  assert.equal(ofMinion(research)[0].includes('--cloud'), false, 'at perigee, no new session');
+  writeFileSync(join(root, `end-${research}`), '');
+  await idle(research);
+
+  const running = minion('research');
+  kept(running, 'session_01KEEPabc', cara.id);
+  say(running, 'go with A');
+  await until('the follow-up', () => ofMinion(running).length > 0);
+  await idle(running);
+  assert.deepEqual(ofMinion(running)[0].slice(1, 2).concat(ofMinion(running)[0].slice(3, 5)), ['-p', '--cloud', 'session_01KEEPabc'], 'nothing lost mid-job');
 });

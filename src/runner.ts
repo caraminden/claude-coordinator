@@ -88,7 +88,7 @@ import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
 import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
 import { type CloudHost, TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
-import { CLOUD_PLACE, CloudPool } from './cloud-pool.ts';
+import { CLOUD_OFF, CLOUD_PLACE, CloudPool } from './cloud-pool.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
@@ -2691,7 +2691,7 @@ export class Runner {
   /** Whose login a minion's first cloud turn would run on, or why it can't go: only a minion's ordinary turn on Claude. */
   private cloudAsk(id: number, via?: RetryKind): string | { ticket: Ticket; project: Project; person: number; type: string | null } {
     const type = this.store.props.forTarget('minion', id).type;
-    if (!this.cloud.may(id, typeof type === 'string' ? type : null)) return 'not a research or ideation minion, nor marked for the cloud';
+    if (!this.cloud.may(id, typeof type === 'string' ? type : null)) return this.cloud.on() ? 'not a research or ideation minion, nor marked for the cloud' : CLOUD_OFF;
     const ticket = this.store.getTicket(id);
     const project = ticket && this.store.getProject(ticket.project_id);
     if (!ticket || !project || ticket.kind !== 'ticket' || !ticket.cwd) return 'not a minion with a checkout';

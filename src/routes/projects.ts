@@ -27,7 +27,7 @@ import { repoSetup } from '../repo-setup.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
-import { newMark } from '../cloud-pool.ts';
+import { CLOUD_SWITCH, newMark } from '../cloud-pool.ts';
 import { claimName, type Claim } from '../claims.ts';
 import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
@@ -373,6 +373,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
   if (runsOn) app.runner.runsOn.set(id, runsOn, session.name);
   if (cloud) app.runner.cloud.made(id, cloud, session.name);
+  if (cloud && !app.runner.cloud.on()) notes.push(`Cloud sessions are off for every scheme right now (an admin switch), so it runs at perigee; ${'go' in cloud ? 'it' : 'its cloud mark is kept and it'} goes to the cloud only if the switch is back on before its first turn.`);
   // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
   store.addPick(id, model, effort, pickBy, because);
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
@@ -920,7 +921,7 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    // Citadel-wide settings: the GitHub owner new schemes' repos are made under.
+    // Citadel-wide settings: the GitHub owner new schemes' repos are made under, and whether cloud sessions may start (#2193).
     method: ['GET', 'PUT'],
     path: '/api/app/settings',
     who: ['person'],
@@ -934,8 +935,12 @@ export const projectRoutes: Route[] = [
           if (owner) app.store.setSetting(GITHUB_OWNER, owner);
           else app.store.deleteSetting(GITHUB_OWNER);
         }
+        if (body.cloud_sessions !== undefined) {
+          if (typeof body.cloud_sessions !== 'boolean') throw new HttpError(400, 'cloud_sessions is true or false');
+          app.store.setSetting(CLOUD_SWITCH, body.cloud_sessions);
+        }
       }
-      return json(res, 200, { github_owner: app.store.getSetting<string>(GITHUB_OWNER), github_owner_default: await citadelOwner() });
+      return json(res, 200, { github_owner: app.store.getSetting<string>(GITHUB_OWNER), github_owner_default: await citadelOwner(), cloud_sessions: app.runner.cloud.on() });
     },
   },
   {

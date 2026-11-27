@@ -2,11 +2,12 @@
 // putting a turn it may take there first, on a fake host and a mocked clock.
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { CLOUD, CLOUD_PLACE, CloudPool, cloudSpend, cloudPrompt, handoffBrief, markRefusal, newMark, staysHome, startBlock, type StartIn } from '../src/cloud-pool.ts';
+import { CLOUD, CLOUD_PLACE, CLOUD_SWITCH, CloudPool, cloudSpend, cloudPrompt, handoffBrief, markRefusal, newMark, staysHome, startBlock, type StartIn } from '../src/cloud-pool.ts';
 import { TurnLine, type LineHost } from '../src/turn-line.ts';
 
-const settings = () => {
-  const saved = new Map<string, string>();
+/** A settings store; the admin switch is on (`on`), as the rules below are what the cloud does while it is. */
+const settings = (on = true) => {
+  const saved = new Map<string, string>(on ? [[CLOUD_SWITCH, 'true']] : []);
   return {
     saved,
     getSetting: <T>(k: string): T | null => (saved.has(k) ? (JSON.parse(saved.get(k)!) as T) : null),
@@ -65,6 +66,35 @@ test("create_ticket lets a research minion go unless cloud: false or its brief n
   assert.match(pool.takes(1, { ...asks, repoUrl: null }) ?? '', /isn't on GitHub/);
   pool.made(3, { kind: 'sweep', minutes: 20 }, 'Cara');
   assert.equal(pool.may(3, 'chore'), true);
+});
+
+test('with the admin switch off (its default), no new cloud session starts: not a research minion, a marked one nor a sweep; on, as before', () => {
+  const gh = 'https://github.com/a/b';
+  const asks = (type: string) => ({ type, ran: false, repoUrl: gh });
+  const store = settings(false);
+  const pool = new CloudPool(store);
+  assert.equal(pool.on(), false, 'off until an admin turns it on (Cara, 2026-11-26: "Lets turn off cloud sessions")');
+  pool.made(1, { go: true }, 'Cara');
+  pool.made(2, { kind: 'research', minutes: 20 }, 'Cara');
+  pool.made(3, { kind: 'sweep', minutes: 20 }, 'Cara');
+  for (const [id, type] of [
+    [1, 'research'],
+    [2, 'research'],
+    [3, 'chore'],
+  ] as const) {
+    assert.equal(pool.may(id, type), false, `#${id} may not`);
+    assert.match(pool.takes(id, asks(type)) ?? '', /cloud sessions are off/, `#${id} stays home`);
+  }
+  assert.ok(pool.mark(2) && pool.mark(3), 'its mark is kept for when the switch is on again');
+  store.setSetting(CLOUD_SWITCH, true);
+  for (const [id, type] of [
+    [1, 'research'],
+    [2, 'research'],
+    [3, 'chore'],
+  ] as const) {
+    assert.equal(pool.may(id, type), true);
+    assert.equal(pool.takes(id, asks(type)), null);
+  }
 });
 
 test("the driver's word of its session is kept on the minion with its person and account, and only when it looks like one", () => {

@@ -43,6 +43,14 @@ export const CLOUD = {
   idleMs: 8 * 60_000,
 };
 
+/**
+ * The admin switch for every scheme's cloud sessions (#2193; Cara, 2026-11-26: "Lets turn off cloud sessions until we figure this
+ * out": a session can't have a back-and-forth with people). Off unless an admin set it true; a session already running keeps its
+ * follow-ups (CloudPool.bound in the runner), and saved marks wait for it.
+ */
+export const CLOUD_SWITCH = 'cloud-sessions';
+export const CLOUD_OFF = 'cloud sessions are off for every scheme (the admin switch on the Citadel-wide settings page), so it runs at perigee';
+
 /** The minion types that go to the cloud with no mark. */
 export const CLOUD_TYPES: readonly string[] = ['research', 'ideation'];
 
@@ -165,6 +173,11 @@ export class CloudPool {
     this.store = store;
   }
 
+  /** The admin switch (CLOUD_SWITCH): whether a new cloud session may start at all. */
+  on(): boolean {
+    return this.store.getSetting<boolean>(CLOUD_SWITCH) === true;
+  }
+
   mark(ticketId: number): CloudMark | null {
     return this.store.getSetting<CloudMark>(markKey(ticketId)) ?? null;
   }
@@ -189,7 +202,7 @@ export class CloudPool {
 
   /** Whether the cloud may take it at all, before anything costlier is asked: marked, or let go and still of a type that goes. */
   may(ticketId: number, type: string | null): boolean {
-    return !!this.mark(ticketId) || (!!this.store.getSetting<boolean>(goKey(ticketId)) && CLOUD_TYPES.includes(type ?? ''));
+    return this.on() && (!!this.mark(ticketId) || (!!this.store.getSetting<boolean>(goKey(ticketId)) && CLOUD_TYPES.includes(type ?? '')));
   }
 
   session(ticketId: number): CloudSession | null {
@@ -203,6 +216,7 @@ export class CloudPool {
 
   /** Why `ticketId`'s first turn can't start as a cloud session now, or null. */
   takes(ticketId: number, i: Pick<StartIn, 'type' | 'ran'> & { repoUrl: string | null }): string | null {
+    if (!this.on()) return CLOUD_OFF;
     return startBlock({ ...i, github: !!githubRepo(i.repoUrl ?? ''), mark: this.mark(ticketId), go: !!this.store.getSetting<boolean>(goKey(ticketId)) });
   }
 

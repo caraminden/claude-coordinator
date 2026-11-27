@@ -271,6 +271,32 @@ test('@imports picks only the test files that import the changed file directly',
   }
 });
 
+test('@inherit: a module with no rule of its own takes the rule tests of the modules that import it, up to @inheritmax importers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aff-inh-'));
+  try {
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'big.ts'), "import { a } from './part.ts';\nimport './own.ts';\n");
+    writeFileSync(join(dir, 'src', 'part.ts'), '');
+    writeFileSync(join(dir, 'src', 'own.ts'), '');
+    writeFileSync(join(dir, 'src', 'other.ts'), "import './part.ts';\n");
+    const base = '@tests test/*.test.ts\n@inherit src/**\nsrc/big.ts: test/big.test.ts\nsrc/own.ts: test/own.test.ts\nsrc/**: test/all.test.ts\n';
+    const tr = ['src/big.ts', 'src/part.ts', 'src/own.ts', 'src/other.ts', 'test/big.test.ts', 'test/own.test.ts', 'test/all.test.ts'];
+    const picks = (m: string, p: string, narrow = false) => affected(parseMap(m), [p], tr, dir, narrow).run.map((r) => r.test);
+    assert.deepEqual(picks(base, 'src/part.ts'), ['test/all.test.ts', 'test/big.test.ts']);
+    assert.deepEqual(picks(base, 'src/own.ts'), ['test/all.test.ts', 'test/own.test.ts'], 'a module with its own rule inherits nothing');
+    assert.deepEqual(picks(base, 'src/part.ts', true), [], 'the narrow pick does not inherit');
+    assert.deepEqual(picks('@tests test/*.test.ts\nsrc/big.ts: test/big.test.ts\n', 'src/part.ts'), [], 'no @inherit, no inheriting');
+    assert.deepEqual(picks(`${base}@inheritmax 1\n`, 'src/part.ts'), ['test/all.test.ts'], 'two importers is over @inheritmax 1');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a module split out of runner.ts still picks the rows #1840 depended on (#2233)', () => {
+  const ids = affected(map, ['src/closing.ts'], tracked, repo).run.map((r) => r.test);
+  assert.ok(ids.includes('test/closed-cleanup.test.ts') && ids.includes('test/background-jobs.test.ts'));
+});
+
 // #1928: citadel-test's default pick is the tests you touched and the same-named ones; the wide pick keeps the rest.
 test('--narrow picks only touched, same-name and @pinned tests, however many import the file; the wide pick still adds them', () => {
   const changed = ['src/runner.ts', 'src/db.ts', 'src/inbox.ts', 'test/affected.test.ts', 'NOTES.txt'];

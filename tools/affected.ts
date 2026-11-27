@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 
 export type Rule = { line: number; glob: string; re: RegExp; tests: string[] };
-export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[]; imports: RegExp[]; pinned: string[] };
+export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[]; imports: RegExp[]; inherit: RegExp[]; inheritMax: number; pinned: string[] };
 
 // A glob over a repo path: `*` and `?` stay inside a folder name, `**` crosses folders, `**/` may be no folder at all.
 export function globRe(glob: string): RegExp {
@@ -38,7 +38,7 @@ export function globRe(glob: string): RegExp {
 }
 
 export function parseMap(text: string): Map {
-  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [], imports: [], pinned: [] };
+  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [], imports: [], inherit: [], inheritMax: 8, pinned: [] };
   const fail = (n: number, why: string): never => {
     throw new Error(`map line ${n}: ${why}`);
   };
@@ -58,6 +58,12 @@ export function parseMap(text: string): Map {
       } else if (name === 'imports') {
         if (!vals.length) fail(n, '@imports needs a glob');
         map.imports.push(...vals.map(globRe));
+      } else if (name === 'inherit') {
+        if (!vals.length) fail(n, '@inherit needs a glob');
+        map.inherit.push(...vals.map(globRe));
+      } else if (name === 'inheritmax') {
+        if (vals.length !== 1 || !/^\d+$/.test(vals[0])) fail(n, '@inheritmax is a number');
+        map.inheritMax = Number(vals[0]);
       } else if (name === 'pinned') {
         if (!vals.length) fail(n, '@pinned needs a test');
         map.pinned.push(...vals);
@@ -113,6 +119,9 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
   };
   const unmapped: string[] = [];
   let imports: globalThis.Map<string, string[]> | undefined;
+  let srcImports: globalThis.Map<string, string[]> | undefined;
+  // A rule that names a file (or a folder's files), not a catch-all like src/**: only these count as a module's own rows.
+  const own = (r: Rule, p: string) => r.re.test(p) && !r.glob.includes('**');
   for (const p of changed) {
     const isTest = map.tests.some((re) => re.test(p));
     if (isTest && existsSync(join(root, p))) add(p, 'touched');
@@ -145,6 +154,13 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
           add(t, `imports ${p}`);
           covered = true;
         }
+    }
+    // @inherit: a changed module with no rule of its own takes the rules of the modules that import it directly, when it has
+    // at most @inheritmax of them (a split-out part keeps the rows of the file it came from; a shared helper is not that).
+    if (!narrow && !isTest && map.inherit.some((re) => re.test(p)) && !map.rules.some((r) => own(r, p))) {
+      srcImports ??= new Map(tracked.filter((t) => map.inherit.some((re) => re.test(t))).map((t) => [t, directImports(root, t)]));
+      const importers = [...srcImports].filter(([, deps]) => deps.includes(p)).map(([f]) => f);
+      if (importers.length <= map.inheritMax) for (const f of importers) for (const r of map.rules) if (own(r, f)) for (const t of r.tests) for (const h of /[*?]/.test(t) ? tracked.filter((x) => globRe(t).test(x)) : [t]) add(h, `inherit ${f} map:${r.line}`);
     }
     if (!covered && !narrow) unmapped.push(p);
   }

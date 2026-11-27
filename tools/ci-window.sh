@@ -15,7 +15,8 @@ me="$win/${GITHUB_RUN_ID:-0}-$$"
 start=$(date +%s)
 mkdir -p "$win" && echo "$start 0" >"$me"
 # The overlap check ignores an open window untouched for 30 minutes (a killed job's): a long command keeps its own fresh.
-( trap 'kill "$s"; exit' TERM; while :; do sleep 600 & s=$!; wait "$s"; touch "$me"; done ) >/dev/null 2>&1 &
+# It ends with the job (#2221): left alive after a kill, it kept a dead window fresh and every ship's suite read as shared.
+( parent=$$; trap 'kill "$s"; exit' TERM; while kill -0 "$parent" 2>/dev/null; do sleep 600 & s=$!; wait "$s"; kill -0 "$parent" 2>/dev/null && touch "$me"; done ) >/dev/null 2>&1 &
 toucher=$!
 trap 'kill "$toucher" 2>/dev/null; echo "$start $(date +%s)" >"$me"' EXIT
 "$@"

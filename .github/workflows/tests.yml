@@ -175,13 +175,20 @@ jobs:
           started=$SECONDS
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
           wend=$(date +%s); echo "$wstart $wend" >"$me"
-          # Overlapped: another run's window started before this one ended and ended after it began (or is still open, written in the last 30 min: a killed run leaves one).
+          # Overlapped (#1811, #2221): another run's window shared at least a fifth of this suite's time. An open window (end 0)
+          # counts to now only while its job's pid (the name's last part) lives and the file was written in the last 30 min:
+          # a dead job's orphaned toucher kept its window fresh and marked every clean suite as shared.
           rm -f "$RUNNER_TEMP/suite-overlap"
           for f in "$win"/*; do
             [ "$f" != "$me" ] || continue
             read -r s e <"$f" || continue
-            [ "$e" != 0 ] || { [ -n "$(find "$f" -mmin -30)" ] && e=$wend || continue; }
-            if [ "$s" -lt "$wend" ] && [ "$e" -gt "$wstart" ]; then echo "$f" >"$RUNNER_TEMP/suite-overlap"; break; fi
+            if [ "$e" = 0 ]; then
+              pid=${f##*-}; [ -n "$(find "$f" -mmin -30)" ] || continue
+              case $pid in *[!0-9]* | '') ;; *) kill -0 "$pid" 2>/dev/null || continue ;; esac # a name with no pid counts as alive
+              e=$wend
+            fi
+            lo=$(( s > wstart ? s : wstart )); hi=$(( e < wend ? e : wend ))
+            if [ $(( (hi - lo) * 5 )) -ge $(( wend - wstart )) ] && [ "$hi" -gt "$lo" ]; then echo "$f" >"$RUNNER_TEMP/suite-overlap"; break; fi
           done
           [ "$rc" != 0 ] || echo "$((SECONDS - started))" >"$RUNNER_TEMP/suite-secs" # a green run's wall time, for the numbers step
           kill "$poster" 2>/dev/null || true # it ends by itself with no run token: bash -e would fail the step on that kill

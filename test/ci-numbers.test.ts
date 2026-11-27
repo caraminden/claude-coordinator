@@ -220,7 +220,7 @@ test('tests.yml keeps no suite time for a run that overlapped another suite run,
   const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
   assert.match(yml, /echo "\$wstart 0" >"\$me"/); // an open window is written before the suite starts
   assert.match(yml, /echo "\$wstart \$wend" >"\$me"/); // and closed after it, red or green
-  assert.match(yml, /if \[ "\$s" -lt "\$wend" \] && \[ "\$e" -gt "\$wstart" \]; then echo "\$f" >"\$RUNNER_TEMP\/suite-overlap"/);
+  assert.match(yml, /if \[ \$\(\( \(hi - lo\) \* 5 \)\) -ge \$\(\( wend - wstart \)\) \] && \[ "\$hi" -gt "\$lo" \]; then echo "\$f" >"\$RUNNER_TEMP\/suite-overlap"/);
   assert.match(yml, /\[ -e "\$RUNNER_TEMP\/suite-overlap" \] \|\| nums\+=\("\$series=/);
   assert.match(yml, /nums\+=\("front-end-size=/); // the size still records
 });
@@ -250,6 +250,28 @@ test('the overlap check flags crossing windows and open recent ones, not disjoin
   assert.equal(run(['120 150']), true);
   assert.equal(run(['150 0']), true); // still open, file just written
   assert.equal(run(['150 0'], 60), false); // open but untouched for an hour: a killed run, not a live one
+});
+
+// #2221: the series went dark after #2082: a window left open by a dead job (its orphaned toucher kept it fresh) or a
+// sliver of overlap marked every clean suite as shared, so suite-time and suite-time-pipeline kept no rows on main.
+test('the overlap check ignores an open window whose job is gone, and a sliver of overlap (#2221)', () => {
+  const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
+  const loop = yml.match(/( *)for f in "\$win"\/\*; do\n[\s\S]*?\n\1done\n/)![0];
+  const deadPid = String(spawnSync('bash', ['-c', 'true & echo $!; wait']).stdout).trim(); // a pid that has just ended
+  const run = (files: Record<string, string>) => {
+    const d = mkdtempSync(join(root, 'ovl-'));
+    const win = join(d, 'w');
+    mkdirSync(win);
+    writeFileSync(join(win, '5-1'), '100 400\n'); // me: a 300 s suite
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(win, name), `${text}\n`);
+    const out = spawnSync('bash', ['-c', `win=${win}; me=${win}/5-1; wstart=100; wend=400; RUNNER_TEMP=${d}\n${loop}`]);
+    assert.equal(out.status, 0, String(out.stderr));
+    return existsSync(join(d, 'suite-overlap'));
+  };
+  assert.equal(run({ [`7-${deadPid}`]: '150 0' }), false); // open, fresh, but its job is gone
+  assert.equal(run({ [`7-${process.pid}`]: '150 0' }), true); // open, and its job is alive
+  assert.equal(run({ '7-1': '380 500' }), false); // 20 s of 300 s shared: the suite still read as itself
+  assert.equal(run({ '7-1': '300 500' }), true); // 100 s of 300 s shared
 });
 
 test("a build's ship run keeps its own ref, so it never joins main's line (#2082)", () => {
@@ -316,7 +338,7 @@ test("a proof's or heavy job's window marks the ship suite it crossed as overlap
   assert.equal(r.status, 3, r.stderr); // the command's own exit
   assert.match(r.stdout, /^\d+ 0$/m); // open while it ran
   const loop = readFileSync(here('.github/workflows/tests.yml'), 'utf8').match(/( *)for f in "\$win"\/\*; do\n[\s\S]*?\n\1done\n/)![0];
-  const out = spawnSync('bash', ['-c', `win=${win}; me=${win}/me; wstart=${wstart}; wend=${wstart + 60}; RUNNER_TEMP=${d}\n${loop}`]);
+  const out = spawnSync('bash', ['-c', `win=${win}; me=${win}/me; wstart=${wstart}; wend=${wstart + 2}; RUNNER_TEMP=${d}\n${loop}`]);
   assert.equal(out.status, 0, String(out.stderr));
   assert.ok(existsSync(join(d, 'suite-overlap')));
   assert.doesNotMatch(readFileSync(join(win, readdirSync(win)[0]), 'utf8'), / 0$/m); // closed

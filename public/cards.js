@@ -597,7 +597,7 @@ const rosterList = (rows) =>
   h(
     'ul',
     { class: 'roster' },
-    rows.map((r) => h('li', {}, h('span', { class: 'what' }, r.scheme ? h('span', { class: 'muted' }, `${r.scheme} · `) : '', r.what), h('span', { class: 'meta' }, r.cost ?? 'no estimate', ' · ', r.when, r.tier ? h('span', { class: 'muted tier' }, ` · ${r.tier}`) : ''))),
+    rows.map((r) => h('li', {}, h('span', { class: 'what' }, r.scheme ? h('span', { class: 'muted' }, `${r.scheme} · `) : '', r.what), h('span', { class: 'meta' }, r.cost ?? 'no estimate', ' · ', threadRefs(r.when), r.tier ? h('span', { class: 'muted tier' }, ` · ${r.tier}`) : ''))),
   );
 
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */

@@ -330,7 +330,7 @@ function runningBlock(s, now, ui) {
   const queues = queuesBut(v, ships);
   const head = queues.length ? queues.map(queueWords).join(' · ') : 'nothing queued';
   // The Runners tab's notes (#1019: runners moved onto Overview), for a repo whose runners can't be listed or that has none.
-  const note = v.runners === null ? "CI health can't list this repo's runners: it needs a repo admin's linked GitHub." : !own.length ? "No self-hosted runners; jobs run on GitHub's." : '';
+  const note = v.runners === null ? "CI health can't list this repo's runners: it needs a repo admin's linked GitHub." : !own.length ? "No self-hosted runners; jobs run on GitHub's." : v.runs.some(githubShip) ? "Ships don't run here unless GitHub can't take them (see Fallbacks)." : '';
   const busy = count('busy') + theirs.length,
     off = count('offline');
   const [tone, word] = off ? ['warn', `${off} offline`] : busy ? ['info', `${busy} busy`] : ['ok', 'Idle'];
@@ -419,15 +419,16 @@ function waitingBlock(s, now, ui) {
     { key: `ci-waiting-${s.id}`, icon: 'rows', hue: n ? 'waiting' : 'done', title: 'Waiting for a runner', summary: n ? [toneChip('warn', `${n} waiting`), `oldest ${shortSpan(now - oldest)}`] : [toneChip('ok', 'Nobody'), 'no job is waiting'] },
     n ? statTiles([String(n), 'jobs queued', 'waiting'], [shortSpan(now - oldest), 'oldest wait', 'waiting']) : null,
     n ? showFirst({ key: `ci-waiting-${s.id}`, items: groups.map((g) => queueRows(g, v.slug, ui)), n: 5, noun: 'groups', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) }) : emptyCard('No job is waiting', 'Jobs queue here when every runner is busy.'),
+    v.runs.some(githubShip) ? h('p', { class: 'look-prose' }, "Shards waiting for GitHub's slots show with their ship, not here.") : null,
   );
   return block(null, n ? 'waiting' : 'done', 'ci-waiting', row);
 }
 
 // ---------- ship CI on GitHub's runners (#2231; Cara, 2026-11-27, picked "Its own block, with a shard strip" and "Ships on top") ----------
 
-/** A ship's run (a `land/` branch) whose jobs ran on GitHub's runners. */
+/** A ship's run (a `land/` branch) split into shards on GitHub's runners: a scheme whose ships run whole on GitHub keeps its page as it was. */
 /** @param {CiRun} r */
-const githubShip = (r) => r.branch.startsWith('land/') && r.where === 'github';
+const githubShip = (r) => r.branch.startsWith('land/') && r.where === 'github' && !!r.shards;
 /** The GitHub ship runs going now: their jobs show in Ship CI on GitHub, not as runners busy or jobs waiting. */
 /** @param {CiViewData} v */
 const shipRunIds = (v) => new Set(v.runs.filter((r) => githubShip(r) && r.status !== 'completed').map((r) => r.id));
@@ -459,14 +460,10 @@ const verdictSecs = (runs) => runs.filter((r) => r.status === 'completed' && (r.
 function shardStrip(sh) {
   const running = sh.started - sh.done - sh.red;
   const cells = [...Array(sh.done).fill(['done', 'green']), ...Array(sh.red).fill(['red', 'red']), ...Array(Math.max(0, running)).fill(['run', 'running']), ...Array(Math.max(0, sh.n - sh.started)).fill(['queued', "waiting for one of GitHub's slots"])];
-  const strip = h(
-    'div',
-    { class: 'ci-shards', role: 'img', 'aria-label': `${sh.n} shards: ${sh.done} green, ${sh.red} red, ${Math.max(0, running)} running, ${sh.n - sh.started} waiting for a slot` },
-    ...cells.map(([st, word], i) => h('span', { class: 'ci-shard', 'data-s': st, title: `shard ${i + 1} of ${sh.n}: ${word}` })),
-  );
+  const strip = h('div', { class: 'ci-shards', role: 'img', 'aria-label': `${sh.n} shards: ${sh.done} green, ${sh.red} red, ${Math.max(0, running)} running, ${sh.n - sh.started} waiting for a slot` }, ...cells.map(([st, word]) => h('span', { class: 'ci-shard', 'data-s': st, title: word })));
   strip.style.setProperty('--n', String(sh.n));
   const key = (/** @type {string} */ st, /** @type {string} */ word) => h('span', {}, h('i', { class: 'ci-shard', 'data-s': st }), word);
-  return [strip, h('div', { class: 'ci-shard-key muted' }, key('done', 'green'), key('run', 'running'), key('queued', 'waiting for a GitHub slot'), key('red', 'red'))];
+  return [strip, h('div', { class: 'ci-shard-key muted' }, key('done', 'green'), key('red', 'red'), key('run', 'running'), key('queued', 'waiting for a GitHub slot'))];
 }
 
 /**
@@ -486,28 +483,22 @@ function shipBlock(s, now) {
     const last = ships.find((r) => r.status === 'completed' && !r.moved) ?? ships[0];
     const green = last.conclusion === 'success';
     const [row] = settingsRow(
-      { key: `ci-ships-${s.id}`, icon: 'box', hue: 'done', title: 'Ship CI on GitHub', summary: [toneChip('ok', 'Idle'), 'last ', whoText(last), ` ${green ? 'green' : (last.conclusion ?? 'ended')}${last.secs != null ? ` in ${mmss(last.secs)}` : ''}, ${age(last.at)}`] },
+      { key: `ci-ships-${s.id}`, icon: 'box', hue: 'done', title: 'Ship CI on GitHub', summary: [toneChip('ok', 'Idle'), `last ${green ? 'green' : (last.conclusion ?? 'ended')}${last.secs != null ? ` in ${mmss(last.secs)}` : ''}, ${age(last.at)}: `, whoText(last)] },
       statTiles([String(ships.length), 'ship runs on GitHub', 'running'], med != null && [mmss(med), 'median push to verdict', 'running']),
-      h('p', { class: 'look-prose' }, `No ship is in CI.${usual}`),
+      h('p', { class: 'look-prose' }, "No ship is in CI. Each ship splits its tests over 20 of GitHub's runners and gets one verdict."),
     );
     return block(null, 'done', 'ci-ships', row);
   }
   const rows = going.map((r) => {
-    const sh = r.shards;
+    const sh = /** @type {import('./types/ci.js').CiShards} */ (r.shards);
     const since = now - Date.parse(r.at);
-    const waitingSlots = sh ? sh.n - sh.started : 0;
-    const [tone, word, hue] = !sh ? ['info', 'Starting', 'running'] : sh.red ? ['danger', `${sh.red} red`, 'danger'] : waitingSlots ? ['warn', `${waitingSlots} waiting for a slot`, 'waiting'] : ['info', 'Running', 'running'];
+    const waitingSlots = sh.n - sh.started;
+    const [tone, word, hue] = sh.red ? ['danger', `${sh.red} red`, 'danger'] : waitingSlots ? ['warn', `${waitingSlots} waiting for a slot`, 'waiting'] : ['info', 'Running', 'running'];
     const [row] = settingsRow(
       { key: `ci-ship-${s.id}`, icon: 'box', hue, title: 'Ship CI on GitHub', summary: [toneChip(tone, word), whoText(r), ` · ${shortSpan(since)}`] },
-      sh ? statTiles([`${sh.started}/${sh.n}`, 'shards started', 'running'], [String(sh.done), 'green', 'done'], [String(sh.red), 'red', sh.red ? 'danger' : 'done'], [shortSpan(since), 'since the push', 'running']) : null,
-      ...(sh ? shardStrip(sh) : []),
-      h(
-        'p',
-        { class: 'look-prose' },
-        !sh ? 'Splitting the suite: the shards start once its times job is done.' : waitingSlots ? "If every shard hasn't started a minute after the push, the ship script cancels this run and sends the ship to the desktop." : `One verdict: red if any shard is.${usual}`,
-        ' ',
-        ext(r.url, 'The run on GitHub'),
-      ),
+      statTiles([`${sh.started}/${sh.n}`, 'shards started', 'running'], [String(sh.done), 'green', 'done'], [String(sh.red), 'red', sh.red ? 'danger' : 'done'], [shortSpan(since), 'since the push', 'running']),
+      ...shardStrip(sh),
+      h('p', { class: 'look-prose' }, waitingSlots ? "If every shard hasn't started a minute after the push, the ship script cancels this run and sends the ship to the desktop." : `One verdict: red if any shard is.${usual}`, ' ', ext(r.url, 'The run on GitHub')),
     );
     return row;
   });
@@ -527,13 +518,21 @@ function fallbacksBlock(s) {
     perigee = fb.length - own;
   const ringing = s.problems.some((x) => x.key === 'land:off-github' || x.key === 'land:fallback');
   const newest = [...fb].sort((a, b) => b.at - a.at);
+  /** The desktop run that took a fallback over: dispatched on its land branch within 15 minutes of the line, its result. */
+  const tookOver = (/** @type {import('./types/ci.js').CiFallback} */ f) => {
+    if (f.to !== 'own') return null;
+    const r = s.view.runs.findLast((x) => x.branch === `land/${f.branch}` && x.event === 'workflow_dispatch' && Date.parse(x.at) >= f.at - 60_000 && Date.parse(x.at) <= f.at + 15 * 60_000);
+    if (!r) return null;
+    const word = r.status !== 'completed' ? 'running' : r.conclusion === 'success' ? 'green' : r.conclusion === 'failure' ? 'red' : (r.conclusion ?? 'ended');
+    return ` · desktop run ${word}${r.status === 'completed' && r.secs != null ? ` in ${mmss(r.secs)}` : ''}`;
+  };
   const items = newest.map((f) =>
     hueRow(
       { hue: f.to === 'own' ? 'held' : 'waiting', lead: pacificClockBare(f.at), meta: age(f.at) },
       h('span', { class: 'ci-tag', 'data-to': f.to }, f.to === 'own' ? 'Desktop' : 'perigee'),
       ' ',
       f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion}`) : h('span', {}, f.branch),
-      h('span', { class: 'ci-detail-line muted' }, f.why || (f.to === 'own' ? 'moved off GitHub' : 'ran the suite on perigee')),
+      h('span', { class: 'ci-detail-line muted' }, f.why || (f.to === 'own' ? 'moved off GitHub' : 'ran the suite on perigee'), tookOver(f)),
     ),
   );
   const [row] = settingsRow(
@@ -577,8 +576,15 @@ function historyTab(s) {
     return [
       hueRow(
         { hue, lead: word, meta: age(r.at) },
-        h('span', { class: 'ci-ship-head' }, h('span', { class: 'ci-tag', 'data-to': r.where ?? '' }, r.where === 'github' ? `GitHub${r.shards ? ` · ${r.shards.n}` : ''}` : r.where === 'own' ? 'Desktop' : '…'), whoText(r), ext(r.url, 'run')),
-        h('span', { class: 'ci-ship-meta muted' }, secs != null ? meter(secs / max, mmss(secs)) : null, r.moved && !nested.has(r.id) ? h('span', {}, `moved to the desktop: ${r.moved}`) : red && !going ? h('span', {}, red) : null),
+        h('span', { class: 'ci-ship-head' }, whoText(r)),
+        h(
+          'span',
+          { class: 'ci-ship-meta muted' },
+          h('span', { class: 'ci-tag', 'data-to': r.where ?? '' }, r.where === 'github' ? `GitHub${r.shards ? ` · ${r.shards.n}` : ''}` : r.where === 'own' ? 'Desktop' : '…'),
+          ext(r.url, 'run'),
+          secs != null ? meter(secs / max, mmss(secs)) : null,
+          r.moved && !nested.has(r.id) ? h('span', {}, `moved to the desktop: ${r.moved}`) : red && !going ? h('span', {}, red) : null,
+        ),
       ),
       m ? h('div', { class: 'queue-sub' }, hueRow({ hue: 'held', lead: 'moved', meta: m.secs != null ? mmss(m.secs) : null }, h('span', { class: 'muted' }, 'GitHub run · ', m.moved || 'moved off GitHub', ' · '), ext(m.url, 'run'))) : null,
     ];
@@ -590,6 +596,8 @@ function historyTab(s) {
   const moved = ships.filter((r) => r.moved).length;
   const other = runs.filter((r) => !r.branch.startsWith('land/'));
   const otherReds = other.filter((r) => r.status === 'completed' && r.conclusion === 'failure').length;
+  const otherOk = other.every((r) => r.status === 'completed' && (r.conclusion === 'success' || r.conclusion === 'skipped'));
+  const otherGoing = other.filter((r) => r.status !== 'completed').length;
   const names = [...new Set(other.map((r) => r.name))];
   const [otherRow] = settingsRow(
     {
@@ -597,7 +605,9 @@ function historyTab(s) {
       icon: 'rows',
       hue: otherReds ? 'danger' : 'held',
       title: 'Other runs',
-      summary: other.length ? [toneChip(otherReds ? 'danger' : 'ok', otherReds ? `${otherReds} red` : 'All green'), `${plural(other.length, 'run')}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`] : [toneChip('neutral', 'None'), 'only ships ran'],
+      summary: other.length
+        ? [otherReds ? toneChip('danger', `${otherReds} red`) : otherOk ? toneChip('ok', 'All green') : otherGoing ? toneChip('info', `${otherGoing} running`) : toneChip('neutral', 'No reds'), `${plural(other.length, 'run')}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`]
+        : [toneChip('neutral', 'None'), 'only ships ran'],
     },
     other.length ? h('div', { class: 'ci-runs' }, ...other.map((r) => runRow(r))) : emptyCard('No other runs', 'Runs that are not a ship (a schedule, a cache, a run by hand) list here.'),
   );
@@ -620,7 +630,7 @@ function historyTab(s) {
  * @param {CiUi} ui
  */
 function overview(s, pcs, now, ui) {
-  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), waitingBlock(s, now, ui), fallbacksBlock(s), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
+  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), fallbacksBlock(s), waitingBlock(s, now, ui), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
 
 // ---------- the Releases page (#1423) ----------

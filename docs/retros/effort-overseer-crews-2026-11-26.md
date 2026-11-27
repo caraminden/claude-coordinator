@@ -39,7 +39,7 @@ The last piece shipped at 14:02 PST Nov 26[^l]. Times are Pacific.
    - **Why it happens:** `citadel:briefing` says how to write one handoff. It says nothing about a set of handoffs
      written at once, where a later piece calls a tool that an earlier piece is assumed to add, or that is assumed to
      exist already.
-   - **Fix:** a handoff, `shared/project/handoffs/handoff-citadel-chain-briefs-name-their-tools.md`. It adds a step to
+   - **Fix:** a handoff, `shared/project/handoffs/handoff-citadel-chain-briefs-name-their-tools.md` (Cara picked it; #2173). It adds a step to
      "Writing a handoff" in `kit/skills/briefing/SKILL.md`, the step where these briefs get written:
      - each handoff in a set names every tool or flag it calls, and either the `rg` line that finds it or the earlier
        piece that adds it;
@@ -73,7 +73,7 @@ The last piece shipped at 14:02 PST Nov 26[^l]. Times are Pacific.
    `outside_spend`[^e]. I don't know whether another table counts them (the query is in the handoff). If none does,
    every budget readout and Taskmaster cost alert misses the most expensive check in the repo. The brief's $14 estimate
    didn't include it either.
-   - **Fix:** a handoff, `shared/project/handoffs/handoff-citadel-prompt-eval-spend.md`. It checks first, and if
+   - **Fix:** a handoff, `shared/project/handoffs/handoff-citadel-prompt-eval-spend.md` (Cara picked it; #2174). It checks first, and if
      nothing counts the eval, books `run.ts`'s total cost on the minion that ran it.
 
 ## Not fixed, and why

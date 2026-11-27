@@ -9,6 +9,7 @@ import { validSessionId } from './sessions.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
 import { turnOf } from './turn-row.ts';
+import { cloudSpend, type CloudPool } from './cloud-pool.ts';
 import { codexThreadKey, CODEX_WAITING, type CodexThread } from './codex.ts';
 import type { Holds } from './prompt-hold.ts';
 import { hideSecrets, hideSecretsIn } from './secrets.ts';
@@ -52,6 +53,8 @@ export interface TurnEventsDeps {
   savePlan: (ticketId: number, p: ReturnType<typeof createProgress>, upTo: number) => void;
   carryReply: (ticketId: number) => void;
   keepTurn: (ticketId: number, state: TurnState | null | undefined, r: TurnResult) => void;
+  /** The cloud's pool (#2153): a cloud turn's session is kept on its minion. */
+  cloud: () => CloudPool;
   settleSpend: (ticketId: number) => void;
   setFailNote: (ticketId: number, fields: { note: string; state?: TicketState }) => void;
   onStatusTrailer: (ticketId: number, fields: StatusFields) => void;
@@ -163,6 +166,11 @@ export class TurnEvents {
       this.d.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     if (this.d.compactWatch.observe(ticketId, ev)) this.d.broadcastTicket(ticketId);
+    // A cloud turn's session and the last result it read (#2153), kept on the minion for its follow-ups.
+    if (ev.type === 'system' && ev.subtype === 'cloud') {
+      const state = this.d.store.getSetting<TurnState>(turnKey(ticketId));
+      if (state?.person != null) this.d.cloud().heard(ticketId, state.person, state.account ?? null, ev, this.d.now());
+    }
     // The held prompt (#1276): a compaction summarises its note away, and a turn that ran has read the note it carried.
     if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.d.promptHolds().compacted(ticketId);
     // Only a turn that ran has read its note: after an error the next turn carries it again.
@@ -220,7 +228,10 @@ export class TurnEvents {
     if (ev.type === 'result' && this.d.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.d.store.getSetting<TurnState>(turnKey(ticketId));
-      this.d.keepTurn(ticketId, state, { event_id: row.id, ...turnOf(ev), ended_at: row.created_at });
+      // A cloud turn's cost is this turn's estimate, not a session's running total (#2153): kept as one, like a killed turn's,
+      // on the minion's Claude session so that session's running total carries across it.
+      const cloudUsd = cloudSpend(ev);
+      this.d.keepTurn(ticketId, state, cloudUsd === null ? { event_id: row.id, ...turnOf(ev), ended_at: row.created_at } : { event_id: row.id, session_id: this.d.store.getTicket(ticketId)?.session_id, session_cost_usd: 0, ended_at: row.created_at, estimate: { cloud: cloudUsd } });
       this.d.settleSpend(ticketId);
       if (state?.spend?.open) this.d.saveTurn(ticketId, { spend: { ...state.spend, open: {} } });
     }

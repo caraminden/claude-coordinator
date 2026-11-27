@@ -59,7 +59,7 @@ import { type AwayEnd, MachineTurn, placedAt, placeTurn } from './machine-turn.t
 import { hostReach, writesLine } from './host-reach.ts';
 import type { Block, MachineHost, MachinePools } from './machine-pools.ts';
 import { RunsOn, type runsOnCard } from './runs-on.ts';
-import { alive, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
+import { alive, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, TURN_NODE, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets } from './secrets.ts';
 import type { StatusFields } from './status-trailer.ts';
@@ -84,7 +84,8 @@ import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillRes
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
 import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
-import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { type CloudHost, TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { CLOUD, CLOUD_PLACE, CloudPool } from './cloud-pool.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
@@ -171,6 +172,8 @@ export interface TurnState {
   killTries?: number;
   /** It runs on Codex (src/codex-turn.ts), not claude (#337). */
   codex?: true;
+  /** It runs as a cloud session (src/cloud-turn.mjs, #2153): it holds a cloud place, and its words are sent once, so no steering. */
+  cloud?: true;
   /** A Claude turn that starts with the Codex turns before it: their thread is dropped once it succeeds. */
   handBack?: true;
   /** The person it runs for (turnPerson). */
@@ -470,6 +473,8 @@ export class Runner {
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
   /** The connected machines as places for turns (Build 7 T4), set by server.ts; none yet: a turn marked for one waits. */
   pools: MachinePools | null = null;
+  /** The cloud's pool (#2153, src/cloud-pool.ts): marks, sessions and runs a day. */
+  readonly cloud: CloudPool;
   /** Where each minion's turns may run, when a person said (Build 7 T4). */
   readonly runsOn: RunsOn;
   onRunsOnCard: (ticketId: number, question: ReturnType<typeof runsOnCard>) => string | null = () => null;
@@ -710,9 +715,11 @@ export class Runner {
       },
       now: () => this.now(),
     });
+    this.cloud = new CloudPool(store);
     this.turnLine = new TurnLine({
       store,
       pools: this.machineHost,
+      cloud: this.cloudHost,
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
@@ -896,6 +903,7 @@ export class Runner {
       savePlan: (id, p, upTo) => this.savePlan(id, p, upTo),
       carryReply: (id) => this.carryReply(id),
       keepTurn: (id, state, r) => this.keepTurn(id, state, r),
+      cloud: () => this.cloud,
       settleSpend: (id) => this.spends.get(id)?.meter.settle(),
       setFailNote: (id, fields) => this.setFailNote(id, fields),
       onStatusTrailer: (id, fields) => this.onStatusTrailer(id, fields),
@@ -1650,7 +1658,7 @@ export class Runner {
           this.lendWorker(ticketId);
           return live.ended;
         },
-        live.machine?.id ?? 0,
+        live.machine?.id ?? (turn.cloud ? CLOUD_PLACE : 0),
       ),
     );
     if (turn.card) this.endLive(live, ticketId);
@@ -2061,7 +2069,7 @@ export class Runner {
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
-    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && !live.ending);
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && !turn.cloud && !live.ending);
     // A minion waiting on its start card (#1674) holds everything, wakes and its chained brief too, until a person answers it.
     const parked = !!(!live && ticket && ((hold && this.parked(ticket)) || (!('answer' in extra) && this.store.getSetting(startHoldKey(ticketId)))));
     // A person's words to a minion waiting on a kept card stand in for its answer (#1916). A question card's answer isn't about it.
@@ -2648,6 +2656,42 @@ export class Runner {
     stuck: (id, since, block) => this.runsOn.stuck(id, since, block),
   };
 
+  /** A cloud follow-up runs on the account its session was started on (#2153): another can't resume it. */
+  private cloudAccount(id: number, person: number | null): number[] | undefined {
+    const s = this.turnLine.placeOf(id) === CLOUD_PLACE ? this.cloud.session(id) : null;
+    return s && s.person === person && s.account ? [s.account] : undefined;
+  }
+
+  /** Whose login a minion's first cloud turn would run on, or why it can't go: only a minion's ordinary turn on Claude. */
+  private cloudAsk(id: number, via?: RetryKind): string | { ticket: Ticket; project: Project; person: number; type: string | null } {
+    const type = this.store.props.forTarget('minion', id).type;
+    if (!this.cloud.may(id, typeof type === 'string' ? type : null)) return 'not a research or ideation minion, nor marked for the cloud';
+    const ticket = this.store.getTicket(id);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    if (!ticket || !project || ticket.kind !== 'ticket' || !ticket.cwd) return 'not a minion with a checkout';
+    const person = this.turnPerson(ticket, project, this.waiting(id), !!via);
+    if (person === null) return 'no one to run it for';
+    return this.turnAtHome(ticket, project, person)?.why ?? { ticket, project, person, type: typeof type === 'string' ? type : null };
+  }
+
+  /** What the line asks of the cloud (#2153): only a research, ideation or marked minion's first turn starts a session, on the login and account its turn would use. */
+  private readonly cloudHost: CloudHost = {
+    bound: (id) => !!this.cloud.session(id),
+    takes: (id, via) => {
+      const ask = this.cloudAsk(id, via);
+      if (typeof ask === 'string') return ask;
+      const { payer, account } = this.accountOf(ask.ticket, ask.person);
+      if (account === 0) return 'none of their Claude accounts can run a turn now';
+      const usage = this.store.getSetting<Usage>(accountUsageKey(payer, account ?? 1));
+      return this.cloud.takes(id, ask.person, { type: ask.type, ran: !!ask.ticket.session_id || !!this.store.lastTurnOn(id), usage, repoUrl: ask.project.repo_url }, this.now());
+    },
+    started: (id, via) => {
+      const ask = this.cloud.session(id) ? null : this.cloudAsk(id, via);
+      if (ask && typeof ask !== 'string') this.cloud.counted(ask.person, this.now());
+    },
+    size: () => CLOUD.size,
+  };
+
   /** Only an ordinary minion's turn on Claude is ever placed on a machine (spec section 2): why this one, a fresh start's step or one that Codex runs, isn't. */
   private turnAtHome(ticket: Ticket, project: Project, person: number | null): Block | null {
     if (this.fresh.freshStep(ticket.id)) return { why: 'this turn runs at perigee', never: true };
@@ -2663,6 +2707,15 @@ export class Runner {
   private startPlace(ticket: Ticket, person: number | null, via?: RetryKind): { id: number; name: string } | 'wait' | null {
     const need = this.machineHost.mark(ticket.id);
     const at = this.turnLine.placeOf(ticket.id);
+    if (at === CLOUD_PLACE) {
+      // Its session is on one login: another person's turn can't follow it up there (sender pays), so that one runs here, fresh.
+      const s = this.cloud.session(ticket.id);
+      if (s && s.person !== person) {
+        this.emit(ticket.id, 'note', { text: `This turn runs at perigee: this minion's cloud session is on ${this.store.getUser(s.person)?.name ?? 'another person'}'s login, and a turn runs on its sender's own.` });
+        this.turnLine.comeHome(ticket.id);
+      }
+      return null;
+    }
     if (!need && !at) return null;
     const project = this.store.getProject(ticket.project_id);
     const home = need === 0 || (need && need !== at) || !project || this.turnAtHome(ticket, project, person);
@@ -2874,7 +2927,7 @@ export class Runner {
     // A hidden keepalive (#862): it re-reads the cached prefix and changes nothing of the minion's, the chat included.
     const keepalive = !!batch[0]?.keepalive;
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container; on a machine, an account signed in there (#2061).
-    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator', keepalive || batch[0]?.fresh ? undefined : this.pools?.accountsAt(this.turnLine.placeOf(ticket.id), person)) ?? { host: true as const };
+    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator', keepalive || batch[0]?.fresh ? undefined : (this.cloudAccount(ticket.id, person) ?? this.pools?.accountsAt(this.turnLine.placeOf(ticket.id), person))) ?? { host: true as const };
     if ('refused' in claudePlace) {
       if (keepalive) return;
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
@@ -2958,7 +3011,7 @@ export class Runner {
     const same = codexThread?.person === person && codexThread.thread;
     // The place startPlace found a moment ago; one whose machine went since waits there for it. Codex turns, keepalives and fresh-session steps run here (turnAtHome).
     const at = codex || keepalive || step ? 0 : this.turnLine.placeOf(ticket.id);
-    const worker = at ? { id: at, name: this.pools!.nameOf(at) } : null;
+    const worker = at > 0 ? { id: at, name: this.pools!.nameOf(at) } : null;
     // Host reach (T8): marked for that machine, on its owner's turn: the owner's login and the owner's ask (the asker the
     // run_on_host route checks), so a relay that runs on the owner's login doesn't reach. Its tools, container and chat lines follow.
     const reach = worker && asker === person && hostReach(this.runsOn.get(ticket.id), this.store.getMachine(worker.id) ?? null, person) ? worker.name : null;
@@ -3122,7 +3175,12 @@ export class Runner {
       if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
-    await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
+    // A cloud turn (#2153): the turn's wrapper runs the cloud driver in claude's place, on the same login and with the same env.
+    const flag = (f: string) => (plan.args.includes(f) ? (plan.args[plan.args.indexOf(f) + 1] ?? null) : null); // the minion's model and effort, as its claude would get them
+    const cloudJob = at === CLOUD_PLACE && ticket.cwd ? this.cloud.job({ ...ticket, cwd: ticket.cwd }, batch, plan.command, filesDir, this.now(), { model: flag('--model'), effort: flag('--effort') }) : null;
+    if (cloudJob) await writeFile(join(dir, 'cloud.json'), JSON.stringify(cloudJob));
+    const spec = cloudJob ? { ...plan, command: join(dir, 'pin', 'bin', TURN_NODE), args: [join(dir, 'pin', 'cloud-turn.mjs'), join(dir, 'cloud.json')] } : plan;
+    await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(spec, ticket.cwd)), { mode: 0o600 });
     if (plan.spawn.how === 'container') await containerFiles(dir, place as Extract<TurnPlace, { host: false }>);
     // Its `machine` file and first beat: the machine's agent fetches the folder and starts it (src/machine-turn.ts), from its account's own folder there (#2061).
     const projects = join(dirname(this.store.path), 'projects');
@@ -3191,6 +3249,7 @@ export class Runner {
       chosenEffort: !!ticket.effort || codex || light,
       ...(light ? { light: true as const } : {}),
       ...(codex ? { codex: true as const } : {}),
+      ...(cloudJob ? { cloud: true as const } : {}),
       ...(handBack.length ? { handBack: true as const } : {}),
       ...(step ? { fresh: step } : {}),
       ...(handoff ? { handoff: true as const } : {}),

@@ -112,7 +112,7 @@ async function runOnce(kind: string, argv: string[], back: string[], top: string
 /** Follows a started job to its end: its log, its files back, its status. */
 async function follow(started: { job: number; machine: string }, kind: string, back: string[], top: string, scratch: string): Promise<number | 'away'> {
   const { job: id, machine } = started;
-  say(`runs on ${machine} (job #${id}), in Citadel's ${kind} build image`);
+  say(`runs on ${machine} (job #${id}), in Citadel's build image for ${kind === 'other' ? 'any command' : kind} jobs`);
   if (env.CITADEL_HEAVY_ON_FILE) writeFileSync(env.CITADEL_HEAVY_ON_FILE, machine);
   const stop = async (sig: NodeJS.Signals) => {
     await call('POST', '', { do: 'stop', job: id }).catch(() => {});
@@ -177,7 +177,7 @@ async function follow(started: { job: number; machine: string }, kind: string, b
       say(`${back.join(', ')} didn't come back from ${machine}: ${why}; job #${id}'s results stay on Citadel`);
       return j.exit_code || 1;
     }
-    say(`brought back ${back.join(', ')} from ${machine}`);
+    say(`unpacked what came back from ${machine} (asked for ${back.join(', ')}; tar names any it didn't find above)`);
   }
   await call('POST', '', { do: 'done', job: id }).catch(() => {});
   if (j.exit_code !== null) return j.exit_code;

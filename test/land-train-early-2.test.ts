@@ -282,7 +282,7 @@ test("light check: a busy side runner or another ship's light check is waited fo
   for (const [extra, hold, said, logged] of [
     [{ FAKE_QUEUED: '14' }, false, /land: light check: green in \d+ s, so it joins the line/, [/^light check · ticket\/2-x · green · \d+s · runner after (1[4-9]|[2-9]\d|\d{3})s$/]],
     [
-      { FAKE_NO_RUNNER: 'no runner took it within 360 s (busy with a longer job, or asleep or off), so the CI run is cancelled' },
+      { FAKE_NO_RUNNER: 'no runner took it within 360 s (busy with a longer job, or asleep or off), so the CI run is cancelled', LAND_LIGHT_CHECK_LIMIT: '400' },
       false,
       /land: light check: nothing ran on CI \(no runner took it within 360 s \(busy with a longer job, or asleep or off\), so the CI run is cancelled\), so this joins the line unchecked/,
       [/^light check · ticket\/2-x · skipped: nothing ran on CI \(no runner took it within 360 s \(busy with a longer job, or asleep or off\), so the CI run is cancelled\) · \d+s$/],
@@ -310,7 +310,11 @@ test("light check: a busy side runner or another ship's light check is waited fo
       assert.equal(got.length, logged.length, got.join('\n'));
       got.forEach((x, i) => assert.match(x, logged[i]));
       if (extra.LAND_LIGHT_CHECK_LOCK_WAIT) assert.equal(heavyCalls(l.r.dir), '', 'no light check ran');
-      else assert.match(heavyCalls(l.r.dir), /^ship 1$/m);
+      else {
+        assert.match(heavyCalls(l.r.dir), /^ship 1$/m);
+        // The CI queue leaves the run 150 s of the limit: 360 s by default, 250 s of a 400 s limit.
+        assert.match(heavyCalls(l.r.dir), extra.LAND_LIGHT_CHECK_LIMIT ? /^queue 250$/m : /^queue 360$/m);
+      }
       assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2']);
       l.done();
     } finally {

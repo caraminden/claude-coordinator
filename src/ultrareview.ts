@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { AUTH_VARS, resolveClaude, stripAnsi, type TurnPlace } from './claude-link.ts';
+import { AUTH_VARS, resolveClaudeLater, stripAnsi, type TurnPlace } from './claude-link.ts';
 import { githubRepo } from './github.ts';
 import { HostJobs, type JobState } from './host-job.ts';
 import { asEnv, errorText } from './scheme-repo.ts';
@@ -480,7 +480,7 @@ export class UltraReviews {
         await place.ensure();
         // podman exec passes none of the server's environment, so the container's own sign-in is the only login.
         const cenv = Object.entries(place.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-        argv = [...limit, 'podman', 'exec', '-w', repo, ...cenv, place.container, resolveClaude(this.deps.claudeBin), ...args];
+        argv = [...limit, 'podman', 'exec', '-w', repo, ...cenv, place.container, await resolveClaudeLater(this.deps.claudeBin), ...args];
         // podman itself gets the server's environment, as it did as the server's child.
         env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
       }

@@ -6,8 +6,8 @@
 // Citadel's bookkeeping: container, volume path, email and plan.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
-import { access, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { access, copyFile, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { execResult } from './exec.ts';
@@ -70,14 +70,7 @@ export const ANDROID_SDK = '.local/share/android-sdk';
 export const ANDROID_JDK = '.local/share/mise/installs/java/temurin-21';
 export const GRADLE_PROPS = '.gradle/gradle.properties';
 
-/** What a turn needs to build an Android app, once the host has it: the same paths in a container, mounted read-only. */
-export function androidEnv(home: string, path = ''): Record<string, string> {
-  const sdk = join(home, ANDROID_SDK);
-  const jdk = join(home, ANDROID_JDK);
-  if (!existsSync(sdk) || !existsSync(jdk)) return {};
-  return { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: jdk, PATH: [path, join(jdk, 'bin')].filter(Boolean).join(delimiter) };
-}
-/** androidEnv off the server's thread, for a turn's start (#2137). */
+/** What a turn needs to build an Android app, once the host has it: the same paths in a container, mounted read-only. Off the server's thread (#2137). */
 export async function androidEnvLater(home: string, path = ''): Promise<Record<string, string>> {
   const sdk = join(home, ANDROID_SDK);
   const jdk = join(home, ANDROID_JDK);
@@ -211,14 +204,14 @@ interface Login {
   sent?: boolean;
 }
 
-/** The `claude` executable's real file, so its folder (every installed version) can be mounted read-only. */
-export function resolveClaude(bin: string, path = process.env.PATH ?? ''): string {
-  if (bin.includes('/')) return realpathSync(bin);
-  for (const d of path.split(delimiter)) if (d && existsSync(join(d, bin))) return realpathSync(join(d, bin));
-  throw new Error(`${bin} is not on PATH`);
-}
+/** Whether a path is there, off the server's thread. */
+const there = (p: string) =>
+  access(p).then(
+    () => true,
+    () => false,
+  );
 
-/** resolveClaude off the server's thread, for a turn's start (#2137). */
+/** The `claude` executable's real file, so its folder (every installed version) can be mounted read-only. Off the server's thread (#2137). */
 export async function resolveClaudeLater(bin: string, path = process.env.PATH ?? ''): Promise<string> {
   if (bin.includes('/')) return realpath(bin);
   for (const d of path.split(delimiter)) {
@@ -512,18 +505,18 @@ export class ClaudeLink {
   async spec(uid: number, taskmaster = false): Promise<ContainerSpec> {
     // The two slow reads (git's ignored list, the image folder walk) run off the main thread, fresh every time. The image
     // tag is for the current Containerfile and the files it copies in (codex/).
-    const [checkout, image] = await Promise.all([LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT), imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`)]);
+    const [checkout, image, claude] = await Promise.all([LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT), imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`), resolveClaudeLater(this.claudeBin)]);
     const mounts: Mount[] = [
       { src: this.name(uid), dst: this.home, volume: true },
       { src: join(this.dataDir, 'projects'), dst: join(this.dataDir, 'projects') },
       { src: this.turnsDir(uid), dst: this.turnsDir(uid) },
-      { src: dirname(resolveClaude(this.claudeBin)), dst: dirname(resolveClaude(this.claudeBin)), ro: true },
+      { src: dirname(claude), dst: dirname(claude), ro: true },
     ];
     // Codex's hook and requirements from the code this server runs, over the image's copy: a container that runs for days
     // (a busy one is never replaced) still gets the deployed hook, not the one it was built with (#748). A folder, not a file:
     // a deploy replaces the file's inode, which a file mount would keep showing the old one of.
     mounts.push({ src: join(CONTAINERFILE_DIR, 'codex'), dst: '/etc/codex', ro: true });
-    for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
+    for (const d of TOOL_DIRS) if (await there(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.
     mounts.push(...(checkout ?? []));
@@ -538,7 +531,7 @@ export class ClaudeLink {
         return dirname(f) === this.home ? [f, slotsOf(f)] : [dirname(f)];
       });
       for (const dir of new Set(dirs)) {
-        if (existsSync(dir)) mounts.push({ src: dir, dst: dir, ro: true });
+        if (await there(dir)) mounts.push({ src: dir, dst: dir, ro: true });
       }
     }
     // Each scheme's Claude Code memory, shared with the host's turns: the server's copy, at the path claude looks in.
@@ -546,7 +539,7 @@ export class ClaudeLink {
       if (!p.repo_dir) continue;
       const slug = projectSlug(p.repo_dir);
       const src = join(claudeConfigDir(process.env), 'projects', slug, 'memory');
-      mkdirSync(src, { recursive: true });
+      await mkdir(src, { recursive: true });
       // In every account's folder (#779), linked or not, so linking another never changes the spec under running turns.
       for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
@@ -577,21 +570,21 @@ export class ClaudeLink {
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
     await this.containers.createVolume(volume);
     // A bind mount's folder must exist: a fresh server has no run/turns until its first turn.
-    for (const m of spec.mounts) if (!m.volume && !m.ro) mkdirSync(m.src, { recursive: true });
+    for (const m of spec.mounts) if (!m.volume && !m.ro) await mkdir(m.src, { recursive: true });
     // Mounts inside HOME need their folders made in the volume first, as the person: podman makes missing
     // ones as root, and a root-owned ~/.claude left Claude unable to save the sign-in.
     const vol = await this.containers.volumePath(volume);
     if (vol && this.serverLogin(uid)) this.store.setSetting(containerHomeKey(uid), vol);
-    for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) mkdirSync(join(vol, relative(this.home, m.dst)), { recursive: true });
+    for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) await mkdir(join(vol, relative(this.home, m.dst)), { recursive: true });
     // Gradle's defaults (no daemon idling on 1 GB): the person's ~/.gradle is their own, so it gets the host's copy.
-    if (vol && existsSync(join(this.home, GRADLE_PROPS))) {
-      mkdirSync(join(vol, dirname(GRADLE_PROPS)), { recursive: true });
-      copyFileSync(join(this.home, GRADLE_PROPS), join(vol, GRADLE_PROPS));
+    if (vol && (await there(join(this.home, GRADLE_PROPS)))) {
+      await mkdir(join(vol, dirname(GRADLE_PROPS)), { recursive: true });
+      await copyFile(join(this.home, GRADLE_PROPS), join(vol, GRADLE_PROPS));
     }
     // The shared Gradle build cache's init script (#1153): on only in a turn, which names the cache.
     if (vol) {
       try {
-        ensureGradleInit(vol);
+        await ensureGradleInit(vol);
       } catch (e) {
         console.warn(`gradle init script for ${vol}: ${(e as Error).message}`);
       }
@@ -726,12 +719,12 @@ export class ClaudeLink {
   }
 
   /** Run claude's `args` for account `n`: in the person's container, or on the host for the server login's extras. */
-  private claudeCmd(uid: number, n: number, args: string[]): Promise<CmdResult> {
+  private async claudeCmd(uid: number, n: number, args: string[]): Promise<CmdResult> {
     if (this.serverLogin(uid)) {
       const env = this.hostEnv(this.hostFolder(uid, n));
-      return execResult(resolveClaude(this.claudeBin), args, { env, timeout: 30_000 }).then((r) => ({ code: r.code, stdout: r.out, stderr: r.err || r.fail }));
+      return execResult(await resolveClaudeLater(this.claudeBin), args, { env, timeout: 30_000 }).then((r) => ({ code: r.code, stdout: r.out, stderr: r.err || r.fail }));
     }
-    return this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), ...args], { env: { CLAUDE_CONFIG_DIR: join(this.home, accountDir(n)) }, timeout: 30_000 });
+    return this.containers.exec(this.name(uid), [await resolveClaudeLater(this.claudeBin), ...args], { env: { CLAUDE_CONFIG_DIR: join(this.home, accountDir(n)) }, timeout: 30_000 });
   }
 
   /**
@@ -766,7 +759,7 @@ export class ClaudeLink {
       }
       // Started again (or unlinked) while the container was starting: that call owns the sign-in now.
       if (this.logins.get(uid) !== login) return this.status(uid);
-      const claude = resolveClaude(this.claudeBin);
+      const claude = await resolveClaudeLater(this.claudeBin);
       const script = ['script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'];
       const child = host ? spawn(script[0], script.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: this.hostEnv(this.hostFolder(uid, n)) }) : spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, accountDir(n))}`, this.name(uid), ...script], { stdio: ['pipe', 'pipe', 'pipe'] });
       login.child = child;

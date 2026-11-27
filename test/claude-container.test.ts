@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { turnPlace } from '../src/access.ts';
-import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMountsAsync, ClaudeLink, CONTAINER_MEMORY, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TASKMASTER_MEMORY, TOOL_DIRS } from '../src/claude-link.ts';
+import { ANDROID_JDK, ANDROID_SDK, androidEnvLater, checkoutMountsAsync, ClaudeLink, CONTAINER_MEMORY, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TASKMASTER_MEMORY, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, unitProps, type CmdResult, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
@@ -168,8 +168,8 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
   assert.equal(env.COORDINATOR_CONTAINER, '1');
   // The host's Android SDK and JDK (#379), where it has them (on perigee it does), at the same paths as on the host.
-  assert.equal(env.ANDROID_HOME, androidEnv(homedir()).ANDROID_HOME);
-  assert.equal(env.JAVA_HOME, androidEnv(homedir()).JAVA_HOME);
+  assert.equal(env.ANDROID_HOME, (await androidEnvLater(homedir())).ANDROID_HOME);
+  assert.equal(env.JAVA_HOME, (await androidEnvLater(homedir())).JAVA_HOME);
   // citadel-heavy (#325): pinned in the turn's folder, ahead of the image's tools, behind only the heavy-command shims (#1298), and its slots in the mounted projects folder.
   assert.match(env.PATH, /^[^:]*\/pin\/bin\/heavy:[^:]*\/pin\/bin:.*:\/usr\/local\/bin:/);
   assert.match(env.CITADEL_HEAVY_DIR, /\/projects\/\.heavy$/);
@@ -595,6 +595,7 @@ test("the server login gets a Codex-only container (#341): its Codex turns go th
   assert.equal(link.codexPlace(josh.id), null, 'only for the server login');
   mkdirSync(join(vol, '.codex'), { recursive: true });
   writeFileSync(join(vol, '.codex', 'auth.json'), '{}');
+  await codex.refresh(owner.id);
   assert.equal(codex.status(owner.id).state, 'linked');
   await link.unlink(owner.id);
   assert.ok(!log.some((c) => c.join(' ').includes('volume rm')), 'it has no Claude link, so its volume stays');
@@ -856,12 +857,12 @@ test("a container turn has the host's tools: the image installs what schemes' sc
 
 test("the host's Android toolchain (#379): turns get ANDROID_HOME and JAVA_HOME only once it's installed, and a container's ~/.gradle gets the host's no-daemon defaults", async () => {
   const home = mkdtempSync(join(root, 'android-home-'));
-  assert.deepEqual(androidEnv(home, '/usr/bin'), {}, 'nothing installed: nothing set');
+  assert.deepEqual(await androidEnvLater(home, '/usr/bin'), {}, 'nothing installed: nothing set');
   mkdirSync(join(home, ANDROID_SDK), { recursive: true });
-  assert.deepEqual(androidEnv(home, '/usr/bin'), {}, 'an SDK with no JDK builds nothing');
+  assert.deepEqual(await androidEnvLater(home, '/usr/bin'), {}, 'an SDK with no JDK builds nothing');
   mkdirSync(join(home, ANDROID_JDK, 'bin'), { recursive: true });
   const sdk = join(home, ANDROID_SDK);
-  assert.deepEqual(androidEnv(home, '/usr/bin'), { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: join(home, ANDROID_JDK), PATH: `/usr/bin:${join(home, ANDROID_JDK, 'bin')}` });
+  assert.deepEqual(await androidEnvLater(home, '/usr/bin'), { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: join(home, ANDROID_JDK), PATH: `/usr/bin:${join(home, ANDROID_JDK, 'bin')}` });
   mkdirSync(join(home, '.gradle'));
   writeFileSync(join(home, GRADLE_PROPS), 'org.gradle.daemon=false\n');
   const vol = join(root, 'android-vol');

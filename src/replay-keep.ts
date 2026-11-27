@@ -5,7 +5,8 @@
 // logs their content. They go after KEEP_DAYS, with the session (DELETE /sessions/:name), and when the person opts out
 // in Settings → Your account (`replay_optout:<person>`).
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { appendFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ContraptionRow } from './db.ts';
 import { projectDir } from './workspace.ts';
@@ -67,36 +68,41 @@ const sessionPrefix = (person: number, session: string) => `${personPrefix(perso
 export const keptFile = (dir: string, person: number, session: string, claudeSession: string) => join(dir, `${sessionPrefix(person, session)}${claudeSession.slice(0, 8)}.jsonl`);
 
 /** Turns already kept in a file (0 when there is none). */
-function turnsIn(file: string): number {
+async function turnsIn(file: string): Promise<number> {
   try {
-    return readFileSync(file, 'utf8').split('\n').filter(Boolean).length;
+    return (await readFile(file, 'utf8')).split('\n').filter(Boolean).length;
   } catch {
     return 0;
   }
 }
 
 /** Whether this turn of the session is still one to keep. */
-export function wantsKeep(file: string): boolean {
-  return turnsIn(file) < KEEP_TURNS;
+export async function wantsKeep(file: string): Promise<boolean> {
+  return (await turnsIn(file)) < KEEP_TURNS;
 }
 
 /** Add a turn to its session's file, and drop the folder's files past KEEP_DAYS. */
-export function keepTurn(file: string, turn: Omit<KeptTurn, 'v' | 'n'>, now = Date.now()) {
-  const n = turnsIn(file) + 1;
+export async function keepTurn(file: string, turn: Omit<KeptTurn, 'v' | 'n'>, now = Date.now()) {
+  const n = (await turnsIn(file)) + 1;
   if (n > KEEP_TURNS) return;
   const dir = join(file, '..');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  appendFileSync(file, JSON.stringify({ v: 1, n, ...turn }) + '\n', { mode: 0o600 });
-  prune(dir, now);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await appendFile(file, JSON.stringify({ v: 1, n, ...turn }) + '\n', { mode: 0o600 });
+  await prune(dir, now);
 }
 
 /** Delete files in a kept folder last written more than KEEP_DAYS ago. */
-export function prune(dir: string, now = Date.now()) {
-  if (!existsSync(dir)) return;
-  for (const f of readdirSync(dir)) {
+export async function prune(dir: string, now = Date.now()) {
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return; // no folder yet
+  }
+  for (const f of files) {
     const path = join(dir, f);
     try {
-      if (now - statSync(path).mtimeMs > KEEP_DAYS * 86_400_000) rmSync(path, { force: true });
+      if (now - (await stat(path)).mtimeMs > KEEP_DAYS * 86_400_000) await rm(path, { force: true });
     } catch {}
   }
 }
@@ -120,19 +126,20 @@ function dropMatching(dir: string | null, match: (file: string) => boolean) {
 }
 
 /** Every kept-chats folder on the server, apps no longer registered included: for the daily prune and opt-outs. */
-export function keptDirs(dataDir: string): string[] {
-  const root = join(dataDir, 'projects');
-  const sub = (d: string) => {
+export async function keptDirs(dataDir: string): Promise<string[]> {
+  const sub = async (d: string) => {
     try {
-      return readdirSync(d).map((f) => join(d, f));
+      return (await readdir(d)).map((f) => join(d, f));
     } catch {
       return [];
     }
   };
-  return sub(root).flatMap((p) => sub(join(p, 'shared', 'project', '.replay')));
+  const out: string[] = [];
+  for (const p of await sub(join(dataDir, 'projects'))) out.push(...(await sub(join(p, 'shared', 'project', '.replay'))));
+  return out;
 }
 
 /** The daily sweep: files past KEEP_DAYS in every kept folder, so an app that stops keeping still loses its old chats. */
-export function sweepKept(dataDir: string, now = Date.now()) {
-  for (const dir of keptDirs(dataDir)) prune(dir, now);
+export async function sweepKept(dataDir: string, now = Date.now()) {
+  for (const dir of await keptDirs(dataDir)) await prune(dir, now);
 }

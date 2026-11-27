@@ -47,7 +47,7 @@ import { asData } from './src/quote.ts';
 import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
 import { ciFinished, postCard, registerCiArmed, tellTaskmaster } from './src/ci-armed.ts';
-import { claudeConfigDir, lastEffort } from './src/sessions.ts';
+import { claudeConfigDir, lastEffortLater } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
@@ -889,6 +889,8 @@ const machineCopies = new MachineCopies({ store, note: (id, text) => runner.emit
 wireCopies(machineCopies, runner.runsOn);
 if (!BOOT_CHECK && !PREVIEW) every('machine away', 5_000, () => awayTick());
 const codexLink = new CodexLink(claudeLink);
+// Who is signed in to Codex, looked at off the thread as the server starts, so a first turn's codexWhy has its answer.
+for (const u of store.listUsers()) void codexLink.refresh(u.id);
 // Codex turns (#337) run only in a person's own container, once they've signed in to Codex there (the server login's: #341).
 const codexReady = (uid: number) => {
   const state = codexLink.status(uid).state;
@@ -1308,11 +1310,7 @@ if (!BOOT_CHECK && !PREVIEW) every('cold mail', 60_000, () => runner.coldSweep()
 // failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
 if (!BOOT_CHECK && !PREVIEW) {
   // The init script that points host turns' Gradle builds at the shared build cache (#1153); containers get theirs at start.
-  try {
-    ensureGradleInit(homedir());
-  } catch (err) {
-    console.error('Could not write the Gradle build cache init script (#1153):', err);
-  }
+  ensureGradleInit(homedir()).catch((err) => console.error('Could not write the Gradle build cache init script (#1153):', err));
   // Then dismissed minions' whole worktrees past their grace, and leftover Grunt worktrees (#660).
   const sweepBuild: Job = every(
     'build output sweep',
@@ -1752,7 +1750,7 @@ if (!PREVIEW)
             .reverse()
             .find((e) => e.kind === 'claude' && e.data.includes('"subtype":"init"'));
           const model = t.last_model ?? (init ? (JSON.parse(init.data).model ?? null) : null);
-          store.updateTicketQuietly(t.id, { last_model: model, last_effort: t.last_effort ?? lastEffort(t, configDir) });
+          store.updateTicketQuietly(t.id, { last_model: model, last_effort: t.last_effort ?? (await lastEffortLater(t, configDir)) });
         }
         // On its lane, so a turn a message starts meanwhile waits for it (#259); errors are logged there.
         await runner.saveIdleSession(t.id, configDir);

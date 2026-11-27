@@ -3,7 +3,7 @@
 // signs in with ChatGPT in their browser. The login stays in ~/.codex/auth.json in their volume:
 // Citadel only checks that the file exists, and never reads, stores or relays it.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { stripAnsi, type ClaudeLink } from './claude-link.ts';
 import { Containers } from './containers.ts';
@@ -39,6 +39,9 @@ const LIMITS_EVERY_MS = 5 * 60_000;
 export class CodexLink {
   private logins = new Map<number, Login>();
   private limitsAt = new Map<number, number>();
+  /** Whether each volume home has ~/.codex/auth.json, as last looked (off the thread: status() is read on every turn start). */
+  private authed = new Map<string, boolean>();
+  private looking = new Map<string, Promise<void>>();
   private claude: ClaudeLink;
   private containers: Containers;
 
@@ -53,7 +56,7 @@ export class CodexLink {
     const home = this.claude.volumeHome(uid);
     if (!home && !this.claude.serverLogin(uid)) return { state: 'no container' };
     const login = this.logins.get(uid);
-    if (home && existsSync(join(home, '.codex', 'auth.json'))) {
+    if (home && this.signedIn(home)) {
       if (login?.done) this.logins.delete(uid);
       return { state: 'linked' };
     }
@@ -61,6 +64,35 @@ export class CodexLink {
     // From the click on: the container can take minutes to start before codex even runs.
     if (login && !login.done && !login.error) return login.code ? { state: 'waiting', url: login.url, code: login.code } : { state: 'starting' };
     return { state: 'not linked', ...error };
+  }
+
+  /** The last look at a home's Codex login, and a new look started for the next call. */
+  private signedIn(home: string): boolean {
+    void this.look(home);
+    return this.authed.get(home) ?? false;
+  }
+
+  private look(home: string): Promise<void> {
+    let now = this.looking.get(home);
+    if (!now) {
+      now = access(join(home, '.codex', 'auth.json'))
+        .then(
+          () => true,
+          () => false,
+        )
+        .then((yes) => void this.authed.set(home, yes))
+        .finally(() => this.looking.delete(home));
+      this.looking.set(home, now);
+    }
+    return now;
+  }
+
+  /** Look at a person's Codex login now, for an answer that must be current (Settings, the end of a sign-in or sign-out, the server's start). */
+  async refresh(uid: number): Promise<void> {
+    const home = this.claude.volumeHome(uid);
+    if (!home) return;
+    await this.looking.get(home); // a look started before the file changed can't land after this one
+    await this.look(home);
   }
 
   /** Start the device sign-in in their container; resolves once OpenAI's link and code are out (or it failed). */
@@ -113,6 +145,7 @@ export class CodexLink {
       login.error = thrown(err).message;
       login.done = true;
     }
+    await this.refresh(uid);
     return this.status(uid);
   }
 
@@ -137,9 +170,11 @@ export class CodexLink {
   /** Sign out of Codex in their container (codex revokes the login and deletes the file). */
   async unlink(uid: number): Promise<void> {
     this.cancel(uid);
+    await this.refresh(uid);
     if (this.status(uid).state !== 'linked') return;
     await this.claude.ensure(uid);
     const r = await this.containers.exec(this.claude.name(uid), ['codex', 'logout', '-c', FILE_STORE], { timeout: 60_000 });
+    await this.refresh(uid);
     if (r.code !== 0) throw new Error(`Codex didn't sign out: ${lastLines(`${r.stdout}\n${r.stderr}`)}`);
   }
 }

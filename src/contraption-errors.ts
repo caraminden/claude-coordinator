@@ -4,7 +4,7 @@
 // tool calls and real chats ~10 to disabled tools before anyone noticed; this makes that visible every day.
 // The file is reports/contraption-errors/<day>.md in the app's home scheme's shared folder, rewritten every 10 minutes
 // while the day has new errors and once more when it ends; the scheme's list_tickets shows yesterday's count.
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ContraptionErrorRow, ContraptionRow, Store } from './db.ts';
 import { afterAllWrites } from './http.ts';
@@ -144,13 +144,13 @@ export class ErrorDigest {
       if (!last || last < yesterday) {
         const from = last && last >= addDays(today, -CATCH_UP_DAYS) ? addDays(last, 1) : yesterday;
         let ok = true;
-        for (let d = from; d <= yesterday; d = addDays(d, 1)) (ok = this.write(d, true) && ok), written.add(d);
+        for (let d = from; d <= yesterday; d = addDays(d, 1)) (ok = (await this.write(d, true)) && ok), written.add(d);
         // A scheme's file that failed is tried again next tick; the others are rewritten with it, which is harmless.
         if (ok) this.store.setSetting(FINAL, yesterday);
       }
       const days = [...this.dirty];
       this.dirty.clear();
-      for (const d of days) if (!written.has(d) && !this.write(d, false)) this.dirty.add(d);
+      for (const d of days) if (!written.has(d) && !(await this.write(d, false))) this.dirty.add(d);
     } finally {
       this.busy = false;
     }
@@ -185,7 +185,7 @@ export class ErrorDigest {
    * Write a day's file for each scheme with errors that day, or (`all`, an ended day) for every owning scheme.
    * False when a scheme's file couldn't be written (logged); the other schemes' still are.
    */
-  private write(day: string, all: boolean): boolean {
+  private async write(day: string, all: boolean): Promise<boolean> {
     const rows = this.store.contraptionErrors(day);
     let ok = true;
     for (const [scheme, apps] of this.owners()) {
@@ -195,10 +195,10 @@ export class ErrorDigest {
       if (!dir) continue;
       try {
         const folder = join(dir, DIGEST_DIR);
-        mkdirSync(folder, { recursive: true });
+        await mkdir(folder, { recursive: true });
         const file = join(folder, `${day}.md`);
-        writeFileSync(`${file}.tmp`, render(this.store.getProject(scheme)?.name ?? 'This scheme', day, apps, mine, this.now(), all));
-        renameSync(`${file}.tmp`, file);
+        await writeFile(`${file}.tmp`, render(this.store.getProject(scheme)?.name ?? 'This scheme', day, apps, mine, this.now(), all));
+        await rename(`${file}.tmp`, file);
       } catch (err) {
         ok = false;
         console.error(`Contraption errors: scheme ${scheme}'s ${day} file: ${thrown(err).message ?? err}`);

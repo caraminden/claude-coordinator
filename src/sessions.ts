@@ -475,25 +475,3 @@ export async function lastEffortLater(ticket: Ticket, configDir: string): Promis
 }
 
 const lastEffortIn = (tail: string) => [...tail.matchAll(/"effort":"([a-z]+)"/g)].at(-1)?.[1] ?? null;
-
-/** The same at once, for the startup sweep. */
-export function lastEffort(ticket: Ticket, configDir: string): string | null {
-  if (!ticket.session_id || !ticket.cwd) return null;
-  const path = transcriptPath(configDir, ticket.cwd, ticket.session_id);
-  if (!path) return null;
-  let fd;
-  try {
-    fd = openSync(path, 'r');
-  } catch {
-    return null;
-  }
-  try {
-    const size = fstatSync(fd).size;
-    const len = Math.min(size, 256 * 1024);
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    return lastEffortIn(buf.toString('utf8'));
-  } finally {
-    closeSync(fd);
-  }
-}

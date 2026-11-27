@@ -1,6 +1,5 @@
 // The shared Android emulator's lease (#1128): tools/citadel-android writes "<until epoch s>\t<who>\t<what for>" to
 // android.lease in citadel-heavy's folder. A lease past its time is nobody's, so a turn that died gives it back by itself.
-import { readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -11,9 +10,9 @@ export interface EmulatorLease {
 }
 
 /** The current lease (until in ms), or null when there is none or it has run out. */
-export function readEmulatorLease(dir: string, now = Date.now()): EmulatorLease | null {
+export async function readEmulatorLease(dir: string, now = Date.now()): Promise<EmulatorLease | null> {
   try {
-    return leaseIn(readFileSync(join(dir, 'android.lease'), 'utf8'), now);
+    return leaseIn(await readFile(join(dir, 'android.lease'), 'utf8'), now);
   } catch {
     return null;
   }

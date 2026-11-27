@@ -21,7 +21,7 @@ import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { moveEffort } from '../effort-retros.ts';
 import { unsealedBy } from '../held-mail.ts';
-import { buildBranch } from '../workspace.ts';
+import { buildBranchLater } from '../workspace.ts';
 import { historyPage } from '../history.ts';
 import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
@@ -952,7 +952,7 @@ export const ticketRoutes: Route[] = [
       const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? ('merge' as const) : null;
       // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
       const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
-      const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
+      const into = proj && ticket.kind !== 'coordinator' && (await buildBranchLater(proj.repo_dir, ticket.build)) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
       // A start (#2050) is a minion's plain card: a Taskmaster starts its own with create_ticket, and a ship card's pick is a go.
       if (questions.some((q) => q.options.some((o) => o.start)) && (kind || ticket.kind === 'coordinator' || body.for_everyone === true)) throw new HttpError(400, "start goes on a minion's own question card, not a ship card or a Taskmaster's (a Taskmaster starts minions with create_ticket)");
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;

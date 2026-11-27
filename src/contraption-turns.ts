@@ -15,13 +15,14 @@
 // transcript is the person's own Claude session, in their folder.
 // The other is a turn the app sends with `keep: true` (#836): src/replay-keep.ts keeps the session's first few turns
 // in the app's home scheme's shared folder for replay tests, unless the person opted out.
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import { appendFile, copyFile, cp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ClaudeEvent } from './claude-events.ts';
-import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
+import { AUTH_VARS, isAuthFailure, resolveClaudeLater, type TurnPlace } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { blockText, claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
@@ -36,6 +37,9 @@ import { jsonLines } from './json-lines.ts';
 import { keepTurn, keptDir, keptFile, dropKeptSession, optOutKey, sha256, cap, wantsKeep, type KeptCall } from './replay-keep.ts';
 import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
 import { thrown } from './thrown.ts';
+
+/** A path's real path, or null when it isn't there. */
+const realOrNull = (path: string) => realpath(path).catch(() => null);
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
 const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.ts'), 'utf8');
@@ -429,24 +433,24 @@ export class ContraptionTurns {
   }
 
   /** Forget a session's Codex thread and its log. */
-  private dropCodex(key: string, logFile: string | null) {
+  private async dropCodex(key: string, logFile: string | null) {
     this.store.deleteSetting(key);
-    if (logFile) rmSync(logFile, { force: true });
+    if (logFile) await rm(logFile, { force: true });
   }
 
   /** A blind turn's folder and every transcript it left (its cwd is never used again, so nothing could resume them). */
-  private dropBlind(person: number, blind: Blind, at: TurnPlace) {
-    if (blind.root) rmSync(blind.root, { recursive: true, force: true });
-    else if (!at.host) spawnSync(this.podman, ['exec', at.container, 'rm', '-rf', blind.cwd], { stdio: 'ignore', timeout: 10_000 });
-    for (const dir of this.claude.configDirs(person)) rmSync(join(dir, 'projects', projectSlug(blind.cwd)), { recursive: true, force: true });
+  private async dropBlind(person: number, blind: Blind, at: TurnPlace) {
+    if (blind.root) await rm(blind.root, { recursive: true, force: true });
+    else if (!at.host) await new Promise<void>((done) => execFile(this.podman, ['exec', at.container, 'rm', '-rf', blind.cwd], { timeout: 10_000 }, () => done()));
+    for (const dir of this.claude.configDirs(person)) await rm(join(dir, 'projects', projectSlug(blind.cwd)), { recursive: true, force: true });
   }
 
   /** Delete a Claude session's transcript and its subagents' from the person's Claude folder. */
-  private dropTranscript(where: { configDir: string; cwd: string }, claudeSession: string) {
+  private async dropTranscript(where: { configDir: string; cwd: string }, claudeSession: string) {
     const file = transcriptPath(where.configDir, where.cwd, claudeSession);
     if (!file) return; // an id that isn't one: no path is made from it, least of all to delete
-    rmSync(file, { force: true });
-    rmSync(file.replace(/\.jsonl$/, ''), { recursive: true, force: true });
+    await rm(file, { force: true });
+    await rm(file.replace(/\.jsonl$/, ''), { recursive: true, force: true });
   }
 
   /**
@@ -477,7 +481,8 @@ export class ContraptionTurns {
     // Busy only once the turn is recorded, so a throw here can't leave the name busy until a restart (#468 S04-8).
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     // A neutral folder for everything of the turn's (host: its private files and cwd; a container: only the cwd, made inside it).
-    const blind: Blind | null = !req.blind ? null : at.host ? { root: mkdtempSync(join(BLIND_ROOT, 't-')), cwd: '' } : { root: null, cwd: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`) };
+    // Made in the try below, once the name is busy (a wait here would let a second turn in the session past the check).
+    const blind: Blind | null = !req.blind ? null : at.host ? { root: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`), cwd: '' } : { root: null, cwd: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`) };
     if (blind?.root) blind.cwd = join(blind.root, 'w');
     const dir = this.turnDir(id, at, blind);
     const live: Live = {
@@ -523,12 +528,14 @@ export class ContraptionTurns {
       emit(event, data);
     };
     try {
+      // Private, and new: mkdir without `recursive` fails on a folder that is already there, as mkdtemp would.
+      if (blind?.root) await mkdir(blind.root, { mode: 0o700 });
       let r = await this.turn(c, req, place, at, wantCodex, live, dir, blind, out, () => !sent);
       if (r.retry) {
         // The limit moved this person's turns to their next account; turn() carries the session's transcript over to it.
         retrying = true;
         const next = this.claude.place(req.person, known ? appWarmKey(c.id, req.session) : undefined);
-        rmSync(dir.onHost, { recursive: true, force: true }); // turn() makes it again
+        await rm(dir.onHost, { recursive: true, force: true }); // turn() makes it again
         live.replied = false;
         live.steers.clear();
         // Only a Claude turn retries, and its `at` is its place.
@@ -541,14 +548,15 @@ export class ContraptionTurns {
     } finally {
       this.live.delete(id);
       this.names.delete(key);
-      rmSync(dir.onHost, { recursive: true, force: true });
-      if (blind) this.dropBlind(req.person, blind, at);
       this.store.endContraptionTurn(id, outcome, usage);
       const cut = cutKey(c.id, req.person, req.session);
       if (outcome === 'interrupted') this.store.setSetting(cut, true);
       else if (this.store.getSetting<boolean>(cut)) this.store.deleteSetting(cut);
       const a = live.audit;
       if (a) this.store.putTurnAudit(id, { model: a.model, blind: req.blind, images: req.imageBlocks?.length ?? 0, system: clip(a.system), prompt: clip(a.prompt), output: clip(a.output) });
+      // The files go last, off the thread: the turn's records above are written before anything waits.
+      await rm(dir.onHost, { recursive: true, force: true }).catch(() => {});
+      if (blind) await this.dropBlind(req.person, blind, at).catch(() => {});
     }
   }
 
@@ -556,10 +564,10 @@ export class ContraptionTurns {
   private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, at: TurnPlace, wantCodex: boolean, live: Live, dir: { onHost: string; inside: string }, blind: Blind | null, emit: Emit, canRetry: () => boolean): Promise<{ outcome: string; usage: Usage | null; retry?: true }> {
     const base = this.scratch(c, req.person, place);
     const where = blind ? { ...base, cwd: blind.cwd, onHost: blind.cwd } : base;
-    if (!blind || blind.root) mkdirSync(where.onHost, { recursive: true });
+    if (!blind || blind.root) await mkdir(where.onHost, { recursive: true });
     // Its working folder, inside the container it runs in: Codex's app turns run only their MCP tools, so it holds nothing they need.
     const runIn = at === place ? where : this.scratch(c, req.person, at);
-    if (runIn !== where) mkdirSync(runIn.onHost, { recursive: true });
+    if (runIn !== where) await mkdir(runIn.onHost, { recursive: true });
     // Codex (#337): a Codex pick, or the person's "Enable Codex override", once their container has Codex; else Claude's default.
     const codex = wantCodex && !at.host && !this.codexWhy(req.person);
     if (isCodexModel(req.model) && !codex) req = { ...req, model: isCodexModel(c.default_model) ? null : c.default_model };
@@ -568,11 +576,11 @@ export class ContraptionTurns {
     let model: string | null = codex ? codexModelFor(req.model) : req.model;
     const ckey = codexKey(c.id, req.person, req.session);
     const logFile = codexLogFile(where.onHost, req.session);
-    if (req.fresh) this.dropCodex(ckey, logFile);
+    if (req.fresh) await this.dropCodex(ckey, logFile);
     const codexSession = this.store.getSetting<CodexSession>(ckey);
     let codexLog = '';
     try {
-      if (codexSession) codexLog = readFileSync(logFile, 'utf8');
+      if (codexSession) codexLog = await readFile(logFile, 'utf8');
     } catch {
       // No Codex turn logged anything yet.
     }
@@ -582,56 +590,58 @@ export class ContraptionTurns {
     // A limit (#785) or a cold move (#793) took this session to another account, where it may have carried on: the newest
     // copy of its transcript (and its subagents') comes in, or a move back would resume the conversation as it was before.
     if (transcript && !req.fresh) {
-      const here = existsSync(transcript) ? realpathSync(transcript) : null;
+      const here = await realOrNull(transcript);
       let from: { path: string; at: number } | null = null;
       for (const dir of this.claude.configDirs(req.person)) {
         const path = transcriptPath(dir, where.cwd, known!.claude_session);
         // A shared projects folder (claude-link.ts, SHARED_CONFIG) is the same file: copying a file onto itself would empty it.
-        if (!path || !existsSync(path) || realpathSync(path) === here) continue;
-        const at = statSync(path).mtimeMs;
+        const real = path && (await realOrNull(path));
+        if (!path || !real || real === here) continue;
+        const at = (await stat(path)).mtimeMs;
         if (!from || at > from.at) from = { path, at };
       }
-      if (from && (!here || from.at > statSync(here).mtimeMs)) {
-        mkdirSync(dirname(transcript), { recursive: true });
-        copyFileSync(from.path, transcript);
-        if (existsSync(from.path.replace(/\.jsonl$/, ''))) cpSync(from.path.replace(/\.jsonl$/, ''), transcript.replace(/\.jsonl$/, ''), { recursive: true });
+      if (from && (!here || from.at > (await stat(here)).mtimeMs)) {
+        await mkdir(dirname(transcript), { recursive: true });
+        await copyFile(from.path, transcript);
+        const subagents = from.path.replace(/\.jsonl$/, '');
+        if (await realOrNull(subagents)) await cp(subagents, transcript.replace(/\.jsonl$/, ''), { recursive: true });
       }
     }
-    const resume = !!transcript && !req.fresh && existsSync(transcript);
+    const resume = !!transcript && !req.fresh && !!(await realOrNull(transcript));
     const claudeSession = resume ? known!.claude_session : randomUUID();
     // The name can never get back to the session it leaves, so that session's transcript goes.
-    if (known && !resume) this.dropTranscript(where, known.claude_session);
+    if (known && !resume) await this.dropTranscript(where, known.claude_session);
     if (!blind) this.store.putContraptionSession(c.id, req.person, req.session, claudeSession);
     // A kept turn (#836): what it streams, written once it ends well. Not a blind one's, nor an opted-out person's.
     const keepDir = req.keep && !blind && !this.store.getSetting<boolean>(optOutKey(req.person)) ? keptDir(this.dataDir, c) : null;
     const keepAt = keepDir ? keptFile(keepDir, req.person, req.session, claudeSession) : null;
-    const kept = keepAt && wantsKeep(keepAt) ? { calls: new Map<string, KeptCall>(), text: '' } : null;
+    const kept = keepAt && (await wantsKeep(keepAt)) ? { calls: new Map<string, KeptCall>(), text: '' } : null;
 
     // Private: it holds the prompt, the contraption's system prompt and its MCP tokens until the turn ends.
-    mkdirSync(dir.onHost, { recursive: true, mode: 0o700 });
-    mkdirSync(join(dir.onHost, 'slots'), { mode: 0o700 });
-    mkdirSync(join(dir.onHost, 'tmp'));
-    const secret = (name: string, text: string) => writeFileSync(join(dir.onHost, name), text, { mode: 0o600 });
+    await mkdir(dir.onHost, { recursive: true, mode: 0o700 });
+    await mkdir(join(dir.onHost, 'slots'), { mode: 0o700 });
+    await mkdir(join(dir.onHost, 'tmp'));
+    const secret = (name: string, text: string) => writeFile(join(dir.onHost, name), text, { mode: 0o600 });
     const config: { mcpServers: Record<string, object> } = mcpConfig(c.port, req.mcp);
     // The person's own machines (#306), through the same stand-in minion turns use; a contraption server's name wins.
     const machines = !req.machines ? [] : this.machines(req.person).filter((m) => !req.mcp.some((s) => s.name === m.name) && !(req.media && m.name === MEDIA_SERVER));
     live.machines = machines.map((m) => m.id);
     if (machines.length) {
-      secret('machine-mcp.ts', MACHINE_MCP);
+      await secret('machine-mcp.ts', MACHINE_MCP);
       const env = { COORDINATOR_API: this.apiUrl(), COORDINATOR_TOKEN: live.token, COORDINATOR_MACHINE_ROUTE: 'contraption-session' };
       for (const m of machines) config.mcpServers[m.name] = { type: 'stdio', command: process.execPath, args: [join(dir.inside, 'machine-mcp.ts'), String(m.id), m.name, 'mcp'], env };
     }
     // Citadel's own media server (#732), over HTTP on the address machine proxies use, with the turn's token.
     if (req.media) config.mcpServers[MEDIA_SERVER] = { type: 'http', url: `${this.apiUrl()}/api/contraption-media/mcp`, headers: { Authorization: `Bearer ${live.token}` } };
-    secret('mcp.json', JSON.stringify(config));
+    await secret('mcp.json', JSON.stringify(config));
     const system = [req.system, codex ? '' : toolNamesPrompt(Object.keys(config.mcpServers)), machinesPrompt(machines)].filter(Boolean).join('\n\n');
-    if (system) secret('system.md', system);
+    if (system) await secret('system.md', system);
     let hook = null;
     if (req.agents) {
-      secret('agent-cap.ts', AGENT_CAP);
+      await secret('agent-cap.ts', AGENT_CAP);
       hook = { node: process.execPath, script: join(dir.inside, 'agent-cap.ts'), slots: join(dir.inside, 'slots') };
     }
-    secret(
+    await secret(
       'settings.json',
       JSON.stringify(
         settings(
@@ -643,16 +653,16 @@ export class ContraptionTurns {
     );
     let prompt = req.prompt;
     if (codex) {
-      for (const [f, text] of CODEX_FILES) secret(f, text);
+      for (const [f, text] of CODEX_FILES) await secret(f, text);
       // The hook reads this (CITADEL_CODEX_TRIPWIRE): only the contraption's own servers and the person's machines.
-      secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, at.host ? place.configDir! : at.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
+      await secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, at.host ? place.configDir! : at.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
       let claudeJsonl = '';
       try {
-        if (resume) claudeJsonl = readFileSync(transcript!, 'utf8');
+        if (resume) claudeJsonl = await readFile(transcript!, 'utf8');
       } catch {
         // No Claude transcript: a new thread starts from the Codex turns alone, if any.
       }
-      secret('handover.md', fitLog([...claudeParts(claudeJsonl), ...readParts(codexLog)]));
+      await secret('handover.md', fitLog([...claudeParts(claudeJsonl), ...readParts(codexLog)]));
       if (!codexSession) this.store.setSetting(ckey, { thread: null });
     } else if (codexSession) {
       // Back on Claude after Codex turns: they come first, verbatim.
@@ -701,7 +711,7 @@ export class ContraptionTurns {
       await at.ensure();
       // `exec` keeps the pid, written first, so a cancel can signal claude inside the container.
       cmd = this.podman;
-      const exe = codex ? process.execPath : resolveClaude(this.claudeBin);
+      const exe = codex ? process.execPath : await resolveClaudeLater(this.claudeBin);
       // A blind turn makes its random folder inside the container, and runs there.
       const [wd, script, more] = blind ? [BLIND_ROOT, 'echo $$ > "$0"; mkdir -p "$1" && cd "$1" && shift && exec "$@"', [blind.cwd]] : [runIn.cwd, 'echo $$ > "$0"; exec "$@"', []];
       cmdArgs = ['exec', '-i', '-w', wd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container, 'sh', '-c', script, join(dir.inside, 'pid'), ...more, exe, ...argv];
@@ -837,17 +847,17 @@ export class ContraptionTurns {
       // This turn's log joins the session's, for the way back to Claude; its folder goes when the turn ends.
       let log = '';
       try {
-        log = readFileSync(join(dir.onHost, 'codex-log.jsonl'), 'utf8');
+        log = await readFile(join(dir.onHost, 'codex-log.jsonl'), 'utf8');
       } catch {
         // It logged nothing.
       }
       if (log) {
-        mkdirSync(dirname(logFile), { recursive: true, mode: 0o700 });
-        appendFileSync(logFile, log, { mode: 0o600 });
+        await mkdir(dirname(logFile), { recursive: true, mode: 0o700 });
+        await appendFile(logFile, log, { mode: 0o600 });
       }
     } else if (codexSession && result && !result.is_error) {
       // Claude has the Codex turns now.
-      this.dropCodex(ckey, logFile);
+      await this.dropCodex(ckey, logFile);
     }
 
     const usage: Usage | null = metered ? total : null;
@@ -863,7 +873,7 @@ export class ContraptionTurns {
       // Checked again at the end: the person may have opted out, or deleted the session, while the turn ran.
       if (kept && keepAt && !this.store.getSetting(optOutKey(req.person)) && this.store.contraptionSession(c.id, req.person, req.session)) {
         try {
-          keepTurn(keepAt, {
+          await keepTurn(keepAt, {
             at: Date.now(),
             turn: live.id,
             prompt: req.prompt,
@@ -986,17 +996,19 @@ export class ContraptionTurns {
    * Forget a session name and delete its transcript from the person's Claude folder. With their sign-in
    * expired there's no folder to reach, so the transcript stays in their own volume.
    */
-  deleteSession(c: ContraptionRow, person: number, name: string): 'deleted' | 'busy' | 'missing' {
+  async deleteSession(c: ContraptionRow, person: number, name: string): Promise<'deleted' | 'busy' | 'missing'> {
     if (this.names.has(this.key(c.id, person, name))) return 'busy';
     this.store.deleteTurnAudit(c.id, person, name); // blind turns keep no session, so before the check
     const s = this.store.contraptionSession(c.id, person, name);
     if (!s) return 'missing';
     const place = this.claude.place(person, appWarmKey(c.id, name));
-    if (place) this.dropTranscript(this.scratch(c, person, place), s.claude_session);
-    this.dropCodex(codexKey(c.id, person, name), place ? codexLogFile(this.scratch(c, person, place).onHost, name) : null);
+    // The rows go before anything waits, so a turn sent in the name meanwhile starts a fresh session, not this one.
     this.store.deleteContraptionSession(c.id, person, name);
     this.store.deleteSetting(cutKey(c.id, person, name));
     dropKeptSession(keptDir(this.dataDir, c), person, name);
+    const dropping = this.dropCodex(codexKey(c.id, person, name), place ? codexLogFile(this.scratch(c, person, place).onHost, name) : null);
+    if (place) await this.dropTranscript(this.scratch(c, person, place), s.claude_session);
+    await dropping;
     return 'deleted';
   }
 }

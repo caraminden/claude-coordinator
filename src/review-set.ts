@@ -337,7 +337,7 @@ export function nameFor(slug: string): string {
   return words.join(' ').replace(/^./, (c) => c.toUpperCase());
 }
 
-/** A scheme's agent file that reviews, critiques or teaches (#1089), as readAgentFiles finds it. */
+/** A scheme's agent file that reviews, critiques or teaches (#1089), as readAgentFilesLater finds it. */
 export type AgentFile = { path: string; slug: string; description: string; kind: string; text: string };
 // The words that make an agent a judge (Q2 "Guess", Josh 2026-11-19), first match wins: its name, then its description.
 const AGENT_GUESS: [RegExp, string][] = [
@@ -365,33 +365,7 @@ export function withoutGoneAgents(entries: ReviewEntry[], files: AgentFile[]): R
   return entries.filter((e) => !isAgentFile(e) || files.some((f) => e.source === `agent:${f.path}`));
 }
 
-/** A scheme repo's `.claude/agents/*.md` that agentKind counts as judges, read live (at most 100 files of 256 KB). */
-export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] {
-  if (!repoDir) return [];
-  let names: string[];
-  try {
-    names = readdirSync(join(repoDir, '.claude', 'agents'))
-      .filter((n) => n.endsWith('.md'))
-      .sort()
-      .slice(0, 100);
-  } catch {
-    return [];
-  }
-  const out: AgentFile[] = [];
-  for (const n of names) {
-    let raw: string;
-    try {
-      raw = readFileSync(join(repoDir, '.claude', 'agents', n), 'utf8');
-    } catch {
-      continue;
-    }
-    const file = agentFile(n, raw);
-    if (file) out.push(file);
-  }
-  return out;
-}
-
-/** readAgentFiles off the server's thread, for a turn's start (#2137). */
+/** A scheme repo's `.claude/agents/*.md` that agentKind counts as judges, read live (at most 100 files of 256 KB), off the server's thread (#2137). */
 export async function readAgentFilesLater(repoDir: string | null | undefined): Promise<AgentFile[]> {
   if (!repoDir) return [];
   const dir = join(repoDir, '.claude', 'agents');
@@ -809,7 +783,7 @@ export class ReviewSet {
   }
 
   /**
-   * An entry for each of the scheme's reviewing agent files (readAgentFiles) it has no entry for yet, on, its text left
+   * An entry for each of the scheme's reviewing agent files (readAgentFilesLater) it has no entry for yet, on, its text left
    * in the file. An entry of the scheme's own with the same slug is that agent's row already (Q4 "One"), so it adds none.
    */
   ensureAgents(projectId: number, files: AgentFile[], at = Date.now()): void {

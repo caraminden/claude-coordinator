@@ -10,7 +10,7 @@ import { marksTitle } from '../public/ui/marks.js';
 import type { Project, Store, Ticket } from '../src/db.ts';
 import type { NewDelivery } from '../src/db/deliveries.ts';
 import { projectDir, projectSharedDir } from '../src/workspace.ts';
-import { readAgentFiles } from '../src/review-set.ts';
+import { readAgentFilesLater } from '../src/review-set.ts';
 import { loadTemplates, templateFields, templateVars } from '../src/schedules.ts';
 import { projectSlug } from '../src/sessions.ts';
 import { inviteHash } from '../src/auth.ts';
@@ -1827,7 +1827,7 @@ mock.boards('#takes', { boards: [
   'review-set': {
     about:
       "the Seeded scheme's Reviewers and critics page (#1054): a Taste panel of two critics and its referee, a blocking critic that always fails and holds a minion's ship, an order, hand-offs, run dots, a pass rate and two recorded verdicts; an art critic handing off to its own Art professor teacher, and the kit's Professor under the others, each with fixes that held or didn't (#1089)",
-    seed(c) {
+    async seed(c) {
       const r = c.store.reviews;
       const id = c.project.id;
       const t = minion(c, 'New onboarding screens', { note: 'held by the copy critic' });
@@ -1851,7 +1851,7 @@ mock.boards('#takes', { boards: [
       c.store.setProjectRepoDir(id, repo);
       writeFileSync(join(repo, '.claude', 'agents', 'shader-critic.md'), '---\nname: shader-critic\ndescription: Judges a new or changed shader in motion, against the look bible\n---\n\nYou judge shaders from a clip, never a still.\n\n## Blockers\n\n- Banding in a gradient\n- A flash brighter than the UI\n');
       writeFileSync(join(repo, '.claude', 'agents', 'sound-critic.md'), '---\nname: sound-critic\ndescription: Judges new sounds\n---\nListen.\n');
-      r.ensureAgents(id, readAgentFiles(repo));
+      r.ensureAgents(id, await readAgentFilesLater(repo));
       rmSync(join(repo, '.claude', 'agents', 'sound-critic.md'));
       r.save(id, 'shader-critic', { body: 'Our water shader foams at the shore: judge the foam line too.\n' }, c.who, 'Edited by hand');
       mk('art-professor', 'Art professor', 'teacher', { triggers: {}, body: '## For fixes\n\nRead the palette ramp first; name a tone, a pixel size and a frame range.\n' });

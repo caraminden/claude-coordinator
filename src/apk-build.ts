@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { access, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { constants } from 'node:os';
-import { androidEnv } from './claude-link.ts';
+import { androidEnvLater } from './claude-link.ts';
 import { apksigner, install, OldApk, OtherKey, signers } from './apk-release.ts';
 import type { ContraptionRow } from './db.ts';
 import { hasKey, keyFiles, makeReleaseKey, type Keytool } from './release-key.ts';
@@ -340,7 +340,7 @@ export class ApkBuilds {
 
     const base = Object.fromEntries(['HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'XDG_RUNTIME_DIR'].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
     const path = `${join(this.d.home, '.local/share/mise/shims')}:${join(this.d.home, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
-    const env: NodeJS.ProcessEnv = { ...base, PATH: path, ...androidEnv(this.d.home, path), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: src, CITADEL_HEAVY_WHO: `${row.title} APK build`, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PRIORITY: '1', CI: '1' };
+    const env: NodeJS.ProcessEnv = { ...base, PATH: path, ...(await androidEnvLater(this.d.home, path)), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: src, CITADEL_HEAVY_WHO: `${row.title} APK build`, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PRIORITY: '1', CI: '1' };
     if (!env.ANDROID_HOME) return fail(`the Android toolchain isn't installed on perigee (tools/android/install-sdk.sh)`);
     const run = this.d.run ?? runLogged;
     const deadline = Date.now() + BUILD_MS;

@@ -767,7 +767,7 @@ export const machineRoutes: Route[] = [
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.
-  { method: 'GET', path: '/api/emulator-lease', ...people, handler: ({ res, app }) => json(res, 200, app.heavyDir ? readEmulatorLease(app.heavyDir) : null) },
+  { method: 'GET', path: '/api/emulator-lease', ...people, handler: async ({ res, app }) => json(res, 200, app.heavyDir ? await readEmulatorLease(app.heavyDir) : null) },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {
     method: 'POST',

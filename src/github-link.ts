@@ -9,7 +9,7 @@
 // (GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_SLUG), whose token reaches only repos where the
 // repo's owner installed the App and the person has access. A person has one link; linking again replaces it.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Credentials } from './credentials.ts';
 import type { Store, User } from './db.ts';
@@ -386,10 +386,16 @@ export function schemeGithub(store: Store, link: GithubLink, repoDir: string, da
   return owner && link.token(owner) ? personGithub(link, owner, join(dataDir, 'people', String(owner.id))).env : undefined;
 }
 
+const madeGh = new Set<string>();
+
 /** An empty gh config folder in `dir`, so gh and git's gh credential helper can't fall back to the box's login; no prompts. */
 function noLogin(dir: string, make = true): Record<string, string> {
   const ghDir = join(dir, 'gh');
-  if (make) mkdirSync(ghDir, { recursive: true, mode: 0o700 });
+  // Off the thread, once a folder: gh reads a config folder that isn't there yet as an empty one, so nothing waits on it.
+  if (make && !madeGh.has(ghDir)) {
+    madeGh.add(ghDir);
+    mkdir(ghDir, { recursive: true, mode: 0o700 }).catch(() => madeGh.delete(ghDir));
+  }
   return { GH_CONFIG_DIR: ghDir, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
 }
 

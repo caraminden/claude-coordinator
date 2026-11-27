@@ -8,7 +8,7 @@ import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } fr
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { ANDROID_SDK, androidEnv } from './claude-link.ts';
+import { ANDROID_SDK, androidEnvLater } from './claude-link.ts';
 import { HttpError } from './http.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { thrown } from './thrown.ts';
@@ -27,7 +27,7 @@ export function certDigests(out: string): string[] {
 }
 
 /** apksigner from the newest build-tools installed (#379), so a toolchain upgrade doesn't break publishing; throws when there is none. */
-export function apksigner(home = homedir(), sdk = androidEnv(home).ANDROID_HOME ?? join(home, ANDROID_SDK)): string {
+export function apksigner(home = homedir(), sdk = join(home, ANDROID_SDK)): string {
   const tools = join(sdk, 'build-tools');
   const newest = (existsSync(tools) ? readdirSync(tools) : []).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })).at(-1);
   if (!newest) throw new Error(`apksigner isn't installed (no ${tools}): install the Android toolchain (tools/android/install-sdk.sh)`);
@@ -36,7 +36,7 @@ export function apksigner(home = homedir(), sdk = androidEnv(home).ANDROID_HOME 
 
 /** An APK's signing certificates (SHA-256), by apksigner from the shared Android toolchain (#379); throws when it doesn't verify. */
 export async function signers(apk: string): Promise<string[]> {
-  const env = { ...process.env, ...androidEnv(homedir(), process.env.PATH) };
+  const env = { ...process.env, ...(await androidEnvLater(homedir(), process.env.PATH)) };
   let tool: string;
   try {
     tool = apksigner(homedir(), env.ANDROID_HOME);

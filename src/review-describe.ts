@@ -4,7 +4,7 @@
 // page's ordinary save, so it is a version History can undo.
 import { execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
+import { AUTH_VARS, resolveClaudeLater, type TurnPlace } from './claude-link.ts';
 import { BUILT_INS, isAgentFile, isKit, onFailText, whenText, type OnFail, type ReviewEntry } from './review-set.ts';
 
 /** How it works with the others (Q7, phase 3), which the agent may set on a scheme's own entries besides the body. */
@@ -135,7 +135,7 @@ export async function runOneShot(place: TurnPlace, prompt: string, o: OneShot): 
   } else {
     await place.ensure();
     const cenv = Object.entries(place.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-    argv = ['podman', 'exec', '-i', '-w', place.turnsDir, ...cenv, place.container, resolveClaude(o.claudeBin), ...ARGS];
+    argv = ['podman', 'exec', '-i', '-w', place.turnsDir, ...cenv, place.container, await resolveClaudeLater(o.claudeBin), ...ARGS];
     env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
     running.set(place.container, describesIn(place.container) + 1);
   }

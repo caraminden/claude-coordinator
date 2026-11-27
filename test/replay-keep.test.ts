@@ -28,25 +28,25 @@ test('deleting a session takes its files only, not those of a session whose name
   assert.deepEqual(readdirSync(dir).sort(), [ab, other].sort());
 });
 
-test("an opt-out takes everything of the person's in every scheme's folders, unregistered apps included, and nobody else's", () => {
+test("an opt-out takes everything of the person's in every scheme's folders, unregistered apps included, and nobody else's", async () => {
   const one = dirOf(3, 'live-app');
   const gone = dirOf(4, 'removed-app');
   put(one, 7, 's1');
   put(gone, 7, 's2');
   const kept = put(gone, 8, 's2');
   mkdirSync(join(data, 'projects', '5', 'shared', 'project'), { recursive: true }); // a scheme with nothing kept
-  assert.deepEqual(keptDirs(data).sort(), [dirOf(1, 'app'), one, gone].sort());
-  dropKeptPerson(keptDirs(data), 7);
+  assert.deepEqual((await keptDirs(data)).sort(), [dirOf(1, 'app'), one, gone].sort());
+  dropKeptPerson(await keptDirs(data), 7);
   assert.deepEqual(readdirSync(one), []);
   assert.deepEqual(readdirSync(gone), [kept]);
 });
 
-test('the daily sweep drops files past KEEP_DAYS in every kept folder', () => {
+test('the daily sweep drops files past KEEP_DAYS in every kept folder', async () => {
   const dir = dirOf(6, 'quiet-app');
   const old = put(dir, 1, 'old');
   const fresh = put(dir, 1, 'fresh');
   const t = (Date.now() - (KEEP_DAYS + 1) * 86_400_000) / 1000;
   utimesSync(join(dir, old), t, t);
-  sweepKept(data);
+  await sweepKept(data);
   assert.deepEqual(readdirSync(dir), [fresh]);
 });

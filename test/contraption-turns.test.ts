@@ -539,7 +539,7 @@ test('two names run at once, a second turn on a busy name gets busy, and cancel 
       ['aura-2', false],
     ],
   );
-  assert.equal(turns.deleteSession(mandate, cara.id, 'aura-1'), 'busy');
+  assert.equal(await turns.deleteSession(mandate, cara.id, 'aura-1'), 'busy');
   assert.equal(turns.cancel(peek.id, started.data.turn!), false, "another contraption can't cancel it");
   assert.equal(turns.running(), 1);
   assert.equal(turns.cancel(mandate.id, started.data.turn!), true);
@@ -678,7 +678,7 @@ test('an audit row goes with its session, and every row goes once its days are u
   const id = (await turn(mandate, { session: 'audit-gone' }))[0].data.turn!;
   const keep = (await turn(mandate, { session: 'audit-stays' }))[0].data.turn!;
   assert.ok(store.turnAudit(id));
-  assert.equal(turns.deleteSession(mandate, cara.id, 'audit-gone'), 'deleted');
+  assert.equal(await turns.deleteSession(mandate, cara.id, 'audit-gone'), 'deleted');
   assert.equal(store.turnAudit(id), undefined);
   assert.ok(store.turnAudit(keep), "another session's stays");
   store.sweepTurnAudit(Date.now() - 60_000);
@@ -796,7 +796,7 @@ test("a stream's session id that isn't one is never stored, and one stored befor
   const next = (await turn(mandate, { session: 'odd' }))[0].data.claudeSession!;
   assert.match(next, /^[0-9a-f-]{36}$/, 'the name starts a new session');
   assert.ok(existsSync(join(victim, 'keep')));
-  assert.equal(turns.deleteSession(mandate, cara.id, 'odd'), 'deleted');
+  assert.equal(await turns.deleteSession(mandate, cara.id, 'odd'), 'deleted');
 });
 
 // Kept chats (#836): an app's `keep: true` turns, the session's first KEEP_TURNS, in its home scheme's shared folder.
@@ -829,7 +829,7 @@ test("a kept turn writes the prompt, tool calls and reply to the home scheme's .
   assert.deepEqual(readdirSync(dir), files);
   assert.ok(!existsSync(join(data, 'projects', 'null')));
   // Deleting the session deletes what was kept of it.
-  assert.equal(turns.deleteSession(app, cara.id, 'k1'), 'deleted');
+  assert.equal(await turns.deleteSession(app, cara.id, 'k1'), 'deleted');
   assert.deepEqual(readdirSync(dir), []);
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', keep: true, blind: true }, mandate), /not both/);
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', keep: 'yes' }, mandate), /keep must be true or false/);
@@ -857,10 +857,10 @@ test('deleting a session forgets the name and deletes its transcript', async () 
   const id = (await turn(mandate, { session: 'aura-gone' }))[0].data.claudeSession;
   const file = join(claudeDir, 'projects', join(data, 'contraption-scratch', 'mandate', String(cara.id)).replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`);
   assert.ok(existsSync(file));
-  assert.equal(turns.deleteSession(mandate, cara.id, 'aura-gone'), 'deleted');
+  assert.equal(await turns.deleteSession(mandate, cara.id, 'aura-gone'), 'deleted');
   assert.ok(!existsSync(file));
   assert.equal(store.contraptionSession(mandate.id, cara.id, 'aura-gone'), undefined);
-  assert.equal(turns.deleteSession(mandate, cara.id, 'aura-gone'), 'missing');
+  assert.equal(await turns.deleteSession(mandate, cara.id, 'aura-gone'), 'missing');
 });
 
 test("a Codex pick the person can't run falls back to the app's default, or Claude's own, and start says so (#409)", async () => {

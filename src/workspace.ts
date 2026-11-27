@@ -205,7 +205,7 @@ export async function landsBuilds(repoDir: string | null): Promise<boolean> {
  */
 export async function ticketBase(repoDir: string, build: number | null = null): Promise<string> {
   await syncMain(repoDir);
-  const ofBuild = buildBranch(repoDir, build);
+  const ofBuild = await buildBranchLater(repoDir, build);
   if (ofBuild) return ofBuild;
   const ok = (args: string[]) =>
     git(args, repoDir).then(

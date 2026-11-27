@@ -41,13 +41,13 @@ test('a trim leaves an entry Gradle may still be writing, and never follows a sy
   assert.ok(existsSync(join(outside, 'precious')));
 });
 
-test('the init script is written once and rewritten when it differs', () => {
+test('the init script is written once and rewritten when it differs', async () => {
   const home = join(root, 'home');
-  assert.equal(ensureGradleInit(home), true);
+  assert.equal(await ensureGradleInit(home), true);
   assert.equal(readFileSync(join(home, GRADLE_INIT), 'utf8'), GRADLE_INIT_SCRIPT);
-  assert.equal(ensureGradleInit(home), false);
+  assert.equal(await ensureGradleInit(home), false);
   writeFileSync(join(home, GRADLE_INIT), 'old');
-  assert.equal(ensureGradleInit(home), true);
+  assert.equal(await ensureGradleInit(home), true);
   assert.equal(readFileSync(join(home, GRADLE_INIT), 'utf8'), GRADLE_INIT_SCRIPT);
 });
 

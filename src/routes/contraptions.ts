@@ -602,14 +602,14 @@ export const contraptionRoutes: Route[] = [
   fromContraption('GET', '/api/contraptions/sessions', ({ res, app, url }, c) => {
     return json(res, 200, app.contraptionTurns.sessions(c.id, enabledPerson(app, c, url)));
   }),
-  fromContraption('DELETE', '/api/contraptions/sessions/:session', ({ res, app, url, params }, c) => {
+  fromContraption('DELETE', '/api/contraptions/sessions/:session', async ({ res, app, url, params }, c) => {
     let name: string;
     try {
       name = decodeURIComponent(params.session);
     } catch {
       throw new HttpError(400, 'Not a session name');
     }
-    const done = app.contraptionTurns.deleteSession(c, enabledPerson(app, c, url), name);
+    const done = await app.contraptionTurns.deleteSession(c, enabledPerson(app, c, url), name);
     if (done === 'busy') throw new HttpError(409, 'busy');
     if (done === 'missing') throw new HttpError(404, 'No such session');
     return json(res, 200, { ok: true });

@@ -2,7 +2,7 @@
 // Everyone in the scheme reads it; people and the Taskmaster change anything. A minion saves only an entry's body,
 // for the critic loop's learning step (citadel:critique step 9): the switches stay a person's call (Q10, Q12).
 import { HttpError, isInt, json, readJson, type App, type Route } from '../http.ts';
-import { BUILT_INS, calibratedText, isAgentFile, isKit, loadStarters, readAgentFiles, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type AgentFile, type EntryFields, type ReviewEntry, type Lesson, type ReviewSet, type Verdict } from '../review-set.ts';
+import { BUILT_INS, calibratedText, isAgentFile, isKit, loadStarters, readAgentFilesLater, nameFor, parseWhen, renderEntry, ReviewError, stageFor, whenText, type AgentFile, type EntryFields, type ReviewEntry, type Lesson, type ReviewSet, type Verdict } from '../review-set.ts';
 import { describeCron, loadTemplates, templateFields, templateVars } from '../schedules.ts';
 import { describePrompt, readProposals, runDescribe } from '../review-describe.ts';
 import { turnEnv } from '../turn-launch.ts';
@@ -33,9 +33,9 @@ function kitAgent(slug: string): { path: string; text: string } | null {
 }
 
 /** The kit's built-ins and the scheme's reviewing agent files (#1089), each on the page once the scheme opens it. */
-function ensure(app: App, project: Project): void {
+async function ensure(app: App, project: Project): Promise<void> {
   app.store.reviews.ensureBuiltIns(project.id);
-  app.store.reviews.ensureAgents(project.id, readAgentFiles(project.repo_dir));
+  app.store.reviews.ensureAgents(project.id, await readAgentFilesLater(project.repo_dir));
 }
 
 /**
@@ -69,8 +69,9 @@ const view = (e: ReviewEntry, more: { record?: Record_; verdicts?: Verdict[]; ag
 };
 type Record_ = ReturnType<ReviewSet['record']> extends Map<number, infer R> ? R : never;
 /** One entry as the page shows it, with its record and verdicts. */
-function viewOne(app: App, project: Project, e: ReviewEntry) {
-  return view(e, { record: app.store.reviews.record(project.id).get(e.id), verdicts: app.store.reviews.verdicts(project.id).get(e.id), agents: readAgentFiles(project.repo_dir), lessons: lessonsView(app, project) });
+async function viewOne(app: App, project: Project, e: ReviewEntry) {
+  const agents = await readAgentFilesLater(project.repo_dir);
+  return view(e, { record: app.store.reviews.record(project.id).get(e.id), verdicts: app.store.reviews.verdicts(project.id).get(e.id), agents, lessons: lessonsView(app, project) });
 }
 /** Every kind the checker is counting, and whether the reviewer reads it yet. */
 function lessonsView(app: App, project: Project) {
@@ -183,10 +184,10 @@ export const reviewRoutes: Route[] = [
     path: '/api/projects/:project/reviews',
     who: ['person', 'taskmaster', 'minion'],
     async handler({ res, app, project }) {
-      ensure(app, project);
+      await ensure(app, project);
       const record = app.store.reviews.record(project.id);
       const verdicts = app.store.reviews.verdicts(project.id);
-      const agents = readAgentFiles(project.repo_dir);
+      const agents = await readAgentFilesLater(project.repo_dir);
       const lessons = lessonsView(app, project);
       const entries = app.store.reviews.list(project.id);
       // The headline's numbers (#1094): judged this week, the last run, where this month's changes fall unwatched.
@@ -235,7 +236,7 @@ export const reviewRoutes: Route[] = [
     who: ['person', 'taskmaster'],
     refuse: 'Only people and Taskmasters add reviewers and critics; ask your Taskmaster',
     async handler({ req, res, app, session, project }) {
-      ensure(app, project);
+      await ensure(app, project);
       const body = await readJson(req);
       const f = fieldsFrom(body);
       const starter = f.extends ? loadStarters().find((s) => s.slug === f.extends) : null;
@@ -250,7 +251,7 @@ export const reviewRoutes: Route[] = [
       if (!triggers && starterWhen && starterWhen !== 'set by the extending rubric') triggers = run(() => parseWhen(starterWhen));
       const e = run(() => app.store.reviews.create(project.id, { ...f, slug, name: f.name ?? nameFor(slug), triggers: triggers ?? {}, stage: f.stage ?? stageFor(triggers ?? {}), trial: true }, session.name));
       broadcast(app, project);
-      return json(res, 201, viewOne(app, project, e));
+      return json(res, 201, await viewOne(app, project, e));
     },
   },
   {
@@ -265,7 +266,7 @@ export const reviewRoutes: Route[] = [
       const uid = session.uid!; // who: ['person']
       const place = app.claude.place(uid);
       if (!place) throw new HttpError(409, "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the agent on");
-      ensure(app, project);
+      await ensure(app, project);
       const entries = app.store.reviews.list(project.id);
       let reply: string;
       try {
@@ -289,7 +290,7 @@ export const reviewRoutes: Route[] = [
         throw new HttpError(403, "A minion saves only an entry's body (what it learned) and a calibration run's counts; switches, triggers and names are for people and the Taskmaster");
       }
       if (body.version !== undefined && !Number.isInteger(body.version)) throw new HttpError(400, 'version is the whole number you started from');
-      ensure(app, project);
+      await ensure(app, project);
       if (body.calibration !== undefined) {
         // A calibration run's counts (citadel:critique, references/calibrate.md); the store decides whether it comes off trial.
         if (Object.keys(f).length) throw new HttpError(400, 'Send a calibration on its own, not with other changes');
@@ -297,7 +298,7 @@ export const reviewRoutes: Route[] = [
         if (!c || typeof c !== 'object') throw new HttpError(400, 'calibration is {hits, notes, false_alarms, controls, model}');
         const e = run(() => app.store.reviews.calibrate(project.id, slug, c, session.name));
         broadcast(app, project);
-        return json(res, 200, viewOne(app, project, e));
+        return json(res, 200, await viewOne(app, project, e));
       }
       const was = app.store.reviews.get(project.id, slug);
       // A person taking an entry off trial marks it good (Q12): the record says who vouched for it instead of a run's counts.
@@ -305,7 +306,7 @@ export const reviewRoutes: Route[] = [
       const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 200) : noteFor(f);
       const e = run(() => app.store.reviews.save(project.id, slug, f, session.name, note, body.version));
       broadcast(app, project);
-      return json(res, 200, viewOne(app, project, e));
+      return json(res, 200, await viewOne(app, project, e));
     },
   },
   {
@@ -317,10 +318,10 @@ export const reviewRoutes: Route[] = [
     async handler({ req, res, app, session, project, params }) {
       const { dir } = (await readJson(req)) ?? {};
       if (dir !== 'up' && dir !== 'down') throw new HttpError(400, 'dir is up or down');
-      ensure(app, project);
+      await ensure(app, project);
       const e = run(() => app.store.reviews.move(project.id, decodeURIComponent(params.slug), dir, session.name));
       broadcast(app, project);
-      return json(res, 200, viewOne(app, project, e));
+      return json(res, 200, await viewOne(app, project, e));
     },
   },
   {
@@ -331,7 +332,7 @@ export const reviewRoutes: Route[] = [
     refuse: 'Only the minion that ran it records a run',
     async handler({ req, res, app, caller, project, params }) {
       const { round, verdict } = (await readJson(req)) ?? {};
-      ensure(app, project);
+      await ensure(app, project);
       const r = run(() => app.store.reviews.recordRun(project.id, decodeURIComponent(params.slug), { ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!), round, verdict }));
       broadcast(app, project);
       return json(res, 201, r);
@@ -345,7 +346,7 @@ export const reviewRoutes: Route[] = [
     refuse: 'Only a minion records a verdict, when a person disagrees with a critic in its chat',
     async handler({ req, res, app, caller, project, params }) {
       const { person, words } = (await readJson(req)) ?? {};
-      ensure(app, project);
+      await ensure(app, project);
       const v = run(() => app.store.reviews.recordVerdict(project.id, decodeURIComponent(params.slug), { person, words, ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!) }));
       broadcast(app, project);
       return json(res, 201, v);
@@ -359,7 +360,7 @@ export const reviewRoutes: Route[] = [
     refuse: 'Only the minion that ran the finding checker records what it refuted',
     async handler({ req, res, app, caller, project }) {
       const { refuted } = (await readJson(req)) ?? {};
-      ensure(app, project);
+      await ensure(app, project);
       const counted = run(() => app.store.reviews.recordRefutes(project.id, { ticketId: caller!.kind === 'coordinator' ? null : caller!.id, minion: minionName(caller!), refuted }));
       broadcast(app, project);
       return json(res, 201, { counted, read: app.store.reviews.lessons(project.id).map((l) => l.kind) });
@@ -409,7 +410,7 @@ export const reviewRoutes: Route[] = [
       if (!isInt(version)) throw new HttpError(400, 'Name the version to restore');
       const e = run(() => app.store.reviews.restore(project.id, decodeURIComponent(params.slug), version, session.name));
       broadcast(app, project);
-      return json(res, 200, viewOne(app, project, e));
+      return json(res, 200, await viewOne(app, project, e));
     },
   },
 ];

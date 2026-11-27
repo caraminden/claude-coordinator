@@ -31,7 +31,10 @@ function personView(app: App, u: User) {
 
 /** The signed-in person's id; a cookie from before per-person logins has none. */
 /** The Settings card's Codex: its sign-in, and the override it makes possible (#337). */
-const codexState = (app: App, uid: number) => ({ ...app.codex.status(uid), override: app.runner.codexView(uid) });
+const codexState = async (app: App, uid: number) => {
+  await app.codex.refresh(uid);
+  return { ...app.codex.status(uid), override: app.runner.codexView(uid) };
+};
 
 function uidOf(session: { uid?: number }): number {
   if (typeof session.uid !== 'number') throw new HttpError(400, 'Sign in again first');
@@ -377,26 +380,26 @@ export const peopleRoutes: Route[] = [
     method: 'GET',
     path: '/api/me/codex',
     who: ['person'],
-    handler({ res, app, session }) {
+    async handler({ res, app, session }) {
       const uid = uidOf(session);
       // Fresh usage windows for the card's bar (#342): they arrive as a 'codex' message.
       void app.codex.readLimits(uid).then(
         (l) => l && app.runner.updateCodexUsage(l, uid),
         () => {},
       );
-      return json(res, 200, codexState(app, uid));
+      return json(res, 200, await codexState(app, uid));
     },
   },
   {
     method: 'POST',
     path: '/api/me/codex',
     who: ['person'],
-    handler({ res, app, session }) {
+    async handler({ res, app, session }) {
       const uid = uidOf(session);
       if (app.codex.status(uid).state === 'no container') throw new HttpError(400, 'Codex signs in inside your own Claude container, and you have none: link your Claude first.');
       // Starting the container can take minutes (it rebuilds the image after an update): Settings polls GET meanwhile.
       void app.codex.link(uid);
-      return json(res, 202, codexState(app, uid));
+      return json(res, 202, await codexState(app, uid));
     },
   },
   {
@@ -410,7 +413,7 @@ export const peopleRoutes: Route[] = [
         await app.codex.unlink(uidOf(session)).catch((err) => {
           throw new HttpError(400, err.message);
         });
-      return json(res, 200, codexState(app, uidOf(session)));
+      return json(res, 200, await codexState(app, uidOf(session)));
     },
   },
   // "Enable Codex override" (#337): Codex becomes the person's default everywhere their turns run.
@@ -437,7 +440,7 @@ export const peopleRoutes: Route[] = [
       const { keep } = await readJson(req);
       if (typeof keep !== 'boolean') throw new HttpError(400, 'keep must be true or false');
       app.store.setSetting(optOutKey(uid), !keep);
-      if (!keep) dropKeptPerson(keptDirs(app.dataDir), uid);
+      if (!keep) dropKeptPerson(await keptDirs(app.dataDir), uid);
       return json(res, 200, { keep });
     },
   },

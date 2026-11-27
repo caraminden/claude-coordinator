@@ -21,7 +21,7 @@ import {
   loadStarters,
   nameFor,
   parseWhen,
-  readAgentFiles,
+  readAgentFilesLater,
   renderEntry,
   renderSet,
   repoRubrics,
@@ -704,7 +704,7 @@ test('a critic hands a second fail to its teacher entry: the file keeps the step
   assert.match(readFileSync(join(dir, 'art.md'), 'utf8'), /\non_fail: person after 3 fails\n/);
 });
 
-test("a scheme's agent files: kind from name, description or kind:, one entry each unless a same-named one exists, and the turn hears them", () => {
+test("a scheme's agent files: kind from name, description or kind:, one entry each unless a same-named one exists, and the turn hears them", async () => {
   assert.equal(agentKind('art-critic', ''), 'critic');
   assert.equal(agentKind('claim-referee', 'Judges claims'), 'referee');
   assert.equal(agentKind('art-professor', 'Judges nothing'), 'teacher', 'the name wins over the description');
@@ -719,7 +719,7 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   writeFileSync(join(dir, 'art-professor.md'), '---\ndescription: Teaches art fixes\n---\nTeach.\n');
   writeFileSync(join(dir, 'tuner.md'), '---\ndescription: Tunes\nkind: checker\n---\nCheck.\n');
   writeFileSync(join(dir, 'notes.txt'), 'not an agent');
-  const files = readAgentFiles(repo);
+  const files = await readAgentFilesLater(repo);
   assert.deepEqual(
     files.map((f) => [f.slug, f.kind, f.path, f.description]),
     [
@@ -729,8 +729,8 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
     ],
   );
   assert.equal(files[0].text.trim(), 'You judge shaders.');
-  assert.deepEqual(readAgentFiles(null), []);
-  assert.deepEqual(readAgentFiles(join(root, 'no-such-repo')), []);
+  assert.deepEqual(await readAgentFilesLater(null), []);
+  assert.deepEqual(await readAgentFilesLater(join(root, 'no-such-repo')), []);
 
   const { set } = fresh();
   set.create(3, { slug: 'art-professor', name: 'Art professor', kind: 'teacher', body: 'Fix palettes first.' }, 'Josh');
@@ -760,7 +760,7 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   // A file named like a reserved slug stays off rather than break the page; a kind: edit in a file reaches its entry.
   writeFileSync(join(dir, 'audits.md'), '---\ndescription: Audits\n---\nx\n');
   writeFileSync(join(dir, 'tuner.md'), '---\ndescription: Tunes\nkind: teacher\n---\nTeach.\n');
-  set.ensureAgents(3, readAgentFiles(repo));
+  set.ensureAgents(3, await readAgentFilesLater(repo));
   assert.equal(set.get(3, 'audits'), null);
   assert.equal(set.get(3, 'tuner')!.kind, 'teacher');
   // A critic's hand-off to a repo teacher that's on stays in its rubric; back on trial, a repo blocker only advises.

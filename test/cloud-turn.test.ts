@@ -61,8 +61,9 @@ function push(text, reply) {
   execFileSync('git', ['clone', '-q', ${JSON.stringify(origin)}, d]);
   mkdirSync(join(d, '.citadel/out'), { recursive: true });
   writeFileSync(join(d, '.citadel/out/report.md'), '# Report ' + reply);
-  writeFileSync(join(d, '.citadel/result.json'), JSON.stringify({ reply, card: reply === 'first' ? { questions: [{ question: 'Which?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } : null, files: ['.citadel/out/report.md', '../../etc/passwd'] }));
-  g('add', '-A'); g('commit', '-q', '-m', reply); g('push', '-q', 'origin', 'HEAD:refs/heads/' + branch);
+  writeFileSync(join(d, '.citadel/result.json'), JSON.stringify({ job: branch, reply, card: reply === 'first' ? { questions: [{ question: 'Which?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } : null, files: ['.citadel/out/report.md', '../../etc/passwd'] }));
+  // stray: as session_01CCievTuZm4rpBfvJoJd4WY did on 2026-11-26, the result goes only to the session's own working branch.
+  g('add', '-A'); g('commit', '-q', '-m', reply); g('push', '-q', 'origin', 'HEAD:refs/heads/' + (mode === 'stray' ? 'claude/work-' + branch.split('/')[1] : branch));
 }
 if (args[0] === '-p') {
   if (mode === 'fail') { console.error('session not found'); process.exit(1); }
@@ -304,4 +305,34 @@ test('a session that is quiet but asks nothing is said to be quiet once, and wai
   const evs = await drive({ branch: 'cloud/t7-quiet', session: 'session_01FAKEabc123', text: 'cloud/t7-quiet', limitMs: 4000, idleMs: 300, teleportMs: 1000 }, { FAKE_MODE: 'stuck' });
   assert.equal(texts(evs).filter((t) => /no push yet and no question/.test(t)).length, 1);
   assert.equal((evs.at(-1) as { is_error: boolean }).is_error, true);
+});
+
+test("a result pushed only to the session's own claude/ branch is read from there, and that branch is left alone; another job's result there is not", async () => {
+  // A working branch that already holds an earlier job's result, as tonight's did: never read as this job's.
+  const d = join(root, 'stale');
+  execFileSync('git', ['clone', '-q', origin, d], { stdio: 'ignore' });
+  mkdirSync(join(d, '.citadel'), { recursive: true });
+  writeFileSync(join(d, '.citadel/result.json'), JSON.stringify({ job: 'cloud/t7-earlier', reply: 'stale', files: [] }));
+  git(d, 'add', '-A');
+  git(d, 'commit', '-q', '-m', 'earlier');
+  git(d, 'push', '-q', 'origin', 'HEAD:refs/heads/claude/work-stale');
+  const branch = 'cloud/t7-stray';
+  const evs = await drive({ branch, session: 'session_01FAKEabc123', sha: 'old', text: `Push to ${branch}.`, limitMs: 20_000, idleMs: 15_000 }, { FAKE_MODE: 'stray' });
+  assert.match(texts(evs).at(-1)!, /^second/);
+  assert.equal((evs.at(-1) as { is_error: boolean }).is_error, false);
+  assert.equal(jsonLines(log).at(-1)?.[0], '-p', 'read off the branch, not through teleport');
+  assert.notEqual(git(origin, 'branch', '--list', 'claude/work-t7-stray'), '', "the session's own branch is kept");
+  assert.notEqual(git(origin, 'branch', '--list', 'claude/work-stale'), '');
+});
+
+test('a result naming another job is not read off its own result branch either', async () => {
+  const d = join(root, 'other');
+  execFileSync('git', ['clone', '-q', origin, d], { stdio: 'ignore' });
+  mkdirSync(join(d, '.citadel'), { recursive: true });
+  writeFileSync(join(d, '.citadel/result.json'), JSON.stringify({ job: 'cloud/t7-someone-else', reply: 'wrong', files: [] }));
+  git(d, 'add', '-A');
+  git(d, 'commit', '-q', '-m', 'other');
+  git(d, 'push', '-q', 'origin', 'HEAD:refs/heads/cloud/t7-own');
+  const evs = await drive({ branch: 'cloud/t7-own', session: 'session_01FAKEabc123', text: 'cloud/t7-own', limitMs: 300 }, { FAKE_MODE: 'silent' });
+  assert.equal(texts(evs).at(-1), 'from teleport');
 });

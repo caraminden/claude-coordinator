@@ -32,15 +32,15 @@ test('a research or ideation minion create_ticket let go may start in the cloud 
   assert.equal(startBlock({ ...marked, mark: { ...marked.mark, kind: 'sweep' }, type: 'chore' }), null, 'a marked test sweep may be of any type');
 });
 
-test('a job with a step over 25 minutes is refused for the cloud, and so is a kind not on the allow list', () => {
-  assert.equal(markRefusal('research', 25), null);
-  assert.match(markRefusal('research', 26) ?? '', /a step over 25 minutes is refused/);
+test('a job with a step over 110 minutes is refused for the cloud, and so is a kind not on the allow list', () => {
+  assert.equal(markRefusal('research', 110), null);
+  assert.match(markRefusal('research', 111) ?? '', /a step over 110 minutes is refused/);
   assert.match(markRefusal('feature', 5) ?? '', /must be one of research, ideation, sweep/);
   assert.match(markRefusal('sweep', 0) ?? '', /positive number/);
   const pool = new CloudPool(settings());
-  assert.match(pool.setMark(1, { kind: 'sweep', minutes: 40, by: 'x' }) ?? '', /refused/);
+  assert.match(pool.setMark(1, { kind: 'sweep', minutes: 140, by: 'x' }) ?? '', /refused/);
   assert.equal(pool.mark(1), null, 'a refused mark is not kept');
-  assert.equal(startBlock({ ...ok, mark: { kind: 'sweep', minutes: 40, by: 'x', at: NOW } })?.includes('refused'), true, 'a mark saved before the cap still stops');
+  assert.equal(startBlock({ ...ok, mark: { kind: 'sweep', minutes: 140, by: 'x', at: NOW } })?.includes('refused'), true, 'a mark saved before the cap still stops');
 });
 
 test("create_ticket lets a research minion go unless cloud: false or its brief names the shared folder; a schedule's never goes", () => {
@@ -159,7 +159,8 @@ test("a card's research start carries its handoff's text and goes to the cloud; 
 test('the first message names the branch, the time and what the session lacks; a follow-up only how to answer', () => {
   const first = cloudPrompt({ ticket: 9, branch: 'cloud/t9-a', minutes: 15, first: true, messages: '[Josh]: compare X and Y' });
   assert.match(first, /minion #9's cloud session/);
-  assert.match(first, /keep it under 25 minutes/);
+  assert.match(first, /timeout of up to 110 minutes[^\n]*Never end your turn while a command still runs/);
+  assert.match(first, /"job": "cloud\/t9-a"/, 'a result names its job, so one left by another is never read');
   assert.match(first, /longest step should take about 15 minutes/);
   assert.match(first, /\[Josh\]: compare X and Y/);
   assert.match(first, /git push origin HEAD:refs\/heads\/cloud\/t9-a/);

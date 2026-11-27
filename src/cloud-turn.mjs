@@ -66,11 +66,14 @@ export function keyFor(screen) {
  * A result as the session wrote it, checked: it comes from outside, so anything not of its shape is refused.
  * @param {string} text @returns {CloudResult}
  */
-export function readResult(text) {
+export function readResult(text, job = '', strict = false) {
   /** @type {unknown} */
   const raw = JSON.parse(text);
   if (!raw || typeof raw !== 'object') throw new Error('the result is not a JSON object');
   const r = /** @type {Record<string, unknown>} */ (raw);
+  // A result names its job (its result branch): one left on a branch by an earlier job is never read as this one's. Off its own
+  // result branch (a session's working branch) a result must name it; on its own, an older session's unnamed one still reads.
+  if (job && (typeof r.job === 'string' || strict) && r.job !== job) throw Object.assign(new Error(`the result is another job's (${String(r.job ?? 'unnamed')})`), { notOurs: true });
   if (typeof r.reply !== 'string') throw new Error('the result has no reply');
   const card = r.card && typeof r.card === 'object' && Array.isArray(/** @type {Record<string, unknown>} */ (r.card).questions) ? { questions: /** @type {unknown[]} */ (/** @type {Record<string, unknown>} */ (r.card).questions) } : null;
   const files = Array.isArray(r.files) ? r.files.filter((f) => typeof f === 'string' && /^\.citadel\/out\/[^\0]+$/.test(f) && !f.split('/').includes('..')).slice(0, MAX_FILES) : [];
@@ -211,16 +214,39 @@ async function remoteSha(job, branch = job.branch) {
   return out.split(/\s/)[0] || null;
 }
 
+/** A session's own working branches: the cloud environment's Stop hook has it push there (`claude/<name>`), whatever it was told. */
+export const WORKING = 'refs/heads/claude/*';
+
+/**
+ * One look at origin: the job's result branch and every session working branch, by branch name to sha.
+ * @param {CloudJob} job @returns {Promise<Map<string, string>>}
+ */
+async function heads(job) {
+  const out = await run('git', ['-C', job.cwd, 'ls-remote', 'origin', `refs/heads/${job.branch}`, WORKING]);
+  return new Map(
+    out
+      .split('\n')
+      .map((l) => l.split('\t'))
+      .filter(([sha, ref]) => sha && ref?.startsWith('refs/heads/'))
+      .map(([sha, ref]) => [ref.slice('refs/heads/'.length), sha]),
+  );
+}
+
 /**
  * Read the result at `sha`, copying its files into the minion's files folder, then delete the branch.
  * @param {CloudJob} job @param {string} sha @returns {Promise<CloudResult>}
  */
 async function fetchResult(job, sha, branch = job.branch) {
   const ref = `refs/citadel-cloud/${branch}`;
+  const own = branch === job.branch || branch === job.last;
   await run('git', ['-C', job.cwd, 'fetch', '-q', 'origin', `+refs/heads/${branch}:${ref}`]);
   let read = false;
   try {
-    const result = readResult(await run('git', ['-C', job.cwd, 'show', `${sha}:${RESULT}`]));
+    const text = await run('git', ['-C', job.cwd, 'show', `${sha}:${RESULT}`]).catch((err) => {
+      if (own) throw err;
+      throw Object.assign(new Error(`no ${RESULT} on ${branch}`), { notOurs: true });
+    });
+    const result = readResult(text, branch === job.last ? job.last : job.branch, !own);
     /** @type {string[]} */
     const missing = [];
     if (job.files && result.files.length) {
@@ -236,8 +262,8 @@ async function fetchResult(job, sha, branch = job.branch) {
     return { ...result, files: result.files.filter((f) => !missing.includes(f)), missing: missing.length ? { files: missing, branch } : undefined };
   } finally {
     await run('git', ['-C', job.cwd, 'update-ref', '-d', ref]).catch(() => {});
-    // A result read: its branch goes. One that couldn't be read stays on origin for a look.
-    if (read) await run('git', ['-C', job.cwd, 'push', '-q', 'origin', '--delete', branch]).catch((err) => say(`Could not delete the result branch \`${branch}\`: ${err.message}`));
+    // A result read: its branch goes (never a session's own working branch). One that couldn't be read stays on origin for a look.
+    if (read && own) await run('git', ['-C', job.cwd, 'push', '-q', 'origin', '--delete', branch]).catch((err) => say(`Could not delete the result branch \`${branch}\`: ${err.message}`));
   }
 }
 
@@ -283,7 +309,7 @@ async function teleport(job, session) {
       return Date.now() - askedAt > 1500 ? { text: '' } : null;
     };
     const { found, screen } = await underPty(job, '--teleport', session, join(dir, 'repo'), job.teleportMs ?? 90_000, done);
-    return { result: found?.text ? readResult(found.text) : null, screen };
+    return { result: found?.text ? readResult(found.text, job.branch) : null, screen };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -328,6 +354,9 @@ export async function cloudTurn(job) {
   // Its result comes back through origin: a checkout that can't reach it would leave the turn waiting for nothing.
   const reach = await run('git', ['-C', job.cwd, 'ls-remote', 'origin', 'HEAD'], { timeout: 30_000 }).catch((err) => err);
   if (reach instanceof Error) return end(`This turn can't reach the repo on GitHub from its checkout, so a cloud session's result could never come back. Nothing was sent to the cloud.\n\n${reach.message}`, true);
+  // The working branches as they stand before this job goes: a later push there is looked at, an earlier one never.
+  const before = await heads(job).catch(() => new Map());
+  before.delete(job.branch);
   const sized = [...(job.model ? ['--model', job.model] : []), ...(job.effort ? ['--effort', job.effort] : [])];
   if (!session) {
     const { found, screen, exited } = await underPty(job, '--cloud', job.text, job.cwd, job.startMs, sessionIn, { CLOUD_MODEL: job.model ?? '', CLOUD_EFFORT: job.effort ?? '', CLOUD_DENY: 'AskUserQuestion' });
@@ -361,27 +390,37 @@ export async function cloudTurn(job) {
   let fails = 0;
   let looks = 0;
   let quietSaid = false;
+  /** Each branch's sha already looked at, so a commit that holds no result of this job's is fetched once: the session's working
+   * branches as they stood before this job went, and anything read since. */
+  const seen = new Map(before);
   /** @param {unknown} err */
   const note = (err) => {
     failed = err instanceof Error ? err.message : String(err);
     return null;
   };
   for (;;) {
-    const sha = await remoteSha(job).then(
+    const now = await heads(job).then(
       (v) => ((fails = 0), v),
       (err) => ((fails += 1), note(err)),
     );
     if (fails >= MAX_GIT_FAILS) return end(`This turn lost its way to the repo on GitHub: ${MAX_GIT_FAILS} looks for \`${job.branch}\` failed in a row. The cloud session${session ? ` ${session}` : ''} may still push it; the next message reads it.\n\nThe last error: ${failed}`, true);
-    if (sha && sha !== job.sha) {
+    // Its own result branch first, then any working branch that moved since the job went (2026-11-26: a session pushed its
+    // answer only to its own claude/ branch, and the turn waited on a branch that never came).
+    const moved = [...(now ?? [])].filter(([b, sha]) => sha !== job.sha && seen.get(b) !== sha).sort(([a], [b]) => Number(b === job.branch) - Number(a === job.branch));
+    for (const [branch, sha] of moved) {
+      seen.set(branch, sha);
       try {
-        result = await fetchResult(job, sha);
+        result = await fetchResult(job, sha, branch);
       } catch (err) {
+        if (/** @type {{ notOurs?: boolean }} */ (err).notOurs) continue;
         emit({ type: 'system', subtype: 'cloud', session, branch: job.branch, sha });
-        return end(`The cloud session pushed \`${job.branch}\` (${sha.slice(0, 9)}) but its result couldn't be read: ${err instanceof Error ? err.message : String(err)}`, true);
+        return end(`The cloud session pushed \`${branch}\` (${sha.slice(0, 9)}) but its result couldn't be read: ${err instanceof Error ? err.message : String(err)}`, true);
       }
+      if (branch !== job.branch) say(`The cloud session pushed its result to its own branch \`${branch}\`, not \`${job.branch}\`; read from there.`);
       emit({ type: 'system', subtype: 'cloud', session, branch: job.branch, sha });
       break;
     }
+    if (result) break;
     // shortcut: a start with no id keeps no branch for a later look, so a push after this turn ends is lost; save the branch alone if that bites.
     // Quiet for idleMs with no push: read the session back. It may have a question open that only claude.ai shows (#2191).
     if (session && job.idleMs && Date.now() - began >= job.idleMs * (looks + 1) && Date.now() - began < job.limitMs) {

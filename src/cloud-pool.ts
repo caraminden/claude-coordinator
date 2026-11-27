@@ -10,8 +10,9 @@
 //     marked for the cloud (CLOUD_KINDS). A schedule's start stays home: its run files itself away with Citadel's tools;
 //   - the cloud first, though perigee has room (Cara, same answer: "Anything that can go to the cloud with no loss of value
 //     should prioritize running there"; src/turn-line.ts); a first turn whose message carries pictures or files stays home;
-//   - a job whose longest single step runs over CLOUD.stepMinutes is refused: a cloud session stops one background command at
-//     30 minutes, not the session (Cara, 2026-11-26: "I feel like even medium jobs could be moved right? 30m isn't THAT short");
+//   - a job whose longest single step runs over CLOUD.stepMinutes is refused: a session runs a foreground command for at most 10
+//     minutes and a background one for up to 2 hours when it is given a timeout (code.claude.com/docs/en/tools-reference, read
+//     2026-11-27 by #2200's research; #2147's 30 minutes is the default with none);
 //   - no cap of ours on sessions at once, a day or by weekly plan use (Josh, 2026-11-26: "we shouldnt be adding any limits,
 //     we should get any value we can out of cloud sessions"); Anthropic documents none either;
 //   - never a Taskmaster's turn, the Overlord's or a ship's: only a minion's ordinary turns are ever placed (the line and
@@ -25,10 +26,10 @@ import { githubRepo } from './github.ts';
 export const CLOUD_PLACE = -1;
 
 export const CLOUD = {
-  /** The longest single step a job may have: the VM stops one background command at 30 minutes (#2147). */
-  stepMinutes: 25,
+  /** The longest single step a job may have: a background command with a timeout runs up to 2 hours (B3 of #2200's research). */
+  stepMinutes: 110,
   /** How long a turn waits for its session's result before reading it back through teleport: a session may run several steps. */
-  turnMinutes: 90,
+  turnMinutes: 130,
   /** How often the driver looks for the session's branch. */
   pollMs: 20_000,
   /**
@@ -120,7 +121,7 @@ export const cloudBranch = (ticketId: number, now: number) => `cloud/t${ticketId
 export function markRefusal(kind: unknown, minutes: unknown): string | null {
   if (typeof kind !== 'string' || !(CLOUD_KINDS as readonly string[]).includes(kind)) return `cloud kind must be one of ${CLOUD_KINDS.join(', ')}`;
   if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) return 'cloud minutes must be a positive number: how long its longest single step should take';
-  if (minutes > CLOUD.stepMinutes) return `a cloud session stops a background command at 30 minutes, so a job with a step over ${CLOUD.stepMinutes} minutes is refused for the cloud: this one's is ${minutes}`;
+  if (minutes > CLOUD.stepMinutes) return `a cloud session stops a background command at 2 hours, so a job with a step over ${CLOUD.stepMinutes} minutes is refused for the cloud: this one's is ${minutes}`;
   return null;
 }
 
@@ -264,17 +265,17 @@ export class CloudPool {
 export function cloudPrompt(o: { ticket: number; branch: string; minutes: number | null; first: boolean; messages: string }): string {
   const how = [
     `Send your result home this way (Citadel reads it off the branch; nobody reads this session):`,
-    `1. Write \`.citadel/result.json\`: {"reply": "<markdown for the chat>", "card": null, "files": []}.`,
+    `1. Write \`.citadel/result.json\`: {"job": "${o.branch}", "reply": "<markdown for the chat>", "card": null, "files": []}. "job" must be exactly that: a result naming another job is not read.`,
     `   - "files": report or other files you made, put under \`.citadel/out/\` and listed by that path; people see them.`,
     `   - "card": when you need a person's decision, {"questions": [{"question": "...?", "header": "<24 chars>", "options": [{"label": "...", "description": "...", "recommended": true}, {"label": "...", "description": "..."}], "multiSelect": false}]} (2 to 4 options, exactly one recommended), then stop: the answer comes back as your next message here.`,
     `   - Never use AskUserQuestion or anything else that waits on a person in this session: nobody sees it there. Put the question in "card" and stop.`,
-    `2. Commit them and push: \`git push origin HEAD:refs/heads/${o.branch}\`. Push once for each result.`,
+    `2. Commit them and push: \`git push origin HEAD:refs/heads/${o.branch}\`. Push once for each result. A hook may also ask you to push your own working branch: do both, but this push is the one Citadel reads.`,
     `3. If the push fails, print the same JSON between a line \`CITADEL-RESULT-BEGIN\` and a line \`CITADEL-RESULT-END\` as your last message.`,
   ].join('\n');
   if (!o.first) return `${o.messages}\n\n---\n${how}`;
   return [
     `You are minion #${o.ticket}'s cloud session: Citadel (a web app that runs Claude Code sessions as workers) sent this job here. You have the repo and the web; you don't have Citadel's tools, its shared folder, its database or its server's files.`,
-    `Run each long command (a build, a test run) in the foreground and keep it under ${CLOUD.stepMinutes} minutes, splitting a longer one into steps: the session stops a background command at 30 minutes, and a job still running when you stop dies.${o.minutes ? ` This job's longest step should take about ${o.minutes} minutes.` : ''}`,
+    `A command that may take over 10 minutes (a build, a test run): start it in the background with a timeout of up to ${CLOUD.stepMinutes} minutes, then wait for it in this same turn; check on it in the foreground until it ends. Never end your turn while a command still runs: nothing wakes you, and the command dies with your turn.${o.minutes ? ` This job's longest step should take about ${o.minutes} minutes.` : ''}`,
     `The job:\n\n${o.messages}`,
     `---\n${how}`,
   ]

@@ -47,7 +47,8 @@ export const peopleQueries = {
       this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
       // The heir's, lent to no scheme with every role off, so a gone person's computer reaches no one's turns and serves
       // nothing new until the heir switches it on or removes it.
-      this.db.prepare('UPDATE machine_roles SET "on" = 0 WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
+      // Through the roles' own writer, so the old columns agree and the next boot's rollback check doesn't switch them back.
+      for (const { id: m } of this.db.prepare('SELECT id FROM machines WHERE owner_id = ?').all(id) as { id: number }[]) this.writeMachineRoles(m, (roles) => roles.map((r) => ({ ...r, on: false, projects: [] })));
       this.db.prepare('DELETE FROM machine_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
       this.db.prepare('DELETE FROM machine_role_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
       this.db.prepare('UPDATE machines SET owner_id = ?, scoped = 1 WHERE owner_id = ?').run(heir, id);

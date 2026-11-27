@@ -70,15 +70,22 @@ test("a removed owner's machine goes to the heir, lent to no scheme with every r
   store.setMachineProjects(box.id, [shared.id]);
   store.setMachineRole(box.id, 'ci', { on: true, projects: [shared.id] });
   store.setMachineRole(box.id, 'turns', { on: true, projects: [shared.id] });
+  // A CI runner host of theirs that no role write ever reached: its roles are still read from the old columns.
+  const host = store.createMachine('gone-host', '', 'Gone', gone.id);
+  store.db.prepare('UPDATE machines SET last_check = ? WHERE id = ?').run(JSON.stringify({ at: 1, results: [], runners: true }), host.id);
+  store.db.prepare('DELETE FROM machine_roles WHERE machine_id = ?').run(host.id);
   store.deleteUser(gone.id, cara.id);
-  assert.deepEqual(
-    store
-      .machineRoles(box.id)
+  const on = (s: Store, id: number) =>
+    s
+      .machineRoles(id)
       .filter((r) => r.on)
-      .map((r) => r.role),
-    [],
-    "the heir switches on what the gone person's PC serves",
-  );
+      .map((r) => r.role);
+  assert.deepEqual([on(store, box.id), on(store, host.id)], [[], []], "the heir switches on what the gone person's PCs serve");
+  // Still off after a restart (the boot's rollback check reads the old columns), and a new scheme joins no CI list.
+  const rebooted = new Store(join(dir, 'c.db'));
+  rebooted.createProject('After Gone', null, cara.id);
+  assert.deepEqual([on(rebooted, box.id), on(rebooted, host.id)], [[], []]);
+  rebooted.db.close();
   const after = store.getMachine(box.id)!;
   assert.equal(after.owner_id, cara.id, 'every machine has an owner: the heir, as with their schemes');
   assert.deepEqual(store.machineProjects(box.id), []);

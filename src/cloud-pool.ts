@@ -39,6 +39,8 @@ export const CLOUD = {
   costUsd: { start: 0.4, followUp: 0.1 },
   /** How long a pty start may take before it gives up (first runs answer onboarding screens: 55 s in the trial). */
   startMs: 180_000,
+  /** A session with no push for this long is read back for a question open in it (#2191). */
+  idleMs: 8 * 60_000,
 };
 
 /** The minion types that go to the cloud with no mark. */
@@ -240,7 +242,7 @@ export class CloudPool {
     const messages = batch.map((m) => `[${m.author}]: ${m.text}${left(m) ? `\n(${left(m)} picture(s) or file(s) came with this in Citadel's chat; you can't see them, so say so if the job needs them.)` : ''}`).join('\n\n');
     const text = cloudPrompt({ ticket: t.number ?? t.id, branch, minutes: this.mark(t.id)?.minutes ?? null, first: !s, messages });
     const cost = s ? CLOUD.costUsd.followUp : CLOUD.costUsd.start;
-    return { claude, cwd: t.cwd, branch, last: s?.branch ?? null, session: s?.session ?? null, sha: s?.sha ?? null, text, files, model: run.model ?? null, effort: run.effort ?? null, cost, limitMs: CLOUD.turnMinutes * 60_000, pollMs: CLOUD.pollMs, startMs: CLOUD.startMs };
+    return { claude, cwd: t.cwd, branch, last: s?.branch ?? null, session: s?.session ?? null, sha: s?.sha ?? null, text, files, model: run.model ?? null, effort: run.effort ?? null, cost, limitMs: CLOUD.turnMinutes * 60_000, idleMs: CLOUD.idleMs, pollMs: CLOUD.pollMs, startMs: CLOUD.startMs };
   }
 }
 

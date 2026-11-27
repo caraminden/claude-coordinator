@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { keyFor, printedResult, readResult, sessionIn } from '../src/cloud-turn.mjs';
+import { keyFor, printedResult, questionsIn, readResult, sessionIn } from '../src/cloud-turn.mjs';
 import { jsonLines } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'cloud-turn-'));
@@ -54,7 +54,7 @@ const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const mode = process.env.FAKE_MODE || 'push';
 function push(text, reply) {
-  if (mode === 'silent') return;
+  if (['silent', 'ask', 'stuck'].includes(mode)) return;
   const branch = text.match(/cloud\\/[\\w-]+/)[0];
   const d = mkdtempSync(join(${JSON.stringify(root)}, 'vm-'));
   const g = (...a) => execFileSync('git', ['-C', d, ...a], { env: { ...process.env, GIT_AUTHOR_NAME: 'vm', GIT_AUTHOR_EMAIL: 'v@m', GIT_COMMITTER_NAME: 'vm', GIT_COMMITTER_EMAIL: 'v@m' } });
@@ -70,7 +70,9 @@ if (args[0] === '-p') {
   push(args[1], 'second');
   console.log(JSON.stringify({ ok: true }));
 } else if (args[0] === '--teleport') {
-  process.stdout.write('\\x1b[2Jtranscript...\\nCITADEL-RESULT-BEGIN\\n{"reply":"from teleport","files":[]}\\nCITADEL-RESULT-END\\n');
+  if (mode === 'ask') process.stdout.write('\\x1b[2Jtranscript...\\n\\u25cfInterrupted\\u00b7noanswersavedforClaude\\'squestions:\\n  \\u23bf  \\u00b7 Which database? (Postgres / SQLite)\\n\\u25cfSession resumed\\n');
+  else if (mode === 'stuck') process.stdout.write('\\x1b[2Jtranscript...\\nworking on it\\n');
+  else process.stdout.write('\\x1b[2Jtranscript...\\nCITADEL-RESULT-BEGIN\\n{"reply":"from teleport","files":[]}\\nCITADEL-RESULT-END\\n');
   setInterval(() => {}, 1000);
 } else {
   process.stdout.write('Welcome\\n\\x1b[1mPress Enter to continue\\x1b[0m\\n');
@@ -256,3 +258,49 @@ test('a checkout that cannot reach origin fails at once, before a session starts
 });
 
 mkdirSync(join(root, 'files'), { recursive: true });
+
+const askScreen = "\u25cfInterrupted\u00b7noanswersavedforClaude'squestions:\r  \u23bf  \u00b7 Which database? (Postgres / SQLite)\r  \u00b7 Keep it? (Yes / No / Later)\r\u25cfSession resumed\r";
+
+test('a question left open in the session is read off its screen: each question with its options, the first one recommended', () => {
+  assert.deepEqual(questionsIn(askScreen), {
+    questions: [
+      { question: 'Which database?', header: 'Which database?', options: [{ label: 'Postgres', recommended: true }, { label: 'SQLite' }], multiSelect: false },
+      { question: 'Keep it?', header: 'Keep it?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }, { label: 'Later' }], multiSelect: false },
+    ],
+  });
+  assert.equal(questionsIn('working on it\r'), null);
+  assert.equal(questionsIn("\u25cfInterrupted\u00b7noanswersavedforClaude'squestions:\r  \u23bf  \u00b7 No options here\r"), null, 'a card needs 2 options');
+});
+
+test('a session that goes quiet with a question open: it is read back after idleMs, its question posted as a card, and the turn ends there', async () => {
+  const before = posted.length;
+  const evs = await drive({ branch: 'cloud/t7-ask', session: 'session_01FAKEabc123', text: 'cloud/t7-ask', limitMs: 20_000, idleMs: 300, teleportMs: 8000 }, { FAKE_MODE: 'ask' });
+  assert.equal(posted.length, before + 1);
+  assert.equal((posted.at(-1) as { questions: { question: string }[] }).questions[0].question, 'Which database?');
+  const last = evs.at(-1) as { is_error: boolean; result: string };
+  assert.equal(last.is_error, false, 'a question is an answer, not a failure');
+  assert.match(last.result, /was waiting on a question/);
+  assert.match(last.result, /Which database\?/);
+  assert.equal(
+    evs.some((e) => e.subtype === 'cloud' && e.branch === 'cloud/t7-ask'),
+    true,
+    'its branch is kept for the next turn',
+  );
+});
+
+test("the person's answer goes back into the same session as a follow-up", async () => {
+  const evs = await drive({ branch: 'cloud/t7-ans', session: 'session_01FAKEabc123', sha: 'old', last: 'cloud/t7-ask', text: 'Postgres. Push to cloud/t7-ans.' });
+  assert.deepEqual(
+    jsonLines(log)
+      .find((a) => a[0] === '-p' && a[1] === 'Postgres. Push to cloud/t7-ans.')
+      ?.slice(2, 4),
+    ['--cloud', 'session_01FAKEabc123'],
+  );
+  assert.match(texts(evs).at(-1)!, /^second/);
+});
+
+test('a session that is quiet but asks nothing is said to be quiet once, and waited for to the limit', async () => {
+  const evs = await drive({ branch: 'cloud/t7-quiet', session: 'session_01FAKEabc123', text: 'cloud/t7-quiet', limitMs: 4000, idleMs: 300, teleportMs: 1000 }, { FAKE_MODE: 'stuck' });
+  assert.equal(texts(evs).filter((t) => /no push yet and no question/.test(t)).length, 1);
+  assert.equal((evs.at(-1) as { is_error: boolean }).is_error, true);
+});

@@ -32,7 +32,7 @@ let cost = 0;
 /** How long a start whose id never showed has its branch watched: it may have started, and a stuck screen shouldn't hold its turn for the full limit. */
 const NO_ID_WATCH_MS = 30 * 60_000;
 
-/** @typedef {{ claude: string, cwd: string, branch: string, last?: string | null, session: string | null, sha: string | null, text: string, files: string | null, model?: string | null, effort?: string | null, cost?: number, limitMs: number, pollMs: number, startMs: number }} CloudJob */
+/** @typedef {{ claude: string, cwd: string, branch: string, last?: string | null, session: string | null, sha: string | null, text: string, files: string | null, model?: string | null, effort?: string | null, cost?: number, limitMs: number, idleMs?: number, teleportMs?: number, pollMs: number, startMs: number }} CloudJob */
 /** @typedef {{ questions: unknown[] }} Card */
 /** @typedef {{ reply: string, card: Card | null, files: string[], missing?: { files: string[], branch: string } }} CloudResult */
 
@@ -75,6 +75,30 @@ export function readResult(text) {
   const card = r.card && typeof r.card === 'object' && Array.isArray(/** @type {Record<string, unknown>} */ (r.card).questions) ? { questions: /** @type {unknown[]} */ (/** @type {Record<string, unknown>} */ (r.card).questions) } : null;
   const files = Array.isArray(r.files) ? r.files.filter((f) => typeof f === 'string' && /^\.citadel\/out\/[^\0]+$/.test(f) && !f.split('/').includes('..')).slice(0, MAX_FILES) : [];
   return { reply: r.reply, card, files };
+}
+
+/**
+ * The questions a session had open when `--teleport` read it back: Claude Code shows a pending AskUserQuestion as "Interrupted ·
+ * no answer saved for Claude's questions:" and a line `· <question> (<option> / <option>)` each (seen in #2191's trial; it keeps
+ * neither the options' descriptions nor multi-select). As a card, the first option of each is the recommended one. Null when none.
+ * @param {string} screen @returns {Card | null}
+ */
+export function questionsIn(screen) {
+  const text = plain(screen);
+  const m = /no\s*answer\s*saved\s*for\s*Claude's\s*questions:?/i.exec(text);
+  if (!m) return null;
+  const questions = [];
+  for (const line of text.slice(m.index + m[0].length).split(/\r\n|\r|\n/)) {
+    if (!line.trim()) continue;
+    const q = /^\s*(?:\u23bf\s*)?\u00b7\s*(.+?)\s*\(([^()]*)\)\s*$/.exec(line);
+    if (!q) break;
+    const labels = q[2]
+      .split(' / ')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (labels.length >= 2) questions.push({ question: q[1], header: q[1].slice(0, 24), options: labels.slice(0, 4).map((label, i) => (i ? { label } : { label, recommended: true })), multiSelect: false });
+  }
+  return questions.length ? { questions } : null;
 }
 
 /** The result a session printed between the markers (the teleport read-back), or null. @param {string} screen */
@@ -241,15 +265,25 @@ async function shown(job, result) {
   return reply;
 }
 
-/** The result read back through `claude --teleport`, in a throwaway clone so the minion's checkout is never touched. @param {CloudJob} job @param {string} session */
+/** The result (and the screen) read back through `claude --teleport`, in a throwaway clone so the minion's checkout is never touched. @param {CloudJob} job @param {string} session */
 async function teleport(job, session) {
   const dir = mkdtempSync(join(tmpdir(), 'cloud-teleport-'));
   try {
     const url = (await run('git', ['-C', job.cwd, 'remote', 'get-url', 'origin'])).trim();
     await run('git', ['clone', '-q', '--shared', job.cwd, join(dir, 'repo')]);
     await run('git', ['-C', join(dir, 'repo'), 'remote', 'set-url', 'origin', url]);
-    const { found } = await underPty(job, '--teleport', session, join(dir, 'repo'), 90_000, printedResult);
-    return found ? readResult(found) : null;
+    // The screen is read once a question list has stood still for 1.5 s, so a list still being drawn isn't cut after its first question.
+    let askedAt = 0;
+    /** @param {string} scr */
+    const done = (scr) => {
+      const text = printedResult(scr);
+      if (text) return { text };
+      if (!questionsIn(scr)) return null;
+      askedAt ||= Date.now();
+      return Date.now() - askedAt > 1500 ? { text: '' } : null;
+    };
+    const { found, screen } = await underPty(job, '--teleport', session, join(dir, 'repo'), job.teleportMs ?? 90_000, done);
+    return { result: found?.text ? readResult(found.text) : null, screen };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -271,6 +305,20 @@ async function postCard(card) {
 /** @param {string} text @param {boolean} [error] */
 function end(text, error = false) {
   emit({ type: 'result', subtype: error ? 'error_during_execution' : 'success', is_error: error, result: text, total_cost_usd: 0, cloud_cost_usd: cost, num_turns: 1, usage: { input_tokens: 0, output_tokens: 0 } });
+}
+
+/**
+ * A session waiting on a question only claude.ai shows: post it as a card on the minion and end the turn. The answer comes
+ * back as the next message and goes in as a follow-up like any other; the session closes its open question when it arrives.
+ * @param {CloudJob} job @param {string} session @param {Card} card
+ */
+async function askedHome(job, session, card) {
+  emit({ type: 'system', subtype: 'cloud', session, branch: job.branch });
+  const href = await postCard(card).catch((err) => err);
+  const asked = card.questions.map((q) => `- ${/** @type {{ question: string }} */ (q).question}`).join('\n');
+  const reply = `The cloud session ${session} was waiting on a question in its own session, where nobody can answer it. ${href instanceof Error ? `It couldn't be posted as a card (${href.message}), so here it is; send the answer as a message.` : 'It is posted as a card here; your answer goes back into the session.'}\n\n${asked}`;
+  say(reply);
+  end(reply);
 }
 
 /** @param {CloudJob} job */
@@ -311,6 +359,8 @@ export async function cloudTurn(job) {
   /** Why the last look at origin or teleport failed, for the message if nothing comes back. */
   let failed = '';
   let fails = 0;
+  let looks = 0;
+  let quietSaid = false;
   /** @param {unknown} err */
   const note = (err) => {
     failed = err instanceof Error ? err.message : String(err);
@@ -333,8 +383,21 @@ export async function cloudTurn(job) {
       break;
     }
     // shortcut: a start with no id keeps no branch for a later look, so a push after this turn ends is lost; save the branch alone if that bites.
+    // Quiet for idleMs with no push: read the session back. It may have a question open that only claude.ai shows (#2191).
+    if (session && job.idleMs && Date.now() - began >= job.idleMs * (looks + 1) && Date.now() - began < job.limitMs) {
+      looks += 1;
+      const seen = await teleport(job, session).catch(note);
+      if (seen?.result) {
+        result = seen.result;
+        break;
+      }
+      const card = seen && questionsIn(seen.screen);
+      if (card) return askedHome(job, session, card);
+      if (!quietSaid) say(`The cloud session ${session} has been quiet ${Math.round(job.idleMs / 60_000)} minutes: no push yet and no question open in it. Still waiting on \`${job.branch}\`.`);
+      quietSaid = true;
+    }
     if (Date.now() - began >= (session ? job.limitMs : Math.min(job.limitMs, NO_ID_WATCH_MS))) {
-      result = session ? await teleport(job, session).catch(note) : null;
+      result = session ? await teleport(job, session).then((t) => t.result, note) : null;
       if (result) break;
       return end(
         `No result from the cloud session ${session ?? '(its id never showed)'} after ${Math.round((session ? job.limitMs : Math.min(job.limitMs, NO_ID_WATCH_MS)) / 60_000)} minutes, on \`${job.branch}\` or through teleport. A turn waits that long before reading it through teleport.${failed ? `\n\nThe last error: ${failed}` : ''}`,

@@ -3,14 +3,14 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-/** @import { CiRead, CiScheme, CiProblem, CiRun, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, ReadFailed, TestHealth, CiNumbersView } from './types/ci.js' */
+/** @import { CiRead, CiScheme, CiProblem, CiRun, CiFallback, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, ReadFailed, TestHealth, CiNumbersView } from './types/ci.js' */
 /** @import { ListedTicket } from './types/list.js' */
 /** @import { View, Scheme } from './types.js' */
 /** @import { StatusData } from './types/status.js' */
 /** @import { Child } from './base.js' */
-import { ago, api, h, icon, keepView, view, pacificStamp, poller } from './base.js';
+import { ago, api, h, icon, keepView, view, pacificClockBare, pacificStamp, poller } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
-import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
+import { emptyCard, hueRow, meter, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
 import { pcCard, pcWord, trouble, troubleLine } from './ci-desktop.js';
 import { readHealth, testHealth } from './ci-health.js';
@@ -292,7 +292,8 @@ const queueWords = (q) => `${labelName(q.labels)}: ${q.runners ? `${plural(q.run
  */
 function runningBlock(s, now, ui) {
   const v = s.view;
-  const running = v.running ?? [];
+  const ships = shipRunIds(v);
+  const running = (v.running ?? []).filter((j) => !ships.has(j.run));
   const own = v.runners ?? [];
   const names = new Set(own.map((r) => r.name));
   const jobCell = (/** @type {CiRunningJob} */ j) => [ext(`https://github.com/${v.slug}/actions/runs/${j.run}`, j.name), ' · ', whoText(j)];
@@ -326,7 +327,7 @@ function runningBlock(s, now, ui) {
     // Its opened jobs are part of the same item, so "Show all" never cuts them off the row that opened them.
     ...(ui.hostedOpen ? theirs.map((j) => hueRow({ hue: 'running', lead: 'running', meta: since(j) }, h('strong', { title: j.runner }, j.runner), ' ', jobCell(j))) : []),
   ]);
-  const queues = v.queues ?? [];
+  const queues = queuesBut(v, ships);
   const head = queues.length ? queues.map(queueWords).join(' · ') : 'nothing queued';
   // The Runners tab's notes (#1019: runners moved onto Overview), for a repo whose runners can't be listed or that has none.
   const note = v.runners === null ? "CI health can't list this repo's runners: it needs a repo admin's linked GitHub." : !own.length ? "No self-hosted runners; jobs run on GitHub's." : '';
@@ -351,7 +352,9 @@ function runningBlock(s, now, ui) {
 function runsOn(s, pcs, ui) {
   const mine = pcs.filter((pc) => pc.projects.includes(s.id));
   if (!mine.length) return '';
-  return h('p', { class: 'ci-runs-on muted' }, 'Runs on ', ...mine.flatMap((pc, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'link', onclick: () => ui.openPc(pc.host) }, pc.host), ` · ${pcWord(pc)[1]}`]));
+  // #2231: a scheme whose ships run on GitHub's shards uses its PC for the rest and the fallbacks.
+  const lead = s.view.runs.some(githubShip) ? "Ships run on GitHub's runners; other runs and fallbacks run on " : 'Runs on ';
+  return h('p', { class: 'ci-runs-on muted' }, lead, ...mine.flatMap((pc, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'link', onclick: () => ui.openPc(pc.host) }, pc.host), ` · ${pcWord(pc)[1]}`]));
 }
 
 /**
@@ -406,16 +409,214 @@ function queueRows(g, slug, ui) {
  * @param {CiUi} ui
  */
 function waitingBlock(s, now, ui) {
-  const v = s.view,
-    n = v.waiting.length;
-  const oldest = n ? Math.min(...v.waiting.map((j) => Date.parse(j.since))) : 0;
-  const groups = queueGroups(v.waiting);
+  const v = s.view;
+  const ships = shipRunIds(v);
+  const waiting = v.waiting.filter((j) => !ships.has(j.run)),
+    n = waiting.length;
+  const oldest = n ? Math.min(...waiting.map((j) => Date.parse(j.since))) : 0;
+  const groups = queueGroups(waiting);
   const [row] = settingsRow(
     { key: `ci-waiting-${s.id}`, icon: 'rows', hue: n ? 'waiting' : 'done', title: 'Waiting for a runner', summary: n ? [toneChip('warn', `${n} waiting`), `oldest ${shortSpan(now - oldest)}`] : [toneChip('ok', 'Nobody'), 'no job is waiting'] },
     n ? statTiles([String(n), 'jobs queued', 'waiting'], [shortSpan(now - oldest), 'oldest wait', 'waiting']) : null,
     n ? showFirst({ key: `ci-waiting-${s.id}`, items: groups.map((g) => queueRows(g, v.slug, ui)), n: 5, noun: 'groups', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) }) : emptyCard('No job is waiting', 'Jobs queue here when every runner is busy.'),
   );
   return block(null, n ? 'waiting' : 'done', 'ci-waiting', row);
+}
+
+// ---------- ship CI on GitHub's runners (#2231; Cara, 2026-11-27, picked "Its own block, with a shard strip" and "Ships on top") ----------
+
+/** A ship's run (a `land/` branch) whose jobs ran on GitHub's runners. */
+/** @param {CiRun} r */
+const githubShip = (r) => r.branch.startsWith('land/') && r.where === 'github';
+/** The GitHub ship runs going now: their jobs show in Ship CI on GitHub, not as runners busy or jobs waiting. */
+/** @param {CiViewData} v */
+const shipRunIds = (v) => new Set(v.runs.filter((r) => githubShip(r) && r.status !== 'completed').map((r) => r.id));
+/**
+ * The queue per labels without the GitHub ship runs' waiting jobs.
+ * @param {CiViewData} v
+ * @param {Set<number>} ships
+ */
+function queuesBut(v, ships) {
+  const key = (/** @type {string[]} */ ls) => [...ls].sort().join(',');
+  const less = new Map();
+  for (const j of v.waiting) if (ships.has(j.run)) less.set(key(j.labels), (less.get(key(j.labels)) ?? 0) + 1);
+  return (v.queues ?? []).map((q) => ({ ...q, jobs: q.jobs - (less.get(key(q.labels)) ?? 0) })).filter((q) => q.jobs > 0);
+}
+/** "3m 23s": a push to verdict reads to the second. */
+/** @param {number} secs */
+const mmss = (secs) => (secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`);
+/** @param {number[]} xs */
+const median = (xs) => {
+  const v = [...xs].sort((a, b) => a - b);
+  return v.length ? (v.length % 2 ? v[v.length >> 1] : Math.round((v[v.length / 2 - 1] + v[v.length / 2]) / 2)) : null;
+};
+/** Ship runs with a verdict, their push to verdict. */
+/** @param {CiRun[]} runs */
+const verdictSecs = (runs) => runs.filter((r) => r.status === 'completed' && (r.conclusion === 'success' || r.conclusion === 'failure') && r.secs != null && !r.moved).map((r) => /** @type {number} */ (r.secs));
+
+/** The 20 cells, green, red, running then waiting for a slot. */
+/** @param {import('./types/ci.js').CiShards} sh */
+function shardStrip(sh) {
+  const running = sh.started - sh.done - sh.red;
+  const cells = [...Array(sh.done).fill(['done', 'green']), ...Array(sh.red).fill(['red', 'red']), ...Array(Math.max(0, running)).fill(['run', 'running']), ...Array(Math.max(0, sh.n - sh.started)).fill(['queued', "waiting for one of GitHub's slots"])];
+  const strip = h(
+    'div',
+    { class: 'ci-shards', role: 'img', 'aria-label': `${sh.n} shards: ${sh.done} green, ${sh.red} red, ${Math.max(0, running)} running, ${sh.n - sh.started} waiting for a slot` },
+    ...cells.map(([st, word], i) => h('span', { class: 'ci-shard', 'data-s': st, title: `shard ${i + 1} of ${sh.n}: ${word}` })),
+  );
+  strip.style.setProperty('--n', String(sh.n));
+  const key = (/** @type {string} */ st, /** @type {string} */ word) => h('span', {}, h('i', { class: 'ci-shard', 'data-s': st }), word);
+  return [strip, h('div', { class: 'ci-shard-key muted' }, key('done', 'green'), key('run', 'running'), key('queued', 'waiting for a GitHub slot'), key('red', 'red'))];
+}
+
+/**
+ * Ship CI on GitHub (ADR 0043): a ship's tests split over GitHub's runners, as one run with its shards, its time since the push
+ * and, while shards wait for a slot, the 60 s rule that sends it to the desktop. Idle, its last ship and the day's median.
+ * A scheme whose ships never ran on GitHub has no block.
+ * @param {CiScheme} s
+ * @param {number} now
+ */
+function shipBlock(s, now) {
+  const ships = s.view.runs.filter(githubShip);
+  if (!ships.length) return '';
+  const going = ships.filter((r) => r.status !== 'completed');
+  const med = median(verdictSecs(ships));
+  const usual = med == null ? '' : ` The day's median from push to verdict is ${mmss(med)}.`;
+  if (!going.length) {
+    const last = ships.find((r) => r.status === 'completed' && !r.moved) ?? ships[0];
+    const green = last.conclusion === 'success';
+    const [row] = settingsRow(
+      { key: `ci-ships-${s.id}`, icon: 'box', hue: 'done', title: 'Ship CI on GitHub', summary: [toneChip('ok', 'Idle'), 'last ', whoText(last), ` ${green ? 'green' : (last.conclusion ?? 'ended')}${last.secs != null ? ` in ${mmss(last.secs)}` : ''}, ${age(last.at)}`] },
+      statTiles([String(ships.length), 'ship runs on GitHub', 'running'], med != null && [mmss(med), 'median push to verdict', 'running']),
+      h('p', { class: 'look-prose' }, `No ship is in CI.${usual}`),
+    );
+    return block(null, 'done', 'ci-ships', row);
+  }
+  const rows = going.map((r) => {
+    const sh = r.shards;
+    const since = now - Date.parse(r.at);
+    const waitingSlots = sh ? sh.n - sh.started : 0;
+    const [tone, word, hue] = !sh ? ['info', 'Starting', 'running'] : sh.red ? ['danger', `${sh.red} red`, 'danger'] : waitingSlots ? ['warn', `${waitingSlots} waiting for a slot`, 'waiting'] : ['info', 'Running', 'running'];
+    const [row] = settingsRow(
+      { key: `ci-ship-${s.id}`, icon: 'box', hue, title: 'Ship CI on GitHub', summary: [toneChip(tone, word), whoText(r), ` · ${shortSpan(since)}`] },
+      sh ? statTiles([`${sh.started}/${sh.n}`, 'shards started', 'running'], [String(sh.done), 'green', 'done'], [String(sh.red), 'red', sh.red ? 'danger' : 'done'], [shortSpan(since), 'since the push', 'running']) : null,
+      ...(sh ? shardStrip(sh) : []),
+      h(
+        'p',
+        { class: 'look-prose' },
+        !sh ? 'Splitting the suite: the shards start once its times job is done.' : waitingSlots ? "If every shard hasn't started a minute after the push, the ship script cancels this run and sends the ship to the desktop." : `One verdict: red if any shard is.${usual}`,
+        ' ',
+        ext(r.url, 'The run on GitHub'),
+      ),
+    );
+    return row;
+  });
+  return block(null, rows.length ? 'running' : 'done', 'ci-ships', ...rows);
+}
+
+/**
+ * Fallbacks: each ship whose CI GitHub couldn't take (to the desktop) or that ran its suite on perigee, with the ship script's
+ * why, newest first. Two in a row off GitHub ring (src/ci-land-gate.ts ownFallbackProblems), as perigee's do.
+ * @param {CiScheme} s
+ */
+function fallbacksBlock(s) {
+  const fb = s.view.fallbacks;
+  const onGithub = s.view.runs.filter((r) => githubShip(r) && !r.moved).length;
+  if (!fb || (!fb.length && !onGithub)) return '';
+  const own = fb.filter((f) => f.to === 'own').length,
+    perigee = fb.length - own;
+  const ringing = s.problems.some((x) => x.key === 'land:off-github' || x.key === 'land:fallback');
+  const items = [...fb]
+    .reverse()
+    .map((f) =>
+      hueRow(
+        { hue: f.to === 'own' ? 'held' : 'waiting', lead: pacificClockBare(f.at), meta: age(f.at) },
+        h('span', { class: 'ci-tag', 'data-to': f.to }, f.to === 'own' ? 'Desktop' : 'perigee'),
+        ' ',
+        f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion}`) : h('span', {}, f.branch),
+        h('span', { class: 'ci-detail-line muted' }, f.why || (f.to === 'own' ? 'moved off GitHub' : 'ran the suite on perigee')),
+      ),
+    );
+  const [row] = settingsRow(
+    { key: `ci-fallbacks-${s.id}`, icon: 'rows', hue: fb.length ? 'held' : 'done', title: 'Fallbacks', summary: fb.length ? [toneChip(ringing ? 'danger' : 'warn', `${fb.length} in a day`), `last ${age(/** @type {CiFallback} */ (fb.at(-1)).at)}`] : [toneChip('ok', 'None'), 'every ship ran on GitHub'] },
+    statTiles([String(own), 'to the desktop', own ? 'held' : 'done'], [String(perigee), 'to perigee', perigee ? 'waiting' : 'done'], [String(onGithub), 'ships stayed on GitHub', 'running']),
+    items.length ? showFirst({ key: `ci-fallbacks-${s.id}`, items, n: 5, noun: 'fallbacks' }) : emptyCard('No fallbacks', 'Every ship in the last day ran its CI on GitHub.', { mark: '✓', hue: 'done' }),
+    h('p', { class: 'look-prose' }, "From the ship script's retro log. Two in a row off GitHub wake the Taskmaster, then ring people after the wait, as fallbacks to perigee do."),
+  );
+  return block(null, fb.length ? 'held' : 'done', 'ci-fallbacks', row);
+}
+
+/**
+ * History: one row per ship try (where it ran, push to verdict as a bar, green or red), a run moved off GitHub inside the run that
+ * took it over; the other workflows in a row that opens. A scheme with no ship runs keeps the plain list.
+ * @param {CiScheme} s
+ * @param {number} now
+ */
+function historyTab(s, now) {
+  const runs = s.view.runs;
+  const ships = runs.filter((r) => r.branch.startsWith('land/'));
+  if (!ships.length) return [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), runs.length ? h('div', { class: 'ci-runs' }, ...runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))];
+  // A moved run sits under the next newer run on its branch (runs are newest first): the one that took it over.
+  /** @type {Map<number, CiRun>} */
+  const under = new Map();
+  for (const [i, r] of ships.entries()) {
+    if (!r.moved) continue;
+    const by = ships.slice(0, i).findLast((x) => x.branch === r.branch);
+    if (by && !under.has(by.id)) under.set(by.id, r);
+  }
+  const nested = new Set([...under.values()].map((r) => r.id));
+  const total = (/** @type {CiRun} */ r) => {
+    const m = under.get(r.id);
+    return r.secs == null ? null : m ? r.secs + Math.round((Date.parse(r.at) - Date.parse(m.at)) / 1000) : r.secs;
+  };
+  const max = Math.max(1, ...ships.map((r) => total(r) ?? 0));
+  const shipItem = (/** @type {CiRun} */ r) => {
+    const going = r.status !== 'completed';
+    const [hue, word] = going ? ['running', r.status.replace('_', ' ')] : r.conclusion === 'success' ? ['done', 'green'] : r.conclusion === 'failure' ? ['danger', 'red'] : ['held', r.moved ? 'moved' : (r.conclusion ?? 'done')];
+    const secs = total(r);
+    const m = under.get(r.id);
+    const red = r.shards?.red ? `${plural(r.shards.red, 'shard')} red` : '';
+    return [
+      hueRow(
+        { hue, lead: word, meta: h('span', { class: 'ci-ship-meta' }, secs != null ? meter(secs / max, mmss(secs)) : going ? shortSpan(now - Date.parse(r.at)) : '', h('span', { class: 'muted' }, ` ${age(r.at)}`)) },
+        h('span', { class: 'ci-tag', 'data-to': r.where ?? '' }, r.where === 'github' ? `GitHub${r.shards ? ` · ${r.shards.n}` : ''}` : r.where === 'own' ? 'Desktop' : '…'),
+        ' ',
+        whoText(r),
+        ' ',
+        ext(r.url, 'run'),
+        r.moved && !nested.has(r.id) ? h('span', { class: 'ci-detail-line muted' }, `moved to the desktop: ${r.moved}`) : red && !going ? h('span', { class: 'ci-detail-line muted' }, red) : null,
+      ),
+      m ? h('div', { class: 'queue-sub' }, hueRow({ hue: 'held', lead: 'moved', meta: m.secs != null ? mmss(m.secs) : null }, h('span', { class: 'muted' }, 'GitHub run · ', m.moved || 'moved off GitHub', ' · '), ext(m.url, 'run'))) : null,
+    ];
+  };
+  const shown = ships.filter((r) => !nested.has(r.id));
+  const med = median(verdictSecs(ships.filter((r) => r.where === 'github')));
+  const done = shown.filter((r) => r.status === 'completed' && (r.conclusion === 'success' || r.conclusion === 'failure'));
+  const reds = done.filter((r) => r.conclusion === 'failure').length;
+  const moved = ships.filter((r) => r.moved).length;
+  const other = runs.filter((r) => !r.branch.startsWith('land/'));
+  const otherReds = other.filter((r) => r.status === 'completed' && r.conclusion === 'failure').length;
+  const names = [...new Set(other.map((r) => r.name))];
+  const [otherRow] = settingsRow(
+    {
+      key: `ci-other-runs-${s.id}`,
+      icon: 'rows',
+      hue: otherReds ? 'danger' : 'held',
+      title: 'Other runs',
+      summary: other.length ? [toneChip(otherReds ? 'danger' : 'ok', otherReds ? `${otherReds} red` : 'All green'), `${plural(other.length, 'run')}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`] : [toneChip('neutral', 'None'), 'only ships ran'],
+    },
+    other.length ? h('div', { class: 'ci-runs' }, ...other.map((r) => runRow(r))) : emptyCard('No other runs', 'Runs that are not a ship (a schedule, a cache, a run by hand) list here.'),
+  );
+  return [
+    h(
+      'section',
+      { class: 'ci-block ci-history' },
+      h('h3', { class: 'settings-section', 'data-hue': reds ? 'danger' : 'running' }, 'Ships'),
+      statTiles([String(shown.length), 'ship runs, last day', 'running'], med != null && [mmss(med), 'median push to verdict on GitHub', 'running'], [String(moved), moved === 1 ? 'fallback' : 'fallbacks', moved ? 'held' : 'done'], [String(reds), `red of ${done.length}`, reds ? 'danger' : 'done']),
+      showFirst({ key: `ci-ships-${s.id}`, items: shown.map(shipItem), n: 6, noun: 'ship runs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) }),
+    ),
+    block(null, otherReds ? 'danger' : 'held', 'ci-other', otherRow),
+  ];
 }
 
 /**
@@ -425,7 +626,7 @@ function waitingBlock(s, now, ui) {
  * @param {CiUi} ui
  */
 function overview(s, pcs, now, ui) {
-  return [problemsBlock(s), verdictsBlock(s.view), runningBlock(s, now, ui), waitingBlock(s, now, ui), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
+  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), waitingBlock(s, now, ui), fallbacksBlock(s), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
 
 // ---------- the Releases page (#1423) ----------
@@ -787,8 +988,8 @@ export function releasesShell() {
         : tab === 'health'
           ? testHealth(s, health.get(s.id) ?? null, readTab)
           : tab === 'numbers'
-            ? numbersTab(s, numbers.get(s.id) ?? null, readTab)
-            : [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), s.view.runs.length ? h('div', { class: 'ci-runs' }, ...s.view.runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))]),
+            ? numbersTab(s, numbers.get(s.id) ?? null, readTab, s.view.runs.some(githubShip))
+            : historyTab(s, Date.now())),
     );
   };
 

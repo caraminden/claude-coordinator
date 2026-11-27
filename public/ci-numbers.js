@@ -17,6 +17,8 @@ export const readNumbers = (id) => api(`api/projects/${id}/ci-numbers`);
  * @param {number} v
  * @param {string} [unit]
  */
+/** #2231: a push-to-verdict point from a ship on the scheme's own runners (src/ci-view.ts shipTimes), drawn in its own hue. */
+const OWN = / on own runners$/;
 const fmt = (v, unit) => `${+Number(v).toPrecision(4)}${unit ? ` ${unit}` : ''}`;
 /** @param {{ baseline: number; level: number }} s */
 const pct = (s) => (s.baseline ? `+${Math.round(((s.level - s.baseline) / Math.abs(s.baseline)) * 100)}%` : 'up');
@@ -82,7 +84,20 @@ function chart(series, commit) {
   const cross = /** @type {SVGLineElement} */ (svg.querySelector('.cross'));
   // A point is a real link to its commit, its hit box bigger than its dot.
   const dots = pts.map((p, i) =>
-    at(h('a', { class: 'ci-pt', href: commit(p.sha), target: '_blank', rel: 'noopener', 'aria-label': `${fmt(p.value, unit)}, ${p.workflow} run ${p.run_id}, commit ${p.sha.slice(0, 9)}`, 'data-step': stepAt.includes(i) ? '' : null, onfocus: () => show(i), onblur: () => hide() }), { left: left(i), top: top(p.value) }),
+    at(
+      h('a', {
+        class: 'ci-pt',
+        href: commit(p.sha),
+        target: '_blank',
+        rel: 'noopener',
+        'aria-label': `${fmt(p.value, unit)}, ${p.workflow} run ${p.run_id}, commit ${p.sha.slice(0, 9)}`,
+        'data-step': stepAt.includes(i) ? '' : null,
+        'data-own': OWN.test(p.workflow) ? '' : null,
+        onfocus: () => show(i),
+        onblur: () => hide(),
+      }),
+      { left: left(i), top: top(p.value) },
+    ),
   );
   let near = -1;
   const show = (/** @type {number} */ i) => {
@@ -117,7 +132,18 @@ function chart(series, commit) {
   return h(
     'figure',
     { class: 'ci-figure' },
-    h('figcaption', {}, h('span', { class: 'ci-title' }, `${series.name}${unit ? `, ${unit}` : ''}`), h('span', { class: 'ci-legend' }, h('span', {}, `${n} run${n === 1 ? '' : 's'} on ${series.ref.replace(/^refs\/heads\//, '')}`), stepAt.length ? h('span', {}, h('i', { class: 'key step' }), 'step up held') : '')),
+    h(
+      'figcaption',
+      {},
+      h('span', { class: 'ci-title' }, `${series.name}${unit ? `, ${unit}` : ''}`),
+      h(
+        'span',
+        { class: 'ci-legend' },
+        h('span', {}, `${n} run${n === 1 ? '' : 's'} on ${series.ref.replace(/^refs\/heads\//, '')}`),
+        stepAt.length ? h('span', {}, h('i', { class: 'key step' }), 'step up held') : '',
+        pts.some((p) => OWN.test(p.workflow)) ? h('span', {}, h('i', { class: 'key own' }), 'on the desktop, after a fallback') : '',
+      ),
+    ),
     el,
   );
 }
@@ -127,7 +153,9 @@ function chart(series, commit) {
  * @param {CiNumberSeries} view
  * @param {CiNumbersRules & { repo: string | null }} rules
  */
-function seriesRow(s, view, rules) {
+function seriesRow(s, view, rules, ships = false) {
+  // #2231: with ships on GitHub's runners (which can't reach the store), a series a workflow sends comes from the nightly and the desktop fallbacks only.
+  const deskOnly = ships && view.name !== 'push-to-verdict';
   const pts = view.points,
     unit = view.unit,
     last = /** @type {Point} */ (pts.at(-1));
@@ -141,7 +169,7 @@ function seriesRow(s, view, rules) {
       icon: 'chart',
       hue: recent.length ? 'waiting' : 'done',
       title: view.name,
-      summary: [recent.length ? toneChip('warn', `Stepped up ${pct(/** @type {CiNumberStepRow} */ (recent.at(-1)))}`) : toneChip('ok', 'Steady'), fmt(last.value, unit)],
+      summary: [recent.length ? toneChip('warn', `Stepped up ${pct(/** @type {CiNumberStepRow} */ (recent.at(-1)))}`) : toneChip('ok', 'Steady'), deskOnly ? toneChip('neutral', 'Nightly and fallbacks') : null, fmt(last.value, unit)],
     },
     statTiles([fmt(last.value, unit), 'latest run', recent.length ? 'waiting' : 'done'], recent.length ? [fmt(/** @type {CiNumberStepRow} */ (recent.at(-1)).baseline, unit), 'before the step', 'held'] : before.length && [fmt(median(before), unit), `usual, the ${before.length} runs before`, 'held'], [
       String(pts.length),
@@ -178,6 +206,8 @@ function seriesRow(s, view, rules) {
           ),
         ),
     }),
+    deskOnly ? h('p', { class: 'look-prose' }, "Ships run their CI on GitHub's runners, which can't send numbers here, so this series' points come from main's nightly run and from ships that fell back to the desktop.") : null,
+    view.name === 'push-to-verdict' ? h('p', { class: 'look-prose' }, "Read from GitHub's own run and job times: each ship's push to its CI verdict; after a fallback, from the first push.") : null,
     h('p', { class: 'look-prose' }, `A step up is flagged once ${rules.held} runs in a row are over ${Math.round(rules.pct * 100)}% above the median of the ${rules.base} runs before, and past their usual run-to-run wobble. It wakes the Taskmaster; it never blocks a ship.`),
   );
   return row;
@@ -189,7 +219,7 @@ function seriesRow(s, view, rules) {
  * @param {CiNumbersView | ReadFailed | null} data
  * @param {() => void} refresh
  */
-export function numbersTab(s, data, refresh) {
+export function numbersTab(s, data, refresh, ships = false) {
   if (!data) return [h('p', { class: 'muted' }, 'Reading CI numbers…')];
   if (data.error) return [h('p', { class: 'error' }, "Couldn't read CI numbers. ", h('button', { type: 'button', class: 'secondary', onclick: refresh }, 'Try again'))];
   if (!data.series.length) {
@@ -199,5 +229,5 @@ export function numbersTab(s, data, refresh) {
   /** @param {CiNumberSeries} v */
   const isNew = (v) => v.steps.some((st) => v.points.findIndex((p) => p.run_id === st.run_id) >= v.points.length - (rules.held + rules.base));
   const stepped = data.series.filter(isNew);
-  return [h('section', { class: 'ci-block' }, h('h3', { class: 'settings-section', 'data-hue': stepped.length ? 'waiting' : 'done' }, 'Numbers per run'), h('div', { class: 'settings-rows' }, ...[...stepped, ...data.series.filter((v) => !isNew(v))].map((v) => seriesRow(s, v, rules))))];
+  return [h('section', { class: 'ci-block' }, h('h3', { class: 'settings-section', 'data-hue': stepped.length ? 'waiting' : 'done' }, 'Numbers per run'), h('div', { class: 'settings-rows' }, ...[...stepped, ...data.series.filter((v) => !isNew(v))].map((v) => seriesRow(s, v, rules, ships))))];
 }

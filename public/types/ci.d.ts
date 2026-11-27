@@ -299,6 +299,28 @@ export interface CiRun {
   url: string;
   minion?: number | null;
   who?: CiWho;
+  /** #2231: where its jobs ran, push to last job in seconds once done, its shards on GitHub's runners, and why the ship script moved it off GitHub. */
+  where?: 'github' | 'own' | null;
+  secs?: number | null;
+  shards?: CiShards | null;
+  moved?: string;
+}
+
+export interface CiShards {
+  n: number;
+  started: number;
+  done: number;
+  red: number;
+  queued: number;
+}
+
+/** A ship's CI gone off GitHub (to the scheme's own runners) or to perigee's suite (#2231). */
+export interface CiFallback {
+  at: number;
+  to: 'own' | 'perigee';
+  branch: string;
+  why: string;
+  minion?: number | null;
 }
 
 export interface CiRunner {
@@ -356,6 +378,7 @@ export interface CiViewData {
   queues?: CiQueue[];
   workflows: CiWorkflow[];
   runs: CiRun[];
+  fallbacks?: CiFallback[];
 }
 
 /** The fix minion as the minions list draws it (src/routes/machines.ts fixTicket); the page's own stand-in has fewer fields. */

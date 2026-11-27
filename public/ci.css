@@ -46,8 +46,10 @@
 .ci-pt { pointer-events: none; position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; display: grid; place-items: center; }
 .ci-pt::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--running); border: 2px solid var(--panel); opacity: 0; }
 .ci-pt[data-step]::after { background: var(--waiting); opacity: 1; }
+.ci-pt[data-own]::after { background: var(--held); opacity: 1; }
 .ci-pt.on::after, .ci-pt:focus-visible::after { opacity: 1; }
 .ci-figure i.key.step { display: inline-block; width: 2px; height: 10px; background: var(--waiting); flex: none; }
+.ci-figure i.key.own { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--held); flex: none; }
 .ci-pools-wrap { overflow-x: auto; }
 .ci-pools { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .ci-pools th { font-size: var(--size-meta); font-weight: 600; color: var(--muted); text-align: left; white-space: nowrap; }

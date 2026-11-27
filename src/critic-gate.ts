@@ -123,7 +123,10 @@ export function matchedFiles(e: Pick<ReviewEntry, 'triggers'>, files: DiffFile[]
   const globs = e.triggers.diff ?? [];
   if (!globs.length) return [];
   // A comment-only file asks no critic (Cara, 2026-11-24, on #1795's card: "Skip comment-only edits").
-  const hit = files.filter((f) => !f.comments && globs.some((g) => posix.matchesGlob(f.path, g)));
+  // A glob starting with `!` excludes: public/** with !public/*-agent.mjs skips the agents that run on PCs and draw nothing (#2246).
+  const skip = globs.filter((g) => g.startsWith('!')).map((g) => g.slice(1));
+  const take = globs.filter((g) => !g.startsWith('!'));
+  const hit = files.filter((f) => !f.comments && take.some((g) => posix.matchesGlob(f.path, g)) && !skip.some((g) => posix.matchesGlob(f.path, g)));
   const lines = hit.reduce((n, f) => n + f.lines, 0);
   return hit.length && lines >= (e.triggers.lines ?? 0) ? hit : [];
 }

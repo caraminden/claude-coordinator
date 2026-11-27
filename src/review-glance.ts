@@ -20,7 +20,7 @@ export const folderOf = (p: string) => {
 };
 
 /** The critics of a scheme's own that watch a diff: on, written for the scheme (not the kit's, not a repo agent file), with diff globs. A teacher runs only on a hand-off, so its globs watch nothing. */
-export const ownGlobs = (entries: ReviewEntry[]) => entries.filter((e) => e.enabled && e.kind !== 'teacher' && !fromFile(e) && e.triggers.diff?.length).flatMap((e) => e.triggers.diff!);
+export const ownGlobs = (entries: ReviewEntry[]) => entries.filter((e) => e.enabled && e.kind !== 'teacher' && !fromFile(e) && e.triggers.diff?.length).flatMap((e) => e.triggers.diff!.filter((g) => !g.startsWith('!')));
 
 export interface Coverage {
   changes: number;

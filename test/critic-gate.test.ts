@@ -17,6 +17,17 @@ function fresh() {
   return new ReviewSet(db);
 }
 
+test('a !glob in diff: leaves non-UI served files out, and UI modules, css and html still fire (#2246)', () => {
+  const t = { diff: ['public/**', '!public/*.mjs'] };
+  const hit = (path: string) => matchedFiles({ triggers: t }, [{ path, lines: 4 }]).length;
+  assert.equal(hit('public/runner-agent.mjs'), 0);
+  assert.equal(hit('public/machine-worker.mjs'), 0);
+  assert.equal(hit('public/machine-worker-row.js'), 1);
+  assert.equal(hit('public/app.css'), 1);
+  assert.equal(hit('public/x/page.html'), 1);
+  assert.deepEqual(parseWhen('diff: public/**, !public/*.mjs'), { diff: ['public/**', '!public/*.mjs'] });
+});
+
 test('a when: line takes lines, only with diff globs', () => {
   const t = parseWhen('diff: public/**/*.css, docs/** | lines: 10 | ask');
   assert.deepEqual(t, { diff: ['public/**/*.css', 'docs/**'], lines: 10, ask: true });

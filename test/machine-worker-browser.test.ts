@@ -46,7 +46,19 @@ const turnsSwitch = (name = 'my-pc') => `${tile(name)}?.querySelector('.rules-sw
 const cardText = () => page.eval<string>(`${row('my-pc')}?.textContent ?? ''`);
 async function open(name: string) {
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/machines` });
-  await wait(`${name}'s card`, `!!${row(name)}`);
+  // The whole app's first load, with nine other copies booting beside it in CI's burn-in: the "it hung" deadline, not
+  // waitFor's 10 s, and a timeout says what the page showed instead.
+  let seen = '';
+  await until(
+    `${name}'s card`,
+    async () => {
+      const [has, at] = await page.eval<[boolean, string]>(`[!!${row(name)}, location.hash + ' | ' + (document.body?.innerText ?? '').slice(0, 300)]`).catch(() => [false, 'no page yet'] as [boolean, string]);
+      seen = at;
+      return has;
+    },
+    undefined,
+    () => `the page showed ${seen}`,
+  );
 }
 /** What the worker's program posts, over and over until it says something else. */
 const says = { image: { state: 'ready', text: 'claude 2' }, github: false as boolean, signedIn: false as boolean, test: null as null | { id: string; done: boolean; lines: { key: string; state: string; text: string }[] } };

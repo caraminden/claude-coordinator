@@ -63,7 +63,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .qcard .opt .desc .md pre { margin: 0.3rem 0; }
 .qcard .chip { display: inline-block; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--running); border: 1px solid color-mix(in srgb, var(--running) 40%, var(--line)); border-radius: 999px; padding: 0 0.45rem; margin-right: 0.4rem; vertical-align: 0.1em; }
 .qcard .roster { list-style: none; margin: 0 0 0.6rem; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
-.qcard .roster li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.1rem 1rem; padding: 0.35rem 0.6rem; border-left: 3px solid var(--accent, #c2410c); background: var(--bg-alt, rgba(127,127,127,0.08)); border-radius: 4px; font-weight: 400; }
+.qcard .roster li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.1rem 1rem; padding: 0.35rem 0.6rem; border-left: 3px solid var(--accent); background: rgba(127,127,127,0.08); border-radius: 4px; font-weight: 400; }
 .qcard .roster .what { font-weight: 600; flex: 1 1 14rem; }
 .qcard .roster .meta { color: var(--muted); }
 .qcard .roster .tier { font-size: 0.85em; opacity: 0.8; white-space: nowrap; }

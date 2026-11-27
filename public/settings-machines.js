@@ -7,7 +7,7 @@ import { openMergePanel, runnerAgentLines } from './machine-merge.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
 import { pauseButton, roleCards } from './machine-role-cards.js';
 import { forgetWorkerLink, workerReason, workerWord } from './machine-worker-row.js';
-import { emptyCard } from './look.js';
+import { emptyCard, toneChip } from './look.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { copyText, markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -547,9 +547,9 @@ function machineLine(m) {
   const word = workWord ?? { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
   const fix = !gone && fixButton(m, open);
-  // Its VMs are its capabilities (Build 10 H4), named on its closed line.
-  const vms = m.vms?.length ? ` · ${m.vms.map((/** @type {{ name: string }} */ vm) => `VM: ${vm.name}`).join(' · ')}` : '';
-  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}${vms}`, open: isOpen }, machineBody(m));
+  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
+  // Its VMs are its capabilities (Build 10 H4): chips on a line of their own under its status, so a phone's ellipsis can't hide them.
+  if (m.vms?.length) sum.parentElement?.append(h('span', { class: 'machine-vm-tags' }, ...m.vms.map((vm) => toneChip('neutral', `VM: ${vm.name}`))));
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
   // Two rows for one PC (Build 7 M2b): its owner merges them into one. It shows the kept row's token, so only to its owner.

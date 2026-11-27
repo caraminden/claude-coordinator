@@ -219,6 +219,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/worker-join.ts`, `public/machine-worker-row.js` | Joining a machine as a worker: the server's side of that program and its self-test, and Minion turns on the machine's row of the Machines page |
 | `src/host-reach.ts` | What a minion marked for a machine reaches on its owner's turn there (Build 7 T8): who gets it, the `run_on_host` starts sent to that PC's agent, and the chat's line on what it wrote to the owner's folders |
 | `tools/worker/` | What makes a PC a worker, served at `/worker-setup/`: `install-worker.ps1` (Windows, a WSL distro of its own), `install-worker.sh` (Linux and inside that distro), and `citadel-worker`, the owner's sign-ins and caps there |
+| `tools/build-images/`, `.github/workflows/build-images.yml` | Citadel's build images for a machine's Builds role (Android, Node, Rust; H1): their Dockerfiles, the hello-world APK the self-test builds, and `images.json`, each pinned by digest, which the server hands the agent at Set up; the workflow builds, checks and pushes them to ghcr.io |
 | `public/refstate.js` | Paints minion links in chat (`a.thread-ref`) by their minion's state: waiting, working, deployed (`refBucket` in `public/threadstate.js`) |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |

@@ -69,6 +69,7 @@ export async function runSetup(ctx) {
     if (ask.role === 'screen') return await screen(ctx, say, end);
     if (ask.role === 'gpu') return await gpu(ctx, say, end);
     if (ask.role === 'turns') return await turns(ctx, say, end);
+    if (ask.role === 'builds') return await builds(ctx, say, end);
     return await end(false, { why: `This agent can't set up "${ask.role}"` });
   } catch (err) {
     return end(false, { why: `The agent's step failed: ${err.message}` });
@@ -192,6 +193,132 @@ async function gpu(ctx, say, end) {
   const inside = first(run.out).replace(/\s*\(UUID:.*\)$/, '');
   await say(n, `nvidia-smi in a container: ${inside}`, 'ok');
   return end(true, { report: `${inside} in a container` });
+}
+
+// ---------- Builds: podman, Citadel's build images by digest, their cache volumes, then a hello-world APK ----------
+
+/** The WSL distro Minion turns' install makes (tools/worker/install-worker.ps1), and its user, whose rootless podman builds use on Windows. */
+export const BUILDS_DISTRO = 'citadel-workers';
+const BUILDS_USER = 'citadel-worker';
+/** How often a long pull or build says it's still going, so the app (QUIET_MS) doesn't take it for gone. */
+const BEAT_MS = 60_000;
+
+/** A program run with a line on the card at most once a second, and a beat each minute while it says nothing. */
+async function watched(run, say, n, label, timeout) {
+  const started = Date.now();
+  let last = 0;
+  let line = '';
+  const beat = setInterval(() => say(n, `${label}: ${Math.round((Date.now() - started) / 60_000)} min so far${line ? `, ${line}` : ''}`, 'running'), BEAT_MS);
+  try {
+    return await run({
+      timeout,
+      onLine: (l) => {
+        line = l.slice(0, 200);
+        if (Date.now() - last < 1000) return;
+        last = Date.now();
+        say(n, `${label}: ${line}`, 'running');
+      },
+    });
+  } finally {
+    clearInterval(beat);
+  }
+}
+
+const tail = (out) =>
+  String(out ?? '')
+    .split(/\r?\n/)
+    .filter((l) => l.trim())
+    .slice(-3)
+    .join(' ')
+    .slice(0, 300);
+const gb = (mb) => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`);
+
+async function builds(ctx, say, end) {
+  if (ctx.platform === 'darwin') return end(false, { why: 'Builds need Linux, or Windows with WSL.' });
+  const given = ctx.ask.builds && typeof ctx.ask.builds === 'object' ? ctx.ask.builds : {};
+  const images = Object.entries(given.images && typeof given.images === 'object' ? given.images : {}).filter(([k, v]) => /^[a-z]+$/.test(k) && typeof v === 'string' && /^[a-z0-9][a-z0-9._/:-]{0,250}@sha256:[a-f0-9]{64}$/.test(v));
+  const volumes = (Array.isArray(given.volumes) ? given.volumes : []).filter((v) => typeof v === 'string' && /^citadel-[a-z]+$/.test(v));
+  if (!images.some(([k]) => k === 'android')) return end(false, { why: "Citadel sent no Android build image to pull: it isn't published yet." });
+  const win = ctx.platform === 'win32';
+  // On Windows, podman in the distro as its worker user, in that user's session (lingering), as its worker runs it.
+  const podman = (args, opts) => (win ? ctx.exec('wsl.exe', ['-d', BUILDS_DISTRO, '-u', BUILDS_USER, '--exec', '/bin/sh', '-c', 'XDG_RUNTIME_DIR=/run/user/$(id -u) exec podman "$@"', 'podman', ...args], opts) : ctx.exec('podman', args, opts));
+  let n = 0;
+  if (win) {
+    // As the worker's installer asks: WSL 2 answers --version; the old inbox stub doesn't.
+    if ((await ctx.exec('wsl.exe', ['--version'], { timeout: 30_000 })).code !== 0) {
+      await say(n, "WSL 2 isn't installed on this PC", 'fail');
+      await ctx.post({ id: ctx.ask.id, admin: { needs: ['wsl'] } });
+      return end(false, { why: 'Run the administrator command on the card, restart the PC, then press Set up again.' });
+    }
+    const wsl = await ctx.exec('wsl.exe', ['-l', '-q'], { timeout: 30_000 });
+    // wsl.exe prints UTF-16.
+    const distros = wsl.out
+      .replace(/\0/g, '')
+      .split(/\r?\n/)
+      .map((l) => l.trim());
+    if (!distros.includes(BUILDS_DISTRO)) {
+      const why = `Builds run in the ${BUILDS_DISTRO} WSL distro, which isn't on this PC yet: press Set up on Minion turns, which makes it with podman, then press this Set up again.`;
+      return say(n, `No ${BUILDS_DISTRO} WSL distro here`, 'fail').then(() => end(false, { why }));
+    }
+    await say(n++, `The ${BUILDS_DISTRO} WSL distro is here`, 'ok');
+  }
+  const version = await podman(['--version'], { timeout: 60_000 });
+  if (version.code !== 0) {
+    await say(n, win ? `podman doesn't answer in ${BUILDS_DISTRO}: ${tail(version.out) || 'no output'}` : 'podman is not installed', 'fail');
+    if (win) return end(false, { why: `podman in ${BUILDS_DISTRO} is missing or broken: press Set up on Minion turns to put it back, then press this Set up again.` });
+    const pm = (await ctx.exec('apt-get', ['--version'])).code === 0 ? 'apt' : (await ctx.exec('dnf', ['--version'])).code === 0 ? 'dnf' : null;
+    await ctx.post({ id: ctx.ask.id, admin: { needs: ['podman'], pm } });
+    return end(false, { why: 'Run the administrator command on the card on this PC, then press Set up again.' });
+  }
+  await say(n++, `${first(version.out)}${win ? ` in ${BUILDS_DISTRO}` : ''}`, 'ok');
+  const sizes = [];
+  for (const [kind, image] of images) {
+    const name = `citadel-build-${kind}`;
+    const have = (await podman(['image', 'exists', image])).code === 0;
+    if (!have && ctx.ask.kind === 'test') {
+      const why = `${name} isn't pulled on this PC: press Set up.`;
+      return say(n, why, 'fail').then(() => end(false, { why }));
+    }
+    if (!have) {
+      await say(n, `Pulling ${name}`, 'running');
+      const pull = await watched((o) => podman(['pull', image], o), say, n, `Pulling ${name}`, 60 * 60_000);
+      if (pull.code !== 0) {
+        const why = `${name} didn't pull: ${tail(pull.out) || 'it stopped'}`;
+        return say(n, why, 'fail').then(() => end(false, { why }));
+      }
+    }
+    const size = await podman(['image', 'inspect', '--format', '{{.Size}}', image]);
+    const mb = Math.round(Number(first(size.out)) / 1e6);
+    if (Number.isFinite(mb) && mb > 0) sizes.push(`${kind} ${gb(mb)}`);
+    await say(n++, `${have ? 'Already pulled' : 'Pulled'} ${name}${Number.isFinite(mb) && mb > 0 ? ` (${gb(mb)})` : ''}`, 'ok');
+  }
+  const made = [];
+  for (const v of volumes) {
+    if ((await podman(['volume', 'exists', v])).code === 0) continue;
+    if (ctx.ask.kind === 'test') {
+      const why = `The cache volume ${v} isn't on this PC: press Set up.`;
+      return say(n, why, 'fail').then(() => end(false, { why }));
+    }
+    const r = await podman(['volume', 'create', v]);
+    if (r.code !== 0) {
+      const why = `Could not make the cache volume ${v}: ${tail(r.out) || 'it failed'}`;
+      return say(n, why, 'fail').then(() => end(false, { why }));
+    }
+    made.push(v);
+  }
+  if (volumes.length) await say(n++, `Cache volumes ${volumes.join(', ')}${made.length ? ` (made ${made.join(', ')})` : ' (already there)'}`, 'ok');
+  const android = images.find(([k]) => k === 'android')[1];
+  const threads = Number.isInteger(ctx.ask.caps?.threads) && ctx.ask.caps.threads > 0 ? ['--cpus', String(ctx.ask.caps.threads)] : [];
+  const label = 'Building a hello-world APK in citadel-build-android (the first build fetches Gradle’s plugins into citadel-gradle)';
+  await say(n, label, 'running');
+  const apk = await watched((o) => podman(['run', '--rm', '--security-opt', 'label=disable', ...threads, '-v', 'citadel-gradle:/cache/gradle', android, 'citadel-hello-apk'], o), say, n, 'Building the hello-world APK', 30 * 60_000);
+  const bytes = Number(apk.out.match(/^apk (\d+)$/m)?.[1]);
+  if (apk.code !== 0 || !bytes) {
+    const why = `The hello-world APK didn't build: ${tail(apk.out) || 'it stopped'}`;
+    return say(n, why, 'fail').then(() => end(false, { why }));
+  }
+  await say(n, `Built a hello-world APK (${Math.max(1, Math.round(bytes / 1000))} KB) in citadel-build-android`, 'ok');
+  return end(true, { report: `Hello-world APK built${sizes.length ? `; images ${sizes.join(', ')}` : ''}` });
 }
 
 // ---------- Minion turns on Windows: the worker's own installer, in the owner's normal PowerShell ----------

@@ -6,7 +6,7 @@
 /** @import { SetupAdmin, SetupRun } from './types.js' */
 
 /** The roles whose Set up and Test this release runs. */
-export const SETUP_ROLES = ['tools', 'screen', 'turns', 'gpu', 'ci'];
+export const SETUP_ROLES = ['tools', 'screen', 'turns', 'gpu', 'ci', 'builds'];
 
 /** What a step needs done as administrator, by key: the words people read and, per package manager, the command. */
 /** @type {Record<string, { what: string, os: 'windows' | 'linux' }>} */

@@ -26,6 +26,8 @@ const CAPS = {
     ['disk_gb', 'Disk', 'GB'],
   ],
   ci: [['runners', 'Runners awake', '']],
+  // The most CPU threads a build there may take (H2 sizes each build job to fit under it).
+  builds: [['threads', 'CPU threads', '']],
 };
 /** Bounds of each cap on the page; workers and runners may be 0 (none at once). */
 /** @type {Record<string, number[]>} */
@@ -85,6 +87,7 @@ function cannot(m, r) {
   if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';
   if (r.role === 'turns' && !(m.owner_id === account?.id)) return 'Only its owner can switch Minion turns on.';
   if (r.role === 'gpu' && m.report && !m.report.gpu && !hasGpu(m)) return 'That PC reported no GPU.';
+  if (r.role === 'builds' && m.report?.os === 'macos') return 'Builds need Linux, or Windows with WSL.';
   return null;
 }
 
@@ -110,7 +113,8 @@ function standing(m, r) {
     if (n) return { text: `✓ runner agent${n > 1 ? 's' : ''} connected`, tone: 'ok' };
     return lastRun(r)?.done && !lastRun(r)?.ok ? { text: 'set up failed', tone: 'danger' } : { text: 'not set up yet', tone: 'info' };
   }
-  if (hasGpu(m)) return { text: '✓ GPU jobs ready', tone: 'ok' };
+  if (r.role === 'gpu' && hasGpu(m)) return { text: '✓ GPU jobs ready', tone: 'ok' };
+  if (r.role === 'builds' && lastRun(r)?.ok) return { text: '✓ builds ready', tone: 'ok' };
   // After a Set up that failed, the header says so too, not "not set up yet" over the section's red chip.
   const run = lastRun(r);
   return run?.done && !run.ok ? { text: 'set up failed', tone: 'danger' } : { text: 'not set up yet', tone: 'info' };
@@ -147,6 +151,7 @@ function capsLine(m, r, redraw) {
   const key = `${m.id}:${r.role}`;
   let words;
   if (r.role === 'ci') words = r.caps.runners != null ? `up to ${r.caps.runners} runner${r.caps.runners === 1 ? '' : 's'} awake at once` : 'every runner there may be awake';
+  else if (r.role === 'builds') words = r.caps.threads != null ? `builds take up to ${r.caps.threads} CPU thread${r.caps.threads === 1 ? '' : 's'}` : 'builds may take every CPU thread there';
   else {
     const held = heldCaps(m);
     words = held ? [`up to ${held.workers ?? '?'} minions at once`, held.threads != null ? `${held.threads} threads` : '', held.memory_gb != null ? `${held.memory_gb} GB memory` : '', held.disk_gb != null ? `${held.disk_gb} GB disk` : ''].filter(Boolean).join(' · ') : 'caps from that PC once it is set up';
@@ -224,7 +229,7 @@ function capsEditor(m, r, redraw) {
     const next = {};
     for (const [k, label] of caps) {
       const v = capValue(k, shown(k));
-      if (!v.ok) return toast(`${label}: a whole number from ${LIMITS[k][0]} to ${LIMITS[k][1]}, or blank for ${r.role === 'ci' ? 'no cap' : "that PC's own"}`, { tone: 'danger' });
+      if (!v.ok) return toast(`${label}: a whole number from ${LIMITS[k][0]} to ${LIMITS[k][1]}, or blank for ${r.role === 'ci' || r.role === 'builds' ? 'no cap' : "that PC's own"}`, { tone: 'danger' });
       next[k] = v.n;
     }
     editing.delete(key);
@@ -253,9 +258,11 @@ function capsEditor(m, r, redraw) {
   const hint =
     r.role === 'ci'
       ? 'Blank: no cap here, every runner registered there may be awake.'
-      : own
-        ? `Blank uses that PC's own cap; a number here is held there instead, above it too${over ? ". Threads and memory go up to what that PC has; if they don't take, run that PC's install command again" : ''}.`
-        : "Blank is that PC's own cap, once it is set up.";
+      : r.role === 'builds'
+        ? 'Blank: no cap here, a build may take every CPU thread there.'
+        : own
+          ? `Blank uses that PC's own cap; a number here is held there instead, above it too${over ? ". Threads and memory go up to what that PC has; if they don't take, run that PC's install command again" : ''}.`
+          : "Blank is that PC's own cap, once it is set up.";
   return h('div', { class: 'role-caps-edit' }, h('b', { class: 'small' }, `${r.name} caps, set here`), h('div', { class: 'worker-caps' }, ...fields), h('p', { class: 'muted small' }, hint), h('div', { class: 'row' }, save, cancel));
 }
 

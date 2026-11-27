@@ -94,7 +94,7 @@ export const CHOICES: { choice: Choice; label: string; description: string }[] =
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,59}$/;
 const FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
-const IMAGE = /^[a-z0-9][a-z0-9._\/:-]{0,250}@sha256:[a-f0-9]{64}$/;
+export const IMAGE = /^[a-z0-9][a-z0-9._\/:-]{0,250}@sha256:[a-f0-9]{64}$/;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const bool = (v: unknown, field: string, dflt?: boolean): boolean => {

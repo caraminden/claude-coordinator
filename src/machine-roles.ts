@@ -4,10 +4,10 @@
 // reads what this release had (legacyFromRoles). Pure: the store (src/db/machines.ts) reads and writes the rows.
 
 /** The roles, in the order the Machines page shows them. */
-export const ROLES = ['tools', 'screen', 'ci', 'turns', 'gpu'] as const;
+export const ROLES = ['tools', 'screen', 'ci', 'turns', 'gpu', 'builds'] as const;
 export type Role = (typeof ROLES)[number];
 /** The words people read for each role. */
-export const ROLE_NAMES: Record<Role, string> = { tools: 'Tools and folders', screen: 'Windows screen', ci: 'CI runners', turns: 'Minion turns', gpu: 'GPU jobs' };
+export const ROLE_NAMES: Record<Role, string> = { tools: 'Tools and folders', screen: 'Windows screen', ci: 'CI runners', turns: 'Minion turns', gpu: 'GPU jobs', builds: 'Builds' };
 
 /**
  * Which MCP server and workspaces the Tools role lends (#439's ticks; machines.ts Lend), kept in its caps as `ticks`.
@@ -58,7 +58,7 @@ export const runnerHost = (lastCheck: string | null) => /"runners":true/.test(la
 /**
  * A machine's roles from the columns before roles (the migration, and the roles of a machine no row has been
  * written for yet): lend.server and lend.workspaces become the Tools role's ticks, lend.gpu_off the GPU switch,
- * lend.worker the Minion turns switch, a runner host's flag the CI switch; Windows screen is new and starts off.
+ * lend.worker the Minion turns switch, a runner host's flag the CI switch; Windows screen and Builds are new and start off.
  * Tools is on unless it is a runner host, which lends turns nothing. machine_projects, its one list, goes to every
  * role that's on, so every turn, tool and runner token goes where it went before.
  */
@@ -66,7 +66,7 @@ export function rolesFromLegacy(m: { lend: string | null; last_check: string | n
   const lend = parseLegacyLend(m.lend);
   const runners = runnerHost(m.last_check);
   const ticks: Ticks = lend ? { server: lend.server, workspaces: lend.workspaces, ...(lend.before_ticks ? { before_ticks: true as const } : {}) } : null;
-  const on: Record<Role, boolean> = { tools: !runners, screen: false, ci: runners, turns: !!lend?.worker, gpu: !lend?.gpu_off };
+  const on: Record<Role, boolean> = { tools: !runners, screen: false, ci: runners, turns: !!lend?.worker, gpu: !lend?.gpu_off, builds: false };
   const list = [...new Set(projects)].sort((a, b) => a - b);
   return ROLES.map((role) => ({ role, on: on[role], caps: role === 'tools' ? { ticks } : {}, setup: role === 'ci' && runners ? { runner_host: true } : null, projects: on[role] ? [...list] : [] }));
 }

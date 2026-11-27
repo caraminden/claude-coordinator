@@ -1,0 +1,11 @@
+#!/bin/sh
+# Builds the hello-world APK in /opt/citadel/hello-apk: the Builds role's self-test (src/role-setup.ts). Prints the
+# APK's size last, as "apk <bytes>"; exits non-zero when no APK came out.
+set -eu
+work=$(mktemp -d)
+cp -r /opt/citadel/hello-apk/. "$work"
+cd "$work"
+gradle --no-daemon --console=plain assembleDebug
+apk=$(find build/outputs/apk/debug -name '*.apk' | head -n 1)
+[ -n "$apk" ] || { echo 'citadel-hello-apk: no APK came out' >&2; exit 1; }
+echo "apk $(wc -c < "$apk")"

@@ -63,12 +63,14 @@ type Job = { id: number; state: string; exit_code: number | null; error: string 
 
 const place = (kind: string) => call<{ spots: Spot[] }>('POST', '', { do: 'place', kind }).then((r) => r.spots);
 
-/** Never packed, even where .gitignore doesn't cover them: SECRETS' file names, and Android's own places for keys and local paths. */
+/** The ignored files a Capacitor build reads, from the Gradle project: what `cap sync` writes, and apk-build.ts's init script. Nothing else ignored goes, since that's where people keep keys. */
+const SYNCED = /^(app\/src\/main\/assets\/|app\/src\/main\/res\/xml\/config\.xml$|capacitor-cordova-android-plugins\/|capacitor\.settings\.gradle$|app\/capacitor\.build\.gradle$|\.citadel-apk-version\.gradle$)/;
+/** Never among the extras either: SECRETS' file names, and Android's own places for keys and local paths. */
 const KEPT_HOME = new RegExp(`^(?:${[...SECRETS.map((g) => g.replace('**/', '')), 'local.properties', 'keystore.properties', '*.pass'].map((g) => g.replace(/\./g, '\\.').replace(/\*/g, '.*')).join('|')})$`);
 
 /**
  * What a Capacitor Android build needs that .gitignore leaves out (H3): `cap sync`'s output in the Gradle project
- * (the web assets, the Cordova plugins) and the node_modules packages capacitor.settings.gradle names. `dir` is the
+ * (SYNCED) and the node_modules packages capacitor.settings.gradle names. `dir` is the
  * Gradle project, from `top`; the files are named from `top`. Gradle's own output (a build/ beside a build.gradle)
  * and key files stay. None for a project that isn't Capacitor's.
  */
@@ -86,6 +88,7 @@ export function capacitorExtras(top: string, dir: string): string[] {
   const ignored = execFileSync('git', ['-C', top, 'ls-files', '-z', '-oi', '--exclude-standard', '--', dir || '.'], { encoding: 'utf8', maxBuffer: 256 << 20 });
   for (const f of ignored.split('\0').filter(Boolean)) {
     const parts = f.split('/');
+    if (!SYNCED.test(relative(project, join(top, f)))) continue;
     if (!parts.some((p, i) => p === 'node_modules' || outputs(join(top, ...parts.slice(0, i)), p)) && !KEPT_HOME.test(parts.at(-1)!)) out.add(f);
   }
   const walk = (at: string) => {

@@ -17,8 +17,8 @@ is **read-only**.
   a cold build takes every core it can get and 2–3 GB of RAM (`--heavy`: a first build counts as heavy before its past runs say).
   `--back` names what you need here: the build may run on another machine with the Builds role (perigee when none has room),
   and only those paths come back, into the same folders. Without it a scheme with CI sends the build to CI and no APK arrives.
-  What goes there is the checkout as git sees it, plus a Capacitor project's synced web files and plugin packages; of key files
-  only a tracked `debug.keystore`.
+  What goes there is the checkout as git sees it, plus a Capacitor project's synced web files and plugin packages. No other ignored file goes (a build that needs one adds `--here`),
+  and of key files only a tracked `debug.keystore`.
 - The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
 - The Gradle daemon is off (`~/.gradle/gradle.properties`, copied into container homes). Don't pass
   `--daemon` or override it in the project's `gradle.properties`. After the build,

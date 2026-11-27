@@ -36,7 +36,7 @@ function app(name: string) {
   put(live, {
     // As Capacitor's own templates write it: no trailing slash, so a linked node_modules is ignored too.
     '.gitignore': 'node_modules\n',
-    'android/.gitignore': 'build/\nlocal.properties\n*.jks\nkeystore.properties\n/app/src/main/assets/public\n',
+    'android/.gitignore': '.*\n!.gitignore\nbuild/\nlocal.properties\n*.jks\n*.pk8\nkey.properties\nkeystore.properties\n/app/src/main/assets/public\n',
     'capacitor.config.json': JSON.stringify({ appId: 'x', webDir: 'shell' }),
     'shell/index.html': 'shell',
     'android/gradlew': '#!/bin/sh\n',
@@ -125,7 +125,8 @@ function world(outcomes: Outcome[], took = () => {}) {
   const run: Runner = async (argv, cwd, _env, _log, ms) => {
     perigee.push(argv);
     if (argv[1] === 'sign') signLimits.push(ms);
-    if (argv.includes('sync')) put(cwd, { 'android/app/src/main/assets/public/index.html': 'synced web', 'android/local.properties': 'sdk.dir=/perigee', 'android/keystore.properties': 'storePassword=hunter2', 'android/release.jks': 'stray' });
+    if (argv.includes('sync'))
+      put(cwd, { 'android/app/src/main/assets/public/index.html': 'synced web', 'android/local.properties': 'sdk.dir=/perigee', 'android/keystore.properties': 'storePassword=hunter2', 'android/release.jks': 'stray', 'android/app/platform.pk8': 'SECRET-pk8', 'android/key.properties': 'hunter2' });
     if (argv.includes('assembleRelease')) put(cwd, { 'app/build/outputs/apk/release/app-release-unsigned.apk': 'unsigned on perigee' });
     if (argv[1] === 'sign') {
       signed.push(readFileSync(argv.at(-1)!, 'utf8'));
@@ -164,10 +165,10 @@ test('a release build placed on a machine is signed on perigee, and no key file 
   assert.ok(argv.includes('-Pcitadel.versionCode=1'));
   for (const f of ['android/app/src/main/assets/public/index.html', 'node_modules/@capacitor/android/capacitor/src/Bridge.java', 'android/app/build.gradle', 'android/app/debug.keystore']) assert.ok(files.includes(f), f);
   assert.deepEqual(
-    files.filter((f) => f !== 'android/app/debug.keystore' && /\.(jks|keystore|pass)$|local\.properties|keystore\.properties|left-pad|capacitor\/build\//.test(f)),
+    files.filter((f) => f !== 'android/app/debug.keystore' && /\.(jks|keystore|pass)$|\.pk8$|key\.properties|local\.properties|keystore\.properties|left-pad|capacitor\/build\//.test(f)),
     [],
   );
-  assert.doesNotMatch(text, /THE-KEY|hunter2/);
+  assert.doesNotMatch(text, /THE-KEY|hunter2|SECRET-pk8/);
   assert.match(w.told.join(), /allowBackup="true"/, 'the manifest came back for its warnings');
   assert.ok(!existsSync(join(root, 'cache/placed/machine')), 'the snapshot is gone');
 });

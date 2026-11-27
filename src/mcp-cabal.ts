@@ -42,7 +42,7 @@ const ROW_KEYS = ['row', 'minion', 'scheme', 'label', 'title', 'lane', 'after', 
 export const CABAL_START = {
   name: 'cabal_start',
   description:
-    "Start a member of your cabal from a row on your board that people approved on its forming card (cabal_board action form). It starts from the row's handoff on the row's model and effort, in your build and Goal, with you as parent and lead, chained on the row's after; the Taskmaster hears of it. A row nobody approved is refused: add it with a card. Past your width it waits as next up and starts by itself once a member merges, is dismissed or is sealed.",
+    "Start a member of your cabal from a row on your board that people approved on its forming card (cabal_board action form). It starts from the row's handoff on the row's model and effort, in your build and Goal, with you as parent and lead, chained on the row's after; the Taskmaster hears of it. A feature row nobody approved is refused: add it with a card; a fixer row (role: fixer) starts with none. Past your width it waits as next up and starts by itself once a member merges, is dismissed or is sealed.",
   inputSchema: {
     type: 'object',
     properties: {

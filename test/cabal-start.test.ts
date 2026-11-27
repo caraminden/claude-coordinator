@@ -280,3 +280,18 @@ test('a page load never answers with an older cabal list than the stream sent: t
     await holds(`every page load keeps the card with ${n} rows`, has, { ms: 4000 });
   }
 });
+
+test('a fixer row starts with no forming card, who started it logged; a feature row nobody approved is still refused (Cara, 2026-11-27)', async () => {
+  assert.equal((await board(lead.id, { action: 'row', label: 'FX', title: 'Fix the red test', handoff: 'handoffs/d.md', model: 'claude-sonnet-5-5', effort: 'low', role: 'fixer' })).status, 200);
+  assert.equal((await board(lead.id, { action: 'row', label: 'FT', title: 'A feature piece', handoff: 'handoffs/d.md', model: 'claude-sonnet-5-5', effort: 'low' })).status, 200);
+  const feature = await start('FT');
+  assert.equal(feature.status, 403);
+  assert.match(String(feature.data.error), /add it with a card/);
+  const fix = await start('FX');
+  assert.equal(fix.status, 200, JSON.stringify(fix.data));
+  assert.ok(rowOf('FX').ticket_id, 'the fixer is started');
+  assert.match(String(rowOf('FX').approved_by), /fixer, no card/);
+  const text = String((await s.call(`/api/tickets/${lead.id}/cabal?text=1`)).data.text);
+  assert.match(text, /Started fixer row FX with no forming card/);
+  assert.equal((await board(lead.id, { action: 'row', row: rowOf('FT').id, remove: true })).status, 200);
+});

@@ -27,7 +27,7 @@ asks, merges since your last wake, then every other open ask, answered together.
 3. Add one roster row per piece (`cabal_board` row): label (T1, M2), title, lane, what it waits on (`after`), the files
    it expects to touch, handoff path, model, effort and expected cost. A row for a member in another scheme names it
    with `scheme`. Add a **fixer** row (`role: fixer`, a handoff that says "takes small fixes across the cabal, one at a
-   time, from <your cabal>'s Overseer"): it is started only once a fix needs it.
+   time, from <your cabal>'s Overseer"): it is started only once a fix needs it, with no forming card.
 4. Post the **forming card**: `cabal_board` form, with a width (default 4: members at work at once). Link the card in
    your reply. People's go approves the whole roster; end the turn and wait for it.
 5. A build cabal (you were made with `build_owner`, your prompt names the build): make the branch first (section 4,
@@ -40,8 +40,9 @@ asks, merges since your last wake, then every other open ask, answered together.
 - Start each approved row with `cabal_start` (`message_taskmaster` for a row in another scheme: that scheme's
   Taskmaster starts it on its own people's go). Start every row whose `after` is met; past your width it waits as
   next up and starts by itself. Members chained on another's work start when it is in.
-- A piece people didn't approve (a new row, a changed handoff, model or cost) goes on a new forming card. Never start
-  around one.
+- A feature piece people didn't approve (a new row, a changed handoff, model or cost) goes on a new forming card. Never
+  start around one. A fixer row (a red run, a failing test or a bug in the cabal's work) is the exception: add it and
+  start it at once, no card; the start card's budget threshold still applies.
 - Unseal, stop or reseal your own members with `cabal_member`; everything outside the cabal stays the Taskmaster's
   (`message_coordinator`).
 - Asks: a member's non-blocking ask is held mail. Answer them together at your next wake (`cabal_board` answer). A

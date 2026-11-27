@@ -121,14 +121,30 @@ coverage is too slow or not available.
      - E, optional shared harnesses;
    - the habits behind the fat, each with a rule.
 2. **Delete the per-Grunt files** once the report is written.
-3. **Post an `ask_question` card** asking which batches to do, with your recommendation marked. Also ask whether
+3. **Post an `ask_question` card** asking which batches to do, with your recommendation marked and the CI wall saving (test-seconds saved divided by files CI runs at once) next to each speed batch. Also ask whether
    the habit rules go in the kit.
 4. **Write one handoff for each batch picked** (`handoffs/handoff-test-audit-<scheme>-<batch>.md`). Each one
    holds:
    - the exact files and line ranges;
    - the rule "never loosen or delete a test that guards real behaviour";
-   - the instruction to run each file it touches before and after.
+   - the instruction to run each file it touches before and after;
+   - **its premises, marked as skims.** Every count or claim a Grunt made from a skim carries that mark, for example
+     "56-72 files write their own fake claude (Grunt skim)". The minion checks each such claim on three named files
+     before it builds. When fewer than half of them hold, it says so in its first reply and shrinks the work to what
+     does hold;
+   - **the order to run in.** The shared-harness batch (E) starts after the cut and merge batches (A, B) have
+     shipped. Each handoff lists the `who-touches` result for its files on the day it was written;
+   - **for a speed batch (C), its CI wall saving**: the test-seconds it saves divided by the number of files CI runs
+     at once. The step 3 card shows that wall number next to each speed batch, and the speed minion repeats it in
+     its hand-back with the number it measured (see "Speed work hands back its wall saving" below).
 5. **Message the Taskmaster** with the handoff paths, then set state complete with the report named in the note.
+
+## Speed work hands back its wall saving
+
+A minion on a speed batch (C) ends its hand-back with one line: the test-seconds it saved, the number of files CI
+runs at once, and their quotient, the CI wall saving. Test-seconds saved are not wall seconds: Citadel's three speed
+minions together bought about 9 s of CI wall (effort retro #2161). When the wall saving is a few seconds, say so, so
+a person can judge whether the minion was worth it.
 
 ## What Citadel found, to calibrate against
 

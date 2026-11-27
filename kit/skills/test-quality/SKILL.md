@@ -129,7 +129,7 @@ and saying so is fine.
 ## Auditing a whole suite
 
 A scheme-wide audit (the standard Test audit schedule, or someone asking whether a suite is too big or
-too weak) follows [references/audit-method.md](references/audit-method.md): size and time, Sonnet
+too weak) follows [references/audit-method.md](references/audit-method.md) (a speed minion's hand-back states its CI wall saving, per "Speed work hands back its wall saving" there): size and time, Sonnet
 Grunts per batch, your own re-check, then a report and a card.
 
 ## Check before calling it done

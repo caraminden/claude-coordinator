@@ -68,8 +68,41 @@ function scene(c: SeedCtx, kind: Scene): string {
   return kind === 'formed' ? `#/p/${project.id}/cabal/${lead.number}` : `#/p/${project.id}/t/${lead.number}`;
 }
 
+/** A lead's chat with its forming card, 6 rows (#2185): the question text and its roster, as cabal-start.ts posts them. */
+function formingCard(c: SeedCtx): string {
+  const { store, project } = c;
+  const lead = store.createTicket({ project_id: project.id, title: 'Build 10: one kind of machine', permission_mode: 'bypassPermissions', created_by: c.who });
+  store.updateTicket(lead.id, { status: 'idle', build: 10 });
+  const roster = [
+    { what: 'One agent per computer, its helpers hidden', cost: '~$40', when: 'now', tier: 'Opus 5.5 high' },
+    { what: 'The Machines page, take B (two switches)', cost: '~$25', when: 'now', tier: 'Opus 5.5 high' },
+    { what: 'Every machine has an owner (no "shared" rows)', cost: '~$15', when: 'now', tier: 'Opus 5.5 high' },
+    { what: 'A VM is a capability of its computer', cost: '~$15', when: 'once #2179 is live', tier: 'Opus 5.5 high' },
+    { what: 'Runner host rows become PC rows; Cara’s desktop moves over', cost: '~$15', when: 'after Every machine has an owner and One agent per computer, its…', tier: 'Opus 5.5 high' },
+    { what: 'Build 10’s fixer: small fixes across the cabal', cost: '~$8', when: 'now', tier: 'Sonnet 5.5 medium' },
+  ];
+  const lines = roster.map((r) => `- ${r.what} · ${r.cost} · ${r.when}`).join('\n');
+  store.addEvent(lead.id, 'question', {
+    id: 'cabalseedcard',
+    questions: [
+      {
+        header: 'Start the cabal',
+        question: `Build 10's Overseer (#${lead.number}) asks to start 6 members, merging into Build 10, about $118, 4 at once.\n\n${lines}`,
+        roster,
+        multiSelect: false,
+        options: [
+          { label: 'Start the cabal', description: 'The Overseer starts them 4 at a time (the rest wait their turn) and may unseal, stop and reseal its own members; the Taskmaster hears of each start. Anyone not listed needs another card.', recommended: true },
+          { label: 'Not yet', description: 'Nothing starts. Say what to change and the Overseer posts a new card.' },
+        ],
+      },
+    ],
+  });
+  return `#/p/${project.id}/t/${lead.number}`;
+}
+
 export const cabalSeeds: Record<string, { about: string; seed: (c: SeedCtx) => string }> = {
   cabal: { about: "a cabal's lead chat (#2090): Build 7's 18 members mid-build, a blocking ask pinned over the composer, its ledger panel", seed: (c) => scene(c, 'mid') },
   'cabal-formed': { about: "a cabal's board page just formed (#2090): a roster of 18, nobody started yet", seed: (c) => scene(c, 'formed') },
   'cabal-red': { about: "a cabal's lead chat with the red-run bar and its fixer on the board (#2090)", seed: (c) => scene(c, 'red') },
+  'cabal-card': { about: "a cabal lead's forming card (#2185): a 6-row roster drawn as a list", seed: formingCard },
 };

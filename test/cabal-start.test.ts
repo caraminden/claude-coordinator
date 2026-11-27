@@ -260,6 +260,7 @@ test("a row's start reads in words: now, after another piece by its title (label
   assert.equal(whenText({ after: 'VM piece' }, all), 'after A VM is a capability');
   assert.equal(whenText({ after: 'H1, #2179' }, all), 'after Owners piece, once #2179 is live');
   assert.equal(whenText({ after: '2179' }, all), 'once #2179 is live');
+  assert.equal(whenText({ after: 'H1 + #2179' }, all), 'after Owners piece, once #2179 is live');
 });
 
 test('a page load never answers with an older cabal list than the stream sent: the readers have it the moment main does (#2181)', async () => {

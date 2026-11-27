@@ -61,7 +61,7 @@ export function whenText(r: Pick<CabalMemberRow, 'after'>, all: Pick<CabalMember
   const tokens = all.some((x) => x.label && x.label.toLowerCase() === whole.toLowerCase())
     ? [whole]
     : whole
-        .split(/[,;&\s]+|\band\b/i)
+        .split(/[,;&+\s]+|\band\b/i)
         .filter(Boolean)
         .map((t) => (/^\d+$/.test(t) ? `#${t}` : t));
   if (!tokens.length) return 'now';
@@ -237,7 +237,7 @@ export function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | nul
       if (!other) throw new HttpError(400, `Row ${rowName(r)} waits on "${part}", which is no #N and no label on your board`);
       t = other.ticket_id != null ? app.store.getTicket(other.ticket_id) : undefined;
       if (!t) throw new HttpError(409, `Row ${rowName(r)} waits on ${part}, which isn't started yet: start ${part} first`);
-      if (t.project_id !== lead.project_id) throw new HttpError(400, `Row ${rowName(r)} waits on ${part}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${part} ships`);
+      if (t.project_id !== lead.project_id && app.store.lastShipNote(t.id) == null) throw new HttpError(400, `Row ${rowName(r)} waits on ${part}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${part} ships`);
       num = t.number!;
     }
     if (t && app.store.lastShipNote(t.id) != null) continue; // shipped or merged into the build: nothing left to wait on

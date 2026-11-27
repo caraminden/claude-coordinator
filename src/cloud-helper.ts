@@ -284,9 +284,12 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
   if (job.kind === 'run' && code === null) return home(`the session's result has no exit code, so the command didn't run through Citadel's runner${url ? ` (${url})` : ''}`);
   io.log(reply);
   io.log(`citadel-cloud: done after ${mins()} min, ${cost}. Files: ${job.out}`);
-  on(job.kind === 'run' ? `exit ${code} after ${mins()} min` : `done after ${mins()} min`, `${reply}\n\nIts session: ${url}; ${cost}.`);
+  on(job.kind === 'run' ? ended(code, mins()) : `✔ done after ${mins()} min`, `${reply}\n\nIts session: ${url}; ${cost}.`);
   return job.kind === 'brief' || code === 0 ? 0 : 1;
 }
+
+/** A finished step's state on its chat line: plain words for success, the exit code kept for a failure. */
+const ended = (code: number | null | undefined, mins: number) => (code === 0 ? `✔ done after ${mins} min` : `✗ failed (exit ${code}) after ${mins} min`);
 
 /** Where a step runs (ADR 0041, Cara's four priorities and her pick "Helper checks first", 2026-11-27). */
 export type Place = 'machine' | 'github' | 'cloud' | 'home';
@@ -312,9 +315,9 @@ export function pickPlace(f: Facts, job: Pick<Job, 'kind' | 'files'>): { place: 
   if (job.kind === 'brief') return f.on ? { place: 'cloud', why: 'a brief runs in a cloud session' } : { place: 'home', why: off };
   if (!f.on) return { place: 'home', why: off };
   const ci = f.workflow && !job.files.length;
-  if (ci && f.machine) return { place: 'machine', why: 'a PC lending this scheme CI has room, with no ship or CI waiting there' };
+  if (ci && f.machine) return { place: 'machine', why: 'a machine lending this scheme CI has room, with no ship or CI waiting there' };
   if (ci && f.public) return { place: 'github', why: "this repo is public, so GitHub's own runners take it free" };
-  if (!(f.slower !== null && f.slower >= SLOWER)) return { place: 'cloud', why: "no PC has room and GitHub can't take it" };
+  if (!(f.slower !== null && f.slower >= SLOWER)) return { place: 'cloud', why: "no machine has room and GitHub can't take it" };
   return { place: 'home', why: `its cloud runs took ${f.slower?.toFixed(1)}× its runs here` };
 }
 
@@ -410,7 +413,7 @@ async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: strin
     mkdirSync(job.out, { recursive: true });
     for (const f of job.files) if (existsSync(join(io.cwd(), f))) copyFileSync(join(io.cwd(), f), join(job.out, basename(f)));
   }
-  on(code === 75 ? 'handed to Citadel to finish as a minion job' : code === 124 ? `stopped at its ${job.minutes}-minute limit` : code === 143 ? `stopped after ${mins()} min` : `exit ${code} after ${mins()} min`, tail(30));
+  on(code === 75 ? 'handed to Citadel to finish as a minion job' : code === 124 ? `stopped at its ${job.minutes}-minute limit` : code === 143 ? `stopped after ${mins()} min` : ended(code, mins()), tail(30));
   return code;
 }
 
@@ -473,12 +476,12 @@ export async function collect(out: string): Promise<number> {
   remember(h.job.cmd, mins * 60, result.code === 0 ? 0 : 1);
   io.log(result.reply);
   io.log(`citadel-cloud: done after ${mins} min. Files: ${out}`);
-  line.set(`exit ${result.code} after ${mins} min`, `${result.reply}\n\nIts session: ${h.url}.`);
+  line.set(ended(result.code, mins), `${result.reply}\n\nIts session: ${h.url}.`);
   await line.done();
   return result.code === 0 ? 0 : 1;
 }
 
-const WHERE: Record<Place, string> = { machine: 'on a PC lending this scheme CI', github: "on GitHub's own runners", cloud: 'in a cloud session', home: "here, in perigee's heavy-job slot" };
+const WHERE: Record<Place, string> = { machine: 'on a machine lending this scheme CI', github: "on GitHub's own runners", cloud: 'in a cloud session', home: "here, in perigee's heavy-job slot" };
 
 /** POST the step's chat line, or rewrite it; its event id, or null when it couldn't (a missing line, never a failed step). */
 async function postLine(text: string, detail: string, event: number | null): Promise<number | null> {
@@ -501,7 +504,8 @@ async function postLine(text: string, detail: string, event: number | null): Pro
 function liveLine(job: Job, from: number | null = null) {
   let event: number | null = from;
   let chain: Promise<unknown> = Promise.resolve();
-  const what = job.kind === 'run' ? `\`${job.cmd.length > 120 ? `${job.cmd.slice(0, 117)}...` : job.cmd}\`` : 'a brief';
+  // The chat's note line shows plain text: a command in quotes, not markdown's backticks.
+  const what = job.kind === 'run' ? `“${job.cmd.length > 120 ? `${job.cmd.slice(0, 117)}...` : job.cmd}”` : 'a brief';
   let where = '';
   const set = (state: string, detail = '') => {
     const text = `citadel-cloud: ${what} ${where} · ${state}`.replace(/\s+/g, ' ').slice(0, 400);

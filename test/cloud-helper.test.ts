@@ -268,7 +268,7 @@ test('a command goes through citadel-heavy to a PC with room, to GitHub on a pub
       ['--here bash -c npm test', null, 'npm test'],
     ],
   );
-  assert.match(said.join('\n'), /runs on a PC lending this scheme CI[\s\S]*runs on GitHub's own runners[\s\S]*runs here, in perigee's heavy-job slot: cloud helpers are off/);
+  assert.match(said.join('\n'), /runs on a machine lending this scheme CI[\s\S]*runs on GitHub's own runners[\s\S]*runs here, in perigee's heavy-job slot: cloud helpers are off/);
   assert.deepEqual(claudeCalls(), [], 'no session for any of them');
 });
 
@@ -329,9 +329,9 @@ test('a cloud run is remembered for the next pick\'s "WAY slower" check', async 
 test('the chat line: one note for the step, rewritten from its start to its exit, and through a fallback home', async () => {
   assert.equal(await helper(job('echo lined; sleep 1')), 0);
   const texts = lines.map(([t]) => t);
-  assert.equal(texts[0], 'citadel-cloud: `echo lined; sleep 1` in a cloud session · starting');
-  assert.ok(texts.includes('citadel-cloud: `echo lined; sleep 1` in a cloud session · started'), texts.join('\n'));
-  assert.match(texts.at(-1)!, /in a cloud session · exit 0 after 0 min$/);
+  assert.equal(texts[0], 'citadel-cloud: “echo lined; sleep 1” in a cloud session · starting');
+  assert.ok(texts.includes('citadel-cloud: “echo lined; sleep 1” in a cloud session · started'), texts.join('\n'));
+  assert.match(texts.at(-1)!, /in a cloud session · ✔ done after 0 min$/);
   assert.deepEqual(
     lines.map(([, e]) => e),
     [null, ...lines.slice(1).map(() => 41)],
@@ -344,8 +344,8 @@ test('the chat line: one note for the step, rewritten from its start to its exit
   io.quietMs = 1500;
   assert.equal(await helper(job('echo hi', { minutes: 60 })), 0);
   assert.deepEqual(
-    lines.map(([t]) => t.replace('citadel-cloud: `echo hi` ', '')),
-    ['in a cloud session · starting', 'in a cloud session · started', "in a cloud session · the cloud session didn't deliver, so it runs here", "here, in perigee's heavy-job slot · exit 0 after 0 min"],
+    lines.map(([t]) => t.replace('citadel-cloud: “echo hi” ', '')),
+    ['in a cloud session · starting', 'in a cloud session · started', "in a cloud session · the cloud session didn't deliver, so it runs here", "here, in perigee's heavy-job slot · ✔ done after 0 min"],
   );
 });
 
@@ -354,7 +354,7 @@ test('a step allowed long but done before the hand-over time waits in the turn t
   const j = job('echo quick one', { minutes: HAND_MINUTES + 10 });
   assert.equal(await helper(j), 0);
   assert.ok(!existsSync(join(j.out, '.hand.json')), 'never handed over');
-  assert.match(lines.at(-1)![0], /exit 0 after 0 min$/);
+  assert.match(lines.at(-1)![0], /✔ done after 0 min$/);
   const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
   await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
 });
@@ -379,7 +379,7 @@ test('a long cloud step runs on its own once it has run past the hand-over time:
   assert.equal(readFileSync(join(j.out, 'out.txt'), 'utf8'), 'made\n');
   assert.deepEqual(
     lines.map(([t, e]) => [t.replace(/^.*· /, ''), e]),
-    [[/exit 0 after \d+ min/.exec(lines[0][0])![0], 41]],
+    [[/✔ done after \d+ min/.exec(lines[0][0])![0], 41]],
   );
   assert.equal(cloudBranches(), '');
   const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
@@ -402,10 +402,10 @@ test('check: a step on its own that goes quiet or passes its limit is due; colle
     ['--here bash -c echo here'],
   );
   assert.deepEqual(
-    lines.map(([t, e]) => [t.replace('citadel-cloud: `echo here` ', ''), e]),
+    lines.map(([t, e]) => [t.replace('citadel-cloud: “echo here” ', ''), e]),
     [
       ["in a cloud session · the cloud session didn't deliver, so it runs here", 9],
-      ["here, in perigee's heavy-job slot · exit 0 after 0 min", 9],
+      ["here, in perigee's heavy-job slot · ✔ done after 0 min", 9],
     ],
   );
   assert.equal(cloudBranches(), '', 'its beat branch deleted');

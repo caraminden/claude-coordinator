@@ -60,7 +60,10 @@ export const cloudHelpersField = () =>
     id: 'cloud-helpers',
     title: 'Cloud helpers',
     label: 'cloud helpers',
-    help: ["Whether a minion's long step (a test run, a build, a research brief) may run in a Claude Code cloud session on its sender's login, in every scheme.", "Off, citadel-cloud runs it on a machine's CI, GitHub's free runners or here instead."],
-    on: 'On: citadel-cloud may hand a step to a cloud session when no free runner or machine fits.',
-    off: 'Off: no step goes to a cloud session; each runs on CI or here.',
+    help: [
+      "Whether a minion's long step (a test run, a build, a research brief) may go through citadel-cloud, in every scheme: to a machine with room, to GitHub's free runners, or to a Claude Code cloud session on its sender's login.",
+      "Off, minions aren't told of it, and a step handed to it anyway runs on Citadel's own server, as before.",
+    ],
+    on: "On: minions are told of citadel-cloud, which picks a machine, GitHub's runners or a cloud session, in that order.",
+    off: "Off: minions aren't told of citadel-cloud; a step handed to it runs on Citadel's own server.",
   });

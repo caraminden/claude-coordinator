@@ -738,7 +738,7 @@ function drawEvent(event, scroll) {
     // A note rewritten in place (the day's worktree cleanup, #1055): its line and list change, its open state stays.
     for (const el of log.querySelectorAll(`[data-note="${data.event}"]`)) {
       el.querySelector('summary')?.replaceChildren(...[threadRefs(data.text)].flat());
-      el.querySelector('pre')?.replaceChildren(data.detail ?? '');
+      el.querySelector('pre')?.replaceChildren(...threadRefs(data.detail ?? ''));
     }
   } else if (event.kind === 'replaced') {
     // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in the collapsed row.
@@ -790,7 +790,7 @@ function drawEvent(event, scroll) {
     const short = struck ? null : shortNote(data.text);
     if (struck) nodes.push(struck);
     // A note with output under it (a CI runner add or remove, #339) keeps it collapsed, line breaks and all.
-    else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail', 'data-note': event.id }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
+    else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail', 'data-note': event.id }, h('summary', {}, threadRefs(short)), h('pre', {}, threadRefs(data.detail))));
     else if (short != null && pushNote(data.text)) nodes.push(pushLine(data.text));
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'fresh') {

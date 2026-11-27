@@ -585,6 +585,12 @@ export class LiveWaiters {
     return t.build != null && this.store.getSetting<number>(buildOwnerKey(t.project_id, t.build)) === t.id;
   }
 
+  /** How people read chain `c`'s wait on its leader (chainIs, with the leader's build and whether it owns it). */
+  private chainIsOf(c: Chain): string {
+    const leader = this.store.getTicket(c.after);
+    return chainIs(c.when, leader?.build, !!leader && this.isBuildOwner(leader));
+  }
+
   private async chainState(c: Chain): Promise<'go' | 'wait' | 'unshipped'> {
     const leader = this.store.getTicket(c.after);
     if (!leader) return 'unshipped';
@@ -641,7 +647,7 @@ export class LiveWaiters {
   private chainWhat(c: Chain): string {
     const leader = this.store.getTicket(c.after);
     const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
-    return c.held ? `${who}'s work ${chainIs(c.when, leader?.build, !!leader && this.isBuildOwner(leader))}, and ${who} was dismissed without it, so only Unseal starts you` : `${who}'s work ${chainIs(c.when, leader?.build, !!leader && this.isBuildOwner(leader))}`;
+    return c.held ? `${who}'s work ${this.chainIsOf(c)}, and ${who} was dismissed without it, so only Unseal starts you` : `${who}'s work ${this.chainIsOf(c)}`;
   }
 
   /** The brief `ticket` holds until its leader's work is in, for its chat to show read-only; null once it is sent (release) or when there is none. */
@@ -649,7 +655,7 @@ export class LiveWaiters {
     const c = this.chains().find((o) => o.ticket === ticket);
     if (!c || !c.message) return null;
     const leader = this.store.getTicket(c.after);
-    return { text: c.message, from: c.from, leader: leader?.number ?? c.after, when: c.when, is: chainIs(c.when, leader?.build, !!leader && this.isBuildOwner(leader)) };
+    return { text: c.message, from: c.from, leader: leader?.number ?? c.after, when: c.when, is: this.chainIsOf(c) };
   }
 
   /** `ticket`'s held brief, kept in the chain, for a start about to run (Start now); null when none, or one already runs. */
@@ -735,7 +741,7 @@ export class LiveWaiters {
     this.store.setSetting(CHAINS, keep);
     const n = (id: number) => `#${this.store.getTicket(id)?.number ?? id}`;
     for (const c of go) this.starting.add(c.ticket);
-    for (const c of go) this.start(c, `${n(c.after)}'s work ${chainIs(c.when, this.store.getTicket(c.after)?.build)}`);
+    for (const c of go) this.start(c, `${n(c.after)}'s work ${this.chainIsOf(c)}`);
     for (const c of hold) this.hold(c, `${n(c.after)} was dismissed without its work shipping`);
     return go.length;
   }
@@ -763,7 +769,7 @@ export class LiveWaiters {
       const now = outbox.clock();
       if (states.get(r.id) === 'go') {
         if (r.state === 'held' && !this.store.updateDelivery(r.id, { state: 'waiting', reason: null, due: null }, ['held'], now)) continue;
-        if (outbox.meet(r.id, { why: `${n(c.after)}'s work ${chainIs(c.when, this.store.getTicket(c.after)?.build)}` })) met++;
+        if (outbox.meet(r.id, { why: `${n(c.after)}'s work ${this.chainIsOf(c)}` })) met++;
       } else if (states.get(r.id) === 'unshipped' && r.state === 'waiting') {
         // Held until the check finds its work in after all, or a person starts it; a follower reopened after a dismissal is held again quietly.
         const held = { ...c, held: true };

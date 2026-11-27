@@ -50,7 +50,7 @@ test("a retro log that can't be written changes neither a landing's output nor i
     r.commit(r.wt, 'b.txt', 'mine\n');
     const blocker = join(r.dir, 'blocker');
     writeFileSync(blocker, 'a file, not a folder\n');
-    const res = r.run({ COORDINATOR_SHARED_DIR: shared && blocker });
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared && blocker, CITADEL_HEAVY_DIR: join(r.dir, 'heavy') }); // its own heavy history: perigee's real one decides light or heavy, and a run adds a line to it
     assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
     return {
       status: res.status,

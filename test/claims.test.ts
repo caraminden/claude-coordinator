@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { Claims, claimName } from '../src/claims.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, tempRoot, until, zoneLabel, type Booted } from './helpers.ts';
+import { agentToken, bootServer, mintedAgentToken, tempRoot, until, zoneLabel, type Booted } from './helpers.ts';
 import { agentEnv, mcpAgent } from './mcp-agent.ts';
 
 /** Claims on a bare database with schemes 1 and 2 (its rows reference projects). */
@@ -386,7 +386,8 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   assert.equal(busy.status, 409);
   assert.match(busy.data.error, new RegExp(`held by #${a.number}`));
 
-  // A minion reads the claims but can't take one.
+  // A minion reads the claims but can't take one. Its first turn's token replaces the one read before it (#2199: a 401 under load).
+  await mintedAgentToken(join(root, 'data'), b.id);
   assert.equal((await call(url, { as: b.id })).data.claims[0].name, 'pipeline-lane');
   assert.equal((await call(url, { method: 'POST', body: { name: 'pipeline-lane' }, as: b.id })).status, 403);
 

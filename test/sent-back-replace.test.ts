@@ -98,3 +98,16 @@ test("only this turn counts: an earlier turn's send-back is left as it was", () 
   const replaced = store.listEvents(t.id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).replaced);
   assert.equal(replaced.length, 0);
 });
+
+test("a bare KEEP never shows as the minion's latest line, its result or the reply a card carries", () => {
+  const t = store.createTicket({ project_id: project.id, title: 'K', permission_mode: 'default', created_by: 'Cara' });
+  const results: (string | null)[] = [];
+  const run = (l: object) => (runner as any).handleLine(t.id, JSON.stringify(l), (_e: boolean, r: string | null) => results.push(r));
+  for (const l of [say('Done: ![x](a.png)'), feedback(), say('KEEP'), { ...result, result: 'KEEP' }]) run(l);
+  assert.equal(store.getTicket(t.id)!.last_activity, 'Done: ![x](a.png)');
+  assert.equal(results.at(-1), 'Done: ![x](a.png)');
+  assert.deepEqual(
+    [...store.wordsBy(t.id, 5)].map((e) => JSON.parse(e.data).message.content[0].text),
+    ['Done: ![x](a.png)'],
+  );
+});

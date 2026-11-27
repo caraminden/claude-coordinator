@@ -212,20 +212,32 @@ export class TurnEvents {
     // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
     applyEvent(progress, 'claude', slim, row.created_at);
     this.d.recordSteps(ticketId, progress);
-    const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
+    // A bare KEEP answering a send-back is no activity: the first reply stands (replaceSentBack).
+    const keep =
+      this.d.sentBack.has(ticketId) &&
+      ev.type === 'assistant' &&
+      !ev.parent_tool_use_id &&
+      describeActivity(ev)
+        ?.replace(/[*_.!]/g, '')
+        .toUpperCase() === KEEP;
+    const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : keep ? null : describeActivity(ev);
     if (activity && activity !== this.d.store.getTicket(ticketId)?.last_activity) {
       this.d.store.updateTicket(ticketId, { last_activity: activity });
       // Keep the board's progress line live, not just on status changes.
       this.d.broadcastTicket(ticketId);
     }
     if (ev.type === 'result') this.d.savePlan(ticketId, progress, row.id);
-    if (ev.type === 'result' && !ev.is_error) this.d.carryReply(ticketId);
     if (ev.type === 'user' && ((ev.message?.content ?? []) as ContentBlock[]).some?.((b) => typeof b?.text === 'string' && b.text.includes(SENT_BACK)) && !this.d.sentBack.has(ticketId)) {
       this.d.sentBack.add(ticketId);
       this.d.saveTurn(ticketId, { sentBack: true });
     }
     // shortcut: a turn stopped, or cut off and resumed, before the result keeps both versions (a re-attached one doesn't, #1452); rare, so left.
-    if (ev.type === 'result' && this.d.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
+    if (ev.type === 'result' && this.d.sentBack.delete(ticketId)) {
+      const stood = this.replaceSentBack(ticketId, row.id);
+      // The turn's result is the reply that stands, not the KEEP that answered the send-back.
+      if (stood != null) onResult(!!ev.is_error, stood);
+    }
+    if (ev.type === 'result' && !ev.is_error) this.d.carryReply(ticketId);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.d.store.getSetting<TurnState>(turnKey(ticketId));
       // A cloud turn's cost is this turn's estimate, not a session's running total (#2153): kept as one, like a killed turn's,
@@ -272,7 +284,9 @@ export class TurnEvents {
     return { ...ev, message: { ...ev.message, content }, ...(state ? { turn_state: state } : {}) };
   }
 
-  private replaceSentBack(ticketId: number, resultId: number) {
+  /** Swaps each sent-back reply for its rewrite; returns the words of the reply that stood when the last answer was a bare KEEP. */
+  private replaceSentBack(ticketId: number, resultId: number): string | null {
+    let stood: string | null = null;
     // A Grunt's words aren't the reply.
     const words = (data: ClaudeEvent) => data.type === 'assistant' && !data.parent_tool_use_id && ((data.message?.content ?? []) as ContentBlock[]).some((b) => b?.type === 'text' && b.text?.trim());
     const sentBack = (data: ClaudeEvent) => data.type === 'user' && Array.isArray(data.message?.content) && data.message.content.some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
@@ -306,9 +320,11 @@ export class TurnEvents {
           : [original, rewrite];
       const data: ClaudeEvent & { replaced?: number } = JSON.parse(gone.data);
       if (data.replaced) continue;
+      if (gone === rewrite) stood = text(JSON.parse(by.data));
       this.d.store.setEventData(gone.id, { ...data, replaced: by.id });
       this.d.emit(ticketId, 'replaced', { event: gone.id, by: by.id });
     }
+    return stood;
   }
 
   /** The usage ledger (#1306): each tool, skill and Grunt type a main-thread message calls. Never throws. */

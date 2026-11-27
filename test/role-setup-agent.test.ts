@@ -316,3 +316,29 @@ test("Windows: a paste it needs anyway also lets the agent list this PC's Hyper-
   assert.deepEqual(odd.said.find((s) => s.admin)?.admin?.needs, ['runner']);
   assert.throws(() => elevateScript({ platform: 'win32', appUrl: 'http://citadel.test', token: TOKEN, needs: ['hyperv'], sid: "x'; rm" }), /Windows account/);
 });
+
+test("Windows tests' Set up offers the Hyper-V paste alone to a PC that needs no other, and still tests the screen", async () => {
+  const sid = 'S-1-5-21-1004336348-1177238915-682003330-1001';
+  const vmms = 'powershell.exe -NoProfile -Command if (-not (Get-Service vmms';
+  const close = { 'powershell.exe -NoProfile -NonInteractive -Command': ok('closed 1') };
+  const p = pc({ role: 'screen', platform: 'win32', config: { workspaces: {} }, answers: { [vmms]: ok(`locked ${sid}`), ...close } });
+  await p.run();
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin?.needs, ['hyperv']);
+  assert.match(readFileSync(join(p.ctx.home, 'coordinator-agent', 'elevate.ps1'), 'utf8'), new RegExp(`-Member '${sid}'`));
+  assert.equal(p.done().ok, true, 'the screen is still tested');
+  // Get-VM works already, no Hyper-V, or only a Test: no paste.
+  for (const [out, kind] of [
+    ['ok', 'setup'],
+    ['none', 'setup'],
+    [`locked ${sid}`, 'test'],
+  ]) {
+    const q = pc({ role: 'screen', kind, platform: 'win32', config: { workspaces: {} }, answers: { [vmms]: ok(out), ...close } });
+    await q.run();
+    assert.equal(
+      q.said.find((s) => s.admin),
+      undefined,
+      `${out} ${kind}`,
+    );
+    assert.equal(q.done().ok, true);
+  }
+});

@@ -7,7 +7,7 @@ import { bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpe
 import { json } from './typed.ts';
 import { Store } from '../src/db.ts';
 import { cleanReport, hashJoinCode, JOIN_CODE, JOIN_MS, joinState, makeJoin, nameFromHost, newJoinCode, redeemJoin } from '../src/machine-join.ts';
-import { AGENT_VERSION, hypervFrom, joinWithCode, machineReport } from '../public/machine-agent.mjs';
+import { AGENT_VERSION, hypervFrom, hypervMoved, hypervNow, joinWithCode, machineReport } from '../public/machine-agent.mjs';
 import { machineJoinPosix, machineJoinWindows, machineSetupWindows } from '../public/machine-setup.js';
 import { guessJoinOs, reportLine } from '../public/machine-connect.js';
 
@@ -136,6 +136,9 @@ test('the report reads a Windows PC: its version, WSL (whose tools write UTF-16)
   assert.deepEqual(vms.hyperv, { present: true, vms: ['citadel-test-box'] });
   assert.equal(r.hyperv, null, "no answer: it can't tell");
   assert.deepEqual([hypervFrom('none'), hypervFrom('?'), hypervFrom('vm'), hypervFrom('Access denied')], [{ present: false, vms: [] }, { present: true, vms: null }, { present: true, vms: [] }, null]);
+  // A VM made or renamed since the last report sends it again, so it links by discovery; the same list, or none read, doesn't.
+  const now = await hypervNow(async () => 'vm\r\ncitadel-test-box\r\nscratch\r\n');
+  assert.deepEqual([hypervMoved(now, vms.hyperv), hypervMoved(vms.hyperv, vms.hyperv), hypervMoved(null, vms.hyperv), hypervMoved({ present: true, vms: [] }, null)], [true, false, false, true]);
   // Linux inside WSL: no screen of its own.
   const r3 = await machineReport({ platform: 'linux', env: { DISPLAY: ':0' }, home: tmp.dir, run: async () => null, read: (f: string) => (f === '/proc/version' ? 'Linux version 5.15 (microsoft-standard-WSL2)' : 'PRETTY_NAME="Ubuntu 24.04 LTS"\n') });
   assert.deepEqual([r3.os, r3.os_name, r3.in_wsl, r3.wsl, r3.screen, r3.gpu], ['linux', 'Ubuntu 24.04 LTS', true, null, false, null]);

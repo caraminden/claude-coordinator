@@ -2368,7 +2368,7 @@ export async function machineReport({ platform = process.platform, env = process
           ? false
           : !!(env.DISPLAY || env.WAYLAND_DISPLAY || exists('/tmp/.X11-unix/X0') || (env.XDG_RUNTIME_DIR && exists(join(env.XDG_RUNTIME_DIR, 'wayland-0')))),
     os === 'windows' ? run('whoami.exe', ['/groups']).then((v) => (v === null ? null : /S-1-5-32-544/.test(v))) : process.getuid?.() === 0 ? true : run('id', ['-Gn']).then((v) => (v === null ? null : /\b(sudo|wheel|admin)\b/.test(v))),
-    os === 'windows' ? run('powershell.exe', ['-NoProfile', '-Command', HYPERV_PS], 20_000).then(hypervFrom) : null,
+    os === 'windows' ? hypervNow(run) : null,
   ]);
   return {
     host: hostname(),
@@ -2404,6 +2404,11 @@ export function hypervFrom(out) {
   if (lines[0] === 'vm') return { present: true, vms: lines.slice(1, 51).map((n) => n.slice(0, 100)) };
   return null;
 }
+/** Hyper-V and its VMs as the report says them (hypervFrom). */
+export const hypervNow = (run = probe) => run('powershell.exe', ['-NoProfile', '-Command', HYPERV_PS], 20_000).then(hypervFrom);
+/** Whether Hyper-V's VMs changed since the report last sent, so a new VM links by discovery (Build 10 H4); an unread list changes nothing. */
+export const hypervMoved = (now, sent) => now !== null && JSON.stringify(now) !== JSON.stringify(sent ?? null);
+const HYPERV_EVERY_MS = 5 * 60_000;
 
 /**
  * Swap a join code for this machine's token (POST /api/machines/join), once: what came back is kept in `file` (only
@@ -2607,17 +2612,21 @@ async function main() {
     log(`Config problem: worker: ${err.message}, so this computer runs no minion turns`);
   }
 
+  /** Hyper-V's VMs in the report last sent (hypervMoved). */
+  let sentHyperv = null;
   /** Tells the app which servers and workspaces this agent offers; sent on connect and when the config changes. */
   async function sendInfo() {
     await runner.ready;
     const jobs = runner.offer();
+    const report = await machineReport();
+    sentHyperv = report.hyperv;
     await fetch(new URL('/api/machines/info', appUrl), {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
       body: JSON.stringify({
         ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }),
-        report: await machineReport(),
+        report,
         ...(host ? host.summary() : {}),
         problems: [...(host?.summary().problems ?? []), ...runner.leftover()],
         ...(jobs ? { jobs } : {}),
@@ -2647,6 +2656,7 @@ async function main() {
   // Claude Code rewrites its config all the time, so look now and then and say so only when the names changed.
   let reported = [];
   if (managed) setInterval(() => JSON.stringify(found()) !== JSON.stringify(reported) && sendInfo(), FOUND_EVERY_MS).unref();
+  if (process.platform === 'win32') setInterval(async () => hypervMoved(await hypervNow(), sentHyperv) && sendInfo(), HYPERV_EVERY_MS).unref();
 
   /** A role's Set up or Test (Build 7 M4): its steps are role-setup-agent.mjs's, taken from the app at each press as the worker's are. */
   async function runRoleSetup(ask) {

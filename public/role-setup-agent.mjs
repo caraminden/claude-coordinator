@@ -92,6 +92,11 @@ async function screen(ctx, say, end) {
       writeFileSync(ctx.configFile, `${JSON.stringify({ ...raw, screenshots: true, screen_lock: raw.screen_lock ?? join(dirname(ctx.configFile), 'screen.lock') }, null, 2)}\n`);
       await say(n++, 'Turned screenshots on in machine-agent.json', 'ok');
     }
+    // Its VMs are its capabilities (Build 10 H4): a set-up PC that needs no other paste is offered this one on its own.
+    if (await hypervLocked(ctx)) {
+      if (!(await elevate(ctx, say, n, ['hyperv']))) return;
+      await say(n++, "Run the administrator command above on this PC, then sign out of Windows and back in, so the agent can list its Hyper-V VMs (the screen's own steps go on without it)", 'ok');
+    }
   }
   if (ctx.screenBusy()) {
     const why = 'A minion has the screen right now: press Test once its job ends.';

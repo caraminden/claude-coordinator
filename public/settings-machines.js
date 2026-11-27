@@ -126,7 +126,7 @@ export function machinesPage(main = {}) {
           : settingsHelp('Your computers: switch each of their roles on or off, and tick the schemes that get it. Only your own minion turns use them.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'),
       ),
     ),
-    // Connect a computer (Build 7 M2) is the way in; Add by name stays for a shared machine and the GPU jobs distro's line.
+    // Connect a computer (Build 7 M2) is the way in; Add by name stays for a machine with no agent yet and the GPU jobs distro's line; either way the person adding it owns it (#2184).
     h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'machine-connect-toggle', onclick: () => connectComputer() }, 'Connect a computer'), add.toggle),
     add.form,
     h('div', { id: 'machine-connect' }),
@@ -636,7 +636,7 @@ function ciAgentUpdate(m) {
 /** Whether the viewer may relink this machine, as the server's managesMachine says: its owner, or an admin. */
 const managesHere = (m) => !!account?.admin || (m.owner_id !== null && m.owner_id === account?.id);
 
-/** Whether the viewer may show this machine's token (#1355): its owner's own, an admin's for a shared one (Cara, 2026-11-20, "Only its owner"). */
+/** Whether the viewer may show this machine's token (#1355): its owner's alone (Cara, 2026-11-20, "Only its owner"; every machine has one, #2184). */
 const tokenIsMine = (m) => m.owner_id === account?.id;
 
 /** Tokens shown on this page, by machine id, so a redraw from the live list keeps one open until Hide or leaving the page. */

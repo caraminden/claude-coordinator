@@ -35,7 +35,7 @@ const LIMITS = { ...WORKER_LIMITS, workers: [0, WORKER_LIMITS.workers[1]], runne
 
 /** Its owner, or an admin (access.ts managesMachine). @param {MachineRow} m */
 export const managesRoles = (m) => !!account?.admin || (m.owner_id !== null && m.owner_id === account?.id);
-/** Caps on a person's own machine are its owner's alone (spec section 7); a shared one's, an admin's. @param {MachineRow} m */
+/** Caps are its owner's alone (spec section 7; every machine has one, #2184). @param {MachineRow} m */
 const setsCaps = (m) => m.owner_id === account?.id;
 /** The page's newest view of the machine. @param {MachineRow} m */
 const current = (m) => /** @type {MachineRow[] | undefined} */ (view?.machines)?.find((x) => x.id === m.id) ?? m;

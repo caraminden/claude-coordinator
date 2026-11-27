@@ -1,0 +1,93 @@
+# What the full suite needs beyond Node, in the runner user's own home (no root), for tests.yml's desktop job and its
+# GitHub shards and for ci-cache.yml (#2209): one copy of each install. On the desktop each is installed once and kept; on
+# GitHub's runners they come from main's cache (cache: restore), which ci-cache.yml fills (cache: save).
+name: ci tools
+description: sqlite3 and libatomic1, pwsh with PSScriptAnalyzer, the .NET 8 SDK and Chrome's headless shell
+inputs:
+  cache:
+    description: "'' (the desktop keeps its own), restore (a shard), or save (ci-cache.yml on main)"
+    default: ''
+runs:
+  using: composite
+  steps:
+    # Bump the key with any version below; a shard that misses it installs from the Internet (slower, still right).
+    - if: ${{ inputs.cache != '' }}
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        lookup-only: ${{ inputs.cache == 'save' }} # ci-cache.yml only asks whether main has them
+        key: ci-tools-pwsh7.6.9-pssa1.25.0-dotnet8-chs156.0.8078.4
+        path: |
+          ~/.local/pwsh
+          ~/.local/share/powershell/Modules
+          ~/.dotnet
+          ~/.cache/ms-playwright
+          ~/.local/debs
+    # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
+    # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
+    # unpacked from their .debs into the runner's home.
+    - name: libatomic1 and sqlite3, when the distro lacks them
+      if: ${{ inputs.cache != 'save' || steps.cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v sqlite3 >/dev/null || ! /sbin/ldconfig -p | grep -q 'libatomic\.so\.1'; then
+          dir=$HOME/.local/debs
+          if [ ! -x "$dir/usr/bin/sqlite3" ]; then
+            mkdir -p "$dir" && cd "$dir"
+            apt-get download libatomic1 sqlite3
+            for d in *.deb; do dpkg -x "$d" .; done
+          fi
+          echo "LD_LIBRARY_PATH=$dir/usr/lib/x86_64-linux-gnu" >>"$GITHUB_ENV"
+          echo "$dir/usr/bin" >>"$GITHUB_PATH"
+        fi
+    # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
+    # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.
+    - name: pwsh and PSScriptAnalyzer for the .ps1 lint
+      if: ${{ inputs.cache != 'save' || steps.cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        v=7.6.9 dir=$HOME/.local/pwsh
+        if [ ! -x "$dir/$v/pwsh" ]; then
+          mkdir -p "$dir/$v"
+          curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v$v/powershell-$v-linux-x64.tar.gz" | tar -xz -C "$dir/$v"
+          chmod +x "$dir/$v/pwsh"
+        fi
+        echo "$dir/$v" >>"$GITHUB_PATH"
+        "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
+    # test/desktop-launcher-trial.test.ts builds the kit launcher's trial rules with the .NET 8 SDK (#1396) and skips
+    # without one, so it goes where the test looks (~/.dotnet, as on perigee), in the runner's own home, once.
+    - name: the .NET 8 SDK for the desktop launcher's tests
+      if: ${{ inputs.cache != 'save' || steps.cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! "$HOME/.dotnet/dotnet" --list-sdks 2>/dev/null | grep -q '^8\.'; then
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/dotnet-install.sh" https://dot.net/v1/dotnet-install.sh
+          bash "$RUNNER_TEMP/dotnet-install.sh" --channel 8.0 --install-dir "$HOME/.dotnet" --no-path
+        fi
+        "$HOME/.dotnet/dotnet" --list-sdks
+    # Chrome for Testing's headless shell, where test/browser.ts looks for Playwright's (the build perigee has).
+    - name: headless Chromium for the browser tests
+      if: ${{ inputs.cache != 'save' || steps.cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        v=156.0.8078.4 dir=$HOME/.cache/ms-playwright/chromium_headless_shell-1248
+        if [ ! -x "$dir/chrome-headless-shell-linux64/chrome-headless-shell" ]; then
+          mkdir -p "$dir"
+          curl -fsSL -o "$RUNNER_TEMP/chs.zip" "https://storage.googleapis.com/chrome-for-testing-public/$v/linux64/chrome-headless-shell-linux64.zip"
+          python3 -m zipfile -e "$RUNNER_TEMP/chs.zip" "$dir"
+          chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
+        fi
+    - if: ${{ inputs.cache == 'save' && steps.cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        key: ci-tools-pwsh7.6.9-pssa1.25.0-dotnet8-chs156.0.8078.4
+        path: |
+          ~/.local/pwsh
+          ~/.local/share/powershell/Modules
+          ~/.dotnet
+          ~/.cache/ms-playwright
+          ~/.local/debs

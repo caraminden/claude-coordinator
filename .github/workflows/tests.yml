@@ -1,6 +1,10 @@
-# The full suite, on Cara's desktop (the Linux runner in WSL: tools/ci-runner/README.md) instead of perigee (#523).
-# tools/land.sh pushes the rebased commit to land/<branch> and waits for this run on that exact commit; when no
-# runner is online or it doesn't answer in time, land.sh runs the suite on perigee itself.
+# The full suite. A ship's run goes to GitHub's own runners, split 20 ways (the shard job; #2209, ADR 0042: Cara, 2026-11-27,
+# "github should actually be the main CI? with my desktop as the fallback", "if they give us 20, take 20"), and to Cara's
+# desktop (the Linux runner in WSL: tools/ci-runner/README.md; the test job) when GitHub can't: tools/land.sh pushes the
+# rebased commit to land/<branch>, which starts the shards, and waits for this run on that exact commit; when GitHub hasn't
+# started every shard within LAND_CI_GH_START s or a shard fails before its tests, land.sh cancels the run and starts this
+# workflow on the desktop with where=desktop. The repo variable CI_RUNNER=desktop sends ships' pushes to the desktop
+# outright. When no desktop runner is online or it doesn't answer in time either, land.sh runs the suite on perigee itself.
 # A ship's own check (#1567, tools/own-check.sh): before it joins the line, land.sh pushes its rebased commit to
 # check/<branch> while the check runner is free. That run is a ship's run in every step, niced and on the runner with
 # the check label only, so it is never a second land run and never on GitHub's own runners; a green one is the
@@ -16,6 +20,12 @@ on:
   schedule:
     - cron: '30 13 * * *' # the quietest hour for lands: no commit reached main at 13:xx UTC in the 14 days to 2026-11-12
   workflow_dispatch:
+    inputs:
+      where:
+        description: "desktop (Cara's desktop, as a ship's fallback or a run by hand) or github (20 shards on GitHub's runners)"
+        type: choice
+        options: [desktop, github]
+        default: desktop
 
 # One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
 # threads) failed in a different file every run. Landings come one at a time anyway. Any other run (the nightly, or one
@@ -28,7 +38,8 @@ on:
 # same it is that train's run, still going while the next train's early run starts (Cara, 2026-11-22, "Low-priority run
 # on a ship runner").
 concurrency:
-  group: ${{ startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || (startsWith(github.ref, 'refs/heads/check/') && 'citadel-check' || (startsWith(github.ref, 'refs/heads/early/') && format('citadel-early-{0}', github.ref_name) || 'citadel-off-land')) }}
+  # A run on GitHub's runners is a group of its own: the shards take the account's slots, not the desktop (#2209).
+  group: ${{ (inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')) && format('citadel-github-{0}', github.run_id) || startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || (startsWith(github.ref, 'refs/heads/check/') && 'citadel-check' || (startsWith(github.ref, 'refs/heads/early/') && format('citadel-early-{0}', github.ref_name) || 'citadel-off-land')) }}
   cancel-in-progress: false
 
 permissions:
@@ -37,11 +48,13 @@ permissions:
 
 jobs:
   test:
+    # On the desktop: everything but a ship's push and a run started with where=github, which the shards below take.
+    if: ${{ !(inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')) }}
     # A land's run takes either Linux runner; any other (the nightly, one started by hand) only the one with the side
     # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). A ship's own
-    # check takes only the runner with the check label, never GitHub's own (whatever CI_RUNNER says) nor a land's. An
+    # check takes only the runner with the check label, never GitHub's own nor a land's. An
     # early next train's run (early/, #1568) takes a land's runner beside the lands' run, niced, never GitHub's own.
-    runs-on: ${{ startsWith(github.ref, 'refs/heads/check/') && fromJSON('["self-hosted", "citadel-ci-linux-check"]') || (startsWith(github.ref, 'refs/heads/early/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || (vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]')))) }}
+    runs-on: ${{ startsWith(github.ref, 'refs/heads/check/') && fromJSON('["self-hosted", "citadel-ci-linux-check"]') || (startsWith(github.ref, 'refs/heads/early/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]'))) }}
     # land.sh gives up on the run 9 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361; 6 until #1606), the clock step's up to 2 min included, or 3 more
     # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374), plus its burn-in's time (up to 2.5 min, #1443); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's is niced, and may wait its turn first (the ask below).
     timeout-minutes: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/')) && 16 || 45 }}
@@ -58,28 +71,18 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}
         run: node tools/ci-hold-ask.ts
       # fast-check, the property tests' library (#1657, ADR 0029): Citadel's one devDependency, from the lockfile, no install scripts.
-      - name: devDependencies for the tests
+      - &devdeps
+        name: devDependencies for the tests
         run: npm ci --ignore-scripts --no-audit --no-fund
-      # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
-      # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
-      # unpacked from their .debs into the runner's home.
-      - name: libatomic1 and sqlite3, when the distro lacks them
-        run: |
-          set -euo pipefail
-          if ! command -v sqlite3 >/dev/null || ! /sbin/ldconfig -p | grep -q 'libatomic\.so\.1'; then
-            dir=$HOME/.local/debs
-            if [ ! -x "$dir/usr/bin/sqlite3" ]; then
-              mkdir -p "$dir" && cd "$dir"
-              apt-get download libatomic1 sqlite3
-              for d in *.deb; do dpkg -x "$d" .; done
-            fi
-            echo "LD_LIBRARY_PATH=$dir/usr/lib/x86_64-linux-gnu" >>"$GITHUB_ENV"
-            echo "$dir/usr/bin" >>"$GITHUB_PATH"
-          fi
+      # sqlite3 and libatomic1, pwsh with PSScriptAnalyzer, the .NET 8 SDK and Chrome's headless shell, each once in the
+      # runner's own home (.github/actions/ci-tools, shared with the shards and ci-cache.yml).
+      - name: the tools the tests need
+        uses: ./.github/actions/ci-tools
       # Turns in tests start their units with systemd-run --user, as on perigee. Without the user's manager they
       # fall back to running inside the server, so the real path would go untested (and since #519 that fallback
       # raises an alert a test counts).
-      - name: the runner user's systemd
+      - &systemd
+        name: the runner user's systemd
         run: |
           dir=/run/user/$(id -u)
           [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
@@ -115,40 +118,6 @@ jobs:
           echo "  wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd"
           echo "The clock settles within a minute of that (tools/ci-runner/README.md, Citadel's own tests)."
           exit 1
-      # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
-      # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.
-      - name: pwsh and PSScriptAnalyzer for the .ps1 lint
-        run: |
-          set -euo pipefail
-          v=7.6.9 dir=$HOME/.local/pwsh
-          if [ ! -x "$dir/$v/pwsh" ]; then
-            mkdir -p "$dir/$v"
-            curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v$v/powershell-$v-linux-x64.tar.gz" | tar -xz -C "$dir/$v"
-            chmod +x "$dir/$v/pwsh"
-          fi
-          echo "$dir/$v" >>"$GITHUB_PATH"
-          "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
-      # test/desktop-launcher-trial.test.ts builds the kit launcher's trial rules with the .NET 8 SDK (#1396) and skips
-      # without one, so it goes where the test looks (~/.dotnet, as on perigee), in the runner's own home, once.
-      - name: the .NET 8 SDK for the desktop launcher's tests
-        run: |
-          set -euo pipefail
-          if ! "$HOME/.dotnet/dotnet" --list-sdks 2>/dev/null | grep -q '^8\.'; then
-            curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/dotnet-install.sh" https://dot.net/v1/dotnet-install.sh
-            bash "$RUNNER_TEMP/dotnet-install.sh" --channel 8.0 --install-dir "$HOME/.dotnet" --no-path
-          fi
-          "$HOME/.dotnet/dotnet" --list-sdks
-      # Chrome for Testing's headless shell, where test/browser.ts looks for Playwright's (the build perigee has).
-      - name: headless Chromium for the browser tests
-        run: |
-          set -euo pipefail
-          v=156.0.8078.4 dir=$HOME/.cache/ms-playwright/chromium_headless_shell-1248
-          if [ ! -x "$dir/chrome-headless-shell-linux64/chrome-headless-shell" ]; then
-            mkdir -p "$dir"
-            curl -fsSL -o "$RUNNER_TEMP/chs.zip" "https://storage.googleapis.com/chrome-for-testing-public/$v/linux64/chrome-headless-shell-linux64.zip"
-            python3 -m zipfile -e "$RUNNER_TEMP/chs.zip" "$dir"
-            chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
-          fi
       # The burn-in (#1443): a ship's new and changed test files, and up to 3 tests tools/affected-map.txt maps its changed
       # source files to or that import them (#1456), each run as 10 copies at once before the full suite (tools/burn-in.sh). A failed copy fails the run
       # here, with that copy's output, and land.sh refuses the ship on it as its own red, never a flake. land.sh pushes the
@@ -256,7 +225,8 @@ jobs:
       # before land.sh's (steps run back to back on one runner, and land.sh only extends once the full suite has ended),
       # and the reruns end 30 s short of the window, for the job's end and land.sh's next look: a real red is red in time. It never turns
       # a red run green: land.sh gives a red of flakes only its one fresh run.
-      - name: rerun failed files alone
+      - &rerun
+        name: rerun failed files alone
         if: ${{ failure() && steps.suite.conclusion == 'failure' }}
         env:
           NICENESS: ${{ !startsWith(github.ref, 'refs/heads/land/') && '10' || '0' }}
@@ -280,7 +250,8 @@ jobs:
           exit "$rc"
       # A cancelled step's processes live on until the job ends, so a hang still shows what it was waiting in:
       # the test file's node process and whatever it started.
-      - name: what was still running
+      - &still-running
+        name: what was still running
         if: cancelled() || failure()
         run: ps -u "$(id -u)" -o pid,ppid,etimes,stat,args --forest | cut -c1-400
       # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
@@ -288,3 +259,94 @@ jobs:
         if: always()
         continue-on-error: true
         run: node test/ci-leftovers.ts end
+
+  # A ship's run on GitHub's own runners (#2209, ADR 0042): free and unlimited on this public repo, at most 20 jobs at once
+  # across the account (Free plan), so 20 shards (Cara, 2026-11-27, "if they give us 20, take 20"). Each works out the same
+  # split from main's cached file times (tools/suite-runner.ts's CITADEL_TEST_SHARD: longest first onto the emptiest) and
+  # runs its part as the desktop job runs the whole: the same run-tests.sh, skip check and reruns alone. The run is red when
+  # any shard is; land.sh reads the run's one verdict as before, and the failed shards' logs per job. Left out, as
+  # desktop-only: asking Citadel to hold (a ship never asks), the clock check, the numbers (no tailnet from here: ADR
+  # 0042 says what that loses), and Windows' ports. The burn-in runs once, on shard 0, which the split gives
+  # CITADEL_TEST_SHARD_HEAD seconds less work.
+  shard:
+    if: ${{ inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 16 # as a land's desktop job
+    strategy:
+      fail-fast: false # a red shard leaves the others to finish and label their flakes: a fresh run needs to know they were only flakes
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tests read the history; the burn-in and the tier compare with main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      # Caches a land/ branch saves only it can read, so ci-cache.yml keeps these on main after each ship's run.
+      - name: the last split's file times
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/citadel-shard-times.tsv
+          key: ci-shard-times-${{ github.run_id }}
+          restore-keys: ci-shard-times-
+      # Ubuntu's AppArmor blocks the user namespaces Chrome's sandbox needs, and its runner user has no systemd manager
+      # until it lingers (#2198's probe). These machines are GitHub's and thrown away after the job: root is fine here.
+      - name: Chrome's sandbox and a systemd manager for the runner user
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo loginctl enable-linger "$(id -un)"
+          for _ in $(seq 50); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 0.2; done
+      - *devdeps
+      - name: the tools the tests need
+        uses: ./.github/actions/ci-tools
+        with:
+          cache: restore
+      - *systemd
+      - name: burn in new and changed tests
+        if: ${{ strategy.job-index == 0 && (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/')) }}
+        env:
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
+        run: |
+          base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}
+          if ! git rev-parse -q --verify "$base^{commit}" >/dev/null; then
+            echo "burn-in: no $base ref from land.sh, so it compares with GitHub's main, which may lack the last ship or two"
+            base=$(git merge-base HEAD origin/main)
+          fi
+          tools/burn-in.sh --ship "$base"
+      - name: the full suite
+        id: suite
+        env:
+          CITADEL_TEST_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
+          # The burn-in's usual time on shard 0 (a starting value; it is capped at land.sh's CI_BURN).
+          CITADEL_TEST_SHARD_HEAD: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/')) && '60' || '0' }}
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
+        run: |
+          rc=0
+          # The split's times in; this shard's own times out, for ci-cache.yml to merge.
+          export CITADEL_TEST_TIMES=$RUNNER_TEMP/shard-times.tsv
+          cp ~/.cache/citadel-shard-times.tsv "$CITADEL_TEST_TIMES" 2>/dev/null || echo "no file times from main's cache: every shard splits by name"
+          : >"$RUNNER_TEMP/tests.log"
+          tail -n +1 -f "$RUNNER_TEMP/tests.log" & tailer=$!
+          DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          sleep 1; kill "$tailer"
+          # A shard the split left with no file (a kit-lane ship has few) ran nothing, and skipped nothing.
+          ! grep -q '^suite-runner: shard [0-9]* of [0-9]*: 0 test file(s)$' "$RUNNER_TEMP/tests.log" || exit "$rc"
+          # As the desktop's: a skipped test fails the run, a red one too (#1914).
+          skips=$(sed -n 's/^ℹ skipped //p' "$RUNNER_TEMP/tests.log" | tail -n 1)
+          if [ "$skips" != 0 ] && { [ -n "$skips" ] || [ "$rc" = 0 ]; }; then
+            echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"
+            [ "$rc" != 0 ] || rc=1
+          fi
+          exit "$rc"
+      - *rerun
+      - name: keep this shard's file times for the next split
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-times-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/shard-times.tsv
+          retention-days: 1
+          if-no-files-found: ignore
+      - *still-running

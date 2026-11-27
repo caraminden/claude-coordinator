@@ -1,0 +1,68 @@
+# After a ship's run on GitHub's runners (#2209, ADR 0042): its shards' file times, merged into main's cache for the next
+# run's split, and the tools the shards install (.github/actions/ci-tools), cached on main once. A cache a land/ branch saves
+# only that branch can read; this runs on main (workflow_run), so what it saves every ship's run can restore. It never
+# changes a verdict: a run with no shard times (the desktop's) only checks the tools are cached. Started by hand on main, it
+# fills the tools cache.
+name: ci cache
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read # the finished run's artifacts
+
+concurrency:
+  group: ci-cache # one at a time, so two merges don't race to the newest times
+
+jobs:
+  keep:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.workflow_run.head_branch, 'land/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The ship's own commit: the merge drops the times of files that no longer exist, and keeps its new ones.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: the tools, unless main's cache has them
+        uses: ./.github/actions/ci-tools
+        with:
+          cache: save
+      - name: the last split's file times
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/citadel-shard-times.tsv
+          key: ci-shard-times-${{ github.run_id }}
+          restore-keys: ci-shard-times-
+      - name: the shards' times from the run
+        if: ${{ github.event_name == 'workflow_run' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: shard-times-*
+          path: ${{ runner.temp }}/shards
+      - name: merge them
+        id: merge
+        run: |
+          shopt -s nullglob
+          new=("$RUNNER_TEMP"/shards/*/shard-times.tsv)
+          [ ${#new[@]} -gt 0 ] || { echo "no shard times in that run (a desktop run, or a red one cut short)"; exit 0; }
+          mkdir -p ~/.cache
+          node tools/suite-runner.ts --merge-times ~/.cache/citadel-shard-times.tsv "${new[@]}" >"$RUNNER_TEMP/times.tsv"
+          [ -s "$RUNNER_TEMP/times.tsv" ] || { echo "the merge came out empty: keeping the old times"; exit 0; }
+          mv "$RUNNER_TEMP/times.tsv" ~/.cache/citadel-shard-times.tsv
+          echo "$(wc -l <~/.cache/citadel-shard-times.tsv) files' times, ${#new[@]} shards' new"
+          echo save=1 >>"$GITHUB_OUTPUT"
+      - if: ${{ steps.merge.outputs.save == '1' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/citadel-shard-times.tsv
+          key: ci-shard-times-${{ github.event.workflow_run.id || github.run_id }}

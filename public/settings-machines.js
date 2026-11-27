@@ -125,7 +125,7 @@ export function machinesPage(main = {}) {
         'div',
         { class: 'meta' },
         account?.admin
-          ? settingsHelp("Computers that lend their roles (tools and folders, CI runners, minion turns, GPU jobs) to the schemes ticked on each role's card.", 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.')
+          ? settingsHelp("Computers that lend their roles (tools and folders, CI runners, minion turns, GPU jobs, builds) to the schemes ticked on each role's card.", 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.')
           : settingsHelp('Your computers: switch each of their roles on or off, and tick the schemes that get it. Only your own minion turns use them.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'),
       ),
     ),
@@ -325,7 +325,7 @@ function renderMachineList() {
 /** No machines yet (Build 7 M3): what would fill the page, and the button that starts it. */
 function emptyMachines() {
   // Connect a computer (Build 7 M2) is the bar's button above, and its panel opens by itself on an empty page.
-  return h('div', { class: 'machine-empty' }, emptyCard("You haven't connected a computer", 'Connect one with Connect a computer above, and Citadel offers the roles it can do: tools and folders, CI runners, minion turns, GPU jobs.', { mark: '+', hue: 'accent' }));
+  return h('div', { class: 'machine-empty' }, emptyCard("You haven't connected a computer", 'Connect one with Connect a computer above, and Citadel offers the roles it can do: tools and folders, CI runners, minion turns, GPU jobs, builds.', { mark: '+', hue: 'accent' }));
 }
 
 /** Make a new token for a machine and show its install line. */

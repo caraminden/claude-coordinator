@@ -947,3 +947,47 @@ test("waiting in perigee's line with the slot busy and no machine free, it asks 
   }
   assert.equal(await holder.done, 0);
 });
+
+// #2236: a ship script (tools/land.sh) works on the minion's own worktree (its branch, the build branches, the scheme's
+// main), so it runs there whatever its past runs say. Peek's `citadel-job tools/land.sh --into build/2` was judged heavy
+// by its earlier runs and went to the CI desktop, where it ran on a detached snapshot checkout with no build/2 and failed.
+function shipScript() {
+  const repo = join(root, `worktree-${n++}`);
+  mkdirSync(join(repo, 'tools'), { recursive: true });
+  writeFileSync(join(repo, 'tools', 'land.sh'), '#!/bin/sh\necho "landed from $(pwd)"\n', { mode: 0o755 });
+  return repo;
+}
+// Long, busy past runs: any other command with these would be heavy.
+const heavyLands = (who: string) => past(who, 'tools/land.sh --into build/2', 333, 338).repeat(3);
+
+test('a land.sh judged heavy by its past runs still runs in its own worktree: never on CI or another machine', () => {
+  const { dir, env } = folder(1);
+  const e = elsewhere(env);
+  writeFileSync(e.ci, '');
+  writeFileSync(e.room, '');
+  seed(dir, heavyLands('Peek Auras #938 (cara)'));
+  const repo = shipScript();
+  const r = spawnSync(heavy, ['tools/land.sh', '--into', 'build/2'], { cwd: repo, env: { ...judged(e.env), CITADEL_HEAVY_WHO: 'Peek Auras #938 (cara)' }, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `landed from ${repo}\n`);
+  assert.ok(!existsSync(e.ciRan), 'it never went to CI');
+  assert.deepEqual(e.asked(), [], 'nor to a machine with the Builds role');
+  assert.deepEqual([lastLine(dir)[3], lastLine(dir)[9]], ['here', 'light']);
+});
+
+test('a land.sh takes no heavy slot, whatever its past runs say or the caller guesses: its own check takes one if it needs it', async () => {
+  const { dir, env } = folder(1);
+  seed(dir, heavyLands('Peek Auras #938 (cara)'));
+  const repo = shipScript();
+  const { go, holder } = await holdSlot(env);
+  try {
+    const r = spawnSync(heavy, ['--heavy', 'tools/land.sh', '--into', 'build/2'], { cwd: repo, env: { ...judged(env), CITADEL_HEAVY_WHO: 'Peek Auras #938 (cara)' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, `landed from ${repo}\n`);
+    assert.match(r.stderr, /without a heavy slot: it ships/);
+    assert.deepEqual([lastLine(dir)[3], lastLine(dir)[9]], ['here', 'light']);
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+});

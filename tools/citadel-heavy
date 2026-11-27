@@ -73,6 +73,8 @@
 # - Claude-bound jobs are always light (prompt-eval, skill-trigger-eval, citadel-replay, review-escapes, claude itself):
 #   Cara: "Our goal is to be able to run many Claudes as efficiently as possible, its the actual heavy work we want to
 #   offload". No limit of their own.
+# - A ship script (land.sh) is always light (#2236): it works on the minion's worktree and branches, which CI's snapshot
+#   and other machines don't have, and its own check takes a slot when it needs one.
 # - Otherwise by the job's own past runs: history lines of the same scheme (who up to " #" or " (") and the same command
 #   (its first 8 words past env, nice, timeout, time and `mise exec ... --`, paths cut to their last part, so a filtered
 #   `cargo test -p x some_test` is not the whole crate's run), the newest 5.
@@ -180,6 +182,11 @@ pin_cpus() {
 # Light or heavy (#1629, the header): prints "light <why>" or "heavy <why>".
 judge() {
   local claude='(^|[ /])(prompt-eval|skill-trigger-eval|skill-evals|citadel-replay|review-escapes|claude)([ /.]|$)'
+  # A ship script (#2236) works on this worktree's branch, the build branches and the scheme's main, so CI's snapshot or
+  # another machine can't run it, and a light-only merge needs no slot: its check takes one itself when it needs one.
+  # The command's words only: CITADEL_HEAVY_WHAT may be "land.sh's suite for ...", land.sh's own heavy check.
+  local ship='(^|[ /])land\.sh( |$)'
+  if [[ " $* " =~ $ship ]]; then echo "light it ships from this worktree (its own check takes a slot if it needs one), so it never goes to CI or another machine"; return; fi
   if [[ " $* $what " =~ $claude ]]; then echo "light it runs Claude turns, which wait on Claude, not the CPU"; return; fi
   local h=$dir/history
   [ -f "$h" ] || h=/dev/null # a fifo or a missing file would hang or fail the read

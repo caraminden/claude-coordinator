@@ -59,13 +59,6 @@ export function workerState(m) {
 /** @param {MachineRow} m */
 const only = (m) => !m.online && !m.last_seen_at && m.worker?.on;
 
-/** A worker-only row's state word and hue while its worker isn't ready; null leaves the row's own. @param {MachineRow} m */
-export function workerWord(m) {
-  if (!only(m) || m.status !== 'ready') return null;
-  const { tone } = workerState(m);
-  return /** @type {Record<string, string[]>} */ ({ info: ['Setting up', 'running'], warn: ['Needs a fix', 'waiting'], danger: ['Needs a fix', 'danger'] })[tone] ?? null;
-}
-
 /** A row's reason with its Minion turns in it; they stand for it where the worker is all that computer runs. @param {MachineRow} m */
 export function workerReason(m) {
   if (!m.worker?.on) return m.reason;
@@ -439,6 +432,9 @@ export function workerSection(m, redraw, { bare = false } = {}) {
     owner && w.host ? again(m, k, redraw) : null,
   );
 }
+
+/** Its owner's sign-ins there on their own (take B's For me tile, Build 10 H3): the same steps as in its section. @param {MachineRow} m */
+export const signInPart = (m) => signIns(m, keptFor(m.id));
 
 /** The install command again, for an update or a new token, once the block is opened. @param {MachineRow} m @param {Kept} k @param {Redraw} redraw */
 function again(m, k, redraw) {

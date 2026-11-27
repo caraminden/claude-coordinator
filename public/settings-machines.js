@@ -1,14 +1,16 @@
-// The Machines settings page: the list, the add form, the setup steps and each machine's lending (split out of settings.js).
+// The Machines settings page (split out of settings.js; take B since Build 10 H3): one card per computer you own (machine-card.js),
+// the Connect a computer wizard, a New token's install lines, and each card's details and lending.
 import { account, ago, api, h, icon, view } from './base.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { machineJobsSection } from './jobs.js';
-import { openConnectPanel, reportLine } from './machine-connect.js';
+import { connectWizardRedraw, openConnectPanel, openConnectWizard, reportLine } from './machine-connect.js';
+import { isMine, lentLine, machineCard, ownerName } from './machine-card.js';
 import { openMergePanel, runnerAgentLines } from './machine-merge.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
-import { pauseButton, roleCards } from './machine-role-cards.js';
-import { forgetWorkerLink, workerReason, workerWord } from './machine-worker-row.js';
+import { pauseButton } from './machine-role-cards.js';
+import { forgetWorkerLink, workerReason } from './machine-worker-row.js';
 import { emptyCard, toneChip } from './look.js';
-import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
+import { settingsHelp, settingsTabs, settingsTitle } from './settings.js';
 import { copyText, markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
@@ -45,71 +47,10 @@ function machineScreen(sc) {
   );
 }
 
-/** Whether this scheme's minions get a machine for the viewer: their own lent here (their turns get it). */
-const oursHere = (m) => !m.runners && m.gets?.includes(view.projectId) && m.owner_id === account?.id;
-
-/** The add form (#439): a name, and nothing about what it lends, which is ticked once its agent reports. runners: a CI runner host. */
-function machineAddForm(runners, label) {
-  const name = h('input', { name: 'name', placeholder: runners ? 'desktop-ci-runners' : 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
-  const alwaysOn = runners ? null : h('input', { type: 'checkbox', name: 'always_on', checked: true });
-  const status = h('span', { class: 'muted', role: 'status' });
-  const form = h(
-    'form',
-    { class: `machine-add${runners ? ' runners' : ''}` },
-    h('label', {}, 'Name', name),
-    alwaysOn ? h('label', { class: 'check', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on (untick for a laptop)')) : '',
-    h('button', { type: 'submit' }, label),
-    status,
-    // The steps sit in the form they are about (#492), not in a paragraph under the list.
-    runners
-      ? h(
-          'ol',
-          { class: 'settings-steps' },
-          h('li', {}, h('strong', {}, 'Name it'), ' and press Add CI runner host.'),
-          h('li', {}, h('strong', {}, 'Paste the line it shows'), ' on that PC, as administrator or root. Any 64-bit Intel or AMD PC with Windows, or Linux with systemd.'),
-          h('li', {}, h('strong', {}, 'Open its line and pick the schemes'), ' under Runs CI for. Only those schemes can put runners on it: CI there runs code their members push.'),
-        )
-      : h(
-          'ol',
-          { class: 'settings-steps' },
-          h('li', {}, h('strong', {}, 'Name it'), ' and press Add machine.'),
-          h('li', {}, h('strong', {}, 'Paste the line it shows'), ' on that computer. It needs Node 18 or newer.'),
-          h('li', {}, h('strong', {}, 'Open its line and tick what to lend.'), ' It reports the MCP servers set up for Claude Code there, and the servers and folders its owner lists in ', h('code', {}, 'machine-agent.json'), '.'),
-        ),
-  );
-  const toggle = h('button', { type: 'button', class: runners ? 'secondary small' : 'machine-add-toggle secondary', 'aria-expanded': 'false' }, runners ? 'Add a CI runner host' : 'Add by name');
-  const show = (on) => {
-    form.hidden = !on;
-    toggle.setAttribute('aria-expanded', String(on));
-    if (on) name.focus();
-  };
-  toggle.onclick = () => show(form.hidden);
-  form.hidden = true;
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    status.textContent = 'Adding…';
-    try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(alwaysOn && !alwaysOn.checked ? { always_on: false } : {}), ...(runners ? { runners: true } : {}) } });
-      view.machineToken = setupFor(machine, token, agent_url);
-      name.value = '';
-      status.textContent = '';
-      show(false);
-      renderMachineSetup();
-      document.getElementById('machine-setup')?.scrollIntoView({ block: 'nearest' });
-    } catch (err) {
-      status.textContent = err.message;
-    }
-  };
-  return { form, toggle, show };
-}
-
 /** Settings' Machines tab: add machines, show the line that connects one, tick what each lends, and remove them or replace their token. */
 export function machinesPage(main = {}) {
-  view.machineToken = null; // { id, name, token } just made, shown until you leave the page
+  view.machineToken = null; // { id, name, token } a New token just made, shown until you leave the page
   shownTokens.clear();
-  const add = machineAddForm(false, 'Add machine');
-  // A CI runner host is a different program with a different job, so it has its own add and install line (#439).
-  const runners = machineAddForm(true, 'Add CI runner host');
   const section = h(
     'section',
     { class: 'artifacts-main machines-main' },
@@ -118,27 +59,18 @@ export function machinesPage(main = {}) {
       { class: 'ticket-head' },
       h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h(
-        'div',
-        { class: 'meta' },
-        account?.admin
-          ? settingsHelp("Computers that lend their roles (tools and folders, CI runners, minion turns, GPU jobs, builds) to the schemes ticked on each role's card.", 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.')
-          : settingsHelp('Your computers: switch each of their roles on or off, and tick the schemes that get it. Only your own minion turns use them.', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.'),
-      ),
+      h('div', { class: 'meta' }, settingsHelp('Your computers: what each does for you (your own minion turns) and for your schemes (CI, builds, Windows tests, GPU jobs, tools).', 'They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only their owner changes them.')),
     ),
-    // Connect a computer (Build 7 M2) is the way in; Add by name stays for a machine with no agent yet and the GPU jobs distro's line; either way the person adding it owns it (#2184).
-    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'machine-connect-toggle', onclick: () => connectComputer() }, 'Connect a computer'), add.toggle),
-    add.form,
+    // One way in (Build 10 H3, take B): Connect a computer; Add machine and Add a CI runner host are gone.
+    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'machine-connect-toggle', onclick: () => connectComputer() }, 'Connect a computer')),
     h('div', { id: 'machine-connect' }),
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-removals' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
-    h('p', { id: 'emulator-lease', class: 'muted small', role: 'status' }, 'Android emulator: checking…'),
     // The CI desktop's load moved to the CI page (#968, Cara: "move the CI box performance page from machines into here"), since #1423 the Releases page's Overview tab.
     h('p', { class: 'muted small' }, "CI runners, their queue and the CI PCs' load are on ", h('a', { href: `#/p/${view.projectId}/ci` }, "the Releases page's Overview tab"), '.'),
-    h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, "A CI runner host adds and removes schemes' CI runners on its PC, for the schemes you lend it to."), h('span', { class: 'spacer' }), runners.toggle),
-    runners.form,
     h('p', { class: 'muted small' }, 'Nothing typed here runs a command on a machine.'),
+    h('p', { id: 'emulator-lease', class: 'muted small', role: 'status' }, 'Android emulator: checking…'),
     h(
       'details',
       { class: 'small machine-facts' },
@@ -146,42 +78,62 @@ export function machinesPage(main = {}) {
       h(
         'ul',
         { class: 'muted' },
-        h('li', {}, h('strong', {}, 'One MCP server per machine.'), ' Add another machine for a second one.'),
+        h('li', {}, h('strong', {}, 'One MCP server per machine.'), ' Connect another computer for a second one.'),
         h('li', {}, h('strong', {}, 'How minions see it.'), ' Its tools as ', h('code', {}, 'mcp__<name>__…'), ', its ticked folders as ', h('code', {}, 'mcp__<name>-ws__…'), ': git sync and the tasks its owner lists, nothing else.'),
         h('li', {}, h('strong', {}, 'Commands live on that computer.'), ' Commands and tasks are only in ', h('code', {}, 'machine-agent.json'), ' there, beside the agent.'),
-        h('li', {}, h('strong', {}, "A person's own machine"), " goes only to turns they ask for: their minions' turns in schemes they are in, and their contraptions' turns."),
+        h('li', {}, h('strong', {}, 'For me is yours alone.'), ' Minion turns there run only your own turns, on your own Claude sign-in on that PC. For my schemes lends the rest to the schemes ticked on each role.'),
         h('li', {}, h('strong', {}, 'When a minion gets it.'), " At the start of its turn: the tools of every machine online and lent to its scheme, plus the machine's notes."),
       ),
     ),
   );
+  watchLive();
+  // Who holds the shared emulator, for anyone checking before they use it (#1128).
   api('api/emulator-lease')
-    .then((l) => {
+    .then((/** @type {unknown} */ got) => {
+      const l = /** @type {{ who: string, what?: string | null, until: number } | null} */ (got);
       const el = document.getElementById('emulator-lease');
       if (!el) return;
-      if (!l) el.textContent = 'Android emulator (citadel-android): free.';
-      else el.textContent = `Android emulator (citadel-android): leased by ${l.who}${l.what ? ` for "${l.what}"` : ''}, until ${new Date(l.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+      el.replaceChildren('Android emulator (citadel-android) ', l ? toneChip('warn', `leased by ${l.who}`) : toneChip('ok', 'free'), l ? `${l.what ? ` for "${l.what}"` : ''}, until ${new Date(l.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}.` : '');
     })
     .catch(() => document.getElementById('emulator-lease')?.remove());
   setTimeout(() => {
-    // A link to one machine (#1638) opens its row, so its scheme list and ticks show at once.
+    // A link to one machine (#1638) opens its card's details, so its notes and token show at once.
     const focus = main.machine && view.machines?.find((m) => m.name === main.machine);
     if (focus) (view.machineOpen ??= new Set()).add(focus.id);
     renderMachineSetup();
     renderMachineList();
-    if (focus) document.querySelector(`#machine-list .machine-row[data-name="${focus.name}"]`)?.scrollIntoView({ block: 'start' });
-    if (!view.machines?.length) connectComputer();
+    if (focus) document.querySelector(`#machine-list .mcard[data-name="${focus.name}"]`)?.scrollIntoView({ block: 'start' });
   });
   return section;
 }
 
+/** What the cards' live numbers last read: each PC's load and each worker pool. @type {import('./machine-card.js').Live | null} */
+let live = null;
+let liveTimer = 0;
+
+/** Read the live numbers now and every 30 s while the page is open: the CI PCs' load (api/ci-desktop) and the worker pools (api/workers). */
+function watchLive() {
+  clearInterval(liveTimer);
+  const read = () =>
+    Promise.all([api('api/ci-desktop').catch(() => null), api('api/workers').catch(() => null)]).then(([d, w]) => {
+      live = { pcs: d?.pcs ?? [], pool: w?.machines ?? [] };
+      renderMachineList();
+    });
+  // The page isn't in the document yet on this first read; a later tick finding it gone means it was left.
+  liveTimer = setInterval(() => (document.getElementById('machine-list') ? read() : clearInterval(liveTimer)), 30_000);
+  read();
+}
+
 let connectPanel = null;
 
-/** Connect a computer's panel (Build 7 M2), for a new computer or, with `m`, an Update of an agent from before. */
 /**
+ * Connect a computer's panel (Build 7 M2), for a new computer or, with `m`, an Update of an agent from before.
  * @param {import('./types.js').MachineRow | null} [m] the row an Update reconnects
  * @param {string | null} [inside] the computer it is a VM on
  */
 function connectComputer(m = null, inside = null) {
+  // A new computer gets the 3-step wizard (Build 10 H3); an Update of an agent from before keeps its panel on the page.
+  if (!m) return openConnectWizard({ redraw: renderMachineList });
   const el = document.getElementById('machine-connect');
   if (!el) return;
   // One panel at a time: the one before stops watching its code, or its next look would draw over this one.
@@ -305,15 +257,20 @@ function renderMachineList() {
   if (!el) return;
   view.machineOpen ??= new Set();
   mergePanel?.redraw();
+  connectWizardRedraw();
   renderRemovals(document.getElementById('machine-removals'), renderMachineList);
-  const scheme = view.project?.name ?? 'This scheme';
-  const runners = view.machines.filter((m) => m.runners);
-  const ours = view.machines.filter(oursHere);
-  const others = view.machines.filter((m) => !m.runners && !ours.includes(m));
-  const group = (title, list) => (list.length ? [h('h3', { class: 'settings-section' }, title), h('div', { class: 'settings-rows' }, ...list.map(machineLine))] : []);
+  // One card per computer you own (take B); others' computers lent to your schemes are one read-only line.
+  const all = /** @type {import('./types.js').MachineRow[]} */ (view?.machines ?? []);
+  const mine = all.filter(isMine);
   // A field someone is typing in keeps its place over a redraw.
   const at = el.contains(document.activeElement) && document.activeElement.id ? document.activeElement : null;
-  el.replaceChildren(...group(`${scheme}'s minions get`, ours), ...group(ours.length ? 'Other machines' : 'Machines', others), ...group('CI runners', runners), view.machines.length ? '' : emptyMachines());
+  const card = (/** @type {import('./types.js').MachineRow} */ m) => machineCard(m, { live, redraw: renderMachineList, tools: () => machineLends(m), head: isMine(m) ? machineHead(m) : h('span', { class: 'mcard-owner' }, toneChip('neutral', ownerName(m, live)), machineHead(m)), details: () => machineBody(m) });
+  // An admin still reaches everyone's computers (to fix or remove one), closed under their own.
+  const others = account?.admin ? all.filter((m) => !isMine(m)) : [];
+  const theirs = others.length ? h('details', { class: 'mcard-others', open: !!view?.machineOthersOpen }, h('summary', { class: 'small' }, `Everyone else's computers (${others.length}, as an admin)`), ...others.map(card)) : '';
+  if (theirs) theirs.addEventListener('toggle', () => view && (view.machineOthersOpen = theirs.open));
+  el.replaceChildren(...(mine.length ? mine.map(card) : [emptyMachines()]), lentLine(all, live) ?? '', theirs);
+  document.querySelector('.machines-bar .machine-connect-toggle')?.toggleAttribute('hidden', !mine.length);
   const back = at && document.getElementById(at.id);
   if (!back || back === document.activeElement) return;
   // What was typed, half-typed included, and whether it is refused, stay as the person left them.
@@ -323,10 +280,14 @@ function renderMachineList() {
   if (at.selectionStart != null) back.setSelectionRange(at.selectionStart, at.selectionEnd);
 }
 
-/** No machines yet (Build 7 M3): what would fill the page, and the button that starts it. */
+/** No computers yet (take B's empty scene): what they're for, and the one button. */
 function emptyMachines() {
-  // Connect a computer (Build 7 M2) is the bar's button above, and its panel opens by itself on an empty page.
-  return h('div', { class: 'machine-empty' }, emptyCard("You haven't connected a computer", 'Connect one with Connect a computer above, and Citadel offers the roles it can do: tools and folders, CI runners, minion turns, GPU jobs, builds.', { mark: '+', hue: 'accent' }));
+  return h(
+    'div',
+    { class: 'machine-empty' },
+    emptyCard('Connect your first computer', 'Lend its power to your schemes (CI, builds, Windows tests, GPU jobs, tools), and, if you sign in to Claude there, run your own minion turns on it.', { mark: '+', hue: 'accent' }),
+    h('button', { type: 'button', class: 'machine-connect-first', onclick: () => connectComputer() }, 'Connect a computer'),
+  );
 }
 
 /** Make a new token for a machine and show its install line. */
@@ -541,38 +502,26 @@ function machineLends(m) {
 }
 
 /** One line of the quiet list (#437, take A): name, reason, status chip (#492), fix button; click it for the rest. */
-function machineLine(m) {
+/** The fixes a card's header carries (#437, Build 7 M2, M2b, M6b): merge two rows of one PC, Update an old agent, update an old CI agent, a fix. @param {MachineRow} m */
+function machineHead(m) {
   const open = () => {
     view.machineOpen.add(m.id);
     renderMachineList();
   };
   const gone = removing(m);
-  const [workWord, workHue] = gone ? ['Removing…', 'waiting'] : (workerWord(m) ?? []);
-  const word = workWord ?? { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
-  const isOpen = view.machineOpen.has(m.id);
   const fix = !gone && fixButton(m, open);
-  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
-  // Its VMs are its capabilities (Build 10 H4): chips on a line of their own under its status, so a phone's ellipsis can't hide them.
-  if (m.vms?.length) sum.parentElement?.append(h('span', { class: 'machine-vm-tags' }, ...m.vms.map((/** @type {{ name: string }} */ vm) => toneChip('neutral', `VM: ${vm.name}`))));
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
   // Two rows for one PC (Build 7 M2b): its owner merges them into one. It shows the kept row's token, so only to its owner.
   const other = !gone && tokenIsMine(m) && m.same_pc?.find((x) => view.machines.some((y) => y.id === x.id && tokenIsMine(y) && !removing(y)));
   const merge = other && h('button', { type: 'button', class: 'secondary small', title: `${m.name} and ${other.name} report one hostname. Opens the line that moves the CI runner agent onto one row`, onclick: () => mergeMachines(m, other) }, m.merging ? 'Merging: show the line' : 'These are one computer: merge');
-  // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
-  // A CI runner agent from before the balancer (Build 7 M6b): the button opens the row at its update line.
+  // A CI runner agent from before the balancer (Build 7 M6b): the button opens its details at the update line.
   const ciUpdate = m.runner_update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: "Its CI runner agent is from before: it keeps every runner awake instead of following this PC's balance. Opens the line that updates it", onclick: open }, 'Update CI agent');
-  if (fix || update || merge || ciUpdate) sum.after(h('span', { class: 'machine-fix' }, merge || '', update || '', ciUpdate || '', fix || ''));
-  row.classList.add('machine-row', 'machine-line', m.status);
-  row.dataset.name = m.name;
-  row.addEventListener('toggle', () => {
-    if (row.open === view.machineOpen.has(m.id)) return;
-    view.machineOpen[row.open ? 'add' : 'delete'](m.id);
-  });
-  return row;
+  const word = gone ? toneChip('info', 'Removing…') : null;
+  return fix || update || merge || ciUpdate || word ? h('span', { class: 'machine-fix' }, word || '', merge || '', update || '', ciUpdate || '', fix || '') : null;
 }
 
-/** A machine's line opened: what it lends, who gets it, its computer, notes and its buttons. */
+/** A card's Details: its computer, screen, notes, token and its buttons (its roles are on the card's tiles). */
 function machineBody(m) {
   const check = h('button', { type: 'button', class: 'secondary small', disabled: !m.online || m.checking, title: m.online ? "Start its tools and list them, as a minion's turn would" : 'It is offline' }, m.checking ? 'Checking…' : 'Check now');
   check.onclick = () => checkMachine(m, check);
@@ -589,12 +538,7 @@ function machineBody(m) {
       { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : [],
       // Its roles (Build 7 M3, Josh: "A · A card per role, schemes inside"): the Tools ticks and Minion turns live in their cards.
-      h(
-        'div',
-        { class: 'machine-wide' },
-        m.runners || m.roles?.some((/** @type {import('./machine-types.d.ts').MachineRole} */ r) => r.caps?.everyone) ? '' : h('div', { class: 'small muted role-cards-note' }, `Only turns ${m.created_by} asks for (and their contraptions) use it, in the schemes ticked on each role.`),
-        roleCards(m, renderMachineList, { tools: () => machineLends(m) }),
-      ),
+      kv('Status', machineStatusText(m)),
       kv(
         'Computer',
         m.report ? h('div', { class: 'small' }, reportLine(m.report)) : '',

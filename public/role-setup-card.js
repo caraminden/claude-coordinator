@@ -67,7 +67,7 @@ const current = (m) => /** @type {MachineRow[] | undefined} */ (openView().machi
 const runOf = (m, role) => lastRun(current(m).roles?.find((r) => r.role === role));
 
 /** @param {MachineRow} m @param {MachineRole} r @param {'setup' | 'test'} kind @param {() => void} redraw */
-function press(m, r, kind, redraw) {
+export function press(m, r, kind, redraw) {
   const role = current(m).roles?.find((x) => x.role === r.role);
   const was = role?.setup ?? null;
   /** @param {MachineRole['setup']} setup */
@@ -107,12 +107,21 @@ function adminPart(run) {
   );
 }
 
+/** The administrator command a role's latest run waits on, or null: Connect shows each distinct one once.
+ * @param {MachineRow} m
+ * @param {MachineRole} r
+ */
+export function adminFor(m, r) {
+  return adminCommand((runOf(m, r.role) ?? lastRun(r))?.admin)?.command ?? null;
+}
+
 /** Set up and Test on a role's card, and its last run; null for a role this release doesn't set up.
  * @param {MachineRow} m
  * @param {MachineRole} r
  * @param {() => void} redraw
+ * @param {{ admin?: boolean }} [o] admin false: leave the administrator paste out (Connect shows one paste once for every role)
  */
-export function setupPart(m, r, redraw) {
+export function setupPart(m, r, redraw, { admin = true } = {}) {
   if (!SETUP_ROLES.includes(r.role)) return null;
   const run = runOf(m, r.role) ?? lastRun(r);
   const can = presses(m);
@@ -138,7 +147,7 @@ export function setupPart(m, r, redraw) {
     !can && !run ? h('p', { class: 'muted small' }, 'Its owner sets it up.') : null,
     // With an administrator command, that block says what to do: the run's own why would only repeat it.
     run?.why && !adminCommand(run.admin) ? h('p', { class: 'cui-notice', 'data-tone': 'danger' }, run.why) : null,
-    run ? adminPart(run) : null,
+    run && admin ? adminPart(run) : run && adminCommand(run.admin) ? h('p', { class: 'muted small' }, 'Waits on the administrator paste above.') : null,
     showSteps
       ? h(
           'ul',

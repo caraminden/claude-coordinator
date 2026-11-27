@@ -1,14 +1,12 @@
-// A machine's roles on its row of the Machines page (Build 7 M3, specs/machine-connections.md sections 4 and 7; Josh,
-// 2026-11-25, "A · A card per role, schemes inside"): one card per role with its switch, how it stands, the schemes it is
-// lent to as chips, and for Minion turns and CI its caps; and Pause all. Switching a role on lends it to every scheme its owner is
+// A machine's roles' parts on the Machines page (Build 7 M3, specs/machine-connections.md sections 4 and 7; laid out by
+// machine-card.js since Build 10 H3's take B): why a role can't run, how it stands, the schemes it is lent to as chips, its
+// caps and fill order; and Pause all. Switching a role on lends it to every scheme its owner is
 // in (the server's doing, "Every scheme you're in"); off drains. Only its owner or an admin changes anything, and caps
 // on a person's own machine only its owner. Every click shows at once, with its request behind (ui/optimistic.js).
 import { account, api, h, view } from './base.js';
-import { toneChip } from './look.js';
 import { WORKER_LIMITS } from './machine-setup.js';
 import { removing } from './machine-remove.js';
-import { heldCaps, workerSection, workerState } from './machine-worker-row.js';
-import { setupPart } from './role-setup-card.js';
+import { heldCaps, workerState } from './machine-worker-row.js';
 import { lastRun } from './role-setup.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
@@ -40,7 +38,7 @@ const setsCaps = (m) => m.owner_id === account?.id;
 /** The page's newest view of the machine. @param {MachineRow} m */
 const current = (m) => /** @type {MachineRow[] | undefined} */ (view?.machines)?.find((x) => x.id === m.id) ?? m;
 /** @param {MachineRow} m @param {MachineRoleKey} role */
-const roleOf = (m, role) => current(m).roles?.find((r) => r.role === role);
+export const roleOf = (m, role) => current(m).roles?.find((r) => r.role === role);
 /** @param {number} id */
 const schemeName = (id) => (view?.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
 // A run-gpu task (a test box's), or GPU jobs on in its agent's jobs block (what Set up turns on, Build 7 M4).
@@ -59,7 +57,7 @@ const editing = new Map();
  * @param {Redraw} redraw
  * @param {Record<string, unknown>} [shown]
  */
-function changeRole(m, role, fields, label, redraw, shown = fields) {
+export function changeRole(m, role, fields, label, redraw, shown = fields) {
   const was = Object.fromEntries(Object.keys(shown).map((k) => [k, structuredClone(/** @type {Record<string, unknown> | undefined} */ (roleOf(m, role))?.[k])]));
   /** @param {Record<string, unknown>} vals */
   const set = (vals) => {
@@ -68,7 +66,7 @@ function changeRole(m, role, fields, label, redraw, shown = fields) {
     redraw();
   };
   // Each sends the whole value it sets, so the newest wins; a failure rolls back only when nothing came after it.
-  optimistic({
+  return optimistic({
     key: `machine-role:${m.id}:${role}`,
     sets: `machine-role:${m.id}:${role}:${Object.keys(fields).join(',')}`,
     apply: () => set(shown),
@@ -79,7 +77,7 @@ function changeRole(m, role, fields, label, redraw, shown = fields) {
 }
 
 /** Why a role can't be used on this PC, when it can't (shown greyed while off); null when it can. @param {MachineRow} m @param {MachineRole} r */
-function cannot(m, r) {
+export function cannot(m, r) {
   if (r.on) return null;
   if (removing(m)) return 'It is being removed: nothing new starts there.';
   // What the PC is (its agent's report), as the server judges it (src/machine-roles.ts roleCannot).
@@ -94,7 +92,7 @@ function cannot(m, r) {
 }
 
 /** How a role stands, in a few words, and the tone of its chip. @param {MachineRow} m @param {MachineRole} r */
-function standing(m, r) {
+export function standing(m, r) {
   if (!r.on) return { text: m.paused?.includes(r.role) ? 'paused' : 'off', tone: 'neutral' };
   if (r.role === 'turns') {
     if (!m.worker) return { text: 'not set up yet', tone: 'info' };
@@ -123,7 +121,7 @@ function standing(m, r) {
 }
 
 /** The schemes a role is lent to, as chips that switch: every scheme the viewer sees, and any already on its list. @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw */
-function schemeChips(m, r, redraw) {
+export function schemeChips(m, r, redraw) {
   const can = managesRoles(m);
   const ids = [...new Set([...(view?.projects ?? []).map((p) => p.id), ...r.projects])];
   const chips = ids.map((id) => {
@@ -149,7 +147,7 @@ function schemeChips(m, r, redraw) {
 }
 
 /** A role's caps: the numbers it holds, and "change" for whoever sets them. @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw */
-function capsLine(m, r, redraw) {
+export function capsLine(m, r, redraw) {
   const key = `${m.id}:${r.role}`;
   let words;
   if (r.role === 'ci') words = r.caps.runners != null ? `up to ${r.caps.runners} runner${r.caps.runners === 1 ? '' : 's'} awake at once` : 'every runner there may be awake';
@@ -168,7 +166,7 @@ function capsLine(m, r, redraw) {
  * @param {MachineRow} m
  * @param {Redraw} redraw
  */
-function orderLine(m, redraw) {
+export function orderLine(m, redraw) {
   const c = current(m);
   const theirs = /** @type {MachineRow[]} */ (view?.machines ?? []).filter((x) => x.owner_id === m.owner_id && !x.runners).length;
   if (c.priority == null && theirs < 2) return null;
@@ -266,62 +264,6 @@ function capsEditor(m, r, redraw) {
           ? `Blank uses that PC's own cap; a number here is held there instead, above it too${over ? ". Threads and memory go up to what that PC has; if they don't take, run that PC's install command again" : ''}.`
           : "Blank is that PC's own cap, once it is set up.";
   return h('div', { class: 'role-caps-edit' }, h('b', { class: 'small' }, `${r.name} caps, set here`), h('div', { class: 'worker-caps' }, ...fields), h('p', { class: 'muted small' }, hint), h('div', { class: 'row' }, save, cancel));
-}
-
-/** One role's card. `extra` is what the row puts inside it while it's on (the Tools ticks). @param {MachineRow} m @param {MachineRole} r @param {Redraw} redraw @param {Node | null} [extra] */
-function roleCard(m, r, redraw, extra) {
-  const why = cannot(m, r);
-  const can = managesRoles(m) && !why;
-  const st = standing(m, r);
-  const sw = h('button', {
-    type: 'button',
-    class: 'rules-switch',
-    role: 'switch',
-    id: `role-switch-${m.id}-${r.role}`,
-    'aria-checked': String(r.on),
-    'aria-label': `${r.name} on ${m.name}`,
-    disabled: !can && !(r.on && managesRoles(m)),
-    title: why ?? (!managesRoles(m) ? 'Only its owner or an admin changes this' : r.on ? 'Off: what runs finishes, nothing new starts' : "On: lent to every scheme its owner is in; untick the ones you don't want"),
-    onclick: () => {
-      const now = roleOf(m, r.role) ?? r;
-      const on = !now.on;
-      // Shown as the server does it: switched on with no list, every scheme its owner is in (for its owner, the ones they see here).
-      const shown = on && !now.projects.length && m.owner_id === account?.id ? { on, projects: (view?.projects ?? []).map((p) => p.id) } : { on };
-      changeRole(m, r.role, { on }, `switch ${r.name} ${on ? 'on' : 'off'} on ${m.name}`, redraw, shown);
-    },
-  });
-  return h(
-    'div',
-    { class: 'role-card', 'data-role': r.role, 'data-on': String(r.on), 'aria-disabled': String(!!why) },
-    // A machine being removed takes nothing new (spec section 4): no switch to turn a role back on, as T5's row did.
-    h('div', { class: 'role-card-head' }, removing(m) ? null : sw, h('b', {}, r.name), h('span', { class: 'role-card-state' }, toneChip(st.tone, st.text))),
-    why ? h('p', { class: 'muted small' }, why) : null,
-    r.on && !why ? schemeChips(m, r, redraw) : null,
-    r.on && !why && CAPS[r.role] ? capsLine(m, r, redraw) : null,
-    r.on && !why && r.role === 'turns' ? orderLine(m, redraw) : null,
-    // Its set-up part (T5's) steps aside while the caps editor is open: one set of fields at a time.
-    r.on && r.role === 'turns' && m.worker && !editing.has(`${m.id}:turns`) ? workerSection(m, redraw, { bare: true }) : null,
-    r.on && extra ? extra : null,
-    r.on && !why ? setupPart(m, r, redraw) : null,
-  );
-}
-
-/**
- * A machine's role cards, in the page's order.
- * @param {MachineRow} m
- * @param {Redraw} redraw
- * @param {{ tools?: () => Node | null }} [opts]
- */
-export function roleCards(m, redraw, { tools } = {}) {
-  if (!m.roles?.length) return h('p', { class: 'muted small' }, 'Its roles show once the server has them.');
-  return h(
-    'div',
-    { class: 'role-cards' },
-    // A CI runner host's row is that PC's runner agent: only its CI card belongs here, the PC's other roles on its own row.
-    m.runners
-      ? [roleCard(m, m.roles.find((r) => r.role === 'ci') ?? /** @type {MachineRole} */ ({ role: 'ci', name: 'CI runners', on: false, caps: {}, setup: null, projects: [] }), redraw), h('p', { class: 'muted small' }, "This row is that PC's CI runner agent: its other roles are on the PC's own row.")]
-      : m.roles.map((r) => roleCard(m, r, redraw, r.role === 'tools' ? tools?.() : null)),
-  );
 }
 
 /** Pause all, or Resume once paused: every role that's on goes off (draining), and one click puts them back. @param {MachineRow} m @param {Redraw} redraw */

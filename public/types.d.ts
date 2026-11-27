@@ -348,6 +348,8 @@ export type View = Omit<ReturnType<typeof chatView>, keyof SessionState | 'sendi
     /** Settings > Machines (settings-machines.js): a token just made, shown until you leave the page. */
     machineToken: { id: number; name: string; token: string; url: string; runners: boolean } | null;
     machineOpen: Set<number>;
+    /** Admins: "Everyone else's computers" left open. */
+    machineOthersOpen?: boolean;
     machineSetupOs: 'posix' | 'windows';
     runnerSetupOs: 'posix' | 'windows';
   };

@@ -167,7 +167,7 @@ test('Builds Set up on Linux pulls each image by digest, makes the volumes, then
   assert.ok(p.ran.includes(`podman pull ${ANDROID}`) && p.ran.includes(`podman pull ${NODE}`));
   assert.ok(p.ran.includes('podman volume create citadel-gradle') && p.ran.includes('podman volume create citadel-npm'));
   assert.ok(p.ran.includes(`podman run --rm --security-opt label=disable --cpus 4 -v citadel-gradle:/cache/gradle ${ANDROID} citadel-hello-apk`));
-  assert.match(p.steps().join('\n'), /ok Pulled citadel-build-android \(2\.3 GB\)\n.*\n.*ok Cache volumes citadel-gradle, citadel-npm \(made citadel-gradle, citadel-npm\)\n.*running Building a hello-world APK.*\n.*ok Built a hello-world APK \(12 KB\)/s);
+  assert.match(p.steps().join('\n'), /ok Pulled citadel-build-android \(2\.3 GB\)\n.*\n.*ok Cache volumes ready: citadel-gradle, citadel-npm \(new\)\n.*running Building a hello-world APK.*\n.*ok Built a hello-world APK \(12 KB\)/s);
 });
 
 test("a hello APK that doesn't build fails on its own step with the build's last lines", async () => {
@@ -175,7 +175,7 @@ test("a hello APK that doesn't build fails on its own step with the build's last
   await p.run();
   assert.equal(p.done().ok, false);
   assert.match(p.done().why!, /hello-world APK didn't build: FAILURE.*Could not resolve/);
-  assert.match(p.steps().at(-1)!, /fail The hello-world APK didn't build/);
+  assert.match(p.steps().at(-1)!, /fail Building the hello-world APK$/, 'the step names it; the output is in the why, once');
 });
 
 test('Builds on Windows runs podman in citadel-workers as its worker user, and says to set up Minion turns when the distro is missing', async () => {

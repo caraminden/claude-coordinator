@@ -3,10 +3,24 @@
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
 import { h } from './base.js';
 import { money } from './cabal.js';
+import { cardFor } from './threadstate.js';
 /** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
 
-/** The cards open on this page, by lead id: they stay open across redraws. */
+/** The cards open on this page, by lead id: they stay open across redraws. A card starts shut (Cara, 2026-11-26). */
 export const openCabals = /** @type {Set<number>} */ (new Set());
+/** The card just opened by a click: only its next draw fades its members in, or every redraw would replay it (#2181). */
+let opening = /** @type {number | null} */ (null);
+
+/**
+ * The Overseer's row on a shut card: it carries its members' cards waiting on people as its own (Cara, 2026-11-26: "by
+ * default it would just show the overseer"), so the chip says one waits and a click opens the oldest, the lead's first.
+ * @param {Row} lead @param {Row[]} mine
+ * @returns {Row}
+ */
+function overseerRow(lead, mine) {
+  const theirs = mine.filter((t) => t.id !== lead.id).flatMap((t) => (t.open_cards ?? []).map((c) => ({ ...c, to: cardFor(c, t) || undefined })));
+  return theirs.length ? { ...lead, open_cards: [...(lead.open_cards ?? []), ...theirs] } : lead;
+}
 
 /** A member's state now: its row's own news moves it between building and open before the cards are read again. */
 /** @param {CabalCard['members'][number]} m @param {Row | undefined} t */
@@ -30,11 +44,13 @@ function liveMember(m, t) {
 export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw }) {
   const open = openCabals.has(c.lead);
   const waiting = mine.filter((t) => t.open_cards?.length).length;
-  const asks = c.asks + waiting;
+  const fresh = open && opening === c.lead;
+  if (fresh) opening = null;
+  const lead = rows.find((t) => t.id === c.lead);
   const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {
-    if (!openCabals.delete(c.lead)) openCabals.add(c.lead);
+    if (!openCabals.delete(c.lead)) openCabals.add((opening = c.lead));
     redraw();
   };
   const counts = !c.members.length ? [h('span', {}, 'No roster yet')] : !started ? [h('span', {}, `Roster of ${c.members.length}, nobody started yet`)] : [h('span', {}, `${c.finished} of ${c.members.length} ${c.done}`), c.next ? h('span', {}, `${c.next} next up`) : ''];
@@ -57,16 +73,26 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
             }),
           )
         : '',
-      h('span', { class: 'cabal-foot' }, ...counts, asks ? h('b', { class: 'cabal-asks', title: `${c.asks} to the Overseer on the board, ${waiting} with a card waiting on people` }, `${asks} ask${asks === 1 ? '' : 's'}`) : '', h('span', {}, money(c.spend))),
+      h(
+        'span',
+        { class: 'cabal-foot' },
+        ...counts,
+        // Only what waits on people, in words: members' questions to the Overseer stay on its board (Cara, 2026-11-26: "Im not
+        // sure I care if the minions are asking the overseer questions?").
+        waiting ? h('b', { class: 'cabal-asks', title: 'Minions of this cabal with a card waiting on people' }, `${waiting} waiting on you`) : '',
+        h('span', {}, money(c.spend)),
+      ),
     ),
     build ? h('p', { class: 'cabal-build' }, `${build.behind} behind main`, preview ? [' · ', h('a', { href: `../preview/build/${build.build}/`, target: '_blank', rel: 'noopener', title: `build/${build.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
     open
       ? h(
           'div',
-          { class: 'cabal-members' },
+          { class: `cabal-members${fresh ? ' opening' : ''}` },
           rows.map(row),
           unstarted.map((m) => h('p', { class: 'cabal-planned' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
         )
-      : '',
+      : lead
+        ? h('div', { class: 'cabal-members' }, row(overseerRow(lead, mine)))
+        : '',
   );
 }

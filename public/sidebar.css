@@ -74,12 +74,13 @@
 .cabal-build a { display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--space-1); } /* tap target: Preview sits apart from the toggle */
 .cabal-build:has(a) { margin-top: calc(-1 * var(--space-2)); padding-bottom: 0; } /* the tall link brings its own room */
 .cabal-card:not([data-open]) .cabal-build:has(a) { margin-bottom: -7px; } /* open, the members start under the whole link */
-.cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); animation: cabal-open 0.15s ease-out; }
+.cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); }
+.cabal-members.opening { animation: cabal-open 0.15s ease-out; } /* the click that opens it only: the list redraws on every tick (#2181) */
 .cabal-planned { margin: 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; }
 @keyframes cabal-open { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .cabal-card { transition: none; } .cabal-members { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .cabal-card { transition: none; } .cabal-members.opening { animation: none; } }
 .g-build > h3 { color: var(--gc); }
-.g-build > h3 .muted { text-transform: none; font-weight: normal; }
+.g-build > h3 .muted, .g-cabal > h3 .muted { text-transform: none; font-weight: normal; }
 .g-feature { --gc: hsl(265 55% 55%); }
 .g-feature > h3 { color: var(--gc); }
 /* Olive-lime: red read as the "stuck" state on a row (#1292); no row state or other type uses hue 90. */

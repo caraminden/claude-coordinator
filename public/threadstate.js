@@ -104,7 +104,7 @@ export const LOOK = 0.5;
 
 /** Whose answer a card waits on (#1121): its `to`, else whose the server says the minion is (#1449), else its assignee; '' for anyone's, which is yours. */
 /** @param {{ to?: string } | null | undefined} c @param {Row} t */
-const cardFor = (c, t) => String(c?.to || (t.assignee !== undefined ? t.assignee : t.properties?.assigned) || '').trim();
+export const cardFor = (c, t) => String(c?.to || (t.assignee !== undefined ? t.assignee : t.properties?.assigned) || '').trim();
 /** @param {string} who */
 const isYou = (who) => !who || who.toLowerCase() === String(me ?? '').toLowerCase();
 /** The minion's open cards that wait on you, oldest first. @param {Row} t */

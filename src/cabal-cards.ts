@@ -21,6 +21,8 @@ export interface CabalCard {
   lead: number;
   number: number | null;
   title: string;
+  /** "Build 7", or a goal cabal's name: its section's heading in the list (#2181). */
+  name: string;
   /** "Build 7's Overseer": one per cabal (Josh, 2026-11-25). */
   overseer: string;
   /** The lead's build, whose section the card takes the place of; null for a goal cabal without one. */
@@ -63,6 +65,7 @@ export async function cabalCards(store: Store, projectId: number, deps: BoardDep
       lead: leadId,
       number: board.lead.number,
       title: board.lead.title,
+      name: board.name,
       overseer: overseerOf(board),
       build: store.getTicket(leadId)?.build ?? null,
       done: board.kind === 'build' ? 'merged' : 'shipped',

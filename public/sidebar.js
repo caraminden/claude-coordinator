@@ -203,24 +203,26 @@ function buildHeading(s) {
   ];
 }
 
-/** @param {ReturnType<typeof cabalSplit>['cards']} cards */
-function cabalSection(cards) {
+/**
+ * A cabal's section, headed by what it is for, as a plain build group heads its build (Cara, 2026-11-26: "the category
+ * should be "Build 10" not "cabals""): a goal cabal by its name. `current` is whether its build is the lowest open one.
+ * @param {ReturnType<typeof cabalSplit>['cards'][number]} card @param {boolean} current
+ */
+function cabalSection({ cabal, rows, mine }, current) {
   const view = openView();
   return h(
     'section',
     { class: 'thread-group g-cabal' },
-    h('h3', {}, 'Cabals'),
-    cards.map(({ cabal, rows, mine }) =>
-      cabalCard(cabal, {
-        rows: rows.sort((a, b) => Number(b.id === cabal.lead) - Number(a.id === cabal.lead) || byUrgency(a, b, usage)),
-        mine,
-        tickets: view.tickets,
-        build: view.builds?.find((b) => b.build === cabal.build),
-        preview: !!view.buildPreviews,
-        row: (t) => threadRow(t),
-        redraw: renderSidebar,
-      }),
-    ),
+    h('h3', {}, cabal.name, current ? h('span', { class: 'muted' }, ' current') : ''),
+    cabalCard(cabal, {
+      rows: rows.sort((a, b) => Number(b.id === cabal.lead) - Number(a.id === cabal.lead) || byUrgency(a, b, usage)),
+      mine,
+      tickets: view.tickets,
+      build: view.builds?.find((b) => b.build === cabal.build),
+      preview: !!view.buildPreviews,
+      row: (t) => threadRow(t),
+      redraw: renderSidebar,
+    }),
   );
 }
 
@@ -278,7 +280,8 @@ export function renderSidebar() {
     ),
   );
   // The cabals sit where the current build does: under Deploying, over everything else.
-  if (cards.length) sections.splice(grouped[0]?.key === 'deploying' ? 1 : 0, 0, cabalSection(cards));
+  const lowest = Math.min(...carded, ...grouped.flatMap((g) => g.build ?? []));
+  if (cards.length) sections.splice(grouped[0]?.key === 'deploying' ? 1 : 0, 0, ...cards.map((c) => cabalSection(c, c.cabal.build === lowest)));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
   const pinned = /** @type {Row[]} */ ((openView().pins ?? []).map((id) => byId.get(id)).filter(Boolean));

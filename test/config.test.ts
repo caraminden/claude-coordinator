@@ -30,6 +30,7 @@ test('an empty environment gives every default', () => {
     turnPool: false,
     turnSupervisor: false,
     ghHelper: true,
+    serverTools: true,
     embedModel: 'Qwen3-Embedding-0.6B-Q8_0',
     embedUrl: 'http://127.0.0.1:21434',
     memorySchemes: undefined,

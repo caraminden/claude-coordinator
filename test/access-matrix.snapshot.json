@@ -1409,6 +1409,26 @@
   "m1": "401 Unknown machine token; make a new one in the Machines panel",
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
+ "GET /api/machines/tool-perigee-godot/session": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "403 perigee-godot isn't lent to this scheme",
+  "m2": "403 perigee-godot isn't lent to this scheme"
+ },
+ "POST /api/machines/tool-perigee-godot/session/0123456789abcdef01234567": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "503 That session ended",
+  "m2": "503 That session ended"
+ },
  "DELETE /api/machines/turn-call/x": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",

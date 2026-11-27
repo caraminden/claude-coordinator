@@ -93,6 +93,9 @@ function statusLine(m, pc) {
   return pc ? `Online, ${Math.round(pc.cpu)}% busy` : 'Online';
 }
 
+/** A bare GUID, the name Hyper-V gives WSL's utility VM. */
+export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** The specs and capability chips (VM, WSL, GPU, a signed-in screen) from what its agent reported. @param {MachineRow} m @param {PcNow | null} pc */
 function chips(m, pc) {
   const r = m.report;
@@ -101,7 +104,8 @@ function chips(m, pc) {
   const specs = r ? [r.os_name || r.os, r.threads ? `${r.threads} threads` : '', r.memory_gb ? gb(r.memory_gb) : '', r.disk_free_gb != null ? `${gb(r.disk_free_gb)} free` : ''].filter(Boolean) : [];
   const caps = r ? [r.wsl?.present ? `WSL${r.wsl.version ? ` ${r.wsl.version.split('.')[0]}` : ''}` : '', r.gpu ?? '', r.os === 'windows' && r.screen ? 'Signed-in screen' : ''].filter(Boolean) : [];
   // Its VM rows (Build 10 H4) and the VMs its samples saw, once each.
-  const vms = [...new Set([...(m.vms ?? []).map((v) => v.name), ...Object.keys(pc?.vms ?? {})])].map((n) => `VM: ${n}`);
+  // A bare GUID is WSL's own utility VM, not one a person made: no chip (its CPU still counts in the thread bar).
+  const vms = [...new Set([...(m.vms ?? []).map((v) => v.name), ...Object.keys(pc?.vms ?? {}).filter((n) => !GUID.test(n))])].map((n) => `VM: ${n}`);
   if (!specs.length && !caps.length && !vms.length) return null;
   return h('span', { class: 'mcard-specs' }, ...specs.map((x) => h('span', {}, x)), ...[...caps, ...vms].map((x) => h('span', { class: 'cap' }, x)));
 }

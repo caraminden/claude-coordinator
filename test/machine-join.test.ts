@@ -6,7 +6,7 @@ import { after, before, test } from 'node:test';
 import { bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { json } from './typed.ts';
 import { Store } from '../src/db.ts';
-import { cleanReport, hashJoinCode, JOIN_CODE, JOIN_MS, joinState, makeJoin, nameFromHost, newJoinCode, redeemJoin } from '../src/machine-join.ts';
+import { agentIsOld, cleanReport, LATEST_AGENT, hashJoinCode, JOIN_CODE, JOIN_MS, joinState, makeJoin, nameFromHost, newJoinCode, redeemJoin } from '../src/machine-join.ts';
 import { AGENT_VERSION, hypervFrom, hypervMoved, hypervNow, joinWithCode, machineReport } from '../public/machine-agent.mjs';
 import { machineJoinPosix, machineJoinWindows, machineSetupWindows } from '../public/machine-setup.js';
 import { guessJoinOs, reportLine } from '../public/machine-connect.js';
@@ -24,6 +24,13 @@ after(async () => {
     await stopProcs(procs);
     await tmp.teardown();
   }
+});
+
+test("an agent is old when its report is missing or below the newest version, which is the agent file's own", () => {
+  assert.equal(LATEST_AGENT, AGENT_VERSION);
+  assert.equal(agentIsOld(null), true);
+  assert.equal(agentIsOld({ agent: 4 }), true);
+  assert.equal(agentIsOld({ agent: LATEST_AGENT }), false);
 });
 
 test('a hostname becomes a machine name the page takes, and a taken one gets the next number', () => {

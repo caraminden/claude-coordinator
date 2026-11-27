@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sharedFlip, threadParts } from '../public/machine-card.js';
+import { GUID, sharedFlip, threadParts } from '../public/machine-card.js';
 import { pickRoles } from '../public/machine-connect.js';
 
 // The Machines page, take B (Build 10 H3, specs/one-kind-of-machine.md section 4): the For my schemes switch, the
@@ -78,4 +78,9 @@ test("a shared role its owner switches lends it to every turn in its schemes, an
   assert.deepEqual(roleFields('tools', false, true), { on: false, everyone: false });
   assert.deepEqual(roleFields('screen', true, false), { on: true });
   assert.deepEqual(roleFields('turns', true, true), { on: true });
+});
+
+test("a bare GUID guest (WSL's utility VM) gets no VM chip, a named one does", () => {
+  assert.equal(GUID.test('FF1FA8C6-38C1-4937-B549-C53049221F41'), true);
+  assert.equal(GUID.test('citadel-test-box'), false);
 });

@@ -247,14 +247,21 @@ regen_run() {
   git diff --cached --quiet || git commit -q -m "$title" -m "Made again on main ($(git rev-parse --short main)) by tools/land.sh (#1827)."
 }
 
-# The undo guard (#677): prints, and exits 1 on, the commits among <onto>'s last 60 that this branch reverts without
-# seeing them (a stale squash behind a clean fast-forward: `git reset --soft main` from an older branch). A commit counts
-# when the branch removes 90% of the lines it added (4 or more of 12+ characters, compared trimmed; a removed line is a
-# move, not a removal, only as many times as the branch adds that text back in any file) and, if it removed lines, puts
-# at least half of those back. shortcut: add-backs go to the branch's other removals of that text first, so merging two
-# identical files, one recent, reads as undoing it; if that shows up, credit the add-backs to the commit's own lines first.
-# Commits of the branch's own ticket don't count (ticket/N-… against a subject's leading "#N", "WIP #N" or last "#N)");
-# a meant undo names each commit in a message line "Undoes: <sha>" (git revert's "This reverts commit <sha>" counts too).
+# The undo guard (#677, after Peek Auras #361's tools/undo-guard.sh): prints, and exits 1 on, the commits among
+# <onto>'s last 60 that this branch reverts without seeing them. A stale squash does that behind a clean
+# fast-forward with CI green: `git reset --soft main` from a branch that started further back keeps its old files
+# (Peek Auras #309 undid six landings so). A commit counts when the branch removes 90% of the lines it added (4 or
+# more, repeats included, of 12+ characters, compared trimmed; a removed line is a move, not a removal, only as
+# many times as the branch adds that text back in any file, so a revert that also puts back older copies of a
+# repeated line like "linked: null" still counts: The Trans Agenda #66) and, if it removed lines, puts at least half
+# of those back. shortcut: the add-backs go to the branch's other removals of that text first, so merging two
+# identical files, one of them recent, reads as undoing it (none in ~1,090 landings); if one shows up, credit the
+# add-backs to the commit's own lines first, which scores a stale squash of several exports lower (96% to 93%).
+# Commits of the branch's own ticket don't count (ticket/N-… against a subject's leading "#N" or "WIP #N" or last
+# "#N)"); an undo that is meant names each one in a message line "Undoes: <sha>" (git revert's "This reverts commit
+# <sha>" counts too). Tried on 2026-11-14 over ~690 landings in four schemes: it refused the stale squash, two
+# deliberate removals of another minion's work (what the trailer is for), and nothing else; the line counts of
+# 2026-11-15 refused the same over ~1,090 landings in seven.
 undo_guard() {
   local base
   base=$(git merge-base HEAD "$1") || return 2

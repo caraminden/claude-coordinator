@@ -9,6 +9,7 @@ import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
+type Card = { open: boolean; rows: number; preview: boolean; height: number };
 
 // Build 10's cabal with a Preview link: its Overseer is its only open minion in the list (one member merged, one
 // building with no row here), so the open card lists the Overseer alone, as the shut one does.
@@ -53,7 +54,7 @@ test("a redraw of the list leaves a building member's segment mid-pulse, not bac
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the card to draw', `document.querySelector('.cabal-meter i[data-s=running]')`);
   // Redraw at the pulse's dim half (the shared clock: 1.6 s a turn, dimmest at 0.8 s): a segment that started over is at full strength.
-  const opacity = await page.eval(`(async () => {
+  const opacity = await page.eval<number>(`(async () => {
     const { renderSidebar } = await import('./sidebar.js');
     while (Math.abs((Date.now() % 1600) - 800) > 150) await new Promise(requestAnimationFrame);
     renderSidebar();
@@ -67,9 +68,9 @@ test('opening a card that has only its Overseer to show moves nothing', { skip }
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .thread-row')`);
   const measure = `(() => { const c = document.querySelector('.cabal-card'); return { open: c.hasAttribute('data-open'), rows: c.querySelectorAll('.thread-row').length, preview: !!c.querySelector('.cabal-build a'), height: c.getBoundingClientRect().height }; })()`;
-  const shut = await page.eval(measure);
+  const shut = await page.eval<Card>(measure);
   await page.eval(`document.querySelector('.cabal-toggle').click()`);
-  const open = await page.eval(measure);
+  const open = await page.eval<Card>(measure);
   assert.deepEqual([shut.open, open.open, shut.rows, open.rows, shut.preview], [false, true, 1, 1, true]);
   assert.equal(open.height, shut.height, 'the same rows at the same height, open or shut');
 });

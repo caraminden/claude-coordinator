@@ -92,10 +92,9 @@ test("a train also red on a test that passes on main doesn't ship through: #1430
   l.done();
 });
 
-// A rider that changed main's red test and left it red may have broken it again, so it can't ship through. Since #2212
-// (Cara, 2026-11-27, "Hold only that ship") only it leaves the train: the front runs CI again without it and ships through
-// main's red; the rider, back in line and alone, is refused (its change doesn't make the test pass). Before, the whole train
-// went back in line and the front took its retry in place (#1478).
+// A rider that changed main's red test and left it red may have broken it again, so it can't ship through (#1478). Only it
+// leaves the train (#2212; Cara, 2026-11-27, "Hold only that ship"): the front runs CI again without it and ships through
+// main's red; the rider, back in line and alone, is refused (its change doesn't make the test pass).
 test("a train with a rider that changed main's red test ships through without it; the rider then alone is refused (#1478, #2212)", async () => {
   const l = await line(
     [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, { change: ['test/real.test.ts', "throw new Error('still red');\n"] }],
@@ -140,6 +139,10 @@ test("a train red only on main's red holds only the rider that reaches the red t
   assert.match(front, /SHIPPING THROUGH MAIN'S RED: test\/real\.test\.ts .* of this train's CI run .*, all 2 ships/, 'the two left ship through');
   shipped(l, done[3], 4, 2, 2);
   assert.match(done[3].stderr, /^land: shipped through main's red on test\/real\.test\.ts$/m);
+  const red = front.match(/the only real failure of this train's CI run \(https:\/\/ci\/(\d+)\), but/)?.[1];
+  const through = front.match(/SHIPPING THROUGH MAIN'S RED: .* of this train's CI run \(https:\/\/ci\/(\d+)\)/)?.[1];
+  assert.ok(red && through && red !== through, `the train without the suspect had a CI run of its own: ${red}, ${through}`);
+  assert.match(l.c.calls(), new RegExp(`head_sha=${git(l.r.source, 'rev-parse', 'main')}`), 'CI ran on the commit that shipped');
   assert.equal(done[2].status, 1, done[2].stderr);
   assert.match(done[2].stderr, /ticket\/3-x changed test\/real\.test\.ts or what it imports, yet it still fails/, 'alone, the suspect hears its change is no fix');
   assert.deepEqual(l.subjects().slice(-3), ['f1.txt: 1', 'f2.txt: 2', 'f4.txt: 4'], "the suspect's change didn't land");

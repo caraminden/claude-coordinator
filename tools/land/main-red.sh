@@ -4,6 +4,7 @@
 
 train_main_red() {
   local f i wt r n=0 real=() reds=() other=() chg=() hits=() mine=() touched=()
+  main_red='' main_red_other='' main_red_mine='' main_red_riders=0 # a train run again (main_red_hold) is judged afresh
   [ -z "$burn_red" ] || return 1 # a burn-in red is the ship's own new or changed test (#1443)
   mapfile -t real < <(train_real) || true
   for f in "${real[@]}"; do git cat-file -e "$old:$f" 2>/dev/null && n=1; done
@@ -48,7 +49,7 @@ train_main_red() {
   elif [ -n "$flakes" ] && ! known_flakes "$flakes"; then
     main_red_other="$flakes (passed alone, but no known flake)"
   fi
-  if [ -z "$main_red_other" ] && { [ -n "$main_red_mine" ] || [ ${#touched[@]} -gt 0 ]; }; then
+  if [ -z "$main_red_other" ] && [ -n "$main_red_mine${touched[*]}" ]; then
     r=0
     main_red_hold || r=$?
     [ "$r" = 2 ] || return "$r"
@@ -76,38 +77,35 @@ train_main_red() {
   return 0
 }
 
-# Hold only the suspects (#2212; Cara, 2026-11-27, "Hold only that ship"): main's red is the run's only real failure, but ships
-# on the train changed the red test or what it imports (train_main_red's mine and touched), so they can't ship through it.
-# Only they leave, refused for nothing: a rider goes back in line and the rest run CI again here (train_again), then are judged
-# again; a front steps aside, keeping its place, and the next ship runs the rest (pull_say), as train_suspects pulls a front.
-# 2 (today's whole-train drop) when nobody would be left, or the front has stepped aside three times already.
+# Hold only the suspects (#2212; Cara, 2026-11-27, "Hold only that ship"): main's red is the only real failure, but ships changed
+# its test or what that imports (mine, touched). Only they leave, refused for nothing: riders go back in line and the rest run CI
+# again (train_again); a front steps aside and the next ship runs the rest (pull_say), or, at its 4th, they go first in line and
+# it is refused as it would be alone. 2: nobody would be left, so the whole train goes back.
 main_red_hold() {
-  local i t x sus='' keep=() was=() front=''
-  [ -z "$main_red_mine" ] || { front=1 && [ "$aside" -lt 3 ]; } || return 2
+  local i x t sus='' keep=() was=()
   for ((i = 0; i < ${#train_n[@]}; i++)); do
-    if [[ " ${touched[*]} " == *" ${train_br[$i]} "* ]]; then
-      sus+="${sus:+, }${train_br[$i]}" train_held_tips+=" ${train_was[$i]}"
-    else keep+=("$i"); fi
+    if [[ " ${touched[*]} " == *" ${train_br[$i]} "* ]]; then sus+="${sus:+, }${train_br[$i]}" train_held_tips+=" ${train_was[$i]}"; else keep+=("$i"); fi
   done
-  [ ${#keep[@]} -gt 0 ] || [ -z "$front" ] || return 2
-  [ -n "$front" ] || [ -n "$sus" ] || return 2
-  x="red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is the only real failure of $who CI run ($ci_url), but"
-  if [ -n "$front" ]; then
-    say "$x $branch, at the front, changed $main_red_mine or what it imports, so it can't ship through main's red: it steps aside, keeping its place in line and refused for nothing, and the next ship runs the train without it${sus:+, nor $sus, which changed $main_red or what it imports too: back in line}"
-    retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $branch${sus:+, $sus}"
+  t="red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is"
+  t+=" the only real failure of $who CI run ($ci_url), but"
+  if [ -n "$main_red_mine" ]; then
+    [ ${#keep[@]} -gt 0 ] || return 2
     was=("${keep[@]}") keep=()
-    for i in "${was[@]}"; do # the next front would bring a held ship's commits along with one built on it
-      for t in "$pre" "$own" $train_held_tips; do
-        ! sits_on "${train_was[$i]}" "$t" || { say "${train_br[$i]} goes back in line: it sits on a ship held off this train"; continue 2; }
-      done
+    for i in "${was[@]}"; do # one built on a held ship would bring its commits along: back in line
+      for x in "$pre" "$own" $train_held_tips; do ! sits_on "${train_was[$i]}" "$x" || continue 2; done
       keep+=("$i")
     done
     pull_say "${keep[@]}"
+    [ "$aside" -lt 3 ] || { say "$branch has stepped aside 3 times, so the rest of its train goes first in line without it"; return 2; }
+    say "$t $branch, at the front,${sus:+ and $sus,} changed $main_red or what it imports, so it can't ship through main's red:"\
+" it steps aside, keeping its place in line and refused for nothing, and the next ship runs the train without it"
+    retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $branch${sus:+, $sus}"
     aside=$((aside + 1))
     say "$branch steps aside: the next ship in line runs the train with what is left of it"
     requeue "back at the front after it stepped aside from its train for main's red: starting over from the rebase"
   fi
-  say "$x $sus changed $main_red or what it imports, so it can't ship through main's red: back in line, refused for nothing, and the train runs again without it"
+  say "$t $sus changed $main_red or what it imports, so it can't ship through main's red:"\
+" back in line, refused for nothing, and the train runs again without it"
   retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $sus"
   train_again "testing the train again without the ships that changed main's red test" "${keep[@]}"
   [ "$rc" != 1 ] || train_main_red

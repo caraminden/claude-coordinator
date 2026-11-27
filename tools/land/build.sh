@@ -16,14 +16,14 @@ claims_check() {
   { [ -n "$me" ] && [ "$me" != "$boss" ]; } || return 0 # the build minion's own branch, or one with no minion number
   [ "$mode" != full ] || refuse "--full is the build minion's (#$boss): a feeder merges in with tools/land.sh --into $build <test files>. Nothing merged"
   mb=$(git merge-base "refs/heads/$build" HEAD) || return 0
-  # "<commit> <minion>" for each commit a feeder's --into brought in.
+  # "<commit> <minion>" for each commit a feeder's --into brought in, newest reflog entry first.
   merged=$(git reflog show --format='%H %gs' "refs/heads/$build" 2>/dev/null | awk 'NR > 1 { print $1, prev } { prev = $0 }' |
     while read -r old new tool flag who; do
       [ "$tool $flag" = "land.sh --into" ] || continue
       m=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$who")
       [ -z "$m" ] || git rev-list "$old..$new" 2>/dev/null | sed "s/\$/ $m/"
     done)
-  # The minion that wrote a build commit; nothing for main's and the build minion's.
+  # The minion that wrote a commit of the build, or nothing for main's commits and the build minion's.
   writer() {
     git merge-base --is-ancestor "$1" "refs/heads/$trunk" 2>/dev/null && return 0
     local m
@@ -37,13 +37,13 @@ claims_check() {
       echo "$f is the build minion's plan, so only it changes a claim"
       continue
     fi
-    # A list mark, backticks and commas read as spaces.
+    # A list mark, backticks and commas are read as spaces: "- #4: `a.ts`, `b.ts`" claims both.
     who=$(awk -v f="$f" '{ l = $0; sub(/^[-*][ \t]+/, "", l); gsub(/[`,]/, " ", l) } match(l, /^(#[0-9]+|shared):/) {
         w = substr(l, 1, RLENGTH - 1); sub(/^#/, "", w); n = split(substr(l, RLENGTH + 1), p, /[ \t]+/)
         for (i = 1; i <= n; i++) if (p[i] != "" && (p[i] == f || (p[i] ~ /\/$/ && index(f, p[i]) == 1)) && length(p[i]) > best) { best = length(p[i]); out = w }
       } END { print out }' <<<"$claims")
     if [ "$who" = shared ]; then
-      # Each run of lines this branch changes or removes, blamed at the merge-base: another feeder's refuses.
+      # Each run of lines this branch changes or removes, blamed at the merge-base: any another feeder wrote refuses.
       git -c core.quotePath=false diff -U0 --no-renames "$mb" HEAD -- "$f" | sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? .*/\1 \3/p' | while read -r a b; do
         [ "${b:-1}" != 0 ] || continue
         git blame --porcelain -L "$a,+${b:-1}" "$mb" -- "$f" 2>/dev/null | awk 'length($1) >= 40 && $1 ~ /^[0-9a-f]+$/ { print $1 }' | sort -u | while read -r c; do
@@ -64,7 +64,7 @@ claims_check() {
   done < <(git -c core.quotePath=false diff --name-only --no-renames "$mb" HEAD))
   [ -n "$why" ] || return 0
   why="$branch writes outside its claim in $build's build-claims.md, so nothing merged: $(sed ':a;N;$!ba;s/\n/; /g' <<<"$why"). A late need goes through the build minion: ask #${boss:-?} (message_minion) to move the claim, or leave those files to their owners, then run this again"
-  [ -z "$check" ] || { say "$why"; exit 3; } # exit 3 stops hand_off_land with this text
+  [ -z "$check" ] || { say "$why"; exit 3; } # hand_off_land's early check: exit 3 stops the hand-off with this text
   refuse "$why"
 }
 

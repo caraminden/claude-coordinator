@@ -34,7 +34,7 @@ test('server work (#727): a handed-off land is working until it settles, and its
   work.sync();
   assert.deepEqual(sent, [5], 'nothing moved: nothing sent');
 
-  landings.settled(5);
+  await landings.settled(5);
   assert.deepEqual(work.of(5), { kind: 'land' }, 'read at most once a second');
   work.sync();
   assert.deepEqual(sent, [5, 5], 'settled: its row is sent again');

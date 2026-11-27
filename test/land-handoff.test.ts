@@ -360,7 +360,7 @@ test('a refusal the box caused goes back in line once with no turn, and the next
     const s = setup(`box-${kind.replace(/ /g, '-')}`, {
       requeue: async () => {
         asked++;
-        new Landings(s.data).settled(1);
+        await new Landings(s.data).settled(1);
         return null;
       },
     });
@@ -1411,7 +1411,7 @@ test('handoffs() answers from memory: it does not read the landings folder again
   await l.scanned;
   rmSync(dir, { recursive: true, force: true });
   assert.deepEqual(l.handoffs(), [7], 'found at start, then served from memory');
-  l.settled(7);
+  await l.settled(7);
   assert.deepEqual(l.handoffs(), []);
 });
 
@@ -1591,7 +1591,7 @@ test('a land settled while the start scans is not added back by the scan (#1463)
   mkdirSync(join(data, 'run', 'landings', '8'), { recursive: true });
   writeFileSync(join(data, 'run', 'landings', '8', 'handoff.json'), '{}');
   const l = new Landings(data);
-  l.settled(8);
+  await l.settled(8);
   assert.deepEqual(await l.pending(), []);
   assert.ok(!l.hasHandoff(8));
 });

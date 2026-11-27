@@ -518,6 +518,7 @@ function machineBody(m) {
       ),
       m.screen ? kv('Screen', machineScreen(m.screen)) : [],
       m.runner_update && managesHere(m) ? kv('CI agent', ciAgentUpdate(m)) : [],
+      managesHere(m) ? kv('Name', machineRename(m)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : [],
     ),
@@ -596,6 +597,18 @@ function machineTokenShow(m) {
 }
 
 /** A machine's notes for minions: a collapsed editor that keeps an open draft through re-renders. */
+/** Its name, which its owner changes here: a VM's row links to its Hyper-V VM by name (Build 10 H4), and a CI runner host's row (H6) keeps the host's.
+ * @param {import('./types.js').MachineRow} m */
+function machineRename(m) {
+  const name = h('input', { value: m.name, maxlength: 30, pattern: '[a-z0-9][a-z0-9\\-]*', 'aria-label': `${m.name}'s name`, autocomplete: 'off', class: 'machine-rename' });
+  const save = h('button', { type: 'button', class: 'secondary small' }, 'Rename');
+  save.onclick = () => {
+    const to = name.value.trim().toLowerCase();
+    if (to && to !== m.name) patchMachine(m, { name: to }, `rename ${m.name}`, renderMachineList);
+  };
+  return h('div', { class: 'row' }, name, save);
+}
+
 function machineNotes(m) {
   const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What minions should know: never restart it, where the repo is cloned, what to check first…' });
   notes.value = m.notes ?? '';

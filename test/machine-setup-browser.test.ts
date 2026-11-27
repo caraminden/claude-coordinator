@@ -158,6 +158,17 @@ test("Who gets it is a list of scheme chips on each role's row under Choose what
   assert.deepEqual(await saved(), [other.id]);
 });
 
+test("its owner renames a computer under Details, so a VM's row can take its Hyper-V VM's name (Build 10 H6)", { skip }, async () => {
+  const { machine: m } = (await srv.call('/api/machines', { name: 'rename-box' })).data;
+  await openMachines();
+  await wait("rename-box's card", `!!${card('rename-box')}`);
+  await page.eval(`(() => { const d = ${card('rename-box')}.querySelector('.mcard-details'); d.open = true; d.dispatchEvent(new Event('toggle')); })()`);
+  await wait('its Name row', `!!${card('rename-box')}.querySelector('input.machine-rename')`);
+  await page.eval(`(() => { const i = ${card('rename-box')}.querySelector('input.machine-rename'); i.value = 'Cara-Desktop'; i.nextElementSibling.click(); })()`);
+  await wait('the new name at once', `!!${card('cara-desktop')}`);
+  await wait('it to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.some((x) => x.id === ${m.id} && x.name === 'cara-desktop'))`);
+});
+
 test("a member who is no admin lends their own PC's CI runners to their scheme, not another's (#1933)", { skip }, async () => {
   // Signed in as a member of a scheme of their own: no admin, and not in Citadel's (scheme 2, whose members count as one).
   await srv.call('/api/projects', { name: 'Filler' });

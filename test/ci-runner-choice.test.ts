@@ -129,6 +129,11 @@ test("a ship's own check runs only on the check runner, in its own group, and ke
   assert.match(runsOn(yml), /runs-on: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/check\/'\) && fromJSON\('\["self-hosted", "citadel-ci-linux-check"\]'\) \|\|/, 'before the hosted-runner switch, so it never goes to GitHub');
   assert.match(yml, /if: \$\{\{ success\(\) && !startsWith\(github\.ref, 'refs\/heads\/check\/'\) && !startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/);
   assert.match(read('tools/own-check.sh'), /^OWN_CHECK_LABEL=citadel-ci-linux-check$/m);
+  // #2241: a check runner Citadel's plan keeps asleep is offline on GitHub; the check job queued for it is what wakes it,
+  // so the guard counts it registered, not online (the start limit still ends a check no runner takes).
+  const own = read('tools/own-check.sh');
+  assert.match(own, /runners\?per_page=100" --jq "\[\.runners\[\] \| select\(any\(\.labels\[\]; \.name == \\"\$OWN_CHECK_LABEL\\"\)\)\] \| length"/);
+  assert.doesNotMatch(own, /status == \\"online\\" and any/);
 });
 
 // The early next train's run (#1568; Cara, 2026-11-22, "Low-priority run on a ship runner"): early/<branch> runs beside the

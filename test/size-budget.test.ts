@@ -105,8 +105,8 @@ export const SHIP_LIMITS = {
     'tools/land/blame.sh': 30_000,
     'tools/land/main-red.sh': 10_000,
   } as Record<string, number>,
-  total: 214_000,
-  longLines: 184,
+  total: 216_700, // what the trim leaves with #2141's 2.5 KB on top
+  longLines: 176,
 };
 
 export function shipSizes(dir = root): Record<string, { bytes: number; long: number }> {

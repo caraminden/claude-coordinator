@@ -174,7 +174,7 @@ test('own check: a check runner busy for longer than a ship waits sends it to th
     const done = await l.go();
     done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
     assert.match(done[1].stderr, /own check: ticket\/9-x's check has about 17 min to go, more than the 120 s a ship waits for it, so this one skips its own check/);
-    assert.match(done[1].stderr, /light check: CI's side runner isn't free, so this joins the line unchecked/);
+    assert.match(done[1].stderr, /light check: CI's side runner isn't registered, so this joins the line unchecked/);
     assert.doesNotMatch(done[1].stderr, /check runner, on/);
     l.done();
   } finally {
@@ -244,11 +244,11 @@ test("light check: a red that is the ship's own is refused before the line, with
   }
 });
 
-test('light check: no verdict joins the line; with the side runner busy, or LAND_LIGHT_CHECK=0, nothing runs (#1620)', async () => {
+test('light check: no verdict joins the line; with no side runner registered, or LAND_LIGHT_CHECK=0, nothing runs (#1620, #2242)', async () => {
   for (const [extra, said, logged] of [
     [{ FAKE_LIGHT_OUT: 'light check: no verdict: test/p2.test.ts passed alone (flakes)' }, /light check: test\/p2\.test\.ts passed alone \(flakes\), so it joins the line, where CI decides/, ['light check · ticket/2-x · no verdict: test/p2.test.ts passed alone (flakes) · Ns']],
     [{ FAKE_LIGHT_OUT: 'citadel-heavy: no runner took it' }, /light check: the run ended without one \(citadel-heavy: no runner took it\), so it joins the line/, ['light check · ticket/2-x · no verdict: the run ended without one (citadel-heavy: no runner took it) · Ns']],
-    [{ FAKE_SIDE_RUNNERS: '0' }, null, ['light check · ticket/2-x · skipped: no idle side runner']],
+    [{ FAKE_SIDE_RUNNERS: '0' }, null, ['light check · ticket/2-x · skipped: no side runner registered']],
     [{ LAND_LIGHT_CHECK: '0' }, null, []],
   ] as [Record<string, string>, RegExp | null, string[]][]) {
     let holder: ReturnType<typeof spawn> | undefined;
@@ -275,42 +275,42 @@ test('light check: no verdict joins the line; with the side runner busy, or LAND
   }
 });
 
-// #2242: on a public repo the light check's runner is GitHub's own, free there: the side runner busy, offline or held by
-// another ship's light check doesn't stop it; GitHub not taking it is no runner, and the ship joins the line saying so.
-test("light check: on a public repo it runs on GitHub's own runners whatever the side runner is doing, with the wait in its retro line; no runner there joins the line unchecked (#2242)", async () => {
-  for (const [extra, said, logged] of [
-    [{ FAKE_QUEUED: '14' }, /land: light check: green in \d+ s, so it joins the line/, ['light check · ticket/2-x · green · Ns · runner after Ns']],
+// #2242: a busy or asleep side runner is waited for, not skipped (the fake heavy-ci's FAKE_QUEUED: its CI queue wait),
+// with the wait in the retro line; nothing taking it in the queue limit, or another ship's light check holding the side
+// runner past LAND_LIGHT_CHECK_LOCK_WAIT, joins the line unchecked, saying so.
+test("light check: a busy side runner or another ship's light check is waited for, the wait in its retro line; nothing taking it joins the line unchecked (#2242)", async () => {
+  for (const [extra, hold, said, logged] of [
+    [{ FAKE_QUEUED: '14' }, false, /land: light check: green in \d+ s, so it joins the line/, [/^light check · ticket\/2-x · green · \d+s · runner after (1[4-9]|[2-9]\d|\d{3})s$/]],
     [
-      { FAKE_NO_RUNNER: "GitHub's runners didn't take it within 360 s (its queue is full), so the CI run is cancelled" },
-      /land: light check: no runner on GitHub's own runners took it \(GitHub's runners didn't take it within 360 s \(its queue is full\), so the CI run is cancelled\), so this joins the line unchecked/,
-      ["light check · ticket/2-x · skipped: no runner on GitHub's own runners (GitHub's runners didn't take it within Ns (its queue is full), so the CI run is cancelled) · Ns"],
+      { FAKE_NO_RUNNER: 'no runner took it within 360 s (busy with a longer job, or asleep or off), so the CI run is cancelled' },
+      false,
+      /land: light check: nothing ran on CI \(no runner took it within 360 s \(busy with a longer job, or asleep or off\), so the CI run is cancelled\), so this joins the line unchecked/,
+      [/^light check · ticket\/2-x · skipped: nothing ran on CI \(no runner took it within 360 s \(busy with a longer job, or asleep or off\), so the CI run is cancelled\) · \d+s$/],
     ],
-  ] as [Record<string, string>, RegExp, string[]][]) {
+    [{ LAND_LIGHT_CHECK_LOCK_WAIT: '1' }, true, /land: light check: another ship's light check held the side runner for [1-9]\d* s, so this joins the line unchecked/, [/^light check · ticket\/2-x · skipped: another ship's light check held the side runner · \d+s$/]],
+  ] as [Record<string, string>, boolean, RegExp, RegExp[]][]) {
     let holder: ReturnType<typeof spawn> | undefined;
     let side: ReturnType<typeof spawn> | undefined;
     try {
-      // The side runner offline (FAKE_SIDE_RUNNERS 0) and another ship's light check holding its lock.
       const l = await line(
         [{}, {}],
-        (d) => ({ ...light(d), FAKE_SIDE_RUNNERS: '0', FAKE_REPO_PRIVATE: 'false', ...extra }),
+        (d) => ({ ...light(d), ...extra }),
         (r) => {
           holder = busyCheck(r);
-          side = spawn('flock', [join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'light-check.lock'), 'cat'], { stdio: ['pipe', 'ignore', 'ignore'] });
+          // Another ship's light check, holding the side runner till the end: waited for 1 s (flock -w, not -n), then skipped.
+          if (hold) side = spawn('flock', [join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'light-check.lock'), 'cat'], { stdio: ['pipe', 'ignore', 'ignore'] });
         },
       );
       await until('the check lock is held', () => lockHeld(l.state));
-      await until('the light check lock is held', () => spawnSync('flock', ['-n', join(l.state, 'light-check.lock'), 'true']).status === 1);
+      if (hold) await until('the light check lock is held', () => spawnSync('flock', ['-n', join(l.state, 'light-check.lock'), 'true']).status === 1);
       const done = await l.go();
       done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
-      assert.match(done[1].stderr, /land: light check: its own and affected test files run now on GitHub's own runners instead, on [0-9a-f]{7,}/);
       assert.match(done[1].stderr, said);
-      const calls = heavyCalls(l.r.dir);
-      assert.match(calls, /^github 1$/m, "it asks heavy-ci.ts for GitHub's runners");
-      assert.match(calls, /^ship 1$/m);
-      assert.deepEqual(
-        retro(l.r.dir, 'light check · ').map((x) => x.replace(/\b\d+ ?s\b/g, 'Ns')),
-        logged,
-      );
+      const got = retro(l.r.dir, 'light check · ');
+      assert.equal(got.length, logged.length, got.join('\n'));
+      got.forEach((x, i) => assert.match(x, logged[i]));
+      if (extra.LAND_LIGHT_CHECK_LOCK_WAIT) assert.equal(heavyCalls(l.r.dir), '', 'no light check ran');
+      else assert.match(heavyCalls(l.r.dir), /^ship 1$/m);
       assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2']);
       l.done();
     } finally {

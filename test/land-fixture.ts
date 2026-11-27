@@ -204,9 +204,6 @@ export function ci(r: ReturnType<typeof setup>) {
 case "$*" in *citadel-ci-linux-check*) [ -n "\${FAKE_CHECK_RUNNERS:-}" ] || { echo 0; exit 0; } ;; esac
 # The light check's side runner (#1620, tools/light-check.sh): never logged; none idle unless a test sets FAKE_SIDE_RUNNERS.
 case "$*" in *citadel-ci-linux-side*) echo "\${FAKE_SIDE_RUNNERS:-0}"; exit 0 ;; esac
-# Whether the repo is private (#2242: a public one's light check runs on GitHub's own runners): private, unless a test
-# sets FAKE_REPO_PRIVATE; never logged.
-case "$*" in "api repos/"*" --jq .private") echo "\${FAKE_REPO_PRIVATE:-true}"; exit 0 ;; esac
 # What is left of the hour (#1722, land.sh's gh_quota): "<remaining> <limit> <reset epoch>", FAKE_QUOTA's when set,
 # "down" for no answer; never logged, so every other land test is asked exactly what it was before.
 case "$*" in "api rate_limit "*) [ "\${FAKE_QUOTA:-}" != down ] || exit 1; echo "\${FAKE_QUOTA:-4321 5000 \$((\$(date +%s) + 1500))}"; exit 0 ;; esac

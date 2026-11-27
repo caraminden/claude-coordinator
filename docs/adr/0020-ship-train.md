@@ -356,24 +356,28 @@ runner was busy. Those 96 are the gap.
   Replayed against the 16 reds, the failing file was in the ship's own and affected set for 13.
 - Each logs `light check · <branch> · <verdict> · <s>[ · runner after <s>]`. Off: `LAND_LIGHT_CHECK=0` or `<state>/light-check-off`.
 
-### On GitHub's own runners (#2242, quick train piece 2)
+### The side runner waited for, not skipped (#2242, quick train piece 2)
 
 Josh, 2026-11-24, on #1910's card: "Plan approved: build it this way." (the quick check gets a promised runner); Cara,
 2026-11-27, on the card after #1912's count: "Go, with both changes". Nov 22 to 25, 45 of 92 light checks were skipped:
 37 found no idle side runner, 8 another light check holding it. From the own check's switch-off (`<state>/own-check-off`,
-Nov 24, 8:29 PM PST) none ran at all, since only the own check calls one; at #2209's go-live (Nov 27) the side runner was
-busy, the long and check runners offline. So in place of a reservation on the desktop:
+Nov 24, 8:29 PM PST) none ran at all, since only the own check calls one: 0 in the 18 ships since #2209 went live. So:
 
-- On a public repo (one `repos/<slug>` read: `private` false) the light check runs on GitHub's own runners
-  (`CITADEL_HEAVY_GITHUB=1`): free there, never busy with the desktop's optional work, many at once, so no idle gate
-  and no lock. A private repo keeps the side runner and its gates as above.
-- heavy-ci.ts names such a run `heavy gh-…` (`heavy shipgh-…` for a ship's): `kindOf` in `src/ci-hold.ts` and
-  `ci_busy` leave it alone, as #2210's `pre/` runs. Before, the hold took a GitHub-hosted light check for a desktop
-  check and cancelled it (the replay shows run 46075091331, Nov 27 2:11 PM PST).
-- GitHub not starting it within `LAND_LIGHT_CHECK_QUEUE` (360 s; a ship's 20 shards can take the account's jobs for
-  about 5 min) is no runner: heavy-ci.ts cancels it and exits 120, and the ship joins the line unchecked, saying
-  `no runner on GitHub's own runners took it (<why>)`, logged `skipped: no runner on …`. Its retro line gives the wait
-  for a runner (`runner after <s>`), from heavy-ci.ts's `CITADEL_HEAVY_QUEUED_FILE`.
+- Any side runner registered counts, asleep or online, as the own check's runner does (#2241): the job's labels wake
+  it. None registered: `skipped: no side runner registered`.
+- One busy is queued for, not skipped, up to `LAND_LIGHT_CHECK_QUEUE` (360 s); later jobs queue behind it, and
+  #1902's hold already keeps optional work off the desktop while a ship is in line. Past it heavy-ci.ts cancels the run
+  whatever else runs on CI (since #2209 that is mostly ships on GitHub's runners, which say nothing of the desktop) and
+  exits 120, and the ship joins the line unchecked: `skipped: nothing ran on CI (<why>)`.
+- Another ship's light check is waited for (`flock -w`, `LAND_LIGHT_CHECK_LOCK_WAIT`, 300 s) and its wait comes off
+  the 720 s limit. The retro line gives both waits: `runner after <s>` (`CITADEL_HEAVY_QUEUED_FILE`).
+- Not GitHub's own runners: a light check runs while the ship ahead lands, and one still running when that ship's 20
+  shards start keeps one from starting within 60 s, which sends the whole ship's tests to the desktop (ADR 0043).
 - A ship touching `public/` also runs `test/instant-open-browser.test.ts` (#1912's change 1: the map leaves it out for
   its 41 CPU-s, and it went red in burn-in on front-end ships twice). A light check that passed took 67 s at the median
-  (90th percentile 99 s), within its 240 s for the tests.
+  (90th percentile 99 s), and the browser test about 60 s more here: within its 240 s for the tests.
+- Left as it was, both #2209 follow-ups: `ci_busy` (deploy-queue.sh) counts a ship's tests.yml run on GitHub's runners
+  as the desktop busy, so the own check returns before it would call a light check; and the CI hold holds a ship's own
+  check (`check` kind, a light check's job too) while any ship's tests run (`shipsFirst`, `seen.ship`). Once the own
+  check is back on, those, not the side runner, decide most skips. A quick train's check in the gap after a full train
+  meets neither.

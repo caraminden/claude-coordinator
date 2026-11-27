@@ -978,22 +978,6 @@ test('a check or early run whose branch is gone is let go, and a light check nev
   }
 });
 
-test("a heavy job or a ship's light check on GitHub's own runners is never held: the hold is for the CI desktop (#2242)", async () => {
-  for (const title of ['heavy shipgh-1-1-x', 'heavy gh-1-1-x']) {
-    const w = world();
-    w.refs.add('main');
-    await w.for(10 * MIN);
-    const run = w.add(title, { file: 'citadel-heavy.yml', head_branch: 'main' });
-    const land = w.land();
-    await w.tick();
-    assert.equal(await w.ask(run), true, `${title}: let in with a ship's run going`);
-    await w.for(2 * MIN);
-    end(land);
-    await w.for(10 * MIN);
-    assert.deepEqual(w.posts, [], `${title}: never cancelled`);
-  }
-});
-
 test('a check or early run starts only on an idle desktop: not beside a run, nor with one queued; ships in line with no run are no bar', async () => {
   const w = world();
   w.line = 2;

@@ -414,13 +414,12 @@ restart_lock() {
 
 # <hub function> <slug>: 0 when Citadel's hold is on and a run of its own (ship, check, heavy job, suite; not a flake proof, which
 # runs beside ships: Josh, 2026-11-25) is on the CI desktop or queued: a check or early run starts on an idle one only (#1906, src/ci-hold.ts, which stops one that slips through).
-# Fails open: off, or GitHub not read, it isn't busy. A run left queued over an hour is one GitHub abandoned. A pre-ship run
-# (#2210) and a heavy job on GitHub's own runners ("heavy gh-…", #2242) aren't on the desktop.
+# Fails open: off, or GitHub not read, it isn't busy. A run left queued over an hour is one GitHub abandoned.
 ci_busy() {
   local st n
   [ ! -e "$state/hold-off" ] || return 1
   for st in in_progress queued; do
-    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|citadel-heavy)\\.yml")) and (.head_branch | test("^pre/") | not) and (.display_title | test("^heavy (ship)?gh-") | not) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
+    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|citadel-heavy)\\.yml")) and (.head_branch | test("^pre/") | not) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
     [[ ! $n =~ ^[1-9][0-9]*$ ]] || return 0
   done
   return 1

@@ -31,6 +31,10 @@ Status: accepted, 2026-11-25. Built by #2050. Reverses Cara's "Not now" of 2026-
   refused start, or other options picked beside the starts) wakes the owner with what started and what didn't.
 - This is an exception to ADR 0036's "card answers … always run": an all-started pick is held, not run, since nothing is
   left for the owner to do.
+- And when nothing is left for people either, the server dismisses the owner there and then (#2175, 2026-11-26), with a
+  "so the server dismissed this minion" note naming what started: no other card waits, its state is ready or none, no turn
+  runs or waits, it leads no build or cabal, and its branch has nothing main lacks (commits or uncommitted files). Any of
+  those keeps it open with the held mail, as before (`leftForPeople`, src/card-starts.ts).
 - The scheme's Taskmaster gets held mail (a fyi) naming what started.
 - A pick with typed words or a picture starts nothing: the words may change the brief, so the owner is woken as before
   and passes the picks on.

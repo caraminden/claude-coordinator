@@ -26,6 +26,7 @@
 //   LAND_KNOWN_RED, LAND_PARK_RETRIED  the kit core -> its --verify run and land_fallback (#1323).
 //   CITADEL_HEAVY_SHIP, CITADEL_HEAVY_CI_QUEUE, CITADEL_HEAVY_WHO  the light check (tools/light-check.sh) -> heavy-ci.ts (#1620).
 //   CITADEL_HEAVY_JUDGE           burn-in.sh off CI -> citadel-heavy: a local burn-in always takes a slot and the load gate (#1725).
+//   CITADEL_HEAVY_NO_ELSEWHERE    citadel-heavy -> itself (H2, #2107): back into perigee's line, without asking the Builds role again.
 export const SCRIPT_ENV = [
   'DEPLOY_LOCKED',
   'DEPLOY_TESTED',
@@ -34,6 +35,7 @@ export const SCRIPT_ENV = [
   'DEPLOY_QUEUE_TICKET',
   'CITADEL_HEAVY_HELD',
   'CITADEL_HEAVY_FALLBACK_FILE',
+  'CITADEL_HEAVY_NO_ELSEWHERE',
   'LAND_REBASED',
   'LAND_REDO',
   'LAND_RETRIED',

@@ -273,7 +273,7 @@ run_elsewhere() {
 # Back from the line each minute: a machine with room now takes it, and its place in the line goes to the next.
 asked=$SECONDS
 try_elsewhere() {
-  [ -n "$elsewhere" ] && [ $((SECONDS - asked)) -ge 60 ] || return 0
+  [ -n "$elsewhere" ] && [ $((SECONDS - asked)) -ge "${CITADEL_HEAVY_REPLACE_S:-60}" ] || return 0
   asked=$SECONDS
   "${builds[@]}" --place-only -- "$@" || return 0
   say "a machine with the Builds role has room now, so this leaves perigee's line"

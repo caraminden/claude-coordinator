@@ -50,6 +50,8 @@ function folder(slots?: number, pressure = 5) {
     CITADEL_HEAVY_TASKSET: undefined,
     RUNNER_TEMP: undefined,
     GITHUB_ACTIONS: undefined,
+    // Never another machine (H2): a turn's own server would be asked.
+    COORDINATOR_API: undefined,
   };
   return { dir, env, pressureFile };
 }
@@ -835,4 +837,91 @@ test('--help after the command belongs to the command', () => {
   const r = spawnSync(heavy, ['sh', '-c', 'echo "$1"', 'x', '--help'], { env, encoding: 'utf8', timeout: 10_000 });
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '--help');
+});
+
+// H2 (#2107): a job with files to bring back, or in a scheme with no CI, goes to a machine with the Builds role first
+// (tools/heavy-builds.ts), perigee's line last. A stand-in citadel-node plays heavy-ci.ts and heavy-builds.ts: `room`
+// says a machine has room, `ci` that the scheme has CI.
+function elsewhere(env: NodeJS.ProcessEnv) {
+  const bin = join(root, `bin-${n++}`);
+  const log = join(root, `builds-asked-${n}`),
+    room = join(root, `builds-room-${n}`),
+    ci = join(root, `ci-on-${n}`),
+    ciRan = join(root, `ci-ran-${n}`);
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, 'citadel-node'),
+    `#!/bin/sh
+case "$1" in
+  *heavy-ci.ts) [ -e '${ci}' ] || exit 1; [ "$2" = --repo ] && { echo o/r; exit 0; }; touch '${ciRan}'; exit 0 ;;
+  *heavy-builds.ts) shift; echo "$*" >>'${log}'
+    case " $* " in *" --place-only "*) [ -e '${room}' ]; exit $? ;; esac
+    if [ -e '${room}' ]; then printf "Josh's PC" >"$CITADEL_HEAVY_ON_FILE"; echo 3 >"$CITADEL_HEAVY_RAN_FILE"; echo remote-out; exit 7; fi
+    echo none >"$CITADEL_HEAVY_FALLBACK_FILE"; exit 120 ;;
+esac
+exec node "$@"
+`,
+    { mode: 0o755 },
+  );
+  const asked = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
+  return { env: { ...env, CITADEL_HEAVY_HERE: undefined, COORDINATOR_API: 'http://citadel.invalid', CITADEL_HEAVY_REPLACE_S: '0', PATH: `${bin}:${process.env.PATH}` }, asked, room, ci, ciRan };
+}
+
+test("with a machine's Builds role free it runs there: its output and status come back, and the history says on:<machine>", () => {
+  const { dir, env } = folder(1);
+  const e = elsewhere(env);
+  writeFileSync(e.room, '');
+  const here = join(root, `ran-here-${n++}`);
+  const r = spawnSync(heavy, ['--back', 'target/release/app', 'sh', '-c', touch(here)], { env: { ...e.env, CITADEL_HEAVY_WHO: 'Peek #1 (cara)' }, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(r.status, 7, r.stderr);
+  assert.match(r.stdout, /remote-out/);
+  assert.ok(!existsSync(here), 'nothing ran on perigee');
+  assert.deepEqual(e.asked(), [`--back target/release/app -- sh -c ${touch(here)}`]);
+  assert.equal(lastLine(dir)[3], "on:Josh's PC");
+  assert.equal(lastLine(dir)[6], '7');
+});
+
+test("with no machine free it runs here in perigee's line; --here never asks", () => {
+  const { dir, env } = folder(1);
+  const e = elsewhere(env);
+  const here = join(root, `ran-here-${n++}`);
+  const r = spawnSync(heavy, ['sh', '-c', touch(here)], { env: e.env, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(here));
+  assert.equal(e.asked().length, 1);
+  assert.doesNotMatch(lastLine(dir)[3], /^on:/);
+  assert.equal(spawnSync(heavy, ['--here', 'true'], { env: e.env, timeout: 30_000 }).status, 0);
+  assert.equal(e.asked().length, 1, '--here asked nobody');
+});
+
+test('a log-only job in a scheme with CI goes to CI as before; one with --back goes to the Builds role', () => {
+  const { env } = folder(1);
+  const e = elsewhere(env);
+  writeFileSync(e.ci, '');
+  writeFileSync(e.room, '');
+  assert.equal(spawnSync(heavy, ['true'], { env: e.env, timeout: 30_000 }).status, 0);
+  assert.ok(existsSync(e.ciRan), 'CI ran it');
+  assert.equal(e.asked().length, 0);
+  assert.equal(spawnSync(heavy, ['--back', 'out.apk', 'true'], { env: e.env, timeout: 30_000 }).status, 7);
+  assert.equal(e.asked().length, 1);
+});
+
+test("waiting in perigee's line with the slot busy and no machine free, it asks again and leaves the line once one has room", async () => {
+  const { env } = folder(1);
+  const e = elsewhere(env);
+  const { go, holder } = await holdSlot(env);
+  const here = join(root, `ran-here-${n++}`);
+  let waiter: Job | undefined;
+  try {
+    waiter = job(e.env, 'Peek #2 (cara)', touch(here));
+    await until('it to wait in the line', () => /waiting for one/.test(waiter!.err()));
+    await until('it to ask the Builds role again', () => e.asked().some((a) => a.startsWith('--place-only')));
+    writeFileSync(e.room, '');
+    assert.equal(await waiter.done, 7, waiter.err());
+    assert.match(waiter.err(), /leaves perigee's line/);
+    assert.ok(!existsSync(here), 'nothing ran on perigee');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
 });

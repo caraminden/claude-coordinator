@@ -85,9 +85,9 @@ refuse() { say "$*"; exit 1; }
 check=
 [ "${1:-}" != --check ] || { check=1; shift; }
 args=("$@") # for the rebased copy (the execs below)
-flake_kept=${LAND_FLAKE_KEPT:-0} # how many times this hand-off kept its place after a CI red of flakes only (flake_keep below)
+flake_kept=${LAND_FLAKE_KEPT:-0} # how many times this hand-off kept its place after a CI red of flakes only (flake_keep, tools/land/ci.sh)
 aside=${LAND_ASIDE:-0} # how many times this hand-off stepped aside from its own red train (train_suspects)
-retried=${LAND_RETRIED:-} # why it was refused by the pipeline once already (retry_in_place below), in the copy that goes again
+retried=${LAND_RETRIED:-} # why it was refused by the pipeline once already (retry_in_place, tools/land/ci.sh), in the copy that goes again
 mode=land build='' files=()
 case ${1:-} in
   '') ;;
@@ -351,7 +351,7 @@ train_reporter() {
   (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
 }
 # Conflict prep's waiting side (#1366, above): while a train ahead of this one is tested (<state>/train-top, top_say
-# below), whether this would still rebase once it ships, by git merge-tree, as against main. Once per train top, branch
+# in tools/land/train.sh), whether this would still rebase once it ships, by git merge-tree, as against main. Once per train top, branch
 # tip and count of recorded fixes. A conflict the recorded fixes don't resolve says one "prep:" line, which the server
 # turns into a wake with the steps (src/land.ts), naming the ship on the train that brings it (the first train commit it
 # conflicts with). It never leaves the line: the minion's fix, or the conflict at its rebase, decides as before.

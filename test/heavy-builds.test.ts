@@ -303,14 +303,15 @@ async function client(stub: Stub, args: string[]) {
   });
   const port = await tmp.serve(server);
   const fell = tmp.path(`fell${n++}`);
-  const env = { ...process.env, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '9', CITADEL_HEAVY_BUILD_POLL_MS: '20', CITADEL_HEAVY_AWAY_MS: '100', CITADEL_HEAVY_FALLBACK_FILE: fell, CITADEL_HEAVY_UNATTENDED: undefined };
+  const env = { ...process.env, COORDINATOR_API: `http://127.0.0.1:${port}`, COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '9', CITADEL_HEAVY_BUILD_POLL_MS: '20', CITADEL_HEAVY_AWAY_MS: '100', CITADEL_HEAVY_FALLBACK_FILE: fell, CITADEL_HEAVY_WAITED_FILE: `${fell}-waited`, CITADEL_HEAVY_UNATTENDED: undefined };
   const p = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'tools', 'heavy-builds.ts'), ...args], { cwd: join(top, 'sub'), env });
   let out = '';
   let err = '';
   p.stdout!.on('data', (c) => (out += c));
   p.stderr!.on('data', (c) => (err += c));
   const status = await new Promise<number | null>((ok) => p.on('close', ok));
-  return { status, out, err, seen, top, fell: existsSync(fell) };
+  const waited = existsSync(`${fell}-waited`) ? readFileSync(`${fell}-waited`, 'utf8') : '';
+  return { status, out, err, seen, top, fell: existsSync(fell), waited };
 }
 
 test('a job that ran there: the snapshot leaves out .env and keys, its log and --back files come back from this folder, and done is said', async () => {
@@ -323,6 +324,13 @@ test('a job that ran there: the snapshot leaves out .env and keys, its log and -
   assert.match(c.out, /remote log/);
   assert.equal(c.seen.done, 1);
   assert.ok(!c.fell);
+});
+
+test("a job that waited for room there says so for the history line (#2109); one that started at once doesn't", async () => {
+  const waited = await client({ states: [{ state: 'queued' }, { state: 'done', exit_code: 0 }] }, ['--', 'cargo', 'build']);
+  assert.equal(waited.waited, 'room', waited.err);
+  const atOnce = await client({ states: [{ state: 'done', exit_code: 0 }] }, ['--', 'cargo', 'build']);
+  assert.equal(atOnce.waited, '');
 });
 
 test("a green build whose --back files don't come back fails here, and its results stay on Citadel", async () => {

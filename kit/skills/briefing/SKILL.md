@@ -95,6 +95,9 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
 - An idea or research minion ends in one handoff per piece of work it proposes, then the card that
   asks which to start (past four handoffs, a choices page: the Citadel-wide card rule (Asking and picking)).
   Give each handoff's option its `start` (ask_question): a plain pick then starts that minion with no turn.
+- A set written together (a chain, an idea minion's pieces): each handoff lists every tool, flag or route it calls, with
+  the `rg -n` line that finds it on main or the earlier piece, by number, that adds it. The piece that turns the feature
+  on has a Done when line that starts it as a person or Taskmaster would, with no hand-set rows.
 
 ## Idea minions and process-only changes
 

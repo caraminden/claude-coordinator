@@ -153,7 +153,7 @@ test('a GPU job with no machine named goes to a machine whose GPU jobs role is l
   mkdirSync(join(dir, 'jobs'), { recursive: true });
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ jobs: { dir: join(dir, 'jobs'), folders: {}, max_disk_gb: 10, gpu: true } }));
   const { machine, token } = await call('/api/machines', { name: 'gpu-a' }, 'POST');
-  const gpu = startMachineAgent({ base: srv.base, token, os: { os: 'windows', name: 'Windows 11' }, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
+  const gpu = startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json'), '--', process.execPath, mcpServer] });
   await until('gpu-a online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'gpu-a' && m.online));
   await call(`/api/machines/${machine.id}/roles`, { role: 'gpu', on: true, projects: [lent.id] }, 'PATCH');
 

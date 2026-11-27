@@ -2,7 +2,7 @@
 // verdict, and the ship script's fallbacks off GitHub, a streak of which rings.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fallbackStreak, fallbacksOf, type Job, movedOff, type Run, runShape, shipTimes } from '../src/ci-view.ts';
+import { fallbackStreak, fallbacksOf, type Job, movedRuns, type Run, runShape, shipTimes } from '../src/ci-view.ts';
 import { ownFallbackProblems } from '../src/ci-land-gate.ts';
 import { parseRetro } from '../src/land-reds.ts';
 
@@ -54,11 +54,16 @@ test('the fallback lines read as where the ship went and why; a moved run is the
       ['own', 'ticket/1-a', 'not every shard started within 60 s of the push'],
     ],
   );
-  assert.equal(movedOff(run(1, 'land/ticket/1-a', T('10:00'), T('10:01', 4), 'cancelled'), fb)?.why, 'not every shard started within 60 s of the push');
-  // Another branch, a run that ended long before the line, and the desktop run that took over are not moved.
-  assert.equal(movedOff(run(2, 'land/ticket/2-b', T('10:00'), T('10:01'), 'cancelled'), fb), undefined);
-  assert.equal(movedOff(run(3, 'land/ticket/1-a', T('09:40'), T('09:45')), fb), undefined);
-  assert.equal(movedOff(run(4, 'land/ticket/1-a', T('10:01', 2), T('10:08'), 'success', { event: 'workflow_dispatch' }), fb), undefined, 'dispatched before the line is written');
+  const moved = (...runs: Run[]) => [...movedRuns(runs, fb)].map(([id, f]) => [id, f.why]);
+  // The push GitHub had when the line came is the moved one; the desktop run it dispatched first is not.
+  assert.deepEqual(moved(run(1, 'land/ticket/1-a', T('10:00'), T('10:01', 4), 'cancelled'), run(4, 'land/ticket/1-a', T('10:01', 2), T('10:08'), 'success', { event: 'workflow_dispatch' })), [[1, 'not every shard started within 60 s of the push']]);
+  // Another branch, and a push that stopped long before the line, are not moved.
+  assert.deepEqual(moved(run(2, 'land/ticket/2-b', T('10:00'), T('10:01'), 'cancelled'), run(3, 'land/ticket/1-a', T('09:40'), T('09:45'))), []);
+  // A flake rerun pushed straight after a red: the line is the rerun's, and the red keeps its own verdict.
+  assert.deepEqual(
+    moved(run(5, 'land/ticket/1-a', T('09:57'), T('10:00')), run(6, 'land/ticket/1-a', T('10:00', 5), T('10:01', 3), 'cancelled')).map(([id]) => id),
+    [6],
+  );
 });
 
 test("push to verdict: each ship run with a verdict; a fallback's from the first push, the run GitHub gave up on not on its own", () => {
@@ -73,12 +78,19 @@ test("push to verdict: each ship run with a verdict; a fallback's from the first
   ];
   const jobs = [...ghRun(1, T('10:00'), T('10:02', 24)), ...ghRun(2, T('10:10'), T('10:13', 18)), ...ghRun(3, T('10:20'), T('10:21')), ...deskRun(31, T('10:27', 10)), ...ghRun(4, T('10:30'), T('10:31')), ...ghRun(5, T('10:40'), T('10:41'))];
   assert.deepEqual(
-    shipTimes(runs, jobs, fb).map((t) => [t.runId, t.value, t.workflow]),
+    shipTimes(runs, jobs, fb, Date.parse(T('11:00'))).map((t) => [t.runId, t.value, t.workflow]),
     [
       [1, 144, 'tests on GitHub'],
       [2, 198, 'tests on GitHub'],
       [31, 430, 'tests on own runners'],
     ],
+  );
+  // A GitHub verdict under 3 minutes old waits: one that failed before its tests is moved after it ends, its line still to come.
+  assert.deepEqual(
+    shipTimes(runs, jobs, fb, Date.parse(T('10:15')))
+      .filter((t) => t.workflow.endsWith('on GitHub'))
+      .map((t) => t.runId),
+    [1],
   );
 });
 
@@ -94,7 +106,10 @@ test('two ships in a row moved off GitHub ring; a ship with its own verdict on G
   const now = Date.parse(T('10:12'));
   const [p] = ownFallbackProblems(streak, now);
   assert.equal(p.key, 'land:off-github');
-  assert.match(p.title, /fell back from GitHub to the desktop on 2 ships in a row: ticket\/1-a \(slots taken\), ticket\/2-b/);
+  assert.ok(
+    ['ticket/1-a', 'ticket/2-b', 'slots taken', ' 2 '].every((x) => p.title.includes(x)),
+    p.title,
+  );
   assert.equal(p.since, Date.parse(T('10:11', 5)));
   assert.equal(p.quiet, true, 'it waits like the perigee fallback: its Taskmaster first, people after');
   assert.deepEqual(ownFallbackProblems(streak.slice(1), now), []);

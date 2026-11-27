@@ -133,7 +133,10 @@ export class CiNumbers {
   private check(project: Project, name: string, ref: string): CiNumberStep | null {
     // Each ref is its own line, so a branch's slow tries never count against main's; only the charted line is watched.
     if (this.store.ciNumberMainRef(project.id, name) !== ref) return null;
-    const runs = this.store.ciNumberRuns(project.id, name, ref, STEP.held + STEP.base);
+    // #2231: a ship that fell back to the desktop counts its wait for GitHub too; the off-GitHub ring tells of those, so the step rule reads GitHub's runs only.
+    const all = this.store.ciNumberRuns(project.id, name, ref, name === PUSH_TO_VERDICT ? 4 * (STEP.held + STEP.base) : STEP.held + STEP.base);
+    const runs = name === PUSH_TO_VERDICT ? all.filter((n) => !/ on own runners$/.test(n.workflow ?? '')).slice(-(STEP.held + STEP.base)) : all;
+    if (!runs.length) return null;
     const found = stepUp(runs.map((n) => n.value));
     if (!found) return null;
     // Flagged once: a step marked inside these runs is this one still holding, unless this level is a further step over it.

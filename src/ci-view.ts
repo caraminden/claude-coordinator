@@ -173,14 +173,23 @@ export function fallbacksOf(lines: { at: number; kind: string; parts: string[] }
     .sort((a, b) => a.at - b.at);
 }
 
-/** A ship run on GitHub that the ship script moved off it (#2231): a `ci to desktop` line for its branch from its push until shortly after it stopped (land.sh cancels it, dispatches the desktop run, then writes the line, so the dispatched take-over is never the moved one). */
+/**
+ * The ship runs on GitHub the ship script moved off (#2231), by run id, each with its `ci to desktop` line: for each line, the
+ * newest push to its `land/` branch made before it, still running or stopped at most MOVED_TAIL_MS before it. land.sh cancels
+ * that run, dispatches the desktop run and then writes the line, so the dispatched take-over is never the moved one, and a
+ * flake rerun pushed just before keeps the line from reaching the red run it reran.
+ */
 export const MOVED_TAIL_MS = 3 * 60_000;
-export function movedOff(r: { head_branch: string; created_at: string; updated_at?: string; event?: string }, fallbacks: Fallback[]): Fallback | undefined {
-  if (!r.head_branch.startsWith('land/') || r.event === 'workflow_dispatch') return undefined;
-  const branch = r.head_branch.slice('land/'.length);
-  const from = Date.parse(r.created_at),
-    to = Date.parse(r.updated_at ?? r.created_at) + MOVED_TAIL_MS;
-  return fallbacks.find((f) => f.to === 'own' && f.branch === branch && f.at >= from && f.at <= to);
+type Movable = { id: number; head_branch: string; created_at: string; updated_at?: string; event?: string };
+export function movedRuns(runs: Movable[], fallbacks: Fallback[]): Map<number, Fallback> {
+  const out = new Map<number, Fallback>();
+  for (const f of fallbacks) {
+    if (f.to !== 'own') continue;
+    const pushes = runs.filter((r) => r.head_branch === `land/${f.branch}` && r.event !== 'workflow_dispatch' && Date.parse(r.created_at) <= f.at);
+    const r = pushes.sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
+    if (r && f.at <= Date.parse(r.updated_at ?? r.created_at) + MOVED_TAIL_MS) out.set(r.id, f);
+  }
+  return out;
 }
 
 /** One push-to-verdict reading (#2231): a ship run with a verdict, from its push (a fallback's: the GitHub run's push) to its last job. */
@@ -195,19 +204,22 @@ export interface ShipTime {
 /**
  * The last day's ship runs' push-to-verdict, for the Numbers tab: each `land/` run that ended green or red, on GitHub or the
  * scheme's own runners. A run moved off GitHub has no verdict of its own; the run that took it over (the next on its branch,
- * within FALLBACK_MS) counts from the first run's push. `runs` newest first, as GitHub lists them.
+ * within FALLBACK_MS) counts from the first run's push. A GitHub run's verdict waits out MOVED_TAIL_MS first: one that failed
+ * before its tests ran is moved to the desktop after it ends, and its line can come after a read.
  */
 const FALLBACK_MS = 15 * 60_000;
-export function shipTimes(runs: Run[], jobs: Job[], fallbacks: Fallback[]): ShipTime[] {
+export function shipTimes(runs: Run[], jobs: Job[], fallbacks: Fallback[], now: number): ShipTime[] {
   const out: ShipTime[] = [];
+  const moved = movedRuns(runs, fallbacks);
   const land = runs.filter((r) => r.head_branch.startsWith('land/')).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   for (const [i, r] of land.entries()) {
     if (r.status !== 'completed' || !(r.conclusion === 'success' || RED_JOB.has(r.conclusion ?? ''))) continue;
-    if (movedOff(r, fallbacks)) continue;
+    if (moved.has(r.id)) continue;
     const shape = runShape(r, jobs);
     if (shape.secs == null || !shape.where) continue;
+    if (shape.where === 'github' && Date.parse(r.created_at) + shape.secs * 1000 + MOVED_TAIL_MS > now) continue;
     const prev = land.slice(0, i).findLast((x) => x.head_branch === r.head_branch);
-    const from = prev && movedOff(prev, fallbacks) && Date.parse(r.created_at) - Date.parse(prev.created_at) <= FALLBACK_MS ? Date.parse(prev.created_at) : Date.parse(r.created_at);
+    const from = prev && moved.has(prev.id) && Date.parse(r.created_at) - Date.parse(prev.created_at) <= FALLBACK_MS ? Date.parse(prev.created_at) : Date.parse(r.created_at);
     const end = Date.parse(r.created_at) + shape.secs * 1000;
     out.push({ runId: r.id, sha: r.head_sha, branch: r.head_branch, workflow: `${r.name} on ${shape.where === 'github' ? 'GitHub' : 'own runners'}`, at: end, value: Math.round((end - from) / 1000) });
   }
@@ -276,7 +288,8 @@ export async function branchTips(dir: string | null | undefined): Promise<Map<st
  */
 export function fallbackStreak(runs: Run[], jobs: Job[], fallbacks: Fallback[]): Fallback[] {
   const onGithub = runs.filter((r) => r.head_branch.startsWith('land/') && runShape(r, jobs).where === 'github').sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  const moved = movedRuns(runs, fallbacks);
   let since = -Infinity;
-  for (const r of onGithub) if (r.status === 'completed' && (r.conclusion === 'success' || RED_JOB.has(r.conclusion ?? '')) && !movedOff(r, fallbacks)) since = Date.parse(r.created_at);
+  for (const r of onGithub) if (r.status === 'completed' && (r.conclusion === 'success' || RED_JOB.has(r.conclusion ?? '')) && !moved.has(r.id)) since = Date.parse(r.created_at);
   return fallbacks.filter((f) => f.to === 'own' && f.at > since);
 }

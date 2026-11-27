@@ -12,7 +12,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fallbacksOf, movedOff } from './ci-view.ts';
+import { fallbacksOf, movedRuns } from './ci-view.ts';
 
 export type Cause = 'flaky' | 'main' | 'change' | 'unknown';
 
@@ -135,8 +135,8 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
 /** The land runs created since `since`, counted, and each red one's cause from the retro log's lines. */
 export function landReds(runs: LandRun[], lines: RetroLine[], since: number): LandReds {
   // #2231: a run the ship script moved off GitHub (`ci to desktop`) isn't a ship of its own: the run that took it over counts.
-  const moved = fallbacksOf(lines);
-  const land = runs.filter((r) => r.head_branch.startsWith('land/') && Date.parse(r.created_at) >= since && !movedOff(r, moved)).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  const moved = movedRuns(runs, fallbacksOf(lines));
+  const land = runs.filter((r) => r.head_branch.startsWith('land/') && Date.parse(r.created_at) >= since && !moved.has(r.id)).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   const out: LandReds = { since, runs: land.length, green: 0, red: 0, other: 0, causes: { change: 0, flaky: 0, main: 0, unknown: 0 }, riders: 0, reds: [] };
   const sorted = [...lines].sort((a, b) => a.at - b.at);
   for (const [i, r] of land.entries()) {

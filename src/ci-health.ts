@@ -135,7 +135,7 @@ export {
   CI_SENDER,
   itemKey,
 } from './ci-problems.ts';
-import { branchTips, type CiView, fallbackStreak, fallbacksOf, type GhBody, type GhNote, type Job, movedOff, type Run, type Runner, runKind, runMinion, runningNow, type ShipTime, shipTimes, viewRun } from './ci-view.ts';
+import { branchTips, type CiView, fallbackStreak, fallbacksOf, type GhBody, type GhNote, type Job, movedRuns, type Run, type Runner, runKind, runMinion, runningNow, type ShipTime, shipTimes, viewRun } from './ci-view.ts';
 import type { RetroLine } from './land-reds.ts';
 export { type CiView, type Job, type Run, type Runner, runKind, runMinion, runningNow, type ViewRun } from './ci-view.ts';
 import { type LandSeen, type LandState, newLandState, landStep, landProblems, ownFallbackProblems } from './ci-land-gate.ts';
@@ -648,9 +648,11 @@ export class CiHealth {
     const [tickets, tips] = [this.store.listTickets(p.id), await branchTips(p.repo_dir)];
     const minion = (r: Run) => runMinion(r.head_branch, r.head_sha, tickets, tips);
     // #2231: the ship script's fallbacks off GitHub, a streak of them rings; each ship's push-to-verdict goes to the Numbers tab.
-    const fallbacks = fallbacksOf((await this.deps.retro?.(p, now - WINDOW_MS, now).catch(() => [])) ?? []).map((f) => ({ ...f, minion: runMinion(f.branch, '', tickets, new Map()) }));
+    // The retro log comes in whole UTC days: only the window's lines count.
+    const fallbacks = fallbacksOf(((await this.deps.retro?.(p, now - WINDOW_MS, now).catch(() => [])) ?? []).filter((l) => l.at >= now - WINDOW_MS)).map((f) => ({ ...f, minion: runMinion(f.branch, '', tickets, new Map()) }));
     out.push(...ownFallbackProblems(fallbackStreak(runs, all, fallbacks), now));
-    const times = shipTimes(runs, all, fallbacks);
+    const times = shipTimes(runs, all, fallbacks, now);
+    const moved = movedRuns(runs, fallbacks);
     if (times.length) this.deps.shipTimes?.(p, times);
     const shown: CiView['workflows'] = [];
     for (const w of workflows) {
@@ -692,7 +694,7 @@ export class CiHealth {
         }),
       ...runningNow(all, runs, runners, minion),
       workflows: shown,
-      runs: runs.slice(0, 30).map((r) => ({ ...viewRun(slug, r, minion, all), ...(movedOff(r, fallbacks) && { moved: movedOff(r, fallbacks)?.why }) })),
+      runs: runs.slice(0, 30).map((r) => ({ ...viewRun(slug, r, minion, all), ...(moved.has(r.id) && { moved: moved.get(r.id)?.why }) })),
       fallbacks,
     });
     return out;

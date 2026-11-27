@@ -371,6 +371,13 @@ test("ship runs' push-to-verdict from GitHub's times is kept once a run on main'
   assert.equal(kept.length, 10);
   assert.deepEqual([...new Set(kept.map((n) => `${n.ref} ${n.unit} ${n.workflow}`))], ['refs/heads/main s tests on GitHub']);
   assert.deepEqual(told, []);
-  numbers.own(p, times(11, [300, 300, 300]));
+  // Ships that fell back to the desktop are slow by their wait for GitHub: kept and drawn, but the off-GitHub ring tells of them, not a step.
+  numbers.own(
+    p,
+    times(11, [450, 450, 450]).map((t) => ({ ...t, workflow: 'tests on own runners' })),
+  );
+  assert.equal(store.ciNumbers(p.id, 'push-to-verdict').length, 13);
+  assert.deepEqual(told, []);
+  numbers.own(p, times(14, [300, 300, 300]));
   assert.deepEqual(told, [300]);
 });

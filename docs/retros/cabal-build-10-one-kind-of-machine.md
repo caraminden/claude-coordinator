@@ -32,8 +32,8 @@ as part of its computer, and CI runner hosts turned into ordinary PC rows. Times
    member's row note as a done-when line, and the Overseer checks it when that member merges.
 3. **Three stale tests in files no member touched reached only the full run.** They were `runner-agent.test.ts` (H1's
    new CI rule) and two Machines page browser tests (H3 removed `.machine-row`). FX2 fixed them in 16 min for
-   $1.06[^t]. This repeats the ledger row "A feeder's land runs only its own files' tests." The browser tests drive the
-   page through a server rather than importing it, so neither `@samename` nor `@imports` picks them.
+   $1.06[^t]. This repeats the ledger row "A feeder's land runs only its own files' tests." Two of the three browser
+   tests drive the page through a server rather than importing it, so neither `@samename` nor `@imports` picks them.
    **Edit:** `tools/affected-map.txt` gains rules for `public/settings-machines.js` and `public/machine-*.js` naming the
    three `test/machine-*-browser.test.ts` files. That reaches `--wide` and CI. The narrow `--affected` pick still
    skips map rules (#1928), so the build's full run stays the guard.

@@ -78,7 +78,7 @@ function formingCard(c: SeedCtx): string {
     { what: 'The Machines page, take B (two switches)', cost: '~$25', when: 'now', tier: 'Opus 5.5 high' },
     { what: 'Every machine has an owner (no "shared" rows)', cost: '~$15', when: 'now', tier: 'Opus 5.5 high' },
     { what: 'A VM is a capability of its computer', cost: '~$15', when: 'once #2179 is live', tier: 'Opus 5.5 high' },
-    { what: 'Runner host rows become PC rows; Cara’s desktop moves over', cost: '~$15', when: 'after Every machine has an owner and One agent per computer, its…', tier: 'Opus 5.5 high' },
+    { what: 'Runner host rows become PC rows; Cara’s desktop moves over', cost: '~$15', when: 'after Every machine has an owner and One agent per computer', tier: 'Opus 5.5 high' },
     { what: 'Build 10’s fixer: small fixes across the cabal', cost: '~$8', when: 'now', tier: 'Sonnet 5.5 medium' },
   ];
   const lines = roster.map((r) => `- ${r.what} · ${r.cost} · ${r.when}`).join('\n');

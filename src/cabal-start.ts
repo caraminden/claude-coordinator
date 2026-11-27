@@ -52,7 +52,7 @@ export const rowScheme = (lead: Pick<Ticket, 'project_id'>, r: Pick<CabalMemberR
 const schemeName = (app: App, id: number) => app.store.getProject(id)?.name ?? `scheme ${id}`;
 const money = (n: number) => `$${Math.round(n)}`;
 
-const clip = (t: string, n = 40) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+const clip = (t: string, n = 60) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** When a row starts, in words: "now", "after the VM piece", "once #2179 is live". A label names its row by its title, never as "H2". */
 export function whenText(r: Pick<CabalMemberRow, 'after'>, all: Pick<CabalMemberRow, 'label' | 'title'>[]): string {

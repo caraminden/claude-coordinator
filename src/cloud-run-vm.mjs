@@ -121,6 +121,8 @@ async function child(job) {
   const gone = () => spawnSync('git', ['ls-remote', '--exit-code', 'origin', `refs/heads/${job.ref}`], { stdio: 'ignore' }).status === 2;
   const stop = () => {
     stopped = true;
+    // Idempotent: a beat left by a Stop whose recheck failed on the network still goes (#2230).
+    spawnSync('git', ['push', '-q', 'origin', '--delete', job.beat], { stdio: 'ignore' });
     try {
       if (p.pid) process.kill(-p.pid, 'SIGKILL');
     } catch {}
@@ -137,10 +139,7 @@ async function child(job) {
     }
     // The helper's Stop deletes the source, then the beat branch: a Stop between the check above and this push would
     // leave the beat branch on origin for good, so look again and delete it ourselves (#2230).
-    if (gone()) {
-      spawnSync('git', ['push', '-q', 'origin', '--delete', job.beat], { stdio: 'ignore' });
-      stop();
-    }
+    if (gone()) stop();
   };
   await beat();
   const timer = setInterval(beat, BEAT_MS);

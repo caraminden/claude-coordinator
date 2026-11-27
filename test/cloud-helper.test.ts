@@ -3,11 +3,11 @@
 // every way the cloud can't be used or goes quiet, and Stop, which ends the runner's job through its deleted source branch.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, test } from 'node:test';
-import { AT_HOME, cloud, io, type Job, MAX_MINUTES, parse, sessionText, stop } from '../src/cloud-helper.ts';
+import { AT_HOME, cloud, type Facts, helper, io, type Job, MAX_MINUTES, parse, pickPlace, SLOWER, sessionText, slower, stop } from '../src/cloud-helper.ts';
 import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'cloud-helper-'));
@@ -68,13 +68,36 @@ else if (args[0] === '--cloud') {
 `,
 );
 chmodSync(fake, 0o755);
+// citadel-heavy: says how it was called, and exits with FAKE_HEAVY_CODE.
+const fakeHeavy = join(root, 'citadel-heavy');
+writeFileSync(
+  fakeHeavy,
+  `#!${process.execPath}
+require('node:fs').appendFileSync(${JSON.stringify(join(root, 'heavy.log'))}, JSON.stringify({ args: process.argv.slice(2), github: process.env.CITADEL_HEAVY_GITHUB ?? null, what: process.env.CITADEL_HEAVY_WHAT }) + '\\n');
+process.exit(Number(process.env.FAKE_HEAVY_CODE || 0));
+`,
+);
+chmodSync(fakeHeavy, 0o755);
+function heavyCalls(): { args: string[]; github: string | null; what: string }[] {
+  if (!existsSync(join(root, 'heavy.log'))) return [];
+  const text = readFileSync(join(root, 'heavy.log'), 'utf8'); // raw-read-ok: read only after the fake citadel-heavy has exited
+  return text
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+}
+const heavyDir = join(root, 'heavy');
 
 const said: string[] = [];
 const kept = { ...io };
 beforeEach(() => {
   said.length = 0;
-  Object.assign(io, kept, { claude: fake, cwd: () => work, helpersOff: async () => null, log: (l: string) => said.push(l), pollMs: 100, everyMs: 500 });
+  Object.assign(io, kept, { claude: fake, cwd: () => work, helpersOff: async () => null, log: (l: string) => said.push(l), pollMs: 100, everyMs: 500, place: async () => ({ on: true, machine: false }), isPublic: () => false, heavy: fakeHeavy, heavyDir: () => heavyDir });
   rmSync(join(root, 'claude.log'), { force: true });
+  rmSync(join(root, 'heavy.log'), { force: true });
+  rmSync(heavyDir, { recursive: true, force: true }); // timing-ok: own temp dir
+  rmSync(join(work, '.github'), { recursive: true, force: true }); // timing-ok: own temp dir
+  delete process.env.FAKE_HEAVY_CODE;
   rmSync(join(root, 'vm-dir'), { force: true });
   delete process.env.CITADEL_JOB;
   delete process.env.CITADEL_CLOUD;
@@ -171,4 +194,90 @@ test("a command job's session text carries the runner whole and its job; a brief
   assert.deepEqual(vm, { ref: 'cloud/src-t7-x', branch: 'cloud/t7-x', beat: 'cloud/t7-x-beat', cmd: 'npm test', minutes: 5, files: [] });
   const brief = sessionText(job('', { kind: 'brief', brief: 'Look into X.' }), 'cloud/t7-y', '', '', 7);
   assert.match(brief, /Look into X\.[\s\S]*"job": "cloud\/t7-y"[\s\S]*git push origin HEAD:refs\/heads\/cloud\/t7-y/);
+});
+
+test("pickPlace: Cara's order, a PC with room, GitHub on a public repo, the cloud unless WAY slower, else perigee", () => {
+  const f = (more: Partial<Facts>): Facts => ({ on: true, machine: false, workflow: true, public: false, slower: null, ...more });
+  const run = { kind: 'run' as const, files: [] };
+  const cases: [Partial<Facts>, Pick<Job, 'kind' | 'files'>, string][] = [
+    [{ machine: true, public: true }, run, 'machine'],
+    [{ public: true }, run, 'github'],
+    [{ machine: true, public: true, workflow: false }, run, 'cloud'],
+    [{ machine: true, public: true }, { kind: 'run', files: ['out.txt'] }, 'cloud'],
+    [{ slower: SLOWER - 0.1 }, run, 'cloud'],
+    [{ slower: SLOWER }, run, 'home'],
+    [{ on: false }, run, 'home'],
+    [{ machine: true }, { kind: 'brief', files: [] }, 'cloud'],
+    [{ on: false, machine: true }, { kind: 'brief', files: [] }, 'home'],
+  ];
+  for (const [facts, job, place] of cases) assert.equal(pickPlace(f(facts), job).place, place, JSON.stringify([facts, job]));
+});
+
+test("slower: the cloud's runs of a command over this scheme's runs of it on perigee, newest 5 of each, failures and CI left out", () => {
+  const dir = mkdtempSync(join(root, 'hist-'));
+  process.env.CITADEL_HEAVY_WHO = 'Citadel #9 (x)';
+  const line = (who: string, what: string, reason: string, secs: number, status: number) => `2026-11-27T00:00:00-0800\t${who}\t${what}\t${reason}\t0\t${secs}\t${status}\t-\n`;
+  assert.equal(slower('npm test', dir), null, 'no runs');
+  writeFileSync(join(dir, 'history'), [line('Citadel #1 (a)', 'npm test', 'none', 100, 0), line('Citadel #2 (b)', 'npm test', 'slots', 100, 1), line('Citadel #3', 'npm test', 'ci:o/r', 9, 0), line('Delve #4', 'npm test', 'none', 9, 0), line('Citadel #5', 'npm test', 'none', 9, 2)].join(''));
+  assert.equal(slower('npm test', dir), null, 'no cloud runs yet');
+  writeFileSync(join(dir, 'cloud-history'), [line('Citadel #6', 'npm test', 'cloud', 900, 0), line('Citadel #7', 'npm test', 'cloud', 300, 0), line('Citadel #8', 'npm test', 'cloud', 300, 0)].join(''));
+  assert.equal(slower('npm test', dir), 3);
+  assert.equal(slower('npm run other', dir), null);
+  delete process.env.CITADEL_HEAVY_WHO;
+  rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+});
+
+test('a command goes through citadel-heavy to a PC with room, to GitHub on a public repo, or to perigee when helpers are off', async () => {
+  mkdirSync(join(work, '.github/workflows'), { recursive: true });
+  writeFileSync(join(work, '.github/workflows/citadel-heavy.yml'), 'on: workflow_dispatch\n');
+  io.place = async () => ({ on: true, machine: true });
+  process.env.FAKE_HEAVY_CODE = '75';
+  assert.equal(await helper(job('npm test')), 75, "citadel-heavy's exit code, 75 included");
+  io.place = async () => ({ on: true, machine: false });
+  io.isPublic = () => true;
+  process.env.FAKE_HEAVY_CODE = '3';
+  assert.equal(await helper(job('npm test')), 3);
+  io.place = async () => ({ on: false, machine: false });
+  io.isPublic = () => false;
+  delete process.env.FAKE_HEAVY_CODE;
+  assert.equal(await helper(job('npm test')), 0);
+  assert.deepEqual(
+    heavyCalls().map((c) => [c.args.join(' '), c.github, c.what]),
+    [
+      ['bash -c npm test', null, 'npm test'],
+      ['bash -c npm test', '1', 'npm test'],
+      ['--here bash -c npm test', null, 'npm test'],
+    ],
+  );
+  assert.match(said.join('\n'), /runs on a PC lending this scheme CI[\s\S]*runs on GitHub's own runners[\s\S]*runs here, in perigee's heavy-job slot: cloud helpers are off/);
+  assert.deepEqual(claudeCalls(), [], 'no session for any of them');
+});
+
+test("a cloud session that goes quiet falls back to perigee's slot by itself; a brief the cloud can't take comes back 69 for a Grunt", async () => {
+  process.env.FAKE_MODE = 'quiet';
+  io.quietMs = 1500;
+  assert.equal(await helper(job('echo hi', { minutes: 60 })), 0, "the home run's exit code");
+  assert.deepEqual(claudeCalls(), ['--cloud', '--teleport']);
+  assert.deepEqual(
+    heavyCalls().map((c) => c.args.join(' ')),
+    ['--here bash -c echo hi'],
+  );
+  assert.match(said.join('\n'), /No progress from the cloud session[\s\S]*runs here, in perigee's heavy-job slot instead/);
+  rmSync(join(root, 'claude.log'), { force: true });
+  io.place = async () => ({ on: false, machine: true });
+  assert.equal(await helper(job('', { kind: 'brief', brief: 'Look into X.', minutes: 60 })), AT_HOME);
+  assert.equal(heavyCalls().length, 1, 'a brief never goes to citadel-heavy');
+  assert.deepEqual(claudeCalls(), [], 'nor to a session with helpers off');
+});
+
+test('a cloud run is remembered for the next pick\'s "WAY slower" check', async () => {
+  assert.equal(await helper(job('echo remembered')), 0);
+  const lines = readFileSync(join(heavyDir, 'cloud-history'), 'utf8').trim().split('\n');
+  assert.deepEqual(
+    lines.map((l) => l.split('\t').slice(2, 4).concat(l.split('\t')[6])),
+    [['echo remembered', 'cloud', '0']],
+  );
+  assert.equal(heavyCalls().length, 0);
+  const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
+  await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
 });

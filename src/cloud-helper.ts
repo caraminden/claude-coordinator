@@ -4,18 +4,21 @@
 // this file with cloud-turn.mjs and cloud-run-vm.mjs beside it), so it imports nothing that reaches the database.
 //
 //   citadel-cloud run [--minutes 30] [--files a,b] [--out <dir>] -- <command>
-//       A command job: <command> (bash) runs on your branch's last commit, in the cloud VM. Its runner pushes a progress
-//       line every 2 minutes (printed here as it comes) and the output's end, its exit code and the files named come back.
+//       A command job: <command> (bash) runs where Cara's four priorities put it (pickPlace below): a PC lending this
+//       scheme CI with room, GitHub's free runners on a public repo, a cloud session on your branch's last commit, or
+//       perigee's own heavy-job slot. Wherever it runs its output streams here; in the cloud its runner pushes a progress
+//       line every 2 minutes and the output's end, its exit code and the --files named come back. A cloud session that
+//       can't start or goes quiet falls back to perigee's slot by itself.
 //   citadel-cloud brief <file> [--minutes 30] [--model sonnet|opus] [--out <dir>]
 //       A brief job (research, a review): the session reads <file> and works on its own up to --minutes, then pushes its
 //       reply and files. Nobody can answer a question there: one it asks comes back as text.
 //
-// Exit codes: 0 done (a command's exit 0), 1 done and the command failed (or hit its limit), 69 the cloud couldn't be used
-// or didn't deliver: run the step at home now, 2 a usage error. Run it as a background command and wait with
-// `citadel-wait pid`; not under citadel-job, which leaves out your Claude login (exit 69 there).
+// Exit codes: the command's own (0 done, 1 failed or hit its limit in the cloud), 75 citadel-heavy handed it to the server,
+// 69 a brief the cloud couldn't take (run it as a Grunt), 2 a usage error, 143 stopped. Run it as a background command and
+// wait with `citadel-wait pid`; not under citadel-job, which leaves out your Claude login (no cloud there).
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { jsonLines } from './json-lines.ts';
 
@@ -49,6 +52,10 @@ export const io = {
   pollMs: POLL_MS,
   quietMs: QUIET_MS,
   everyMs: 60_000,
+  place: () => readPlace(),
+  isPublic: (cwd: string) => isPublic(cwd),
+  heavy: 'citadel-heavy',
+  heavyDir: () => process.env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'),
 };
 
 /** The usage line for a bad call. */
@@ -239,6 +246,129 @@ export async function cloud(job: Job): Promise<number> {
   return job.kind === 'brief' || code === 0 ? 0 : 1;
 }
 
+/** Where a step runs (ADR 0041, Cara's four priorities and her pick "Helper checks first", 2026-11-27). */
+export type Place = 'machine' | 'github' | 'cloud' | 'home';
+/** What the pick reads. `slower`: the cloud's runs of this command over perigee's (medians), null with none of either. */
+export interface Facts {
+  on: boolean;
+  machine: boolean;
+  workflow: boolean;
+  public: boolean;
+  slower: number | null;
+}
+/** A cloud session this many times slower than home is "WAY slower" (priority 3). */
+export const SLOWER = 3;
+
+/**
+ * Cara's order: a PC lending the scheme CI with room and nothing time-sensitive waiting (1 and 2: off perigee, no overload);
+ * GitHub's free runners on a public repo (4: no session when they'd do); a cloud session unless its runs of this command were
+ * WAY slower (3); else perigee's own small slot. A command that brings files back skips the CI places, which return only
+ * output. A brief needs a model, so it's a cloud session or a Grunt at home.
+ */
+export function pickPlace(f: Facts, job: Pick<Job, 'kind' | 'files'>): { place: Place; why: string } {
+  const off = 'cloud helpers are off';
+  if (job.kind === 'brief') return f.on ? { place: 'cloud', why: 'a brief runs in a cloud session' } : { place: 'home', why: off };
+  const ci = f.workflow && !job.files.length;
+  if (ci && f.machine) return { place: 'machine', why: 'a PC lending this scheme CI has room, with no ship or CI waiting there' };
+  if (ci && f.public) return { place: 'github', why: "this repo is public, so GitHub's own runners take it free" };
+  if (f.on && !(f.slower !== null && f.slower >= SLOWER)) return { place: 'cloud', why: "no PC has room and GitHub can't take it" };
+  return { place: 'home', why: f.on ? `its cloud runs took ${f.slower?.toFixed(1)}× its runs here` : off };
+}
+
+/** The server's half of the facts: the switch and a PC's room. Unreadable counts as off and no room. */
+async function readPlace(): Promise<{ on: boolean; machine: boolean }> {
+  const base = process.env.COORDINATOR_API;
+  const ticket = process.env.COORDINATOR_TICKET;
+  if (!base || !ticket) return { on: false, machine: false };
+  try {
+    const r = await fetch(`${base}/api/tickets/${ticket}/cloud-helpers/place`, { headers: { Authorization: `Bearer ${process.env.COORDINATOR_TOKEN ?? ''}` } });
+    const got = (r.ok ? await r.json() : {}) as { on?: unknown; machine?: unknown };
+    return { on: got.on === true, machine: got.machine === true };
+  } catch {
+    return { on: false, machine: false };
+  }
+}
+
+/** Whether origin is a public GitHub repo (GitHub's runners are free there); a failed look counts as private. */
+function isPublic(cwd: string): boolean {
+  const url = spawnSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).stdout?.trim() ?? '';
+  const slug = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1];
+  if (!slug) return false;
+  return spawnSync('gh', ['api', `repos/${slug}`, '--jq', '.private'], { encoding: 'utf8', timeout: 20_000 }).stdout?.trim() === 'false';
+}
+
+/** The command as citadel-heavy's history names it (CITADEL_HEAVY_WHAT, cut the same way). */
+const whatOf = (cmd: string) => {
+  const w = cmd.replace(/[\t\n]/g, ' ');
+  return w.length <= 100 ? w : `${w.slice(0, 97)}...`;
+};
+/** This scheme's part of CITADEL_HEAVY_WHO ("Citadel #12 (title)" → "Citadel"), as citadel-heavy matches past runs. */
+const scheme = (who: string) => who.split(/ #| \(/)[0];
+const median = (xs: number[]) => (xs.length ? xs.toSorted((a, b) => a - b)[Math.floor(xs.length / 2)] : null);
+
+/** The cloud's runs of `cmd` over perigee's, the newest 5 of each; null when either has none. */
+export function slower(cmd: string, dir = io.heavyDir()): number | null {
+  const what = whatOf(cmd);
+  const who = scheme(process.env.CITADEL_HEAVY_WHO ?? '');
+  const runs = (file: string, keep: (reason: string) => boolean) => {
+    if (!existsSync(join(dir, file))) return null;
+    const secs = readFileSync(join(dir, file), 'utf8')
+      .split('\n')
+      .map((l) => l.split('\t'))
+      .filter((f) => f.length >= 7 && f[2] === what && scheme(f[1]) === who && keep(f[3]) && /^[01]$/.test(f[6]))
+      .map((f) => Number(f[5]))
+      .filter((n) => n > 0);
+    return median(secs.slice(-5));
+  };
+  const home = runs('history', (r) => !r.startsWith('ci:'));
+  const cloud = runs('cloud-history', () => true);
+  return home && cloud ? cloud / home : null;
+}
+
+/** A cloud run's line for `slower`, in citadel-heavy's history shape. */
+function remember(cmd: string, seconds: number, code: number): void {
+  try {
+    mkdirSync(io.heavyDir(), { recursive: true });
+    const who = (process.env.CITADEL_HEAVY_WHO ?? '').replace(/[\t\n]/g, ' ');
+    appendFileSync(join(io.heavyDir(), 'cloud-history'), `${new Date().toISOString()}\t${who}\t${whatOf(cmd)}\tcloud\t0\t${seconds}\t${code}\t-\n`);
+  } catch {}
+}
+
+/** A command through citadel-heavy: a PC's CI, GitHub's runners or perigee's slot. Its exit code (75: the server has it). */
+async function heavy(place: Exclude<Place, 'cloud'>, job: Job): Promise<number> {
+  const args = place === 'home' ? ['--here', 'bash', '-c', job.cmd] : ['bash', '-c', job.cmd];
+  const env = { ...process.env, CITADEL_HEAVY_WHAT: whatOf(job.cmd), ...(place === 'github' ? { CITADEL_HEAVY_GITHUB: '1' } : {}) };
+  const child = spawn(io.heavy, args, { cwd: io.cwd(), stdio: 'inherit', env });
+  stopping = () => child.kill('SIGTERM');
+  const code = await new Promise<number>((r) => {
+    child.once('error', () => r(127));
+    child.once('exit', (c, sig) => r(c ?? (sig === 'SIGTERM' ? 143 : 1)));
+  });
+  stopping = null;
+  return code;
+}
+
+const WHERE: Record<Place, string> = { machine: 'on a PC lending this scheme CI', github: "on GitHub's own runners", cloud: 'in a cloud session', home: "here, in perigee's heavy-job slot" };
+
+/** The helper's whole call: pick the place, run there, and bring a cloud job that didn't deliver home. */
+export async function helper(job: Job): Promise<number> {
+  const cwd = io.cwd();
+  const server = await io.place();
+  const workflow = existsSync(join(cwd, '.github/workflows/citadel-heavy.yml'));
+  const facts: Facts = { ...server, workflow, public: job.kind === 'run' && workflow && !server.machine && !job.files.length && io.isPublic(cwd), slower: job.kind === 'run' ? slower(job.cmd) : null };
+  const { place, why } = pickPlace(facts, job);
+  io.log(`citadel-cloud: runs ${WHERE[place]}: ${why}`);
+  if (place !== 'cloud') return job.kind === 'brief' ? home(why) : heavy(place, job);
+  const began = Date.now();
+  const code = await cloud(job);
+  if (job.kind === 'brief' || code !== AT_HOME) {
+    if (job.kind === 'run' && (code === 0 || code === 1)) remember(job.cmd, Math.round((Date.now() - began) / 1000), code);
+    return code;
+  }
+  io.log(`citadel-cloud: runs ${WHERE.home} instead`);
+  return heavy('home', job);
+}
+
 /** The cloud can't take this step: say why, and that it runs at home. */
 function home(why: string): number {
   io.log(`citadel-cloud: not in the cloud: ${why}\ncitadel-cloud: exit ${AT_HOME}: run this step at home now (citadel-heavy, or a Grunt for a brief).`);
@@ -253,7 +383,7 @@ if (import.meta.main) {
   }
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
-  cloud(job).then(
+  helper(job).then(
     (c) => process.exit(c),
     (err) => {
       home(`the helper failed: ${(err as Error).message}`);

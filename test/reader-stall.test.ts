@@ -1,6 +1,7 @@
 // Page reads while the readers are stalled on a swamped disk (#2003, src/front.ts): they wait for a reader, or fail in
 // a way the page retries, and never run on the main thread, which would freeze every other request. The main thread's
-// page reads are made slow here (citadel-test-main-read), so one that reaches it holds /api/health too.
+// page reads are made slow here (citadel-test-main-read) and say so in the log: the tests count those lines. They don't time
+// /api/health against the hold: a starved runner answers it that slowly with no page read on the main thread (#2165).
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,25 +44,24 @@ async function stall(srv: Booted, log: string, ms: number) {
   gone.abort();
   await Promise.all(sent);
 }
-/** The slowest /api/health, a main-thread answer, until `done` settles. */
-async function slowestHealth(srv: Booted, done: Promise<unknown>) {
+/** Asks /api/health, a main-thread answer, until `done` settles: it answers throughout. */
+async function healthAnswers(srv: Booted, done: Promise<unknown>) {
   let over = false;
   void done.finally(() => (over = true)).catch(() => {});
-  let worst = 0;
   while (!over) {
-    const t0 = Date.now();
     assert.equal((await fetch(`${srv.base}/api/health`)).status, 200);
-    worst = Math.max(worst, Date.now() - t0);
     // timing-ok: how often the main thread is asked, not a wait for anything
     await new Promise((r) => setTimeout(r, 50));
   }
-  return worst;
 }
+/** How many page reads the main thread has run (server.ts says each on stderr, written to the log before it holds). */
+const mainReads = (log: string) => readFileSync(join(root, log), 'utf8').split('Main test hook: holding a page read').length - 1;
 
 test('with both readers stalled, page reads are answered by the readers started in their place, the main thread free throughout', { timeout: 90_000 }, async () => {
   const srv = await bootServer({ root, env: KNOBS, log: join(root, 'one.log') });
   try {
     await readersAnswer(srv, 'one.log');
+    const before = mainReads('one.log');
     await stall(srv, 'one.log', 15_000);
     const t0 = Date.now();
     // As the page asks (public/base.js): again on a 503 that says so.
@@ -74,10 +74,10 @@ test('with both readers stalled, page reads are answered by the readers started 
         }
       }),
     );
-    const worst = await slowestHealth(srv, pages);
+    await healthAnswers(srv, pages);
     for (const got of await pages) assert.deepEqual([got.status, got.by], [200, 'reader']);
     // timing-ok: one page read reaching the main thread holds it 2 s; a health answer takes a few ms
-    assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
+    assert.equal(mainReads('one.log'), before, 'a page read ran on the main thread');
     // timing-ok: the stalled readers are stuck for 15 s, so these answers came from new ones
     assert.ok(Date.now() - t0 < 14_000, `pages took ${Date.now() - t0} ms`);
     // Each new one was ready before an old one went.
@@ -98,6 +98,7 @@ test('readers that are alive but answer nothing are replaced, and the journal an
   const log = () => readFileSync(join(root, 'wedge.log'), 'utf8');
   try {
     await readersAnswer(srv, 'wedge.log');
+    const before = mainReads('wedge.log');
     const gone = new AbortController();
     const sent = [1, 2].map((n) => get(srv, `/api/tickets/${M.id}/events?citadel-test-reader=wedge&n=${n}`, gone.signal).catch(() => null));
     await until('both readers are wedged', () => log().split('Reader test hook: wedged').length === 3);
@@ -110,10 +111,10 @@ test('readers that are alive but answer nothing are replaced, and the journal an
         }
       }),
     );
-    const worst = await slowestHealth(srv, pages);
+    await healthAnswers(srv, pages);
     for (const got of await pages) assert.deepEqual([got.status, got.by], [200, 'reader']);
     // timing-ok: one page read reaching the main thread holds it 2 s; a health answer takes a few ms
-    assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
+    assert.equal(mainReads('wedge.log'), before, 'a page read ran on the main thread');
     gone.abort();
     await Promise.all(sent);
     await until('the wedged readers are gone', () => log().split('Reader thread replaced').length === 3);
@@ -142,18 +143,19 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
   const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_READER_BOOT_WAIT: may }, log: join(root, 'two.log') });
   try {
     await readersAnswer(srv, 'two.log');
+    const before = mainReads('two.log');
     rmSync(may); // the ones started in their place don't get ready
     await stall(srv, 'two.log', 10_000);
     const first = get(srv, PAGE);
     // The tests' own client (bootServer's call) asks again on that answer, as the page does, so a read on a loaded
     // runner waits for a reader rather than failing its test (#2012).
     const asked = srv.call(PAGE);
-    const worst = await slowestHealth(srv, first);
+    await healthAnswers(srv, first);
     const got = await first;
     assert.deepEqual([got.status, got.by], [503, 'front']);
     assert.equal(JSON.parse(got.body).retry, true);
     // timing-ok: as above
-    assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
+    assert.equal(mainReads('two.log'), before, 'a page read ran on the main thread');
     // Slow, not stuck: the same readers answer once their disk does, neither thrown away.
     await until('a reader answers again', async () => (await get(srv, PAGE)).by === 'reader');
     assert.equal((await asked).status, 200, "the tests' client asked again until a reader answered");
@@ -174,14 +176,16 @@ test('a page read before the first reader is up waits for it past its usual wait
     // Its reader, once up, takes 1.5 s over it: it has the whole wait from then, not what was left of the read's own.
     const first = get(srv, `${PAGE}&citadel-test-reader=stall-1500`);
     const sent = Date.now();
-    const worst = slowestHealth(srv, first);
+    const before = mainReads('four.log');
+    const health = healthAnswers(srv, first);
     // timing-ok: past the 4 s a read waits for readers that have been up, where it got a 503
     await until('the usual wait to be over', () => Date.now() - sent > 5000);
     writeFileSync(may, '');
     const got = await first;
     assert.deepEqual([got.status, got.by], [200, 'reader']);
     // timing-ok: as above
-    assert.ok((await worst) < HELD, `the main thread was held for ${await worst} ms`);
+    await health;
+    assert.equal(mainReads('four.log'), before, 'a page read ran on the main thread');
   } finally {
     writeFileSync(may, '');
     await srv.stop();
@@ -192,6 +196,7 @@ test('while writes are backed up, page reads wait for them in a reader, the main
   const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_DB_WRITE_DELAY_MS: '300' }, log: join(root, 'three.log') });
   try {
     await readersAnswer(srv, 'three.log');
+    const before = mainReads('three.log');
     const sent = srv.call(`/api/tickets/${M.id}/messages`, { text: 'read your writes' });
     let over = false;
     void sent.finally(() => (over = true));
@@ -200,8 +205,8 @@ test('while writes are backed up, page reads wait for them in a reader, the main
       while (!over) seen.push((await get(srv, PAGE)).by);
     })();
     // timing-ok: as above
-    const worst = await slowestHealth(srv, reads);
-    assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
+    await healthAnswers(srv, reads);
+    assert.equal(mainReads('three.log'), before, 'a page read ran on the main thread');
     assert.equal((await sent).status, 202);
     assert.ok(seen.length > 0 && seen.every((by) => by === 'reader' || by === 'front'), seen.join());
     // The message's answer came once its writes ran (#1244): the next read has it.

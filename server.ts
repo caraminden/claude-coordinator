@@ -2779,6 +2779,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
       }
       // test/reader-stall.test.ts: a page read that holds this thread, as one on a swamped disk does.
       const held = SETTLED_ROUTE && /[?&]citadel-test-main-read=(\d+)/.exec(req.url ?? '');
+      // Said on stderr, which a test server writes to its log file at once: the test counts these, not the clock (#2165).
+      if (held) console.error('Main test hook: holding a page read');
       if (held) for (const until = Date.now() + Number(held[1]); Date.now() < until; );
       // test/front.test.ts: one step of the main thread that writes, pauses, then writes again; no reader may see the half.
       if (SETTLED_ROUTE && req.url?.startsWith('/api/test/half-step')) {

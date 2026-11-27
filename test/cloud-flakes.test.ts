@@ -7,6 +7,7 @@ import { after, test } from 'node:test';
 import { CLOUD_SOURCE, cloudCostUsd, HELPERS_SWITCH, keepNights, nightSightings, readNight, SWEEP, sweepsKey, type SweepNight } from '../src/cloud-flakes.ts';
 import { Store } from '../src/db.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
+import { cloudHelperRoutes } from '../src/routes/cloud-helpers.ts';
 import { projectRoutes } from '../src/routes/projects.ts';
 import { flakeBrief } from '../src/flakes.ts';
 import { batchStep, fits, flag, helpersOff, io, judge, proof, readBatches, sessionText, sweep } from '../tools/cloud-flake.ts';
@@ -111,7 +112,7 @@ test("a proof's failure seen in the cloud stands; only a file the cloud proved n
 });
 
 async function call(method: string, path: string, ctx: Record<string, unknown>) {
-  const route = projectRoutes.find((r) => r.method === method && r.path === path)!;
+  const route = [...projectRoutes, ...cloudHelperRoutes].find((r) => r.method === method && r.path === path)!;
   let body = '';
   let status = 200;
   const res = {

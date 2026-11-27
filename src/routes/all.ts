@@ -4,6 +4,7 @@ import { usageRoutes } from './usage.ts';
 import { appRoutes } from './app.ts';
 import { peopleRoutes } from './people.ts';
 import { projectRoutes } from './projects.ts';
+import { cloudHelperRoutes } from './cloud-helpers.ts';
 import { reviewRoutes } from './reviews.ts';
 import { ticketRoutes } from './tickets.ts';
 import { proposalRoutes } from './proposals.ts';
@@ -32,6 +33,7 @@ export const apiRoutes = [
   ...appRoutes,
   ...peopleRoutes,
   ...projectRoutes,
+  ...cloudHelperRoutes,
   ...reviewRoutes,
   ...ticketRoutes,
   ...timeLogRoutes,

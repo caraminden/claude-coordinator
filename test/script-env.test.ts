@@ -54,7 +54,22 @@ test('the list covers everything the scripts export or pass to a child by assign
 // The suites that really run these scripts (the others only name their paths, or stand in for them). A new suite that
 // runs one belongs here. Split suites build their env once, in a fixture of their own that they import.
 const FIXTURES = ['land-fixture.ts', 'land-recover-fixture.ts', 'scheme-setup-land-fixture.ts'];
-const RUNS_SCRIPTS = ['land.test.ts', 'land-deploy.test.ts', 'land-queue.test.ts', 'land-recover.test.ts', 'land-boot-check.test.ts', 'deploy.test.ts', 'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts', 'scheme-setup-land-ci.test.ts', 'scheme-setup-land-lanes.test.ts'];
+const RUNS_SCRIPTS = [
+  'land.test.ts',
+  'land-2.test.ts',
+  'land-3.test.ts',
+  'land-4.test.ts',
+  'land-deploy.test.ts',
+  'land-queue.test.ts',
+  'land-recover.test.ts',
+  'land-boot-check.test.ts',
+  'deploy.test.ts',
+  'run-tests.test.ts',
+  'run-tests-scope.test.ts',
+  'scheme-setup-land.test.ts',
+  'scheme-setup-land-ci.test.ts',
+  'scheme-setup-land-lanes.test.ts',
+];
 
 test('the suites that start land.sh, deploy.sh or run-tests.sh start them with scriptEnv', () => {
   for (const f of [...FIXTURES, ...RUNS_SCRIPTS]) {

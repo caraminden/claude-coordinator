@@ -483,8 +483,21 @@ function shipBlock(s, now) {
     const last = ships.find((r) => r.status === 'completed' && !r.moved) ?? ships[0];
     const green = last.conclusion === 'success';
     const [row] = settingsRow(
-      { key: `ci-ships-${s.id}`, icon: 'box', hue: 'done', title: 'Ship CI on GitHub', summary: [toneChip('ok', 'Idle'), `last ${green ? 'green' : (last.conclusion ?? 'ended')}${last.secs != null ? ` in ${mmss(last.secs)}` : ''}, ${age(last.at)}: `, whoText(last)] },
+      { key: `ci-ships-${s.id}`, icon: 'branch', hue: 'done', title: 'Ship CI on GitHub', summary: [toneChip('ok', 'Idle'), `last ${green ? 'green' : (last.conclusion ?? 'ended')}${last.secs != null ? ` in ${mmss(last.secs)}` : ''}, ${age(last.at)}: `, whoText(last)] },
       statTiles([String(ships.length), 'ship runs on GitHub', 'running'], med != null && [mmss(med), 'median push to verdict', 'running']),
+      h(
+        'div',
+        { class: 'ci-history' },
+        h(
+          'div',
+          { class: 'hue-rows' },
+          hueRow(
+            { hue: green ? 'done' : 'danger', lead: green ? 'green' : (last.conclusion ?? 'ended'), meta: age(last.at) },
+            h('span', { class: 'ci-ship-head' }, whoText(last)),
+            h('span', { class: 'ci-ship-meta muted' }, h('span', { class: 'ci-tag', 'data-to': 'github' }, `GitHub · ${last.shards?.n ?? 20}`), ext(last.url, 'run'), last.secs != null ? mmss(last.secs) : null),
+          ),
+        ),
+      ),
       h('p', { class: 'look-prose' }, "No ship is in CI. Each ship splits its tests over 20 of GitHub's runners and gets one verdict."),
     );
     return block(null, 'done', 'ci-ships', row);
@@ -495,10 +508,16 @@ function shipBlock(s, now) {
     const waitingSlots = sh.n - sh.started;
     const [tone, word, hue] = sh.red ? ['danger', `${sh.red} red`, 'danger'] : waitingSlots ? ['warn', `${waitingSlots} waiting for a slot`, 'waiting'] : ['info', 'Running', 'running'];
     const [row] = settingsRow(
-      { key: `ci-ship-${s.id}`, icon: 'box', hue, title: 'Ship CI on GitHub', summary: [toneChip(tone, word), whoText(r), ` · ${shortSpan(since)}`] },
+      { key: `ci-ship-${s.id}`, icon: 'branch', hue, title: 'Ship CI on GitHub', summary: [toneChip(tone, word), whoText(r), ` · ${shortSpan(since)}`] },
       statTiles([`${sh.started}/${sh.n}`, 'shards started', 'running'], [String(sh.done), 'green', 'done'], [String(sh.red), 'red', sh.red ? 'danger' : 'done'], [shortSpan(since), 'since the push', 'running']),
       ...shardStrip(sh),
-      h('p', { class: 'look-prose' }, waitingSlots ? "If every shard hasn't started a minute after the push, the ship script cancels this run and sends the ship to the desktop." : `One verdict: red if any shard is.${usual}`, ' ', ext(r.url, 'The run on GitHub')),
+      h(
+        'p',
+        { class: 'look-prose' },
+        waitingSlots ? (since > 60_000 ? 'Past the minute with shards still waiting: the ship script is moving this ship to the desktop.' : "If every shard hasn't started a minute after the push, the ship script cancels this run and sends the ship to the desktop.") : `One verdict: red if any shard is.${usual}`,
+        ' ',
+        ext(r.url, 'The run on GitHub'),
+      ),
     );
     return row;
   });
@@ -523,12 +542,12 @@ function fallbacksBlock(s) {
     if (f.to !== 'own') return null;
     const r = s.view.runs.findLast((x) => x.branch === `land/${f.branch}` && x.event === 'workflow_dispatch' && Date.parse(x.at) >= f.at - 60_000 && Date.parse(x.at) <= f.at + 15 * 60_000);
     if (!r) return null;
-    const word = r.status !== 'completed' ? 'running' : r.conclusion === 'success' ? 'green' : r.conclusion === 'failure' ? 'red' : (r.conclusion ?? 'ended');
-    return ` · desktop run ${word}${r.status === 'completed' && r.secs != null ? ` in ${mmss(r.secs)}` : ''}`;
+    const [tone, word] = r.status !== 'completed' ? ['info', 'running'] : r.conclusion === 'success' ? ['ok', 'green'] : r.conclusion === 'failure' ? ['danger', 'red'] : ['neutral', r.conclusion ?? 'ended'];
+    return h('span', { class: 'ci-took-over' }, 'desktop run ', toneChip(tone, `${word}${r.status === 'completed' && r.secs != null ? ` ${mmss(r.secs)}` : ''}`));
   };
   const items = newest.map((f) =>
     hueRow(
-      { hue: f.to === 'own' ? 'held' : 'waiting', lead: pacificClockBare(f.at), meta: age(f.at) },
+      { hue: f.to === 'own' ? 'held' : 'waiting', meta: h('span', { title: pacificClockBare(f.at) }, age(f.at)) },
       h('span', { class: 'ci-tag', 'data-to': f.to }, f.to === 'own' ? 'Desktop' : 'perigee'),
       ' ',
       f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion}`) : h('span', {}, f.branch),
@@ -536,7 +555,7 @@ function fallbacksBlock(s) {
     ),
   );
   const [row] = settingsRow(
-    { key: `ci-fallbacks-${s.id}`, icon: 'rows', hue: fb.length ? 'held' : 'done', title: 'Fallbacks', summary: fb.length ? [toneChip(ringing ? 'danger' : 'warn', `${fb.length} in a day`), `last ${age(newest[0].at)}`] : [toneChip('ok', 'None'), 'every ship ran on GitHub'] },
+    { key: `ci-fallbacks-${s.id}`, icon: 'rows', hue: fb.length ? 'held' : 'done', title: 'Fallbacks', summary: fb.length ? [toneChip(ringing ? 'danger' : 'violet', `${fb.length} in a day`), `last ${age(newest[0].at)}`] : [toneChip('ok', 'None'), 'every ship ran on GitHub'] },
     statTiles([String(own), 'to the desktop', own ? 'held' : 'done'], [String(perigee), 'to perigee', perigee ? 'waiting' : 'done'], [String(onGithub), 'ships stayed on GitHub', 'running']),
     items.length ? showFirst({ key: `ci-fallbacks-${s.id}`, items, n: 5, noun: 'fallbacks' }) : emptyCard('No fallbacks', 'Every ship in the last day ran its CI on GitHub.', { mark: '✓', hue: 'done' }),
     h('p', { class: 'look-prose' }, "From the ship script's retro log. Two in a row off GitHub wake the Taskmaster, then ring people after the wait, as fallbacks to perigee do."),
@@ -569,7 +588,7 @@ function historyTab(s) {
   const max = Math.max(1, ...ships.map((r) => total(r) ?? 0));
   const shipItem = (/** @type {CiRun} */ r) => {
     const going = r.status !== 'completed';
-    const [hue, word] = going ? ['running', r.status.replace('_', ' ')] : r.conclusion === 'success' ? ['done', 'green'] : r.conclusion === 'failure' ? ['danger', 'red'] : ['held', r.moved ? 'moved' : (r.conclusion ?? 'done')];
+    const [hue, word] = going ? ['running', r.status === 'queued' ? 'queued' : 'running'] : r.conclusion === 'success' ? ['done', 'green'] : r.conclusion === 'failure' ? ['danger', 'red'] : ['held', r.moved ? 'moved' : (r.conclusion ?? 'done')];
     const secs = total(r);
     const m = under.get(r.id);
     const red = r.shards?.red ? `${plural(r.shards.red, 'shard')} red` : '';
@@ -586,7 +605,17 @@ function historyTab(s) {
           r.moved && !nested.has(r.id) ? h('span', {}, `moved to the desktop: ${r.moved}`) : red && !going ? h('span', {}, red) : null,
         ),
       ),
-      m ? h('div', { class: 'queue-sub' }, hueRow({ hue: 'held', lead: 'moved', meta: m.secs != null ? mmss(m.secs) : null }, h('span', { class: 'muted' }, 'GitHub run · ', m.moved || 'moved off GitHub', ' · '), ext(m.url, 'run'))) : null,
+      m
+        ? h(
+            'div',
+            { class: 'queue-sub' },
+            hueRow(
+              { hue: 'running', lead: 'moved', meta: m.secs != null ? mmss(m.secs) : null },
+              h('span', { class: 'ci-ship-head muted' }, m.moved || 'moved off GitHub'),
+              h('span', { class: 'ci-ship-meta muted' }, h('span', { class: 'ci-tag', 'data-to': 'github' }, `GitHub${m.shards ? ` · ${m.shards.n}` : ''}`), ext(m.url, 'run')),
+            ),
+          )
+        : null,
     ];
   };
   const shown = ships.filter((r) => !nested.has(r.id));

@@ -141,7 +141,7 @@ function chart(series, commit) {
         { class: 'ci-legend' },
         h('span', {}, `${n} run${n === 1 ? '' : 's'} on ${series.ref.replace(/^refs\/heads\//, '')}`),
         stepAt.length ? h('span', {}, h('i', { class: 'key step' }), 'step up held') : '',
-        pts.some((p) => OWN.test(p.workflow)) ? h('span', {}, h('i', { class: 'key own' }), 'on the desktop, after a fallback') : '',
+        ...(pts.some((p) => OWN.test(p.workflow)) ? [h('span', {}, h('i', { class: 'key gh' }), 'on GitHub'), h('span', {}, h('i', { class: 'key own' }), 'on the desktop, after a fallback')] : []),
       ),
     ),
     el,

@@ -49,7 +49,8 @@
 .ci-pt[data-own]::after { background: var(--held); opacity: 1; }
 .ci-pt.on::after, .ci-pt:focus-visible::after { opacity: 1; }
 .ci-figure i.key.step { display: inline-block; width: 2px; height: 10px; background: var(--waiting); flex: none; }
-.ci-figure i.key.own { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--held); flex: none; }
+.ci-figure i.key.own, .ci-figure i.key.gh { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--held); flex: none; }
+.ci-figure i.key.gh { background: var(--running); }
 .ci-pools-wrap { overflow-x: auto; }
 .ci-pools { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .ci-pools th { font-size: var(--size-meta); font-weight: 600; color: var(--muted); text-align: left; white-space: nowrap; }

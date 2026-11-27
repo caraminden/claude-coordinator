@@ -527,12 +527,14 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-shard[data-s="done"] { --c: var(--done); }
 .ci-shard[data-s="red"] { --c: var(--error); }
 .ci-shard[data-s="run"] { --c: var(--running); }
-.ci-shard[data-s="queued"] { --c: transparent; outline: 1.5px dashed var(--waiting); outline-offset: -1.5px; }
+.ci-shard[data-s="queued"] { --c: transparent; outline: 1.5px dashed var(--muted); outline-offset: -1.5px; }
 .ci-shard-key { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin-top: 0.35rem; font-size: 0.8em; }
 .ci-shard-key .ci-shard { display: inline-block; width: 0.55rem; margin-right: 0.3rem; vertical-align: -0.1rem; animation: none; }
 .ci-ship-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.8rem; margin-top: 0.15rem; font-size: 0.85em; }
 .ci-ship-meta:empty { display: none; }
-.ci-ship-meta .meter { width: 11rem; max-width: 100%; }
+.ci-ship-meta .meter { flex: 1 1 7rem; max-width: 11rem; }
+.ci-history .hue-row-lead { min-width: 4.2rem; }
+.ci-took-over { display: block; margin-top: 0.2rem; }
 .ci-history .hue-rows { margin-top: var(--space-2); }
 .ci-history .hue-rows > *, .ci-history .queue-sub .hue-row { min-width: 0; }
 .ci-ship-head { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

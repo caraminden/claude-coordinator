@@ -228,6 +228,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .mcard-ttl { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
 .mcard-big { font-size: 1em; font-weight: 600; }
 .mcard-tile > .small { font-size: 0.82em; }
+.mcard-tile .size-offer { font-size: 0.82em; }
+.mcard-tile .size-offer p { margin: 0 0 0.5rem; }
 .mcard-tile .worker-part { margin: 0.2rem 0 0; font-size: 0.88em; }
 .rules-switch.mcard-switch { width: 2.75rem; min-width: 2.75rem; height: 1.5rem; min-height: 1.5rem; }
 .rules-switch.mcard-switch::after { width: calc(1.5rem - 4px); height: calc(1.5rem - 4px); }

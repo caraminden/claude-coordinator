@@ -313,7 +313,7 @@ export function sizeOfferPart(m, redraw) {
     h(
       'p',
       { class: 'small' },
-      `Still on the old starting caps (${WORKER_CAPS.workers} minions, ${WORKER_CAPS.threads} threads, ${WORKER_CAPS.memory_gb} GB). Its worker sees ${pc.threads} threads and ${pc.memory_gb} GB there: sized to it, that's ${size.workers} minions, ${size.threads} threads, ${size.memory_gb} GB, keeping the rest for you and CI.`,
+      `On the old starting caps: ${WORKER_CAPS.workers} minions, ${WORKER_CAPS.threads} threads, ${WORKER_CAPS.memory_gb} GB. Sized to the ${pc.threads} threads and ${pc.memory_gb} GB its worker sees: ${size.workers} minions, ${size.threads} threads, ${size.memory_gb} GB, the rest kept for you and CI.`,
     ),
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'secondary small', onclick: use }, "Use this PC's size")),
   );

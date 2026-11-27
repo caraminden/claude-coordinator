@@ -54,7 +54,8 @@ test("no workflow but a ship's run can take the first runner: every other self-h
       // What's left once the side label's form and (in tests.yml) the land-guarded ships' form are taken out must not
       // name a self-hosted runner at all: a form this test can't read counts against it.
       let rest = sel.split(side).join('');
-      if (f === 'citadel-heavy.yml') rest = rest.split(long).join('');
+      // A heavy run also names its heavy label (#2120), which only narrows it to the one runner Citadel handed it to.
+      if (f === 'citadel-heavy.yml') rest = rest.split(', "citadel-heavy-suite"').join('').split(long).join('');
       if (f === 'tests.yml') rest = rest.split(landOnly).join('').split(checkOnly).join('').split(earlyOnly).join('');
       if (/self-hosted|citadel-ci-linux/.test(rest)) bad.push(`${f}:${i + 1}: ${sel.trim()}`);
     });

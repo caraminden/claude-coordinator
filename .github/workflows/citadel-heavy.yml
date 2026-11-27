@@ -124,11 +124,6 @@ jobs:
         if: always()
         continue-on-error: true
         run: if [ -x tools/ci-window.sh ]; then tools/ci-window.sh --close; fi
-      # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
-      - name: clear what this job left running
-        if: always()
-        continue-on-error: true
-        run: if [ -f test/ci-leftovers.ts ]; then node test/ci-leftovers.ts end; fi # an older snapshot has none
       # Its room on the PC is free at once (Citadel #2120): Citadel placed this job there by its heavy label and held room
       # for it; without this step the room is freed at Citadel's next look at GitHub. The run's own token, no secret.
       - name: tell Citadel its room is free
@@ -138,3 +133,8 @@ jobs:
         run: |
           t=$(curl -fsS -m 15 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=citadel-ci-store" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
           curl -fsS -m 15 -X POST -H "Authorization: Bearer $t" -H 'content-type: application/json' -d "{\"runner\":\"$RUNNER_NAME\"}" "${CITADEL_STORE_URL:-http://perigee.tail59477f.ts.net:8574}/api/heavy/done" || true
+      # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
+      - name: clear what this job left running
+        if: always()
+        continue-on-error: true
+        run: if [ -f test/ci-leftovers.ts ]; then node test/ci-leftovers.ts end; fi # an older snapshot has none

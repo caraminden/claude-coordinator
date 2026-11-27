@@ -158,8 +158,9 @@ test('citadel-heavy.yml runs a long job only on the long runner, and every other
   const wf = readFileSync(new URL('../.github/workflows/citadel-heavy.yml', import.meta.url), 'utf8');
   assert.match(wf, /^ {6}long:\s*$/m, 'it declares the input the pump looks for');
   const runsOn = wf.match(/^ {4}runs-on: (.*)$/m)![1];
-  assert.match(runsOn, /inputs\.long == 'true' && fromJSON\('\["self-hosted", "citadel-ci-linux", "citadel-ci-linux-long"\]'\)/);
-  assert.match(runsOn, /\|\| fromJSON\('\["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"\]'\)/);
+  // Each form also names the heavy label (#2120): Citadel hands it to one runner of a PC with room.
+  assert.match(runsOn, /inputs\.long == 'true' && fromJSON\('\["self-hosted", "citadel-ci-linux", "citadel-ci-linux-long", "citadel-heavy-suite"\]'\)/);
+  assert.match(runsOn, /\|\| fromJSON\('\["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side", "citadel-heavy-suite"\]'\)/);
 });
 
 test('a dispatch that errors is never sent twice at once: it waits for a run, goes back in line, and is lost after three tries', async () => {

@@ -64,7 +64,7 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
     { class: 'cabal-card', 'data-lead': c.lead, 'data-open': open ? '' : null },
     h(
       'div',
-      { class: 'cabal-head' },
+      { class: 'cabal-sum' },
       h(
         'div',
         { class: 'cabal-top' },

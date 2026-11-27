@@ -310,3 +310,44 @@ undo_guard() {
     exit 1;
   ' "$base" "$(sed -nE 's|^ticket/([0-9]+)-.*|\1|p' <<<"$branch")"
 }
+
+# The early check (#770): <onto> <when>. Whether the rebase onto <onto> (--build's merge of it) would stop on a conflict,
+# by git merge-tree (no worktree, index or ref touched). With $under, as the rebase's --onto leaves it behind. On a
+# conflict it logs the files as conflict() does, says the same refusal, and fails; a git that can't tell counts as clean.
+# shortcut: a three-way merge, not a replay: a branch that changes a line and back can pass here and still stop in the
+# rebase, and a cherry-picked commit with a later one on the same lines is refused here though the rebase would skip it.
+# A conflict the git rerere fix resolves counts as clean (rerere_covers).
+# attrs_of <onto>: a scratch folder holding <onto>'s .gitattributes files, printed, for trial()'s merge-tree to run in
+# with an empty index: git before 2.40 ignores attr.tree (#2071). Removed after the trial.
+attrs_of() {
+  local d m o p
+  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") && d=$(cd "$d" && pwd -P) || return 1
+  # A symlink's text isn't read as attributes, so only plain files are copied.
+  while IFS=$'\t' read -r -d '' m p; do
+    read -r m _ o <<<"$m"
+    case $m:/$p in 1006??:*/.gitattributes) ;; *) continue ;; esac
+    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$o" >"$d/$p" || { rm -rf "$d"; return 1; }
+  done < <(git ls-tree -r -z "$1")
+  echo "$d"
+}
+
+# Commit titles (#1489): a rebase continued on a conflict with GIT_EDITOR=true read "#N: ..." as a comment and dropped it.
+# One line in $lost naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
+lost_title() { # <git log's range...>: what it reads, instead of everything from main or the build
+  [ $# -gt 0 ] || set -- "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)"
+  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$@" 2>&1)
+}
+
+# ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
+# while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.
+# <onto> <branch> [<onto's name>]: sets renamed, the renames it committed; fails with what it left in the worktree.
+adr_commit() {
+  local n=${2#ticket/}
+  renamed=''
+  [ -f "$tools/ship-numbers.ts" ] || return 0
+  renamed=$("$tools/citadel-node" --no-warnings "$tools/ship-numbers.ts" adr "$1" ${3:+"$3"} </dev/null) || return 1
+  [ -n "$renamed" ] || return 0
+  n=${n%%-*}
+  git commit -q -m "${n:+#$n: }$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed" || return 1
+  sed 's/^/land: /' <<<"$renamed" >&2
+}

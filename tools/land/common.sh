@@ -89,3 +89,56 @@ burn_advice() {
       "$(burn_list <<<"$o") failed only as copies at once, so it is racy: $r}"
   fi
 }
+
+phase_ticker() {
+  queue_phase "$1"
+  (
+    exec 9>&- 7>&- 6>&-
+    trap 'exit 0' TERM
+    t0=$SECONDS
+    while :; do
+      read -rt "${LAND_PHASE_EVERY:-300}" <> <(:) || [ $? -gt 128 ] || exit 0 # a sleep with no child left behind: only a timeout ticks
+      kill -0 $$ 2>/dev/null || exit 0
+      mapfile -t l 2>/dev/null <"${DEPLOY_QUEUE_TICKET:-/dev/null}" || exit 0
+      [[ ${l[3]:-} == "$1"* ]] || exit 0
+      queue_phase "$1, $(((SECONDS - t0) / 60)) min so far"
+    done
+  ) &
+  ticker=$!
+}
+
+phase_ticker_end() {
+  [ -n "$ticker" ] || return 0
+  kill "$ticker" 2>/dev/null || true
+  wait "$ticker" 2>/dev/null || true
+  ticker=''
+}
+
+# <what it says once back>: this ship lets go of the lock, keeps its ticket and lets the next one go first; back at the
+# front it starts over from its rebase.
+requeue() {
+  train_drop
+  train_release # none after pull_say, which hands them over
+  top_done
+  early_end # its background stack must not outlive this run's hold on the lock (#1864, LA6)
+  ci_done
+  trap 'land_timing $? || true; queue_done' EXIT
+  queue_wait_check() { { train_verdict && prep_check; } || true; }
+  flock -u 9
+  QUEUE_KEEP=$DEPLOY_QUEUE_TICKET QUEUE_YIELD=yield queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
+  unset -f queue_wait_check
+  train_verdict held
+  say "$1"
+  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}"
+}
+
+# A finished red run's facts, from GitHub: a call it doesn't answer is asked three times, as no answer says nothing
+# about a ship (#1864). Fails when it never answers.
+ci_fact() {
+  local n out
+  for n in 1 2 3; do
+    out=$(hub gh "$@" 2>"$state/ci.err") && [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
+    [ "$n" = 3 ] || sleep "$CI_POLL"
+  done
+  return 1
+}

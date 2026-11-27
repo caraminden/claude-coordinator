@@ -88,3 +88,35 @@ merge_into() {
   say "$build is now at $(git log -1 --format='%h "%s"' "$tip"); main and the live checkout are untouched"
   exit 0
 }
+
+# A claims merge in flight (#1684): the build minion's --into of a changed build-claims.md marks itself with
+# <state>/build-<n>.claims.<pid> (its queue_proc identity); a mark whose process is gone counts for nothing.
+# claims_inflight prints the pid of a live one other than this run (a dead one's goes).
+claims_mark() { echo "$state/build-${build#build/}.claims"; }
+
+claims_inflight() {
+  local f
+  for f in "$(claims_mark)".*; do
+    [ -f "$f" ] && [ "${f##*.}" != $$ ] || continue
+    [ "$(queue_proc "${f##*.}")" != "$(cat "$f" 2>/dev/null)" ] || { echo "${f##*.}"; return 0; }
+    rm -f "$f"
+  done
+  return 1
+}
+
+# claims_check, unless a claims merge is in flight: the claims are about to change, so a feeder's hand-off (--check)
+# goes ahead, and its run waits for that merge and is checked against the new plan. Under the build's lock claims_check
+# runs again whatever happened here.
+claims_gate() {
+  local pid t=$SECONDS
+  if pid=$(claims_inflight); then
+    say "claims merge in flight on $build (the build minion's run, pid $pid), waiting for it to end; the claims are checked against the new plan after"
+    [ -z "$check" ] || return 0
+    while pid=$(claims_inflight); do
+      [ $((SECONDS - t)) -lt "${LAND_BUILD_WAIT:-3600}" ] || refuse "waited ${LAND_BUILD_WAIT:-3600} s for the claims merge on $build (pid $pid) to end, so nothing merged: run it again later"
+      sleep "$QUEUE_POLL"
+    done
+    say "the claims merge on $build ended: checking the claims"
+  fi
+  claims_check main
+}

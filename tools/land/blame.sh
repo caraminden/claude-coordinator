@@ -378,3 +378,57 @@ split_over() {
   rm -f "$state/split"
   split_of='' split_rest=' '
 }
+
+# <commit> <ship's tip>: whether the commit is built on that ship, which main hasn't got.
+sits_on() { git merge-base --is-ancestor "$2" "$1" 2>/dev/null && ! git merge-base --is-ancestor "$2" "$old" 2>/dev/null; }
+
+# A front that is pulled itself leaves the rest of its train to the next front: <state>/pull, its label, then a
+# "keep <ticket> <branch>" line per ship left on the train and a "held <ticket> <branch> <tip> <files> <run> <kind>
+# <how> <log, base64>" line per ship held off it. The kept ones go first in line (queue/.order). The next front reads it
+# once (pull_look); any front but the one the kept ones name drops it, the held back in line with no verdict.
+# <rider index>...: the riders that stay on the train; everyone else not held or refused goes back in line.
+pull_say() {
+  local i v keep=()
+  for ((i = 0; i < ${#train_n[@]}; i++)); do
+    [[ " ${held_n[*]} " == *" ${train_n[$i]} "* ]] || ! read -r v _ 2>/dev/null <"$train_dir/${train_n[$i]}" || [ "$v" != riding ] || rm -f "$train_dir/${train_n[$i]}"
+  done
+  if [ $# -gt 0 ]; then
+    {
+      echo "$label"
+      for i; do echo "keep ${train_n[$i]} ${train_br[$i]}"; done
+      for ((i = 0; i < ${#held_n[@]}; i++)); do
+        echo "held ${held_n[$i]} ${held_br[$i]} ${held_was[$i]} ${held_files[$i]} ${held_run[$i]} ${held_kind[$i]} ${held_how[$i]} $(base64 -w0 <<<"${held_log[$i]}")"
+      done
+    } >"$state/pull.tmp$$" && mv -f "$state/pull.tmp$$" "$state/pull"
+    for i; do keep+=("${train_n[$i]}"); done
+    queue_front "$state/queue" "${keep[@]}"
+    held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=() # the next front's now
+    split_over
+  else train_release; fi
+  train_tip=() train_br=() train_n=() train_was=()
+}
+
+pull_look() {
+  local l=() x v n b w f u k h d mine='' keep=' '
+  [ "$mode" = land ] && mapfile -t l 2>/dev/null <"$state/pull" || return 0
+  rm -f "$state/pull"
+  for x in "${l[@]:1}"; do
+    read -r v n b _ <<<"$x"
+    [ "$v" = keep ] && [[ $n =~ ^[0-9]{10}$ ]] || continue
+    if [ "$n" = "${DEPLOY_QUEUE_TICKET##*/}" ] && [ "$b" = "$branch" ]; then mine=1; else keep+="$n "; fi
+  done
+  for x in "${l[@]:1}"; do
+    read -r v n b w f u k h d <<<"$x"
+    [ "$v" = held ] && [[ $n =~ ^[0-9]{10}$ ]] && [ -e "$state/queue/$n" ] || continue
+    if [ -n "$mine" ] && [ -n "$d" ]; then
+      train_hold "$n" "$b" "$w" "$f" "$u" "$k" "$h" "$(base64 -d <<<"$d" 2>/dev/null || true)"
+      train_tell "$n" "riding $branch pulled $f"
+      train_held_tips+=" $w"
+    elif read -r v _ 2>/dev/null <"$train_dir/$n" && [ "$v" = riding ]; then
+      rm -f "$train_dir/$n"
+    fi
+  done
+  [ -n "$mine" ] || return 0
+  train_only=$keep train_left=1
+  say "ship train: $branch runs on what is left of ${l[0]}'s red train, with nobody else from the line"
+}

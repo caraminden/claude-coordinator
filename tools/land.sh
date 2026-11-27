@@ -117,36 +117,6 @@ rr=()
 # git turns rerere on everywhere once rr-cache exists, which these rebases make: keep it to land.sh and the prep steps.
 [ ${#rr[@]} -eq 0 ] || [ -n "$(git config --get rerere.enabled)" ] || git config rerere.enabled false 2>/dev/null || true
 
-# A claims merge in flight (#1684): the build minion's --into of a changed build-claims.md marks itself with
-# <state>/build-<n>.claims.<pid> (its queue_proc identity); a mark whose process is gone counts for nothing.
-# claims_inflight prints the pid of a live one other than this run (a dead one's goes).
-claims_mark() { echo "$state/build-${build#build/}.claims"; }
-claims_inflight() {
-  local f
-  for f in "$(claims_mark)".*; do
-    [ -f "$f" ] && [ "${f##*.}" != $$ ] || continue
-    [ "$(queue_proc "${f##*.}")" != "$(cat "$f" 2>/dev/null)" ] || { echo "${f##*.}"; return 0; }
-    rm -f "$f"
-  done
-  return 1
-}
-# claims_check, unless a claims merge is in flight: the claims are about to change, so a feeder's hand-off (--check)
-# goes ahead, and its run waits for that merge and is checked against the new plan. Under the build's lock claims_check
-# runs again whatever happened here.
-claims_gate() {
-  local pid t=$SECONDS
-  if pid=$(claims_inflight); then
-    say "claims merge in flight on $build (the build minion's run, pid $pid), waiting for it to end; the claims are checked against the new plan after"
-    [ -z "$check" ] || return 0
-    while pid=$(claims_inflight); do
-      [ $((SECONDS - t)) -lt "${LAND_BUILD_WAIT:-3600}" ] || refuse "waited ${LAND_BUILD_WAIT:-3600} s for the claims merge on $build (pid $pid) to end, so nothing merged: run it again later"
-      sleep "$QUEUE_POLL"
-    done
-    say "the claims merge on $build ended: checking the claims"
-  fi
-  claims_check main
-}
-
 label=$branch # for the retro log's lines: which kind of run this is
 untouched="main is untouched"
 case $mode in
@@ -211,25 +181,6 @@ if [[ $mode = land || $mode = into ]]; then
 fi
 # What to do about a conflict, the same for a rebase or merge that stopped and for the early check below.
 regen_hint=" If every conflicted file is a command's output (a reformat, a baseline, generated files), declare it instead: a commit with the trailers Regenerate: <command> and Regenerate-files: <those files>, and the ship makes them again on main"
-# The early check (#770): <onto> <when>. Whether the rebase onto <onto> (--build's merge of it) would stop on a conflict,
-# by git merge-tree (no worktree, index or ref touched). With $under, as the rebase's --onto leaves it behind. On a
-# conflict it logs the files as conflict() does, says the same refusal, and fails; a git that can't tell counts as clean.
-# shortcut: a three-way merge, not a replay: a branch that changes a line and back can pass here and still stop in the
-# rebase, and a cherry-picked commit with a later one on the same lines is refused here though the rebase would skip it.
-# A conflict the git rerere fix resolves counts as clean (rerere_covers).
-# attrs_of <onto>: a scratch folder holding <onto>'s .gitattributes files, printed, for trial()'s merge-tree to run in
-# with an empty index: git before 2.40 ignores attr.tree (#2071). Removed after the trial.
-attrs_of() {
-  local d m o p
-  d=$(mktemp -d "${TMPDIR:-/tmp}/land-attrs.XXXXXX") && d=$(cd "$d" && pwd -P) || return 1
-  # A symlink's text isn't read as attributes, so only plain files are copied.
-  while IFS=$'\t' read -r -d '' m p; do
-    read -r m _ o <<<"$m"
-    case $m:/$p in 1006??:*/.gitattributes) ;; *) continue ;; esac
-    mkdir -p "$d/$(dirname "$p")" && git cat-file blob "$o" >"$d/$p" || { rm -rf "$d"; return 1; }
-  done < <(git ls-tree -r -z "$1")
-  echo "$d"
-}
 
 # LAND_REBASED: this is the rebased land.sh, started below by the one that rebased, and it holds the lock on fd 9.
 # LAND_REDO with it: main went back while this waited for the restart ahead, so this starts over once (1: the rebase
@@ -263,12 +214,6 @@ if [ -n "$check" ]; then
   exit 0 # --full: no rebase, so nothing to check
 fi
 
-# Commit titles (#1489): a rebase continued on a conflict with GIT_EDITOR=true read "#N: ..." as a comment and dropped it.
-# One line in $lost naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
-lost_title() { # <git log's range...>: what it reads, instead of everything from main or the build
-  [ $# -gt 0 ] || set -- "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)"
-  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$@" 2>&1)
-}
 formatted=''; [ -n "$resumed" ] || [ "$mode" = build ] || [ ! -x tools/fmt ] || [ ! -f "$tools/ship-format.sh" ] || { . "$tools/ship-format.sh"; format_ship; } # the ship's own files, in a commit of their own (#1885)
 [ -n "$resumed" ] || [ "$mode" = into ] || [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 quiet=$resumed
@@ -307,26 +252,10 @@ if [ "$mode" = land ] && [ -n "$regen_attrs" ]; then
   QUEUE_TRAIN=hold
   [ -n "$quiet" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, behind only ships a person placed"
 fi
-# The front (pid $1) hands its riders' lines to deploy.sh (DEPLOY_RIDERS): "<api> <token> <ticket> <train commit>".
-# A failed write never stops a landing.
-train_reporter() {
-  [ -n "${COORDINATOR_API:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] && [ -n "${COORDINATOR_TICKET:-}" ] || return 0
-  (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
-}
 # Conflict prep's waiting side (#1366): while a train ahead is tested (<state>/train-top, top_say in tools/land/train.sh),
 # whether this would still rebase once it ships, once per train top, branch tip and count of recorded fixes. A conflict
 # the fixes don't resolve says one "prep:" line, which the server turns into a wake (src/land.ts). It never leaves the line.
 prepped=''
-# Whether this ship would ride the quick train, and why not (#1912; tools/quick-train.ts): one retro line per ship. In a
-# subshell, failures swallowed, 10 s at most, so it never decides a landing. LAND_RISK is the hand-off's label
-# (src/ship-handoff.ts). shortcut: judged on the branch before its rebase.
-quick_train_line() (
-  set +e
-  { [ "$mode" = land ] || [ "$mode" = build ]; } && [ -f "$tools/quick-train.ts" ] || exit 0
-  base=$(under_of) && [ -n "$base" ] || base=$(git merge-base main HEAD)
-  out=$(timeout 10 "$tools/citadel-node" "$tools/quick-train.ts" --main main --base "$base" --risk "${LAND_RISK:-}" --mode "$mode")
-  retro_log "quick train · $label · ${out:-not: could not be judged}"
-) >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null || true
 # The rebased copy is the same process, so its ticket (none, from a land.sh older than the line) still names it, and it
 # holds both locks already (an exec keeps its fds); only the trap that removes the ticket has to be set again.
 if [ -z "$resumed" ]; then
@@ -377,7 +306,7 @@ old=$(git -C "$SOURCE" rev-parse main)
 if [ "$mode" = build ] && [ "$redo" = 1 ]; then
   git reset -q --keep "$base" # main went back while this waited: main is merged in again without what came off it
 fi
-under=$(under_of) # under_of above: a commit that came off main, which the rebase leaves behind
+under=$(under_of) # under_of (tools/land/prepare.sh): a commit that came off main, which the rebase leaves behind
 [ -n "$pre" ] || pre=$(git rev-parse HEAD)
 case $mode in
   land)
@@ -422,19 +351,6 @@ esac
 # holds no deploy lock and only tests and moves a branch.
 [ "$mode" = into ] || [ -n "$quiet" ] || [ "$(land_self)" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}"
 
-# ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
-# while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.
-# <onto> <branch> [<onto's name>]: sets renamed, the renames it committed; fails with what it left in the worktree.
-adr_commit() {
-  local n=${2#ticket/}
-  renamed=''
-  [ -f "$tools/ship-numbers.ts" ] || return 0
-  renamed=$("$tools/citadel-node" --no-warnings "$tools/ship-numbers.ts" adr "$1" ${3:+"$3"} </dev/null) || return 1
-  [ -n "$renamed" ] || return 0
-  n=${n%%-*}
-  git commit -q -m "${n:+#$n: }$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed" || return 1
-  sed 's/^/land: /' <<<"$renamed" >&2
-}
 adr_onto=
 case $mode in land | build) adr_onto=main ;; into) adr_onto=refs/heads/$build ;; esac # the build's lock holds it at $base
 if [ -n "$adr_onto" ]; then
@@ -501,45 +417,12 @@ fi
 # one unchanged for DEPLOY_QUEUE_STALL (15 min), and a long step (a fallback suite, the guard tests, #1864) can take
 # longer. Once anything else sets the phase, it is theirs. Gone with land.sh: it looks for it at each tick.
 ticker=''
-phase_ticker() {
-  queue_phase "$1"
-  (
-    exec 9>&- 7>&- 6>&-
-    trap 'exit 0' TERM
-    t0=$SECONDS
-    while :; do
-      read -rt "${LAND_PHASE_EVERY:-300}" <> <(:) || [ $? -gt 128 ] || exit 0 # a sleep with no child left behind: only a timeout ticks
-      kill -0 $$ 2>/dev/null || exit 0
-      mapfile -t l 2>/dev/null <"${DEPLOY_QUEUE_TICKET:-/dev/null}" || exit 0
-      [[ ${l[3]:-} == "$1"* ]] || exit 0
-      queue_phase "$1, $(((SECONDS - t0) / 60)) min so far"
-    done
-  ) &
-  ticker=$!
-}
-phase_ticker_end() {
-  [ -n "$ticker" ] || return 0
-  kill "$ticker" 2>/dev/null || true
-  wait "$ticker" 2>/dev/null || true
-  ticker=''
-}
 
 # The guard tests, on the rebased commit before a CI run is spent (#1240). Each checks the repo's files against what main
 # already holds (a schema number, the prompts' budget, the UI contract, size limits), so a branch clean alone can break
 # one only together with main. Only the ones the repo has; --into skips them as it skips CI, and its build's land runs them.
 guard_set=(test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts test/size-budget.test.ts)
 front_guards='' # guards()'s answer on this ship's own commit
-# A light ship gets no CI, so its guards are the tests the affected map picks for its paths (#1864): a README line or
-# a rule file can break a test that reads it, and main would go red with nothing between.
-light_guards() {
-  local aff
-  if ! aff=$("$tools/citadel-node" --no-warnings tools/affected.ts --root . --base "$old" 2>/dev/null); then
-    say "the affected map couldn't answer, so no test that reads these paths ran: main's own CI decides"
-    return 0
-  fi
-  mapfile -t guard_set < <(sed -nE $'s/^run\t([^\t]+)\t.*/\\1/p' <<<"$aff")
-  guards
-}
 if [ "$mode" = into ]; then :
 elif [ "$lane" != light ]; then guards
 elif [ -f tools/affected.ts ]; then light_guards
@@ -591,70 +474,11 @@ QUIET_LIMIT=${LAND_QUIET_LIMIT:-1800} QUIET_POLL=${LAND_QUIET_POLL:-30}
 heavy_dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
 busy='' busy_spent=0 busy_last='' busy_told=''
 no_verdicts=0 NO_VERDICT_MAX=${LAND_NO_VERDICT_MAX:-3}
-# <what it says once back>: this ship lets go of the lock, keeps its ticket and lets the next one go first; back at the
-# front it starts over from its rebase.
-requeue() {
-  train_drop
-  train_release # none after pull_say, which hands them over
-  top_done
-  early_end # its background stack must not outlive this run's hold on the lock (#1864, LA6)
-  ci_done
-  trap 'land_timing $? || true; queue_done' EXIT
-  queue_wait_check() { { train_verdict && prep_check; } || true; }
-  flock -u 9
-  QUEUE_KEEP=$DEPLOY_QUEUE_TICKET QUEUE_YIELD=yield queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
-  unset -f queue_wait_check
-  train_verdict held
-  say "$1"
-  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}"
-}
 # A CI red of flakes only on the one fresh run too (#1419): when every failed file passed alone again and no ship on the
 # train changed one or what it imports, the ship keeps its place (retry_in_place) instead of going back to its minion,
 # at most FLAKE_KEEP_MAX times a hand-off; past that it is refused, so a ship that really breaks something can't circle.
 FLAKE_KEEP_MAX=2
-# flake_only's answer, and nothing when leftover processes were in it too: those are no flake.
-flake_free() {
-  ! grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed" || return 1
-  flake_only
-}
-# The run this landing's push started, when no poll has read its id yet (#1894): a stop in the seconds after the push
-# left it running. Only one of the pushed commit on this landing's own scratch branch.
-ci_late() {
-  local run
-  while :; do
-    run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$ci_pushed&per_page=20" --jq "[.workflow_runs[] | select((.path | startswith(\"$CI_WORKFLOW\")) and .head_branch == \"$CI_REF\")][0] // empty | [.id, .status] | @tsv" 2>/dev/null) || run=''
-    if [[ $run =~ ^([0-9]+)$'\t'([a-z_]+) ]] && [ "${BASH_REMATCH[1]}" -gt "${ci_stale:-0}" ]; then ci_id=${BASH_REMATCH[1]} ci_status=${BASH_REMATCH[2]}; return 0; fi
-    [ -n "$ci_pushed_at" ] && [ $((SECONDS - ci_pushed_at)) -lt "$CI_LATE" ] || return 0
-    sleep "$CI_LATE_POLL"
-  done
-}
-# A finished red run's facts, from GitHub: a call it doesn't answer is asked three times, as no answer says nothing
-# about a ship (#1864). Fails when it never answers.
-ci_fact() {
-  local n out
-  for n in 1 2 3; do
-    out=$(hub gh "$@" 2>"$state/ci.err") && [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
-    [ "$n" = 3 ] || sleep "$CI_POLL"
-  done
-  return 1
-}
 
-# The tests CI's suite skipped (#1914): the count, then up to 5 names, a line each; fails when it skipped none. Only
-# CI's own lines count ("<job>\t<step>\t<time> ℹ skipped 1": node's summary, the last one): a test's quoted output is
-# indented, and perigee's suite always skips the Biome tests it has no Biome for, so its log (no prefix) never matches.
-skipped_tests() {
-  local pre=$'^[^\t]+\t[^\t]+\t[^ \t]+' n
-  n=$(sed -nE "s/$pre ℹ skipped ([0-9]+)\$/\\1/p" <<<"$failed" | tail -n 1)
-  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
-  echo "$n"
-  sed -nE "s/$pre +﹣ (.*) \([0-9.]+ms\).*/\\1/p" <<<"$failed" | sort -u | sed -n 1,5p
-}
-# skipped_tests' answer in words: "a test was skipped in CI (<run>): <names>".
-skipped_said() {
-  local n=${1%%$'\n'*} names=''
-  [ "$n" = "$1" ] || names=": $(sed '1d' <<<"$1" | paste -sd';' - | sed 's/;/; /g')"
-  if [ "$n" = 1 ]; then echo "a test was skipped in CI ($ci_url)$names"; else echo "$n tests were skipped in CI ($ci_url)$names"; fi
-}
 # Red on main too (#1430): before a red train's suspects or bisect, or a red ship alone's refusal, each real failure
 # (train_real) runs alone here on main's tip ($old), niced, one file at a time, without the lock's fds. One that fails
 # there too is main's red, not the train's: neither suspects nor bisect can judge it, so no ship is refused for it: the
@@ -676,13 +500,6 @@ declare -A through_by=() # #1478: <commit> -> main's red tests its green was let
 # the train, or fails the undo guard against it.
 own=$tip train_tip=() train_br=() train_n=() train_was=() greens=' '
 declare -A known_by=() # #1419: <commit> -> the known flakes its green was let through on
-# <a red run's log>: what a refused rider hears of it, its last 40 lines, after the test it skipped, if any (the wake's
-# kind is read from it, #1914).
-train_tail() {
-  local failed=$1 f
-  ! f=$(skipped_tests) || echo "land: $(skipped_said "$f")"
-  tail -n 40 <<<"$failed"
-}
 # Early next train (#1366, #1568). While this train's CI runs (top_gate), early_next stacks the ship next in line, and
 # the train it would take, on this train's top in a scratch worktree, and once this train's run has a runner and another
 # ship runner is free, pushes it to early/<its branch>: tests.yml runs it niced beside this one. A red here drops it.
@@ -693,78 +510,6 @@ train_tail() {
 # (early_gate). Off: LAND_EARLY=0, or <state>/early-off. With the hold on (no <state>/hold-off, #1902) it goes only at
 # this train's deploy, on an idle desktop.
 early_ahead='' early_top='' early_pid='' train_only='' train_left='' # train_left: train_only is what is left of a red train (#1918)
-# <worktree> <onto> <branch> <base> <tip>: what a ship at the front gets after its rebase (adr_commit, the prompt baseline,
-# the commit titles), for one rebased onto <onto> in a scratch worktree (#1864). Fails with the reason in skip, the worktree put back clean.
-train_steps() {
-  local n=${3#ticket/} renamed
-  [ -e "$1/node_modules" ] || [ ! -d node_modules ] || ln -s "$PWD/node_modules" "$1/node_modules" # typescript
-  if ! (
-    cd "$1" || exit 1
-    n=${n%%-*}
-    git diff --quiet "$2" HEAD -- docs/adr || adr_commit "$2" "$3" "the ship train" || exit 1
-    if [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$4" "$5" -- test/prompt-baseline.json; then
-      PROMPT_BASELINE=write "$tools/citadel-node" --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 </dev/null || true
-      git add test/prompt-baseline.json && { git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/prompt-baseline.json measured again at ship time"; } || exit 1
-    fi
-    if [ -f tools/typecheck.ts ] && ! git diff --quiet "$4" "$5" -- test/typecheck-baseline.json; then
-      CITADEL_TEST_FILES=0 "$tools/citadel-node" --no-warnings tools/typecheck.ts --update >/dev/null 2>&1 </dev/null ||
-        { git checkout -q -- test/typecheck-baseline.json; exit 1; }
-      git add test/typecheck-baseline.json || exit 1
-      git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/typecheck-baseline.json measured again at ship time" || exit 1
-    fi
-  ); then
-    skip="renumbering its ADRs or measuring its prompt baseline on the train failed"
-  elif [ -x "$tools/commit-titles.sh" ] && ! (cd "$1" && "$tools/commit-titles.sh" "$2") >/dev/null 2>&1; then
-    skip="a commit of it lost its #N: title"
-  else return 0; fi
-  git -C "$1" reset -q --hard >/dev/null 2>&1 || true
-  git -C "$1" clean -fdq >/dev/null 2>&1 || true
-  return 1
-}
-train_guards_run() {
-  local t0 lo hi mid i rc out files keep was t v k room ahead
-  while [ ${#train_n[@]} -gt 0 ]; do
-    t0=$SECONDS rc=0
-    guard_at "$tip" || rc=$?
-    [ "$rc" = 1 ] || { [ "$rc" != 0 ] || say "guard tests passed on the ship train's top $short in $((SECONDS - t0)) s"; return 0; }
-    out=$guard_out lo=0 hi=${#train_n[@]}
-    while [ $((hi - lo)) -gt 1 ]; do
-      mid=$(((lo + hi) / 2)) rc=0
-      guard_at "$(train_at "$mid")" || rc=$?
-      if [ "$rc" = 1 ]; then hi=$mid out=$guard_out; elif [ "$rc" = 0 ]; then lo=$mid; else break; fi
-    done
-    [ "$rc" -lt 2 ] || { say "the guard tests failed on the ship train's top ($short) but couldn't decide on a step before it (exit $guard_rc), so they name no ship: CI runs them"; return 0; }
-    if [ "$hi" = 1 ] && [ "$front_guards" = 2 ]; then # this one never passed them (#1864): the first rider isn't the cause unless it does now
-      rc=0
-      guard_at "$own" || rc=$?
-      [ "$rc" != 1 ] || { say "the guard tests failed on the ship train's top ($short), but $branch's own run of them didn't decide and fails now too, so they name no ship: CI runs them"; return 0; }
-      [ "$rc" = 0 ] || { say "the guard tests failed on the ship train's top ($short), but $branch's own run of them didn't decide, then or now (exit $guard_rc), so they name no ship: CI runs them"; return 0; }
-      front_guards=0
-    fi
-    i=$((hi - 1)) guard_out=$out files=$(guard_files) room=''
-    # A size red (#2139): how far over, and the ships on the train before it that used the room, each by its own step.
-    if [[ ,$files, == *,test/size-budget.test.ts,* ]] && [ -f "$tools/size-room.ts" ]; then
-      ahead=(--ahead "$branch=$(git merge-base main "$own")..$own")
-      for ((k = 0; k < i; k++)); do ahead+=(--ahead "${train_br[$k]}=$(train_at "$k")..$(train_at $((k + 1)))"); done
-      ahead+=(--self "${train_br[$i]}=$(train_at "$i")..$(train_at "$hi")")
-      room=$("$tools/citadel-node" --no-warnings "$tools/size-room.ts" "${ahead[@]}" 2>/dev/null | grep ' over its limit ') || : # exit 1: over
-    fi
-    say "the guard tests failed on the ship train's top ($short) in ${files:-the guard tests}, and on the train first with ${train_br[$i]} on it, so it is refused before any CI run and the train is built again without it"
-    [ -z "$room" ] || say "$room"
-    retro_log "guard · ${train_br[$i]} · on $label's train · $files · $((SECONDS - t0))s"
-    train_say "$i" "refused $branch guard-tests guard ${files:-guards}" "$(grep -v '^full output: ' <<<"$out" | tail -n 40)" ${room:+"$room"}
-    train_refused+="${train_n[$i]} " train_refused_tips+=" ${train_was[$i]}"
-    keep=("${train_n[@]:0:$i}" "${train_n[@]:$hi}") was=("${train_n[@]}")
-    train_tip=() train_br=() train_n=() train_was=()
-    tip=$own short=$(git rev-parse --short "$own")
-    [ -n "$train_left" ] || train_only='' # its early run had the refused rider, so it won't count: the next in line may ride (#1864)
-    train_build "${keep[@]}"
-    for t in "${was[@]}"; do # a rider the train no longer takes: back in line
-      [[ " ${train_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
-    done
-  done
-  return 0 # the loop's last test can read a refused rider's verdict, and land.sh runs under set -e
-}
 
 # Suspects first (#1346): a red train's real failures (not the flakes) are pinned on ships. Each failing file first runs
 # alone here on the train's prefixes (train_pin, #1403): the ship that turns it red is the cause. A file perigee can't
@@ -774,158 +519,6 @@ train_guards_run() {
 # now is (its top red, its log in $failed).
 suspect_tests='' suspect_new='' train_refused=' ' train_refused_tips='' train_held_tips=''
 held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()
-# A burn-in red's failing cases that one train member added (#2019): "<member> <file>" a line (0: this ship, 1 on: its
-# riders). A case main and the ships before one don't have can only be that ship's. The log names each as
-# "test at <file>:<line>:<col>", then "✖ <case> (<ms>)". A case already on main, one a ship only edited, or one whose
-# file a later ship changes too, is left to the guess. [<riders>]: only the train up to that rider (all by default).
-burn_new() {
-  local f name i j red last=${1:-${#train_n[@]}}
-  [ -n "$burn_red" ] || return 0
-  red=$(burn_lines | sed 's/: failed in .*//')
-  while IFS=$'\t' read -r f name; do
-    grep -qxF -- "$f" <<<"$red" && ! has_case "$old" "$f" "$name" || continue
-    for ((i = 0; i <= last; i++)); do
-      has_case "$(train_at "$i")" "$f" "$name" || continue
-      for ((j = i + 1; j <= last; j++)); do
-        git diff --quiet "$(train_at $((j - 1)))" "$(train_at "$j")" -- "$f" || continue 3 # a later ship edits it: a guess
-      done
-      echo "$i $f"
-      break
-    done
-  done < <(awk 'match($0, /test at [^ ]+:[0-9]+:[0-9]+/) { f = substr($0, RSTART + 8, RLENGTH - 8); sub(/:[0-9]+:[0-9]+$/, "", f); next }
-    f != "" { if (i = index($0, "✖ ")) { n = substr($0, i + length("✖ ")); sub(/ \([0-9.]+ms\).*$/, "", n); print f "\t" n } f = "" }' <<<"$failed" | sort -u) | sort -u
-}
-# <commit> <file> <case>: the file there has the case, named in quotes (a name built at run time is never found, so guessed).
-# git grep, with no pipe: under pipefail a `git show | grep -q` fails on a file over 64 KB that has the case.
-has_case() { git grep -qF -e "'$3'" -e "\"$3\"" -e "\`$3\`" "$1" -- "$2" 2>/dev/null; }
-# <ticket> <branch> <tip> <files> <run> <kind> <how> <log>: held off the train until the train without it has a verdict.
-train_hold() {
-  held_n+=("$1") held_br+=("$2") held_was+=("$3") held_files+=("$4") held_run+=("$5") held_kind+=("$6") held_how+=("$7") held_log+=("$8")
-}
-# The train's last verdict: what becomes of the ships still held off it. One that ships past main's red or a known flake
-# was red on those files all the same.
-train_end() {
-  local f=''
-  [ ${#held_n[@]} -gt 0 ] || return 0
-  if [ "$rc" = 1 ] || [ -n "${through_by[$tip]:-}${known_by[$tip]:-}" ]; then
-    f=$(train_failing)
-    # A log that doesn't name every failed file proves no file passed: the held go back in line.
-    [ -n "$burn_red" ] || train_labels >/dev/null || { train_release; return 0; }
-  fi
-  # shellcheck disable=SC2086 # file names
-  if [ "$rc" = 0 ] || { [ "$rc" = 1 ] && [ -n "$f" ]; }; then train_settle $f; fi
-  train_release
-}
-# <most> <what>: waits until at most that many of train_each's runs are going. The phase moves at each end and every
-# 5 min (the queue stall limit).
-train_wait() {
-  local n t
-  while n=$(jobs -rp | wc -l) && [ "$n" -gt "$1" ]; do
-    queue_phase "running the red tests alone here: $2, $n left at $(date +%H:%M)"
-    t=$SECONDS
-    while [ "$(jobs -rp | wc -l)" = "$n" ] && [ $((SECONDS - t)) -lt 300 ]; do read -rt .3 <> <(:) || true; done
-  done
-}
-# <function> <what it looks for>: that function on each file of $real with a scratch worktree, LAND_PIN_JOBS at once; pins[<file>] = its answer.
-train_each() {
-  local k pd wts=()
-  : >"$state/train-pin.log"
-  pd=$(mktemp -d "${TMPDIR:-/tmp}/land-pins.XXXXXX")
-  # The worktrees are added here, one at a time, not in the jobs: git's admin files don't take parallel adds.
-  for ((k = 0; k < ${#real[@]}; k++)); do
-    wts[$k]=$(mktemp -d "${TMPDIR:-/tmp}/land-pin.XXXXXX") && git worktree add -q --detach "${wts[$k]}" "$tip" 2>/dev/null || { rmdir "${wts[$k]}" 2>/dev/null; wts[$k]=''; }
-  done
-  for ((k = 0; k < ${#real[@]}; k++)); do
-    train_wait $((${LAND_PIN_JOBS:-3} - 1)) "$2"
-    (set +e; "$1" "${real[$k]}" "${wts[$k]}") >"$pd/$k" 2>/dev/null &
-  done
-  train_wait 0 "$2"
-  for ((k = 0; k < ${#real[@]}; k++)); do
-    pins[${real[$k]}]=$(cat "$pd/$k" 2>/dev/null)
-    [ -z "${wts[$k]}" ] || git worktree remove --force "${wts[$k]}" >/dev/null 2>&1 || true
-  done
-  rm -rf "${pd:?}"
-}
-# <test file> <scratch worktree>: its guessed members (guess) run alone with it on main's tip here: "<m>" fails it (twice,
-# so one load failure blames nobody), "-<m>" doesn't; "main" when it fails on main's tip itself. No word of one with no
-# answer: a run or checkout that gave none, or a ship that doesn't rebase onto main by itself or sits on another ship of
-# the train, since what fails there may be the other's.
-train_solo() {
-  local f=$1 wt=$2 m i c b x r=0
-  [ -n "$wt" ] && [ -n "${guess[$f]:-}" ] || return 0
-  train_alone "$wt" "$old" "$f" || r=$?
-  [ "$r" != 1 ] || echo main
-  [ "$r" = 0 ] || return 0
-  for m in ${guess[$f]}; do
-    c=$own
-    if [ "$m" != 0 ]; then
-      c=${train_was[$((m - 1))]}
-      for x in "$pre" "$own" "${train_was[@]}"; do
-        [ "$x" = "$c" ] || ! sits_on "$c" "$x" || continue 2
-      done
-      b=$(git merge-base "$old" "$c") && git -C "$wt" checkout -q --detach "$c" 2>/dev/null || continue
-      git -C "$wt" "${rr[@]}" rebase -q --onto "$old" "$b" >/dev/null 2>&1 || { git -C "$wt" rebase --abort >/dev/null 2>&1; continue; }
-      c=$(git -C "$wt" rev-parse HEAD)
-    fi
-    for i in 1 2; do
-      r=0
-      train_alone "$wt" "$c" "$f" || r=$?
-      [ "$r" = 1 ] || break
-    done
-    if [ "$r" = 1 ]; then echo "$m"; elif [ "$r" = 0 ]; then echo "-$m"; fi
-  done
-}
-# <commit> <ship's tip>: whether the commit is built on that ship, which main hasn't got.
-sits_on() { git merge-base --is-ancestor "$2" "$1" 2>/dev/null && ! git merge-base --is-ancestor "$2" "$old" 2>/dev/null; }
-# A front that is pulled itself leaves the rest of its train to the next front: <state>/pull, its label, then a
-# "keep <ticket> <branch>" line per ship left on the train and a "held <ticket> <branch> <tip> <files> <run> <kind>
-# <how> <log, base64>" line per ship held off it. The kept ones go first in line (queue/.order). The next front reads it
-# once (pull_look); any front but the one the kept ones name drops it, the held back in line with no verdict.
-# <rider index>...: the riders that stay on the train; everyone else not held or refused goes back in line.
-pull_say() {
-  local i v keep=()
-  for ((i = 0; i < ${#train_n[@]}; i++)); do
-    [[ " ${held_n[*]} " == *" ${train_n[$i]} "* ]] || ! read -r v _ 2>/dev/null <"$train_dir/${train_n[$i]}" || [ "$v" != riding ] || rm -f "$train_dir/${train_n[$i]}"
-  done
-  if [ $# -gt 0 ]; then
-    {
-      echo "$label"
-      for i; do echo "keep ${train_n[$i]} ${train_br[$i]}"; done
-      for ((i = 0; i < ${#held_n[@]}; i++)); do
-        echo "held ${held_n[$i]} ${held_br[$i]} ${held_was[$i]} ${held_files[$i]} ${held_run[$i]} ${held_kind[$i]} ${held_how[$i]} $(base64 -w0 <<<"${held_log[$i]}")"
-      done
-    } >"$state/pull.tmp$$" && mv -f "$state/pull.tmp$$" "$state/pull"
-    for i; do keep+=("${train_n[$i]}"); done
-    queue_front "$state/queue" "${keep[@]}"
-    held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=() # the next front's now
-    split_over
-  else train_release; fi
-  train_tip=() train_br=() train_n=() train_was=()
-}
-pull_look() {
-  local l=() x v n b w f u k h d mine='' keep=' '
-  [ "$mode" = land ] && mapfile -t l 2>/dev/null <"$state/pull" || return 0
-  rm -f "$state/pull"
-  for x in "${l[@]:1}"; do
-    read -r v n b _ <<<"$x"
-    [ "$v" = keep ] && [[ $n =~ ^[0-9]{10}$ ]] || continue
-    if [ "$n" = "${DEPLOY_QUEUE_TICKET##*/}" ] && [ "$b" = "$branch" ]; then mine=1; else keep+="$n "; fi
-  done
-  for x in "${l[@]:1}"; do
-    read -r v n b w f u k h d <<<"$x"
-    [ "$v" = held ] && [[ $n =~ ^[0-9]{10}$ ]] && [ -e "$state/queue/$n" ] || continue
-    if [ -n "$mine" ] && [ -n "$d" ]; then
-      train_hold "$n" "$b" "$w" "$f" "$u" "$k" "$h" "$(base64 -d <<<"$d" 2>/dev/null || true)"
-      train_tell "$n" "riding $branch pulled $f"
-      train_held_tips+=" $w"
-    elif read -r v _ 2>/dev/null <"$train_dir/$n" && [ "$v" = riding ]; then
-      rm -f "$train_dir/$n"
-    fi
-  done
-  [ -n "$mine" ] || return 0
-  train_only=$keep train_left=1
-  say "ship train: $branch runs on what is left of ${l[0]}'s red train, with nobody else from the line"
-}
 # The ships a red train is down to: <state>/split, the train's leader as retro_log names it, then a "<ticket> <branch>" line each.
 # <rider>: this one and its riders up to that one.
 split_of='' split_rest=''
@@ -1112,22 +705,6 @@ train_owner=$branch
 
 # Only when the live checkout doesn't have it (a failed check or a rolled-back restart put it back, or it never pulled): main follows, unless it moved on since.
 moved=
-main_back() {
-  [ -n "$moved" ] || return 0
-  # A deploy killed outright never put the checkout back; only with the lock, which a deploy that queued its restart has let go of.
-  # Nor beside a restart being judged on that checkout (#566): then the next landing does it, with both locks.
-  ! flock -n 9 2>/dev/null || ! flock -n 7 2>/dev/null || deploy_unchecked_back "$state" "$LIVE"
-  git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && return 0
-  if [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
-    while read -r c b; do taken_back "$state" "$c" "$b"; done < <(train_others)
-    taken_back "$state" "$tip" "$train_owner" # first: the landing behind looks for it the moment main goes back
-    git -C "$SOURCE" reset -q --keep "$old"
-  fi
-  # Also when the landing behind this one took it off main first (it does once the restart has its verdict).
-  if ! git -C "$SOURCE" merge-base --is-ancestor "$tip" main 2>/dev/null; then
-    refuse "the live checkout doesn't have it (the deploy stopped before taking it, or its restart was rolled back), so main is back at $(git log -1 --format=%h "$old"); $branch keeps the rebased work. Fix it and land again"
-  fi
-}
 # Killed mid-deploy (a person's Stop, a time limit): the same rule, from here on, once the deploy has put the checkout back.
 trap 'main_back; exit 130' INT
 trap 'main_back; exit 143' TERM

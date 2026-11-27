@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
+import { settled } from '../src/settled.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
 import { holds, lines, tempRoot, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
@@ -402,7 +403,7 @@ test("a dismissal's cleanup waits for the last turn's save, and a turn's end tha
   await until('the next message to run', () => turnsRun() === 3 && !r.isRunning(id));
 });
 
-test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, and removes one that never will", () => {
+test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, and removes one that never will", async () => {
   const r = makeRunner();
   const starting = join(r.turnsDir, '999-1');
   const dead = join(r.turnsDir, '999-2');
@@ -413,11 +414,12 @@ test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, an
   const old = new Date(Date.now() - 5 * 60_000);
   utimesSync(dead, old, old);
   r.recover();
+  assert.deepEqual(await settled(), [], 'the sweep renames and deletes off the thread (#2137): wait for it to finish');
   assert.ok(existsSync(starting), 'no pid.json yet is no proof it is gone');
   assert.ok(!existsSync(dead));
 });
 
-test("a restart's sweep removes only turn folders, never a running Codex review's or anything else it didn't make (C5)", () => {
+test("a restart's sweep removes only turn folders, never a running Codex review's or anything else it didn't make (C5)", async () => {
   const r = makeRunner();
   const person = join(r.turnsDir, 'person-3');
   // codex-review.ts makes review-* beside a person's turn folders; it has no pid.json and its mtime stops moving.
@@ -431,6 +433,7 @@ test("a restart's sweep removes only turn folders, never a running Codex review'
     utimesSync(d, old, old);
   }
   r.recover();
+  assert.deepEqual(await settled(), [], 'the sweep renames and deletes off the thread (#2137): wait for it to finish');
   assert.ok(existsSync(review), 'a Codex review may still be running');
   assert.ok(existsSync(ultra));
   assert.ok(existsSync(other));

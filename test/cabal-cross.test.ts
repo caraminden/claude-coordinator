@@ -106,7 +106,7 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
     ['Delve piece'],
     'their card draws their rows as a list too',
   );
-  assert.match(theirData.questions[0].question, /^- Delve piece · ~\$6 · now$/m);
+  assert.match(theirData.questions[0].question, /^- \[Delve\] Delve piece · ~\$6 · now$/m);
   assert.deepEqual(
     theirData.cabalForm.rows.map((r: { id: number }) => r.id),
     [rowOf('D').id],

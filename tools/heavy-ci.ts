@@ -326,6 +326,8 @@ async function main(argv: string[]): Promise<number> {
   const slug = repo();
   const command = remoteCommand(argv);
   const ship = process.env.CITADEL_HEAVY_SHIP === '1'; // a ship's own light check (#1620): stopped only, never handed over
+  // GitHub's own runners (#2200, citadel-cloud's pick on a public repo): the PCs' ships and holds don't touch them.
+  const github = process.env.CITADEL_HEAVY_GITHUB === '1';
   const id = `${ship ? 'ship' : ''}${newId()}`;
   const ref = `refs/citadel-heavy/${id}`;
   let sha: string;
@@ -393,7 +395,7 @@ async function main(argv: string[]): Promise<number> {
   process.on('SIGINT', () => stop(2));
   process.on('SIGTERM', () => stop(15));
   try {
-    if (!ship) {
+    if (!ship && !github) {
       while (!(await waitForHold(slug, poll))) if (handOver({ id, slug, sha, command, argv })) return ((kept = true), HANDED_OVER);
       await waitForShips(slug, poll); // the repo's own ships, and what the hold says when it can't be read
     }
@@ -401,7 +403,7 @@ async function main(argv: string[]): Promise<number> {
       const branch = gh<{ default_branch: string }>([`repos/${slug}`], 'reading the repo').default_branch;
       // From here a run may exist even if the call failed (it timed out after GitHub took it), so it is looked for.
       dispatched = true;
-      gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow', 1);
+      gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`, ...(github ? ['-f', 'inputs[runner]=github'] : [])], 'starting the workflow', 1);
     } catch (e) {
       // GitHub answering 4xx refused it outright: no run to look for.
       if (/HTTP 4\d\d/.test(failure(e).message)) dispatched = false;

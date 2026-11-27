@@ -47,6 +47,7 @@ src/turn-supervisor.mjs: test/turn-supervisor.test.ts
 src/supervisor-client.ts: test/turn-supervisor.test.ts
 src/turn-run.mjs: test/turn-supervisor.test.ts test/steer.test.ts test/turn-survives.test.ts
 src/turn-wrapper.mjs: test/steer.test.ts test/turn-survives.test.ts test/claude-container.test.ts
+src/cloud-run-vm.mjs: test/cloud-helper.test.ts
 # A running turn's signal, stop, liveness and re-attach, per kind of process (#1937).
 src/running-turn.ts: test/running-turn.test.ts test/claude-container.test.ts test/turn-supervisor.test.ts test/outside-kill.test.ts test/stop-sigint.test.ts test/side-ask.test.ts test/wrapper-argv-replay.test.ts test/minion-lane.test.ts
 # closed-cleanup and background-jobs broke ships #1449-#1464 and #1364-#1383 (#1622); each runs in about 1 s.

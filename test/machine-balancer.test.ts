@@ -210,3 +210,18 @@ test("the order is set on the machine's row by its owner alone, 1 to 99 or none"
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });
+
+test("room (#2200): a job starts there now only with room, and never beside a ship's tests or waiting CI; a look holds nothing", () => {
+  let input = { threads: 16, caps: none, ship: false, ciWaiting: 0, running: 1 };
+  const b = new MachineBalancer({ machines: () => [7], input: (id) => (id === 7 ? input : null), changed: () => {}, now: () => 0 });
+  assert.equal(b.room(7, 6), true);
+  assert.equal(b.room(7, 14), false, '16 threads less a turn leave 13');
+  input = { ...input, ship: true };
+  assert.equal(b.room(7, 6), false, "a ship's tests run there");
+  input = { ...input, ship: false, ciWaiting: 1 };
+  assert.equal(b.room(7, 6), false, 'CI waits there');
+  input = { ...input, ciWaiting: 0 };
+  assert.equal(b.ask(7, { key: 'apk', label: 'APK build', size: 8 }), 'start');
+  assert.equal(b.room(7, 6), false, 'the APK build holds 8 of the 13');
+  assert.equal(b.room(8, 1), false, 'no report from that machine: no say, no room');
+});

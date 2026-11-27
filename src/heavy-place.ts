@@ -63,7 +63,7 @@ export interface PlaceMachine {
 }
 
 export interface HeavyDeps {
-  balancer: Pick<MachineBalancer, 'ask' | 'release' | 'done' | 'current' | 'plan'>;
+  balancer: Pick<MachineBalancer, 'ask' | 'release' | 'done' | 'current' | 'plan' | 'room'>;
   /** The PCs that may take the repo's heavy jobs: CI on and lent to its scheme, its runner agent connected, a balancer plan there. */
   machines(repo: string): PlaceMachine[];
   /** The repo's runners as GitHub lists them. */
@@ -130,6 +130,11 @@ export class HeavyPlacer {
   /** Whether a job of this run waits for room on a PC with its runners up (tools/heavy-ci.ts: then it waits, not back to perigee). */
   holds(repo: string, run: number): boolean {
     return [...this.held.values()].some((h) => h.job.run === run && h.job.repo.toLowerCase() === repo.toLowerCase() && h.state === 'waiting' && h.home !== null);
+  }
+
+  /** Whether a PC lending the repo CI has room for a full suite now, with no ship or CI waiting there (citadel-cloud's first place, #2200). */
+  room(repo: string): boolean {
+    return this.d.machines(repo).some((m) => this.d.balancer.room(m.id, HEAVY_SIZES.suite));
   }
 
   view(): HeavyView[] {

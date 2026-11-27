@@ -24,6 +24,10 @@ on:
         description: true for a long job (citadel-heavy --long), which runs on the runner with the long label alone (#1592)
         required: false
         default: 'false'
+      runner:
+        description: github for GitHub's own runners, free on a public repo (citadel-cloud's pick, #2200); else the scheme's PCs
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -36,7 +40,7 @@ jobs:
     # a heavy job waits behind a proof instead, and heavy-ci.ts waits too while CI is busy. A long job goes to the runner
     # with the long label (#1592): on 2026-11-22 one held the side runner from 02:04 to 07:30 and five proofs queued behind it.
     # citadel-heavy-suite (#2120): Citadel puts it on one runner of the PC with room for a full suite (src/heavy-place.ts).
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (inputs.long == 'true' && fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-long", "citadel-heavy-suite"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side", "citadel-heavy-suite"]')) }}
+    runs-on: ${{ (vars.CI_RUNNER == 'github' || inputs.runner == 'github') && 'ubuntu-latest' || (inputs.long == 'true' && fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-long", "citadel-heavy-suite"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side", "citadel-heavy-suite"]')) }}
     timeout-minutes: ${{ fromJSON(inputs.minutes || '60') }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +53,10 @@ jobs:
       # Deploys first (#1902): while a ship is in line this run is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
       - name: ask Citadel whether ships go first
         run: if [ -f tools/ci-hold-ask.ts ]; then node tools/ci-hold-ask.ts; fi # a snapshot from before #1902 has none
+      # Ubuntu 24.04's AppArmor blocks the user namespaces Chrome's sandbox needs on GitHub's own runners (#2198).
+      - name: Chrome's sandbox on GitHub's runners
+        if: runner.environment == 'github-hosted'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # As in tests.yml (#1863): without them the type check and the property tests can't run.
       - name: devDependencies for the tests
         if: hashFiles('package-lock.json') != ''

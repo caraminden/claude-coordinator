@@ -415,7 +415,7 @@ export interface App {
   ciHold?: Pick<CiHold, 'ask' | 'state'>;
   runnerCap?: Pick<RunnerCap, 'text'>;
   /** Heavy jobs off the server waiting for room on a PC (src/heavy-place.ts, #2120); absent in tests that don't need it. */
-  heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone' | 'holds'>;
+  heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone' | 'holds' | 'room'>;
   /** The heavy jobs each place holds or has waiting (src/heavy-now.ts, #2109); absent in tests that don't need it. */
   heavyNow?: (canSee: (projectId: number) => boolean, owns: (machineId: number) => boolean) => HeavyNow;
   /** Where citadel-heavy's heavy jobs go, and the Builds role's container jobs (src/heavy-builds.ts, H2); absent in tests that don't need it. */

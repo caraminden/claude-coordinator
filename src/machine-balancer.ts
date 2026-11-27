@@ -200,6 +200,19 @@ export class MachineBalancer {
     return [...(this.heavy.get(machineId)?.values() ?? [])].filter((h) => h.running && h.key.startsWith(prefix)).reduce((n, h) => n + h.size, 0);
   }
 
+  /**
+   * Whether a job of `size` threads would start there now, with nothing time-sensitive there for it to slow: no ship's tests,
+   * no CI waiting (Cara's second priority for helpers, #2200: "No overload machines that are running time sensitive jobs").
+   * A look only: nothing is held.
+   */
+  room(machineId: number, size: number): boolean {
+    const input = this.d.input(machineId);
+    if (!input || input.threads <= 0 || input.ship || input.ciWaiting > 0) return false;
+    const now = this.d.now();
+    const probe = { key: '\0room', label: '', size, since: now };
+    return balance({ ...input, heavy: [...(this.heavy.get(machineId)?.values() ?? []), probe], now }).start.includes(probe.key);
+  }
+
   /** Every job there whose key starts with `prefix` ended or stopped waiting, but `keep`. */
   release(machineId: number, prefix: string, keep: string | null) {
     const jobs = this.heavy.get(machineId);

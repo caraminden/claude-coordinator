@@ -401,6 +401,16 @@ test('while ships are in line a job is not dispatched: after its wait it is hand
   assert.equal(git(r.bare, 'rev-parse', `refs/citadel-heavy/${job.id}`), job.sha);
 });
 
+test("a job for GitHub's own runners (citadel-cloud's pick, #2200) asks for them, and the PCs' ships and holds don't keep it", () => {
+  const r = repo();
+  hold(r);
+  const res = run(r, 'ok', { CITADEL_HEAVY_HOLD_WAIT: '0.2', COORDINATOR_TICKET: '42', CITADEL_HEAVY_GITHUB: '1' });
+  assert.equal(res.status, 3, res.stderr);
+  assert.equal(res.stdout, 'hello from CI\n');
+  assert.equal(JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8'))['inputs[runner]'], 'github');
+  assert.equal(jobs(r).length, 0, 'not handed to Citadel');
+});
+
 test("a hold that is off, old, not this repo's, unreadable, or asked by a ship's own check holds nothing", () => {
   const cases: [Record<string, unknown>, NodeJS.ProcessEnv][] = [
     [{ off: true, why: null }, {}],

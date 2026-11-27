@@ -5,6 +5,7 @@
 import { HELPERS_OFF, helpersOn, keepNights, nightSightings, readNight, SWEEP, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
 import { FLAKE_WINDOW_MS } from '../flakes.ts';
 import { HttpError, json, readJson, type Route } from '../http.ts';
+import { repoSlug } from '../prlinks.ts';
 
 export const cloudHelperRoutes: Route[] = [
   {
@@ -14,6 +15,18 @@ export const cloudHelperRoutes: Route[] = [
     refuse: "Only a minion's turn hands work to a cloud helper",
     handler({ res, app }) {
       json(res, 200, { on: helpersOn(app.store) });
+    },
+  },
+  {
+    // What only the server sees for citadel-cloud's pick of a place (#2200, Cara's "Helper checks first"): the switch, and
+    // whether a PC lending this scheme CI has room for a suite now with no ship or CI waiting there.
+    method: 'GET',
+    path: '/api/tickets/:ticket/cloud-helpers/place',
+    who: ['minion'],
+    refuse: "Only a minion's turn hands work to a cloud helper",
+    handler({ res, app, ticket }) {
+      const slug = repoSlug(app.store.getProject(ticket.project_id)?.repo_url ?? null);
+      json(res, 200, { on: helpersOn(app.store), machine: !!slug && (app.heavy?.room(slug) ?? false) });
     },
   },
   {

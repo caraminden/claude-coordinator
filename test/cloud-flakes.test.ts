@@ -142,6 +142,7 @@ test('a minion posts its night; the tab shows it beside the flakes, with its cos
   assert.equal((await call('GET', '/api/tickets/:ticket/cloud-sweep/picks', { url: new URL('http://x/'), ticket: store.getTicket(t.id) })).status, 409);
   assert.equal((await call('GET', '/api/projects/:project/test-health', tab)).body.sweeps, undefined);
   assert.equal((await call('GET', '/api/tickets/:ticket/cloud-helpers/switch', { ticket: store.getTicket(t.id) })).body.on, false);
+  assert.deepEqual((await call('GET', '/api/tickets/:ticket/cloud-helpers/place', { ticket: store.getTicket(t.id) })).body, { on: false, machine: false }, "citadel-cloud's place (#2200): no PCs here");
   store.setSetting(HELPERS_SWITCH, true);
   after(() => store.setSetting(HELPERS_SWITCH, null));
   assert.equal((await call('GET', '/api/tickets/:ticket/cloud-helpers/switch', { ticket: store.getTicket(t.id) })).body.on, true);

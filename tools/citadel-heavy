@@ -295,7 +295,8 @@ if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
   # One job per repo on CI at a time: this waits for the repo's turn, then holds fd 5 while its job runs there.
   # shortcut: this wait writes no wait-* file, so Citadel shows the minion as running, not waiting; add one if people ask.
   key=${slug//\//-} n=${CITADEL_HEAVY_CI_SLOTS:-1} cislot= ciwaited=none
-  if command -v flock >/dev/null && mkdir -p "$dir" 2>/dev/null; then
+  # CITADEL_HEAVY_GITHUB=1 (#2200): on GitHub's own runners, which hold none of the scheme's PCs, so no turn to wait for.
+  if [ "${CITADEL_HEAVY_GITHUB:-}" != 1 ] && command -v flock >/dev/null && mkdir -p "$dir" 2>/dev/null; then
     told=-60
     until [ -n "$cislot" ]; do
       for ((i = 0; i < n; i++)); do

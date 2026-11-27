@@ -215,3 +215,11 @@ test('two heavy jobs at once on a PC with room for both go to two of its runners
     ['desk1-linux-1', 'desk1-linux-2'],
   );
 });
+
+test("room: a PC lending the repo CI has a suite's room now (citadel-cloud's first place, #2200); full PCs have none", () => {
+  const w = world();
+  assert.equal(w.placer.room(REPO), false, 'two turns on 8 threads leave 2, under a suite');
+  w.threads.set(2, 14);
+  assert.equal(w.placer.room(REPO), true);
+  assert.equal(w.labelled().length, 0, 'a look only: nothing handed out');
+});

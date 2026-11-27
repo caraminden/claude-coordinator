@@ -215,8 +215,9 @@ export async function runLookupTool(name: string, args: Record<string, unknown>)
       return `Started ${String(args.program)} on ${r.machine}${r.pid ? ` (process ${r.pid})` : ''}.`;
     }
     case 'list_machines': {
-      const { machines, others } = await call<{ machines: MachineInfo[]; others?: { name: string; owner_name?: string | null }[] }>('GET', `/api/projects/${C().PROJECT}/machines`);
-      return [...(machines.length ? machines.map(machineText) : ['No machines this scheme can see.']), ...(others?.length ? [`Not lent here (propose_machine_lend asks for one): ${others.map((o) => (o.owner_name ? `${o.name} (${o.owner_name}'s own)` : o.name)).join(', ')}`] : [])].join('\n\n');
+      const { machines, others } = await call<{ machines: MachineInfo[]; others?: { name: string; owner_name?: string | null; vm_on?: string | null }[] }>('GET', `/api/projects/${C().PROJECT}/machines`);
+      const other = (o: { name: string; owner_name?: string | null; vm_on?: string | null }) => [o.vm_on ? `a VM on ${o.vm_on}` : '', o.owner_name ? `${o.owner_name}'s own` : ''].filter(Boolean).join(', ');
+      return [...(machines.length ? machines.map(machineText) : ['No machines this scheme can see.']), ...(others?.length ? [`Not lent here (propose_machine_lend asks for one): ${others.map((o) => (other(o) ? `${o.name} (${other(o)})` : o.name)).join(', ')}`] : [])].join('\n\n');
     }
     case 'check_machine': {
       if (typeof args.name !== 'string' || !/^[a-z0-9-]{1,30}$/i.test(args.name)) throw new Error('name is required: the machine name, as list_machines shows it');

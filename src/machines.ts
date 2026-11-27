@@ -34,6 +34,30 @@ import { pausedRoles, setPaused } from './machine-pause.ts';
 import { legacyFromRoles, ROLE_NAMES, rolesCannot } from './machine-roles.ts';
 import { POOLED_WINDOWS, WindowsPool } from './machine-pick.ts';
 
+/** A VM on a computer (Build 10 H4): it shows only on its host's card, and its owner is its host's. */
+export const isVm = (m: Pick<Machine, 'vm_of'>): boolean => m.vm_of != null;
+
+/**
+ * Link the machines named like the Hyper-V VMs a computer's agent found (One kind of machine section 3: "a VM is a
+ * capability of its host") to it as its VMs: only its owner's own machines (or one with no owner yet), and never the
+ * computer itself or one already a VM elsewhere. A VM no longer listed stays linked (a VM stopped or saved still lists).
+ * True when it linked one.
+ */
+export function vmsFound(store: Pick<Store, 'listMachines' | 'linkMachineVm'>, host: Machine, names: string[]): boolean {
+  if (isVm(host) || !names.length) return false;
+  const wanted = new Set(names.map((n) => n.toLowerCase()));
+  let linked = false;
+  for (const m of store.listMachines()) {
+    if (m.id === host.id || isVm(m) || !wanted.has(m.name.toLowerCase())) continue;
+    if (m.owner_id !== null && m.owner_id !== host.owner_id) continue;
+    if (store.linkMachineVm(m.id, host.id)) {
+      console.log(`Machine VMs (H4): ${m.name} (row ${m.id}) is now a VM on ${host.name} (row ${host.id}), which reports it in Hyper-V.`);
+      linked = true;
+    }
+  }
+  return linked;
+}
+
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
 /** Names the app's own MCP servers already use. */
@@ -440,7 +464,12 @@ export class MachineRelay {
     return expected.length === given.length && timingSafeEqual(expected, given) ? machine : null;
   }
 
+  /** A machine as the page shows it, with its VMs inside (Build 10 H4: "a capability of a machine"), each as its own view: what it lends, its workspaces and screen. */
   view(machine: Machine) {
+    return { ...this.viewOf(machine), vms: this.store.machineVms(machine.id).map((vm) => this.viewOf(vm)) };
+  }
+
+  private viewOf(machine: Machine) {
     const agent = this.agents.get(machine.id);
     const check = storedCheck(machine);
     const runnersHere = this.runnersOn(machine.id);
@@ -542,6 +571,8 @@ export class MachineRelay {
       paused: pausedRoles(this.store, machine.id),
       /** Each role its PC can't do, with why (One kind of machine H2): the page greys it and PATCH roles won't switch it on. */
       cannot: rolesCannot(storedReport(machine), this.gpuFound(machine)),
+      /** The computer it is a VM on (Build 10 H4), or null: a VM shows only inside its host's view. */
+      vm_of: machine.vm_of ?? null,
     };
   }
 
@@ -561,8 +592,12 @@ export class MachineRelay {
     return true;
   }
 
+  /** Every computer as people see it: a VM is inside its host's view (vms), never a machine of its own (Build 10 H4). */
   list() {
-    return this.store.listMachines().map((m) => this.view(m));
+    return this.store
+      .listMachines()
+      .filter((m) => !isVm(m))
+      .map((m) => this.view(m));
   }
 
   /** Machines connected right now, with the servers a starting turn in any scheme should get. */
@@ -755,7 +790,8 @@ export class MachineRelay {
   samePc(machine: Machine): Machine[] {
     const mine = this.hostsOf(machine);
     if (!mine.size) return [];
-    return this.store.listMachines().filter((m) => m.id !== machine.id && m.owner_id === machine.owner_id && (this.runnerRow(m) || this.runnerRow(machine)) && [...this.hostsOf(m)].some((h) => mine.has(h)));
+    if (isVm(machine)) return [];
+    return this.store.listMachines().filter((m) => m.id !== machine.id && !isVm(m) && m.owner_id === machine.owner_id && (this.runnerRow(m) || this.runnerRow(machine)) && [...this.hostsOf(m)].some((h) => mine.has(h)));
   }
 
   private dropAgent(machineId: number, agent: Agent) {
@@ -803,6 +839,8 @@ export class MachineRelay {
     agent.report = cleanReport(body.report);
     const report = agent.report && JSON.stringify(agent.report);
     if (report && report !== machine.report) this.store.updateMachine(machine.id, { report });
+    // The Hyper-V VMs it reports that are machines of its owner's become its VMs (Build 10 H4).
+    if (agent.report?.hyperv?.vms && vmsFound(this.store, machine, agent.report.hyperv.vms)) this.onChange();
     agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])] : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
     // Its owner's jobs block (#857), or none, and the jobs it holds, which the queue reconciles. An agent lists them even

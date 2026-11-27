@@ -104,11 +104,12 @@ export const proposalRoutes: Route[] = [
       const machine = seen.find((m) => m.name === name);
       const view = machine && app.machines.view(machine);
       if (!machine || !view || view.runners) {
-        const names = seen.filter((m) => !app.machines.view(m).runners).map((m) => m.name);
+        const names = seen.filter((m) => !app.machines.view(m).runners).map((m) => (m.vm_of != null ? `${m.name} (a VM on ${store.getMachine(m.vm_of)?.name ?? 'another machine'})` : m.name));
         throw new HttpError(404, machine ? `${name} is a CI runner host: it lends no tools` : `No machine called ${name}; there are ${names.join(', ') || 'none'}`);
       }
       // An online agent says what it has, so a typo is caught here, not after a person approves it. Offline, nobody knows.
-      const page = `#/p/${project.id}/machines/${name}`;
+      // A VM (Build 10 H4) is changed from its host's card.
+      const page = `#/p/${project.id}/machines/${(machine.vm_of != null && store.getMachine(machine.vm_of)?.name) || name}`;
       if (view.managed === false && (change.tick || change.untick || change.server !== undefined)) {
         throw new HttpError(400, `${name}'s agent is from before ticks: it lends what its own command line says. Propose workspace_tools instead, or ask its owner to reinstall it from [${name} on the Machines page](${page})`);
       }

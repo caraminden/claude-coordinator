@@ -14,6 +14,46 @@ export const machineQueries = {
     return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
   },
 
+  /** The machines that are VMs on this computer (Build 10 H4), by name. */
+  machineVms(this: Store, hostId: number): Machine[] {
+    return this.listMachines().filter((m) => m.vm_of === hostId);
+  },
+
+  /**
+   * Make a machine a VM on its host (Build 10 H4; Cara, 2026-11-26: "really just a capability of a machine"). It takes the
+   * host's owner, so who manages it and whose turns get it follow the host; its own roles (what it lends, to which
+   * schemes) stay its own, edited from the host's card. A machine is never its own host, nor a VM on a VM.
+   * shortcut: the owner is copied here, not followed live; nothing changes a machine's owner after it is made today (a
+   * person deleted clears both alike), so a future owner change must copy it to the host's VMs too.
+   */
+  linkMachineVm(this: Store, vmId: number, hostId: number): boolean {
+    const r = this.db.prepare('UPDATE machines SET vm_of = ?2, owner_id = (SELECT owner_id FROM machines WHERE id = ?2) WHERE id = ?1 AND ?1 != ?2 AND (SELECT vm_of FROM machines WHERE id = ?2) IS NULL AND NOT EXISTS (SELECT 1 FROM machines WHERE vm_of = ?1)').run(vmId, hostId);
+    return Number(r.changes) > 0;
+  },
+
+  /**
+   * The one-off link for the machine saved before VMs were capabilities (Build 10 H4, spec one-kind-of-machine.md section 5):
+   * the Windows test box, the Hyper-V VM on Cara's desktop (tools/win-test-box/README.md), becomes a VM on the row whose
+   * agents report that desktop's hostname. Its tool names don't change (they are its own name). Says what it did.
+   */
+  testBoxOnItsHost(this: Store) {
+    const box = this.listMachines().find((m) => m.name === 'citadel-test-box');
+    if (!box || box.vm_of != null) return;
+    const hostname = (json: string | null | undefined) => {
+      try {
+        const h = json ? (JSON.parse(json) as { host?: unknown }).host : null;
+        return typeof h === 'string' ? h.toLowerCase() : null;
+      } catch {
+        return null;
+      }
+    };
+    const hosts = this.listMachines().filter((m) => m.id !== box.id && m.vm_of == null && [hostname(m.report), hostname(m.last_check)].includes('desktop-g248ij8'));
+    if (hosts.length !== 1) return console.log(`Machine VMs (H4): ${box.name} (row ${box.id}) stays a machine of its own: ${hosts.length ? `${hosts.length} rows report` : 'no row reports'} its desktop's hostname, DESKTOP-G248IJ8.`);
+    const host = hosts[0];
+    this.linkMachineVm(box.id, host.id);
+    console.log(`Machine VMs (H4): ${box.name} (row ${box.id}, owner ${box.owner_id ?? 'none'}) is now a VM on ${host.name} (row ${host.id}, owner ${host.owner_id ?? 'none'}); its roles and schemes are as they were.`);
+  },
+
   /** A join code for Connect a computer (Build 7 M2, src/machine-join.ts), hashed; machineId: the row an Update reconnects. */
   addMachineJoin(this: Store, j: { codeHash: string; askerId: number | null; by: string; ownerId: number | null; machineId: number | null; at: number; expiresAt: number }): number {
     const { lastInsertRowid } = this.db.prepare('INSERT INTO machine_joins (code_hash, asker_id, created_by, owner_id, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(j.codeHash, j.askerId, j.by, j.ownerId, j.machineId, j.at, j.expiresAt);

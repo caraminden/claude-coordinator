@@ -294,3 +294,25 @@ test("Linux: Builds' podman and a waiting helper are one paste, package line fir
   await alone.run();
   assert.deepEqual(alone.said.find((s) => s.admin)?.admin, { needs: ['podman'], pm: 'apt' });
 });
+
+test("Windows: a paste it needs anyway also lets the agent list this PC's Hyper-V VMs, by its own account's SID only", async () => {
+  const sid = 'S-1-5-21-1004336348-1177238915-682003330-1001';
+  const locked = { 'powershell.exe -NoProfile -Command if (-not (Get-Service vmms': ok(`locked ${sid}`) };
+  const p = pc({ platform: 'win32', role: 'ci', answers: locked });
+  await p.run();
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin?.needs, ['runner', 'hyperv']);
+  const text = readFileSync(join(p.ctx.home, 'coordinator-agent', 'elevate.ps1'), 'utf8');
+  assert.match(text, new RegExp(`Add-LocalGroupMember -SID 'S-1-5-32-578' -Member '${sid}'`));
+  assert.match(text, /\$failed \+= 'Hyper-V Administrators'/);
+  // Get-VM works already, or no Hyper-V: nothing more in the paste.
+  for (const out of ['ok', 'none']) {
+    const q = pc({ platform: 'win32', role: 'ci', answers: { 'powershell.exe -NoProfile -Command if (-not (Get-Service vmms': ok(out) } });
+    await q.run();
+    assert.deepEqual(q.said.find((s) => s.admin)?.admin?.needs, ['runner']);
+  }
+  // Something that isn't a SID never reaches the script.
+  const odd = pc({ platform: 'win32', role: 'ci', answers: { 'powershell.exe -NoProfile -Command if (-not (Get-Service vmms': ok("locked x'; rm") } });
+  await odd.run();
+  assert.deepEqual(odd.said.find((s) => s.admin)?.admin?.needs, ['runner']);
+  assert.throws(() => elevateScript({ platform: 'win32', appUrl: 'http://citadel.test', token: TOKEN, needs: ['hyperv'], sid: "x'; rm" }), /Windows account/);
+});

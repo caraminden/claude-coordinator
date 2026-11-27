@@ -370,13 +370,34 @@ async function ci(ctx, say, end) {
 // ---------- the elevate script: one administrator paste for every role (Cara, 2026-11-26, "One agent, helpers hidden") ----------
 
 /** The needs the elevate script itself holds: public/role-setup.js SCRIPT_NEEDS (this file is fetched on its own, so it can't import it). */
-export const HELD = ['wsl', 'runner', 'runner-linux', 'worker'];
+export const HELD = ['wsl', 'runner', 'runner-linux', 'worker', 'hyperv'];
 /** The Linux package manager the card's package lines are for, or null (neither apt nor dnf). */
 const packageManager = async (ctx) => ((await ctx.exec('apt-get', ['--version'])).code === 0 ? 'apt' : (await ctx.exec('dnf', ['--version'])).code === 0 ? 'dnf' : null);
 const TOKEN = /^ccm_\d+_[\w-]{43}$/;
 const ORIGIN = /^https?:\/\/[A-Za-z0-9.:-]+$/;
 /** The worker's caps as install-worker.sh takes them. */
 const CAP_FLAGS = { workers: '--workers', threads: '--threads', memory_gb: '--memory', disk_gb: '--disk' };
+/** A Windows account's SID, the only thing about this PC the script's Hyper-V step holds. */
+const SID = /^S-1-5-21(-\d{1,10}){1,6}$/;
+/**
+ * Hyper-V is here and this agent's account can't list its VMs (Get-VM needs Hyper-V Administrators): then the account's
+ * SID, for the script's Hyper-V step, so the agent finds its VMs (Build 10 H4: "a VM is a capability"); else null.
+ */
+const HYPERV_LOCKED = "if (-not (Get-Service vmms -ErrorAction SilentlyContinue)) { 'none' } else { try { $null = Get-VM -ErrorAction Stop; 'ok' } catch { 'locked ' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } }";
+const hypervAsked = new WeakMap();
+/** @param {{ platform: string, exec: typeof exec }} ctx @returns {Promise<string | null>} */
+export function hypervLocked(ctx) {
+  if (ctx.platform !== 'win32') return Promise.resolve(null);
+  if (!hypervAsked.has(ctx))
+    hypervAsked.set(
+      ctx,
+      ctx.exec('powershell.exe', ['-NoProfile', '-Command', HYPERV_LOCKED], { timeout: 30_000 }).then((r) => {
+        const sid = r.code === 0 ? (r.out.trim().match(/^locked (\S+)$/)?.[1] ?? null) : null;
+        return sid && SID.test(sid) ? sid : null;
+      }),
+    );
+  return hypervAsked.get(ctx);
+}
 
 /**
  * What the elevate script holds on this PC: this role's own needs, and those of the other roles that are on and still
@@ -389,6 +410,8 @@ export async function scriptNeeds(ctx, own) {
   if (ctx.platform === 'win32') {
     if (also.includes('ci')) needs.add('runner');
     if (!needs.has('wsl') && (also.includes('turns') || also.includes('builds')) && (await ctx.exec('wsl.exe', ['--version'], { timeout: 30_000 })).code !== 0) needs.add('wsl');
+    // Its VMs are its capabilities (Build 10 H4): a paste it needs anyway also lets the agent list them.
+    if (needs.size && (await hypervLocked(ctx))) needs.add('hyperv');
   } else {
     if (also.includes('ci')) needs.add('runner-linux');
     if (also.includes('turns')) needs.add('worker');
@@ -396,16 +419,16 @@ export async function scriptNeeds(ctx, own) {
     if (also.includes('builds') && !needs.has('podman') && (await ctx.exec('podman', ['--version'])).code !== 0) needs.add('podman');
   }
   // Packages first (the card's lines before the script), then the runner agent, WSL last: its install asks for a restart.
-  const order = ['podman', 'nvidia-toolkit', 'cdi', 'runner', 'runner-linux', 'worker', 'wsl'];
+  const order = ['podman', 'nvidia-toolkit', 'cdi', 'runner', 'runner-linux', 'worker', 'hyperv', 'wsl'];
   return [...needs].sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }
 
 /**
  * The elevate script's text: fixed steps for each need, filled in only with this agent's own address and token and the
  * worker's whole-number caps, so nothing a report or an ask says becomes a command. Throws on an address or token
- * that isn't one. @param {{ platform: string, appUrl: string, token: string, needs: string[], caps?: Record<string, unknown>, at?: Date }} o
+ * that isn't one. `sid`: the agent's own Windows account, for the Hyper-V step. @param {{ platform: string, appUrl: string, token: string, needs: string[], caps?: Record<string, unknown>, at?: Date, sid?: string | null }} o
  */
-export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = new Date() }) {
+export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = new Date(), sid = null }) {
   const u = new URL(appUrl).origin;
   if (!ORIGIN.test(u)) throw new Error(`the app's address ${u} isn't one the script can hold`);
   if (!TOKEN.test(token ?? '')) throw new Error("this agent's token isn't a machine token");
@@ -437,6 +460,14 @@ export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = 
         "  if ($LASTEXITCODE) { throw 'the lines above say why' }",
         '} catch { Write-Host "elevate: the CI runner agent did not install: $_" -ForegroundColor Red; $failed += \'the CI runner agent\' }',
       );
+    if (needs.includes('hyperv')) {
+      if (!SID.test(sid ?? '')) throw new Error("this agent's Windows account isn't one the script can hold");
+      lines.push(
+        // Hyper-V Administrators (S-1-5-32-578) lets the agent's own account run Get-VM, so its VMs show on its card.
+        "Write-Host 'elevate: letting the machine agent list this PC''s Hyper-V VMs (Hyper-V Administrators)'",
+        `try { Add-LocalGroupMember -SID 'S-1-5-32-578' -Member '${sid}' -ErrorAction Stop; Write-Host 'elevate: sign out of Windows and back in (or restart), so the agent can list them.' } catch [Microsoft.PowerShell.Commands.MemberExistsException] { } catch { Write-Host "elevate: could not add the account to Hyper-V Administrators: $_" -ForegroundColor Red; $failed += 'Hyper-V Administrators' }`,
+      );
+    }
     if (needs.includes('wsl'))
       lines.push(
         "Write-Host 'elevate: installing WSL 2'",
@@ -490,7 +521,7 @@ async function elevate(ctx, say, n, own) {
   const file = elevateFile(ctx.platform, ctx.home);
   let text;
   try {
-    text = elevateScript({ platform: ctx.platform, appUrl: ctx.appUrl, token: ctx.token, needs: needs.filter((x) => HELD.includes(x)), caps: workerCaps(ctx.ask) });
+    text = elevateScript({ platform: ctx.platform, appUrl: ctx.appUrl, token: ctx.token, needs: needs.filter((x) => HELD.includes(x)), caps: workerCaps(ctx.ask), sid: await hypervLocked(ctx) });
     mkdirSync(dirname(file), { recursive: true });
     // It holds the token.
     writeFileSync(file, text, { mode: 0o600 });

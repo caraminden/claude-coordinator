@@ -547,7 +547,9 @@ function machineLine(m) {
   const word = workWord ?? { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const isOpen = view.machineOpen.has(m.id);
   const fix = !gone && fixButton(m, open);
-  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}`, open: isOpen }, machineBody(m));
+  // Its VMs are its capabilities (Build 10 H4), named on its closed line.
+  const vms = m.vms?.length ? ` · ${m.vms.map((vm) => `VM: ${vm.name}`).join(' · ')}` : '';
+  const [row, sum] = settingsRow({ icon: m.runners ? 'plug' : 'monitor', hue: workHue ?? { ready: 'done', fix: 'waiting', down: 'danger' }[m.status] ?? 'muted', title: m.name, summary: `${word} · ${machineStatusText(m)}${vms}`, open: isOpen }, machineBody(m));
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
   // Two rows for one PC (Build 7 M2b): its owner merges them into one. It shows the kept row's token, so only to its owner.
@@ -602,7 +604,14 @@ function machineBody(m) {
     ),
     m.jobs ? machineJobsSection(m) : '',
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, removing(m) ? null : pauseButton(m, renderMachineList), remove),
+    ...(m.vms ?? []).map(machineVm),
   );
+}
+
+/** A VM on this computer (Build 10 H4: "really just a capability of a machine"): what it lends and its screen, inside its host's card. */
+function machineVm(vm) {
+  const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[vm.status];
+  return h('section', { class: 'machine-vm', 'aria-label': `VM: ${vm.name}` }, h('div', { class: 'row machine-vm-head' }, h('strong', {}, `VM: ${vm.name}`), h('span', { class: 'small muted' }, `${word} · ${machineStatusText(vm)}`)), machineBody(vm));
 }
 
 /** An old CI runner agent's update line, per OS: its install again, with the token already on that PC, so nothing else is cut off.

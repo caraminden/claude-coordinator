@@ -122,6 +122,7 @@ export const ASYNC_WRITES = ['recordTurn', 'markSeen', 'syncArtifacts'];
 
 /** Writes that return a value: they run on the server's thread after the queue, and a write they make inside runs with them. */
 export const VALUE_WRITES = [
+  'linkMachineVm',
   'ensureCabal',
   'addCabalRow',
   'joinCabal',

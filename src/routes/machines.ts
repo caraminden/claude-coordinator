@@ -521,8 +521,10 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
         project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
         // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
         minions_get_it: lendsRole(app.store, m, 'tools', project, asker === null ? [] : [asker]),
+        // A VM (Build 10 H4) is its host's capability: named with it, and on the page it is inside the host's card.
+        vm_on: m.vm_of == null ? null : (app.store.getMachine(m.vm_of)?.name ?? null),
         // The machine on the Machines page (#1638), for tool replies and cards to link.
-        page: `#/p/${project.id}/machines/${m.name}`,
+        page: `#/p/${project.id}/machines/${(m.vm_of != null && app.store.getMachine(m.vm_of)?.name) || m.name}`,
       };
     });
 }
@@ -994,7 +996,7 @@ export const machineRoutes: Route[] = [
       const others = ctx.app.store
         .listMachines()
         .filter((m) => ((asker !== null && m.owner_id === asker) || lendsToEveryone(ctx.app.store, m, 'tools')) && !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
-        .map((m) => ({ name: m.name, owner_name: ctx.app.store.getUser(m.owner_id ?? -1)?.name ?? null }));
+        .map((m) => ({ name: m.name, owner_name: ctx.app.store.getUser(m.owner_id ?? -1)?.name ?? null, vm_on: m.vm_of == null ? null : (ctx.app.store.getMachine(m.vm_of)?.name ?? null) }));
       return json(ctx.res, 200, { machines, others });
     },
   },

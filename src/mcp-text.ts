@@ -342,6 +342,8 @@ export interface MachineInfo {
   problems: string[];
   notes?: string;
   page?: string;
+  /** The computer it is a VM on (Build 10 H4), or null. */
+  vm_on?: string | null;
 }
 /** A machine as list_machines shows it (#307), its status first as the Machines tab says it (#437). */
 export function machineText(m: MachineInfo): string {
@@ -350,7 +352,7 @@ export function machineText(m: MachineInfo): string {
   const lent = m.tools_everyone ? `${whose}'s, lent to every turn in ${list}` : `${whose}'s own: goes to the turns they ask for, in ${list}`;
   const ws = m.workspaces.map((w) => `${w.name} (${w.path})`).join(', ');
   return [
-    `${m.name}: ${STATUS_WORDS[m.status] ?? m.status}: ${m.when ? `${m.reason} · ${m.when.label} ${ago(m.when.at)}` : m.reason}`,
+    `${m.name}${m.vm_on ? ` (a VM on ${m.vm_on})` : ''}: ${STATUS_WORDS[m.status] ?? m.status}: ${m.when ? `${m.reason} · ${m.when.label} ${ago(m.when.at)}` : m.reason}`,
     `  ${m.online ? `ONLINE, connected since ${ago(m.connected_at)}, host ${m.host || '?'}, ${m.sessions} session${m.sessions === 1 ? '' : 's'} open` : `OFFLINE, last seen ${ago(m.last_seen_at)}`}`,
     ...(m.managed
       ? [
@@ -367,7 +369,7 @@ export function machineText(m: MachineInfo): string {
     m.problems.length ? `  agent reports problems: ${m.problems.join('; ')}` : '',
     m.notes ? `  notes: ${m.notes.replace(/\n+/g, ' ')}` : '',
     // #1638: a change goes through propose_machine_lend, and its page entry is a link.
-    m.page ? `  change it: propose_machine_lend; on the page: [${m.name} on the Machines page](${m.page})` : '',
+    m.page ? `  change it: propose_machine_lend; on the page: [${m.vm_on ? `${m.vm_on}'s card` : m.name} on the Machines page](${m.page})` : '',
   ]
     .filter(Boolean)
     .join('\n');

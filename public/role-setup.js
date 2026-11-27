@@ -18,6 +18,7 @@ export const ADMIN_NEEDS = {
   podman: { what: 'podman', os: 'linux' },
   'nvidia-toolkit': { what: "NVIDIA's container toolkit", os: 'linux' },
   cdi: { what: 'the GPU device list containers read (CDI)', os: 'linux' },
+  hyperv: { what: "Hyper-V access for the machine agent, so it finds this PC's VMs", os: 'windows' },
 };
 export const PACKAGE_MANAGERS = ['apt', 'dnf'];
 
@@ -27,7 +28,7 @@ export const PACKAGE_MANAGERS = ['apt', 'dnf'];
  * its own address and its own token, at a fixed place beside itself (ELEVATE), so the command the card shows is always
  * the same words: nothing from the agent's report goes in it.
  */
-export const SCRIPT_NEEDS = ['wsl', 'runner', 'runner-linux', 'worker'];
+export const SCRIPT_NEEDS = ['wsl', 'runner', 'runner-linux', 'worker', 'hyperv'];
 /** Where the agent writes its elevate script: the folder Connect a computer installs it in (machine-setup.js). */
 export const ELEVATE = { windows: '$env:USERPROFILE\\coordinator-agent\\elevate.ps1', linux: '~/coordinator-agent/elevate.sh' };
 /**

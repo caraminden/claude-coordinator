@@ -176,6 +176,10 @@ export interface MachineRow {
   same_pc?: { id: number; name: string }[];
   /** A merge waiting on this row's runner agents connecting to the kept row (src/machine-merge.ts Merge). */
   merging?: { from: number; into: number; os: ('windows' | 'linux')[]; by: string; at: number } | null;
+  /** The computer it is a VM on (Build 10 H4), or null. */
+  vm_of?: number | null;
+  /** Its VMs (Build 10 H4: a VM is a capability of its computer), each as its own row: they never show as machines of their own. */
+  vms?: MachineRow[];
 }
 
 // The connect, merge, remove, set up and runs-on pages.

@@ -202,6 +202,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
   // What its agent says the PC can do (Build 7 M2, src/machine-join.ts MachineReport), as JSON; null before an agent that reports.
   ['machines', 'report', 'ALTER TABLE machines ADD COLUMN report TEXT'],
+  // The computer a VM runs on (Build 10 H4): a VM is a capability of its host, never a machine of its own on any list people see.
+  ['machines', 'vm_of', 'ALTER TABLE machines ADD COLUMN vm_of INTEGER REFERENCES machines(id) ON DELETE SET NULL'],
   ['turns', 'payer', 'ALTER TABLE turns ADD COLUMN payer INTEGER'],
   ['turns', 'prompt_digest', 'ALTER TABLE turns ADD COLUMN prompt_digest TEXT'],
   ['turns', 'keepalive', 'ALTER TABLE turns ADD COLUMN keepalive INTEGER'],
@@ -360,6 +362,7 @@ export const SCHEMA_HISTORY = [
   [125, 'machine_joins, machines.report (Build 7 M2, #2053)'],
   [126, 'machines.priority (Build 7 M6, #2056)'],
   [127, "machines.owner_id filled where it was empty, from created_by or machine_joins; those rows' roles caps.everyone (Build 10 H1, #2184)"],
+  [128, 'machines.vm_of: the computer a VM runs on, linked when its agent finds the VM in Hyper-V (Build 10 H4, #2188)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

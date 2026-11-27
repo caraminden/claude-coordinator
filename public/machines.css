@@ -49,6 +49,10 @@
 .machines-main .machine-add[hidden] { display: none; }
 h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
+/* A VM inside its host's card (Build 10 H4). */
+.machine-vm { border: 1px solid var(--line); border-radius: 8px; display: grid; }
+.machine-vm-head { gap: 0.5rem; padding: 0.5rem 0.75rem; flex-wrap: wrap; }
+.machine-vm > .machine-body { font-size: 1em; }
 .machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
 .machine-kv > div { min-width: 0; overflow-wrap: anywhere; }
 .machine-kv .machine-lending, .machine-kv .machine-notes { margin: 0; font-size: 1em; }

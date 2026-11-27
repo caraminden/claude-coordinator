@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { git, makeRepo } from './git.ts';
@@ -14,7 +14,13 @@ const bin = join(repo, 'tools', 'citadel-test');
 // No NODE_TEST_CONTEXT, which makes a node --test inside a test skip its files. Its own TMPDIR: the log lands there, and the leak guard counts a process as leaked when it names a deleted folder in it.
 const scratch = tempRoot('citadel-test-');
 const tmp = scratch.dir;
-after(() => scratch.teardown());
+// A run stopped at its limit, or killed, leaves its files' temp folders in here to their reapers (test/leak-file.ts), which
+// remove them a second or so later. A recursive delete that meets another one inside its folder gives up without an
+// error and leaves the folder (#2238: the leak guard then found this one after the teardown), so the reapers go first.
+after(async () => {
+  await until("the stopped files' reapers to remove their temp folders", () => !readdirSync(tmp).some((e) => e.startsWith('f-')));
+  await scratch.teardown();
+});
 
 function file(name: string, body: string): string {
   const path = join(tmp, name);

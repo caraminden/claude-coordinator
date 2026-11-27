@@ -71,8 +71,9 @@ export const machineQueries = {
     this.db.prepare('DELETE FROM runner_load WHERE at < ?').run(before);
   },
 
-  /** A machine `ownerId` manages (#306), or a shared one with none. It is lent to no scheme until some are added (#438). */
-  createMachine(this: Store, name: string, tokenHash: string, by: string, ownerId: number | null = null): Machine {
+  /** A machine `ownerId` owns and manages (#306): every machine has one (Build 10 H1). It is lent to no scheme until some are added (#438). */
+  createMachine(this: Store, name: string, tokenHash: string, by: string, ownerId: number): Machine {
+    if (!Number.isInteger(ownerId)) throw new Error(`A machine needs an owner, not ${ownerId}`); // and the foreign key wants a real person
     const { lastInsertRowid } = this.db.prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, 1)').run(name, tokenHash, by, Date.now(), ownerId);
     return this.getMachine(Number(lastInsertRowid))!;
   },

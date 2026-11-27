@@ -349,10 +349,9 @@ export class MachineJobs {
     for (const t of this.timers) t.stop();
   }
 
-  /** The person whose go a machine's jobs need: its owner, or for one from before owners, the person who added it. */
+  /** The person whose go a machine's jobs need: its owner (every machine has one, Build 10 H1). */
   ownerOf(m: Machine): User | null {
-    if (m.owner_id !== null) return this.store.getUser(m.owner_id) ?? null;
-    return this.store.listUsers().find((u) => u.name === m.created_by) ?? null;
+    return this.store.getUser(m.owner_id ?? -1) ?? null;
   }
 
   /** Whether this person may pause, resume or stop a machine's jobs, or see them: its owner, or an admin (a Citadel scheme member). The go itself is isOwner. */

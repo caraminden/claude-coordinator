@@ -3,7 +3,7 @@
 // verdict on it.
 import { join } from 'node:path';
 import { lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
-import { lendsRole, managesMachine } from '../access.ts';
+import { lendsRole, lendsToEveryone, managesMachine } from '../access.ts';
 import { APP_NAME } from '../appname.ts';
 import { cardHref } from '../card-links.ts';
 import { keyFiles } from '../release-key.ts';
@@ -67,7 +67,7 @@ export const proposalRoutes: Route[] = [
       // As a turn of this minion's gets it (src/runner.ts): lent to this scheme, and someone's own only on its owner's ask.
       if (!machine || !lendsRole(store, machine, 'tools', project, asker === null ? [] : [asker])) throw new HttpError(404, `No machine called ${name} that this minion gets`);
       if (notes === machine.notes) throw new HttpError(400, `Those are already ${name}'s notes`);
-      const owner = machine.owner_id === null ? null : (store.getUser(machine.owner_id)?.name ?? null);
+      const owner = store.getUser(machine.owner_id ?? -1)?.name ?? null;
       const event = postPlan(app, ticket.id, {
         summary: `New notes for ${name}`,
         plan: notes,
@@ -98,9 +98,9 @@ export const proposalRoutes: Route[] = [
       const why = body.why === undefined ? '' : str(body.why, 'Why', 500);
       const project = store.getProject(ticket.project_id)!;
       // Any machine by name, lent here or not: asking for one not lent yet is the point. Approving is who can save it on the page.
-      // Someone else's own machine stays out of sight (#306): only shared ones and the turn's asker's own.
+      // Someone else's machine stays out of sight (#306): only the turn's asker's own, and those whose owner lent their tools to everyone.
       const asker = store.turnAsker(ticket.id);
-      const seen = store.listMachines().filter((m) => m.owner_id === null || m.owner_id === asker);
+      const seen = store.listMachines().filter((m) => (asker !== null && m.owner_id === asker) || lendsToEveryone(store, m, 'tools'));
       const machine = seen.find((m) => m.name === name);
       const view = machine && app.machines.view(machine);
       if (!machine || !view || view.runners) {
@@ -123,7 +123,7 @@ export const proposalRoutes: Route[] = [
       if (!lines.length) throw new HttpError(400, `Nothing to change: ${name} already ${Object.keys(change).length ? 'has all of that' : 'is as it is; name what should change'}`);
       const after = lendAfter(change, now, project.id);
       const was = view.projects.includes(project.id);
-      const owner = machine.owner_id === null ? null : (store.getUser(machine.owner_id)?.name ?? null);
+      const owner = store.getUser(machine.owner_id ?? -1)?.name ?? null;
       const event = postPlan(app, ticket.id, {
         summary: change.here === false && was ? `Take ${name} from ${project.name}` : change.here && !was ? `Lend ${name} to ${project.name}` : `Change what ${name} lends`,
         plan: [

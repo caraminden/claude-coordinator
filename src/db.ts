@@ -359,6 +359,7 @@ export const SCHEMA_HISTORY = [
   [124, 'machine_roles, machine_role_projects, filled from machines.lend and machine_projects (Build 7 M1, #2052)'],
   [125, 'machine_joins, machines.report (Build 7 M2, #2053)'],
   [126, 'machines.priority (Build 7 M6, #2056)'],
+  [127, "machines.owner_id filled where it was empty, from created_by or machine_joins; those rows' roles caps.everyone (Build 10 H1, #2184)"],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -457,6 +458,7 @@ export class Store {
     this.shippingFromRules();
     this.lendingLists();
     this.machineRoleTables();
+    this.machineOwners();
     this.noteSchemaVersion();
   }
 
@@ -640,6 +642,42 @@ export class Store {
         const roles = this.writeMachineRoles(m.id, () => rolesFromLegacy(m, list(m.id)));
         const on = roles.filter((r) => r.on).map((r) => `${ROLE_NAMES[r.role]} (${r.projects.join(', ') || 'no scheme'})`);
         console.log(`Machine roles (M1): ${m.name}${has.has(m.id) ? ', changed by an older release,' : ''} now lends ${on.join('; ') || 'nothing'}.`);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * Every machine has an owner (Build 10 H1; Cara, 2026-11-26: "every machine should have an owner"). A row with none
+   * (a shared one, #28 and #438, or one an older release added after a rollback) gets the person its created_by names
+   * (their name or login, one person only), else whoever made the join code that connected it (machine_joins). It
+   * keeps reaching the turns it reached while shared: each of its roles but Minion turns goes to every turn in its
+   * schemes (caps.everyone, access.ts lendsToEveryone), and its owner can take that back. A row none of those name is
+   * left without one and said, for a person to settle (it lends nothing meanwhile): an owner is never guessed. Every
+   * boot; says what it did, for the deploy's notes.
+   */
+  private machineOwners() {
+    const rows = this.db.prepare('SELECT id, name, created_by FROM machines WHERE owner_id IS NULL ORDER BY id').all() as { id: number; name: string; created_by: string }[];
+    if (!rows.length) return;
+    const users = this.listUsers();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const m of rows) {
+        const by = m.created_by.trim().toLowerCase();
+        const named = users.filter((u) => u.name.toLowerCase() === by || u.login.toLowerCase() === by);
+        const join = this.db.prepare('SELECT owner_id, asker_id FROM machine_joins WHERE joined_id = ? AND machine_id IS NULL AND COALESCE(owner_id, asker_id) IN (SELECT id FROM users) ORDER BY id LIMIT 1').get(m.id) as { owner_id: number | null; asker_id: number | null } | undefined;
+        const owner = named.length === 1 ? { id: named[0].id, why: `created_by "${m.created_by}"` } : join ? { id: (join.owner_id ?? join.asker_id)!, why: 'the join code that connected it' } : null;
+        if (!owner) {
+          console.log(`Machine owners (H1): ${m.name} (row ${m.id}) has no owner, and neither its created_by ("${m.created_by}") nor a join code names one person: left as it is, lending nothing, for a person to give it an owner or remove it.`);
+          continue;
+        }
+        this.db.prepare('UPDATE machines SET owner_id = ? WHERE id = ?').run(owner.id, m.id);
+        this.writeMachineRoles(m.id, (roles) => roles.map((r) => (r.role === 'turns' ? r : { ...r, caps: { ...r.caps, everyone: true } })));
+        const name = users.find((u) => u.id === owner.id)!.name;
+        console.log(`Machine owners (H1): ${m.name} (row ${m.id}) is now ${name}'s, from ${owner.why}; its roles but Minion turns stay lent to every turn in their schemes.`);
       }
       this.db.exec('COMMIT');
     } catch (err) {

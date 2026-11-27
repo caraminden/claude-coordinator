@@ -156,7 +156,7 @@ export function adminOwned(store: Store, project: Project): boolean {
   return !!store.getUser(project.owner_id ?? -1)?.admin;
 }
 
-/** Who may see and change a machine on the Machines page: its owner, and admins (all of them, ownerless ones too). */
+/** Who may see and change a machine on the Machines page: its owner, and admins (all of them). */
 export function managesMachine(who: Pick<Session, 'uid' | 'admin'>, machine: Pick<Machine, 'owner_id'>): boolean {
   return !!who.admin || (machine.owner_id !== null && machine.owner_id === who.uid);
 }
@@ -167,17 +167,27 @@ export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Sessi
 }
 
 /**
+ * Whether its owner lent this role to every turn in its schemes, not only the turns they ask for (Build 10 H1,
+ * `caps.everyone`): the owner's "for my schemes". Minion turns never: a turn runs only on its sender's own Claude login.
+ */
+export function lendsToEveryone(store: Store, machine: Pick<Machine, 'id'>, role: Role): boolean {
+  return role !== 'turns' && !!store.machineRoles(machine.id).find((r) => r.role === role)?.caps.everyone;
+}
+
+/**
  * Whether a machine lends this role to this scheme, for a turn `askers` asked for (Build 7 M1): only if the role is
- * switched on and its list of schemes has this one (#438's one list, a list per role since M1), whoever owns the
- * scheme. A person's own (#306, Josh: "any scheme they are in ... can use their machine to do stuff on their behalf")
- * also needs its owner to have asked for the turn and to be in the scheme; for CI runners, which no turn asks for,
- * only to be in it. A CI runner host lends nothing but its runners (ci-runner.ts mayFetch).
+ * switched on and its list of schemes has this one (#438's one list, a list per role since M1), and its owner is in the
+ * scheme. Every machine has an owner (Build 10 H1); a role it lent to everyone (lendsToEveryone) goes to any turn there,
+ * else only to turns its owner asked for (#306, Josh: "any scheme they are in ... can use their machine to do stuff on
+ * their behalf"). CI runners, which no turn asks for, need only the owner in the scheme. A row with no owner (one the
+ * backfill could name no one for) lends nothing. A CI runner host lends nothing but its runners (ci-runner.ts mayFetch).
  */
 export function lendsRole(store: Store, machine: Machine, role: Role, project: Project, askers: readonly number[] = []): boolean {
   if (!store.roleGrants(machine.id, role, project.id)) return false;
-  if (role === 'ci') return machine.owner_id === null || ownerAsked(store, machine.owner_id, [machine.owner_id], project.id);
+  if (role === 'ci') return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
   if (storedCheck(machine)?.runners) return false;
-  return machine.owner_id === null || ownerAsked(store, machine.owner_id, askers, project.id);
+  if (lendsToEveryone(store, machine, role)) return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
+  return ownerAsked(store, machine.owner_id, askers, project.id);
 }
 
 /**
@@ -190,9 +200,9 @@ export function taskmasterSeesMachine(store: Store, machine: Machine, project: P
   return lendsRole(store, machine, 'tools', project, askerId === null ? [] : [askerId]);
 }
 
-/** Whether a machine's owner is among a turn's askers and, for a scheme's turn, in that scheme. */
-export function ownerAsked(store: Store, ownerId: number, askers: readonly number[], projectId: number | null): boolean {
-  const owner = store.getUser(ownerId);
+/** Whether a machine's owner is among a turn's askers and, for a scheme's turn, in that scheme. No owner: never. */
+export function ownerAsked(store: Store, ownerId: number | null, askers: readonly number[], projectId: number | null): boolean {
+  const owner = store.getUser(ownerId ?? -1);
   if (!owner || owner.disabled_at || !askers.includes(owner.id)) return false;
   return projectId === null || store.canSee({ uid: owner.id, admin: !!owner.admin }, projectId);
 }

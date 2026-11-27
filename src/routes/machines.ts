@@ -7,7 +7,7 @@ import { byMinion, REAPED, reapedRows } from '../reaper.ts';
 import { readEmulatorLease } from '../emulator-lease.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { lendsRole, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
+import { lendsRole, lendsToEveryone, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { readLongJobsA } from '../long-jobs.ts';
 import { runnerAsk } from '../ci-runner.ts';
 import { heldRows } from '../ci-hold.ts';
@@ -80,9 +80,7 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   // A machine being removed takes no new starts (spec section 4): its page hides the switch, and the server holds to it too.
   if ((worker ?? lend?.worker) && app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it takes no new turns`);
   // A machine runs only its owner's turns, on a sign-in they make there themselves: nobody else offers it, though an admin may switch it off.
-  if ((worker ?? lend?.worker) && !app.machines.lendsWorker(machine) && machine.owner_id !== session.uid) {
-    throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
-  }
+  if ((worker ?? lend?.worker) && !app.machines.lendsWorker(machine) && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can switch Minion turns on');
   const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number; priority?: number | null } = {};
   // Its owner's order among their computers (Build 7 M6; Josh, 2026-11-25: "put work on machine 1 before using machine 2"): theirs alone, like caps.
   if (body.priority !== undefined) {
@@ -123,9 +121,10 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
 const rolesView = (roles: RoleRow[]) => roles.map(({ caps: { ticks: _, ...caps }, ...r }) => ({ ...r, name: ROLE_NAMES[r.role], caps }));
 
 /**
- * Change one of a machine's roles (Build 7 M1): { role, on?, projects? (the whole list), caps? }. Its owner and admins
- * (managesMachine). Switched on with no list, a role keeps the list it had, or with none is lent to every scheme its
- * owner is in (Josh, 2026-11-25: "Every scheme you're in"; an ownerless machine's: the ones the person switching it can see).
+ * Change one of a machine's roles (Build 7 M1): { role, on?, projects? (the whole list), caps?, everyone? }. Its owner and
+ * admins (managesMachine). Switched on with no list, a role keeps the list it had, or with none is lent to every scheme its
+ * owner is in (Josh, 2026-11-25: "Every scheme you're in"). everyone (Build 10 H1, its owner only, never Minion turns):
+ * the role goes to every turn in its schemes, not only the ones its owner asks for (access.ts lendsToEveryone).
  */
 export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: Record<string, unknown>) {
   if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
@@ -147,23 +146,24 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   } catch (err) {
     throw new HttpError(400, (err as Error).message);
   }
+  if (body.everyone !== undefined && typeof body.everyone !== 'boolean') throw new HttpError(400, 'everyone must be true or false');
+  if (body.everyone === true && role === 'turns') throw new HttpError(400, "Minion turns run only their owner's turns: they can't be lent to everyone");
+  if (body.everyone !== undefined && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can lend it to everyone in its schemes');
   // A machine runs only its owner's turns, on a sign-in they make there themselves: nobody else offers it, though an admin may switch it off.
-  if (role === 'turns' && body.on === true && !was.on && machine.owner_id !== session.uid) {
-    throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
-  }
+  if (role === 'turns' && body.on === true && !was.on && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can switch Minion turns on');
   // What the PC is decides what it can do (H2): a role its agent's report rules out isn't switched on.
   const cannot = body.on === true && !was.on ? roleCannot(storedReport(machine), role, app.machines.gpuFound(machine)) : null;
   if (cannot) throw new HttpError(409, `${ROLE_NAMES[role]} can't go on for ${machine.name}: ${cannot}`);
   if (role === 'turns' && body.on === true && !was.on && app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it takes no new turns`);
   // Caps on a person's own machine are set by its owner's own sign-in only (spec section 7, Josh: "On the page").
-  if (body.caps !== undefined && machine.owner_id !== null && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can set its caps');
-  const owner = machine.owner_id === null ? null : app.store.getUser(machine.owner_id);
+  if (body.caps !== undefined && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can set its caps');
+  const owner = app.store.getUser(machine.owner_id ?? -1);
   const who = owner ? { uid: owner.id, admin: !!owner.admin } : session;
   const everyScheme = app.store
     .listProjects()
     .filter((p) => app.store.canSee(who, p.id))
     .map((p) => p.id);
-  const roles = app.store.setMachineRole(machine.id, role, { ...(typeof body.on === 'boolean' ? { on: body.on } : {}), ...(projects ? { projects } : {}), ...(caps ? { caps } : {}), everyScheme });
+  const roles = app.store.setMachineRole(machine.id, role, { ...(typeof body.on === 'boolean' ? { on: body.on } : {}), ...(projects ? { projects } : {}), ...(caps || body.everyone !== undefined ? { caps: { ...caps, ...(body.everyone !== undefined ? { everyone: body.everyone || null } : {}) } } : {}), everyScheme });
   if (body.on === true) unpause(app.store, machine.id, role);
   await ownWrites(); // what follows re-reads the grants (#1244)
   app.machines.rolesChanged(machine.id);
@@ -516,7 +516,8 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
       const view = app.machines.view(m);
       return {
         ...view,
-        owner_name: m.owner_id === null ? null : (app.store.getUser(m.owner_id)?.name ?? null),
+        owner_name: app.store.getUser(m.owner_id ?? -1)?.name ?? null,
+        tools_everyone: lendsToEveryone(app.store, m, 'tools'),
         project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
         // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
         minions_get_it: lendsRole(app.store, m, 'tools', project, asker === null ? [] : [asker]),
@@ -544,7 +545,7 @@ function pickWindows(app: App, caller: Ticket, project: Project | undefined, ser
   const owned = app.runner.ownedMachines(caller.id);
   const eligible = app.machines
     .online()
-    .filter((m) => m.servers.includes('ws') && lendsRole(app.store, m, 'screen', project, asker === null ? [] : [asker]) && (m.owner_id === null || owned.includes(m.id)))
+    .filter((m) => m.servers.includes('ws') && lendsRole(app.store, m, 'screen', project, asker === null ? [] : [asker]) && (lendsToEveryone(app.store, m, 'screen') || owned.includes(m.id)))
     .map((m) => ({ id: m.id, name: m.name, busy: app.machines.screenBusy(m.id, caller.id), priority: m.priority ?? null }));
   const got = app.machines.windows.pick(caller.id, eligible);
   if (!got) throw new HttpError(503, `No Windows machine lent to ${project.name} is online with its workspace tools on`, true);
@@ -557,10 +558,11 @@ function openTurnSession({ res, url, app, caller, params }: Ctx, pooled: boolean
   const project = app.store.getProject(caller!.project_id);
   const picked = pooled ? pickWindows(app, caller!, project, server) : null;
   const machine = picked ? picked.machine : app.store.getMachine(Number(params.machineId));
-  // A person's own (#306) opens only for a turn that got it at its start (src/runner.ts TurnState.owned),
-  // which its owner asked for: never mid-turn, never for someone else's.
+  // A machine (every one has an owner, #306, Build 10 H1) opens only for a turn that got it at its start (src/runner.ts
+  // TurnState.owned), which its owner asked for: never mid-turn, never for someone else's; unless its owner lent this
+  // role to everyone in its schemes (lendsToEveryone), when the scheme check below decides.
   // The owner check too: a removed machine's id can come back as someone else's.
-  if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
+  if (machine && !lendsToEveryone(app.store, machine, pooled ? 'screen' : 'tools') && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
     throw new HttpError(403, "That machine is someone else's, or this turn started without it");
   }
   // A machine opens only for a minion in a scheme its Tools role is lent to (#438, M1), as at its turn's start
@@ -781,18 +783,16 @@ export const machineRoutes: Route[] = [
     ...people,
     async handler({ req, res, app, session }) {
       const body = await readJson(req);
-      // A person's machine is their own (#306). An admin's is shared, as before, unless they say it's theirs.
-      if (body.mine !== undefined && typeof body.mine !== 'boolean') throw new HttpError(400, 'mine must be true or false');
-      const mine = !session.admin || body.mine === true;
+      // Every machine has an owner (#306, Build 10 H1): whoever adds it. An older page's `mine` is read no more.
       // Someone signed in with the old shared password has no id to own it by.
-      if (mine && session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to add a machine');
+      if (session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to add a machine');
       const name = machineName(body.name);
       // Adding is a name (#439): what it lends is ticked once its agent reports what it found. runners: a CI runner host.
       for (const k of ['always_on', 'runners'] as const) if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
       let machine;
       try {
         // The real hash goes in once the id (part of the token) is known.
-        machine = app.store.createMachine(name, '', session.name, mine ? session.uid! : null);
+        machine = app.store.createMachine(name, '', session.name, session.uid);
       } catch {
         throw new HttpError(409, 'A machine with that name already exists');
       }
@@ -869,7 +869,7 @@ export const machineRoutes: Route[] = [
     path: '/api/machines/:machine/token',
     ...people,
     handler: managed(({ req, res, app, machine, session }) => {
-      if (!(machine.owner_id === null ? session.admin : machine.owner_id === session.uid)) throw new HttpError(403, 'Only its owner can show its token');
+      if (machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can show its token');
       const token = app.machines.shownToken(machine);
       if (!token) throw new HttpError(409, 'Linked before tokens were kept: make a new token once, and it can be shown from then on');
       return json(res, 200, { token, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
@@ -986,12 +986,12 @@ export const machineRoutes: Route[] = [
     handler: (ctx) => {
       const machines = taskmasterMachines(ctx);
       // The names of the rest (#1638): one not lent here yet is what propose_machine_lend asks for.
-      // Someone else's own machine stays out of sight, as it does everywhere (#306).
+      // Someone else's machine stays out of sight, as it does everywhere (#306), unless they lent its tools to everyone.
       const asker = ctx.app.store.turnAsker(ctx.caller!.id);
       const others = ctx.app.store
         .listMachines()
-        .filter((m) => (m.owner_id === null || m.owner_id === asker) && !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
-        .map((m) => ({ name: m.name, owner_name: m.owner_id === null ? null : (ctx.app.store.getUser(m.owner_id)?.name ?? null) }));
+        .filter((m) => ((asker !== null && m.owner_id === asker) || lendsToEveryone(ctx.app.store, m, 'tools')) && !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
+        .map((m) => ({ name: m.name, owner_name: ctx.app.store.getUser(m.owner_id ?? -1)?.name ?? null }));
       return json(ctx.res, 200, { machines, others });
     },
   },

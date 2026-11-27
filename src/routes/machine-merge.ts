@@ -8,7 +8,7 @@ import { HttpError, json, ownWrites, publicOrigin, readJson, type App, type Ctx,
 import { dropMachine } from './machines.ts';
 
 /** As the token's Show (routes/machines.ts): the merge shows the kept row's token, so only its owner, or an admin for an ownerless one. */
-const ownsToken = (session: Ctx['session'], m: Machine) => (m.owner_id === null ? !!session.admin : m.owner_id === session.uid);
+const ownsToken = (session: Ctx['session'], m: Machine) => m.owner_id === session.uid;
 
 function lines(app: App, ctx: Ctx, merge: Merge) {
   const into = app.store.getMachine(merge.into)!;

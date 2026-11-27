@@ -322,6 +322,8 @@ export interface MachineInfo {
   project_names: string[];
   owner_id: number | null;
   owner_name?: string | null;
+  /** Its owner lent its tools to every turn in its schemes (Build 10 H1, access.ts lendsToEveryone). */
+  tools_everyone?: boolean;
   workspaces: { name: string; path: string }[];
   online: boolean;
   connected_at: number | null;
@@ -344,7 +346,8 @@ export interface MachineInfo {
 /** A machine as list_machines shows it (#307), its status first as the Machines tab says it (#437). */
 export function machineText(m: MachineInfo): string {
   const list = m.project_names.length ? m.project_names.join(', ') : 'no scheme';
-  const lent = m.owner_id !== null ? `${m.owner_name ?? 'a removed person'}'s own: goes to the turns they ask for, in ${list}` : `lent to ${list}`;
+  const whose = m.owner_name ?? 'a removed person';
+  const lent = m.tools_everyone ? `${whose}'s, lent to every turn in ${list}` : `${whose}'s own: goes to the turns they ask for, in ${list}`;
   const ws = m.workspaces.map((w) => `${w.name} (${w.path})`).join(', ');
   return [
     `${m.name}: ${STATUS_WORDS[m.status] ?? m.status}: ${m.when ? `${m.reason} · ${m.when.label} ${ago(m.when.at)}` : m.reason}`,

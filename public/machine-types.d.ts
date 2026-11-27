@@ -38,6 +38,8 @@ export interface MachineRoleCaps {
   threads?: number;
   memory_gb?: number;
   disk_gb?: number;
+  /** Its owner lent the role to every turn in its schemes, not only theirs (Build 10 H1, src/access.ts lendsToEveryone). */
+  everyone?: true;
 }
 
 /** One role of a machine as its row's cards read it (src/machines.ts view `roles`, src/machine-roles.ts RoleRow plus its name). */

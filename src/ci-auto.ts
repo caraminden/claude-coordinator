@@ -201,7 +201,7 @@ export class CiAuto {
 /** The no-machine card's one question, for the scheme's members (in its Taskmaster's chat): the PCs they could ask to be lent, by whose they are. */
 export function noMachineCard(store: Store, project: Project, os: Os, could: Machine[]): CardQuestion {
   const kind = os === 'linux' ? 'Linux' : 'Windows';
-  const whose = (m: Machine) => (m.owner_id === null ? 'an admin' : (store.getUser(m.owner_id)?.name ?? 'its owner'));
+  const whose = (m: Machine) => store.getUser(m.owner_id ?? -1)?.name ?? 'its owner';
   const asks = could.slice(0, 3).map((m) => ({
     label: `Ask ${whose(m)} to lend ${m.name}`.slice(0, 80),
     description: `${m.name} runs CI for other schemes. Once ${project.name} is ticked under its CI runners, it gets a runner by itself.`,

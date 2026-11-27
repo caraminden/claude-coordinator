@@ -16,7 +16,8 @@ export const ROLE_NAMES: Record<Role, string> = { tools: 'Tools and folders', sc
 export type Ticks = { server: string | null; workspaces: string[]; before_ticks?: true } | null;
 /** The caps an owner sets on the page (M3): workers, runners, threads, memory and disk; whole numbers from 0. */
 export const CAP_KEYS = ['workers', 'runners', 'threads', 'memory_gb', 'disk_gb'] as const;
-export type Caps = Partial<Record<(typeof CAP_KEYS)[number], number>> & { ticks?: Ticks };
+// everyone: its owner lent the role to every turn in its schemes, not only theirs (Build 10 H1, access.ts lendsToEveryone).
+export type Caps = Partial<Record<(typeof CAP_KEYS)[number], number>> & { ticks?: Ticks; everyone?: true };
 
 export type RoleRow = { role: Role; on: boolean; caps: Caps; setup: Record<string, unknown> | null; projects: number[] };
 /** machines.lend as the releases before roles wrote and read it (machines.ts Lend). */

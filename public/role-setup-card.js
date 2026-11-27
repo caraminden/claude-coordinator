@@ -60,7 +60,7 @@ function runnerInstall(m, redraw) {
 }
 
 /** Who presses it: its owner, or an admin on a shared machine (the server's rule). @param {MachineRow} m */
-const presses = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
+const presses = (m) => m.owner_id === account?.id;
 /** @param {MachineRow} m @returns {MachineRow} */
 const current = (m) => /** @type {MachineRow[] | undefined} */ (openView().machines)?.find((x) => x.id === m.id) ?? m;
 /** @param {MachineRow} m @param {string} role */

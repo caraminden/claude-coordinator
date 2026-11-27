@@ -142,6 +142,9 @@ export function redeemJoin(store: Store, issueToken: (machineId: number) => stri
     // As the token route: a new token would cut the draining agent off before its copies are home.
     if (removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token until its copies are cleared`);
   } else {
+    // Every machine has an owner (Build 10 H1): whoever made the code, which Connect a computer does with their own login.
+    const owner = join.owner_id ?? join.asker_id;
+    if (owner === null) throw new HttpError(410, 'This join code has no one to own the machine: press Connect a computer on the Machines page for a new one');
     const host = report?.host || text(body.host, 100);
     const names = new Set(store.listMachines().map((m) => m.name));
     const taken = (n: string) => names.has(n) || RESERVED_NAMES.has(n) || n.endsWith(WS_SUFFIX);
@@ -149,7 +152,7 @@ export function redeemJoin(store: Store, issueToken: (machineId: number) => stri
     for (let tries = 0; !machine && tries < 5; tries++) {
       const name = nameFromHost(host, taken);
       try {
-        machine = store.createMachine(name, '', join.created_by, join.owner_id);
+        machine = store.createMachine(name, '', join.created_by, owner);
       } catch (err) {
         if (!/UNIQUE/.test(String(err))) throw err;
         names.add(name);

@@ -147,12 +147,12 @@ export class MachinePools {
     const never = (why: string): Block => ({ why, never: true });
     const m = this.d.store.getMachine(machineId);
     // A removed machine's number can come to another one.
-    if (!m || m.owner_id === null || (name && m.name !== name)) return never('that computer was removed');
-    const owner = this.d.store.getUser(m.owner_id)?.name ?? 'its owner';
+    if (!m || (name && m.name !== name)) return never('that computer was removed');
+    const owner = this.d.store.getUser(m.owner_id ?? -1)?.name ?? 'its owner';
     if (!this.d.lends(m)) return never(`${owner} has switched Minion turns off there`);
     if (person !== m.owner_id) return never(`it runs only ${owner}'s turns, and this one is ${person === null ? 'nobody' : (this.d.store.getUser(person)?.name ?? 'someone else')}'s`);
     const project = this.d.store.getProject(ticket.project_id);
-    if (!project || !lendsRole(this.d.store as Store, m, 'turns', project, [m.owner_id])) return never('it is not lent to this scheme');
+    if (!project || !lendsRole(this.d.store as Store, m, 'turns', project, [m.owner_id ?? -1])) return never('it is not lent to this scheme');
     const info = this.d.info(m.id);
     if (info?.signedIn === false) return never(`${owner} is not signed in to Claude there`);
     // The account a turn runs on must be signed in there (#2061): the pick there is among those (accountsAt).
@@ -182,8 +182,8 @@ export class MachinePools {
   /** "Runs on" choices for a person: each machine of theirs, with why it can't be picked. */
   choices(projectId: number, person: number | null): { id: number; name: string; why: string | null }[] {
     return this.d.store.listMachines().flatMap((m) => {
-      if (m.owner_id === null || !(this.d.lends(m) || m.owner_id === person)) return [];
-      const why = m.owner_id !== person ? `only ${this.d.store.getUser(m.owner_id)?.name ?? 'its owner'} can pick it` : (this.refuses(m.id, { project_id: projectId }, person)?.why ?? null);
+      if (!(this.d.lends(m) || m.owner_id === person)) return [];
+      const why = m.owner_id !== person ? `only ${this.d.store.getUser(m.owner_id ?? -1)?.name ?? 'its owner'} can pick it` : (this.refuses(m.id, { project_id: projectId }, person)?.why ?? null);
       return [{ id: m.id, name: m.name, why }];
     });
   }

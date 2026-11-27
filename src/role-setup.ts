@@ -169,7 +169,7 @@ export class RoleSetups {
     if (kind !== 'setup' && kind !== 'test') throw new HttpError(400, 'kind must be setup or test');
     const name = ROLE_NAMES[role];
     // It runs installers and programs on that PC: its owner's press (a shared machine's: an admin's).
-    if (machine.owner_id === null ? !person.admin : machine.owner_id !== person.id) throw new HttpError(403, `Only ${machine.name}'s owner sets up and tests its roles`);
+    if (machine.owner_id !== person.id) throw new HttpError(403, `Only ${machine.name}'s owner sets up and tests its roles`);
     const going = this.active.get(machine.id);
     if (going) throw new HttpError(409, `${ROLE_NAMES[going.run.role]} ${going.run.kind === 'setup' ? 'Set up' : 'test'} is still running on ${machine.name}: one at a time`);
     const report = storedReport(machine);

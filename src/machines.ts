@@ -445,10 +445,10 @@ export class MachineRelay {
     const check = storedCheck(machine);
     const runnersHere = this.runnersOn(machine.id);
     const runnerRow = this.runnerRow(machine);
-    // Its list of schemes (#438), and which of those schemes' turns get it: all of them, or for a person's own,
-    // the ones its owner is in (and only the turns they ask for).
+    // Its list of schemes (#438), and which of those schemes' turns get it: the ones its owner is in (and only the
+    // turns they ask for, unless they lent its tools to everyone there).
     const projects = this.store.machineProjects(machine.id);
-    const owner = machine.owner_id === null ? [] : [machine.owner_id];
+    const owner = [machine.owner_id ?? -1];
     const gets = this.store
       .listProjects()
       .filter((p) => lendsRole(this.store, machine, 'tools', p, owner))
@@ -498,8 +498,6 @@ export class MachineRelay {
       mcp_command: machine.mcp_command,
       /** The schemes it is lent to: its list. */
       projects,
-      /** False only for a CI runner host from before #438 with no list: it serves every scheme an admin owns. */
-      scoped: !!machine.scoped,
       servers: agent?.servers ?? [],
       /** Whether its agent takes ticks (#439); null while offline, when nobody knows which agent will connect. */
       managed: agent ? agent.managed : null,
@@ -694,7 +692,7 @@ export class MachineRelay {
       setPaused(this.store, machine.id, [...paused, 'ci']);
       this.store.setMachineRole(machine.id, 'ci', { setup: { ...ci.setup, runner_agent: true } });
     } else if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && !merges(this.store).some((m) => m.into === machine.id)) {
-      const owner = machine.owner_id === null ? null : this.store.getUser(machine.owner_id);
+      const owner = this.store.getUser(machine.owner_id ?? -1);
       const everyScheme = owner
         ? this.store
             .listProjects()

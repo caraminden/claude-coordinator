@@ -76,7 +76,7 @@ export function renderRemovals(el, redraw) {
   if (!el) return;
   // One draining that this page never clicked (its owner's reload or other tab): its command is kept from here on too.
   const machines = /** @type {MachineRow[]} */ (openView().machines);
-  for (const m of machines) if (m.removing && (m.owner_id === null ? account?.admin : m.owner_id === account?.id)) removals.set(key(m), { name: m.name, command: uninstallFor(m, { removing: true, uninstall: /** @type {MachineRemoveReply['uninstall']} */ (m.removing) }) });
+  for (const m of machines) if (m.removing && m.owner_id === account?.id) removals.set(key(m), { name: m.name, command: uninstallFor(m, { removing: true, uninstall: /** @type {MachineRemoveReply['uninstall']} */ (m.removing) }) });
   /** @type {[string, { name: string, command: { tag: 'powershell' | 'bash', command: string } | null }, boolean][]} */
   const shown = [...removals].filter(([, r]) => r.command).map(([id, r]) => [id, r, machines.some((m) => key(m) === id)]);
   // Left alone while nothing changed, so a selection in a command survives the list's redraws.

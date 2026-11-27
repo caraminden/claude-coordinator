@@ -3,7 +3,6 @@
 // row and moves the other's runner agents onto it: its owner reinstalls them there with the kept row's token, and once
 // each has connected to the kept row, the CI role moves over and the other row goes, its token with it
 // (src/routes/machine-merge.ts). Until then both rows keep working, so nothing stops while the owner runs the lines.
-import { adminOwned } from './access.ts';
 import type { Machine, Store } from './db.ts';
 
 export type Os = 'windows' | 'linux';
@@ -32,19 +31,13 @@ export function pickKept<T extends Pick<Machine, 'id'>>(a: T, b: T, runnerRow: (
 
 /**
  * The schemes the kept row's CI role is lent to once merged: each row's own where its CI role is on, so every scheme
- * that got runner tokens from either PC row still does. A row from before #438 with no list (ownerless, unscoped) served
- * every scheme an admin owns: those it serves now go on the list, as the kept row then has one.
+ * that got runner tokens from either PC row still does.
  */
 export function mergedCi(store: Store, from: Machine, into: Machine): number[] {
   const list = (m: Machine) => {
     const ci = store.machineRoles(m.id).find((r) => r.role === 'ci');
     if (!ci?.on) return [];
-    return m.owner_id === null && !m.scoped
-      ? store
-          .listProjects()
-          .filter((p) => adminOwned(store, p))
-          .map((p) => p.id)
-      : ci.projects;
+    return ci.projects;
   };
   return [...new Set([...list(into), ...list(from)])].sort((a, b) => a - b);
 }

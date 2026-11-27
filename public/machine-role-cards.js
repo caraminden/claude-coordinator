@@ -36,7 +36,7 @@ const LIMITS = { ...WORKER_LIMITS, workers: [0, WORKER_LIMITS.workers[1]], runne
 /** Its owner, or an admin (access.ts managesMachine). @param {MachineRow} m */
 export const managesRoles = (m) => !!account?.admin || (m.owner_id !== null && m.owner_id === account?.id);
 /** Caps on a person's own machine are its owner's alone (spec section 7); a shared one's, an admin's. @param {MachineRow} m */
-const setsCaps = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
+const setsCaps = (m) => m.owner_id === account?.id;
 /** The page's newest view of the machine. @param {MachineRow} m */
 const current = (m) => /** @type {MachineRow[] | undefined} */ (view?.machines)?.find((x) => x.id === m.id) ?? m;
 /** @param {MachineRow} m @param {MachineRoleKey} role */
@@ -87,7 +87,6 @@ function cannot(m, r) {
   if (why) return why;
   if (r.role === 'ci' && m.report?.os === 'macos') return 'CI runners need Windows or Linux.';
   if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this computer runs Linux.';
-  if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';
   if (r.role === 'turns' && !(m.owner_id === account?.id)) return 'Only its owner can switch Minion turns on.';
   if (r.role === 'gpu' && m.report && !m.report.gpu && !hasGpu(m)) return 'That PC reported no GPU.';
   if (r.role === 'builds' && m.report?.os === 'macos') return 'Builds need Linux, or Windows with WSL.';
@@ -171,7 +170,7 @@ function capsLine(m, r, redraw) {
  */
 function orderLine(m, redraw) {
   const c = current(m);
-  const theirs = m.owner_id === null ? 0 : /** @type {MachineRow[]} */ (view?.machines ?? []).filter((x) => x.owner_id === m.owner_id && !x.runners).length;
+  const theirs = /** @type {MachineRow[]} */ (view?.machines ?? []).filter((x) => x.owner_id === m.owner_id && !x.runners).length;
   if (c.priority == null && theirs < 2) return null;
   const words = c.priority === 1 ? "First among its owner's computers" : `Order ${c.priority} among its owner's computers`;
   if (m.owner_id !== account?.id) return c.priority == null ? null : h('div', { class: 'small muted role-caps' }, words);

@@ -92,8 +92,7 @@ function change(m, fields, send, label, redraw) {
 /** @param {MachineRow} m @param {Redraw} redraw */
 function workerSwitch(m, redraw) {
   const { on } = /** @type {MachineWorker} */ (m.worker);
-  const shared = m.owner_id === null;
-  const why = on ? null : shared ? 'Shared machines run no minions' : mine(m) ? null : 'Only its owner can switch this on';
+  const why = on || mine(m) ? null : 'Only its owner can switch this on';
   const flip = () => change(m, { on: !on }, () => api(`api/machines/${m.id}`, { method: 'PATCH', body: { worker: !on } }), `switch Minion turns ${on ? 'off' : 'on'} for ${m.name}`, redraw);
   return h('button', {
     type: 'button',
@@ -426,7 +425,7 @@ export function workerSection(m, redraw, { bare = false } = {}) {
       'div',
       { class: 'worker-head-text' },
       h('span', { class: 'worker-head-line' }, h('b', {}, 'Minion turns'), w.on ? toneChip(st.tone, st.word) : null),
-      h('span', { class: 'muted small' }, m.owner_id === null && !w.on ? 'A machine runs only its owner\'s minions, and this one is shared. To use that PC, add it again with "Mine" ticked and switch it on in that row.' : st.why),
+      h('span', { class: 'muted small' }, st.why),
     ),
   );
   if (!w.on) return bare ? h('div', { class: 'worker worker-bare' }) : h('div', { class: 'worker', 'data-tone': 'neutral' }, head);

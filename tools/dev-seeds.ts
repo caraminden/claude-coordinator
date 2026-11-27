@@ -37,6 +37,14 @@ export interface SeedCtx {
   who: string;
 }
 
+/** The person seeded machines belong to (every machine has an owner, Build 10 H1): the signed-in one, else the first admin. */
+const seedOwner = (c: SeedCtx): number => {
+  const users = c.store.listUsers();
+  const u = users.find((x) => x.name === c.who) ?? users.find((x) => x.admin) ?? users[0];
+  if (!u) throw new Error('No person to own a seeded machine: sign in to the copy first');
+  return u.id;
+};
+
 /** The "Seeded" scheme, made once, with `login` (the copy's signed-in admin) a member. */
 export function seedScheme(store: Store, dataDir: string, login: string): SeedCtx {
   const user = store.listUsers().find((u) => u.login.toLowerCase() === login.toLowerCase());
@@ -1201,7 +1209,7 @@ mock.boards('#takes', { boards: [
     about: "a minion's pending propose_machine_lend card: lend a seeded box to this scheme and tick a workspace, with what it lends after and a link to the box on the Machines page (#1638)",
     seed(c) {
       const name = `seeded-box-${hex().slice(0, 4)}`;
-      const m = c.store.createMachine(name, hex(), c.who);
+      const m = c.store.createMachine(name, hex(), c.who, seedOwner(c));
       const lend = { server: 'godot-ai', workspaces: ['art'] };
       c.store.updateMachine(m.id, { lend: JSON.stringify(lend) });
       const t = minion(c, 'Render the sprite sheets on the box', { note: 'needs the box lent here' });
@@ -1217,7 +1225,7 @@ mock.boards('#takes', { boards: [
         status: 'pending',
         summary: `Lend ${name} to ${c.project.name}`,
         plan: [...lines, '', `After this it lends: the godot-ai MCP server; workspaces ${after.workspaces.join(', ')}.`, '', why, '', `[${name} on the Machines page](${page})`].join('\n'),
-        machineLend: { id: m.id, name, owner: null, scheme, change, lines, after, why, page },
+        machineLend: { id: m.id, name, owner: c.who, scheme, change, lines, after, why, page },
       });
       return route(c, t, e.id);
     },
@@ -1225,8 +1233,7 @@ mock.boards('#takes', { boards: [
   'gpu-jobs': {
     about: "a minion's GPU jobs on a seeded desktop in every state (needs go, queued outside hours, running, paused resumable and frozen, done, failed), and that desktop on the Machines page (#859)",
     seed(c) {
-      const owner = c.store.listUsers().find((u) => u.name === c.who);
-      const m = c.store.createMachine(`seeded-desktop-${hex().slice(0, 4)}`, hex(), c.who, owner?.id ?? null);
+      const m = c.store.createMachine(`seeded-desktop-${hex().slice(0, 4)}`, hex(), c.who, seedOwner(c));
       c.store.updateMachine(m.id, { jobs: JSON.stringify({ folders: ['audiobooks', 'models'], max_limit_h: 8, gpu: true }), job_settings: JSON.stringify({ start: '23:00', end: '08:00', until: null, paused: false }) });
       c.store.setMachineProjects(m.id, [c.project.id]);
       const t = minion(c, 'Transcribe the audiobook', { note: 'GPU jobs on the desktop' });
@@ -1310,7 +1317,7 @@ mock.boards('#takes', { boards: [
         ),
       ];
       const waits = (j: (typeof jobs)[number]) => (j.state === 'queued' ? 'outside job hours (opens 11:00 PM PST)' : null);
-      const viewOf = (j: (typeof jobs)[number]) => jobView(j, { machine: machine.name, waits: waits(j), decider: owner?.id ?? null, ticketNumber: t.number });
+      const viewOf = (j: (typeof jobs)[number]) => jobView(j, { machine: machine.name, waits: waits(j), decider: m.owner_id, ticketNumber: t.number });
       w.asked('Transcribe chapters 5 to 8 on my desktop, and render chapter 8 with the narrator voice.');
       w.init();
       w.said('Queuing them on the desktop as GPU jobs; each shows below as it goes.');
@@ -1596,7 +1603,7 @@ mock.boards('#takes', { boards: [
         ],
       });
       // #1019: CI desktop load on Overview, collapsed to a line of CPU and memory: the PC's agent sampled every 30 s for 20 min.
-      const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who);
+      const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who, seedOwner(c));
       c.store.addRunnerLoads(
         Array.from({ length: 40 }, (_, i) => ({
           machine: pc.id,
@@ -1697,7 +1704,7 @@ mock.boards('#takes', { boards: [
         runs: [],
       });
       c.store.setSetting(`ci-health:${c.project.id}`, { offline: {}, sent: {}, problems: [] });
-      const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who);
+      const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who, seedOwner(c));
       // Someone is at the PC (idle_sec 0) and the CPU sits at 90% or more: the rule's "Overloading".
       c.store.addRunnerLoads(
         Array.from({ length: 40 }, (_, i) => ({

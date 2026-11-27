@@ -45,22 +45,19 @@ function machineScreen(sc) {
   );
 }
 
-/** Whether this scheme's minions get a machine for the viewer: a shared one lent here, or their own (their turns get it). */
-const oursHere = (m) => !m.runners && m.gets?.includes(view.projectId) && (m.owner_id === null || m.owner_id === account?.id);
+/** Whether this scheme's minions get a machine for the viewer: their own lent here (their turns get it). */
+const oursHere = (m) => !m.runners && m.gets?.includes(view.projectId) && m.owner_id === account?.id;
 
 /** The add form (#439): a name, and nothing about what it lends, which is ticked once its agent reports. runners: a CI runner host. */
 function machineAddForm(runners, label) {
   const name = h('input', { name: 'name', placeholder: runners ? 'desktop-ci-runners' : 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
   const alwaysOn = runners ? null : h('input', { type: 'checkbox', name: 'always_on', checked: true });
-  // Everyone else's machine is their own (#306); an admin's is shared unless they tick this.
-  const mine = !runners && account?.admin ? h('input', { type: 'checkbox', name: 'mine' }) : null;
   const status = h('span', { class: 'muted', role: 'status' });
   const form = h(
     'form',
     { class: `machine-add${runners ? ' runners' : ''}` },
     h('label', {}, 'Name', name),
     alwaysOn ? h('label', { class: 'check', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on (untick for a laptop)')) : '',
-    mine ? h('label', { class: 'check', title: "Off: a shared machine, its roles lent to the schemes ticked on each. On: only turns you ask for get it, in schemes you are in, and your contraptions' turns." }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
     h('button', { type: 'submit' }, label),
     status,
     // The steps sit in the form they are about (#492), not in a paragraph under the list.
@@ -92,7 +89,7 @@ function machineAddForm(runners, label) {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(alwaysOn && !alwaysOn.checked ? { always_on: false } : {}), ...(mine?.checked ? { mine: true } : {}), ...(runners ? { runners: true } : {}) } });
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(alwaysOn && !alwaysOn.checked ? { always_on: false } : {}), ...(runners ? { runners: true } : {}) } });
       view.machineToken = setupFor(machine, token, agent_url);
       name.value = '';
       status.textContent = '';
@@ -585,10 +582,8 @@ function machineBody(m) {
       'div',
       { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : [],
-      // A CI runner host from before #438 with no list serves every scheme an admin owns; ticking a scheme ends that.
-      m.runners && m.owner_id === null && !m.scoped ? kv('Runs CI for', 'Every scheme an admin owns') : [],
       // Its roles (Build 7 M3, Josh: "A · A card per role, schemes inside"): the Tools ticks and Minion turns live in their cards.
-      h('div', { class: 'machine-wide' }, m.owner_id === null || m.runners ? '' : h('div', { class: 'small muted role-cards-note' }, `Only turns ${m.created_by} asks for (and their contraptions) use it, in the schemes ticked on each role.`), roleCards(m, renderMachineList, { tools: () => machineLends(m) })),
+      h('div', { class: 'machine-wide' }, m.runners || m.roles?.some((r) => r.caps?.everyone) ? '' : h('div', { class: 'small muted role-cards-note' }, `Only turns ${m.created_by} asks for (and their contraptions) use it, in the schemes ticked on each role.`), roleCards(m, renderMachineList, { tools: () => machineLends(m) })),
       kv(
         'Computer',
         m.report ? h('div', { class: 'small' }, reportLine(m.report)) : '',
@@ -637,7 +632,7 @@ function ciAgentUpdate(m) {
 const managesHere = (m) => !!account?.admin || (m.owner_id !== null && m.owner_id === account?.id);
 
 /** Whether the viewer may show this machine's token (#1355): its owner's own, an admin's for a shared one (Cara, 2026-11-20, "Only its owner"). */
-const tokenIsMine = (m) => (m.owner_id === null ? !!account?.admin : m.owner_id === account?.id);
+const tokenIsMine = (m) => m.owner_id === account?.id;
 
 /** Tokens shown on this page, by machine id, so a redraw from the live list keeps one open until Hide or leaving the page. */
 const shownTokens = new Map();

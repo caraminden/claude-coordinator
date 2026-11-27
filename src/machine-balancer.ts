@@ -319,6 +319,8 @@ export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string
       const before = pcs.filter((o) => o.owner === pc.owner && key(o) < key(pc) && o.runners > 0);
       if (!before.length) return [pc.id, { runners: pc.runners, queued: waiting, ...(want && Object.keys(want).length ? { want } : {}) }];
       const covered = new Set(before.flatMap((o) => [...o.repos]));
+      // A later machine hears the labelled jobs only for repos with a job still waiting: the earlier machine's runners take the rest.
+      const mine = want && Object.fromEntries(Object.entries(want).filter(([repo]) => (waiting[repo] ?? 0) > 0));
       const wanted: Record<string, number> = {};
       for (const repo of pc.repos) {
         const n = (waiting[repo] ?? 0) + (covered.has(repo) ? 0 : 1);
@@ -332,7 +334,7 @@ export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string
             Object.values(wanted).reduce((a, n) => a + n, 0),
           ),
           queued: wanted,
-          ...(want && Object.keys(want).length ? { want } : {}),
+          ...(mine && Object.keys(mine).length ? { want: mine } : {}),
         },
       ];
     }),

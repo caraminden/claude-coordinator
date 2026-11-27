@@ -65,6 +65,18 @@ const labelled = [
   { name: 'linux-4', labels: ['self-hosted', 'ci-linux-check'] },
 ];
 
+test('runnerOrder: a later machine hears labelled jobs only for repos with a job still waiting', () => {
+  const pcs = [
+    { id: 1, owner: 1, priority: 1, runners: 2, repos: new Set(['c']) },
+    { id: 2, owner: 1, priority: 2, runners: 1, repos: new Set(['c', 'only2']) },
+  ];
+  const want = { c: [['linux-4']] };
+  const idle = runnerOrder(pcs, new Map(), want);
+  assert.equal(idle.get(1)?.want?.c?.length, 1);
+  assert.equal(idle.get(2)?.want, undefined, 'the first machine takes it; the second keeps its repo-only runner');
+  assert.deepEqual(runnerOrder(pcs, new Map([['c', 1]]), want).get(2)?.want, want);
+});
+
 test('runnersFor: each queued job gets the runners whose labels cover all of its; a job nobody covers is left out', () => {
   const want = runnersFor(new Map([['C', [['ci-linux-check'], ['ci-linux', 'ci-linux-long'], ['nobody-has-this']]]]), new Map([['C', labelled]]));
   assert.deepEqual(want, { c: [['linux-4'], ['linux-3']] });
@@ -75,6 +87,23 @@ test('a job asking for a label only a sleeping runner has wakes that runner, tho
   assert.deepEqual([...pickAwake(fleet, plan)].sort(), ['linux'], 'by repo alone the awake -linux serves the queued job');
   assert.deepEqual([...pickAwake(fleet, { ...plan, want: { c: [['linux-4']] } })].sort(), ['linux-4'], 'with labels the runner that covers the job is the one up');
   assert.deepEqual([...pickAwake(fleet, { runners: 2, queued: { c: 2 }, want: { c: [['linux-4'], ['linux-2', 'linux-3']] } })].sort(), ['linux-2', 'linux-4']);
+  // Two jobs with the same label and one busy runner that has it: the busy one takes one, the other wakes a second.
+  const busy = [runner('x1', 'c', { busy: true }), runner('x2', 'c', { awake: false }), runner('y', 'c', { awake: false })];
+  assert.deepEqual(
+    [
+      ...pickAwake(busy, {
+        runners: 3,
+        queued: { c: 2 },
+        want: {
+          c: [
+            ['x1', 'x2'],
+            ['x1', 'x2'],
+          ],
+        },
+      }),
+    ].sort(),
+    ['x1', 'x2'],
+  );
   // A runner already up that covers the job is kept, and wakes nothing more.
   assert.deepEqual([...pickAwake(fleet, { runners: 1, queued: { c: 1 }, want: { c: [['linux', 'linux-2']] } })].sort(), ['linux']);
 });

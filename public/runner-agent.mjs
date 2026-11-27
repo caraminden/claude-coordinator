@@ -562,11 +562,18 @@ export function pickAwake(runners, plan) {
   // Queued jobs that ask for labels: a runner whose labels cover each one's, so a job isn't left waiting while a runner
   // without them stays up. A job one kept runner (a busy or ship's, or one picked) covers needs no more; of the idle ones
   // that cover it, one already awake goes first. It counts as the repo's queued job it answers.
+  const claimed = new Set();
   for (const [repo, jobs] of Object.entries(plan.want ?? {})) {
     for (const names of jobs) {
       if (left <= 0) break;
       const mine = runners.filter((r) => r.repo === repo && names.includes(r.name.toLowerCase()));
-      if (!mine.length || mine.some((r) => keep.has(r.key))) continue;
+      if (!mine.length) continue;
+      // A kept runner that covers the job takes it, once: a second job with the same labels needs a runner of its own.
+      const took = mine.find((r) => keep.has(r.key) && !claimed.has(r.key));
+      if (took) {
+        claimed.add(took.key);
+        continue;
+      }
       const pick = (idle.get(repo) ?? []).find((r) => names.includes(r.name.toLowerCase()));
       if (!pick) continue;
       idle.set(
@@ -574,6 +581,7 @@ export function pickAwake(runners, plan) {
         idle.get(repo).filter((r) => r !== pick),
       );
       keep.add(pick.key);
+      claimed.add(pick.key);
       left--;
       if (wanted.get(repo) > 0) wanted.set(repo, wanted.get(repo) - 1);
     }

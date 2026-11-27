@@ -211,18 +211,40 @@ export function findRow(app: App, leadId: number, row: unknown): CabalMemberRow 
 /** Members at work, as the board reads them (building, open or blocked): what the width counts. One sealed on its chain, merged or dismissed holds no place. */
 const atWork = async (app: App, leadId: number, self: number) => ((await readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) }))?.counts.working ?? 0) + app.store.cabalRows(leadId).filter((r) => r.asked_at != null && r.ticket_id == null && r.id !== self).length; // a row asked of another scheme's Taskmaster holds its place
 
-/** What a row's `after` chains on: a #N, or another row's label whose minion is started. */
-function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | null {
-  const after = r.after.trim();
-  if (!after) return null;
-  const n = /^#?(\d+)$/.exec(after);
-  if (n) return Number(n[1]);
-  const other = app.store.cabalRows(lead.id).find((x) => x.label && x.label.toLowerCase() === after.toLowerCase());
-  if (!other) throw new HttpError(400, `Row ${rowName(r)} waits on "${after}", which is no #N and no label on your board`);
-  const t = other.ticket_id != null ? app.store.getTicket(other.ticket_id) : undefined;
-  if (!t) throw new HttpError(409, `Row ${rowName(r)} waits on ${after}, which isn't started yet: start ${after} first`);
-  if (t.project_id !== lead.project_id) throw new HttpError(400, `Row ${rowName(r)} waits on ${after}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${after} ships`);
-  return t.number!;
+/** What a row's `after` chains on: a #N, or another row's label whose minion is started; "H1, H2" (also "and", "&", "+") is a list, and the parts already shipped or merged drop out. */
+export function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | null {
+  const whole = r.after.trim();
+  if (!whole) return null;
+  const rows = app.store.cabalRows(lead.id);
+  // A label may hold spaces (and even "and"), so the whole string is tried as a label first, as whenText does.
+  const isLabel = (x: string) => rows.some((o) => o.label && o.label.toLowerCase() === x.toLowerCase());
+  const parts = isLabel(whole)
+    ? [whole]
+    : whole
+        .split(/\s*(?:[,;&+]|\band\b)\s*/i)
+        .map((x) => x.trim())
+        .filter(Boolean);
+  const open: { part: string; number: number }[] = [];
+  for (const part of parts) {
+    const n = /^#?(\d+)$/.exec(part);
+    let num: number;
+    let t: Ticket | undefined;
+    if (n) {
+      num = Number(n[1]);
+      t = app.store.getTicketByNumber(lead.project_id, num);
+    } else {
+      const other = rows.find((x) => x.label && x.label.toLowerCase() === part.toLowerCase());
+      if (!other) throw new HttpError(400, `Row ${rowName(r)} waits on "${part}", which is no #N and no label on your board`);
+      t = other.ticket_id != null ? app.store.getTicket(other.ticket_id) : undefined;
+      if (!t) throw new HttpError(409, `Row ${rowName(r)} waits on ${part}, which isn't started yet: start ${part} first`);
+      if (t.project_id !== lead.project_id) throw new HttpError(400, `Row ${rowName(r)} waits on ${part}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${part} ships`);
+      num = t.number!;
+    }
+    if (t && app.store.lastShipNote(t.id) != null) continue; // shipped or merged into the build: nothing left to wait on
+    open.push({ part, number: num });
+  }
+  if (open.length > 1) throw new HttpError(409, `Row ${rowName(r)} waits on ${open.map((o) => `${o.part} (#${o.number})`).join(' and ')}, which are all still open and a start waits on one minion: start it once all but one have shipped or merged`);
+  return open[0]?.number ?? null;
 }
 
 /**

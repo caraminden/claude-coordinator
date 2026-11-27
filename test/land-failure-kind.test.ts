@@ -102,6 +102,14 @@ test('a flake: the second red whose files all passed alone', () => {
   assert.equal(kind(killed), null);
 });
 
+test('a burn-in red that failed alone too is no race: the wake says a plain red or a CI-only fault (#2141)', () => {
+  const out = `burn-in: test/real.test.ts: failed in 10 of 10 copies at once (copies 1 2 3 4 5 6 7 8 9 10), in 9 s\nburn-in: test/real.test.ts: alone: failed too\nland: a new or changed test failed its burn-in in CI (https://x/4): test/real.test.ts: failed in 10 of 10 copies at once, so it never reached the full suite and main is untouched. test/real.test.ts failed in every copy, and run once by itself on CI it fails alone too: a plain red or a CI-only environment fault (a temp path, git identity, a missing tool), not a race. Read its output above and fix that, then run this again`;
+  const c = classifyLandFailure(out);
+  assert.equal(c?.kind, 'burn-in');
+  assert.match(c?.line ?? '', /alone too, so it is not a race: a plain red, or a fault only CI's environment has/);
+  assert.doesNotMatch(c?.line ?? '', /fix the race/);
+});
+
 test("a burn-in red (#1443) is the ship's own, even when the failing copy quotes a passed-alone line", () => {
   const out = `burn-in: test/real.test.ts, copy 3 of 10 (its output from the failing tests on):\n✖ test/real.test.ts › races › on a shared path (12ms)\nrun-tests: test/old.test.ts: failed in the full run, passed alone: likely load\nburn-in: test/real.test.ts: failed in 3 of 10 copies at once (copies 2 3 7), in 19 s\nland: refused: a new or changed test failed its burn-in in CI (https://x/4): test/real.test.ts failed in 3 of 10 copies at once, so it never reached the full suite`;
   const c = classifyLandFailure(out);

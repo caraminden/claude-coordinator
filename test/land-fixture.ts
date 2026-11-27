@@ -169,6 +169,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_LOG_WHOLE=<path>: a run whose commit has that path names no failing test at all (#2019);
 // FAKE_REAL_SHORT=<file>: a log with that file counts one more failed file than it names (#1918);
 // FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
+// FAKE_BURN_ALONE=failed|passed|unrun: every copy failed instead, and the file run once alone failed or passed, or had no time to run (#2141);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
 // hang run-tests.sh stopped (the same interrupt, but a verdict); FAKE_CUT_KIND: how those runs were cut off, lost (no step failed and no log: the runner went away, #1864), interrupt
@@ -326,6 +327,7 @@ case "$*" in
       if [ "\${FAKE_LOG:-}" = burn ]; then
         [ -z "\${FAKE_CASE:-}" ] || for f in $rl; do printf '%b test at %s:3:1\\n%b ✖ %s (12.5ms)\\n' "$p" "$f" "$p" "$FAKE_CASE"; done
         for f in $rl; do printf '%b burn-in: %s: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p" "$f"; done
+        [ -z "\${FAKE_BURN_ALONE:-}" ] || for f in $rl; do printf '%b burn-in: refused: %s: alone: failed too, after every copy failed: a plain red\n' "$p" "$f"; done
       else
         printf '%b run-tests: %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\n' "$p" "$(($(wc -w <<<"$rl") + $(grep -cF "\${FAKE_REAL_SHORT:-no}" <<<"$rl")))"
         for f in $rl; do printf '%b run-tests: %s: failed again alone: a real failure\n' "$p" "$f"; done
@@ -336,7 +338,14 @@ case "$*" in
       printf '%b burn-in: test/real.test.ts, copy 2 of 10 (its output from the failing tests on):\n' "$p"
       echo "not ok 1 - the red test's output (run $3)"
       printf '%b land: run-tests: test/slow.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 31.5)\n' "$p"
-      printf '%b burn-in: test/real.test.ts: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p"
+      if [ -n "\${FAKE_BURN_ALONE:-}" ]; then # #2141: every copy failed, then the file ran once alone: failed or passed
+        printf '%b burn-in: test/real.test.ts: failed in 10 of 10 copies at once (copies 1 2 3 4 5 6 7 8 9 10), in 14 s\n' "$p"
+        printf '%b burn-in: test/real.test.ts: alone: %s\n' "$p" "\${FAKE_BURN_ALONE/unrun/no time left to run it}"
+        [ "$FAKE_BURN_ALONE" != failed ] || { printf '%b burn-in: refused: test/real.test.ts: alone: failed too, after every copy failed: a plain red\n' "$p"; exit 0; }
+        [ "$FAKE_BURN_ALONE" != unrun ] || { printf '%b burn-in: refused: test/real.test.ts: alone: no time left to run it, after every copy failed\n' "$p"; exit 0; }
+      else
+        printf '%b burn-in: test/real.test.ts: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p"
+      fi
       printf '%b burn-in: refused: a copy of test/real.test.ts failed when run 10 at once, so it is racy (its output is above); fix the race, not the wait\n' "$p"
       exit 0
     fi

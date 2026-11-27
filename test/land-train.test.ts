@@ -176,6 +176,17 @@ test("a train red in its burn-in: the ship that changed the racy test is refused
   l.done();
 });
 
+// #2141: the rider's refusal reads the burn-in's alone line from the log's last lines the front passes it.
+test('a rider whose burn-in red failed alone too on CI is refused as a plain red, not a race', async () => {
+  const l = await line([{}, {}, { change: ['test/real.test.ts', 'red\n'] }, {}], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn', FAKE_BURN_ALONE: 'failed' });
+  const done = await l.go();
+  assert.equal(done[2].status, 1, done[2].stderr);
+  assert.match(done[2].stderr, /land: a new or changed test failed its burn-in in CI on ticket\/2-x's ship train .*test\/real\.test\.ts failed in every copy, and run once by itself on CI it fails alone too: a plain red or a CI-only environment fault/);
+  assert.doesNotMatch(done[2].stderr, /fix the race/);
+  for (const i of [1, 2, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  l.done();
+});
+
 // #1564 (Cara 2026-11-21, C "Go"): a train with three bad riders refuses all three after its one red run, not one a run.
 // #2019: a burn-in race passes alone, so a run alone can't prove it. A case no ship before this one has needs no proof:
 // only the ship that adds it can have turned it red.

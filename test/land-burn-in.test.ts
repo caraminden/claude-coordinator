@@ -41,6 +41,29 @@ test("a red burn-in refuses the ship as its own red: no fresh run, even when its
   assert.equal(c.localRuns(), 0, 'never on perigee');
 });
 
+// #2141: a file red in every copy ran once alone on CI; the refusal says which case it is.
+for (const [alone, said, not] of [
+  ['failed', /test\/real\.test\.ts failed in every copy, and run once by itself on CI it fails alone too: a plain red or a CI-only environment fault \(a temp path, git identity, a missing tool\), not a race\. Read its output above and fix that, then run this again/, /racy/],
+  ['passed', /failed in 10 of 10 copies at once, so it never reached the full suite and main is untouched\. A file that fails when run as copies at once is racy \(its output is above\): fix the race/, /plain red/],
+  ['unrun', /test\/real\.test\.ts failed in every copy and CI had no time left to run it alone, so it may be a plain red or a race: run it alone with citadel-test/, /racy/],
+] as const) {
+  test(`a burn-in red in every copy that ${alone} alone is refused as ${alone === 'failed' ? 'a plain red, not a race' : alone === 'passed' ? 'a race' : 'either'}`, () => {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'test/real.test.ts', 'red\n');
+    const res = c.run({ FAKE_CI: 'red', FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn', FAKE_BURN_ALONE: alone });
+    assert.equal(res.status, 1, res.stderr);
+    assert.match(res.stderr, said);
+    assert.doesNotMatch(
+      res.stderr
+        .split('\n')
+        .filter((l) => l.startsWith('land: a new or changed test'))
+        .join('\n'),
+      not,
+    );
+  });
+}
+
 test("the run gets the ship's base as land-base/<branch> beside land/<branch>, and both go when the ship is done", async () => {
   const r = setup();
   const c = ci(r);

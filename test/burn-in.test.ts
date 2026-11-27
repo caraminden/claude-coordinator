@@ -56,6 +56,39 @@ test('every file runs past a racy one, and each racy file is named, so a train h
   }
 });
 
+// #2141: every copy failing is run once more alone, and the line says which case it is.
+test('a file failing every copy that fails alone too is named a plain red or a CI environment fault, not a race', () => {
+  const r = ship(repo({ 'test/red.test.ts': "import { test } from 'node:test';\ntest('red', () => { throw new Error('plainly red'); });\n" }));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/red\.test\.ts: failed in 10 of 10 copies at once/m);
+  assert.match(r.stdout, /^burn-in: test\/red\.test\.ts: alone: failed too, so it is no race: a plain red, or a fault of CI's own environment/m);
+  assert.match(r.stdout, /^burn-in: refused: test\/red\.test\.ts: alone: failed too, after every copy failed: a plain red or a fault of CI's own environment, not a race/m);
+  assert.doesNotMatch(r.stdout, /refused: a copy of test\/red\.test\.ts failed when run 10 at once, so it is racy/);
+});
+
+test('a file failing every copy that passes alone is a race, refused as before', () => {
+  // Fails whenever it runs as one of the copies (their TMPDIRs end in /tmp<n>), passes by itself.
+  const r = ship(repo({ 'test/crowd.test.ts': "import { test } from 'node:test';\ntest('crowd', () => { if (/\\/tmp\\d+$/.test(process.env.TMPDIR ?? '')) throw new Error('crowded'); });\n" }));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/crowd\.test\.ts: failed in 10 of 10 copies at once/m);
+  assert.match(r.stdout, /^burn-in: test\/crowd\.test\.ts: alone: passed, so it fails only beside its copies: a race$/m);
+  assert.match(r.stdout, /^burn-in: refused: a copy of test\/crowd\.test\.ts failed when run 10 at once, so it is racy/m);
+});
+
+test('a file failing every copy with no time left to run it alone says so: it may be a plain red or a race', () => {
+  const r = ship(repo({ 'test/red.test.ts': "import { test } from 'node:test';\ntest('red', () => { throw new Error('plainly red'); });\n" }), { BURN_IN_ALONE_MIN: '100000' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/red\.test\.ts: alone: no time left to run it, so it may be a plain red or a race$/m);
+  assert.match(r.stdout, /^burn-in: refused: test\/red\.test\.ts: alone: no time left to run it, after every copy failed: a plain red or a race/m);
+  assert.doesNotMatch(r.stdout, /so it is racy/);
+});
+
+test('a file failing only some copies is not run alone', () => {
+  const r = ship(repo({ 'test/racy.test.ts': ONE_IN_TEN }));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /alone:/);
+});
+
 test('a clean new test passes all 10 copies at once', () => {
   const r = ship(repo({ 'test/clean.test.ts': CLEAN }));
   assert.equal(r.status, 0, r.stdout + r.stderr);

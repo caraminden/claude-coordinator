@@ -549,6 +549,12 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   // The refusal's own line, from either ship script. A "SyntaxError" alone says nothing: tests log them on purpose (#1961).
   if (/^(land: smoke: )?a \.ts file does not parse/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
   // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
+  // Every copy failed and it failed run alone too (#2141): land.sh's refusal says so, and then it is no race.
+  if (/failed its burn-in in CI.*it fails alone too/.test(output))
+    return k(
+      'burn-in',
+      "Kind: a new or changed test failed its burn-in in every copy and alone too, so it is not a race: a plain red, or a fault only CI's environment has (a temp path, git identity, a missing tool). Yours: read its output, fix that (not a race, not the wait), run it with citadel-test, then hand off again.",
+    );
   if (/failed its burn-in in CI/.test(output)) return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
   // The fallback's no-answers on perigee (#1863): the log shown above them can hold a ✖ of a file that then passed alone.
   if (/^land: .*(ran out of its time limit and no test is known to be|packages the tests import could not be installed)/m.test(output))

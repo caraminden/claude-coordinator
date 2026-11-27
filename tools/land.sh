@@ -491,6 +491,16 @@ for c in "${regen_cmds[@]}"; do regen_run "${n:+#$n: }regenerated at ship time: 
 if [[ $mode = land || $mode = into ]] && [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$(git merge-base "$adr_onto" "$pre")" "$pre" -- test/prompt-baseline.json; then
   regen_run "${n:+#$n: }test/prompt-baseline.json measured again at ship time" "PROMPT_BASELINE=write $(printf %q "$tools/citadel-node") --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 || true" test/prompt-baseline.json
 fi
+# The type baseline (#2141): a commit that only lowered it took main's (ship-numbers.ts), so --update lowers it again.
+# shortcut: not for --build, whose lowerings wait for the next --update; upgrade if a build's slack baseline bites.
+if [[ $mode = land || $mode = into ]] && [ -f tools/typecheck.ts ] &&
+  ! git diff --quiet "$(git merge-base "$adr_onto" "$pre")" "$pre" -- test/typecheck-baseline.json; then
+  regen_why="after the rebase onto ${adr_onto#refs/heads/}, node tools/typecheck.ts --update refused on $branch, so nothing"
+  regen_why+=" landed and $untouched. Fix it on your rebased branch, commit, then this again. It said"
+  regen_run "${n:+#$n: }test/typecheck-baseline.json measured again at ship time" \
+    "CITADEL_TEST_FILES=0 $(printf %q "$tools/citadel-node") --no-warnings tools/typecheck.ts --update" test/typecheck-baseline.json
+  regen_why=
+fi
 
 lost_title || refuse "$lost. Nothing landed" # again on the rebased commit, after the smoke check
 
@@ -759,13 +769,20 @@ early_ahead='' early_top='' early_pid='' train_only='' train_left='' # train_lef
 # Fails with the reason in skip, the worktree put back clean.
 train_steps() {
   local n=${3#ticket/} renamed
+  [ -e "$1/node_modules" ] || [ ! -d node_modules ] || ln -s "$PWD/node_modules" "$1/node_modules" # typescript
   if ! (
     cd "$1" || exit 1
+    n=${n%%-*}
     git diff --quiet "$2" HEAD -- docs/adr || adr_commit "$2" "$3" "the ship train" || exit 1
     if [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$4" "$5" -- test/prompt-baseline.json; then
-      n=${n%%-*}
       PROMPT_BASELINE=write "$tools/citadel-node" --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 </dev/null || true
       git add test/prompt-baseline.json && { git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/prompt-baseline.json measured again at ship time"; } || exit 1
+    fi
+    if [ -f tools/typecheck.ts ] && ! git diff --quiet "$4" "$5" -- test/typecheck-baseline.json; then
+      CITADEL_TEST_FILES=0 "$tools/citadel-node" --no-warnings tools/typecheck.ts --update >/dev/null 2>&1 </dev/null ||
+        { git checkout -q -- test/typecheck-baseline.json; exit 1; }
+      git add test/typecheck-baseline.json || exit 1
+      git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/typecheck-baseline.json measured again at ship time" || exit 1
     fi
   ); then
     skip="renumbering its ADRs or measuring its prompt baseline on the train failed"
@@ -1057,10 +1074,10 @@ elif [ "$rc" = 1 ]; then
   split_over
   # shellcheck disable=SC2046 # file names
   pulled_out $(train_real || train_failing)
-  [ -z "$suspect_new" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, and $branch adds the test case that failed, which main doesn't have, so it is the cause: the ships behind it went back in line, so $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
-  [ -z "$suspect_tests" ] || [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, and run alone on perigee it passed on main and failed with $branch on it, so it is the cause: the ships behind it went back in line, so $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
+  [ -z "$suspect_new" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, and $branch adds the test case that failed, which main doesn't have, so it is the cause: the ships behind it went back in line, so $untouched. $(burn_advice "$failed"), then run this again"
+  [ -z "$suspect_tests" ] || [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, and run alone on perigee it passed on main and failed with $branch on it, so it is the cause: the ships behind it went back in line, so $untouched. $(burn_advice "$failed"), then run this again"
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, and run alone on perigee it passed on main and failed with $branch on it, so it is the cause: the ships behind it went back in line, so $untouched. Fix it, re-test, commit, then run this again"
-  [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI ($ci_url): $burn_said, so it never reached the full suite and $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again. This is the ship's own red, never a known flake"
+  [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI ($ci_url): $burn_said, so it never reached the full suite and $untouched. $(burn_advice "$failed"), then run this again. This is the ship's own red, never a known flake"
   [ -z "$reran" ] || refuse "tests failed on the rebased branch in CI again ($ci_url), on the one fresh run after a red whose files all passed alone ($reran), so $untouched. A second red refuses whatever its labels say"
   refuse "tests failed on the rebased branch in CI ($ci_url), so $untouched"
 else

@@ -11,6 +11,11 @@
 //     other side has too) merges as git would, so it conflicts and land.sh names the number to take.
 //     shortcut: a check moves only on a line that says schema_version and only in src/db.ts, not a test that sets
 //     schema_version to the old number; widen it if a renumbered check ever misses.
+//   baseline <ours|theirs> <base> <ours> <theirs>
+//     The merge for test/typecheck-baseline.json (#2141, through land.local.sh's land_merge hook): a side that only
+//     lowered counts or dropped rows takes main's copy, which land.sh measures again on the rebased tree (typecheck.ts
+//     --update), so two ships lowering neighbouring rows never conflict. A side that raised one (--update --moved)
+//     merges as git would, as before.
 //   take <ref>
 //     git merge <ref> with the driver above, <ref> kept: how a build minion takes main in by hand (src/prompts.ts).
 //   adr <onto> [<name>]
@@ -96,6 +101,25 @@ function merge(mainSide: string, basePath: string, oursPath: string, theirsPath:
   return mergeFile(mainSide, oursPath, O, ours.join('\n'), theirs.join('\n'));
 }
 
+type Rows = Record<string, [number, number]>;
+/** Whether <branch>'s baseline text raises no count over <base>'s (an unreadable one counts as raising). */
+function onlyLowers(base: string, branch: string): boolean {
+  try {
+    const o = JSON.parse(base) as Rows;
+    const b = JSON.parse(branch) as Rows;
+    return Object.entries(b).every(([f, c]) => c[0] <= (o[f]?.[0] ?? 0) && c[1] <= (o[f]?.[1] ?? 0));
+  } catch {
+    return false;
+  }
+}
+function baseline(mainSide: string, basePath: string, oursPath: string, theirsPath: string): number {
+  const [O, A, B] = [basePath, oursPath, theirsPath].map((p) => readFileSync(p, 'utf8'));
+  const [main, branch] = mainSide === 'theirs' ? [B, A] : [A, B];
+  if (!onlyLowers(O, branch)) return mergeFile(mainSide, oursPath, O, A, B);
+  writeFileSync(oursPath, main);
+  return 0;
+}
+
 function adr(onto: string, name = onto.replace(/^refs\/heads\//, '')): void {
   const list = (ref: string) => git('ls-tree', '--name-only', `${ref}:docs/adr/`).split('\n').filter(Boolean);
   let ontoFiles: string[];
@@ -158,9 +182,10 @@ function take(ref: string): number {
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === 'merge' && args.length === 4) process.exit(merge(args[0], args[1], args[2], args[3]));
+else if (cmd === 'baseline' && args.length === 4) process.exit(baseline(args[0], args[1], args[2], args[3]));
 else if (cmd === 'take' && args.length === 1) process.exit(take(args[0]));
 else if (cmd === 'adr' && (args.length === 1 || args.length === 2)) adr(args[0], args[1]);
 else {
-  console.error('usage: ship-numbers.ts merge <ours|theirs> <base> <ours> <theirs> | take <ref> | adr <onto> [<name>]');
+  console.error('usage: ship-numbers.ts merge|baseline <ours|theirs> <base> <ours> <theirs> | take <ref> | adr <onto> [<name>]');
   process.exit(2);
 }

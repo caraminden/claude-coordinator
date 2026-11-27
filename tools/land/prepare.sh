@@ -18,7 +18,7 @@ under_of() {
 # Ship-time merges (#1221, #1418): git with the kit core's driver (tools/land-core.sh --merge, MERGES in land.local.sh) for
 # the files tools/ship-numbers.attributes names: a SCHEMA_HISTORY number main took moves on (ship-numbers.ts), MIGRATIONS
 # lines and README's Layout rows (#2104) both added stay, budgets, size caps and judges' counts add up, the prompt baseline is
-# main's, measured again below. The rest conflicts as before. <main side>: main's or the build's (ours for merge-tree and a rebase, theirs for --build's
+# main's, measured again below, and the type baseline too when a commit only lowered it. The rest conflicts as before. <main side>: main's or the build's (ours for merge-tree and a rebase, theirs for --build's
 # merge of main). Not for a person's rebase. A tools/ without the core (mid-rebase) renumbers only, or merges as git would.
 numbers_git() {
   local side=$1
@@ -225,9 +225,9 @@ conflict() {
 # <commit title> <command> <patterns...>: run a Regenerate command (land.sh's Regenerate comment) on the rebased branch and commit what it
 # changed, if anything. It may change only files the patterns (all the branch declared) name: when it fails or writes
 # elsewhere, the worktree is put back and the land refused. Its fds 6, 7 and 9 (the locks) are closed, so a process it
-# leaves behind can't hold the line.
+# leaves behind can't hold the line. regen_why: a failure refuses with it and the whole output.
 regen_run() {
-  local title=$1 cmd=$2 log rc=0 was chk out=() bad=() new=() why
+  local title=$1 cmd=$2 log rc=0 was chk out=() bad=() new=() why full
   shift 2
   was=$(git -c core.quotePath=false ls-files --others --exclude-standard)
   log=$(mktemp "${TMPDIR:-/tmp}/land-regen.XXXXXX")
@@ -243,8 +243,9 @@ regen_run() {
   if [ "$rc" != 0 ] || [ ${#bad[@]} -gt 0 ]; then
     git reset -q --hard HEAD
     [ ${#new[@]} -eq 0 ] || git --literal-pathspecs clean -fq -- "${new[@]}"
-    why=$(tail -n 5 "$log" | tr '\n' ' ')
+    why=$(tail -n 5 "$log" | tr '\n' ' ') full=$(cat "$log")
     rm -f "$log"
+    [ "$rc" = 0 ] || [ "$rc" = 124 ] || [ -z "${regen_why:-}" ] || refuse "$regen_why:"$'\n'"$full"
     [ "$rc" = 0 ] || refuse "the Regenerate command \`$cmd\` $([ "$rc" = 124 ] && echo "ran past ${LAND_REGEN_TIMEOUT:-900} s" || echo "failed (exit $rc)") on main ($(git rev-parse --short HEAD)), so nothing landed and what it wrote was put back${why:+. Its output ended: $why}. Run it on your rebased branch, fix it, commit, then this again"
     refuse "the Regenerate command \`$cmd\` changed files outside Regenerate-files ($*): $(echo "${bad[@]}"), so nothing landed and they were put back. Add them to Regenerate-files: or stop the command writing them, then this again"
   fi

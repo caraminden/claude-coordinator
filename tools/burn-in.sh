@@ -15,6 +15,9 @@
 #
 # One file: exits 0 when every copy passed, 1 when one failed or was stopped at the limit (its output is printed, then a
 # "burn-in: <file>: failed in <n> of <N> copies at once" line, which land.sh reads). BURN_IN_FILE_LIMIT (600) s per copy.
+# When every copy failed, the file runs once more by itself (#2141: 36 of 61 burn-in reds in the retro #2113 were N of
+# N, and some were plain reds or CI-only faults, not races), and a "burn-in: <file>: alone: failed|passed" line says
+# which case it is, for land.sh's refusal. N of N alone proves nothing: racy files have reached 10 of 10.
 # --ship: runs every file, and exits 1 when any had a failed copy, naming each. A file stopped at the ship's time limit has no verdict, said
 # loudly: the full suite after it has its own hang limit. A file not started in time is named, as skipped. Map rules
 # whose glob holds `**` are left out: they map a whole folder to guard tests that read the repo, which race on nothing.
@@ -27,9 +30,10 @@ test_limit=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) # each test, in ms, as the ga
 read -ra nice_cmd <<<"${BURN_IN_NICE:-}"
 unset NODE_TEST_CONTEXT # set by an outer node --test (a test of this script), it makes each copy skip its file and pass
 
+declare -A alone_of=() # <file>: failed, passed or unrun (no time left), run alone after every copy failed
 # <file> <copies> <seconds>: 0 clean, 1 a copy failed, 2 none failed but one was stopped at the limit.
 burn_one() {
-  local file=$1 n=$2 limit=$3 dir i rc fails=() stopped=() t0=$SECONDS first=''
+  local file=$1 n=$2 limit=$3 dir i rc fails=() stopped=() t0=$SECONDS first='' left
   dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/burn-in.XXXXXX") || { echo "burn-in: no temp folder for $file"; return 1; }
   for ((i = 1; i <= n; i++)); do
     mkdir -p "$dir/tmp$i"
@@ -54,6 +58,24 @@ burn_one() {
     if grep -q '✖ failing tests:' "$dir/copy$first.log"; then sed -n '/✖ failing tests:/,$p' "$dir/copy$first.log" | head -n 80
     else tail -n 40 "$dir/copy$first.log"; fi
     echo "burn-in: $file: failed in ${#fails[@]} of $n copies at once (copies ${fails[*]}), in $((SECONDS - t0)) s${stopped:+; ${#stopped[@]} more stopped at ${limit} s}"
+    left=$((limit - (SECONDS - t0)))
+    if [ ${#fails[@]} = "$n" ]; then
+      rc=124
+      if [ "$left" -ge "${BURN_IN_ALONE_MIN:-15}" ]; then # s left of its limit to bother; tests turn it up
+        mkdir -p "$dir/alone" && rc=0
+        TMPDIR=$dir/alone timeout -k 10 "$left" "${nice_cmd[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" --test-reporter=spec "$file" >"$dir/alone.log" 2>&1 || rc=$?
+      fi
+      if [ "$rc" = 0 ]; then
+        alone_of[$file]=passed
+        echo "burn-in: $file: alone: passed, so it fails only beside its copies: a race"
+      elif [ "$rc" != 124 ] && [ "$rc" != 137 ]; then
+        alone_of[$file]=failed
+        echo "burn-in: $file: alone: failed too, so it is no race: a plain red, or a fault of CI's own environment (a temp path, git identity, a missing tool)"
+      else
+        alone_of[$file]=unrun
+        echo "burn-in: $file: alone: no time left to run it, so it may be a plain red or a race"
+      fi
+    fi
     rm -rf "$dir"
     return 1
   fi
@@ -214,5 +236,11 @@ done
 [ ${#nov[@]} = 0 ] || echo "burn-in: NO VERDICT on ${nov[*]}: stopped at the ${limit} s limit (the full suite runs it next, with its own hang limit)"
 [ ${#skipped[@]} = 0 ] || echo "burn-in: SKIPPED ${skipped[*]}: the ${limit} s limit ran out before they could start"
 echo "burn-in: done in $((limit - (deadline - SECONDS))) s"
-for f in "${red[@]}"; do echo "burn-in: refused: a copy of $f failed when run $copies at once, so it is racy (its output is above); fix the race, not the wait"; done
+for f in "${red[@]}"; do
+  case ${alone_of[$f]:-} in
+    failed) echo "burn-in: refused: $f: alone: failed too, after every copy failed: a plain red or a fault of CI's own environment, not a race (its output is above); fix that" ;;
+    unrun) echo "burn-in: refused: $f: alone: no time left to run it, after every copy failed: a plain red or a race (its output is above); run it alone with citadel-test to tell" ;;
+    *) echo "burn-in: refused: a copy of $f failed when run $copies at once, so it is racy (its output is above); fix the race, not the wait" ;;
+  esac
+done
 [ ${#red[@]} = 0 ] || exit 1

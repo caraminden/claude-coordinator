@@ -77,3 +77,22 @@ gh_quota() {
     echo "$l/$m$r"
   else echo unknown; fi
 }
+
+# A burn-in red's advice (#2141): a file red in every copy ran once alone on CI (burn-in.sh), and red alone is no race.
+burn_list() { paste -sd, | sed 's/,/, /g'; }
+burn_advice() {
+  local p u o r="fix the race (a shared path, a fixed port, a timing assumption), not the wait"
+  p=$(sed -n 's/.*burn-in: \(refused: \)\{0,1\}\([^ ]*\): alone: failed.*/\2/p' <<<"$1" | sort -u)
+  u=$(sed -n 's/.*burn-in: \(refused: \)\{0,1\}\([^ ]*\): alone: no time left.*/\2/p' <<<"$1" | sort -u)
+  o=$(sed -n 's/.*burn-in: \([^ ]*\): failed in [0-9]* of [0-9]* copies.*/\1/p' <<<"$1" | sort -u | grep -vxF -f <(echo "$p") || true)
+  if [ -z "$p" ] && [ -n "$u" ] && [ "$o" = "$u" ]; then
+    echo "$(burn_list <<<"$u") failed in every copy and CI had no time left to run it alone, so it may be a plain red or a race:" \
+      "run it alone with citadel-test (red there is a plain red, green a race) and fix that"
+  elif [ -z "$p" ]; then
+    echo "A file that fails when run as copies at once is racy (its output is above): $r"
+  else
+    echo "$(burn_list <<<"$p") failed in every copy, and run once by itself on CI it fails alone too: a plain red or a CI-only" \
+      "environment fault (a temp path, git identity, a missing tool), not a race. Read its output above and fix that${o:+;" \
+      "$(burn_list <<<"$o") failed only as copies at once, so it is racy: $r}"
+  fi
+}

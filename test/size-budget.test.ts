@@ -105,7 +105,7 @@ export const SHIP_LIMITS = {
     'tools/land/blame.sh': 30_000,
     'tools/land/main-red.sh': 10_000,
   } as Record<string, number>,
-  total: 232_000,
+  total: 234_200, // +2,200 for #2141 until step 5's comment trim: Josh, 2026-11-26, "After split steps 3-4" (the cap raised a little until step 5)
   longLines: 184,
 };
 

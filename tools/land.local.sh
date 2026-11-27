@@ -15,14 +15,17 @@ test/size-budget.test.ts append ^export\ const\ ALLOWED:
 test/judges.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \{\ why:\ .*,\ calls:\ [0-9]+\ \},$
 test/judges.test.ts append ^const\ NOT_JUDGES:
 test/prompt-baseline.json main
-README.md rows ^##\ Layout$'
+README.md rows ^##\ Layout$
+test/typecheck-baseline.json hook'
 
 # Core hook (MERGES src/db.ts hook): Citadel's numbers_git driver, ship-numbers.ts merge; git's own merge without it.
 # A tools/ without ship-numbers.ts (mid-rebase) falls back to the worktree's tools/ (git runs drivers from its root).
 land_merge() {
   local t=$CITADEL_TOOLS
   [ -f "$t/ship-numbers.ts" ] || t=tools
-  if [ -f "$t/ship-numbers.ts" ]; then
+  if [ -f "$t/ship-numbers.ts" ] && [ "${5:-}" = test/typecheck-baseline.json ]; then
+    "$t/citadel-node" --no-warnings "$t/ship-numbers.ts" baseline "$1" "$2" "$3" "$4" # main's copy, measured again after the rebase (#2141)
+  elif [ -f "$t/ship-numbers.ts" ]; then
     "$t/citadel-node" --no-warnings "$t/ship-numbers.ts" merge "$1" "$2" "$3" "$4"
   elif [ -z "${LAND_MERGE_DIFF3:-}" ]; then
     git merge-file "$3" "$2" "$4"

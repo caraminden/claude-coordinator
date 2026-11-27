@@ -326,6 +326,14 @@ test('a cloud run is remembered for the next pick\'s "WAY slower" check', async 
   await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
 });
 
+test('the chat line names how a step ended: ✗ and its exit code on a failure, its time limit on 124', async () => {
+  assert.equal(await helper(job('exit 3')), 1);
+  assert.match(lines.at(-1)![0], /in a cloud session · ✗ failed \(exit 3\) after 0 min$/);
+  lines.length = 0;
+  assert.equal(await helper(job('exit 124')), 1);
+  assert.match(lines.at(-1)![0], /in a cloud session · stopped at its time limit, after 0 min$/);
+});
+
 test('the chat line: one note for the step, rewritten from its start to its exit, and through a fallback home', async () => {
   assert.equal(await helper(job('echo lined; sleep 1')), 0);
   const texts = lines.map(([t]) => t);

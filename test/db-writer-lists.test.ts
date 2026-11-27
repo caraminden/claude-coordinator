@@ -16,7 +16,9 @@ after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own t
 const STAYS_ON_THREAD: Record<string, string> = {
   // The constructor's one-time migrations: they run before the writer starts.
   ...Object.fromEntries(
-    ['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds', 'shippingFromRules', 'lendingLists', 'machineRoleTables', 'machineOwners', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed', 'schedules.fillTriggers'].map((m) => [m, 'boot']),
+    ['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds', 'shippingFromRules', 'lendingLists', 'machineRoleTables', 'machineOwners', 'runnerHostRows', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed', 'schedules.fillTriggers'].map(
+      (m) => [m, 'boot'],
+    ),
   ),
   // Helpers that run inside a listed write, with it.
   // The usage ledger batches counts in memory and sends them as usage.addCounts on a timer (#1306, #1877).

@@ -170,10 +170,11 @@ test("a member who is no admin lends their own PC's CI runners to their scheme, 
   try {
     const mira = srv.as({ cookie: srvCookie });
     const mine = (await mira('/api/projects', { name: "Mira's" })).data;
-    await mira('/api/machines', { name: 'mira-pc', runners: true });
+    const pc = (await mira('/api/machines', { name: 'mira-pc' })).data.machine;
+    await mira(`/api/machines/${pc.id}/roles`, { role: 'ci', on: true, projects: [] }, 'PATCH');
     await page.send('Page.navigate', { url: `${srv.base}/#/p/${mine.id}/machines` });
     await wait('the Machines page', '!!document.querySelector("#machine-list")');
-    // A runner host's CI runners are on, and lent to nothing until its owner picks (Build 7 M3).
+    // Her PC's CI runners are on, and lent to nothing until its owner picks (Build 7 M3).
     const ci = await choose('mira-pc', 'ci');
     assert.equal(await page.eval(`${ci}.querySelector('.mcard-tick input').checked`), true);
     const chips = (sel = '') => page.eval<string[]>(`[...${ci}.querySelectorAll('.role-schemes .chip${sel}')].map((c) => c.textContent)`);

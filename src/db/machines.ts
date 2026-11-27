@@ -3,7 +3,7 @@ import type { Machine, MachineJob, Store } from '../db.ts';
 
 /** A row of machine_joins (src/db-schema.ts). */
 export type MachineJoin = { id: number; code_hash: string; asker_id: number | null; created_by: string; owner_id: number | null; machine_id: number | null; created_at: number; expires_at: number; used_at: number | null; joined_id: number | null };
-import { type Caps, type LegacyLend, legacyFromRoles, parseLegacyLend, ROLES, type Role, type RoleRow, rolesFromLegacy, runnerHost, runnerSeen, type Ticks } from '../machine-roles.ts';
+import { type Caps, type LegacyLend, legacyFromRoles, parseLegacyLend, ROLES, type Role, type RoleRow, rolesFromLegacy, runnerHost, type Ticks } from '../machine-roles.ts';
 
 export const machineQueries = {
   listMachines(this: Store): Machine[] {
@@ -179,8 +179,15 @@ export const machineQueries = {
     }
     // An older release (a rollback) made it a CI runner host: the CI role goes on, lent where the machine was, as its runner
     // tokens were before roles (ci-runner.ts mayFetch); runnerHostRows makes it one PC's row again at the next boot.
-    if (keys.includes('last_check') && runnerHost(rest.last_check ?? null) && !runnerSeen(this.machineRoles(id))) {
-      this.writeMachineRoles(id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: r.on ? r.projects : legacyFromRoles(roles).projects, setup: { ...r.setup, runner_agent: true } } : r)));
+    // A row with no role rows yet reads its CI setup as runner_host (rolesFromLegacy), which this release never keeps.
+    if (keys.includes('last_check') && runnerHost(rest.last_check ?? null) && !this.machineRoles(id).find((r) => r.role === 'ci')?.setup?.runner_agent) {
+      this.writeMachineRoles(id, (roles) =>
+        roles.map((r) => {
+          if (r.role !== 'ci') return r;
+          const { runner_host: _, ...setup } = r.setup ?? {};
+          return { ...r, on: true, projects: r.on ? r.projects : legacyFromRoles(roles).projects, setup: { ...setup, runner_agent: true } };
+        }),
+      );
     }
   },
 

@@ -139,7 +139,14 @@ test('the move runs once: a later change to a list stays, and a machine an older
       .map((p) => p.id),
     [1],
   );
-  assert.ok(!store.listProjects().some((p) => lendsRole(store, turned, 'tools', p, [1, 2])), 'a runner host lends turns nothing');
+  // A runner agent's row is one PC's row (Build 10 H6): its own Tools role still decides, and the flag took nothing off it.
+  assert.deepEqual(
+    store
+      .listProjects()
+      .filter((p) => lendsRole(store, turned, 'tools', p, [1, 2]))
+      .map((p) => p.id),
+    [1],
+  );
   assert.equal(store.getMachine(id('ci-host'))!.scoped, 0, 'a runner host is never converted');
   store.db.close();
 });

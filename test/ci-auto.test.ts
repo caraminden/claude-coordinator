@@ -165,10 +165,10 @@ test('a queued job with a label no runner has gets one even with no workflow fil
   assert.deepEqual(w.started.at(-1), 'add Peek Auras windows josh-desktop');
 });
 
-test("unticking a scheme on a PC's row takes its runners off there, a CI runner host's row from before Build 10 H6 too", async () => {
+test("unticking a scheme on a PC's row takes its runners off there, a CI runner host's row as Build 10 H6's boot step leaves it too", async () => {
   const w = world();
   const row = w.pc('josh-desktop', w.josh.id, []);
-  const host = w.pc('cara-desktop-ci-runners', w.cara.id, [], { runner_host: true });
+  const host = w.pc('cara-desktop-ci-runners', w.cara.id, [], { runner_agent: true });
   w.up(row);
   w.up(host);
   w.samples.set(`${row.id}:linux`, new Set(['caraminden/delve', 'someone/not-a-scheme']));

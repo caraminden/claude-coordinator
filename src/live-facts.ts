@@ -90,8 +90,8 @@ export async function newestRun(get: GhGet, slug: string, as: GithubEnv, branche
     conclusion: run.conclusion ?? null,
     url: String(run.html_url ?? ''),
     at: Date.parse(run.run_started_at ?? run.created_at),
-    // A land run (or a ship's own check, #1567) is on the branch rebased onto main, so its commit never matches the head: say so rather than guess.
-    onHead: /^(land|check)\//.test(String(run.head_branch ?? '')) ? null : !!tip && String(run.head_sha ?? '').startsWith(tip),
+    // A land run (or a ship's own check, #1567, or a pre-ship run, #2210) is on the branch rebased onto main, so its commit never matches the head: say so rather than guess.
+    onHead: /^(land|check|pre)\//.test(String(run.head_branch ?? '')) ? null : !!tip && String(run.head_sha ?? '').startsWith(tip),
   };
 }
 
@@ -124,7 +124,7 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
   let ci: Facts['ci'] = null;
   if (t.branch && slug && project?.repo_dir) {
     try {
-      ci = await newestRun(get, slug, schemeGithub(store, app.github, project.repo_dir, app.dataDir), [t.branch, `land/${t.branch}`, `check/${t.branch}`, `early/${t.branch}`], status?.tip.slice(0, 8) ?? null);
+      ci = await newestRun(get, slug, schemeGithub(store, app.github, project.repo_dir, app.dataDir), [t.branch, `land/${t.branch}`, `check/${t.branch}`, `early/${t.branch}`, `pre/${t.branch}`], status?.tip.slice(0, 8) ?? null);
     } catch (err) {
       ci = {
         error: String(thrown(err).message ?? err)

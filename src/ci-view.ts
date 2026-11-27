@@ -100,12 +100,12 @@ export const viewRun = (slug: string, r: Run, minion: (r: Run) => number | null 
 
 /**
  * The minion a run tests (#1019, Cara 2026-11-18: "These lines in CI should link to the minions whose tests they are for"): the one whose
- * branch it ran on (a land's CI copy runs on land/<branch>, a ship's own check on check/<branch>, #1567, an early next train's on early/<branch>, #1568), else the one whose branch tip is its commit (a land's push to the default branch).
+ * branch it ran on (a land's CI copy runs on land/<branch>, a ship's own check on check/<branch>, #1567, an early next train's on early/<branch>, #1568, a pre-ship run's on pre/<branch>, #2210), else the one whose branch tip is its commit (a land's push to the default branch).
  * shortcut: a branch that moved on after its land no longer tops the commit, so that push reads as the default branch's own; upgrade if lands start recording their commit.
  */
 export function runMinion(branch: string, sha: string, tickets: Pick<Ticket, 'number' | 'branch' | 'kind'>[], tips: Map<string, string[]>): number | null {
   const of = (b: string) => tickets.find((t) => t.kind === 'ticket' && t.branch === b)?.number ?? null;
-  return of(branch.replace(/^(land|check|early)\//, '')) ?? (tips.get(sha) ?? []).map(of).find((n) => n != null) ?? null;
+  return of(branch.replace(/^(land|check|early|pre)\//, '')) ?? (tips.get(sha) ?? []).map(of).find((n) => n != null) ?? null;
 }
 
 /** The view's running jobs and its queue per set of labels, so a long queue reads "1 runner, 9 queued". */

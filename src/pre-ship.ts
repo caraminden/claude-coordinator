@@ -8,10 +8,11 @@
 //  - Newest only: a new commit, between turns, is pushed over the last and the older run cancelled. A go no longer waiting
 //    stops the run (it goes again if the go comes back on the same commit); a closed minion's branches go.
 //  - Each result goes to the minion's chat once: a green as held mail, a red (or a branch that won't go onto main) wakes it.
-//  - A ship's run comes first: land.sh writes <state>/pre-yield.<its pid> just before it pushes a ship's run to GitHub
-//    (tools/land/ci.sh's ci_gate), and the server's watch on <state> runs a round at once. While that landing still runs,
-//    nothing starts, running ones are cancelled, and once it has ended the ones cancelled for it run again. land.sh
-//    leaves its mark (its size budget); the next round here deletes it.
+//  - A ship's run comes first: while one is going, nothing starts, running ones are cancelled, and once it has ended the
+//    ones cancelled for it run again. A ship is going when the scheme's repo has a land/** run not yet completed (every
+//    scheme), or, for Citadel's own ships at once, when a landing that wrote <state>/pre-yield.<its pid> just before
+//    pushing its run to GitHub (tools/land/ci.sh's ci_gate) still runs: the server's watch on <state> runs a round then.
+//    land.sh leaves its mark (its size budget); the next round here deletes it.
 // A green doesn't count toward the ship: by the go main has nearly always moved, and land.sh rebases and runs its own commit.
 import { execFile } from 'node:child_process';
 import { readdir, unlink } from 'node:fs/promises';
@@ -30,6 +31,7 @@ const VISIBLE_MS = 3600_000;
 /** A push no workflow run shows up for in this long ran nothing. */
 const LOST_MS = 10 * 60_000;
 const KEY = 'pre-ship:runs';
+const TRIES = 5;
 
 export interface PreRun {
   ticket: number;
@@ -46,6 +48,8 @@ export interface PreRun {
   yielded?: boolean;
   /** Stopped because the go stopped waiting: runs again if it comes back on the same commit. */
   stopped?: boolean;
+  /** Failed tries of a rerun or of deleting the branches: given up at TRIES. */
+  tries?: number;
 }
 
 interface GhRun {
@@ -132,13 +136,21 @@ export class PreShip {
   private async round() {
     const { store } = this.d;
     const runs = store.getSetting<Record<string, PreRun>>(KEY) ?? {};
-    const yielding = await this.d.yielding();
+    const marked = await this.d.yielding();
+    const shipping = new Map<number, Promise<boolean>>();
+    const yielding = (p: Scheme) => marked || (shipping.get(p.id) ?? shipping.set(p.id, this.shipping(p)).get(p.id)!);
     const projects = new Map(store.listProjects().map((p) => [p.id, p]));
     const waiting = new Set<number>();
     for (const p of projects.values()) {
       if (!repoSlug(p.repo_url) || !p.repo_dir || p.gh_runners === 'never') continue;
       const ts = store.listTickets(p.id).filter((t) => waitsForGo(t, store.openCardsOf(t.id)));
-      if (!ts.length || !(await this.eligible(p))) continue;
+      if (!ts.length) continue;
+      const ok = await this.eligible(p);
+      if (!ok) {
+        // GitHub didn't answer: leave its runs be, start none.
+        if (ok === null) for (const t of ts) waiting.add(t.id);
+        continue;
+      }
       for (const t of ts) {
         waiting.add(t.id);
         // Between turns only: in one the branch is still moving.
@@ -153,7 +165,7 @@ export class PreShip {
         }
         if (r && !r.told) await this.cancel(p, r);
         delete runs[t.id];
-        if (yielding) continue;
+        if (await yielding(p)) continue;
         const fresh = await this.start(p, t, head);
         if (fresh) runs[t.id] = fresh;
       }
@@ -162,15 +174,14 @@ export class PreShip {
       const p = projects.get(r.project);
       const t = store.getTicket(r.ticket);
       if (!p || !t || t.status === 'closed') {
-        if (p && r.commit) await this.d.git(p.repo_dir!, ['push', '--quiet', 'origin', `:refs/heads/pre/${r.branch}`, `:refs/heads/pre-base/${r.branch}`], this.d.as(p));
-        delete runs[id];
+        if (!p || !r.commit || (await this.unpush(p, r)) || (r.tries = (r.tries ?? 0) + 1) >= TRIES) delete runs[id];
         continue;
       }
       if (r.told || r.stopped) continue;
       if (!waiting.has(r.ticket)) {
         await this.cancel(p, r);
         r.stopped = true;
-      } else if (yielding) {
+      } else if (await yielding(p)) {
         r.yielded = true;
         await this.cancel(p, r);
       } else await this.follow(p, r);
@@ -178,19 +189,32 @@ export class PreShip {
     store.setSetting(KEY, runs);
   }
 
-  /** A public repo with a workflow on main that runs on pre/** pushes. */
-  private async eligible(p: Scheme): Promise<boolean> {
+  /** A public repo with a workflow on main that runs on pre/** pushes; null when GitHub didn't say and it never has. */
+  private async eligible(p: Scheme): Promise<boolean | null> {
     const slug = repoSlug(p.repo_url)!;
     const main = await this.mainOf(p.repo_dir!);
     if ((await this.d.git(p.repo_dir!, ['grep', '-q', '-F', 'pre/**', main, '--', '.github/workflows'])).code !== 0) return false;
-    let v = this.visible.get(slug);
-    if (!v || this.now() - v.at > VISIBLE_MS) {
-      const a = await this.d.get(`repos/${slug}`, null, this.d.as(p)).catch(() => null);
-      // Unread, it counts as private: a run there would cost minutes.
-      v = { public: a?.status === 200 && (a.body as { private?: unknown } | null)?.private === false, at: this.now() };
-      if (a?.status === 200) this.visible.set(slug, v);
-    }
-    return v.public;
+    const v = this.visible.get(slug);
+    if (v && this.now() - v.at <= VISIBLE_MS) return v.public;
+    const a = await this.d.get(`repos/${slug}`, null, this.d.as(p)).catch(() => null);
+    // Unread, the last answer holds (a blip mustn't cancel runs); never read, nothing starts: a private run costs minutes.
+    if (a?.status !== 200) return v?.public ?? null;
+    const now = { public: (a.body as { private?: unknown } | null)?.private === false, at: this.now() };
+    this.visible.set(slug, now);
+    return now.public;
+  }
+
+  /** Whether a ship's run (land/**) is going in the scheme's repo; unread counts as not. */
+  private async shipping(p: Scheme): Promise<boolean> {
+    const a = await this.d.get(`repos/${repoSlug(p.repo_url)}/actions/runs?per_page=50`, null, this.d.as(p)).catch(() => null);
+    const list = (a?.body as { workflow_runs?: GhRun[] } | null)?.workflow_runs;
+    return Array.isArray(list) && list.some((x) => x.status !== 'completed' && /^land\//.test(x.head_branch ?? ''));
+  }
+
+  /** Delete a run's two branches on GitHub; true once they're gone. */
+  private async unpush(p: Scheme, r: PreRun): Promise<boolean> {
+    const done = await this.d.git(p.repo_dir!, ['push', '--quiet', 'origin', `:refs/heads/pre/${r.branch}`, `:refs/heads/pre-base/${r.branch}`], this.d.as(p));
+    return done.code === 0 || /remote ref does not exist/.test(done.out);
   }
 
   private async mainOf(dir: string): Promise<string> {
@@ -241,13 +265,18 @@ export class PreShip {
     return a?.status === 200 && Array.isArray(list) ? list.filter((x) => x.head_branch === `pre/${r.branch}`) : null;
   }
 
-  /** POST to each run the path `to` gives it (none: skip). */
-  private async each(p: Scheme, r: PreRun, to: (run: GhRun) => string | null) {
-    if (!r.commit) return;
-    for (const run of (await this.listed(p, r)) ?? []) {
+  /** POST to each run the path `to` gives it (none: skip); true when every POST went through. */
+  private async each(p: Scheme, r: PreRun, to: (run: GhRun) => string | null): Promise<boolean> {
+    if (!r.commit) return true;
+    const list = await this.listed(p, r);
+    let ok = !!list;
+    for (const run of list ?? []) {
       const path = to(run);
-      if (path) await this.d.post(`repos/${repoSlug(p.repo_url)}/${path}`, this.d.as(p)).catch(() => null);
+      if (!path) continue;
+      const a = await this.d.post(`repos/${repoSlug(p.repo_url)}/${path}`, this.d.as(p)).catch(() => null);
+      ok &&= !!a && a.status >= 200 && a.status < 300;
     }
+    return ok;
   }
 
   private cancel(p: Scheme, r: PreRun) {
@@ -266,9 +295,11 @@ export class PreShip {
     }
     if (list.some((x) => x.status !== 'completed')) return;
     if (r.yielded && list.some((x) => x.conclusion === 'cancelled')) {
-      r.yielded = false;
-      r.at = this.now();
-      await this.each(p, r, (run) => (run.conclusion === 'cancelled' ? `actions/runs/${run.id}/rerun` : null));
+      // A rerun GitHub refused is asked again next round, up to TRIES times.
+      if ((await this.each(p, r, (run) => (run.conclusion === 'cancelled' ? `actions/runs/${run.id}/rerun` : null))) || (r.tries = (r.tries ?? 0) + 1) >= TRIES) {
+        [r.yielded, r.tries] = [false, 0];
+        r.at = this.now();
+      }
       return;
     }
     r.told = true;
@@ -276,7 +307,7 @@ export class PreShip {
     const what = `the full suite on GitHub, your branch at ${short(r.head)} squashed onto main at ${short(r.main)}`;
     const red = list.filter((x) => !['success', 'skipped', 'neutral', 'cancelled'].includes(x.conclusion ?? ''));
     if (!red.length && list.some((x) => x.conclusion === 'cancelled')) {
-      this.d.send(r.ticket, `Pre-ship check cancelled, not by a ship: ${what}. ${list.map((x) => x.html_url).join(' ')}`, true);
+      this.d.send(r.ticket, `Pre-ship check cancelled, and not run again: ${what}. ${list.map((x) => x.html_url).join(' ')}`, true);
       return;
     }
     if (!red.length) {

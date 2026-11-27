@@ -7,7 +7,7 @@ name: build-images
 
 on:
   push:
-    branches-ignore: [main, 'land/**', 'check/**', 'early/**']
+    branches-ignore: [main, 'land/**', 'check/**', 'early/**', 'pre/**', 'pre-base/**']
     paths:
       - 'tools/build-images/**'
       - '!tools/build-images/images.json' # pasting the digests in rebuilds nothing

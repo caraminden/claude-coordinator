@@ -54,6 +54,8 @@ function world(r: { dir: string }, opts: { private?: boolean; gh_runners?: GhRun
   const posts: string[] = [];
   const sent: { text: string; fyi: boolean }[] = [];
   let yielding = false;
+  // Knobs: the repo read's and every POST's status, the repo's runs on other branches (a ship's), the clock.
+  const gh = { repo: 200, post: 202, ship: [] as { head_branch: string; status: string }[], clock: 0 };
   const pre = new PreShip({
     store: {
       getSetting: <T>(k: string) => (settings.get(k) as T) ?? null,
@@ -65,7 +67,8 @@ function world(r: { dir: string }, opts: { private?: boolean; gh_runners?: GhRun
     },
     as: () => undefined,
     get: async (path) => {
-      if (path === 'repos/someone/other') return { status: 200, etag: null, body: { private: !!opts.private } };
+      if (path === 'repos/someone/other') return { status: gh.repo, etag: null, body: gh.repo === 200 ? { private: !!opts.private } : null };
+      if (path === 'repos/someone/other/actions/runs?per_page=50') return { status: 200, etag: null, body: { workflow_runs: gh.ship } };
       const sha = /head_sha=([0-9a-f]+)/.exec(path)?.[1];
       if (sha) return { status: 200, etag: null, body: { workflow_runs: runs.get(sha) ?? [] } };
       if (/\/jobs/.test(path))
@@ -83,11 +86,12 @@ function world(r: { dir: string }, opts: { private?: boolean; gh_runners?: GhRun
     },
     post: async (path) => {
       posts.push(path);
-      return { status: 202 };
+      return { status: gh.post };
     },
     git,
     send: (_id, text, fyi) => void sent.push({ text, fyi }),
     yielding: async () => yielding,
+    now: () => gh.clock,
   });
   const pushed = () => {
     const out = spawnSync('git', ['rev-parse', '-q', '--verify', 'refs/heads/pre/ticket/5-x'], { cwd: `${r.dir}-origin.git`, encoding: 'utf8' });
@@ -103,6 +107,7 @@ function world(r: { dir: string }, opts: { private?: boolean; gh_runners?: GhRun
     sent,
     pushed,
     record,
+    gh,
     set: (o: { yielding?: boolean; cards?: EventRow[] }) => {
       if (o.yielding !== undefined) yielding = o.yielding;
       if (o.cards) cards = o.cards;
@@ -249,4 +254,79 @@ test("a landing's pre-yield mark counts only while its process runs", async () =
   assert.deepEqual(readdirSync(dir), [], "an ended landing's mark goes");
   writeFileSync(join(dir, `pre-yield.${process.pid}`), '1\n');
   assert.equal(await yieldingIn(dir), true);
+});
+
+test('a GitHub blip at the hourly visibility read leaves runs going; a repo never read starts nothing', async () => {
+  const r = repo();
+  const w = world(r);
+  w.gh.repo = 502;
+  await w.pre.tick();
+  assert.equal(w.pushed(), null, 'never read: nothing starts');
+  w.gh.repo = 200;
+  await w.pre.tick();
+  const commit = w.pushed()!;
+  w.run(commit, 'in_progress', null);
+  w.gh.clock += 2 * 3600_000;
+  w.gh.repo = 502;
+  await w.pre.tick();
+  assert.deepEqual(w.posts, [], 'nothing cancelled');
+  assert.equal(w.record()?.stopped, undefined);
+  w.run(commit, 'completed', 'success');
+  await w.pre.tick();
+  assert.match(w.sent[0]!.text, /^Pre-ship check passed/);
+});
+
+test("another scheme's ship (a land/** run on its repo) comes first with no land.sh mark", async () => {
+  const r = repo();
+  const w = world(r);
+  w.gh.ship = [{ head_branch: 'land/ticket/9-y', status: 'queued' }];
+  await w.pre.tick();
+  assert.equal(w.pushed(), null, 'nothing starts while a ship runs');
+  w.gh.ship = [{ head_branch: 'land/ticket/9-y', status: 'completed' }];
+  await w.pre.tick();
+  const commit = w.pushed()!;
+  w.run(commit, 'in_progress', null);
+  w.gh.ship.push({ head_branch: 'land/ticket/8-z', status: 'in_progress' });
+  await w.pre.tick();
+  assert.deepEqual(w.posts, ['repos/someone/other/actions/runs/70/cancel']);
+  assert.equal(w.record()?.yielded, true);
+});
+
+test('a rerun GitHub refuses is asked again next round, telling nobody', async () => {
+  const r = repo();
+  const w = world(r);
+  await w.pre.tick();
+  const commit = w.pushed()!;
+  w.run(commit, 'in_progress', null);
+  w.set({ yielding: true });
+  await w.pre.tick();
+  w.run(commit, 'completed', 'cancelled');
+  w.set({ yielding: false });
+  w.gh.post = 403;
+  await w.pre.tick();
+  await w.pre.tick();
+  assert.deepEqual(w.posts.slice(1), ['repos/someone/other/actions/runs/70/rerun', 'repos/someone/other/actions/runs/70/rerun']);
+  assert.equal(w.sent.length, 0);
+  assert.equal(w.record()?.yielded, true);
+  w.gh.post = 201;
+  await w.pre.tick();
+  assert.equal(w.record()?.yielded, false);
+  w.run(commit, 'completed', 'success');
+  await w.pre.tick();
+  assert.match(w.sent[0]!.text, /^Pre-ship check passed/);
+});
+
+test("a closed minion's branches that GitHub wouldn't delete are deleted next round", async () => {
+  const r = repo();
+  const w = world(r);
+  await w.pre.tick();
+  assert.ok(w.pushed());
+  w.ticket.status = 'closed';
+  sh(r.dir, 'remote', 'set-url', 'origin', join(root, 'gone.git'));
+  await w.pre.tick();
+  assert.ok(w.record(), 'kept for another try');
+  sh(r.dir, 'remote', 'set-url', 'origin', r.origin);
+  await w.pre.tick();
+  assert.equal(w.pushed(), null);
+  assert.equal(w.record(), undefined);
 });

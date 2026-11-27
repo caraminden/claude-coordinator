@@ -686,6 +686,8 @@ export const HEALTH_KEEP_MS = 8 * 24 * 60 * 60_000;
 export const HOST_SAMPLE_KEEP_MS = 8 * 24 * 60 * 60_000;
 /** How long flake_events rows are kept (#1063): the tab counts 14 days, and the brief quotes older failures. */
 export const FLAKE_KEEP_MS = 90 * 24 * 60 * 60_000;
+/** The flake_events source of a sighting made in a Claude Code cloud session (#2187, src/cloud-flakes.ts): it never counts toward a fix minion. */
+export const CLOUD_SOURCE = 'cloud';
 /** The most health_events rows kept, oldest dropped first, so a page that throws in a loop can't grow the database. */
 export const HEALTH_MAX_ROWS = 5000;
 

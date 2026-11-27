@@ -1670,7 +1670,7 @@ export const projectRoutes: Route[] = [
       const night = readNight(await readJson(req), ticket.number ?? null, Date.now());
       if (typeof night === 'string') throw new HttpError(400, night);
       const { store } = app;
-      store.setSetting(sweepsKey(ticket.project_id), keepNights(store.getSetting<SweepNight[]>(sweepsKey(ticket.project_id)), night));
+      store.setSetting(sweepsKey(ticket.project_id), keepNights(store.getSetting<SweepNight[]>(sweepsKey(ticket.project_id)) ?? [], night));
       const seen = nightSightings(night);
       if (seen.length) store.addFlakeEvents(ticket.project_id, ticket.id, night.sha, night.at, seen);
       json(res, 200, { ok: true, sightings: seen.length, costUsd: night.costUsd });

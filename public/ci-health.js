@@ -1,7 +1,7 @@
 // The CI page's Test health tab (#1063, Josh 2026-11-19: "Add a button to start a minion to fix up flaky tests"): fast mode's state and
 // its known reds for the scheme, and its flakiest test files of the last 14 days (src/flakes.ts counts them from the events land.sh
 // and fast mode's runs leave). Each file offers "Start a minion to fix it", which shows the brief first and starts a bug minion.
-/** @import { FastModeView, FlakeFile, FlakeFix, LandReds, LandRedCause, TestHealth, ReadFailed } from './types/ci.js' */
+/** @import { FastModeView, FlakeFile, FlakeFix, LandReds, LandRedCause, SweepNight, TestHealth, ReadFailed } from './types/ci.js' */
 import { ago, api, h, pacificStamp } from './base.js';
 import { emptyCard, hueRow, meter, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -131,8 +131,16 @@ function flakeBlock(s, flakes, refresh) {
         lead: `${f.count}×`,
         meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} ${f.fix?.state === 'held' ? 'fixed it' : 'is on it'}`) : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it'),
       },
-      h('strong', { title: f.file }, f.file),
-      h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.before ? ` · ${f.before} before the file's last change` : '', f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
+      h('span', {}, h('strong', { title: f.file }, f.file), f.cloud && f.cloud === f.count ? [' ', toneChip('violet', 'cloud only')] : null),
+      f.cloud && f.cloud === f.count ? h('span', { class: 'ci-detail-line muted' }, 'Seen only by the nightly cloud sweep, on a 4-vCPU VM: it starts no fix minion and refuses no ship.') : null,
+      h(
+        'span',
+        { class: 'ci-detail-line muted' },
+        `last ${when(f.last)}`,
+        f.cloud && f.cloud < f.count ? ` · ${f.cloud} in the cloud sweep` : '',
+        f.before ? ` · ${f.before} before the file's last change` : '',
+        f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s land`)] : ' · fast mode',
+      ),
       ...errorLines(f),
       f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null,
     );
@@ -148,6 +156,63 @@ function flakeBlock(s, flakes, refresh) {
     flakes.length ? showFirst({ key: `health-flakes-${s.id}`, items: flakes.map(item), n: 5, noun: 'files' }) : emptyCard('No flaky test file', 'Only schemes whose land script prints flake lines report them.'),
   );
   return block('Flaky tests', flakes.length ? 'waiting' : 'done', row);
+}
+
+// The nightly cloud sweep (#2187, src/cloud-flakes.ts): each night's files and verdicts beside its sessions, minutes and cost.
+// verdict -> [hue, what it means]
+/** @type {Record<string, [string, string]>} */
+const VERDICT = {
+  flaky: ['waiting', 'some copies failed: a cloud sighting'],
+  red: ['danger', 'failed alone on the VM too: a plain red or the VM itself'],
+  skipped: ['held', 'a test skipped on the VM, so it proves nothing'],
+  stopped: ['held', 'over the 25-minute step'],
+  clean: ['done', 'every copy passed'],
+};
+/** @param {number} usd */
+const dollars = (usd) => `$${usd.toFixed(2)}`;
+
+/**
+ * @param {{ id: number }} s
+ * @param {SweepNight[]} sweeps
+ */
+function sweepBlock(s, sweeps) {
+  const key = `health-sweep-${s.id}`;
+  const title = 'Nightly cloud sweep';
+  const last = sweeps[0];
+  if (!last) {
+    const [row] = settingsRow(
+      { key, icon: 'spark', hue: 'held', title, summary: [toneChip('neutral', 'No runs'), 'no night swept yet'] },
+      emptyCard('No night swept yet', "A schedule's minion runs tools/cloud-flake.ts sweep: the flakiest files, about 10 copies each, in a cloud session on main's tip.", { mark: '–', hue: 'held' }),
+    );
+    return block(title, 'held', row);
+  }
+  /** @param {SweepNight} n */
+  const flakyIn = (n) => n.files.filter((f) => f.verdict === 'flaky').length;
+  const flaky = flakyIn(last);
+  const order = Object.keys(VERDICT);
+  const files = [...last.files]
+    .sort((a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict))
+    .map((f) => {
+      const [hue, why] = VERDICT[f.verdict] ?? VERDICT.red;
+      return hueRow({ hue, lead: f.verdict, meta: `${f.failed}/${f.copies} failed · ${f.seconds} s` }, h('strong', { title: f.file }, f.file), h('span', { class: 'ci-detail-line muted', title: f.detail }, why));
+    });
+  const nights = sweeps.map((n) =>
+    hueRow(
+      { hue: n.error ? 'danger' : flakyIn(n) ? 'waiting' : 'done', lead: dollars(n.costUsd), meta: n.minion ? h('a', { href: `#/p/${s.id}/t/${n.minion}` }, `#${n.minion}`) : null },
+      h('strong', {}, when(n.at)),
+      h('span', { class: 'ci-detail-line muted' }, n.error ? `no results: ${n.error.split('\n')[0].slice(0, 140)}` : `${n.files.length} files, ${flakyIn(n)} flaky · ${n.sessions} session × ${Math.round(n.minutes)} min${n.sha ? ` · ${n.sha.slice(0, 9)}` : ''}`),
+    ),
+  );
+  const hue = last.error ? 'danger' : flaky ? 'waiting' : 'done';
+  const [row] = settingsRow(
+    { key, icon: 'spark', hue, title, summary: [last.error ? toneChip('danger', 'No results') : flaky ? toneChip('warn', `${flaky} flaky`) : toneChip('ok', 'Clean'), `${when(last.at)} · ${dollars(last.costUsd)}`] },
+    statTiles([String(last.files.length), 'files swept', 'running'], [String(flaky), 'flaky in the cloud', flaky ? 'waiting' : 'done'], [`${last.sessions} × ${Math.round(last.minutes)} min`, 'sessions × minutes', 'held'], [dollars(last.costUsd), 'plan usage (est.)', 'held']),
+    files.length ? showFirst({ key: `${key}-files`, items: files, n: 5, noun: 'files' }) : null,
+    h('h4', { class: 'settings-section' }, 'Last nights'),
+    showFirst({ key: `${key}-nights`, items: nights, n: 5, noun: 'nights' }),
+    h('p', { class: 'look-prose' }, "Runs on the schedule owner's own plan. A flaky file becomes a cloud sighting under Flaky tests; a cloud VM has 4 vCPU, so those never start a fix minion or refuse a ship."),
+  );
+  return block(title, hue, row);
 }
 
 // Land runs' reds by cause (#1607, src/land-reds.ts): the raw red rate, and the part a ship's own change caused.
@@ -219,7 +284,7 @@ function landRedsBlock(s, lr) {
 export function testHealth(s, data, refresh) {
   if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. ", h('button', { type: 'button', class: 'secondary small', onclick: () => refresh() }, 'Try again'))];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
-  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh)];
+  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh), sweepBlock(s, data.sweeps ?? [])];
 }
 
 /**

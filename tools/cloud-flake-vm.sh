@@ -54,7 +54,7 @@ case ${1:-} in
     fi
     if grep -q 'failing tests:' "$log"; then detail=$(sed -n '/failing tests:/,$p' "$log" | head -n 40)
     else detail=$(tail -n 25 "$log"); fi
-    F=$file C=$copies N=${failed:-0} V=$verdict S=$secs D=$detail node -e 'const e = process.env; console.log(JSON.stringify({ file: e.F, copies: +e.C, failed: Math.min(+e.N || (e.V === "clean" ? 0 : +e.C), +e.C), verdict: e.V, seconds: +e.S, detail: e.D.slice(0, 1500) }))' >>"$results"
+    F=$file C=$copies N=${failed:-0} V=$verdict S=$secs D=$detail node -e 'const e = process.env; console.log(JSON.stringify({ file: e.F, copies: +e.C, failed: Math.min(+e.N || (e.V === "flaky" || e.V === "red" ? +e.C : 0), +e.C), verdict: e.V, seconds: +e.S, detail: e.D.slice(0, 1500) }))' >>"$results"
     rm -f "$log"
     echo "cloud-flake-vm: $file: $verdict (${failed:-0} of $copies copies failed) in $secs s"
     ;;

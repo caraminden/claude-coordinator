@@ -9,11 +9,14 @@
 // never starts or reopens a fix minion (src/flake-fixes.ts skips it) and never refuses a ship (land.sh reads the retro log and
 // flake_fixes, never these rows): a cloud VM has 4 vCPU, so timing-sensitive tests can fail there and nowhere else.
 
-/** The flake_events source of a sighting made in a cloud session. */
-export const CLOUD_SOURCE = 'cloud';
+import { CLOUD } from './cloud-pool.ts';
+import { CLOUD_SOURCE } from './db-rows.ts';
 
-/** Cara's card's figure: about $0.50 for each 20 minutes a session runs, on its sender's plan (an estimate: its tokens never reach Citadel). */
-export const cloudCostUsd = (minutes: number) => Math.round(minutes * 2.5) / 100;
+export { CLOUD_SOURCE };
+
+/** An estimate, since a session's tokens never reach Citadel: Cara's card's figure of about $0.50 for each 20 minutes a session runs,
+ * but never under a session's start (CLOUD.costUsd.start, #2147's measure of a session's first 20 minutes, ~$0.40). */
+export const cloudCostUsd = (minutes: number, sessions = 1) => Math.round(Math.max(minutes * 2.5, sessions * CLOUD.costUsd.start * 100)) / 100;
 
 export const SWEEP = {
   /** Files a night reruns, and copies at once of each (one batch, under load, as tools/flake-proof.sh runs it). */
@@ -79,7 +82,7 @@ export function readNight(body: unknown, minion: number | null, now: number): Sw
   }
   const sha = typeof b.sha === 'string' && /^[0-9a-f]{7,64}$/.test(b.sha) ? b.sha : null;
   const error = typeof b.error === 'string' && b.error ? b.error.slice(0, 600) : null;
-  return { at: now, sha, sessions, minutes: Math.round(minutes * 10) / 10, costUsd: cloudCostUsd(minutes), files, minion, error };
+  return { at: now, sha, sessions, minutes: Math.round(minutes * 10) / 10, costUsd: cloudCostUsd(minutes, sessions), files, minion, error };
 }
 
 /** The sightings a night makes: only its flaky files (a red one failed alone there too, so it's no race). */

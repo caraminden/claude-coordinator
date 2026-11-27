@@ -152,7 +152,7 @@ function home(files: string[], copies: number, why: string): boolean {
 }
 
 const line = (b: SweepFile) => `cloud-flake: ${b.file}: ${b.verdict}, ${b.failed} of ${b.copies} copies failed, ${b.seconds} s${b.verdict !== 'clean' && b.detail ? `\n${b.detail}` : ''}`;
-const costLine = (minutes: number) => `cloud-flake: 1 session × ${minutes.toFixed(1)} min ≈ $${cloudCostUsd(minutes).toFixed(2)} of the plan's usage (an estimate)`;
+const costLine = (minutes: number) => `cloud-flake: 1 session × ${minutes.toFixed(1)} min ≈ $${cloudCostUsd(minutes).toFixed(2)} of your plan's usage (an estimate: a session's start at least, else about $0.50 per 20 minutes)`;
 
 async function proof(files: string[], copies: number, batches: number, seconds: number | null): Promise<number> {
   for (const f of files) if (!existsSync(join(repo, f))) throw new Error(`no such file: ${f}`);
@@ -208,7 +208,9 @@ async function sweep(n: number, copies: number, post: boolean): Promise<number> 
   if (off) throw new Error(`the sweep runs only in the cloud: ${off}`);
   git('fetch', '-q', 'origin', process.env.CLOUD_FLAKE_REF || 'main');
   const onMain = new Set(git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', 'test').split('\n'));
-  const picks = ((await api(`cloud-sweep/picks?n=${n}`)) as { files: string[] }).files.filter((f) => onMain.has(f));
+  // CLOUD_FLAKE_PICKS (comma-separated): sweep these instead of the scheme's flakiest, for a try of the sweep itself.
+  const listed = process.env.CLOUD_FLAKE_PICKS?.split(',').filter(Boolean);
+  const picks = (listed ?? ((await api(`cloud-sweep/picks?n=${n}`)) as { files: string[] }).files).filter((f) => onMain.has(f));
   if (!picks.length) {
     console.log('cloud-flake: no flaky file in 14 days to sweep; nothing ran');
     return 0;

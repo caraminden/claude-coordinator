@@ -1,8 +1,7 @@
 // Flake sightings, their errors (#1438, src/flake-evidence.ts) and fixes (#1313: src/db.ts by area).
 import type { SQLInputValue } from 'node:sqlite';
-import { FLAKE_KEEP_MS, type FlakeFix } from '../db-rows.ts';
+import { CLOUD_SOURCE, FLAKE_KEEP_MS, type FlakeFix } from '../db-rows.ts';
 import type { Store } from '../db.ts';
-import { CLOUD_SOURCE } from '../cloud-flakes.ts';
 
 /** A cloud session's sightings (#2187) never count toward a fix minion: a 4-vCPU VM can fail timing tests nowhere else does. */
 const NOT_CLOUD = `AND source != '${CLOUD_SOURCE}'`;

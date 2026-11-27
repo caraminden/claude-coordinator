@@ -13,12 +13,12 @@ import { settingsRow } from './settings.js';
  */
 export const readNumbers = (id) => api(`api/projects/${id}/ci-numbers`);
 
+/** #2231: a push-to-verdict point from a ship on the scheme's own runners (src/ci-view.ts shipTimes), drawn in its own hue. */
+const OWN = / on own runners$/;
 /**
  * @param {number} v
  * @param {string} [unit]
  */
-/** #2231: a push-to-verdict point from a ship on the scheme's own runners (src/ci-view.ts shipTimes), drawn in its own hue. */
-const OWN = / on own runners$/;
 const fmt = (v, unit) => `${+Number(v).toPrecision(4)}${unit ? ` ${unit}` : ''}`;
 /** @param {{ baseline: number; level: number }} s */
 const pct = (s) => (s.baseline ? `+${Math.round(((s.level - s.baseline) / Math.abs(s.baseline)) * 100)}%` : 'up');

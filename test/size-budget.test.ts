@@ -94,7 +94,7 @@ test('the check fails on growth past the limit or past an allowed size, and pass
 // Raising one needs the decision quoted beside it. A part with no row here fails: give it one.
 export const SHIP_LIMITS = {
   files: {
-    'tools/land.sh': 95_000,
+    'tools/land.sh': 85_000,
     'tools/land/common.sh': 10_000,
     'tools/land/prepare.sh': 30_000,
     'tools/land/guards.sh': 20_000,
@@ -105,7 +105,7 @@ export const SHIP_LIMITS = {
     'tools/land/blame.sh': 30_000,
     'tools/land/main-red.sh': 10_000,
   } as Record<string, number>,
-  total: 234_200, // +2,200 for #2141 until step 5's comment trim: Josh, 2026-11-26, "After split steps 3-4" (the cap raised a little until step 5)
+  total: 214_000,
   longLines: 184,
 };
 

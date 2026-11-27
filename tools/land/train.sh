@@ -54,9 +54,8 @@ train_verdict() {
       [ "$at" != "$c" ] || { train_reporter "$d" "$a"; git reset -q --keep "$a" || true; }
       return 1 ;;
     alone)
-      # Pulled on a guess that nothing proved (#2098): back in line, to ship by itself, so its own CI run decides. It
-      # rides no train and takes no riders, through a re-exec too (LAND_TRAIN), and its ticket says so before the
-      # verdict goes, so no front takes it in between.
+      # Pulled on a guess nothing proved (#2098): back in line to ship by itself, so its own CI run decides. It rides no train and
+      # takes no riders, through a re-exec too (LAND_TRAIN); its ticket says so before the verdict goes, so no front takes it between.
       export LAND_TRAIN=0
       QUEUE_TRAIN=''
       riding=''
@@ -87,9 +86,8 @@ train_verdict() {
         echo "deploy: live now: $c's ship train went live with it" >&2
         land_mark live
       else
-        # An urgent fix riding the train lets the front's restart skip the starved-box hold (deploy.sh's hold, #1417),
-        # and a restart still held says when it expects to go.
-        # Only while that restart waits: it takes the mark as it starts, and one left after that would be the next restart's.
+        # An urgent fix riding the train lets the front's restart skip the starved-box hold (deploy.sh, #1417); a restart still held
+        # says when it expects to go. Only while that restart waits: one left after it would be the next restart's.
         [ -z "${LAND_URGENT:-}${LAND_FIX:-}" ] || { [ ! -s "$state/hold" ] && { [ -n "$(queue_restart "$state")" ] || ! systemctl --user is-active -q "${DEPLOY_UNIT:-cc-restart-when-idle}" 2>/dev/null; }; } || touch "$state/urgent"
         if [ -s "$state/hold" ] && read -r x d <"$state/hold" 2>/dev/null && [[ $x =~ ^[0-9]+$ ]]; then
           echo "deploy: not live yet: the restart $c's ship train queued carries it; the box is starved ($d), so it waits for it to ease, live by about $(TZ=America/Los_Angeles date -d "@$((x + 60))" '+%H:%M %Z') at the latest, and reports here too" >&2
@@ -273,11 +271,9 @@ train_build() {
   retro_log "ship train · $label · ${#train_n[@]} riders: ${train_br[*]}"
 }
 
-# The guard tests on the train's top (#1479), as guards() ran them on this one: a rider's break with main or with the
-# ships before it is as cheap to catch here as this one's own was. Red: the train's prefixes are bisected with them (this
-# one passed), the first red rider is refused with their output before any CI run, and the train is built again
-# without it (the riders after it and the next in line), its new top checked the same way. Undecided, at the top or
-# at a step, names nobody: CI runs them.
+# The guard tests on the train's top (#1479), as guards() ran them on this one: a rider's break is as cheap to catch here as this
+# one's own. Red: the prefixes are bisected with them, the first red rider is refused with their output before any CI run, and the
+# train is built again without it, its new top checked the same way. Undecided: names nobody, CI runs them.
 train_guards() {
   [ ${#train_n[@]} -gt 0 ] || return 0
   phase_ticker "running the guard tests on the train since $(date +%H:%M)"
@@ -285,13 +281,11 @@ train_guards() {
   phase_ticker_end
 }
 
-# The ships held off the train on a guess, now that the train without them has a verdict. <files>: every file it was
-# red on (train_failing). Nobody is refused here (#2098; Josh, 2026-11-26, "Have we not analyzed the guessing at all?"):
-# a held ship was not red alone, so the train passing without it is no proof (6 of the first 10 refused that way were
-# innocent, 3 on flaky tests). One with a test among <files> goes back in line (the guess was wrong). The rest go back
-# in line to ship alone (`alone`, train_verdict), so their own CI run is the proof, and a guess can't pull them off train
-# after train (a flaky test that CI's machine fails with one of them would, lap after lap); known flakes (train_flaky)
-# only change the words. No files: it was green. A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
+# The ships held off the train on a guess, now that the train without them has a verdict. <files>: every file it was red on
+# (train_failing). Nobody is refused here (#2098): a held ship was not red alone, so the train passing without it is no proof. One
+# with a test among <files> goes back in line (the guess was wrong). The rest go back in line to ship alone (`alone`,
+# train_verdict), so their own CI run is the proof; known flakes (train_flaky) only change the words. No files: it was green.
+# A burn-in red ran no suite, so it says nothing of the tests of one held on a suite red.
 train_settle() {
   local i f t red=" $* " again n=("${held_n[@]}") br=("${held_br[@]}") w=("${held_was[@]}") fs=("${held_files[@]}") run=("${held_run[@]}") kind=("${held_kind[@]}") how=("${held_how[@]}") log=("${held_log[@]}")
   held_n=() held_br=() held_was=() held_files=() held_run=() held_kind=() held_how=() held_log=()

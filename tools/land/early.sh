@@ -39,7 +39,7 @@ early_next() {
   read -r lane_e _ < <(git diff --no-renames --name-only "$tip" "$own_e" | "$tools/lane.sh" "$tip") || lane_e=full
   [ "$lane_e" != light ] || return 0 # it runs no CI
   echo "$tip $r $own_e" >"$state/stacked.tmp$$"
-  # The train it would take, as train_build will build it once it has the line, with no verdicts said and nothing logged.
+  # The train it would take, as train_build builds it: no verdicts said, nothing logged.
   out=$(
     early_memo=$state/stacked.tmp$$ branch=$nb own=$own_e old=$tip lane=$lane_e tip=$own_e DEPLOY_QUEUE_TICKET=$nt
     train_n=() train_br=() train_tip=() train_was=() train_only='' train_held_tips=''
@@ -54,7 +54,7 @@ early_next() {
   mv -f "$state/stacked.tmp$$" "$state/stacked"
   # Not on a top the guard tests fail (#1479): its front's own train_guards refuses the ship that broke them.
   guard_at "$top" || [ $? != 1 ] || { say "early next train: the guard tests fail on $nb's train, so its CI waits for its turn"; return 0; }
-  # Not before this train's own run has a runner, which it must not lose to this one (its deploy has had one); only on a free one.
+  # Not before this train's own run has a runner, which it must not lose; only on a free one.
   while [ -z "${1:-}" ]; do
     [ ! -e "$state/early-stop.$$" ] || return 0 # this train's gate ended without a green, or the landing is ending
     st=$(hub gh api "repos/$slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status] | @tsv" 2>/dev/null) || st=''
@@ -67,8 +67,7 @@ early_next() {
   ! ci_busy hub "$slug" || { say "early next train: another Citadel job is on the CI desktop or queued, so $nb's CI waits for its turn"; return 0; }
   [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
   [ ! -e "$state/early-stop.$$" ] || return 0
-  # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.
-  # Its record goes first: a stop that ends the push once GitHub has it still leaves the next landing the run to count or drop (#1894).
+  # With its base, atomic, as ci_gate pushes it (burn-in, #1443). Its record goes first: a stop after the push leaves the run to count or drop (#1894).
   echo "$top $nb $(date +%s) $branch $tip $riders" >"$state/early"
   hub git push -q --atomic "$REMOTE" "+$top:refs/heads/early/$nb" "+$tip:refs/heads/early-base/$nb" 2>"$state/early.err" || { rm -f "$state/early"; say "early next train: pushing $nb's train to GitHub failed$(ci_said "$state/early.err"), so its CI waits for its turn"; return 0; }
   say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while ${1:-"this one's CI runs"} ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
@@ -85,11 +84,10 @@ early_look() {
   [ "$riders" != - ] || train_only=' '
 }
 
-# <slug> <commit>: the workflow's newest run on it, as "<id> <status> <conclusion or ->"; nothing when GitHub has none or doesn't answer.
+# <slug> <commit>: the workflow's newest run, "<id> <status> <conclusion or ->"; nothing when GitHub has none or is silent.
 early_run() { hub gh api "repos/$1/actions/runs?head_sha=$2&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\"] | @tsv" 2>/dev/null || true; }
 
-# <top> <id> <its branch> <why>: an early run nobody will count is cancelled, and its scratch branches go, so a push of
-# the same commit later starts a fresh run.
+# <top> <id> <its branch> <why>: an early run nobody will count is cancelled and its scratch branches go (a later push starts a fresh run).
 early_cancel() {
   [[ ! $2 =~ ^[0-9]+$ ]] || hub gh api -X POST "repos/$(early_slug)/actions/runs/$2/cancel" >/dev/null 2>&1 || true
   hub git push -q "$REMOTE" ":refs/heads/early/$3" ":refs/heads/early-base/$3" >/dev/null 2>&1 || true
@@ -109,8 +107,7 @@ early_drop() {
 # 0 when this landing has an early run stacked on its train's top.
 early_kept() { local top b at fb onto; read -r top b at fb onto _ 2>/dev/null <"$state/early" && [ "$fb" = "$branch" ] && [ "$onto" = "$tip" ]; }
 
-# The gate on the train's top, with the next train's early run started beside it; a red ahead drops it, and the train
-# built again (train_suspects) stacks a new one on its new top. rc as gate's.
+# The gate on the train's top, with the next train's early run beside it; a red ahead drops it, a rebuilt train stacks anew. rc as gate's.
 top_gate() {
   local x
   early_drop "$tip" "the train ahead was built again"
@@ -137,8 +134,7 @@ early_end() {
   rm -f "$state/early-stop.$$"
 }
 
-# At this landing's gate, with its train built: an early run on it counts (early_ahead: how long ago it started; its
-# scratch branches, early_top, are the first gate's run), and any other early run is cancelled.
+# At this landing's gate, train built: an early run on it counts (early_ahead: its age; early_top: the first gate's scratch branches); any other is cancelled.
 early_gate() {
   local top b at fb onto riders slug id st w
   train_only=''

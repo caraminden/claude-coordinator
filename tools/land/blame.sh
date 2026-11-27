@@ -2,9 +2,9 @@
 # The ship train's blame: which ship a red belongs to (sourced by land.sh).
 # Sourced by tools/land.sh up front: definitions only (#2099).
 
-# The real failures in $failed, one test file a line: those that failed again alone, hung, or whose rerun stopped at
-# CI's deadline. A file not rerun, or whose rerun was killed from outside (#1393), may be load or real, so it names no suspect: if it is real, the train without the
-# pulled ships is red on it, and the next round sees it. Fails when there are none, or the log doesn't label every failed file.
+# The real failures in $failed, one test file a line: those that failed again alone, hung, or whose rerun hit CI's deadline.
+# A file not rerun, or killed from outside (#1393), may be load: it names no suspect (if real, the next round sees it). Fails
+# when there are none, or the log doesn't label every failed file.
 train_real() {
   local out
   [ -z "$burn_red" ] || { burn_lines | sed 's/: failed in .*//' | grep .; return; } # each burn-in red file is a real failure (#1443)
@@ -35,7 +35,7 @@ train_imports() {
 # <test file>: the train members (0: this one, 1 on: its riders) its failure is pinned on, nearest first. Reads chg.
 train_suspects_of() {
   local live
-  # set -e as before #1484 ($( ) drops it), so a step that fails still ends the guess with no suspects.
+  # no set -e inside $( ): a step that fails still ends the guess with no suspects.
   live=$(set -e; train_guess "$1")
   [ -z "$live" ] || echo "$live"
 }
@@ -44,14 +44,12 @@ train_suspects_of() {
 train_guess() {
   local f=$1 text reach lvl m c hits named
   text=$(git show "$tip:$f" 2>/dev/null) || text=''
-  # A guard's failure message names the file behind it ("loop-lag.test.ts:22 … 5 sleep hits", #1451): the ship that
-  # changed that file is the suspect, before any guess from what the guard reads or imports.
+  # A guard's failure message names the file behind it (#1451): the ship that changed that file is the suspect.
   named=$({ grep -oE '[A-Za-z0-9_./-]+\.test\.ts:[0-9]+' <<<"$failed" || true; } | sed 's/:[0-9]*$//' | sort -u | while read -r c; do
     [[ $c == */* ]] || c=test/$c
     [ "$c" = "$f" ] || echo "$c"
   done)
-  # A judge-replay red (test/judges.test.ts, #1503) names the pinned code that changed: "(pinned code: src/a.ts src/b.ts)".
-  # The ship that changed that code is the suspect, not the one that only edited the test or its record (#1538).
+  # A judge-replay red (#1503) names the pinned code that changed: that ship is the suspect, not one that only edited the test (#1538).
   [ "$f" != test/judges.test.ts ] || named+=$'\n'$({ grep -oE 'pinned code: [^)]*' <<<"$failed" || true; } | sed 's/^pinned code: //' | tr ' ' '\n' | grep . | sort -u || true)
   named=$(grep . <<<"$named" || true)
   if [ -n "$named" ]; then
@@ -102,11 +100,10 @@ train_alone() {
   "$tools/test-alone.sh" run "$1" "$3" >>"$state/train-pin.log" 2>&1 9>&- 7>&- 6>&- </dev/null
 }
 
-# <test file> <scratch worktree>: the train member (0: this one, 1 on: its riders) that turns it red run alone here: it
-# fails at the train's top and passes on main, so the train's prefixes are bisected with that one file, and the answer
-# is run once more on each side (red with it, green just before it) so one load failure can't pin an innocent ship.
-# Nothing when it passes at the top here (a test only CI's machine fails), fails on main too, a step gives no answer, or
-# the recheck disagrees: the files decide then. The caller adds and removes the worktree, one at a time.
+# <test file> <scratch worktree>: the train member (0: this one, 1 on: its riders) that turns it red run alone here. It fails at
+# the train's top and passes on main, so the prefixes are bisected with that file, and the answer is rerun on each side so one load
+# failure can't pin an innocent ship. Nothing when it passes at the top here, fails on main too, a step gives no answer, or the
+# recheck disagrees: the files decide then. The caller adds and removes the worktree, one at a time.
 train_pin() {
   local f=$1 wt=$2 lo=-1 hi=${#train_n[@]} mid r=0 before
   [ -n "$wt" ] || return 0
@@ -136,18 +133,14 @@ train_failing() {
   tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \([^ ]*\): \(failed in the full run, passed alone\|failed again alone\|hung when rerun alone\|rerun alone stopped\|not rerun\|killed (exit [0-9]*) when rerun alone\).*/\1/p' | sort -u
 }
 
-# A red train (#1918; Josh, 2026-11-24: "we bisect out the likely failures and run 1, 2, 4, 6, 7 if they are green they
-# get shipped and we send 5 and 3 back to debug their failures. If they are still red and we guess 1 is the issue based on
-# the failure, then we take it out and run 2, 4, 6, 7 then we finally get a green and ship those 4"; he approved the plan
-# at 11:24 PM PST). Every likely ship of the red's failing tests is pulled at once, this one at the front included: the
-# one a test's runs on the train's prefixes here name (train_pin) and each one the files name (train_suspects_of). Each of
-# those is run alone on main first (train_solo): red alone, it goes back to its minion with that; another ship pulled for
-# the same test red alone, it waits for the next train (or stays on, when the prefixes name the one red alone); no ship pulled for it red alone, it is held, and all of them go back once
-# the train without them passes the test. The train is built again from what is left, with nothing from the line in the
-# empty seats (train_only); one that can't be rebuilt without the pulled ones goes back in line, blamed for nothing.
-# Still red, on the same test or not, the new failure names the next pull. A file no ship can be named for rides on
-# while others are pulled. With nobody named, or every ship on the train and none of them red alone: train_bisect.
-# All of a round's files are judged before anyone is pulled (#1564, Cara 2026-11-21, C "Go").
+# A red train (#1918): every likely ship of the red's failing tests is pulled at once, this one at the front included: the one a
+# test's runs on the train's prefixes name (train_pin) and each one the files name (train_suspects_of). Each is run alone on main
+# first (train_solo): red alone, it goes back to its minion; another ship pulled for the same test red alone, it waits for the next
+# train (or stays on, when the prefixes name the one red alone); none red alone, it is held and all go back once the train without
+# them passes the test. The train is rebuilt from what is left, nothing from the line in the empty seats (train_only); one that can't
+# be rebuilt without the pulled ones goes back in line, blamed for nothing. Still red, the new failure names the next pull. A file
+# no ship can be named for rides on while others are pulled. Nobody named, or every ship on the train and none red alone:
+# train_bisect. All of a round's files are judged before anyone is pulled (#1564).
 train_suspects() {
   local f i m t v n x line held_line sure_line rest kind real=() hits=() keep=() was=() chg=() open=()
   local -A sus=() sure=() next=() pins=() pin=() guess=() how=() added=() new=()
@@ -297,16 +290,13 @@ train_suspects() {
   done
 }
 
-# A red train whose failing tests name no ship to pull (train_suspects, #1918), and only that. #1899's rule (Josh,
-# 2026-11-24: "keep splitting and any green section gets shipped, until the bad change is found
-# and then pulled out to be fixed and full train starts over"). The part at its front (split_cut) is tested; green, it ships at once
-# (that commit is tested and main hasn't moved, so it needs no further run) and the ships behind it go back in line,
-# nobody refused; red, its own first half is next. <state>/split holds the ships the red may be (split_say), so the next
-# front among them tests half of what is left (split_look, train_build), down to one ship tested by itself: only a red
-# there, on main as it then is, refuses it; but a burn-in red on a case one ship adds (burn_new, #2019) ends the split,
-# and that step is judged as a red train of its own (train_suspects). So two ships red only together ship the first and send back the second, and a
-# flake refuses nobody. That found, the rest and the line form a full train again. A no-answer: the train goes back in
-# line, this one falls back on its own, and the split stays.
+# A red train whose failing tests name no ship to pull (train_suspects, #1918), and only that (#1899). The part at its front
+# (split_cut) is tested; green, it ships at once (tested, main hasn't moved) and the ships behind it go back in line, nobody
+# refused; red, its own first half is next. <state>/split holds the ships the red may be (split_say), so the next front among
+# them tests half of what is left (split_look, train_build), down to one ship: only a red there, on main as it then is, refuses it;
+# a burn-in red on a case one ship adds (burn_new, #2019) ends the split and is judged as a red train of its own. So a flake
+# refuses nobody. That found, the rest and the line form a full train again. A no-answer: the train goes back in line, this one
+# falls back on its own, and the split stays.
 # Each step past this one's own commit runs the guard tests first (#1479): red there is the step's answer, with no CI run.
 train_bisect() {
   local hi=${#train_n[@]} lo g n back

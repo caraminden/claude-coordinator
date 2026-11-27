@@ -15,20 +15,17 @@ quiet() {
   total=$(sed -n 's/^MemTotal: *\([0-9]*\) kB/\1/p' "$QUIET_PROC/meminfo" 2>/dev/null) avail=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' "$QUIET_PROC/meminfo" 2>/dev/null)
   if ! [[ $total =~ ^[0-9]+$ && $avail =~ ^[0-9]+$ ]] || [ "$total" -le 0 ]; then busy+="no memory reading, "
   elif [ $((avail * 100 / total)) -lt "$QUIET_MEM" ]; then busy+="$((avail * 100 / total))% of memory free (quiet is $QUIET_MEM% or more), "; fi
-  # Only looked at, not held: a job that takes it before the run below makes that run wait, but no longer than the busy limit.
+  # Only looked at, not held: a job taking it first makes the run wait, no longer than the busy limit.
   if [ -e "$heavy_dir/slot-0" ] && ! flock -n "$heavy_dir/slot-0" true 2>/dev/null; then busy+="perigee's heavy slot is taken ($(head -c 120 "$heavy_dir/slot-0.who" 2>/dev/null || echo '?')), "; fi
   if [ -e "$heavy_dir/queue" ] && ! flock -n "$heavy_dir/queue" true 2>/dev/null; then busy+="jobs are in line for that slot, "; fi
   busy=${busy%, }
   [ -z "$busy" ]
 }
 
-# A refusal by the pipeline, not by the ship's own change (#1360, Cara 2026-11-20, "Refused ships keep their place"): CI
-# and perigee both busy, the heavy slot taken, or a perigee red of flakes only. Once per hand-off a plain land keeps its
-# ticket instead of refusing: it lets go of the lock, the next ship in line takes it (tools/deploy-queue.sh, QUEUE_YIELD)
-# and takes this one on its train as the first rider; with no train (a pipeline change, CI down) this goes right after
-# it. Back at the front, it starts over from its rebase. Only a fully green run ships it, as ever (ADR 0006).
-# <why>: returns when it can't (a second time, or not a plain land), and the caller refuses as before.
-# <why> flake: flake_keep's, which doesn't count as the one pipeline retry and says how many it has used.
+# A refusal by the pipeline, not the ship's own change (#1360): CI and perigee busy, the heavy slot taken, or a perigee red of
+# flakes only. Once per hand-off a plain land keeps its ticket: it yields the lock (deploy-queue.sh, QUEUE_YIELD), the next ship
+# takes it on its train as first rider, and this one starts over from its rebase. Only a green run ships it (ADR 0006).
+# <why>: returns when it can't (a second time, or not a plain land); the caller refuses. <why> flake: flake_keep's, not counted.
 retry_in_place() {
   [ -n "${2:-}" ] || [ -z "$retried" ] || { say "refused by the pipeline again ($1), after its one retry in place ($retried), so it is refused this time"; return 0; }
   [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ] || return 0
@@ -55,10 +52,9 @@ flake_keep() {
   retry_in_place "$reran, then $again on the fresh run" flake
 }
 
-# Perigee is busy: say so (at first, then every 5 min) and refuse once it has been busy QUIET_LIMIT s. $1: why CI didn't answer.
-# The busy time adds up only from one call to the next (#1361): ci_gate clears busy_last while a runner is online and CI
-# hasn't given up on it, so time spent waiting on a merely busy desktop never counts towards the refusal. So runs lost
-# or cut off before they gave a verdict count apart: without that, a ship whose runs all end so held the lock for ever (#1864).
+# Perigee is busy: say so (first, then every 5 min) and refuse after QUIET_LIMIT s busy. $1: why CI didn't answer.
+# Busy time adds up only from one call to the next (#1361): ci_gate clears busy_last while a runner is online, so waiting on
+# a busy desktop never counts; runs lost or cut off before a verdict count apart (#1864).
 busy_waited() { if [ -n "$busy_last" ]; then echo $((busy_spent + SECONDS - busy_last)); else echo "$busy_spent"; fi; }
 
 busy_wait() {
@@ -69,7 +65,7 @@ busy_wait() {
   elif [ "$waited" -ge "$QUIET_LIMIT" ]; then over="CI and perigee both busy for $((waited / 60)) min"; fi
   [ -z "$over" ] || retry_in_place "$over"
   [ -z "$over" ] || refuse "CI and perigee both busy, try again: CI: $1$lost; perigee for $((waited / 60)) min: $busy. So $untouched"
-  # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL (15 min).
+  # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL.
   if [ -z "$busy_told" ] || [ $((SECONDS - busy_told)) -ge 300 ]; then
     say "waiting for CI or a quiet perigee: CI: $1, but perigee is busy ($busy), so this keeps asking CI and runs the suite here only once perigee is quiet (refused after $((QUIET_LIMIT / 60)) min, $((waited / 60)) min so far)"
     queue_phase "waiting for CI or a quiet perigee, $((waited / 60)) min so far"
@@ -77,16 +73,14 @@ busy_wait() {
   fi
 }
 
-# [<file>]: what gh or git said on stderr ($state/ci.err by default), as " (<its first lines>)" (git's "To <remote>" left out) for a reason (#553 F12d: a rate limit, a missing gh
-# and a rejected push all read alike). Nothing when it said nothing.
+# [<file>]: what gh or git said on stderr ($state/ci.err default), as " (<first lines>)" for a reason (#553 F12d); nothing if silent.
 ci_said() {
   local s
   s=$(grep -v -e '^[[:space:]]*$' -e '^To ' "${1:-$state/ci.err}" 2>/dev/null | head -n 4 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed ':a;N;$!ba;s/\n/; /g' | cut -c1-300) || true
   [ -z "$s" ] || echo " ($s)"
 }
 
-# The newest run of the workflow on this commit, into ci_*; nothing when there is none. Fails when GitHub doesn't answer
-# with one (an error page is no answer).
+# The newest run of the workflow on this commit, into ci_*; nothing when none. Fails when GitHub gives no answer.
 ci_run() {
   local run
   run=$(hub gh api "repos/$ci_slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>"$state/ci.err") || return 1
@@ -103,9 +97,8 @@ ci_done() {
   ci_id='' ci_pushed='' ci_pushed_at='' ci_stale=''
 }
 
-# 0 when the run's full suite step failed and it has a rerun step (#1374), in any state: one already ended means the
-# run ended between the gate's look and this one, and the next look reads its verdict rather than falling back on a
-# red it already has. A first pass still going, a run with no rerun step, or GitHub not answering is no.
+# 0 when the run's full suite step failed and it has a rerun step (#1374), in any state (an ended run is read next look).
+# A first pass still going, no rerun step, or GitHub not answering is no.
 ci_rerunning() {
   local steps
   steps=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_STEP\" or .name == \"$CI_RERUN_STEP\") | [.name, .status, .conclusion // \"-\"] | @tsv] | .[]" 2>/dev/null) || return 1
@@ -113,9 +106,8 @@ ci_rerunning() {
   grep -q "^$CI_RERUN_STEP"$'\t' <<<"$steps"
 }
 
-# 0, with its seconds in $burned (CI_BURN at most, or CI_BURN while it still runs), when the run has a burn-in step that took
-# any time (#1443). One that skipped, a run without the step, or GitHub not answering is no. Timestamps go through date, which
-# reads GitHub's milliseconds and offsets.
+# 0, with its seconds in $burned (CI_BURN at most), when the run has a burn-in step that took time (#1443). Skipped, absent or
+# no answer is no.
 ci_burned() {
   local st a b
   read -r st a b < <(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs" --jq "[.jobs[].steps[] | select(.name == \"$CI_BURN_STEP\") | [.status, .started_at // \"-\", .completed_at // \"-\"] | @tsv][0] // empty" 2>/dev/null) || : # no answer leaves st empty
@@ -128,11 +120,10 @@ ci_burned() {
   [ "$burned" -gt 0 ]
 }
 
-# Only when no runner is online, GitHub errors (#1361) or a runner's clock is off (#900): a late start or a slow run says
-# nothing about the next ship's.
+# Only when no runner is online, GitHub errors (#1361) or a runner's clock is off (#900): a slow run says nothing about the next ship.
 ci_down() { printf '%s %s\n' "$(date +%s)" "$why" >"$state/ci-down" 2>/dev/null || true; }
 
-# How many runners with the label are online. Its own query (the runners list, a page of 100), not the one before a push.
+# How many runners with the label are online (its own query, a page of 100).
 ci_online() {
   local n
   n=$(hub gh api "repos/$ci_slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || return 1
@@ -147,17 +138,16 @@ ci_gate() {
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
-  # A CI outage is paid once (#553): a landing that waited out a limit leaves a note, and those of the next minutes
-  # go straight to the run here instead of each waiting to learn the same thing.
+  # A CI outage is paid once (#553): a landing that waited out a limit leaves a note; the next minutes go straight to the run here.
   local down_at='' down_why='' now
   now=$(date +%s)
   read -r down_at down_why 2>/dev/null <"$state/ci-down" || true
-  # While perigee is busy the note doesn't count: this landing asks CI itself rather than wait on perigee.
+  # While perigee is busy the note doesn't count: this landing asks CI itself.
   if [[ $down_at =~ ^[0-9]+$ ]] && [ $((now - down_at)) -lt "$CI_DOWN" ] && quiet; then
     why="CI gave no answer to a landing $((now - down_at)) s ago ($down_why), so this one doesn't wait for it (it is asked again from $(date -d "@$((down_at + CI_DOWN))" +%H:%M))"
     return 2
   fi
-  # After the outage note (#553): a landing it sends straight to the run here doesn't ask GitHub even this.
+  # After the outage note (#553): no GitHub ask at all.
   ci_quota=$(gh_quota)
   ci_stale=''
   { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's figure (#1722)
@@ -170,15 +160,13 @@ ci_gate() {
     [[ $online =~ ^[0-9]+$ ]] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
     [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
     ci_pushed=$tip ci_pushed_at=$SECONDS # before the push: a stop can end it once GitHub has it
-    # Forced on purpose: land/<branch> and land-base/<branch> are scratch branches only this script writes and deletes, so
-    # there is no one's work to overwrite. Atomic, so the run never starts without the base its burn-in compares with.
+    # Forced on purpose: land/ and land-base/ branches are scratch only this script writes. Atomic: the burn-in needs the base.
     hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; ci_pushed_at=''; return 2; }
   fi
   say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet). GitHub calls left this hour: $ci_quota"
   queue_phase "waiting for CI since $(date +%H:%M)"
   while :; do
-    # One missed answer is not a verdict: the limits below end the wait. But a run of them is: ci_status is then the last
-    # answer GitHub gave, maybe long ago, so the limits below say GitHub didn't answer instead of blaming CI (#1655).
+    # One missed answer is no verdict; a run of them is: ci_status is stale, so the limits say GitHub didn't answer (#1655).
     if ci_run; then ci_fail_n=0; else ci_fail_n=$((ci_fail_n + 1)); [ "$ci_fail_n" -gt 1 ] || ci_fail_at=$(date +%H:%M); fi
     [ "$ci_id" != "$ci_stale" ] || ci_id='' ci_status=''
     if [ -z "$ci_taken" ] && { [ "$ci_status" = in_progress ] || [ "$ci_status" = completed ]; }; then # a runner took it
@@ -189,7 +177,7 @@ ci_gate() {
     fi
     [ "$ci_status" != completed ] || break
     waited=$((SECONDS - started))
-    # Past a limit the suite runs here, but only on a quiet perigee: until then this keeps waiting for the run (busy_wait).
+    # Past a limit the suite runs here, but only on a quiet perigee (busy_wait) until then.
     why='' down=''
     if [ -n "$ci_taken" ]; then
       ran=$((SECONDS - taken_at))
@@ -208,8 +196,7 @@ ci_gate() {
         fi
       fi
     elif [ "$waited" -ge "$CI_START" ]; then
-      # Not started yet: is a runner online? Asked afresh past CI_START, then every CI_ONLINE_POLL s. A missed answer keeps
-      # the last one (the count before the push, at first); with none at all, GitHub errs.
+      # Not started: is a runner online? Asked past CI_START, then every CI_ONLINE_POLL s; a missed answer keeps the last.
       if [ -z "$online_at" ] || [ $((SECONDS - online_at)) -ge "$CI_ONLINE_POLL" ]; then
         if n=$(ci_online); then online=$n online_at=$SECONDS; fi
       fi
@@ -217,16 +204,16 @@ ci_gate() {
       elif [ "$online" = 0 ]; then why="no runner started the job within ${CI_START}s, and no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)" down=1
       elif [ "$waited" -ge "$CI_START_ONLINE" ]; then why="no runner started the job within ${CI_START_ONLINE}s, though a $CI_LABEL runner is online"
       elif [ -z "$told" ] || [ $((SECONDS - told)) -ge 300 ]; then
-        # Every 5 min, a new phase too: the line behind counts an unchanged one as stuck after DEPLOY_QUEUE_STALL (15 min).
+        # Every 5 min, a new phase too (DEPLOY_QUEUE_STALL).
         say "a $CI_LABEL runner is online but hasn't started the job (busy with another run, most likely), so this waits for it: up to $((CI_START_ONLINE / 60)) min, $((waited / 60)) min so far"
         queue_phase "waiting for CI: a busy runner, $((waited / 60)) min so far"
         told=$SECONDS
       fi
     fi
     nap=$CI_POLL
-    # GitHub failing: asking faster only spends what is left of the hour, so each failed poll in a row waits a poll longer, up to CI_BACKOFF s.
+    # GitHub failing: each failed poll in a row waits a poll longer, up to CI_BACKOFF s.
     if [ "$ci_fail_n" -gt 0 ]; then nap=$(awk -v p="$CI_POLL" -v n="$ci_fail_n" -v m="$CI_BACKOFF" 'BEGIN { v = p * (1 + n); print (v > m ? (m > p ? m : p) : v) }'); fi
-    # On a busy perigee it asks CI and perigee again every QUIET_POLL s, not every CI_POLL s (Josh: "re-checking every 30 s").
+    # On a busy perigee it asks every QUIET_POLL s, not CI_POLL s.
     if [ -n "$why" ]; then
       if quiet; then [ -z "$down" ] || ci_down; return 2; fi
       busy_wait "$why"
@@ -239,16 +226,15 @@ ci_gate() {
   case $ci_result in
     success) rm -f "$state/ci-down"; say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
     failure)
-      # Red only when the tests ran: a run that failed setting up (no user manager, a download) says nothing about this
-      # commit, nor does one whose runner went away: its job fails with no failed step (#1864), as in the kit's template.
+      # Red only when tests ran: a failed setup, or a runner gone (no failed step, #1864), says nothing about this commit.
       ci_step=$(ci_fact api "repos/$ci_slug/actions/runs/$ci_id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // (if (.jobs | length) == 0 then "no jobs" else "no failed step" end)') || {
         why="GitHub didn't say which step of the red CI run failed ($ci_url)$(ci_said), so it isn't known whether its tests are red"; return 2; }
       [ "$ci_step" != 'no failed step' ] || { ci_lost=1; return 1; }
       [ "$ci_step" != 'no jobs' ] || return 1 # a workflow file GitHub can't run, not a lost runner
-      # A skewed clock (#900) lasts hours, until the distro behind it stops: the note spares the next landings a run each.
+      # A skewed clock (#900) lasts hours: the note spares the next landings a run each.
       [ "$ci_step" != "$CI_CLOCK_STEP" ] || { why="runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran ($ci_url); a systemd-timesyncd in a WSL distro on Cara's desktop must be masked (tools/ci-runner/README.md)"; ci_down; return 2; }
       [ "$ci_step" != "$CI_BURN_STEP" ] || { burn_red=1; return 1; } # the ship's own red (#1443)
-      # It runs only after a green suite, and measures the PC: the tests passed (LB6). main's own daily run still goes red on it.
+      # It runs only after a green suite and measures the PC (LB6); main's daily run still goes red on it.
       if [ "$ci_step" = "$CI_PORTS_STEP" ]; then
         say "CI's full suite passed on $short, and then its check of the PC's own ports went red (\"$CI_PORTS_STEP\"), which says nothing about this ship: it counts as green ($ci_url). WSL is leaking Windows ports again: tools/ci-runner/README.md"
         retro_log "CI ports red · $branch · counted as green · $ci_url"
@@ -261,9 +247,8 @@ ci_gate() {
   esac
 }
 
-# A red run's failed log into $failed, its last lines on stderr, and run-tests.sh's flake labels into the retro log
-# (they can't reach it from the desktop, so they are written from its output here). Fails, with $why, when GitHub doesn't
-# send the log of a red suite: a flake, a cut-off run and a real failure can't be told apart without it (#1864).
+# A red run's failed log into $failed, its last lines on stderr, and run-tests.sh's flake labels into the retro log. Fails, with
+# $why, when GitHub sends no log of a red suite: flake, cut-off and real failure can't be told apart without it (#1864).
 ci_failed() {
   local f load
   failed=''
@@ -290,11 +275,9 @@ ci_failed() {
 # The burn-in's verdict in $failed (#1443): "<file>: failed in <n> of <N> copies at once" for each red file; nothing otherwise.
 burn_lines() { sed -n 's/.*burn-in: \([^ ]*: failed in [0-9]* of [0-9]* copies at once\).*/\1/p' <<<"$failed" | sort -u; }
 
-# The failed files, comma-separated, when $failed says every one of them passed alone (#769); fails otherwise. It
-# counts on run-tests.sh's own lines: "<n> test file(s) failed; rerunning each alone…" and then one label per file.
-# Without that line (more than its max_reruns files, a hang, a leak, a run that never got to the tests) it is no flake.
-# Only the labels after that line count: a test's own output can quote one (test/land.test.ts does). Nor is a run that
-# skipped a test (#1914).
+# The failed files, comma-separated, when $failed says every one passed alone (#769); fails otherwise. Counts on run-tests.sh's
+# "<n> test file(s) failed; rerunning each alone…" line and the labels after it only (a test can quote one); none: no flake.
+# Nor is a run that skipped a test (#1914).
 flake_only() {
   local at n files
   ! skipped_tests >/dev/null || return 1
@@ -307,12 +290,9 @@ flake_only() {
   sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
 }
 
-# Whether $failed is a run cut off from outside before any test failed (#1377): Node's test runner printed its
-# "Interrupted while running:" (a SIGINT or SIGTERM: run 44859457680 of Nov 20, at 55 s), no test failed, and run-tests.sh
-# didn't stop it as a hang (its timeout sends the same signal, and a hang is a real red). It says nothing about the commit.
-# #1393: so is a run killed from outside (exit 137, the desktop's out-of-memory killer): run-tests.sh's "were killed" line,
-# or only GitHub's exit 137 line when the whole step went. A SIGKILL leaves Node no summary, so "no test failed" there
-# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red.
+# Whether $failed is a run cut off from outside before any test failed (#1377): Node's "Interrupted while running:" with no
+# hang stop by run-tests.sh. #1393: so is a kill from outside (exit 137, out-of-memory): run-tests.sh's "were killed" line, or
+# GitHub's exit 137 line alone. With no Node summary, "no test failed" means no ✖ in the log; an earlier failure stays red.
 cut_off() {
   ! grep -qF 'run-tests: the tests ran past' <<<"$failed" || return 1
   if grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed"; then return 0; fi
@@ -331,12 +311,9 @@ gate() {
   early_top=''
   tip=$1 short=$(git rev-parse --short "$1") failed='' reran='' burn_red=''
   ci_gate || rc=$?
-  # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
-  # run (pushing a commit a branch already has starts none); ci_gate then passes over the red one as stale, so it is
-  # never read as the answer. A no-answer this time falls back to the run here, which must be green too. If the branch
-  # won't go, there is no fresh run: it stays a red, rather than a wait for a run never started read as CI being down.
-  # A run cut off before any test failed (#1377) gets the same one fresh run; cut off again, it is no answer. A red of
-  # known flakes only (#1419: known_flakes) needs no fresh run: it is a green.
+  # One fresh run for a red of flakes only (#769). The scratch branch goes first (pushing an existing commit starts no run); ci_gate
+  # then passes the red one as stale. A no-answer falls back to the run here, which must be green too. If the branch won't go,
+  # it stays red, not a wait read as CI down. A cut-off run (#1377) gets the same one rerun; a red of known flakes only (#1419) is green.
   local cut='' ended='' early_ref='' how='was cut off before any test failed'
   [[ $CI_REF != early/* ]] || early_ref=1
   if [ "$rc" = 1 ] && ! ci_failed; then rc=2; fi

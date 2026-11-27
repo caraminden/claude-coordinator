@@ -2124,6 +2124,199 @@ export class JobRunner {
   }
 }
 
+/** Citadel's own build images (tools/build-images/images.json), by digest: the only ones the Builds role runs. */
+const BUILD_IMAGE = /^ghcr\.io\/caraminden\/citadel-build-[a-z0-9-]{1,40}@sha256:[a-f0-9]{64}$/;
+/** The cache volumes the Builds role's Set up made, and where each goes. */
+const BUILD_VOLUMES = new Map([
+  ['citadel-gradle', '/cache/gradle'],
+  ['citadel-cargo', '/cache/cargo'],
+  ['citadel-npm', '/cache/npm'],
+]);
+/** podman as the Builds role runs it: on Windows in the citadel-workers distro as its worker user, as role-setup-agent.mjs's builds() does (keep the two the same). */
+export const BUILDS_PODMAN = process.platform === 'win32' ? ['wsl.exe', '-d', 'citadel-workers', '-u', 'citadel-worker', '--exec', '/bin/sh', '-c', 'XDG_RUNTIME_DIR=/run/user/$(id -u) exec podman "$@"', 'podman'] : ['podman'];
+
+/** Why a build job.start must be refused, or null: one of Citadel's build images, its one snapshot in, nothing of the owner's read. */
+export function refuseBuild(msg) {
+  const k = msg.kind;
+  if (!k || typeof k !== 'object' || typeof k.name !== 'string' || !/^[a-z]{1,20}$/.test(k.name)) return 'the build has no kind';
+  if (typeof k.image !== 'string' || !BUILD_IMAGE.test(k.image)) return `a build runs only Citadel's build images, by digest, not ${String(k.image).slice(0, 100)}`;
+  if (!Array.isArray(k.command) || !k.command.length || k.command.length > 64 || !k.command.every((a) => typeof a === 'string' && !a.includes('\0'))) return 'the command must be a list of arguments';
+  if (!Array.isArray(k.reads) || k.reads.length || k.gpu === true) return "a build reads none of the owner's folders and has no GPU";
+  if (BUILD_VOLUMES.get(k.volume) !== k.at) return `the cache volume ${String(k.volume).slice(0, 40)} isn't one the Builds role made`;
+  if (!Number.isInteger(k.threads) || k.threads < 1 || k.threads > 256) return 'the build needs a whole number of threads';
+  if (!Number.isInteger(msg.limit_s) || msg.limit_s <= 0 || msg.limit_s > 12 * 3600) return 'the time limit must be at most 12 h';
+  const f = Array.isArray(msg.inputs) && msg.inputs.length === 1 ? msg.inputs[0] : null;
+  if (f?.name !== 'snapshot.tgz' || !Number.isInteger(f.size) || f.size < 0 || f.size > JOB_INPUTS_MAX || typeof f.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(f.sha256)) return 'a build takes one input, snapshot.tgz, with its size and sha256';
+  if (typeof msg.input_token !== 'string' || !msg.input_token) return 'the job has no input token';
+  return null;
+}
+
+/**
+ * A heavy job of a minion's on the Builds role (H2, src/heavy-builds.ts): a JobRunner whose jobs run side by side, the
+ * balancer having sized them, in one of Citadel's build images with its cache volume. Nothing is bind-mounted, since the
+ * citadel-workers distro sees no Windows drive: the snapshot goes in on stdin, the output is the log, and
+ * /tmp/back.tgz comes out with `podman cp` as out/back.tar. A build cut off by an agent restart ends failed; the
+ * minion places it again.
+ */
+export class BuildRunner extends JobRunner {
+  constructor({ dir, appUrl, token, log = () => {}, podman = BUILDS_PODMAN, tickMs = 10_000 }) {
+    mkdirSync(dir, { recursive: true });
+    super({ block: { dir, folders: new Map(), max_limit_h: 12, max_disk_gb: 20, gpu: false }, appUrl, token, log, podman, tickMs });
+  }
+
+  name(job) {
+    return `citadel-build-${job.id}`;
+  }
+
+  /** Not a GPU jobs block: nothing to tell the app. */
+  offer() {
+    return null;
+  }
+
+  async sampleGpu() {
+    return null;
+  }
+
+  /** Builds don't pause: a pause (the whole-machine Pause) stops it, and the minion places it again. */
+  async pause(job) {
+    this.stop(job, 'stopped', 'the machine was paused');
+  }
+
+  async resume() {}
+
+  async restore() {
+    const home = this.block.dir;
+    for (const e of readdirSync(home)) {
+      if (!JOB_ID.test(e) || this.jobs.has(e)) continue;
+      let job = null;
+      try {
+        job = JSON.parse(readFileSync(join(home, e, 'job.json'), 'utf8'));
+      } catch {}
+      if (!job || job.id !== e || (job.final_sent && !(job.outputs ?? []).some((o) => o && o.uploaded === false))) {
+        rmSync(join(home, e), { recursive: true, force: true });
+        continue;
+      }
+      job.home = home;
+      this.jobs.set(e, job);
+      if (job.final_sent || job.final) continue;
+      // Its output went to the agent that's gone: the build can't be followed, so it ends (connected() tells the app).
+      await this.exec(this.podman, ['rm', '-f', this.name(job)]);
+      job._end = ['failed', "the machine's agent restarted during the build"];
+    }
+  }
+
+  async start(msg) {
+    const why = refuseBuild(msg) ?? (this.makeRoom(msg.inputs[0].size) ? null : `the builds folder would go over its ${this.block.max_disk_gb} GB`);
+    if (why) return this.refuse(msg, why);
+    const { name, image, command, network, volume, at, threads } = msg.kind;
+    const job = {
+      id: msg.id,
+      home: this.block.dir,
+      kind: { name, image, command, gpu: false, network: network === true, reads: [], resumable: false, volume, at, threads },
+      limit_s: msg.limit_s,
+      inputs: msg.inputs.map(({ name: n, size, sha256 }) => ({ name: n, size, sha256 })),
+      state: 'starting',
+      run_ms: 0,
+      since: null,
+      gpu_busy_s: 0,
+      started_at: Date.now(),
+      paused: null,
+      outputs: [],
+      final: null,
+      final_sent: false,
+    };
+    this.jobs.set(job.id, job);
+    for (const d of ['in', 'out']) mkdirSync(this.dir(job, d), { recursive: true });
+    this.save(job);
+    this.log(`Build ${job.id}: ${name}, ${threads} threads, up to ${Math.round(job.limit_s / 60)} min`);
+    await this.report(job);
+    job._abort = new AbortController();
+    try {
+      await this.fetchInput(job, job.inputs[0], msg.input_token);
+    } catch (err) {
+      if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error);
+      return this.finish(job, 'failed', `input ${err.message}`);
+    }
+    await this.launch(job);
+  }
+
+  async launch(job) {
+    if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error);
+    const k = job.kind;
+    const args = [
+      'run',
+      '-i',
+      '--name',
+      this.name(job),
+      '--label',
+      `citadel.build=${job.id}`,
+      '--cap-drop',
+      'all',
+      '--security-opt',
+      'no-new-privileges',
+      '--security-opt',
+      'label=disable',
+      // Root inside a rootless podman is the worker user outside: the images' toolchains and the volumes are its own.
+      '--cpus',
+      String(k.threads),
+      '-e',
+      'HOME=/tmp',
+      ...(k.network ? [] : ['--network', 'none']),
+      '-v',
+      `${k.volume}:${k.at}`,
+      k.image,
+      ...k.command,
+    ];
+    const logFile = this.dir(job, 'job.log');
+    const out = createWriteStream(logFile, { flags: 'a' });
+    const p = spawn(this.podman[0], [...this.podman.slice(1), ...args], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.children.add(p);
+    job._run = p;
+    p.stdout.pipe(out, { end: false });
+    p.stderr.pipe(out, { end: false });
+    createReadStream(this.dir(job, 'in', 'snapshot.tgz'))
+      .on('error', () => p.stdin.destroy())
+      .pipe(p.stdin)
+      .on('error', () => {}); // a command that never reads its stdin closes it early
+    job.state = 'running';
+    job.since = Date.now();
+    this.save(job);
+    void this.report(job);
+    const code = await new Promise((done) => {
+      p.on('error', (err) => (out.write(`citadel-heavy: could not run podman: ${err.message}\n`), done(null)));
+      p.on('close', (c) => done(c));
+    });
+    this.children.delete(p);
+    job._run = null;
+    await new Promise((done) => out.end(done));
+    if (this.closed || this.jobs.get(job.id) !== job || job.final) return;
+    if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error, code);
+    // podman's own failures (125 to 127) are the machine's, not the command's.
+    if (code === null || code >= 125) return this.finish(job, 'failed', `podman run failed (${code ?? 'no exit code'}): ${cleanLog(fileTail(logFile, 2000)).slice(-500)}`);
+    await this.copyBack(job);
+    return this.finish(job, code === 0 ? 'done' : 'failed', code === 0 ? null : `it exited with code ${code}`, code);
+  }
+
+  /** /tmp/back.tgz from the ended container, as a tar holding it (podman cp's own stream), into out/. */
+  async copyBack(job) {
+    const file = this.dir(job, 'out', 'back.tar');
+    const p = spawn(this.podman[0], [...this.podman.slice(1), 'cp', `${this.name(job)}:/tmp/back.tgz`, '-'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    this.children.add(p);
+    const [code] = await Promise.all([new Promise((done) => p.on('close', done).on('error', () => done(-1))), pipeline(p.stdout, createWriteStream(file)).catch(() => {})]);
+    this.children.delete(p);
+    // None asked for, or none made: nothing comes back.
+    if (code !== 0) rmSync(file, { force: true });
+  }
+
+  async finish(job, state, error = null, exitCode = null) {
+    await super.finish(job, state, error, exitCode);
+    if (job.final_sent && job.outputs.every((o) => o.uploaded)) {
+      rmSync(this.dir(job), { recursive: true, force: true });
+      this.jobs.delete(job.id);
+    }
+  }
+}
+
 // ---------- running in the background ----------
 
 /** Copies everything the agent prints to a file as well, so a background agent's errors can be read. */
@@ -2566,6 +2759,8 @@ async function main() {
   // GPU jobs (#858): made even without a jobs block, so a job sent here is refused out loud.
   const runner = new JobRunner({ block: host?.jobsBlock ?? null, appUrl, token, log });
   runner.onLeftover = () => sendInfo();
+  // Minions' heavy jobs on the Builds role (H2): the app sends them only while that role is on and set up here.
+  const builds = new BuildRunner({ dir: join(configFile ? dirname(configFile) : homedir(), 'citadel-builds'), appUrl, token, log });
   // Minion turns (Build 7): only with a "worker" block in the config file, and only then is machine-worker.mjs loaded, from beside this file.
   let worker = null;
   try {
@@ -2590,6 +2785,7 @@ async function main() {
   /** Tells the app which servers and workspaces this agent offers; sent on connect and when the config changes. */
   async function sendInfo() {
     await runner.ready;
+    await builds.ready;
     const jobs = runner.offer();
     await fetch(new URL('/api/machines/info', appUrl), {
       method: 'POST',
@@ -2599,9 +2795,9 @@ async function main() {
         ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }),
         report: await machineReport(),
         ...(host ? host.summary() : {}),
-        problems: [...(host?.summary().problems ?? []), ...runner.leftover()],
+        problems: [...(host?.summary().problems ?? []), ...runner.leftover(), ...builds.leftover()],
         ...(jobs ? { jobs } : {}),
-        ...(runner.restored ? { known_jobs: runner.known() } : {}),
+        ...(runner.restored ? { known_jobs: [...runner.known(), ...builds.known()] } : {}),
       }),
     })
       .then(async (res) => {
@@ -2621,7 +2817,7 @@ async function main() {
       runner.ready = before.then(() => runner.setBlock(block)).catch((err) => log(`Jobs: ${err.message}`));
       if (JSON.stringify([...(host.jobsBlock?.folders ?? [])]) !== folders) log('The jobs folders changed: if they are Windows folders, add them to /etc/fstab and restart this distro (wsl --terminate).');
       describeWorkspaces();
-      sendInfo().then(() => runner.connected());
+      sendInfo().then(() => (runner.connected(), builds.connected()));
     });
   }
   // Claude Code rewrites its config all the time, so look now and then and say so only when the names changed.
@@ -2817,7 +3013,7 @@ async function main() {
         log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe}${!managed && host?.workspaces.size ? ` and workspaces ${[...host.workspaces.keys()].join(', ')}` : ''} while this runs.`);
         retry = 0;
         // After the info that lists what this agent holds: then whatever ended while it was away is reported.
-        sendInfo().then(() => runner.connected());
+        sendInfo().then(() => (runner.connected(), builds.connected()));
       } else if (msg.replaced) {
         throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });
       } else if (msg.lend) {
@@ -2831,7 +3027,8 @@ async function main() {
           fetch(new URL('/api/machines/role-setup', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ask.id, done: { ok: false, why: `The agent couldn't run it: ${err.message}` } }) }).catch(() => {});
         });
       } else if (msg.job) {
-        runner.handle(msg.job).catch((err) => log(`Job ${msg.job.id}: ${err.message}`));
+        const lane = msg.job.type === 'job.start' ? (msg.job.kind?.lane === 'builds' ? builds : runner) : builds.jobs.has(String(msg.job.id)) ? builds : runner;
+        lane.handle(msg.job).catch((err) => log(`Job ${msg.job.id}: ${err.message}`));
       } else if (msg.host_start) {
         // run_on_host (T8): checked against this file's own list, whatever the app asks.
         const ask = msg.host_start;

@@ -13,11 +13,12 @@ const minion = { who: ['minion'], refuse: 'Only the minion itself places its hea
 /** The agent takes a command of at most 64 arguments; the recipe's own take six. */
 const MAX_ARGS = 58;
 const LIMIT_MIN = { default: 120, max: 12 * 60 };
-/** What the image runs: the snapshot unpacked, the command in the caller's folder, then the files to bring back into /out. */
+/** What the image runs: the snapshot unpacked, the command in the caller's folder, then the files to bring back into /tmp/back.tgz, which the agent copies out. */
 const SCRIPT = [
   'set -e',
   'mkdir -p /tmp/work',
-  'tar -xzf /in/snapshot.tgz -C /tmp/work',
+  // The snapshot comes in on stdin (the agent's BuildRunner: nothing is bind-mounted).
+  'tar -xzf - -C /tmp/work',
   'cd "/tmp/work/$1"',
   'back=$2',
   'shift 2',
@@ -26,7 +27,7 @@ const SCRIPT = [
   'set +e',
   '"$@"',
   's=$?',
-  `[ -z "$back" ] || printf '%s\\n' "$back" | tar -czf /out/back.tgz --ignore-failed-read -T - || echo "citadel-heavy: some of the files to bring back could not be packed" >&2`,
+  `[ -z "$back" ] || printf '%s\\n' "$back" | tar -czf /tmp/back.tgz --ignore-failed-read -T - || echo "citadel-heavy: some of the files to bring back could not be packed" >&2`,
   'exit $s',
 ].join('\n');
 
@@ -77,10 +78,9 @@ export const heavyBuildRoutes: Route[] = [
       const size = body.size === undefined ? KIND_SIZE[kind] : Number(body.size);
       if (!Number.isInteger(size) || size < 1 || size > 256) throw new HttpError(400, 'size must be a whole number of threads');
       if (body.do === 'place') {
-        if (body.how !== 'container' && body.how !== 'ci') throw new HttpError(400, 'how must be container or ci');
         return json(res, 200, {
           spots: placer(app)
-            .place({ projectId: ticket.project_id, kind, size, how: body.how })
+            .place({ projectId: ticket.project_id, kind, size })
             .map(({ id, name, free }) => ({ id, name, free })),
         });
       }
@@ -145,7 +145,7 @@ export const heavyBuildRoutes: Route[] = [
       const job = ownJob(ctx, ctx.params.job);
       const name = ctx.url.searchParams.get('name');
       if (name !== 'log' && name !== 'back') throw new HttpError(400, 'name must be log or back');
-      const file = join(resultsDir(ctx.app, job.project_id, job.id), name === 'log' ? '.job.log' : 'back.tgz');
+      const file = join(resultsDir(ctx.app, job.project_id, job.id), name === 'log' ? '.job.log' : 'back.tar');
       const st = await fs.stat(file).catch(() => null);
       if (!st?.isFile()) throw new HttpError(404, `Job #${job.id} has no ${name} here`);
       return sendFile(ctx.req, ctx.res, file, st.size, { 'Content-Type': 'application/octet-stream' });

@@ -774,7 +774,7 @@ const sendRunnerPlans = () => {
 };
 if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);
 machines.agentUrl = MACHINES_URL?.origin ?? null;
-// Where citadel-heavy sends a heavy job (H2, src/heavy-builds.ts): a Builds role's container job, the scheme's CI, or perigee's line.
+// Where citadel-heavy sends a job whose files come back, or in a scheme with no CI (H2, src/heavy-builds.ts): a machine's Builds role, else perigee's line.
 const buildsRole = (id: number) => store.machineRoles(id).find((r) => r.role === 'builds');
 const buildPlacer = new BuildPlacer({
   machines: () =>
@@ -788,12 +788,7 @@ const buildPlacer = new BuildPlacer({
     const role = buildsRole(id);
     return !!(m && p && role?.on && lendsRole(store, m, 'builds', p) && buildsReady(role.setup, shippedImages()));
   },
-  ci: (id, projectId) => {
-    const m = store.getMachine(id);
-    const p = store.getProject(projectId);
-    return !!(m && p && lendsCi(store, m, p));
-  },
-  free: (id, how) => (how === 'ci' ? balancer.free(id) : balancer.free(id, buildsRole(id)?.caps.threads ?? null, 'build:')),
+  free: (id) => balancer.free(id, buildsRole(id)?.caps.threads ?? null, 'build:'),
   warm: (projectId, kind) => store.machineJobs({ project: projectId, kindName: kind, states: ['done'] }, 1)[0]?.machine_id ?? null,
 });
 const jobs = new MachineJobs({

@@ -92,7 +92,7 @@ test('a job asking for a label only a sleeping runner has wakes that runner, tho
   assert.deepEqual(
     [
       ...pickAwake(busy, {
-        runners: 3,
+        runners: 2,
         queued: { c: 2 },
         want: {
           c: [

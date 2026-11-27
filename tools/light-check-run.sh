@@ -33,7 +33,9 @@ wide=--affected; grep -q -- '--wide' "$ct" 2>/dev/null && wide=--wide
 # A ship touching public/ runs the front end's browser test too (#2242; Cara, 2026-11-27, "Go, with both changes" on
 # #1912's count): the map leaves it out for its 41 CPU-s, and it went red in burn-in on front-end ships twice.
 extra=()
-git diff --name-only --no-renames "$base" HEAD | grep -q '^public/' && [ -e test/instant-open-browser.test.ts ] && extra+=(test/instant-open-browser.test.ts)
+# Path-limited, not piped to grep -q: under pipefail a SIGPIPE'd git would drop the browser test from a long diff.
+pub=$(git diff --name-only --no-renames "$base" HEAD -- public/) || pub=x
+[ -z "$pub" ] || [ ! -e test/instant-open-browser.test.ts ] || extra+=(test/instant-open-browser.test.ts)
 nice -n 10 "$ct" "$wide" --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" "${extra[@]}" >"$out" 2>&1 </dev/null || rc=$?
 tail -n 60 "$out"
 case $rc in
